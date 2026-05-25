@@ -33,6 +33,7 @@ import {
   type ArticleStatus,
 } from '@lazyit/shared';
 import { ArticlesService } from './articles.service';
+import { maxImportBytes } from './article-import';
 
 class ArticleDto extends createZodDto(ArticleSchema) {}
 class CreateArticleDto extends createZodDto(CreateArticleSchema) {}
@@ -145,7 +146,14 @@ export class ArticlesController {
     },
   })
   @ApiCreatedResponse({ type: ArticleDto })
-  @UseInterceptors(FileInterceptor('file'))
+  // Cap the upload at the interceptor so multer aborts the stream early instead of buffering an
+  // arbitrarily large file into the heap (SEC-001). platform-express maps multer's LIMIT_FILE_SIZE
+  // to 413. The limit is fixed at boot from MAX_IMPORT_SIZE_MB (decoration-time eval); the
+  // service-level file.size check stays as defense in depth. This does not bound .docx decompression
+  // (SEC-002) — a limit-compliant zip can still expand during parsing.
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: maxImportBytes() } }),
+  )
   importArticle(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: ImportArticleDto,
