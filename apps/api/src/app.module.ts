@@ -9,6 +9,7 @@ import { LocationsModule } from './locations/locations.module';
 import { AssetCategoriesModule } from './asset-categories/asset-categories.module';
 import { AssetModelsModule } from './asset-models/asset-models.module';
 import { AssetsModule } from './assets/assets.module';
+import { AssetAssignmentsModule } from './asset-assignments/asset-assignments.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 
 @Module({
@@ -19,6 +20,7 @@ import { PrismaExceptionFilter } from './common/prisma-exception.filter';
     AssetCategoriesModule,
     AssetModelsModule,
     AssetsModule,
+    AssetAssignmentsModule,
   ],
   controllers: [AppController],
   providers: [
