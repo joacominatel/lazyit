@@ -28,6 +28,7 @@ erDiagram
     Asset ||--o{ Ticket : "referenced by"
     User ||--o{ Ticket : "referenced by"
     Ticket ||--o{ TicketComment : has
+    ApplicationCategory ||--o{ Application : classifies
     Application ||--o{ AccessGrant : "granted via"
     User ||--o{ AccessGrant : has
     Application ||--o{ AccessRequest : "requested for"
@@ -49,7 +50,7 @@ The model is organized in loosely-coupled areas:
    [[asset-assignment]], [[asset-history]].
 2. **People** — [[user]] (central to access, peripheral to assets).
 3. **Tickets** — [[ticket]], [[ticket-comment]] (cross-cutting).
-4. **Access** — [[application]], [[access-grant]], [[access-request]].
+4. **Access** — [[application]], [[application-category]], [[access-grant]], [[access-request]].
 5. **Consumables** — [[consumable]], [[consumable-movement]].
 6. **Knowledge base** — [[article]], [[article-category]], [[article-version]].
 
@@ -61,7 +62,7 @@ The model is built atomic-first (see each entity note for status):
 2. [[asset-model]] + [[asset-category]] + [[asset]] — the core.
 3. [[asset-assignment]] + [[asset-history]] — traceability.
 4. [[ticket]] + [[ticket-comment]].
-5. [[application]] + [[access-grant]] + [[access-request]].
+5. [[application]] + [[application-category]] + [[access-grant]] + [[access-request]].
 6. [[consumable]] + [[consumable-movement]].
 7. [[article]] + [[article-category]] + [[article-version]].
 

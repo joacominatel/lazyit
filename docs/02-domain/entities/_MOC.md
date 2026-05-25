@@ -40,9 +40,10 @@ updated: 2026-05-25
 
 ## Access
 
-- ⚪ [[application]] — a SaaS, internal app or service that grants access.
-- ⚪ [[access-grant]] — a user's active access to an application.
-- ⚪ [[access-request]] — a pending request with an approval workflow.
+- 🟢 [[application]] — a SaaS, internal app or service access is granted on.
+- 🟢 [[application-category]] — user-managed grouping of applications.
+- 🟢 [[access-grant]] — a user's access to an application, with grant/revoke history.
+- ⚪ [[access-request]] — approval workflow; **deferred** by [[0023-access-management-design]].
 
 ## Consumables
 

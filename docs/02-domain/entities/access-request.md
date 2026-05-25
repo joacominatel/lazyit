@@ -10,6 +10,13 @@ updated: 2026-05-25
 
 > ⚪ planned · Area: Access · Implementation order: 5
 
+> [!note] Explicitly deferred (not just unbuilt)
+> Access management ships **without an approval workflow** by decision
+> ([[0023-access-management-design]]): [[access-grant]]s are created **directly** for now. This note
+> records the intended shape *when* a workflow is added — a **non-destructive** future addition (a
+> new table that produces an [[access-grant]] on approval). The **approver** concept (briefly
+> sketched on [[application]] in an earlier draft, since removed) belongs here, not on Application.
+
 ## Purpose
 
 A pending request for a [[user]] to gain access to an [[application]], with an **approval
@@ -24,7 +31,8 @@ workflow**. On approval it produces an [[access-grant]].
 ## Business rules
 
 - Has a state workflow: requested → approved / rejected → provisioned.
-- Approver(s) derive from the target [[application]].
+- Approver(s) would be defined as part of this workflow (where to attach them — the target
+  [[application]], a team, or a role — is a design choice for when it's built).
 
 > [!note] Relationship to tickets
 > An access request resembles a [[ticket]] with a specialized workflow. Decide whether it
