@@ -1,0 +1,15 @@
+# environment variables
+.env*
+!.env.example
+
+.idea/
+.claude/
+.vscode/
+
+# node
+node_modules/
+dist/
+*.log
+
+# macOS
+.DS_Store
