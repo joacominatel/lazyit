@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BookOpenIcon,
   Cog6ToothIcon,
   MapPinIcon,
   ServerStackIcon,
@@ -18,6 +19,7 @@ const NAV = [
   { label: "Dashboard", href: "/dashboard", icon: Squares2X2Icon },
   { label: "Assets", href: "/assets", icon: ServerStackIcon },
   { label: "Tickets", href: "/tickets", icon: TicketIcon },
+  { label: "Knowledge Base", href: "/kb", icon: BookOpenIcon },
   { label: "Users", href: "/users", icon: UsersIcon },
   { label: "Locations", href: "/locations", icon: MapPinIcon },
   { label: "Settings", href: "/settings", icon: Cog6ToothIcon },
