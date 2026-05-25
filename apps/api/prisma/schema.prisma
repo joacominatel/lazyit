@@ -31,3 +31,34 @@ model User {
 
   @@map("users")
 }
+
+/// Where an asset physically lives — office, datacenter, rack, warehouse or
+/// "remote / with employee". Flat (non-hierarchical) for now.
+/// See docs/02-domain/entities/location.md
+model Location {
+  id          String       @id @default(cuid())
+  name        String
+  type        LocationType
+  description String?
+  address     String?
+  // String, not number: floors are labels like "PB", "Subsuelo 1", "Mezzanine".
+  floor       String?
+  notes       String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
+
+  @@map("locations")
+}
+
+/// Classification of a Location. Hardcoded for now; user-managed custom types are
+/// known, deferred debt — see docs/03-decisions/0017-location-type-enum.md and
+/// the "Known debt" note in docs/02-domain/entities/location.md.
+enum LocationType {
+  OFFICE
+  DATACENTER
+  RACK
+  REMOTE
+  STORAGE
+  OTHER
+}
