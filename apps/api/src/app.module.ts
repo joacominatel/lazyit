@@ -10,6 +10,8 @@ import { AssetCategoriesModule } from './asset-categories/asset-categories.modul
 import { AssetModelsModule } from './asset-models/asset-models.module';
 import { AssetsModule } from './assets/assets.module';
 import { AssetAssignmentsModule } from './asset-assignments/asset-assignments.module';
+import { ArticleCategoriesModule } from './article-categories/article-categories.module';
+import { ArticlesModule } from './articles/articles.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 
 @Module({
@@ -21,6 +23,8 @@ import { PrismaExceptionFilter } from './common/prisma-exception.filter';
     AssetModelsModule,
     AssetsModule,
     AssetAssignmentsModule,
+    ArticleCategoriesModule,
+    ArticlesModule,
   ],
   controllers: [AppController],
   providers: [
