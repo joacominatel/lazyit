@@ -17,17 +17,17 @@ datasource db {
 /// A person in the organization. Central to access, peripheral to assets:
 /// users come and go while assets persist. See docs/02-domain/entities/user.md
 model User {
-  id        String    @id @default(uuid()) @db.Uuid
-  email     String    @unique
-  firstName String
-  lastName  String
-  isActive  Boolean   @default(true)
+  id         String    @id @default(uuid()) @db.Uuid
+  email      String    @unique
+  firstName  String
+  lastName   String
+  isActive   Boolean   @default(true)
   // Maps to the IdP `sub` once auth is integrated; null until then (no auth yet).
   // Nullable + unique: many users may be unlinked, but a linked sub is 1:1. See ADR-0016.
-  externalId String?  @unique
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  externalId String?   @unique
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
 
   @@map("users")
 }
@@ -48,6 +48,8 @@ model Location {
   updatedAt   DateTime     @updatedAt
   deletedAt   DateTime?
 
+  assets Asset[]
+
   @@map("locations")
 }
 
@@ -61,4 +63,85 @@ enum LocationType {
   REMOTE
   STORAGE
   OTHER
+}
+
+/// Classification for AssetModels (Laptop, Server, Switch, …). User-managed: created,
+/// edited and soft-deleted from the app — the seed set is just an initial, non-special list.
+/// See docs/02-domain/entities/asset-category.md
+model AssetCategory {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  // Free string: a heroicon name for the web UI (e.g. "ServerStackIcon"). Not validated.
+  icon        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  models AssetModel[]
+
+  @@map("asset_categories")
+}
+
+/// The generic make/model an Asset is an instance of (e.g. "Dell Latitude 5520"). Holds
+/// type-level facts; per-unit facts live on Asset. See docs/02-domain/entities/asset-model.md
+model AssetModel {
+  id           String         @id @default(cuid())
+  name         String
+  manufacturer String
+  // Unique when present (Postgres treats NULLs as distinct), optional.
+  sku          String?        @unique
+  description  String?
+  // Model-level default specs (e.g. "Latitude 5520 ships with 16GB"). Distinct from Asset.specs.
+  specs        Json?
+  // Optional category; SetNull on delete so models survive (audit > strict integrity).
+  categoryId   String?
+  category     AssetCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  deletedAt    DateTime?
+
+  assets Asset[]
+
+  @@index([categoryId])
+  @@map("asset_models")
+}
+
+/// The first-class citizen: a single tracked thing, a concrete instance of an AssetModel
+/// living at a Location. See docs/02-domain/entities/asset.md and docs/02-domain/asset-centric.md
+model Asset {
+  id           String      @id @default(cuid())
+  name         String
+  // serial / assetTag: unique when present (NULLs distinct in Postgres).
+  serial       String?     @unique
+  assetTag     String?     @unique
+  status       AssetStatus
+  // Per-unit type-specific attributes (jsonb). Validated in the app (zod), not the DB.
+  // See docs/03-decisions/0007-flexible-asset-specs-jsonb.md
+  specs        Json?
+  notes        String?
+  purchaseDate DateTime?
+  warrantyEnd  DateTime?
+  // FKs are SetNull: deleting a Model/Location detaches assets, never deletes them.
+  modelId      String?
+  model        AssetModel? @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  locationId   String?
+  location     Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
+
+  @@index([modelId])
+  @@index([locationId])
+  @@index([status])
+  @@map("assets")
+}
+
+enum AssetStatus {
+  OPERATIONAL
+  IN_MAINTENANCE
+  IN_STORAGE
+  RETIRED
+  LOST
+  UNKNOWN
 }
