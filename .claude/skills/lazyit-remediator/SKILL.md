@@ -122,10 +122,15 @@ Then `git add <finding-old-path>` is not how moves work — use the filesystem m
 
 ## 5. Repo facts worth caching (verify before relying)
 
-- **Tests:** Jest `*.spec.ts` in `apps/api` (run `bun run test` in `apps/api`); `bun test` with `bun:test`
-  `*.test.ts` in `packages/shared`. e2e `*.e2e-spec.ts` under `apps/api/test` (boots `AppModule` → needs
-  the DB). Prefer a TestingModule with the single controller + a mocked service over a full-app e2e when a
-  fix doesn't need the DB.
+- **Tests:** Jest is the canonical api runner per ADR-0012, **but it does not start in a Node-less
+  sandbox** — `bun run test` (= `jest`) crashes in `jest-environment-node` (`ERR_INVALID_THIS`). Run
+  the api specs with **`bun test <path>`** instead: the `*.spec.ts` are jest-API-compatible
+  (`describe/it/expect`, `jest.fn`, `jest.mock`, `@nestjs/testing`, `supertest` all work under Bun's
+  runner). `packages/shared` uses `bun:test` `*.test.ts` natively. e2e `*.e2e-spec.ts` under
+  `apps/api/test` boots `AppModule` → needs the DB; prefer a `TestingModule` with the single
+  controller + a mocked service (and `jest.mock('../../generated/prisma/client', …)`) over a full-app
+  e2e when a fix doesn't need the DB. After a `packages/shared` schema change, `bun run build` it so the
+  api (which imports the built `dist`) picks it up.
 - **Transversal error mapping:** `apps/api/src/common/prisma-exception.filter.ts` is the global
   (`APP_FILTER`) Prisma→HTTP choke point — the place to map a whole error class once (P2002/P2003/P2025
   today). The global `ZodValidationPipe` (`APP_PIPE`) validates **only** `@Body()` typed as a
