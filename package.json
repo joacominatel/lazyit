@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "shadcn": "^4.8.0",
     "turbo": "^2.9.14"
   },
   "peerDependencies": {

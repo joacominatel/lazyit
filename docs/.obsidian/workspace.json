@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "03-decisions/0002-nestjs-backend.md",
+                "file": "03-decisions/0013-zod-validation-pipe.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "0002-nestjs-backend"
+              "title": "0013-zod-validation-pipe"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "03-decisions/0002-nestjs-backend.md",
+                "file": "03-decisions/0013-zod-validation-pipe.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for 0002-nestjs-backend"
+              "title": "Backlinks for 0013-zod-validation-pipe"
             }
           },
           {
@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "03-decisions/0002-nestjs-backend.md",
+                "file": "03-decisions/0013-zod-validation-pipe.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from 0002-nestjs-backend"
+              "title": "Outgoing links from 0013-zod-validation-pipe"
             }
           },
           {
@@ -156,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "03-decisions/0002-nestjs-backend.md",
+                "file": "03-decisions/0013-zod-validation-pipe.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of 0002-nestjs-backend"
+              "title": "Outline of 0013-zod-validation-pipe"
             }
           }
         ]
@@ -185,25 +185,30 @@
   },
   "active": "59b44ef462c85802",
   "lastOpenFiles": [
-    "README.md.tmp.116084.b459d8f51fc3",
-    "README.md.tmp.116084.a78d5c0cb16a",
-    "04-development/workflows.md.tmp.116084.ec7c88164b93",
-    "04-development/code-conventions.md.tmp.116084.761f15e9b209",
-    "04-development/code-conventions.md.tmp.116084.edf38a2d64de",
-    "04-development/code-conventions.md.tmp.116084.99739032ded1",
-    "01-architecture/stack.md.tmp.116084.7731b4a2f5b9",
-    "01-architecture/stack.md.tmp.116084.c5bd7aa01349",
-    "01-architecture/monorepo.md.tmp.116084.f15062ccc453",
-    "04-development/_MOC.md.tmp.116084.1a5e0e6c3844",
-    "01-architecture/_MOC.md.tmp.116084.c3aa3e80c2fe",
-    "03-decisions/0004-asset-centric-design.md",
+    "01-architecture/deployment.md.tmp.192812.cd4e36850fd7",
+    "README.md.tmp.192812.fb978f414435",
+    "03-decisions/_MOC.md.tmp.192812.d512b5264718",
+    "03-decisions/0010-nextjs-frontend.md.tmp.192812.d90da93fccf7",
+    "01-architecture/stack.md.tmp.192812.3dc5330f4da1",
+    "00-overview/vision.md.tmp.192812.b9f99ab7a8b7",
+    "00-overview/vision.md.tmp.192812.b0f5a4217fad",
+    "02-domain/entities/user.md.tmp.192812.fba533912d76",
+    "02-domain/entities/user.md.tmp.192812.7668864b166c",
+    "02-domain/entities/user.md.tmp.192812.fc4ae7836379",
+    "03-decisions/0016-auth-strategy-deferred.md",
+    "03-decisions/0016-auth-strategy-deferred.md.tmp.192812.c7fb527aee3a",
+    "03-decisions/0015-deployment-model.md",
+    "03-decisions/0014-shared-package-build.md",
+    "03-decisions/0013-zod-validation-pipe.md",
+    "03-decisions/0012-testing-strategy.md",
     "03-decisions/0005-id-strategy.md",
+    "03-decisions/0002-nestjs-backend.md",
+    "03-decisions/0004-asset-centric-design.md",
     "03-decisions/0006-soft-delete-and-auditing.md",
     "03-decisions/0007-flexible-asset-specs-jsonb.md",
     "03-decisions/0008-consumables-vs-assets.md",
     "03-decisions/0009-bun-first-vs-app-stack.md",
     "03-decisions/0011-tailwind-styling.md",
-    "03-decisions/0012-testing-strategy.md",
     "00-overview/vision.md",
     "01-architecture/_MOC.md",
     "01-architecture/deployment.md",
@@ -215,11 +220,6 @@
     "03-decisions/0010-nextjs-frontend.md",
     "02-domain/asset-centric.md",
     "02-domain/_MOC.md",
-    "02-domain/entities/ticket-comment.md",
-    "02-domain/entities/location.md",
-    "02-domain/entities/asset-history.md",
-    "02-domain/entities/asset-assignment.md",
-    "02-domain/entities/article-version.md",
-    "00-overview/problem-space.md"
+    "02-domain/entities/ticket-comment.md"
   ]
 }
