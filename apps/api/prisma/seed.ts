@@ -1,7 +1,8 @@
 /**
- * Seeds the initial AssetCategory set. Idempotent (upsert by unique `name`): safe to re-run,
- * and `update: {}` means it never clobbers user edits — categories are user-managed, the seed
- * set is just an initial, non-special list (see docs/02-domain/entities/asset-category.md).
+ * Seeds the initial AssetCategory and ArticleCategory sets. Idempotent (upsert by unique `name`):
+ * safe to re-run, and `update: {}` means it never clobbers user edits — both category sets are
+ * user-managed, the seed lists are just an initial, non-special starting point (see
+ * docs/02-domain/entities/asset-category.md and docs/02-domain/entities/article-category.md).
  *
  * Run from apps/api: `bunx prisma db seed`.
  */
@@ -15,9 +16,9 @@ if (!connectionString) {
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
-// Initial categories. Users can add / edit / soft-delete categories afterwards; none of these
-// is special. Icons (heroicon names) are left unset for the frontend to assign.
-const INITIAL_CATEGORIES = [
+// Initial asset categories. Users can add / edit / soft-delete categories afterwards; none of
+// these is special. Icons (heroicon names) are left unset for the frontend to assign.
+const INITIAL_ASSET_CATEGORIES = [
   'Server',
   'Switch',
   'Router',
@@ -32,15 +33,37 @@ const INITIAL_CATEGORIES = [
   'Other',
 ];
 
+// Initial knowledge-base categories. Same user-managed, non-special nature. `icon` is a heroicon
+// name for the web UI; `order` (seeded by position) sorts the sidebar — all editable afterwards.
+const INITIAL_ARTICLE_CATEGORIES: { name: string; icon: string }[] = [
+  { name: 'Networking', icon: 'GlobeAltIcon' },
+  { name: 'Servers', icon: 'ServerStackIcon' },
+  { name: 'Access Management', icon: 'KeyIcon' },
+  { name: 'Datacenter', icon: 'BuildingOfficeIcon' },
+  { name: 'Procedures', icon: 'ClipboardDocumentListIcon' },
+  { name: 'Troubleshooting', icon: 'WrenchScrewdriverIcon' },
+  { name: 'Onboarding', icon: 'UserPlusIcon' },
+  { name: 'Tools', icon: 'Cog6ToothIcon' },
+];
+
 async function main() {
-  for (const name of INITIAL_CATEGORIES) {
+  for (const name of INITIAL_ASSET_CATEGORIES) {
     await prisma.assetCategory.upsert({
       where: { name },
       update: {}, // don't overwrite user edits on re-run
       create: { name },
     });
   }
-  console.log(`Seeded ${INITIAL_CATEGORIES.length} asset categories.`);
+  console.log(`Seeded ${INITIAL_ASSET_CATEGORIES.length} asset categories.`);
+
+  for (const [index, { name, icon }] of INITIAL_ARTICLE_CATEGORIES.entries()) {
+    await prisma.articleCategory.upsert({
+      where: { name },
+      update: {}, // don't overwrite user edits on re-run
+      create: { name, icon, order: index + 1 },
+    });
+  }
+  console.log(`Seeded ${INITIAL_ARTICLE_CATEGORIES.length} article categories.`);
 }
 
 main()
