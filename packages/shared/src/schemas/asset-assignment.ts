@@ -10,6 +10,10 @@ import { z } from "zod";
  *
  * ID note: `assetId` references Asset (`cuid`), while `userId` / `assignedById` /
  * `releasedById` reference User (`uuid`, @db.Uuid). See docs/03-decisions/0005-id-strategy.md.
+ *
+ * Actor note: `assignedById` / `releasedById` are recorded by the API from the optional
+ * `X-User-Id` shim (the caller → a JWT later), **never** from the request body — so the
+ * create/release payloads below do not carry them. See docs/03-decisions/0024-asset-assignment-actor-shim.md.
  */
 
 /**
@@ -35,21 +39,21 @@ export const AssetAssignmentSchema = z.object({
  * Payload to open an assignment. `assetId` + `userId` are required. `assignedAt` is optional
  * and defaults to `now()` in the DB — pass it only to backdate an imported/historical record.
  * A duplicate *active* `(assetId, userId)` pair is rejected (409) by the partial unique index.
+ * The actor (`assignedById`) is NOT in the body — it comes from the `X-User-Id` shim.
  */
 export const CreateAssetAssignmentSchema = z.strictObject({
   assetId: z.cuid(),
   userId: z.uuid(),
-  assignedById: z.uuid().optional(),
   assignedAt: z.iso.datetime().optional(),
   notes: z.string().trim().min(1).max(2000).optional(),
 });
 
 /**
  * Payload to release an active assignment (`PATCH /asset-assignments/:id/release`). Sets
- * `releasedAt = now()`. Both fields optional; if `notes` is given it replaces the note.
+ * `releasedAt = now()`. Only `notes` (optional) — if given it replaces the note. The actor
+ * (`releasedById`) is NOT in the body — it comes from the `X-User-Id` shim.
  */
 export const ReleaseAssetAssignmentSchema = z.strictObject({
-  releasedById: z.uuid().optional(),
   notes: z.string().trim().min(1).max(2000).optional(),
 });
 
