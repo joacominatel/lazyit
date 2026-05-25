@@ -1,0 +1,28 @@
+# Docker build context excludes (context = repo root for all infra/docker/*.Dockerfile).
+# Keep the context small and never ship secrets or rebuildable artifacts into an image.
+
+# VCS, editors, agent + docs (not needed to build any image)
+.git
+.github
+.idea
+.vscode
+.claude
+docs
+
+# Dependencies & build outputs — reinstalled / regenerated inside the image
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+apps/api/generated
+
+# Secrets & env — never copied into images
+**/.env
+**/.env.*
+
+# Infra itself is not COPYed into app images
+infra
+
+# Logs & OS cruft
+**/*.log
+.DS_Store
