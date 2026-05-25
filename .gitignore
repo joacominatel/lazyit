@@ -1,6 +1,7 @@
 # environment variables
 .env*
 !.env.example
+!.env*.example
 
 .idea/
 # .claude/
