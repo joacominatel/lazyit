@@ -6,16 +6,21 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import { CreateUserSchema, UpdateUserSchema, UserSchema } from '@lazyit/shared';
 import { UsersService } from './users.service';
+import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
+import { parseActiveOnly } from '../asset-assignments/active-only';
+import { AssetAssignmentDto } from '../asset-assignments/asset-assignment.dto';
 
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe), TS types and the
 // OpenAPI schema, all from one definition. See docs/03-decisions/0018-api-documentation-swagger.md.
@@ -26,7 +31,10 @@ class UpdateUserDto extends createZodDto(UpdateUserSchema) {}
 @ApiTags('users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(
+    private readonly users: UsersService,
+    private readonly assignments: AssetAssignmentsService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List all users (excludes soft-deleted)' })
@@ -40,6 +48,28 @@ export class UsersController {
   @ApiOkResponse({ type: UserDto })
   findOne(@Param('id') id: string) {
     return this.users.findOne(id);
+  }
+
+  @Get(':id/assignments')
+  @ApiOperation({
+    summary: "List a user's asset assignments (active-only by default)",
+  })
+  @ApiQuery({
+    name: 'activeOnly',
+    required: false,
+    type: Boolean,
+    description: 'Default true. Pass false to include released assignments.',
+  })
+  @ApiOkResponse({ type: [AssetAssignmentDto] })
+  async findAssignments(
+    @Param('id') id: string,
+    @Query('activeOnly') activeOnly?: string,
+  ) {
+    await this.users.findOne(id); // 404 if the user is missing or soft-deleted
+    return this.assignments.findAll({
+      userId: id,
+      activeOnly: parseActiveOnly(activeOnly),
+    });
   }
 
   @Post()
