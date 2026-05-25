@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useActingUserId } from "@/lib/api/acting-user";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import {
   useCreateArticle,
@@ -70,6 +71,7 @@ export function ArticleForm({ article }: { article?: Article }) {
   const isEdit = article != null;
   const router = useRouter();
   const { data: categories } = useArticleCategories();
+  const actingUserId = useActingUserId();
   const createArticle = useCreateArticle();
   const updateArticle = useUpdateArticle();
   const isPending = createArticle.isPending || updateArticle.isPending;
@@ -82,6 +84,10 @@ export function ArticleForm({ article }: { article?: Article }) {
   });
 
   const onSubmit = form.handleSubmit((values) => {
+    if (!actingUserId) {
+      toast.error("Pick a user in the top-right switcher to author articles");
+      return;
+    }
     if (article) {
       updateArticle.mutate(
         {
@@ -127,6 +133,12 @@ export function ArticleForm({ article }: { article?: Article }) {
 
   return (
     <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
+      {!actingUserId && (
+        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+          You&apos;re browsing anonymously. Pick a user in the top-right switcher
+          to author articles.
+        </p>
+      )}
       <FieldGroup>
         <Controller
           control={form.control}
@@ -235,7 +247,11 @@ export function ArticleForm({ article }: { article?: Article }) {
         >
           Cancel
         </Button>
-        <Button type="submit" form={FORM_ID} disabled={isPending}>
+        <Button
+          type="submit"
+          form={FORM_ID}
+          disabled={isPending || !actingUserId}
+        >
           {isPending && <ArrowPathIcon className="animate-spin" />}
           {isEdit ? "Save changes" : "Create draft"}
         </Button>
