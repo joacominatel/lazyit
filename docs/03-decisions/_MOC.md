@@ -41,6 +41,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0017-location-type-enum]] | Location type as a hardcoded enum (user-managed types deferred) | accepted |
 | [[0018-api-documentation-swagger]] | API documentation with Swagger/OpenAPI (nestjs-zod) | accepted |
 | [[0019-asset-assignment-integrity]] | AssetAssignment referential integrity & lifecycle | accepted |
+| [[0020-frontend-data-layer]] | Frontend data layer (endpoints → hooks → components) | accepted |
 
 ## Pending ADRs (to write when decided)
 
