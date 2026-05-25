@@ -1,6 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
-import { APP_NAME } from "@lazyit/shared";
 
 @Controller()
 export class AppController {
