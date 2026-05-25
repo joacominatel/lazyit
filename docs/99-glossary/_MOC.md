@@ -1,0 +1,16 @@
+---
+title: Glossary — MOC
+tags: [moc, glossary]
+status: draft
+created: 2026-05-25
+updated: 2026-05-25
+---
+
+# Glossary — Map of Content
+
+Shared vocabulary so docs and code use terms consistently.
+
+- [[it-terms]] — IT/operations terms used across lazyit.
+
+Domain-entity terms (Asset, Ticket, AccessGrant, …) are defined in
+[[entities/_MOC|Entities]], not here.

@@ -1,106 +1,115 @@
+# lazyit — Project Guide for Claude
 
-Default to using Bun instead of Node.js.
+lazyit is a **self-hosted, internal web app for small IT/Systems teams** (5–20 people):
+asset inventory, application access, tickets, consumables and a knowledge base.
+Positioning: ServiceNow-grade capability, but modern, opinionated and IT-native.
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+> **The full documentation lives in `docs/`** — an Obsidian vault (YAML frontmatter,
+> `[[wiki-links]]`, one `_MOC.md` index per folder). This file is the short orientation;
+> **`docs/` is the source of truth.** When this file and the docs disagree, the docs win —
+> then update both. Start at `docs/README.md` (global map + an open-questions "Gaps" section).
 
-## APIs
+## Where things are (docs map)
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
+| You need… | Read |
+| --- | --- |
+| What/why the product is | `docs/00-overview/` — vision, problem-space, competitors |
+| Stack, monorepo, deployment | `docs/01-architecture/` |
+| Domain model & rules | `docs/02-domain/` + `docs/02-domain/entities/` (one note per entity) |
+| Why a decision was made | `docs/03-decisions/` — ADRs (MADR-lite) |
+| Set up & day-to-day work | `docs/04-development/` — setup, workflows, code-conventions |
+| Operations / deploy / backups | `docs/05-runbooks/` (stub until there's something to operate) |
+| Vocabulary | `docs/99-glossary/` |
 
-## Testing
+## Philosophy
 
-Use `bun test` to run tests.
+- **Asset-centric.** The `Asset` is the first-class citizen, not the User — assets persist,
+  people rotate. Ownership is a timestamped join (`AssetAssignment`), never a column, so
+  history is automatic. See `docs/02-domain/asset-centric.md`.
+- **Auditability by default.** Never hard-delete domain data (soft delete); append-only
+  logs/ledgers are immutable.
+- **Opinionated over configurable.** A curated set of capabilities, sensible defaults.
+- **Self-hosted, single-org, small-team operable.** Boring, durable technology.
 
-```ts#index.test.ts
-import { test, expect } from "bun:test";
+## Tech stack (verified against the repo)
 
-test("hello world", () => {
-  expect(1).toBe(1);
-});
+| Layer | Choice | Version |
+| --- | --- | --- |
+| Runtime / package manager | Bun | 1.3.14 |
+| Monorepo orchestration | Turborepo | ^2.9 |
+| Frontend | Next.js (App Router) + React + Tailwind v4 | 16.2.6 / 19.2.4 |
+| Backend | NestJS (Express), strict TypeScript | 11.0.1 |
+| ORM | Prisma | 7.8.0 |
+| Database | PostgreSQL (Docker Compose for dev) | 18-alpine |
+| Shared | `@lazyit/shared` — zod schemas/types front↔back | workspace |
+
+Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432`.
+Details and rationale: `docs/01-architecture/stack.md` and the ADRs.
+
+## Repo layout
+
+```
+apps/web           Next.js frontend (@lazyit/web)
+apps/api           NestJS + Prisma backend (@lazyit/api)
+packages/shared    @lazyit/shared — shared types & zod (leaf: depends on nothing)
+docs/              documentation vault
+docker-compose.yml Postgres for dev
 ```
 
-## Frontend
+`web` and `api` never import each other — they talk over HTTP. Shared contracts go in
+`@lazyit/shared` (one definition, no per-app duplicates).
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
-
-Server:
-
-```ts#index.ts
-import index from "./index.html"
-
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
-```
-
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
-
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
-```
-
-With the following `frontend.tsx`:
-
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
-
-// import .css files directly and it works
-import './index.css';
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
+## Commands
 
 ```sh
-bun --hot ./index.ts
+bun install                 # install all workspaces
+bun run dev                 # turbo dev — runs web + api together
+bun run db:up / db:down     # Postgres via docker compose
+bun run build / bun run lint
+# Prisma — run inside apps/api:
+bunx prisma migrate dev --name <change>
+bunx prisma generate        # client → apps/api/generated/prisma
 ```
 
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+> **Setup gotcha:** `.env.example` does **not** yet include `DATABASE_URL` / `PORT`. The API
+> reads `DATABASE_URL` (Prisma, via `prisma.config.ts`) and `PORT` from `apps/api/.env`.
+> A fresh clone won't connect until that file exists. See `docs/04-development/setup.md`.
+
+## Conventions
+
+- **English everywhere** — code, identifiers, comments, docs.
+- **Naming:** models singular PascalCase; DB tables pluralized snake_case via `@@map`.
+- **IDs:** `uuid()` for sensitive/exposed entities (mainly `User`), `cuid()` for most domain
+  entities, `autoincrement()` for logs/history. → `docs/03-decisions/0005-id-strategy.md`
+- **Timestamps & soft delete:** `createdAt` everywhere; `updatedAt` + `deletedAt` (soft
+  delete) on **mutable domain** entities; **append-only** tables (history, ledgers) get
+  `createdAt` only. → `docs/03-decisions/0006-soft-delete-and-auditing.md`
+- **Flexible asset specs:** type-specific attributes go in a `specs Json` (jsonb) field on
+  `Asset`, validated by zod in `@lazyit/shared`. → `docs/03-decisions/0007-flexible-asset-specs-jsonb.md`
+- **Domain build order:** User + Location → AssetModel + AssetCategory + Asset →
+  AssetAssignment + AssetHistory → Ticket + TicketComment →
+  Application + AccessGrant + AccessRequest → Consumable + ConsumableMovement →
+  Article + ArticleCategory + ArticleVersion. → `docs/02-domain/_MOC.md`
+
+## Bun usage — SCOPED (important)
+
+Bun is the **runtime, package manager, and default for scripts/tooling** — *not* the app
+server/data layer, which is deliberately NestJS + Prisma. Decision:
+`docs/03-decisions/0009-bun-first-vs-app-stack.md`.
+
+**Do** use Bun for tooling, scripts and the shared package:
+
+- `bun <file>` · `bunx <pkg>` · `bun install` · `bun run <script>` — never npm/yarn/pnpm/npx/node.
+- `Bun.file` over `node:fs`; `` Bun.$`...` `` over execa; `bun:sqlite` over better-sqlite3.
+- `bun test` for `packages/shared` and standalone scripts.
+- Rely on Bun's automatic `.env` loading (no `dotenv`) — **except** `prisma.config.ts`, which
+  imports `dotenv/config` because the Prisma CLI runs outside Bun's auto-load.
+
+**Do NOT** "Bun-ify" the app layer (these choices are intentional — don't replace them):
+
+- API HTTP server: **NestJS (Express)** — not `Bun.serve()`.
+- Database access: **Prisma** — not `Bun.sql` / `pg` / `postgres.js`.
+- API tests: **Jest** (in `apps/api`) — `bun test` is for shared/scripts only.
+- Frontend: **Next.js** — not Bun HTML-import serving.
+- Future async workers may use **BullMQ + Redis** (which pulls in `ioredis`) despite the
+  `Bun.redis` preference — to be settled in an ADR when chosen.
