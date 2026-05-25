@@ -24,7 +24,8 @@ Default operating procedure for **every** change. Full version:
    **separate subagents** (one frontend, one backend). Claude Code **orchestrates** — it
    specifies tasks and contracts; it does not implement both sides itself.
 4. **Minimalist commits.** **One file per commit** (documentation may be grouped). Message
-   prefixes: `feat` · `fix` · `chore` · `del` · `updt` · `docs`.
+   prefixes: `feat` · `fix` · `chore` · `del` · `updt` · `docs`. **Do not** add
+   `Co-Authored-By` / Claude attribution trailers to commit messages.
 5. **Docs stay in sync.** Any change to the codebase — especially **core logic** — requires
    reviewing `docs/`; if it lands, update the docs in the same change. **Before committing,
    verify the docs don't reference removed files or a changed philosophy.**
