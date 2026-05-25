@@ -21,6 +21,12 @@ import { UsersService } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { parseActiveOnly } from '../asset-assignments/active-only';
 import { AssetAssignmentDto } from '../asset-assignments/asset-assignment.dto';
+import { AccessGrantsService } from '../access-grants/access-grants.service';
+import {
+  parseActiveOnly as parseGrantActiveOnly,
+  parseIncludeExpired,
+} from '../access-grants/query-params';
+import { AccessGrantDto } from '../access-grants/access-grant.dto';
 
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe), TS types and the
 // OpenAPI schema, all from one definition. See docs/03-decisions/0018-api-documentation-swagger.md.
@@ -34,6 +40,7 @@ export class UsersController {
   constructor(
     private readonly users: UsersService,
     private readonly assignments: AssetAssignmentsService,
+    private readonly grants: AccessGrantsService,
   ) {}
 
   @Get()
@@ -69,6 +76,37 @@ export class UsersController {
     return this.assignments.findAll({
       userId: id,
       activeOnly: parseActiveOnly(activeOnly),
+    });
+  }
+
+  @Get(':id/access-grants')
+  @ApiOperation({
+    summary: "List a user's access grants (active-only by default)",
+  })
+  @ApiQuery({
+    name: 'activeOnly',
+    required: false,
+    type: Boolean,
+    description: 'Default true. Pass false to include revoked grants.',
+  })
+  @ApiQuery({
+    name: 'includeExpired',
+    required: false,
+    type: Boolean,
+    description:
+      'Default true. Pass false to hide active grants already past their expiresAt.',
+  })
+  @ApiOkResponse({ type: [AccessGrantDto] })
+  async findAccessGrants(
+    @Param('id') id: string,
+    @Query('activeOnly') activeOnly?: string,
+    @Query('includeExpired') includeExpired?: string,
+  ) {
+    await this.users.findOne(id); // 404 if the user is missing or soft-deleted
+    return this.grants.findAll({
+      userId: id,
+      activeOnly: parseGrantActiveOnly(activeOnly),
+      includeExpired: parseIncludeExpired(includeExpired),
     });
   }
 
