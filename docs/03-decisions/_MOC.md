@@ -46,6 +46,10 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0022-draft-visibility-auth-shim]] | Draft visibility & the `X-User-Id` auth shim | accepted (temporary) |
 | [[0023-access-management-design]] | Access management design (Application + AccessGrant) | accepted |
 | [[0024-asset-assignment-actor-shim]] | Retrofit AssetAssignment actor to the `X-User-Id` shim | accepted |
+| [[0025-containerization-strategy]] | Containerization & image strategy (Bun build → Node runtime) | accepted |
+| [[0026-reverse-proxy-tls]] | Reverse proxy & TLS (Caddy), same-origin `/api` routing | accepted |
+| [[0027-ci-pipeline]] | CI on GitHub Actions; CD deferred | accepted |
+| [[0028-secrets-and-config]] | Secrets & configuration management (env files per level) | accepted |
 
 ## Pending ADRs (to write when decided)
 
@@ -53,6 +57,7 @@ Use [[0000-adr-template]] as the starting point for new records.
   decided ([[0016-auth-strategy-deferred]]); only the provider choice remains.
 - **Async workers** — BullMQ + Redis (note the [[0009-bun-first-vs-app-stack]] tension:
   BullMQ pulls in `ioredis`, which `CLAUDE.md` discourages).
-- **Deployment topology** — see [[deployment]].
+- **CD / image publishing** — deferred in [[0027-ci-pipeline]]; define the registry (GHCR) +
+  deploy flow + image tagging once a deploy target exists.
 - **E2E tooling & frontend test runner** — deferred in [[0012-testing-strategy]]; choose when
   UI/critical flows exist.
