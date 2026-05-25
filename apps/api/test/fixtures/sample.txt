@@ -1,0 +1,3 @@
+Backup Procedure
+Run the nightly backup job at 02:00.
+Verify the snapshot completed before leaving.
