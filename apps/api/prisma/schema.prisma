@@ -22,6 +22,9 @@ model User {
   firstName String
   lastName  String
   isActive  Boolean   @default(true)
+  // Maps to the IdP `sub` once auth is integrated; null until then (no auth yet).
+  // Nullable + unique: many users may be unlinked, but a linked sub is 1:1. See ADR-0016.
+  externalId String?  @unique
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
