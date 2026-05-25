@@ -44,6 +44,22 @@ concrete instance of a generic [[asset-model]].
 > `AssetCategory.specsSchema`), which does not exist yet. Tracked as a `TODO(specs)` in the
 > shared zod schemas.
 
+> [!note] Expanded read shape (reads only)
+> `GET /assets` and `GET /assets/:id` return an **`AssetWithRelations`**: the asset plus its `model`
+> (with the model's `category` nested), its `location`, and `activeAssignments` — the **active**
+> owners (`releasedAt = null`), each with its `user` inlined. This lets the web render the
+> table/detail in one call instead of fanning out to several list endpoints (resolved by a single
+> nested Prisma `include` — a constant number of queries, no N+1). `model`/`location` are `null`
+> when unset; `activeAssignments` is `[]` when there are no active owners. **Writes are unchanged** —
+> `POST`/`PATCH` still take and return the lean `Asset`. Schemas: `AssetWithRelationsSchema`,
+> `AssetModelWithCategorySchema`, `AssetAssignmentWithUserSchema` in `@lazyit/shared`
+> (`packages/shared/src/schemas/asset-expanded.ts`).
+>
+> **Soft-deleted users are included** in `activeAssignments` (returned with their `deletedAt` set):
+> an owner who left the company still appears as an active owner until the assignment is explicitly
+> released — ownership history is preserved (consistent with [[asset-assignment]]'s `onDelete:
+> Restrict` and the auditability principle). The web decides how to display them.
+
 ## Conventions
 
 - **ID:** `cuid()` ([[0005-id-strategy]]).
@@ -76,17 +92,26 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 
 ## Endpoints
 
-`apps/api/src/assets/` (`AssetsModule`): `GET /assets` (excludes soft-deleted) with optional
-filters **`?categoryId=&locationId=&status=`** — `categoryId` filters by the asset's model's
-category, `status` is validated against the enum (invalid → `400`). Plus `GET /assets/:id`,
-`POST`, `PATCH /:id`, `DELETE /:id` (soft delete). An invalid `modelId`/`locationId` on write
-returns `400` (FK → [[0018-api-documentation-swagger]]). Also `GET /assets/:id/assignments?activeOnly=`
-lists the asset's ownership records ([[asset-assignment]]).
+`apps/api/src/assets/` (`AssetsModule`):
+
+- `GET /assets` — **expanded** list (`AssetWithRelations[]`, excludes soft-deleted, newest first)
+  with optional filters **`?categoryId=&locationId=&status=&q=`**: `categoryId` matches the asset's
+  **model's** category, `status` is validated against the enum (invalid → `400`), and `q` is a
+  case-insensitive substring over `name` / `serial` / `assetTag`.
+- `GET /assets/:id` — one **expanded** asset (`404` if missing/soft-deleted).
+- `GET /assets/:id/assignments?activeOnly=` — the asset's ownership records, each with its `user`
+  inlined (`AssetAssignmentWithUser[]`); `activeOnly` defaults to true, pass `false` for full
+  history (active + released). See [[asset-assignment]].
+- `POST` · `PATCH /:id` · `DELETE /:id` (soft delete) — **unchanged**, lean `Asset` shape; an
+  invalid `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]).
 
 ## Not yet implemented (deferred)
 
 - [[asset-history]] (append-only audit log of asset state changes) — not yet built.
 - Dynamic per-category `specs` validation (see debt note above).
+- **Advanced asset search** — `?q=` today is a simple case-insensitive substring (ILIKE) over
+  `name`/`serial`/`assetTag`, **unindexed** (fine at small-team scale). Full-text / indexed search
+  is deferred to its own task.
 
 Related: [[asset-model]] · [[location]] · [[asset-category]] · [[asset-assignment]] ·
 [[asset-history]] · [[asset-centric]] · [[0007-flexible-asset-specs-jsonb]] ·
