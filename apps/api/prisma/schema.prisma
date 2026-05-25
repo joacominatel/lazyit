@@ -38,6 +38,11 @@ model User {
   articlesAuthored Article[] @relation("ArticleAuthor")
   articlesEdited   Article[] @relation("ArticleLastEditor")
 
+  // Access management: applications this user holds grants on, plus grants they granted/revoked.
+  accessGrants        AccessGrant[] @relation("AccessGrantUser")
+  accessGrantsGranted AccessGrant[] @relation("AccessGrantGrantedBy")
+  accessGrantsRevoked AccessGrant[] @relation("AccessGrantRevokedBy")
+
   @@map("users")
 }
 
@@ -255,4 +260,94 @@ model Article {
 enum ArticleStatus {
   DRAFT
   PUBLISHED
+}
+
+/// User-managed grouping for Applications (SaaS, Internal, Service, …). Like AssetCategory /
+/// ArticleCategory: created, edited and soft-deleted from the app; the seed set is an initial,
+/// non-special list. See docs/02-domain/entities/application-category.md
+model ApplicationCategory {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  // Free string: a heroicon name for the web UI (e.g. "CloudIcon"). Not validated.
+  icon        String?
+  // Optional sort key for sidebar/listings (lower first); null sorts last.
+  order       Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  applications Application[]
+
+  @@map("application_categories")
+}
+
+/// Something a User can be granted access to: a SaaS product (Jira, GitHub, AWS), an internal
+/// system, or a technical service (VPN, AD group). The catalog of access targets. See ADR-0023
+/// and docs/02-domain/entities/application.md
+model Application {
+  id          String               @id @default(cuid())
+  name        String
+  description String?
+  // The system's URL (console/login). Optional, not validated as a URL at the DB level.
+  url         String?
+  // The vendor / provider (Atlassian, Microsoft, AWS, …). Optional.
+  vendor      String?
+  // Optional category; SetNull on delete so applications survive (audit > strict integrity),
+  // like AssetModel -> AssetCategory. See ADR-0023.
+  categoryId  String?
+  category    ApplicationCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  // Flags an application whose access is especially sensitive (production infra, finance, …).
+  isCritical  Boolean              @default(false)
+  // Flexible extras (ssoProvider, ownerTeam, externalIds, …). Unvalidated jsonb — same debt as
+  // Asset.specs / Article.metadata. See ADR-0007 and ADR-0023.
+  metadata    Json?
+  notes       String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  deletedAt   DateTime?
+
+  grants AccessGrant[]
+
+  @@index([categoryId])
+  @@map("applications")
+}
+
+/// Timestamped join recording that a User has access to an Application, over time (ADR-0023).
+/// Append-only with a revoke marker: rows are never deleted, only "closed" by setting revokedAt
+/// (ADR-0006). Multi-grant: a user may hold several active grants on one app at different
+/// accessLevels — there is deliberately NO uniqueness constraint (contrast AssetAssignment).
+/// The actor (grantedById / revokedById) comes from the X-User-Id shim (ADR-0022 / ADR-0023).
+/// See docs/02-domain/entities/access-grant.md
+model AccessGrant {
+  id            String      @id @default(cuid())
+  // Required FKs use Restrict: a User / Application with grant history cannot be hard-deleted
+  // (history is preserved). Soft delete (UPDATE deletedAt) bypasses this — see ADR-0023.
+  // @db.Uuid to match User.id (uuid); same for the audit FKs below.
+  userId        String      @db.Uuid
+  user          User        @relation("AccessGrantUser", fields: [userId], references: [id], onDelete: Restrict)
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  // Free-form, app-defined (e.g. "admin", "developer", "viewer"); lazyit never interprets it.
+  accessLevel   String?
+  grantedAt     DateTime    @default(now())
+  // null => active. Setting it ends the grant without deleting the row (not a soft delete).
+  revokedAt     DateTime?
+  // Informative only — no scheduler auto-revokes at expiry (ADR-0023). null => no expiry.
+  expiresAt     DateTime?
+  // Optional audit FKs — who granted / revoked. SetNull: losing the actor never blocks deleting
+  // them, and the grant record survives. null => system / unknown.
+  grantedById   String?     @db.Uuid
+  grantedBy     User?       @relation("AccessGrantGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+  revokedById   String?     @db.Uuid
+  revokedBy     User?       @relation("AccessGrantRevokedBy", fields: [revokedById], references: [id], onDelete: SetNull)
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // No deletedAt: a lifecycle join, not a soft-deletable entity (ADR-0006). No uniqueness
+  // constraint — multi-grant is allowed by design (ADR-0023).
+  @@index([userId])
+  @@index([applicationId])
+  @@map("access_grants")
 }
