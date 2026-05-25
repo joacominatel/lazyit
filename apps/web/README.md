@@ -39,26 +39,30 @@ app/
     │   ├── page.tsx      # list + filters + table + states; orchestrates dialogs
     │   └── _components/  # colocated, feature-private UI
     │       ├── location-form-dialog.tsx     # create + edit (one form, two modes)
-    │       ├── delete-location-dialog.tsx   # soft-delete confirmation
     │       └── location-type-badge.tsx
     └── users/            # second CRUD feature — same mold as locations
         ├── page.tsx
         └── _components/
             ├── user-form-dialog.tsx         # create + edit (per-mode schema)
-            ├── delete-user-dialog.tsx
             └── user-status-badge.tsx
 
 components/
-├── ui/                   # shadcn/ui primitives (vendored, owned in-repo)
-├── sidebar-nav.tsx       # app navigation with active-route state (client)
-├── theme-toggle.tsx      # light/dark switch (heroicons)
-├── user-avatar.tsx       # deterministic initials avatar (shared across features)
-└── user-menu.tsx         # topbar avatar + dropdown (placeholder)
+├── ui/                        # shadcn/ui primitives (vendored, owned in-repo)
+├── delete-confirm-dialog.tsx  # reusable soft-delete confirmation (any resource)
+├── resource-table.tsx         # table shell + list states + RowActions (any resource)
+├── sidebar-nav.tsx            # app navigation with active-route state (client)
+├── theme-toggle.tsx           # light/dark switch (heroicons)
+├── user-avatar.tsx            # deterministic initials avatar (shared across features)
+└── user-menu.tsx              # topbar avatar + dropdown (placeholder)
 
 lib/
-├── utils.ts              # cn() helper
+├── utils/
+│   ├── index.ts          # cn() helper (importable as @/lib/utils)
+│   └── format.ts         # shared display formatters (formatDate)
 └── api/
     ├── client.ts         # typed fetch wrapper (apiFetch / ApiError)
+    ├── crud-endpoints.ts # createCrudEndpoints — the 5 REST bodies, per-resource generics
+    ├── query-keys.ts     # createQueryKeys — the all/lists/detail key factory
     ├── endpoints/        # pure fetch functions per resource — the ONLY apiFetch callers
     │   ├── locations.ts
     │   └── users.ts
@@ -89,6 +93,12 @@ access is layered so each concern stays in one place:
 3. **Pages and components** consume the hooks only — they never call `apiFetch`
    or `fetch` themselves.
 
+The repetitive parts are factored out: `lib/api/crud-endpoints.ts`
+(`createCrudEndpoints`) builds the five REST bodies from per-resource generics,
+and `lib/api/query-keys.ts` (`createQueryKeys`) builds the `all`/`lists`/`detail`
+key factory. The TanStack hooks stay hand-written per resource on purpose —
+bespoke hooks (publish, assign, by-slug) don't fit a fixed factory. See ADR-0020.
+
 **Forms** use `react-hook-form` + `@hookform/resolvers` with the **shared zod
 schema** as the single source of validation (e.g. `CreateLocationSchema`), wired
 through shadcn's `Field` primitives. Empty optional inputs are mapped to
@@ -99,6 +109,9 @@ Feature-specific UI lives colocated under `app/(app)/<feature>/_components/` (th
 only when a second screen genuinely reuses it — don't generalize preemptively.
 `UserAvatar` is the one deliberate exception: it sits in `components/` from day one
 because it is obviously cross-cutting (asset assignments, tickets, access grants).
+The shared list scaffolding (`<ResourceTable>` + skeleton/empty/error states,
+`RowActions`) and `<DeleteConfirmDialog>` were promoted to `components/` once the
+third screen made the duplication real (ADR-0020) — new screens compose them.
 
 ## Commands
 
