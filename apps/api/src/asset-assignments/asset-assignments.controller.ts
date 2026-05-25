@@ -19,6 +19,7 @@ import {
 } from '@nestjs/swagger';
 import { AssetAssignmentsService } from './asset-assignments.service';
 import { parseActiveOnly } from './active-only';
+import { parseUuidQuery } from '../common/parse-uuid-query';
 import {
   AssetAssignmentDto,
   CreateAssetAssignmentDto,
@@ -61,7 +62,7 @@ export class AssetAssignmentsController {
   ) {
     return this.assignments.findAll({
       assetId,
-      userId,
+      userId: parseUuidQuery(userId, 'userId'),
       activeOnly: parseActiveOnly(activeOnly),
     });
   }
