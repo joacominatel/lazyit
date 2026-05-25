@@ -34,6 +34,8 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0010-nextjs-frontend]] | Next.js for the frontend | accepted |
 | [[0011-tailwind-styling]] | Tailwind CSS + shadcn/ui for styling | accepted |
 | [[0012-testing-strategy]] | Testing strategy | accepted |
+| [[0013-zod-validation-pipe]] | Zod validation via a custom ZodValidationPipe | accepted |
+| [[0014-shared-package-build]] | Build @lazyit/shared to CommonJS + declarations | accepted |
 
 ## Pending ADRs (to write when decided)
 

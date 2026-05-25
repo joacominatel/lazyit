@@ -1,14 +1,14 @@
 ---
 title: User
 tags: [domain, entity]
-status: draft
+status: accepted
 created: 2026-05-25
 updated: 2026-05-25
 ---
 
 # User
 
-> ⚪ planned · Area: People · Implementation order: 1 (atomic, no dependencies)
+> 🟢 implemented · Area: People · Implementation order: 1 (atomic, no dependencies)
 
 ## Purpose
 
@@ -36,5 +36,35 @@ the reverse.
 - **ID:** `uuid()` — sensitive / externally-exposed entity ([[0005-id-strategy]]).
 - **Timestamps / soft delete:** `createdAt`, `updatedAt`, `deletedAt`.
 
+## Fields
+
+Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Validation schemas
+(`UserSchema`, `CreateUserSchema`, `UpdateUserSchema`) live in `@lazyit/shared`
+(`packages/shared/src/schemas/user.ts`) and are the source of truth for both api and web
+([[shared-package]], [[0013-zod-validation-pipe]]).
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` | `@default(uuid())`, `@db.Uuid` — sensitive/exposed ([[0005-id-strategy]]). |
+| `email` | `string` | `@unique`, required. |
+| `firstName` | `string` | required. |
+| `lastName` | `string` | required. |
+| `isActive` | `boolean` | `@default(true)`. Activation flag — see note below. |
+| `createdAt` | `datetime` | `@default(now())`. |
+| `updatedAt` | `datetime` | `@updatedAt`. |
+| `deletedAt` | `datetime?` | Soft delete — `null` while live; reads filter `deletedAt: null` ([[0006-soft-delete-and-auditing]]). |
+
+> [!note] `isActive` vs `deletedAt` — independent concepts
+> `isActive = false` means the person is **offboarded/disabled but retained** (tickets and past
+> assignments still reference them) — this is the offboarding rule above. `deletedAt` means the
+> record is **soft-deleted** (hidden from normal queries). A user can be inactive yet not
+> deleted. Creation always starts active; deactivation is a `PATCH`.
+
+## Endpoints
+
+`apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted), `GET /users/:id`,
+`POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete). Bodies validated against the
+shared schemas via [[0013-zod-validation-pipe]].
+
 Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] · [[ticket]] ·
-[[asset-centric]]
+[[asset-centric]] · [[shared-package]] · [[0013-zod-validation-pipe]]

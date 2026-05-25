@@ -12,7 +12,8 @@ updated: 2026-05-25
 and `api` must agree on**. This note is the contract for what may live here — keep it tight
 so the package doesn't become a junk drawer.
 
-> Today it only exports `APP_NAME`. The contract below governs what gets added.
+> Today it exports `APP_NAME` plus the `User` schemas/types ([[user]]). The contract below
+> governs what gets added.
 
 ## The boundary rule
 
@@ -44,9 +45,12 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
 
 ## Conventions
 
-- **Strict TypeScript**; exposes source directly (`main`/`types` → `./src/index.ts`, no build).
-- Add a focused module under `src/`, then re-export from `src/index.ts`; import as
-  `@lazyit/shared`.
+- **Strict TypeScript**, **built** with `tsc -p tsconfig.build.json` to `dist/` (CommonJS +
+  `.d.ts`); `main`/`types`/`exports` point at `dist/`. The base `tsconfig.json` stays no-emit
+  (editor / Bun). Turbo runs the build before dependents (`build`/`dev`/`test` `dependsOn`
+  `^build`). Why a build (and not source-direct): [[0014-shared-package-build]].
+- Organize `src/` by kind — `schemas/` (zod + inferred types), `constants/`, `utils/` — then
+  re-export from the barrel `src/index.ts` (extensionless imports); import as `@lazyit/shared`.
 - Validation flow: define the **zod schema here** → API uses it for request validation, web
   uses it for forms → share the type via `z.infer`. One definition, no duplication.
 - Tests for `shared` run with `bun test` ([[0012-testing-strategy]]).

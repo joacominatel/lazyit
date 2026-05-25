@@ -31,7 +31,7 @@ updated: 2026-05-25
 
 ## People
 
-- ⚪ [[user]] — central to access, peripheral to assets.
+- 🟢 [[user]] — central to access, peripheral to assets.
 
 ## Tickets
 

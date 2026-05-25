@@ -28,8 +28,9 @@ lazyit/
 
 - **`@lazyit/web`** — Next.js app. Depends on `@lazyit/shared` via `workspace:*`.
 - **`@lazyit/api`** — NestJS app + Prisma. Depends on `@lazyit/shared` via `workspace:*`.
-- **`@lazyit/shared`** — framework-agnostic TypeScript. Exposes its source directly
-  (`main`/`types` → `./src/index.ts`); no build step. Currently exports only `APP_NAME`.
+- **`@lazyit/shared`** — framework-agnostic TypeScript. Built to `dist/` (CommonJS + `.d.ts`)
+  via `tsc`; `main`/`types`/`exports` → `dist/` (the base `tsconfig.json` stays no-emit). Exports
+  `APP_NAME` and the `User` schemas/types so far. Why a build → [[0014-shared-package-build]].
   **What may live here is governed by a contract → [[shared-package]].**
 
 ## Orchestration

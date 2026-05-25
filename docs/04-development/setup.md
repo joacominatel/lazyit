@@ -43,13 +43,14 @@ bun run dev              # web → :3000, api → :3001
 > `.env.example` to copy from.
 > - **`.env`** (root) — read by `docker-compose.yml`: `POSTGRES_USER`, `POSTGRES_PASSWORD`,
 >   `POSTGRES_DB` (defaults to `lazyit`).
-> - **`apps/api/.env`** — read by the API: `DATABASE_URL` (Prisma, via `prisma.config.ts`,
->   which imports `dotenv/config`) and `PORT`. Keep its credentials/db in sync with the root.
+> - **`apps/api/.env`** — `DATABASE_URL` and `PORT`. Read in two places: the Prisma **CLI** via
+>   `prisma.config.ts` (which imports `dotenv/config`), and the **API runtime** because
+>   `start`/`dev` pass `--env-file .env` to `nest start`. Keep its credentials/db in sync with the root.
 > - **`apps/web/.env`** — none yet; the frontend has no environment variables. Add a
 >   `.env.example` here when that changes.
 >
-> Bun auto-loads `.env`, so app code needs no `dotenv`. Make sure `DATABASE_URL` matches the
-> Postgres credentials you set in the root `.env`.
+> No `dotenv` in app code. Make sure `DATABASE_URL` matches the Postgres credentials you set in
+> the root `.env`.
 
 | Variable | Where | Used by |
 | --- | --- | --- |
@@ -57,13 +58,23 @@ bun run dev              # web → :3000, api → :3001
 | `DATABASE_URL` | `apps/api/.env` | Prisma (`prisma.config.ts`) |
 | `PORT` | `apps/api/.env` | NestJS API (`:3001`) |
 
-> Bun auto-loads `.env`, so there's no `dotenv` in app code — except `prisma.config.ts`, which
-> imports `dotenv/config` because the Prisma CLI runs outside Bun's auto-loading.
+> Bun auto-loads `.env` for Bun-run scripts/tooling, so there's no `dotenv` in app code. Two
+> things run *outside* Bun's auto-load and load env explicitly: `prisma.config.ts` (imports
+> `dotenv/config`; the Prisma CLI runs under Node) and the **API runtime** (`nest start
+> --env-file .env`; the app is a Node child of `nest start`, which Bun's auto-load doesn't reach).
 
 ## Verify
 
-- API health: the initial migration created a throwaway `HealthCheck` model — a quick way to
-  confirm DB connectivity until real endpoints exist.
+- API: hit the first real endpoint — `curl http://localhost:3001/users` returns `[]` (or the
+  users you've created). `POST /users` with `{email, firstName, lastName}` creates one. See
+  [[user]].
 - Web: open `http://localhost:3000`.
 
-Related: [[workflows]] · [[stack]] · [[monorepo]] · [[0003-prisma-orm]]
+> [!note] Prisma 7 runtime specifics
+> Prisma 7's generated client is ESM and needs a **driver adapter** — we use
+> `@prisma/adapter-pg` and set `moduleFormat = "cjs"` in the generator (NestJS runs CommonJS).
+> `DATABASE_URL` is read at runtime from `apps/api/.env` because the API's `start`/`dev` scripts
+> pass `--env-file .env` to `nest start` (Node doesn't auto-load `.env`). The Prisma **CLI**
+> reads it separately via `prisma.config.ts`. See [[0003-prisma-orm]].
+
+Related: [[workflows]] · [[stack]] · [[monorepo]] · [[0003-prisma-orm]] · [[user]]

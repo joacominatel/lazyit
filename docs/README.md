@@ -85,9 +85,10 @@ All open questions from the initial briefing are now decided (2026-05-25):
   active owners at once (no uniqueness on the active owner). See [[asset-assignment]].
 - **Bun-first vs app stack** → *scope `CLAUDE.md`*: Bun for runtime/tooling, NestJS + Prisma
   + Jest for the app layer. See [[0009-bun-first-vs-app-stack]] (accepted).
-- **`DATABASE_URL` / env templates** → datasource `url` comes from `DATABASE_URL` via
-  `prisma.config.ts`; one `.env` per scope (root + per-app), with committed
-  `apps/api/.env.example` and a completed root `.env.example`. See [[setup]].
+- **`DATABASE_URL` / env templates** → `DATABASE_URL` lives in `apps/api/.env`, read by the
+  Prisma CLI via `prisma.config.ts` and by the API runtime via `nest start --env-file .env`.
+  Prisma 7 also needs a driver adapter (`@prisma/adapter-pg`) and `moduleFormat = "cjs"`. One
+  `.env` per scope (root + per-app), with committed examples. See [[setup]] · [[0003-prisma-orm]].
 
 ### Not written yet (intentional stubs)
 

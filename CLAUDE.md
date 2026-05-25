@@ -133,8 +133,9 @@ server/data layer, which is deliberately NestJS + Prisma. Decision:
 - `bun <file>` · `bunx <pkg>` · `bun install` · `bun run <script>` — never npm/yarn/pnpm/npx/node.
 - `Bun.file` over `node:fs`; `` Bun.$`...` `` over execa; `bun:sqlite` over better-sqlite3.
 - `bun test` for `packages/shared` and standalone scripts.
-- Rely on Bun's automatic `.env` loading (no `dotenv`) — **except** `prisma.config.ts`, which
-  imports `dotenv/config` because the Prisma CLI runs outside Bun's auto-load.
+- Rely on Bun's automatic `.env` loading (no `dotenv` in code) — **except** two things that run
+  outside Bun's auto-load: `prisma.config.ts` (imports `dotenv/config`; Prisma CLI runs on Node)
+  and the **API runtime** (`nest start --env-file .env`; the app is a Node child of `nest start`).
 
 **Do NOT** "Bun-ify" the app layer (these choices are intentional — don't replace them):
 
