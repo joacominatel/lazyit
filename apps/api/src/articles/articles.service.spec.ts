@@ -16,6 +16,22 @@ jest.mock('../../generated/prisma/client', () => ({
 const AUTHOR = '11111111-1111-1111-1111-111111111111';
 const OTHER = '22222222-2222-2222-2222-222222222222';
 
+// Shapes we assert against the recorded Prisma calls (the jest.Mock arrays are otherwise `any`).
+type ArticleData = {
+  slug?: string;
+  title?: string;
+  content?: string;
+  status?: string;
+  categoryId?: string;
+  authorId?: string;
+  lastEditedById?: string | null;
+  publishedAt?: Date | null;
+  deletedAt?: Date;
+};
+type WhereArg = {
+  where: { deletedAt: null; AND: Array<Record<string, unknown>> };
+};
+
 type ArticleMock = {
   findMany: jest.Mock;
   findFirst: jest.Mock;
@@ -33,16 +49,26 @@ describe('ArticlesService', () => {
     article = {
       findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn(),
-      create: jest.fn().mockImplementation(({ data }) => ({ id: 'art1', ...data })),
+      create: jest.fn().mockImplementation((args: { data: ArticleData }) => ({
+        id: 'art1',
+        ...args.data,
+      })),
       update: jest
         .fn()
-        .mockImplementation(({ where, data }) => ({ id: where.id, ...data })),
+        .mockImplementation(
+          (args: { where: { id: string }; data: ArticleData }) => ({
+            id: args.where.id,
+            ...args.data,
+          }),
+        ),
     };
     // Any well-formed uuid "exists" as a user; overridden per-test for the invalid case.
     user = {
       findFirst: jest
         .fn()
-        .mockImplementation(({ where }) => ({ id: where.id as string })),
+        .mockImplementation((args: { where: { id: string } }) => ({
+          id: args.where.id,
+        })),
     };
     // Category exists by default; overridden per-test.
     articleCategory = { findFirst: jest.fn().mockResolvedValue({ id: 'c1' }) };
@@ -60,8 +86,12 @@ describe('ArticlesService', () => {
     service = moduleRef.get(ArticlesService);
   });
 
-  const lastCreate = () => article.create.mock.calls[0][0].data;
-  const lastUpdate = () => article.update.mock.calls[0][0].data;
+  const lastCreate = (): ArticleData =>
+    (article.create.mock.calls as Array<[{ data: ArticleData }]>)[0][0].data;
+  const lastUpdate = (): ArticleData =>
+    (article.update.mock.calls as Array<[{ data: ArticleData }]>)[0][0].data;
+  const listWhere = (): WhereArg['where'] =>
+    (article.findMany.mock.calls as Array<[WhereArg]>)[0][0].where;
 
   // --- create --------------------------------------------------------------
 
@@ -151,19 +181,14 @@ describe('ArticlesService', () => {
   describe('findAll visibility', () => {
     it('shows only PUBLISHED to anonymous callers', async () => {
       await service.findAll({}, undefined);
-      const where = article.findMany.mock.calls[0][0].where;
-      expect(where.AND[0]).toEqual({ status: 'PUBLISHED' });
+      expect(listWhere().AND[0]).toEqual({ status: 'PUBLISHED' });
       expect(user.findFirst).not.toHaveBeenCalled();
     });
 
     it("shows PUBLISHED plus the caller's own DRAFTs when logged in", async () => {
       await service.findAll({}, AUTHOR);
-      const where = article.findMany.mock.calls[0][0].where;
-      expect(where.AND[0]).toEqual({
-        OR: [
-          { status: 'PUBLISHED' },
-          { status: 'DRAFT', authorId: AUTHOR },
-        ],
+      expect(listWhere().AND[0]).toEqual({
+        OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: AUTHOR }],
       });
     });
 
@@ -172,7 +197,7 @@ describe('ArticlesService', () => {
         { categoryId: 'c1', authorId: AUTHOR, status: 'PUBLISHED', q: 'vpn' },
         undefined,
       );
-      const and = article.findMany.mock.calls[0][0].where.AND;
+      const and = listWhere().AND;
       expect(and).toContainEqual({ categoryId: 'c1' });
       expect(and).toContainEqual({ authorId: AUTHOR });
       expect(and).toContainEqual({ status: 'PUBLISHED' });
@@ -392,7 +417,11 @@ describe('ArticlesService', () => {
         size: 6 * 1024 * 1024,
       };
       await expect(
-        service.importArticle(big, { categoryId: 'c1', status: 'DRAFT' }, AUTHOR),
+        service.importArticle(
+          big,
+          { categoryId: 'c1', status: 'DRAFT' },
+          AUTHOR,
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(article.create).not.toHaveBeenCalled();
     });
