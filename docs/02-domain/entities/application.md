@@ -27,7 +27,9 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
 
 - Only `name` is required. `description`, `url`, `vendor`, `notes` are optional free text.
 - **`url` is stored as a plain string, not strictly URL-validated** — internal IT targets are often
-  scheme-less hosts (e.g. `vpn.corp.local`) that a strict validator would reject.
+  scheme-less hosts (e.g. `vpn.corp.local`) that a strict validator would reject. It does, however,
+  **reject dangerous schemes** (`javascript:`, `data:`, `vbscript:`, `file:`): only scheme-less hosts
+  and `http(s)` are accepted, so the value can't become a link-href XSS sink (SEC-008).
 - **`isCritical`** (default `false`) flags an application whose access is especially sensitive
   (production infra, finance). Informational for now; the UI can highlight it.
 - **Category is optional and `SetNull`** — an application with no category is valid, and deleting a
@@ -66,7 +68,7 @@ Prisma model `Application` → table `applications`. Validation schemas (`Applic
 | `id` | `cuid` | `@default(cuid())`. |
 | `name` | `string` | required (≤200). |
 | `description` | `string?` | optional (≤2000). |
-| `url` | `string?` | optional system URL; stored as a free string (not strictly URL-validated). |
+| `url` | `string?` | optional system URL; stored as a free string (not strictly URL-validated; non-http(s) schemes rejected — SEC-008). |
 | `vendor` | `string?` | optional provider (Atlassian, Microsoft, AWS, …). |
 | `categoryId` | `cuid?` | optional FK → [[application-category]], `onDelete: SetNull`. |
 | `isCritical` | `boolean` | `@default(false)`. |

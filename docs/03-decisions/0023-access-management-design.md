@@ -77,7 +77,10 @@ directly by the IT team.
   a category detaches its apps, like [[asset-model]] → [[asset-category]]; **no 409 guard**, unlike
   [[article-category]] whose FK is `Restrict`). Fields: `name`, `description?`, `url?`, `vendor?`,
   `categoryId?`, `isCritical` (default `false`), `metadata?` (jsonb), `notes?`; soft delete +
-  timestamps.
+  timestamps. `url` stays a lenient free string (scheme-less internal hosts like `vpn.corp.local`
+  are intentionally allowed), **but rejects non-http(s) schemes** — `javascript:` / `data:` /
+  `vbscript:` / `file:` — so a stored value cannot become a link-href XSS sink once the web app
+  renders it (SEC-008; the render layer must still allow-list the scheme as defense in depth).
 - **AccessGrant**: append-only join — `userId` + `applicationId` (both required,
   `onDelete: Restrict`), `accessLevel?` (free-form), `grantedAt` (`@default(now())`), `revokedAt?`
   (`null` = active), `expiresAt?` (informative), `grantedById?` / `revokedById?`
