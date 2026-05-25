@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -53,7 +54,7 @@ export class UsersController {
   @Get(':id')
   @ApiOperation({ summary: 'Get a user by id' })
   @ApiOkResponse({ type: UserDto })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.users.findOne(id);
   }
 
@@ -69,7 +70,7 @@ export class UsersController {
   })
   @ApiOkResponse({ type: [AssetAssignmentDto] })
   async findAssignments(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Query('activeOnly') activeOnly?: string,
   ) {
     await this.users.findOne(id); // 404 if the user is missing or soft-deleted
@@ -98,7 +99,7 @@ export class UsersController {
   })
   @ApiOkResponse({ type: [AccessGrantDto] })
   async findAccessGrants(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Query('activeOnly') activeOnly?: string,
     @Query('includeExpired') includeExpired?: string,
   ) {
@@ -120,14 +121,14 @@ export class UsersController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update a user' })
   @ApiOkResponse({ type: UserDto })
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto) {
     return this.users.update(id, dto);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Soft-delete a user' })
   @ApiOkResponse({ type: UserDto })
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.users.remove(id);
   }
 }
