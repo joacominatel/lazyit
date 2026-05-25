@@ -29,6 +29,11 @@ model User {
   updatedAt  DateTime  @updatedAt
   deletedAt  DateTime?
 
+  // Asset ownership over time (three roles: owner, who-assigned, who-released). See AssetAssignment.
+  assignments         AssetAssignment[] @relation("AssignmentOwner")
+  assignmentsMade     AssetAssignment[] @relation("AssignmentAssignedBy")
+  assignmentsReleased AssetAssignment[] @relation("AssignmentReleasedBy")
+
   @@map("users")
 }
 
@@ -131,6 +136,8 @@ model Asset {
   updatedAt    DateTime    @updatedAt
   deletedAt    DateTime?
 
+  assignments AssetAssignment[]
+
   @@index([modelId])
   @@index([locationId])
   @@index([status])
@@ -144,4 +151,39 @@ enum AssetStatus {
   RETIRED
   LOST
   UNKNOWN
+}
+
+/// Timestamped join recording who owns an Asset, over time (asset-centric ownership; ADR-0004).
+/// Append-only with a release marker: rows are never deleted, only "closed" by setting
+/// releasedAt (ADR-0006). Multi-owner: an asset may have several active assignments at once.
+/// See docs/02-domain/entities/asset-assignment.md and docs/03-decisions/0019-asset-assignment-integrity.md
+model AssetAssignment {
+  id           String    @id @default(cuid())
+  // Required FKs use Restrict: an Asset/User that has assignment history cannot be hard-deleted
+  // (history is preserved). Contrast Asset.modelId/locationId (SetNull). See ADR-0019.
+  assetId      String
+  asset        Asset     @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  // @db.Uuid to match User.id (uuid). Same for the audit FKs below.
+  userId       String    @db.Uuid
+  user         User      @relation("AssignmentOwner", fields: [userId], references: [id], onDelete: Restrict)
+  assignedAt   DateTime  @default(now())
+  // null => active. Setting it ends the assignment without deleting the row (not a soft delete).
+  releasedAt   DateTime?
+  // Optional audit FKs — who assigned / released. SetNull: losing the actor never blocks
+  // deleting them, and the assignment record itself survives.
+  assignedById String?   @db.Uuid
+  assignedBy   User?     @relation("AssignmentAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+  releasedById String?   @db.Uuid
+  releasedBy   User?     @relation("AssignmentReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // No deletedAt: this is a lifecycle join, not a soft-deletable entity (ADR-0006).
+  // A partial UNIQUE INDEX (assetId, userId) WHERE releasedAt IS NULL — "at most one active
+  // assignment per (asset, user)" — is added as raw SQL in the migration: Prisma can't express
+  // a partial index. See ADR-0019 and docs/05-runbooks/prisma-migrations.md §3.
+  @@index([assetId])
+  @@index([userId])
+  @@map("asset_assignments")
 }
