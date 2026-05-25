@@ -3,7 +3,7 @@
 !.env.example
 
 .idea/
-.claude/
+# .claude/
 .vscode/
 
 # node
