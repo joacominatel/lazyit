@@ -20,7 +20,7 @@ concrete instance of a generic [[asset-model]].
 
 - **is an instance of** an optional [[asset-model]] (`modelId`, nullable FK, `onDelete: SetNull`).
 - **lives at** an optional [[location]] (`locationId`, nullable FK, `onDelete: SetNull`).
-- **is owned via** N [[asset-assignment]] records — ⚪ **not yet implemented** (deferred).
+- **is owned via** N [[asset-assignment]] records — 🟢 ownership over time (concurrent, multi-owner).
 - **has** N [[asset-history]] entries — ⚪ **not yet implemented** (deferred).
 - **is referenced by** N [[ticket]]s — ⚪ not yet implemented.
 
@@ -34,8 +34,8 @@ concrete instance of a generic [[asset-model]].
 - FKs (`modelId`, `locationId`) are `onDelete: SetNull`: deleting a model/location **detaches**
   assets, never deletes them (auditability > strict referential integrity). Combined with soft
   delete everywhere, references are preserved in practice.
-- Ownership is **never a column** on the asset — it will be the [[asset-assignment]] join
-  (deferred), so ownership history is automatic.
+- Ownership is **never a column** on the asset — it is the [[asset-assignment]] join, so
+  ownership history is automatic ([[0019-asset-assignment-integrity]]).
 
 > [!warning] Known debt — dynamic `specs` validation
 > `Asset.specs` (and [[asset-model]]`.specs`) currently accept **any JSON object**
@@ -80,14 +80,13 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 filters **`?categoryId=&locationId=&status=`** — `categoryId` filters by the asset's model's
 category, `status` is validated against the enum (invalid → `400`). Plus `GET /assets/:id`,
 `POST`, `PATCH /:id`, `DELETE /:id` (soft delete). An invalid `modelId`/`locationId` on write
-returns `400` (FK → [[0018-api-documentation-swagger]]).
+returns `400` (FK → [[0018-api-documentation-swagger]]). Also `GET /assets/:id/assignments?activeOnly=`
+lists the asset's ownership records ([[asset-assignment]]).
 
 ## Not yet implemented (deferred)
 
-- [[asset-assignment]] (ownership join, concurrent many-to-many with [[user]]) and
-  [[asset-history]] (append-only audit log) — the next task.
+- [[asset-history]] (append-only audit log of asset state changes) — not yet built.
 - Dynamic per-category `specs` validation (see debt note above).
-- Any endpoint mixing [[asset]] with [[user]].
 
 Related: [[asset-model]] · [[location]] · [[asset-category]] · [[asset-assignment]] ·
 [[asset-history]] · [[asset-centric]] · [[0007-flexible-asset-specs-jsonb]] ·

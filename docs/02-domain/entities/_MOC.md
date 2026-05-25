@@ -26,7 +26,7 @@ updated: 2026-05-25
 - 🟢 [[asset-model]] — generic make/model/specs an asset is an instance of.
 - 🟢 [[asset-category]] — classification of models (laptop, switch, server…).
 - 🟢 [[location]] — where an asset physically lives.
-- ⚪ [[asset-assignment]] — join entity: who owns an asset, with history.
+- 🟢 [[asset-assignment]] — join entity: who owns an asset, with history.
 - ⚪ [[asset-history]] — append-only log of asset state changes.
 
 ## People

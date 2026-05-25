@@ -67,7 +67,8 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 
 `apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted), `GET /users/:id`,
 `POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete). Bodies validated against the
-shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).
+shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). Also
+`GET /users/:id/assignments?activeOnly=` lists the assets assigned to the user ([[asset-assignment]]).
 
 Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] · [[ticket]] ·
 [[asset-centric]] · [[shared-package]] · [[0013-zod-validation-pipe]] ·
