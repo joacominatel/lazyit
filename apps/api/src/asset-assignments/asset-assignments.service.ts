@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -20,6 +21,15 @@ export interface FindAssignmentsFilters {
   includeUser?: boolean;
 }
 
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The actor (`assignedById` on create, `releasedById` on release) comes from the optional
+ * `X-User-Id` shim — never the request body (ADR-0024, converging on the AccessGrant pattern of
+ * ADR-0022/0023). When real auth lands, the actor comes from the JWT and these methods are
+ * unchanged.
+ */
 @Injectable()
 export class AssetAssignmentsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -60,8 +70,10 @@ export class AssetAssignmentsService {
    * pair with 409 — a friendly pre-check; the partial unique index is the race-proof backstop
    * (also surfaces as 409 via PrismaExceptionFilter). An invalid assetId/userId hits the FK and
    * is mapped to 400 (P2003). A different user on the same asset is allowed (multi-owner).
+   * `assignedById` is set from the `X-User-Id` shim when present (null = system/unknown).
    */
-  async create(data: CreateAssetAssignment) {
+  async create(data: CreateAssetAssignment, actorId?: string) {
+    const assignedById = await this.resolveActor(actorId);
     const existingActive = await this.prisma.assetAssignment.findFirst({
       where: { assetId: data.assetId, userId: data.userId, releasedAt: null },
     });
@@ -70,26 +82,30 @@ export class AssetAssignmentsService {
         'An active assignment already exists for this asset and user',
       );
     }
-    return this.prisma.assetAssignment.create({ data });
+    return this.prisma.assetAssignment.create({
+      data: {
+        ...data,
+        ...(assignedById !== undefined ? { assignedById } : {}),
+      },
+    });
   }
 
   /**
-   * Release an active assignment: set `releasedAt = now()` (+ optional releasedById / notes).
-   * 404 if missing; 409 if already released (release is not repeatable). Releasing one owner
-   * does not affect any other active assignment on the same asset.
+   * Release an active assignment: set `releasedAt = now()` (+ `releasedById` from the shim,
+   * optional `notes`). 404 if missing; 409 if already released (release is not repeatable).
+   * Releasing one owner does not affect any other active assignment on the same asset.
    */
-  async release(id: string, data: ReleaseAssetAssignment) {
+  async release(id: string, data: ReleaseAssetAssignment, actorId?: string) {
     const assignment = await this.findOne(id);
     if (assignment.releasedAt !== null) {
       throw new ConflictException(`AssetAssignment ${id} is already released`);
     }
+    const releasedById = await this.resolveActor(actorId);
     return this.prisma.assetAssignment.update({
       where: { id },
       data: {
         releasedAt: new Date(),
-        ...(data.releasedById !== undefined
-          ? { releasedById: data.releasedById }
-          : {}),
+        ...(releasedById !== undefined ? { releasedById } : {}),
         ...(data.notes !== undefined ? { notes: data.notes } : {}),
       },
     });
@@ -105,5 +121,30 @@ export class AssetAssignmentsService {
       where: { id },
       data: { notes: data.notes },
     });
+  }
+
+  // --- internals -----------------------------------------------------------
+
+  /**
+   * Resolve the optional `X-User-Id` actor: undefined/empty → undefined (system/unknown, leaves the
+   * FK null). A present value must be a valid live user, else 400 (don't silently drop a bad id; a
+   * soft-deleted user can't act as an actor). Mirrors AccessGrantsService.resolveActor — a shared
+   * helper is a future refactor candidate once a third caller appears.
+   */
+  private async resolveActor(actorId?: string): Promise<string | undefined> {
+    if (actorId === undefined || actorId === '') return undefined;
+    if (!UUID_REGEX.test(actorId)) {
+      throw new BadRequestException('X-User-Id is not a valid user id');
+    }
+    const user = await this.prisma.user.findFirst({
+      where: { id: actorId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!user) {
+      throw new BadRequestException(
+        'X-User-Id does not reference a valid user',
+      );
+    }
+    return user.id;
   }
 }
