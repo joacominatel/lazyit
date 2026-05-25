@@ -1,0 +1,44 @@
+# lazyit reverse proxy — Caddy. See ADR-0026.
+#
+# One HTTPS entry point in front of the web (:3000) and API (:3001) containers.
+# Automatic HTTPS: Caddy's INTERNAL CA for `localhost` (local prod-like), and Let's Encrypt
+# for a real domain. Routing is SAME-ORIGIN: the browser calls /api/* and Caddy forwards it
+# to the API, so the web image is domain-portable (NEXT_PUBLIC_API_URL=/api, baked at build).
+
+{
+	admin off
+	# Real domain (Let's Encrypt): set an ACME contact email. Leave commented for local.
+	# email {$LAZYIT_TLS_EMAIL}
+}
+
+# Site address. Local prod-like: unset -> "localhost" (internal CA, served on :443 -> host :8443).
+# Real domain: set LAZYIT_SITE_ADDRESS=lazyit.example.com (publicly reachable :80/:443).
+{$LAZYIT_SITE_ADDRESS:localhost} {
+	encode zstd gzip
+
+	# Swagger UI + raw OpenAPI live at the API's OWN /api/docs* — forward WITHOUT stripping.
+	@apidocs path /api/docs*
+	handle @apidocs {
+		reverse_proxy api:3001
+	}
+
+	# Everything else under /api/* -> API, stripping the /api prefix (API routes are at root,
+	# e.g. /api/users -> /users). Caddy evaluates handle blocks by matcher specificity, so the
+	# more specific @apidocs above is always tried first.
+	@api path /api/*
+	handle @api {
+		uri strip_prefix /api
+		reverse_proxy api:3001
+	}
+
+	# --- Future IdP slot (ADR-0016) — reserved, NOT configured. Uncomment when auth lands. ---
+	# @auth path /auth/*
+	# handle @auth {
+	# 	reverse_proxy idp:9000
+	# }
+
+	# Everything else -> the Next.js web app (least specific: catch-all).
+	handle {
+		reverse_proxy web:3000
+	}
+}
