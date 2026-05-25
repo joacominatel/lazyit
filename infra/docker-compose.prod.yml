@@ -1,0 +1,95 @@
+# lazyit — production-like / self-hosted stack. See ADR-0025/0026/0028 and docs/05-runbooks/.
+#
+# Bring up (from the repo ROOT), after `cp infra/env/.env.prod.example infra/env/.env.prod`:
+#   docker compose -f infra/docker-compose.prod.yml up -d --build
+#
+# Only Caddy publishes host ports (8080/8443 by default). db/api/web stay on the internal
+# network — Postgres is NEVER exposed to the host (SEC-005 / ADR-0028).
+
+name: lazyit-prod
+
+services:
+  # --- PostgreSQL — internal network only, no published port ---------------
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    shm_size: 256mb
+    env_file: [env/.env.prod]
+    volumes:
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      # $$ escapes compose interpolation so the check reads the container's env at runtime.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-lazyit} -d $${POSTGRES_DB:-lazyit}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [internal]
+
+  # --- One-shot migrate + seed: runs after db is healthy, before the API ----
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/docker/migrate.Dockerfile
+    image: lazyit-migrate:dev
+    restart: "no"
+    env_file: [env/.env.prod]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+
+  # --- API (NestJS on Node) — internal only -------------------------------
+  api:
+    build:
+      context: ..
+      dockerfile: infra/docker/api.Dockerfile
+    image: lazyit-api:dev
+    restart: unless-stopped
+    env_file: [env/.env.prod]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+
+  # --- Web (Next.js standalone on Node) — internal only -------------------
+  web:
+    build:
+      context: ..
+      dockerfile: infra/docker/web.Dockerfile
+      args:
+        # Baked at build time. Relative /api keeps the image domain-portable (ADR-0026).
+        NEXT_PUBLIC_API_URL: /api
+    image: lazyit-web:dev
+    restart: unless-stopped
+    networks: [internal]
+
+  # --- Caddy reverse proxy + automatic HTTPS — the only public surface -----
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    env_file: [env/.env.prod]
+    ports:
+      - "${LAZYIT_HTTP_PORT:-8080}:80"
+      - "${LAZYIT_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_started
+      web:
+        condition: service_started
+    networks: [internal]
+
+volumes:
+  db_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge
