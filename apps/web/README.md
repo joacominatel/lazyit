@@ -200,6 +200,9 @@ cp .env.example .env
   `X-User-Id` header from a `localStorage`-backed acting-user store. The dev-only topbar
   `<UserSwitcher>` chooses it; "anonymous" sees only published articles. It is a stand-in
   until real auth lands, and goes away with it.
+  **To use it:** pick a user from the topbar dropdown (the choice persists in
+  `localStorage` and is sent on every request); if the list is empty, create a user under
+  `/users` first. This is the only way to act as an author and see/edit your own drafts.
 - **CORS is enabled** on the API for the web origin, so the browser calls it directly —
   the Locations and Users screens do. The example hook `lib/api/hooks/use-health.ts`
   (a bare `GET /users`) predates them and is kept only as a minimal reference; it is
