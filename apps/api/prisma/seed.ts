@@ -1,8 +1,8 @@
 /**
- * Seeds the initial AssetCategory and ArticleCategory sets. Idempotent (upsert by unique `name`):
- * safe to re-run, and `update: {}` means it never clobbers user edits — both category sets are
- * user-managed, the seed lists are just an initial, non-special starting point (see
- * docs/02-domain/entities/asset-category.md and docs/02-domain/entities/article-category.md).
+ * Seeds the initial AssetCategory, ArticleCategory and ApplicationCategory sets. Idempotent (upsert
+ * by unique `name`): safe to re-run, and `update: {}` means it never clobbers user edits — all three
+ * category sets are user-managed, the seed lists are just an initial, non-special starting point (see
+ * docs/02-domain/entities/asset-category.md, article-category.md and application-category.md).
  *
  * Run from apps/api: `bunx prisma db seed`.
  */
@@ -46,6 +46,18 @@ const INITIAL_ARTICLE_CATEGORIES: { name: string; icon: string }[] = [
   { name: 'Tools', icon: 'Cog6ToothIcon' },
 ];
 
+// Initial application categories (what an access target is: a SaaS product, an internal system, a
+// technical service, …). Same user-managed, non-special nature; `icon` is a heroicon name and
+// `order` (seeded by position) sorts the listing — all editable afterwards. See ADR-0023.
+const INITIAL_APPLICATION_CATEGORIES: { name: string; icon: string }[] = [
+  { name: 'SaaS', icon: 'CloudIcon' },
+  { name: 'Internal', icon: 'BuildingOffice2Icon' },
+  { name: 'Service', icon: 'WrenchScrewdriverIcon' },
+  { name: 'Third Party', icon: 'BuildingStorefrontIcon' },
+  { name: 'Infrastructure', icon: 'ServerStackIcon' },
+  { name: 'Other', icon: 'Squares2X2Icon' },
+];
+
 async function main() {
   for (const name of INITIAL_ASSET_CATEGORIES) {
     await prisma.assetCategory.upsert({
@@ -64,6 +76,17 @@ async function main() {
     });
   }
   console.log(`Seeded ${INITIAL_ARTICLE_CATEGORIES.length} article categories.`);
+
+  for (const [index, { name, icon }] of INITIAL_APPLICATION_CATEGORIES.entries()) {
+    await prisma.applicationCategory.upsert({
+      where: { name },
+      update: {}, // don't overwrite user edits on re-run
+      create: { name, icon, order: index + 1 },
+    });
+  }
+  console.log(
+    `Seeded ${INITIAL_APPLICATION_CATEGORIES.length} application categories.`,
+  );
 }
 
 main()
