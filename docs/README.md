@@ -95,6 +95,8 @@ All open questions from the initial briefing are now decided (2026-05-25):
 - `05-runbooks/*` — empty until there is something to operate (deploy, backups, on-call).
 - Entity **field tables** — deliberately omitted; entities are conceptual-only until
   they exist in Prisma (see each note in [[entities/_MOC|Entities]]).
-- ADRs for **auth** (NextAuth vs better-auth) and **async workers** (BullMQ + Redis) —
-  placeholders noted in [[03-decisions/_MOC|Decisions]], to be written when decided.
-- [[deployment]] — skeleton only; self-hosting target not yet chosen.
+- ADRs still pending: the **auth IdP/provider** choice and **async workers** (BullMQ + Redis) —
+  see [[03-decisions/_MOC|Decisions]]. (The auth *strategy* and *deployment model* are now
+  decided: [[0016-auth-strategy-deferred]], [[0015-deployment-model]].)
+- [[deployment]] — deployment *topology* still a skeleton; the *model* is decided
+  ([[0015-deployment-model]]: self-hosted, single-org).

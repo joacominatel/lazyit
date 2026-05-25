@@ -28,7 +28,18 @@ Inspired by ServiceNow, but deliberately different:
 - **IT-native** — built around IT objects (assets, access, consumables), not a generic
   ticketing tool bent into shape.
 - **Lightweight and opinionated** — a curated set of capabilities, not a thousand toggles.
-- **Self-hosted** — runs inside the company, for internal use.
+- **Self-hosted** — runs inside the company, not a third-party cloud.
+
+## Deployment model
+
+lazyit is headed toward a **self-hosted product for IT teams** — one instance per organization,
+run inside the customer. The immediate step is **internal validation** (own / former company)
+before any external distribution. Self-hosting is the right default for this segment: the data
+(inventory, access, credentials-adjacent records) is sensitive, AD/LDAP integration is expected,
+and compliance often forbids keeping it off-premises — with clear market precedents (Snipe-IT,
+GLPI, Zammad, Authentik). **Multi-tenant SaaS is deferred** — not designed for now, revisitable
+later. Full rationale: [[0015-deployment-model]]; authentication direction:
+[[0016-auth-strategy-deferred]].
 
 ## Principles
 
@@ -43,6 +54,7 @@ Inspired by ServiceNow, but deliberately different:
 
 - Public/customer-facing service portal (this is internal).
 - ITIL-complete process certification.
-- Multi-tenant SaaS — lazyit is single-org, self-hosted.
+- Multi-tenant SaaS — **deferred**, not now; lazyit ships single-org and self-hosted
+  ([[0015-deployment-model]]).
 
 Related: [[problem-space]] · [[competitors]] · [[asset-centric]]

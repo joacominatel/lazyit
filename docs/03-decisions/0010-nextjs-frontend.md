@@ -44,5 +44,6 @@ lean on — without assembling routing/SSR/bundling by hand.
   shadcn/ui + Tailwind; strong TypeScript story.
 - **Trade-offs:** App Router conventions and RSC mental model; coupling to Next's release
   cadence (currently 16.2.6).
-- **Follow-ups:** authentication choice (NextAuth vs better-auth) is still open — its own ADR
-  ([[03-decisions/_MOC|Decisions]]). Frontend testing is deferred ([[0012-testing-strategy]]).
+- **Follow-ups:** authentication is deferred and will integrate with an external IdP (OIDC),
+  not a self-rolled NextAuth/better-auth flow — see [[0016-auth-strategy-deferred]]. Frontend
+  testing is deferred ([[0012-testing-strategy]]).

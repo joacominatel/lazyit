@@ -31,7 +31,9 @@ Versions below are **verified against the repository** as of 2026-05-25, not jus
 
 - **Frontend:** Next.js + Tailwind decided ([[0010-nextjs-frontend]], [[0011-tailwind-styling]]);
   **shadcn/ui** is the intended component layer but not yet installed.
-- **Auth:** NextAuth vs better-auth — **undecided** (ADR pending, see [[03-decisions/_MOC|Decisions]]).
+- **Auth:** **deferred** — we integrate with an external IdP (OIDC), not a self-rolled flow;
+  provider TBD (Authentik / Keycloak / Zitadel). See [[0016-auth-strategy-deferred]] and
+  [[0015-deployment-model]].
 - **Async workers:** likely BullMQ + Redis.
 
 > [!warning] Bun-first vs app stack

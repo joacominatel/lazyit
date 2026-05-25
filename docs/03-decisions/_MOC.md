@@ -36,10 +36,13 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0012-testing-strategy]] | Testing strategy | accepted |
 | [[0013-zod-validation-pipe]] | Zod validation via a custom ZodValidationPipe | accepted |
 | [[0014-shared-package-build]] | Build @lazyit/shared to CommonJS + declarations | accepted |
+| [[0015-deployment-model]] | Deployment model — self-hosted for IT teams | accepted |
+| [[0016-auth-strategy-deferred]] | Authentication deferred; external IdP when needed | accepted |
 
 ## Pending ADRs (to write when decided)
 
-- **Authentication** — NextAuth vs better-auth (see [[stack]]).
+- **Auth IdP / provider** — Authentik vs Keycloak vs Zitadel vs equivalent. The strategy is
+  decided ([[0016-auth-strategy-deferred]]); only the provider choice remains.
 - **Async workers** — BullMQ + Redis (note the [[0009-bun-first-vs-app-stack]] tension:
   BullMQ pulls in `ioredis`, which `CLAUDE.md` discourages).
 - **Deployment topology** — see [[deployment]].

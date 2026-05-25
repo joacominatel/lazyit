@@ -8,12 +8,12 @@ updated: 2026-05-25
 
 # Deployment
 
-> [!warning] Skeleton — not yet decided
-> lazyit is self-hosted and internal, but the concrete deployment target has **not** been
-> chosen. This note frames the decision; fill it in (and add a runbook under
-> [[05-runbooks/_MOC|Runbooks]]) once decided.
+> [!warning] Topology not yet decided
+> The **deployment model** is decided — self-hosted, single-org ([[0015-deployment-model]]).
+> What remains open is the concrete **topology** (host, orchestration, proxy, backups). This
+> note frames that; fill it in (and add a runbook under [[05-runbooks/_MOC|Runbooks]]) once chosen.
 
-## Constraints (from [[vision]])
+## Constraints (from [[vision]] and [[0015-deployment-model]])
 
 - **Self-hosted, single-org.** Runs inside the company; not multi-tenant SaaS.
 - **Operable by a small team.** Minimal moving parts; boring, durable infrastructure.

@@ -28,8 +28,10 @@ the reverse.
 - Atomic entity — implemented first, alongside [[location]].
 - Offboarding a user must not erase history: assignments and grants are *released*, not
   deleted (soft delete + lifecycle timestamps).
-- Likely the integration point for authentication (NextAuth vs better-auth — undecided;
-  see [[stack]]).
+- **Identity / auth:** the local User is the source of truth for the domain. Authentication is
+  **deferred** ([[0016-auth-strategy-deferred]]); when it lands we integrate with an external IdP
+  (OIDC) and map its `sub` to `externalId` — we do **not** implement our own auth. Current
+  endpoints are **unauthenticated (dev-only)**.
 
 ## Conventions
 
@@ -50,6 +52,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `firstName` | `string` | required. |
 | `lastName` | `string` | required. |
 | `isActive` | `boolean` | `@default(true)`. Activation flag — see note below. |
+| `externalId` | `string?` | `@unique`, nullable. Holds the IdP `sub` once auth is integrated; `null` until then ([[0016-auth-strategy-deferred]]). |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | Soft delete — `null` while live; reads filter `deletedAt: null` ([[0006-soft-delete-and-auditing]]). |
@@ -67,4 +70,5 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 shared schemas via [[0013-zod-validation-pipe]].
 
 Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] · [[ticket]] ·
-[[asset-centric]] · [[shared-package]] · [[0013-zod-validation-pipe]]
+[[asset-centric]] · [[shared-package]] · [[0013-zod-validation-pipe]] ·
+[[0016-auth-strategy-deferred]]
