@@ -42,6 +42,8 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0018-api-documentation-swagger]] | API documentation with Swagger/OpenAPI (nestjs-zod) | accepted |
 | [[0019-asset-assignment-integrity]] | AssetAssignment referential integrity & lifecycle | accepted |
 | [[0020-frontend-data-layer]] | Frontend data layer (endpoints → hooks → components) | accepted |
+| [[0021-knowledge-base-design]] | Knowledge Base design — simple wiki (Article + ArticleCategory) | accepted |
+| [[0022-draft-visibility-auth-shim]] | Draft visibility & the `X-User-Id` auth shim | accepted (temporary) |
 
 ## Pending ADRs (to write when decided)
 

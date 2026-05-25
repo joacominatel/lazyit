@@ -1,0 +1,66 @@
+---
+title: "ADR-0022: Draft visibility & the X-User-Id auth shim"
+tags: [adr]
+status: accepted
+created: 2026-05-25
+updated: 2026-05-25
+deciders: [Joaquín Minatel]
+---
+
+# ADR-0022: Draft visibility & the X-User-Id auth shim
+
+## Status
+
+accepted — 2026-05-25, **temporary**. Stands on [[0016-auth-strategy-deferred]] (no real auth
+yet) and is scoped to the Knowledge Base ([[0021-knowledge-base-design]]). **To be revisited when
+auth lands** — when [[0016-auth-strategy-deferred]] is resolved, this ADR is reviewed.
+
+## Context
+
+KB articles need authorship rules: a `DRAFT` is private to its author, and **only the author** may
+edit, delete, publish or unpublish an article. But real authentication is **deferred**
+([[0016-auth-strategy-deferred]]) — the API is currently unauthenticated, so the server has no
+trustworthy "who is calling". We still want to build and unit-test the authorization logic now, so
+that when auth arrives it slots in **without rewriting the KB**.
+
+## Considered options
+
+- **Wait for real auth** — can't express draft privacy at all until the IdP lands; blocks the
+  whole module. ❌
+- **Add an interim guard / JWT now** — re-introduces the auth we explicitly deferred
+  ([[0016-auth-strategy-deferred]]); throwaway work. ❌
+- **A header shim (`X-User-Id`) resolved inside the service** — the caller passes a `User.id`; the
+  service treats it as `currentUser`. ✅ *(chosen)*
+
+## Decision
+
+- **`X-User-Id` header** carries a `User.id` and simulates the caller:
+  - present + valid (an existing, non-soft-deleted user) → that is `currentUser`;
+  - absent → **anonymous** (sees only `PUBLISHED`);
+  - present but invalid → **`400`**.
+- **Authorization lives in the service**, not in a guard/middleware:
+  - **Read** (`GET` list / `:id` / `by-slug`): `PUBLISHED` is visible to everyone; a `DRAFT` is
+    visible **only to its author**. A `DRAFT` requested by a non-author returns **`404`** — never
+    `403`, so we don't leak the existence of someone's draft.
+  - **Write** (`POST` / `PATCH` / `DELETE` / `publish` / `unpublish`): require `X-User-Id` (else
+    **`400`**). On create, `authorId = currentUser` — **never** taken from the body (can't be
+    forged). For an existing article, **only the author** may modify it: a non-author hitting a
+    *published* article gets **`403`** (they can read it but not change it); a *draft* gets
+    **`404`** (consistent with read visibility).
+- **Swagger** documents `X-User-Id` as an **optional** header on reads and a **required** header on
+  writes ([[0018-api-documentation-swagger]]).
+
+## Consequences
+
+- **Positive:** the full authorization model is implemented and unit-tested **now**. When auth
+  lands, a middleware/decorator fills `currentUser` from the JWT `sub` (mapped via
+  `User.externalId`) and **the service logic is unchanged** — only the *source* of `currentUser`
+  moves from a header to the token.
+- **Negative / security (important):** there is **no real enforcement** — anyone can send any
+  `X-User-Id`. These endpoints are **insecure until auth lands**; acceptable only under the
+  dev-only posture of [[0016-auth-strategy-deferred]], and they **must not be exposed publicly**.
+- **Temporary by construction:** the shim is replaced when the IdP integration arrives; the
+  authorization *rules* (draft privacy, author-only writes, `404`-vs-`403`) survive that change.
+
+Related: [[0016-auth-strategy-deferred]] · [[0021-knowledge-base-design]] · [[article]] ·
+[[user]] · [[0018-api-documentation-swagger]]
