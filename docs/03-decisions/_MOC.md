@@ -50,6 +50,8 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0026-reverse-proxy-tls]] | Reverse proxy & TLS (Caddy), same-origin `/api` routing | accepted |
 | [[0027-ci-pipeline]] | CI on GitHub Actions; CD deferred | accepted |
 | [[0028-secrets-and-config]] | Secrets & configuration management (env files per level) | accepted |
+| [[0029-untrusted-content-sanitization]] | Untrusted-content sanitization is render-time, not write-time | accepted |
+| [[0030-list-pagination-contract]] | List endpoint pagination contract (offset; implementation deferred) | accepted |
 
 ## Pending ADRs (to write when decided)
 
