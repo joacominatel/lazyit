@@ -34,9 +34,29 @@ describe('UsersService', () => {
     service = moduleRef.get(UsersService);
   });
 
-  it('creates a user', async () => {
+  it('creates a user without externalId (current case — no auth yet)', async () => {
     const dto = { email: 'a@b.com', firstName: 'Ada', lastName: 'Lovelace' };
-    const created = { id: 'uuid-1', ...dto, isActive: true, deletedAt: null };
+    const created = {
+      id: 'uuid-1',
+      ...dto,
+      isActive: true,
+      externalId: null,
+      deletedAt: null,
+    };
+    user.create.mockResolvedValue(created);
+
+    await expect(service.create(dto)).resolves.toEqual(created);
+    expect(user.create).toHaveBeenCalledWith({ data: dto });
+  });
+
+  it('creates a user with externalId (future case — IdP sub mapping)', async () => {
+    const dto = {
+      email: 'b@c.com',
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      externalId: 'idp-sub-123',
+    };
+    const created = { id: 'uuid-2', ...dto, isActive: true, deletedAt: null };
     user.create.mockResolvedValue(created);
 
     await expect(service.create(dto)).resolves.toEqual(created);
