@@ -2,6 +2,7 @@ import Link from "next/link";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/user-menu";
+import { UserSwitcher } from "@/components/user-switcher";
 
 // Private app shell: sidebar + topbar. The interactive nav (active state) lives
 // in the SidebarNav client component so this layout stays a server component.
@@ -25,7 +26,8 @@ export default function AppLayout({
         <SidebarNav />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center justify-end gap-1 border-b border-border px-4">
+        <header className="flex h-14 items-center justify-end gap-2 border-b border-border px-4">
+          <UserSwitcher />
           <ThemeToggle />
           <UserMenu />
         </header>
