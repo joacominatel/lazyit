@@ -10,6 +10,7 @@
 node_modules/
 dist/
 *.log
+.turbo/
 
 # macOS
 .DS_Store
