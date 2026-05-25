@@ -25,6 +25,9 @@ import {
   type AssetStatus,
 } from '@lazyit/shared';
 import { AssetsService } from './assets.service';
+import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
+import { parseActiveOnly } from '../asset-assignments/active-only';
+import { AssetAssignmentDto } from '../asset-assignments/asset-assignment.dto';
 
 class AssetDto extends createZodDto(AssetSchema) {}
 class CreateAssetDto extends createZodDto(CreateAssetSchema) {}
@@ -33,7 +36,10 @@ class UpdateAssetDto extends createZodDto(UpdateAssetSchema) {}
 @ApiTags('assets')
 @Controller('assets')
 export class AssetsController {
-  constructor(private readonly assets: AssetsService) {}
+  constructor(
+    private readonly assets: AssetsService,
+    private readonly assignments: AssetAssignmentsService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -67,6 +73,28 @@ export class AssetsController {
   @ApiOkResponse({ type: AssetDto })
   findOne(@Param('id') id: string) {
     return this.assets.findOne(id);
+  }
+
+  @Get(':id/assignments')
+  @ApiOperation({
+    summary: "List an asset's ownership assignments (active-only by default)",
+  })
+  @ApiQuery({
+    name: 'activeOnly',
+    required: false,
+    type: Boolean,
+    description: 'Default true. Pass false to include released assignments.',
+  })
+  @ApiOkResponse({ type: [AssetAssignmentDto] })
+  async findAssignments(
+    @Param('id') id: string,
+    @Query('activeOnly') activeOnly?: string,
+  ) {
+    await this.assets.findOne(id); // 404 if the asset is missing or soft-deleted
+    return this.assignments.findAll({
+      assetId: id,
+      activeOnly: parseActiveOnly(activeOnly),
+    });
   }
 
   @Post()
