@@ -14,7 +14,7 @@ Versions below are **verified against the repository** as of 2026-05-25, not jus
 | --- | --- | --- | --- |
 | Package manager / runtime | **Bun** | `1.3.14` | Workspaces; default runtime — see [[0001-monorepo-bun-turborepo]] |
 | Monorepo orchestration | **Turborepo** | `^2.9` | `turbo dev` / `turbo build` / `turbo lint` |
-| Frontend | **Next.js** (App Router) | `16.2.6` | React `19.2.4`, Tailwind v4, TypeScript |
+| Frontend | **Next.js** (App Router) | `16.2.6` | React `19.2.4`, Tailwind v4, shadcn/ui, TypeScript |
 | Backend | **NestJS** | `11.0.1` | `@nestjs/platform-express`, TypeScript strict |
 | ORM | **Prisma** | `7.8.0` | `prisma-client` generator → `apps/api/generated/prisma` |
 | Database | **PostgreSQL** | `18-alpine` | Docker Compose for dev — see [[0003-prisma-orm]] |
@@ -29,8 +29,6 @@ Versions below are **verified against the repository** as of 2026-05-25, not jus
 
 ## Decided but not yet implemented
 
-- **Frontend:** Next.js + Tailwind decided ([[0010-nextjs-frontend]], [[0011-tailwind-styling]]);
-  **shadcn/ui** is the intended component layer but not yet installed.
 - **Auth:** **deferred** — we integrate with an external IdP (OIDC), not a self-rolled flow;
   provider TBD (Authentik / Keycloak / Zitadel). See [[0016-auth-strategy-deferred]] and
   [[0015-deployment-model]].
