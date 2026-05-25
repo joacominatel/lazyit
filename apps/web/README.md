@@ -45,15 +45,25 @@ app/
     │   └── _components/
     │       ├── user-form-dialog.tsx         # create + edit (per-mode schema)
     │       └── user-status-badge.tsx
-    └── kb/               # third feature — Knowledge Base (ADR-0021/0022)
-        ├── page.tsx               # list (filters, search via ?q=, cards)
-        ├── new/page.tsx           # create (markdown editor)
-        ├── [slug]/page.tsx        # detail (render + publish/unpublish/delete)
-        ├── [slug]/edit/page.tsx   # edit
+    ├── kb/               # third feature — Knowledge Base (ADR-0021/0022)
+    │   ├── page.tsx               # list (filters, search via ?q=, cards)
+    │   ├── new/page.tsx           # create (markdown editor)
+    │   ├── [slug]/page.tsx        # detail (render + publish/unpublish/delete)
+    │   ├── [slug]/edit/page.tsx   # edit
+    │   └── _components/
+    │       ├── article-form.tsx          # create/edit (per-mode schema)
+    │       ├── article-status-badge.tsx
+    │       └── import-article-dialog.tsx  # .md/.txt/.docx upload
+    └── assets/           # fourth feature — Assets (expanded read; ADR-0020)
+        ├── page.tsx               # list (inline relations, filters, stacked owners)
+        ├── new/page.tsx           # create
+        ├── [id]/page.tsx          # detail (info / specs / owners / history)
+        ├── [id]/edit/page.tsx     # edit
         └── _components/
-            ├── article-form.tsx          # create/edit (per-mode schema)
-            ├── article-status-badge.tsx
-            └── import-article-dialog.tsx  # .md/.txt/.docx upload
+            ├── asset-form.tsx            # create/edit (selects + JSON specs editor)
+            ├── asset-status-badge.tsx
+            ├── assign-user-dialog.tsx
+            └── stacked-owner-avatars.tsx
 
 components/
 ├── ui/                        # shadcn/ui primitives (vendored, owned in-repo)
@@ -79,12 +89,21 @@ lib/
     ├── endpoints/        # pure fetch functions per resource — the ONLY apiFetch callers
     │   ├── article-categories.ts
     │   ├── articles.ts
+    │   ├── asset-assignments.ts   # assign / release / notes (writes)
+    │   ├── asset-categories.ts
+    │   ├── asset-models.ts
+    │   ├── assets.ts              # reads return expanded AssetWithRelations
     │   ├── locations.ts
     │   └── users.ts
     └── hooks/            # TanStack Query wrappers over the endpoints
         ├── use-articles.ts            # filtered list + by-slug + articleKeys
         ├── use-article-categories.ts
         ├── use-article-mutations.ts   # create/update/delete/publish/unpublish/import
+        ├── use-assets.ts              # filtered list + detail + assignments + assetKeys
+        ├── use-asset-mutations.ts     # create / update / delete
+        ├── use-asset-assignment-mutations.ts  # assign / release / notes
+        ├── use-asset-categories.ts
+        ├── use-asset-models.ts
         ├── use-locations.ts           # queries + shared query keys
         ├── use-location-mutations.ts  # create / update / delete
         ├── use-users.ts
