@@ -1,22 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { getUser, getUsers } from "../endpoints/users";
+import { createQueryKeys } from "../query-keys";
 
 /**
- * Query-key factory for the User resource — the same shape as `locationKeys`
- * (ADR-0020), so the read hooks and the mutation hooks (which invalidate them)
- * can never drift:
- *
- * - `all`        → `["users"]`               — root/prefix for the whole resource
- * - `lists()`    → `["users", "list"]`       — the list query
- * - `detail(id)` → `["users", "detail", id]` — a single record
- *
- * Mutations invalidate `all`; being the common prefix, it refetches lists + details.
+ * Query-key factory for the User resource (shape from `createQueryKeys`, see
+ * ADR-0020): `all` → `["users"]`, `lists()` → `["users", "list"]`,
+ * `detail(id)` → `["users", "detail", id]`. Mutations invalidate `all`.
  */
-export const userKeys = {
-  all: ["users"] as const,
-  lists: () => [...userKeys.all, "list"] as const,
-  detail: (id: string) => [...userKeys.all, "detail", id] as const,
-};
+export const userKeys = createQueryKeys("users");
 
 /** List all (non-soft-deleted) users. */
 export function useUsers() {
