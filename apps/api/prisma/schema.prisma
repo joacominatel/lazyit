@@ -4,10 +4,27 @@
 // Get a free hosted Postgres database in seconds: `npx create-db`
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  // Prisma 7's client is ESM by default; NestJS runs CommonJS. Emit CJS to match.
+  moduleFormat = "cjs"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+/// A person in the organization. Central to access, peripheral to assets:
+/// users come and go while assets persist. See docs/02-domain/entities/user.md
+model User {
+  id        String    @id @default(uuid()) @db.Uuid
+  email     String    @unique
+  firstName String
+  lastName  String
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("users")
 }
