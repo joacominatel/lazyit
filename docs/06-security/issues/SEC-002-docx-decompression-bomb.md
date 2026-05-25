@@ -66,3 +66,26 @@ the *expanded* size, never trust the upload size. Capture this beside ADR-0021's
 
 - CWE-409: Improper Handling of Highly Compressed Data (Data Amplification). CWE-400.
 - ADR-0021 (import formats; `.docx` via mammoth, "no external binaries") · SEC-001.
+
+## Triage note
+
+🚨 Escalated to user on 2026-05-25 — no clean, dep-free, bounded fix exists; the robust fix is
+structural. Bounding the *decompressed* size of a `.docx` reliably needs either a memory-budgeted
+worker or a streaming inflate cap. The compressed-size check (and SEC-001's interceptor cap) can't
+bound expansion, and the ZIP central directory's declared uncompressed sizes can't be trusted (the
+inflater reads the deflate stream to its end regardless).
+
+Options:
+
+1. **`worker_threads` Worker with `resourceLimits.maxOldGenerationSizeMb`** — parse the docx in a
+   worker; a bomb crashes the worker (not the API) → map to 413/400. Dep-free, robust, moderate
+   complexity (worker lifecycle + buffer transfer + the deprecated `convertToMarkdown` inside it).
+2. **Defer to the planned BullMQ/Redis async worker** (ADR-0009 tension) — move docx parsing off the
+   request path entirely; document the residual until then. SEC-001's cap already bounds the
+   *compressed* input (~5 MB), so worst-case expansion is bounded-but-large in the interim.
+3. **Streaming `node:zlib` inflate of `word/document.xml` with a hard output-byte cap** before
+   mammoth — dep-free but requires hand-rolling ZIP header/central-directory parsing (zip64, data
+   descriptors), itself error-prone for a security control. **Not recommended.**
+
+Recommendation: (1) if `.docx` import must stay synchronous and robust now; otherwise (2) and
+document the residual. Either is an architectural choice → your call.

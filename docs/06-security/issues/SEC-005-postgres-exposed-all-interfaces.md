@@ -66,3 +66,8 @@ compose/deploy review. Revisit in the deployment ADR.
 
 - CWE-1327: Binding to an Unrestricted IP Address. CWE-668: Exposure of Resource to Wrong Sphere.
 - ADR-0015 (deployment model) · docs/04-development/setup.md.
+
+## Triage note
+
+Out of lane → **DevOps**. `module: infra` (`docker-compose.yml` + `.env.example`) is owned by the
+parallel `lazyit-devops` agent, not the remediator. Not remediated here; routed to DevOps.

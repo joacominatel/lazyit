@@ -62,3 +62,23 @@ shared query schema so it is enforced by default for new modules.
 
 - CWE-770: Allocation of Resources Without Limits or Throttling.
 - ADR-0018 (response DTOs / OpenAPI — the pagination shape would live here) · ADR-0020 (frontend data layer).
+
+## Triage note
+
+🚨 Escalated to user on 2026-05-25 — architectural: a new ADR + a shared response shape + touching
+all 11 `findAll`s. Pagination is a cross-cutting contract decision (offset vs cursor, default/max
+page size, response envelope `items` + `nextCursor`/`total`) defined once in `@lazyit/shared` and
+adopted by web and api together — not a bounded guardrail, and it spans backend + frontend (per the
+workflow it should be split into front/back subagents, not done piecemeal here).
+
+Options:
+
+1. **Cursor-based** (id/`createdAt` cursor) — scales best for the growing/append-only tables
+   (assignments, articles), stable under inserts; richer client contract.
+2. **Offset/limit** (`skip`/`take`) — simplest, familiar, fine at MVP scale; degrades on deep pages.
+3. **Defer** — keep unbounded for the 5–20-person MVP and revisit when a table grows (document the
+   residual).
+
+Recommendation: define a shared `PageQuery` / `Page<T>` shape with a capped default (e.g. default 50,
+max 200) as an ADR; offset (2) is the pragmatic MVP choice, cursor (1) if the history tables will
+grow fast. If done incrementally, prioritize `GET /access-grants` (the most sensitive unbounded list).

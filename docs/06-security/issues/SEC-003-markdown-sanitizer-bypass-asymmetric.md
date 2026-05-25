@@ -80,3 +80,24 @@ decision (sanitize-on-write vs sanitize-on-render) as an ADR.
 
 - CWE-79: Improper Neutralization of Input During Web Page Generation (XSS). CWE-80.
 - OWASP XSS Prevention Cheat Sheet · DOMPurify · ADR-0021 (KB design).
+
+## Triage note
+
+🚨 Escalated to user on 2026-05-25 — needs an ADR (sanitize-on-write vs sanitize-on-render) and a
+sanitizer dependency; the dangerous sink is on the frontend (Phase 3). Choosing *where* to sanitize
+is a product/architecture decision and either way pulls in a dep (DOMPurify / sanitize-html /
+rehype-sanitize). The current regex strip is bypassable and asymmetric (import path only).
+
+Options:
+
+1. **Sanitize-on-render** (DOMPurify over rendered HTML) on the web app — OWASP-recommended,
+   authoritative; defer to the Phase-3 frontend, and meanwhile **remove/relabel** the regex strip so
+   it gives no false confidence (a cheap, in-lane change I can do now).
+2. **Sanitize-on-write** server-side with a markdown-aware HTML sanitizer applied uniformly to
+   create/update **and** import — one server choke point, but lossy (mutates stored content) + a new
+   api dep.
+3. **Both** — sanitize on write as defense-in-depth plus the authoritative render-time allow-list.
+
+Recommendation: (1) — render-time is the authoritative layer and fits the deferred-frontend reality;
+pair it with removing/relabeling the misleading regex strip now. Record the choice as an ADR. This +
+SEC-008's render note are one "untrusted-string → web sink" policy for the frontend phase.

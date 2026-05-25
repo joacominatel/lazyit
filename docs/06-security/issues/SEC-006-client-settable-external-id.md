@@ -63,3 +63,23 @@ never in a create/update DTO. Note this in ADR-0016 so the auth work doesn't re-
 
 - CWE-639: Authorization Bypass Through User-Controlled Key. CWE-294 (account pre-hijacking class).
 - ADR-0016 (auth deferred; externalId) · ADR-0022 (author from shim, not body — same principle).
+
+## Triage note
+
+🚨 Escalated to user on 2026-05-25 — touches the **auth contract** (`externalId` is the IdP `sub`
+hinge, ADR-0016) and the **shared contract** (`web` consumes `CreateUserSchema`). Per the
+remediation rules, auth-contract changes are your decision. The fix is otherwise small and the
+direction (server-owned `externalId`) aligns with ADR-0016 / DEF-002 / DEF-005.
+
+Options:
+
+1. **Drop `externalId` from `CreateUserSchema`** (the finding's recommendation) — never
+   client-settable; the future IdP integration provisions it server-side. Cleanest, but a
+   shared-contract change (a `web` "create user" form sending it would break) and removes the only
+   current way to set `externalId`.
+2. **Keep the field but strip/ignore it in `UsersService.create`** — no contract change for web, but
+   the field stays visibly settable and silently dropped (its own footgun).
+
+Recommendation: (1), plus a note in ADR-0016 that `externalId` is server-owned (provisioned by the
+IdP integration, never accepted from a body). I can implement (1) + a regression test + the ADR note
+on your go-ahead — please confirm no current `web` flow POSTs `externalId`.
