@@ -16,6 +16,7 @@ context.
 | Fonts | Geist + Geist Mono via `next/font/google` |
 | Theming | `next-themes` (system + manual, persisted) |
 | Data fetching | TanStack Query (`@tanstack/react-query`) + a thin typed `fetch` wrapper |
+| Forms | `react-hook-form` + `@hookform/resolvers`, validated by `@lazyit/shared` zod schemas |
 | Toasts | `sonner` |
 
 ## Folder structure
@@ -32,11 +33,18 @@ app/
 │   ├── layout.tsx
 │   └── login/page.tsx    # placeholder — no real auth yet (ADR-0016)
 └── (app)/                # private app routes (sidebar + topbar)
-    ├── layout.tsx        # NOTE: no auth guard yet (deferred — ADR-0016)
-    └── dashboard/page.tsx
+    ├── layout.tsx        # shell; renders <SidebarNav>. No auth guard yet (ADR-0016)
+    ├── dashboard/page.tsx
+    └── locations/        # first real CRUD feature — the template for the rest
+        ├── page.tsx      # list + filters + table + states; orchestrates dialogs
+        └── _components/  # colocated, feature-private UI (not shared yet)
+            ├── location-form-dialog.tsx     # create + edit (one form, two modes)
+            ├── delete-location-dialog.tsx   # soft-delete confirmation
+            └── location-type-badge.tsx
 
 components/
 ├── ui/                   # shadcn/ui primitives (vendored, owned in-repo)
+├── sidebar-nav.tsx       # app navigation with active-route state (client)
 ├── theme-toggle.tsx      # light/dark switch (heroicons)
 └── user-menu.tsx         # topbar avatar + dropdown (placeholder)
 
@@ -44,12 +52,41 @@ lib/
 ├── utils.ts              # cn() helper
 └── api/
     ├── client.ts         # typed fetch wrapper (apiFetch / ApiError)
-    └── hooks/use-health.ts  # example query hook (GET /users) — not wired to a page
+    ├── endpoints/        # pure fetch functions per resource — the ONLY apiFetch callers
+    │   └── locations.ts
+    └── hooks/            # TanStack Query wrappers over the endpoints
+        ├── use-locations.ts           # queries + shared query keys
+        ├── use-location-mutations.ts  # create / update / delete
+        └── use-health.ts              # example query hook (GET /users)
 ```
 
 Route groups (`(marketing)`, `(auth)`, `(app)`) don't affect the URL — they only
 let each section have its own layout. `/` → marketing, `/login` → auth,
 `/dashboard` → app.
+
+## Data layer (the feature pattern)
+
+`locations/` is the first real CRUD screen and the **template** every other
+entity (Users, Assets, …) should copy. Data access is layered so each concern
+stays in one place:
+
+1. **`lib/api/endpoints/<resource>.ts`** — pure async functions (`getLocations`,
+   `createLocation`, …). The **only** code allowed to call `apiFetch`. Request
+   and response types come from `@lazyit/shared`.
+2. **`lib/api/hooks/use-<resource>.ts` + `…-mutations.ts`** — TanStack Query
+   wrappers over the endpoints. Reads export their query keys (`locationKeys`);
+   mutations invalidate those keys on success. Hooks never call `fetch` directly.
+3. **Pages and components** consume the hooks only — they never call `apiFetch`
+   or `fetch` themselves.
+
+**Forms** use `react-hook-form` + `@hookform/resolvers` with the **shared zod
+schema** as the single source of validation (e.g. `CreateLocationSchema`), wired
+through shadcn's `Field` primitives. Empty optional inputs are mapped to
+`undefined` (not `""`) so the strict shared schema treats them as untouched.
+
+Feature-specific UI lives colocated under `app/(app)/<feature>/_components/` (the
+`_` prefix opts the folder out of routing). Promote a component to `components/`
+only when a second screen genuinely reuses it — don't generalize preemptively.
 
 ## Commands
 
