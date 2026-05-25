@@ -11,9 +11,3 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
-
-model HealthCheck {
-  id        Int      @id @default(autoincrement())
-  message   String
-  createdAt DateTime @default(now())
-}

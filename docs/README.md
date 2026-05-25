@@ -58,7 +58,6 @@ Verified against the repo, not just the briefing:
 - `apps/api`: NestJS `11.0.1`, runs on `:3001`.
 - ORM: Prisma `7.8.0`; DB: PostgreSQL `18-alpine` via Docker Compose.
 - Shared: `@lazyit/shared` (`packages/shared`) — currently only exports `APP_NAME`.
-- Initial migration applied with a throwaway `HealthCheck` model. No domain model yet.
 
 See [[stack]] for the full picture and [[02-domain/_MOC|Domain]] for what comes next.
 
