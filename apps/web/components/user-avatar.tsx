@@ -56,6 +56,8 @@ interface UserAvatarProps {
   email: string;
   size?: "sm" | "default" | "lg";
   className?: string;
+  /** Native tooltip text (e.g. the person's name) shown on hover. */
+  title?: string;
 }
 
 export function UserAvatar({
@@ -64,9 +66,10 @@ export function UserAvatar({
   email,
   size = "default",
   className,
+  title,
 }: UserAvatarProps) {
   return (
-    <Avatar size={size} className={className}>
+    <Avatar size={size} className={className} title={title}>
       <AvatarFallback className={cn("font-medium", colorFor(email))}>
         {initialsFor(firstName, lastName, email)}
       </AvatarFallback>
