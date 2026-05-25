@@ -40,33 +40,51 @@ app/
     │   └── _components/  # colocated, feature-private UI
     │       ├── location-form-dialog.tsx     # create + edit (one form, two modes)
     │       └── location-type-badge.tsx
-    └── users/            # second CRUD feature — same mold as locations
-        ├── page.tsx
+    ├── users/            # second CRUD feature — same mold as locations
+    │   ├── page.tsx
+    │   └── _components/
+    │       ├── user-form-dialog.tsx         # create + edit (per-mode schema)
+    │       └── user-status-badge.tsx
+    └── kb/               # third feature — Knowledge Base (ADR-0021/0022)
+        ├── page.tsx               # list (filters, search via ?q=, cards)
+        ├── new/page.tsx           # create (markdown editor)
+        ├── [slug]/page.tsx        # detail (render + publish/unpublish/delete)
+        ├── [slug]/edit/page.tsx   # edit
         └── _components/
-            ├── user-form-dialog.tsx         # create + edit (per-mode schema)
-            └── user-status-badge.tsx
+            ├── article-form.tsx          # create/edit (per-mode schema)
+            ├── article-status-badge.tsx
+            └── import-article-dialog.tsx  # .md/.txt/.docx upload
 
 components/
 ├── ui/                        # shadcn/ui primitives (vendored, owned in-repo)
 ├── delete-confirm-dialog.tsx  # reusable soft-delete confirmation (any resource)
+├── markdown-editor.tsx        # textarea + live preview (KB editor)
+├── markdown-view.tsx          # react-markdown + gfm renderer (prose)
 ├── resource-table.tsx         # table shell + list states + RowActions (any resource)
 ├── sidebar-nav.tsx            # app navigation with active-route state (client)
 ├── theme-toggle.tsx           # light/dark switch (heroicons)
 ├── user-avatar.tsx            # deterministic initials avatar (shared across features)
-└── user-menu.tsx              # topbar avatar + dropdown (placeholder)
+├── user-menu.tsx              # topbar avatar + dropdown (placeholder)
+└── user-switcher.tsx          # dev "act as" picker for the X-User-Id shim
 
 lib/
 ├── utils/
 │   ├── index.ts          # cn() helper (importable as @/lib/utils)
 │   └── format.ts         # shared display formatters (formatDate)
 └── api/
-    ├── client.ts         # typed fetch wrapper (apiFetch / ApiError)
+    ├── acting-user.ts    # dev X-User-Id store (acting user) + useActingUserId
+    ├── client.ts         # typed fetch wrapper (apiFetch / ApiError; FormData + X-User-Id)
     ├── crud-endpoints.ts # createCrudEndpoints — the 5 REST bodies, per-resource generics
     ├── query-keys.ts     # createQueryKeys — the all/lists/detail key factory
     ├── endpoints/        # pure fetch functions per resource — the ONLY apiFetch callers
+    │   ├── article-categories.ts
+    │   ├── articles.ts
     │   ├── locations.ts
     │   └── users.ts
     └── hooks/            # TanStack Query wrappers over the endpoints
+        ├── use-articles.ts            # filtered list + by-slug + articleKeys
+        ├── use-article-categories.ts
+        ├── use-article-mutations.ts   # create/update/delete/publish/unpublish/import
         ├── use-locations.ts           # queries + shared query keys
         ├── use-location-mutations.ts  # create / update / delete
         ├── use-users.ts
@@ -177,6 +195,11 @@ cp .env.example .env
 - **No authentication yet.** Auth is deferred to an external IdP (OIDC); the API is
   open and dev-only. The `(app)` layout has no guard — see ADR-0016. The `/login` page
   and `user-menu` are visual placeholders.
+- **Dev "acting user" (X-User-Id shim).** The Knowledge Base needs a caller identity for
+  draft visibility and author-only writes (ADR-0022), so `apiFetch` attaches an
+  `X-User-Id` header from a `localStorage`-backed acting-user store. The dev-only topbar
+  `<UserSwitcher>` chooses it; "anonymous" sees only published articles. It is a stand-in
+  until real auth lands, and goes away with it.
 - **CORS is enabled** on the API for the web origin, so the browser calls it directly —
   the Locations and Users screens do. The example hook `lib/api/hooks/use-health.ts`
   (a bare `GET /users`) predates them and is kept only as a minimal reference; it is
