@@ -3,8 +3,11 @@
  *
  * Base URL comes from NEXT_PUBLIC_API_URL (see .env.example). The API is
  * currently open / unauthenticated and intended for local dev only — see
- * ADR-0016 (auth is deferred to an external IdP).
+ * ADR-0016 (auth is deferred to an external IdP). Until then, the dev "acting
+ * user" (ADR-0022) is attached as `X-User-Id` on every request when set.
  */
+
+import { getActingUserId } from "./acting-user";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -33,13 +36,26 @@ export async function apiFetch<T>(
   path: string,
   { body, headers, ...init }: ApiFetchOptions = {},
 ): Promise<T> {
+  // FormData (file uploads) must be sent as-is so the browser sets the
+  // multipart boundary; only plain values are JSON-serialized.
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+  const actingUserId = getActingUserId();
+
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
-      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(body !== undefined && !isFormData
+        ? { "Content-Type": "application/json" }
+        : {}),
+      ...(actingUserId ? { "X-User-Id": actingUserId } : {}),
       ...headers,
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body:
+      body === undefined
+        ? undefined
+        : isFormData
+          ? (body as BodyInit)
+          : JSON.stringify(body),
   });
 
   const isJson = res.headers.get("content-type")?.includes("application/json");
