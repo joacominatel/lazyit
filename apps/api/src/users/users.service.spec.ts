@@ -49,19 +49,9 @@ describe('UsersService', () => {
     expect(user.create).toHaveBeenCalledWith({ data: dto });
   });
 
-  it('creates a user with externalId (future case — IdP sub mapping)', async () => {
-    const dto = {
-      email: 'b@c.com',
-      firstName: 'Grace',
-      lastName: 'Hopper',
-      externalId: 'idp-sub-123',
-    };
-    const created = { id: 'uuid-2', ...dto, isActive: true, deletedAt: null };
-    user.create.mockResolvedValue(created);
-
-    await expect(service.create(dto)).resolves.toEqual(created);
-    expect(user.create).toHaveBeenCalledWith({ data: dto });
-  });
+  // SEC-006: externalId is no longer a client-settable create field (it is server-owned, ADR-0016).
+  // The schema-level guard is covered by packages/shared user.test.ts; the service just forwards the
+  // (already-validated) payload to Prisma, asserted by the case above.
 
   it('returns a user by id when it exists', async () => {
     const found = { id: 'uuid-1', email: 'a@b.com', deletedAt: null };
