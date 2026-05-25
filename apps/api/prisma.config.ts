@@ -7,6 +7,9 @@ export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
+    // Prisma 7 reads the seed command here (the package.json `prisma.seed` key is ignored
+    // when a Prisma config file is present). Run with `bunx prisma db seed`.
+    seed: "bun prisma/seed.ts",
   },
   datasource: {
     url: process.env["DATABASE_URL"],
