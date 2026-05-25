@@ -22,7 +22,8 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
 - **belongs to** one [[asset]] (`assetId`, required, `onDelete: Restrict`).
 - **belongs to** one [[user]] — the owner (`userId`, required, `onDelete: Restrict`).
 - **optionally references** a [[user]] as `assignedBy` and/or `releasedBy` — audit of who acted
-  (`onDelete: SetNull`; `null` when the system acted or it's unknown).
+  (`onDelete: SetNull`; `null` when the system acted or it's unknown). Recorded from the
+  `X-User-Id` shim, not the body — see the callout below.
 
 ## Business rules
 
@@ -44,6 +45,16 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
   create a new one.
 - **Referential integrity ([[0019-asset-assignment-integrity]]):** the required FKs are
   `onDelete: Restrict` — an [[asset]] or [[user]] with assignment rows **cannot be hard-deleted**.
+
+> [!note] Actor comes from the `X-User-Id` shim, not the body
+> `assignedById` (on open) and `releasedById` (on release) are taken from the optional `X-User-Id`
+> header (the caller → a JWT later), **never** the request body
+> ([[0022-draft-visibility-auth-shim]], [[0024-asset-assignment-actor-shim]]). Absent header →
+> `null` actor (system/unknown), allowed by the `SetNull`/optional design; a present header must be
+> a well-formed id for a **live** (non-soft-deleted) user, else `400`. This converges AssetAssignment
+> onto [[access-grant]]'s actor pattern — [[0024-asset-assignment-actor-shim]] superseded the
+> original body-based design of [[0019-asset-assignment-integrity]] (a breaking contract change,
+> safe pre-auth with no external clients).
 
 > [!warning] Soft delete vs hard delete — `Restrict` is a DB safety net
 > The API's `DELETE /assets/:id` and `DELETE /users/:id` are **soft** deletes (`UPDATE deletedAt`),
@@ -86,13 +97,14 @@ Indexes: `@@index([assetId])`, `@@index([userId])`, plus the partial unique inde
 
 `apps/api/src/asset-assignments/` (`AssetAssignmentsModule`):
 
-- `POST /asset-assignments` — open an assignment. Duplicate *active* `(asset, user)` → `409`;
-  invalid `assetId`/`userId` → `400` (FK).
+- `POST /asset-assignments` — open an assignment; body `{ assetId, userId, assignedAt?, notes? }`.
+  Optional `X-User-Id` header → `assignedById` (a bad/dead actor → `400`). Duplicate *active*
+  `(asset, user)` → `409`; invalid `assetId`/`userId` → `400` (FK).
 - `GET /asset-assignments?assetId=&userId=&activeOnly=` — list, newest first. `activeOnly`
   **defaults to `true`** (only `releasedAt = null`); pass `activeOnly=false` to include released.
 - `GET /asset-assignments/:id` — one by id (`404` if missing).
-- `PATCH /asset-assignments/:id/release` — body `{ releasedById?, notes? }`; sets
-  `releasedAt = now()`. Already released → `409`.
+- `PATCH /asset-assignments/:id/release` — body `{ notes? }`; optional `X-User-Id` header →
+  `releasedById` (a bad/dead actor → `400`); sets `releasedAt = now()`. Already released → `409`.
 - `PATCH /asset-assignments/:id/notes` — body `{ notes }` (`null` clears). The only free edit.
 - **No `DELETE`** — by design (append-only).
 
@@ -106,4 +118,5 @@ All documented via Swagger ([[0018-api-documentation-swagger]]).
 
 Related: [[asset]] · [[user]] · [[asset-history]] · [[asset-centric]] ·
 [[0004-asset-centric-design]] · [[0006-soft-delete-and-auditing]] ·
-[[0019-asset-assignment-integrity]] · [[prisma-migrations]]
+[[0019-asset-assignment-integrity]] · [[0024-asset-assignment-actor-shim]] ·
+[[0022-draft-visibility-auth-shim]] · [[prisma-migrations]]

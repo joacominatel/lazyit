@@ -49,9 +49,9 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
 > `grantedById` (on create) and `revokedById` (on revoke) are taken from the optional `X-User-Id`
 > header (the caller → a JWT later), **never** the request body ([[0022-draft-visibility-auth-shim]],
 > [[0023-access-management-design]]). Absent header → `null` actor (system/unknown), allowed by the
-> `SetNull`/optional design. This **partially supersedes** [[asset-assignment]]'s actor pattern
-> (which reads `assignedById`/`releasedById` from the body, predating the shim); a follow-up will
-> converge AssetAssignment onto the shim ([[0023-access-management-design]]).
+> `SetNull`/optional design. [[asset-assignment]] now follows the **same** pattern — it originally
+> read `assignedById`/`releasedById` from the body (predating the shim) and was converged onto the
+> shim by [[0024-asset-assignment-actor-shim]]. Both append-only joins now agree.
 
 > [!warning] Soft delete vs hard delete — `Restrict` is a DB safety net
 > The API's `DELETE /applications/:id` and `DELETE /users/:id` are **soft** deletes

@@ -14,6 +14,10 @@ deciders: [Joaquín Minatel]
 accepted — 2026-05-25. Implements the ownership join promised by [[0004-asset-centric-design]];
 builds on [[0006-soft-delete-and-auditing]] (lifecycle joins) and [[0005-id-strategy]].
 
+> **Superseded in part** by [[0024-asset-assignment-actor-shim]] (2026-05-25): only the *source* of
+> the actor ids — decision bullet 2 below — moved from the request body to the optional `X-User-Id`
+> header. The FK behaviour (`SetNull`, optional) and everything else in this ADR still stand.
+
 ## Context
 
 [[asset-assignment]] is the timestamped join recording **who owns an [[asset]] over time**.
@@ -65,6 +69,8 @@ open:
   **hard-deleted**; history is protected. The asymmetry with `modelId`/`locationId` (`SetNull`) is
   intentional — those FKs are descriptive, ownership is not.
 - **`assignedById`, `releasedById` → `onDelete: SetNull`**, both optional (`null` = system/unknown).
+  *(FK behaviour stands; the **source** of these ids — originally the request body — was later
+  changed to the `X-User-Id` shim by [[0024-asset-assignment-actor-shim]].)*
 - **Partial unique index** `asset_assignments_assetId_userId_active_key` on `(assetId, userId)
   WHERE releasedAt IS NULL`, added as raw SQL in the migration (see [[prisma-migrations]] §3). The
   service also pre-checks for a friendly `409`; the index is the race-proof backstop.
@@ -92,4 +98,5 @@ open:
 ```
 
 Related: [[asset-assignment]] · [[asset]] · [[user]] · [[0004-asset-centric-design]] ·
-[[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] · [[prisma-migrations]]
+[[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
+[[0024-asset-assignment-actor-shim]] · [[prisma-migrations]]

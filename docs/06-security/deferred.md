@@ -61,18 +61,20 @@ the accepted baseline.
   that trusts `metadata` (renders it, uses it in URLs, etc.) could turn it dangerous. Re-examine in the
   Phase-3 frontend review; relates to [[SEC-003|SEC-003]] (untrusted content → web sink).
 
-## DEF-005 — Assignment actor FKs are client-supplied
+## DEF-005 — Assignment actor FKs are client-supplied · ✅ partially resolved (2026-05-25)
 
-- **ADRs:** [[0019-asset-assignment-integrity]] + the no-auth posture ([[0016-auth-strategy-deferred]]).
-- `assignedById` / `releasedById` come from the request body (`CreateAssetAssignmentSchema`,
-  `ReleaseAssetAssignmentSchema`); a caller can claim any actor. This is the same root as DEF-001/DEF-002:
-  with no auth, the actor cannot be trusted.
-- **Why not a finding:** consistent with the accepted no-auth posture; when auth lands these should come
-  from the verified caller, not the body (same fix shape as [[SEC-006|SEC-006]] / DEF-002).
-- **Now explicitly tracked by [[0023-access-management-design]]:** its "Follow-ups" call to *retrofit
-  AssetAssignment to the `X-User-Id` shim*. The newer AccessGrant already takes the actor from the shim
-  (validated, header-only — `access-grants.service.ts:154`), so AssetAssignment is the known laggard,
-  not a fresh divergence. Convergence is a planned task, not a finding.
+- **ADRs:** [[0019-asset-assignment-integrity]] → [[0024-asset-assignment-actor-shim]] + the no-auth
+  posture ([[0016-auth-strategy-deferred]]).
+- **Original concern:** `assignedById` / `releasedById` came from the request **body**
+  (`CreateAssetAssignmentSchema`, `ReleaseAssetAssignmentSchema`); a caller could claim any actor.
+- **Resolved:** [[0024-asset-assignment-actor-shim]] removed both from the body. The actor is now
+  read from the optional, **validated** `X-User-Id` header (well-formed UUID + live user, else `400`),
+  exactly like AccessGrant (`asset-assignments.service.ts` `resolveActor`). The two append-only joins
+  now share one actor model — the body-supplied-actor divergence is gone.
+- **Residual (rolls into DEF-001):** the `X-User-Id` header is itself spoofable until real auth lands
+  ([[0022-draft-visibility-auth-shim]] security note). That residual is the shared no-auth posture, not
+  a per-endpoint finding; when auth arrives the actor comes from the verified caller (same fix shape as
+  [[SEC-006|SEC-006]] / DEF-002).
 
 ---
 

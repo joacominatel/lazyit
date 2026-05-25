@@ -127,11 +127,11 @@ directly by the IT team.
 
 ## Follow-ups
 
-- **Retrofit [[asset-assignment]] to the `X-User-Id` shim** — this ADR **partially supersedes** the
-  actor pattern of [[0019-asset-assignment-integrity]]: AssetAssignment takes `assignedById` /
-  `releasedById` from the request **body** because it predates the shim. A later task should migrate
-  it to take the actor from `X-User-Id` (header → JWT), converging the "who acted" model across both
-  append-only joins. Until then the two differ **intentionally**.
+- ✅ **Retrofit [[asset-assignment]] to the `X-User-Id` shim** — **done** in
+  [[0024-asset-assignment-actor-shim]] (2026-05-25). AssetAssignment originally took `assignedById` /
+  `releasedById` from the request **body** because it predated the shim; ADR-0024 moved both to the
+  optional `X-User-Id` header (header → JWT later), converging the "who acted" model across both
+  append-only joins. The two no longer differ.
 - AccessRequest approval workflow; expiry auto-revoke scheduler; a soft-delete-time guard on
   apps/users with active grants; `metadata` validation.
 

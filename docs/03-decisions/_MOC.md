@@ -40,11 +40,12 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0016-auth-strategy-deferred]] | Authentication deferred; external IdP when needed | accepted |
 | [[0017-location-type-enum]] | Location type as a hardcoded enum (user-managed types deferred) | accepted |
 | [[0018-api-documentation-swagger]] | API documentation with Swagger/OpenAPI (nestjs-zod) | accepted |
-| [[0019-asset-assignment-integrity]] | AssetAssignment referential integrity & lifecycle | accepted |
+| [[0019-asset-assignment-integrity]] | AssetAssignment referential integrity & lifecycle | accepted (actor source superseded by [[0024-asset-assignment-actor-shim]]) |
 | [[0020-frontend-data-layer]] | Frontend data layer (endpoints → hooks → components) | accepted |
 | [[0021-knowledge-base-design]] | Knowledge Base design — simple wiki (Article + ArticleCategory) | accepted |
 | [[0022-draft-visibility-auth-shim]] | Draft visibility & the `X-User-Id` auth shim | accepted (temporary) |
 | [[0023-access-management-design]] | Access management design (Application + AccessGrant) | accepted |
+| [[0024-asset-assignment-actor-shim]] | Retrofit AssetAssignment actor to the `X-User-Id` shim | accepted |
 
 ## Pending ADRs (to write when decided)
 
