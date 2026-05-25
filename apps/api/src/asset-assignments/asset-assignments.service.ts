@@ -8,6 +8,7 @@ import type {
   ReleaseAssetAssignment,
   UpdateAssetAssignmentNotes,
 } from '@lazyit/shared';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Filters for listing assignments. `activeOnly` defaults to true (set at the controller). */
@@ -15,6 +16,8 @@ export interface FindAssignmentsFilters {
   assetId?: string;
   userId?: string;
   activeOnly?: boolean;
+  /** When true, inline each assignment's owner (`user`). Used by GET /assets/:id/assignments. */
+  includeUser?: boolean;
 }
 
 @Injectable()
@@ -22,15 +25,23 @@ export class AssetAssignmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Assignments, newest first; filter by asset/user and (by default) active only. */
-  findAll({ assetId, userId, activeOnly = true }: FindAssignmentsFilters) {
-    return this.prisma.assetAssignment.findMany({
+  findAll({
+    assetId,
+    userId,
+    activeOnly = true,
+    includeUser = false,
+  }: FindAssignmentsFilters) {
+    const args: Prisma.AssetAssignmentFindManyArgs = {
       where: {
         ...(assetId ? { assetId } : {}),
         ...(userId ? { userId } : {}),
         ...(activeOnly ? { releasedAt: null } : {}),
       },
       orderBy: { assignedAt: 'desc' },
-    });
+      // Inline the owner only when asked (other callers keep the lean shape).
+      ...(includeUser ? { include: { user: true } } : {}),
+    };
+    return this.prisma.assetAssignment.findMany(args);
   }
 
   /** A single assignment by id; throws 404 if missing. (No soft delete — none to filter.) */
