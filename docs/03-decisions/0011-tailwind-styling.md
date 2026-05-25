@@ -41,14 +41,20 @@ As of 2026-05 this is **installed and configured**, not just planned.
 Concrete setup (shadcn CLI `v4.8.0`, which is now **preset-driven** rather than a flat
 `--base-color` flag):
 
-- **`radix-nova` preset** — the *Nova* style on **Radix** primitives (`shadcn init -b radix`),
-  chosen over the newer **Base UI** option (`base-nova`) to honour the Radix decision in this
-  ADR. Note: `--defaults` maps to `base-nova` (Base UI), so the Radix base must be passed
-  explicitly.
+- **`radix-nova` preset** — the *Nova* style on **Radix** primitives, scaffolded with
+  `bunx shadcn@latest init --preset nova -b radix`, chosen over the newer **Base UI** option
+  (`base-nova`) to honour the Radix decision in this ADR. Note: `--defaults` maps to
+  `base-nova` (Base UI), so the Radix base (`-b radix`) must be passed explicitly. Components
+  are added the same way — `bunx shadcn@latest add <component>` — which reads `components.json`
+  and emits the `radix-nova` variant.
 - **`neutral` base color**, **CSS variables**, Tailwind v4 tokens in `oklch` (light + dark in
   `app/globals.css`). Neutral grayscale keeps the look clean and IT-native, not flashy.
 - **Typography: Geist + Geist Mono** (`next/font/google`) — the font the Nova preset assumes;
-  neutral, technical and legible at small sizes for data-dense tables.
+  neutral, technical and legible at small sizes for data-dense tables. The Nova-generated
+  `app/globals.css` expects the CSS variables `--font-sans` and `--font-geist-mono` in its
+  `@theme inline` block, so `app/layout.tsx` **reconciles** this by binding Geist to
+  `--font-sans` and Geist Mono to `--font-geist-mono` (`next/font` `variable` option) — without
+  that wiring the body falls back to the system font.
 - **Dark mode** via `next-themes` — system default + manual toggle, persisted to
   `localStorage`.
 
