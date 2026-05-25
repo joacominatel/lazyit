@@ -44,6 +44,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0020-frontend-data-layer]] | Frontend data layer (endpoints → hooks → components) | accepted |
 | [[0021-knowledge-base-design]] | Knowledge Base design — simple wiki (Article + ArticleCategory) | accepted |
 | [[0022-draft-visibility-auth-shim]] | Draft visibility & the `X-User-Id` auth shim | accepted (temporary) |
+| [[0023-access-management-design]] | Access management design (Application + AccessGrant) | accepted |
 
 ## Pending ADRs (to write when decided)
 
