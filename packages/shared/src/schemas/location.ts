@@ -20,7 +20,10 @@ export const LocationTypeSchema = z.enum([
   "OTHER",
 ]);
 
-/** The full persisted Location entity (mirrors the Prisma `locations` row). */
+/**
+ * The full Location entity as returned by the API. Date fields are ISO-8601 strings (wire
+ * shape) — see the note in user.ts and docs/03-decisions/0018-api-documentation-swagger.md.
+ */
 export const LocationSchema = z.object({
   id: z.cuid(),
   name: z.string().min(1),
@@ -30,9 +33,9 @@ export const LocationSchema = z.object({
   // String, not number: floors are labels like "PB", "Subsuelo 1", "Mezzanine".
   floor: z.string().nullable(),
   notes: z.string().nullable(),
-  createdAt: z.date(),
-  updatedAt: z.date(),
-  deletedAt: z.date().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  deletedAt: z.iso.datetime().nullable(),
 });
 
 /** Payload to create a Location. `type` is required — every location is classified. */
