@@ -1,7 +1,7 @@
 ---
 title: "ADR-0013: Zod validation via a custom ZodValidationPipe"
 tags: [adr]
-status: accepted
+status: superseded
 created: 2026-05-25
 updated: 2026-05-25
 deciders: [Joaquín Minatel]
@@ -11,7 +11,9 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-accepted
+superseded by [[0018-api-documentation-swagger]] — when we adopted Swagger we switched to
+`nestjs-zod`, whose `ZodValidationPipe` + `createZodDto` replace the custom pipe (exactly the
+revisit this ADR's trade-offs anticipated). The decision below is kept for the historical record.
 
 ## Context
 
