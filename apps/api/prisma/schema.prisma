@@ -34,6 +34,10 @@ model User {
   assignmentsMade     AssetAssignment[] @relation("AssignmentAssignedBy")
   assignmentsReleased AssetAssignment[] @relation("AssignmentReleasedBy")
 
+  // Knowledge Base authorship: articles this user authored, and articles they last edited.
+  articlesAuthored Article[] @relation("ArticleAuthor")
+  articlesEdited   Article[] @relation("ArticleLastEditor")
+
   @@map("users")
 }
 
@@ -186,4 +190,69 @@ model AssetAssignment {
   @@index([assetId])
   @@index([userId])
   @@map("asset_assignments")
+}
+
+/// User-managed grouping for knowledge-base Articles (Networking, Servers, Procedures, …). Like
+/// AssetCategory: created/edited/soft-deleted from the app; the seed set is an initial, non-special
+/// list. See docs/02-domain/entities/article-category.md
+model ArticleCategory {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  // Free string: a heroicon name for the web UI (e.g. "ServerStackIcon"). Not validated.
+  icon        String?
+  // Optional sort key for sidebar/listings (lower first); null sorts last.
+  order       Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  articles Article[]
+
+  @@map("article_categories")
+}
+
+/// A knowledge-base document (markdown). Simple wiki: no versioning/tags/FTS (ADR-0021).
+/// DRAFT is author-private, PUBLISHED is team-visible; authorship/visibility rules live in the
+/// service (ADR-0022). See docs/02-domain/entities/article.md
+model Article {
+  id             String          @id @default(cuid())
+  // Short, memorable, unique. Format/length validated in @lazyit/shared (lowercase, [a-z0-9-], <=60).
+  slug           String          @unique
+  title          String
+  // Markdown body (Postgres text). Validated/sanitized in the app, not the DB.
+  content        String
+  // Short summary for listings (<=280). Optional.
+  excerpt        String?
+  status         ArticleStatus   @default(DRAFT)
+  // Required category. Restrict: a category with articles can't be hard-deleted (DB safety net);
+  // the API also refuses to soft-delete a category that still has live articles. See ADR-0021/0019.
+  categoryId     String
+  category       ArticleCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  // Author = the creator (X-User-Id shim today, JWT later — ADR-0022). @db.Uuid to match User.id.
+  // Restrict: authorship is preserved (the user can still be soft-deleted, an UPDATE).
+  authorId       String          @db.Uuid
+  author         User            @relation("ArticleAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  // Who last edited; optional. SetNull so losing the user nulls the link but keeps the article.
+  lastEditedById String?         @db.Uuid
+  lastEditedBy   User?           @relation("ArticleLastEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
+  // Set on the first publish, never cleared (records "was published at least once"). See ADR-0021.
+  publishedAt    DateTime?
+  // Flexible extras (estimatedReadingTime, externalLinks, …). Unvalidated jsonb — same debt as
+  // Asset.specs. See ADR-0007 and docs/02-domain/entities/article.md.
+  metadata       Json?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  deletedAt      DateTime?
+
+  // (categoryId, status): per-category filtered listings. (status, publishedAt): "latest published".
+  @@index([categoryId, status])
+  @@index([status, publishedAt])
+  @@map("articles")
+}
+
+/// Publication state of an Article. DRAFT = author-private; PUBLISHED = team-visible (ADR-0022).
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
 }
