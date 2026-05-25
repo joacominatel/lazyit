@@ -36,6 +36,9 @@ on a SaaS auth provider that would undermine self-hosting ([[0015-deployment-mod
 - Until then, the **local [[user]] is the source of truth** for the domain.
 - [[user]] carries **`externalId` (nullable, unique)**, prepared to hold the IdP `sub` when auth
   arrives. Nullable because there is no auth today; unique because once populated it must be 1:1.
+  It is **server-owned**: never accepted from a create/update body — the future IdP integration
+  provisions it. `CreateUserSchema` omits it and, being a `strictObject`, rejects a client-supplied
+  value, so a caller cannot pre-link a local row to a future federated identity (SEC-006).
 - **Do not** implement our own password / sessions / MFA.
 
 ## Consequences
