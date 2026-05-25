@@ -74,7 +74,9 @@ export async function parseImportFile(file: {
     case 'docx': {
       let value: string;
       try {
-        ({ value } = await mammothMd.convertToMarkdown({ buffer: file.buffer }));
+        ({ value } = await mammothMd.convertToMarkdown({
+          buffer: file.buffer,
+        }));
       } catch {
         throw new BadRequestException('Could not parse the .docx file');
       }

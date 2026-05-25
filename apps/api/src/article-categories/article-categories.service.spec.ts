@@ -81,7 +81,10 @@ describe('ArticleCategoriesService', () => {
   it('soft-deletes a category that has no live articles', async () => {
     articleCategory.findFirst.mockResolvedValue({ id: 'c1', deletedAt: null });
     article.count.mockResolvedValue(0);
-    articleCategory.update.mockResolvedValue({ id: 'c1', deletedAt: new Date() });
+    articleCategory.update.mockResolvedValue({
+      id: 'c1',
+      deletedAt: new Date(),
+    });
 
     await service.remove('c1');
 
@@ -99,7 +102,9 @@ describe('ArticleCategoriesService', () => {
     articleCategory.findFirst.mockResolvedValue({ id: 'c1', deletedAt: null });
     article.count.mockResolvedValue(3);
 
-    await expect(service.remove('c1')).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.remove('c1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     expect(articleCategory.update).not.toHaveBeenCalled();
   });
 

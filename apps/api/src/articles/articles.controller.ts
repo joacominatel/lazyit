@@ -49,7 +49,8 @@ const READ_USER_HEADER = {
 const WRITE_USER_HEADER = {
   name: 'X-User-Id',
   required: true,
-  description: 'Caller user id (auth shim). Required; becomes the author/editor.',
+  description:
+    'Caller user id (auth shim). Required; becomes the author/editor.',
 } as const;
 
 @ApiTags('articles')
@@ -103,7 +104,10 @@ export class ArticlesController {
   @ApiOperation({ summary: 'Get an article by slug' })
   @ApiHeader(READ_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
-  findBySlug(@Param('slug') slug: string, @Headers('x-user-id') userId?: string) {
+  findBySlug(
+    @Param('slug') slug: string,
+    @Headers('x-user-id') userId?: string,
+  ) {
     return this.articles.findBySlug(slug, userId);
   }
 
@@ -166,7 +170,8 @@ export class ArticlesController {
 
   @Post(':id/publish')
   @ApiOperation({
-    summary: 'Publish an article (author only). Sets publishedAt on first publish.',
+    summary:
+      'Publish an article (author only). Sets publishedAt on first publish.',
   })
   @ApiHeader(WRITE_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
@@ -176,7 +181,8 @@ export class ArticlesController {
 
   @Post(':id/unpublish')
   @ApiOperation({
-    summary: 'Unpublish an article back to DRAFT (author only). Keeps publishedAt.',
+    summary:
+      'Unpublish an article back to DRAFT (author only). Keeps publishedAt.',
   })
   @ApiHeader(WRITE_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })

@@ -108,7 +108,10 @@ describe('article-import helpers', () => {
 
     it('rejects an unsupported file type with 400', async () => {
       await expect(
-        parseImportFile({ originalname: 'doc.pdf', buffer: Buffer.from('%PDF') }),
+        parseImportFile({
+          originalname: 'doc.pdf',
+          buffer: Buffer.from('%PDF'),
+        }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });

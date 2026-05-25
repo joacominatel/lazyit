@@ -257,7 +257,9 @@ export class ArticlesService {
       select: { id: true },
     });
     if (!user) {
-      throw new BadRequestException('X-User-Id does not reference a valid user');
+      throw new BadRequestException(
+        'X-User-Id does not reference a valid user',
+      );
     }
     return user.id;
   }

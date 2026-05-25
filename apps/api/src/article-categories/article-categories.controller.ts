@@ -23,8 +23,12 @@ import {
 import { ArticleCategoriesService } from './article-categories.service';
 
 class ArticleCategoryDto extends createZodDto(ArticleCategorySchema) {}
-class CreateArticleCategoryDto extends createZodDto(CreateArticleCategorySchema) {}
-class UpdateArticleCategoryDto extends createZodDto(UpdateArticleCategorySchema) {}
+class CreateArticleCategoryDto extends createZodDto(
+  CreateArticleCategorySchema,
+) {}
+class UpdateArticleCategoryDto extends createZodDto(
+  UpdateArticleCategorySchema,
+) {}
 
 @ApiTags('article-categories')
 @Controller('article-categories')
@@ -32,7 +36,9 @@ export class ArticleCategoriesController {
   constructor(private readonly categories: ArticleCategoriesService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List all article categories (excludes soft-deleted)' })
+  @ApiOperation({
+    summary: 'List all article categories (excludes soft-deleted)',
+  })
   @ApiOkResponse({ type: [ArticleCategoryDto] })
   findAll() {
     return this.categories.findAll();
