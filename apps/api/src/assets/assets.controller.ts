@@ -18,8 +18,10 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  AssetAssignmentWithUserSchema,
   AssetSchema,
   AssetStatusSchema,
+  AssetWithRelationsSchema,
   CreateAssetSchema,
   UpdateAssetSchema,
   type AssetStatus,
@@ -27,11 +29,15 @@ import {
 import { AssetsService } from './assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { parseActiveOnly } from '../asset-assignments/active-only';
-import { AssetAssignmentDto } from '../asset-assignments/asset-assignment.dto';
 
+// Writes keep the lean Asset shape; reads return the expanded AssetWithRelations.
 class AssetDto extends createZodDto(AssetSchema) {}
 class CreateAssetDto extends createZodDto(CreateAssetSchema) {}
 class UpdateAssetDto extends createZodDto(UpdateAssetSchema) {}
+class AssetWithRelationsDto extends createZodDto(AssetWithRelationsSchema) {}
+class AssetAssignmentWithUserDto extends createZodDto(
+  AssetAssignmentWithUserSchema,
+) {}
 
 @ApiTags('assets')
 @Controller('assets')
@@ -44,16 +50,27 @@ export class AssetsController {
   @Get()
   @ApiOperation({
     summary:
-      'List assets (excludes soft-deleted); optional category / location / status filters',
+      'List assets (expanded with model/category, location, activeAssignments). Excludes soft-deleted.',
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'locationId', required: false })
-  @ApiQuery({ name: 'status', required: false, enum: [...AssetStatusSchema.options] })
-  @ApiOkResponse({ type: [AssetDto] })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: [...AssetStatusSchema.options],
+  })
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description:
+      'Case-insensitive substring match on name, serial and assetTag',
+  })
+  @ApiOkResponse({ type: [AssetWithRelationsDto] })
   findAll(
     @Query('categoryId') categoryId?: string,
     @Query('locationId') locationId?: string,
     @Query('status') status?: string,
+    @Query('q') q?: string,
   ) {
     let parsedStatus: AssetStatus | undefined;
     if (status !== undefined) {
@@ -65,19 +82,27 @@ export class AssetsController {
       }
       parsedStatus = result.data;
     }
-    return this.assets.findAll({ categoryId, locationId, status: parsedStatus });
+    return this.assets.findAll({
+      categoryId,
+      locationId,
+      status: parsedStatus,
+      q,
+    });
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get an asset by id' })
-  @ApiOkResponse({ type: AssetDto })
+  @ApiOperation({
+    summary: 'Get an asset by id (expanded with its relations)',
+  })
+  @ApiOkResponse({ type: AssetWithRelationsDto })
   findOne(@Param('id') id: string) {
     return this.assets.findOne(id);
   }
 
   @Get(':id/assignments')
   @ApiOperation({
-    summary: "List an asset's ownership assignments (active-only by default)",
+    summary:
+      "List an asset's ownership assignments, each with its user (active-only by default)",
   })
   @ApiQuery({
     name: 'activeOnly',
@@ -85,15 +110,16 @@ export class AssetsController {
     type: Boolean,
     description: 'Default true. Pass false to include released assignments.',
   })
-  @ApiOkResponse({ type: [AssetAssignmentDto] })
+  @ApiOkResponse({ type: [AssetAssignmentWithUserDto] })
   async findAssignments(
     @Param('id') id: string,
     @Query('activeOnly') activeOnly?: string,
   ) {
-    await this.assets.findOne(id); // 404 if the asset is missing or soft-deleted
+    await this.assets.assertExists(id); // 404 if the asset is missing or soft-deleted
     return this.assignments.findAll({
       assetId: id,
       activeOnly: parseActiveOnly(activeOnly),
+      includeUser: true,
     });
   }
 
