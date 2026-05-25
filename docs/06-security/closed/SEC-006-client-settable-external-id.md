@@ -64,6 +64,43 @@ never in a create/update DTO. Note this in ADR-0016 so the auth work doesn't re-
 - CWE-639: Authorization Bypass Through User-Controlled Key. CWE-294 (account pre-hijacking class).
 - ADR-0016 (auth deferred; externalId) · ADR-0022 (author from shim, not body — same principle).
 
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `ca2b63b` (`fix: drop client-settable externalId from CreateUserSchema (SEC-006)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-05-25
+**Decision**: escalated → user chose option (1) — drop from `CreateUserSchema` + note ADR-0016 —
+after confirming no `apps/web` flow posts `externalId`.
+
+### Changes
+
+- `packages/shared/src/schemas/user.ts`: removed `externalId` from `CreateUserSchema`. It is a
+  `strictObject`, so a client-supplied `externalId` (or any other unknown key) is now rejected.
+  `externalId` stays on the read `UserSchema` (nullable) and is set server-side only, by the future
+  IdP integration.
+- `docs/03-decisions/0016-auth-strategy-deferred.md`: states `externalId` is server-owned, never
+  accepted from a body.
+- `apps/api/src/users/users.service.spec.ts`: removed the obsolete "creates a user with externalId
+  (future case)" test, which exercised the now-forbidden client-set path.
+
+### Tests added
+
+- `packages/shared/src/schemas/user.test.ts` — `CreateUserSchema` accepts a valid payload and
+  rejects `{ ...valid, externalId }`. Fails without the fix (externalId was an accepted optional
+  field, so the payload parsed successfully).
+
+### Verification
+
+`apps/web` source confirmed to have no `externalId` reference (no frontend flow relied on it).
+`bun test src/`: shared → 15 pass (+2), api → 167 pass; both typecheck/build clean.
+
+### Residual risk
+
+None today. When auth lands, `externalId` must be set from the verified token `sub` server-side,
+never from a body — captured in ADR-0016. Same principle as DEF-002 / DEF-005 (actor/identity from
+the server, not the body).
+
 ## Triage note
 
 🚨 Escalated to user on 2026-05-25 — touches the **auth contract** (`externalId` is the IdP `sub`
