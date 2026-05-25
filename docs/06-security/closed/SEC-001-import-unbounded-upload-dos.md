@@ -82,3 +82,38 @@ Make "every file upload declares `limits.fileSize`" a review rule (grep for `Fil
 
 - CWE-770: Allocation of Resources Without Limits or Throttling. CWE-400: Uncontrolled Resource Consumption.
 - ADR-0021 (KB design — import) · ADR-0016 (no auth yet).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `9347f02` (`fix: cap article import upload size at the interceptor (closes SEC-001)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-05-25
+
+### Changes
+
+- `apps/api/src/articles/articles.controller.ts`: `FileInterceptor('file')` now declares
+  `limits: { fileSize: maxImportBytes() }`, so multer aborts the stream as soon as the cap is passed
+  instead of buffering the whole upload into the heap. platform-express maps multer's
+  `LIMIT_FILE_SIZE` to `413 Payload Too Large` (verified in `@nestjs/platform-express@11`
+  `multer.utils.js`), so no custom error mapping was needed. The service-level
+  `file.size > maxImportBytes()` check is kept as defense in depth.
+
+### Tests added
+
+- `apps/api/src/articles/articles.controller.spec.ts`::"rejects an over-limit upload with 413 and
+  never reaches the service" — uploads `maxImportBytes() + 1 KB` and asserts the response is `413`
+  **and** that the service handler was never invoked (proof multer aborted before buffering). Fails
+  without the cap (the file buffers fully and the handler returns `201`). A companion case asserts an
+  under-limit upload still reaches the handler.
+
+### Verification
+
+`bun test src/articles/` → 42 pass (40 prior + 2 new). Typecheck `tsc -p tsconfig.build.json
+--noEmit` clean. (Tests run under `bun test`; jest cannot start in this sandbox — no Node runtime —
+but the specs are jest-compatible.)
+
+### Residual risk
+
+The cap bounds the **compressed** upload only. A limit-compliant `.docx` can still decompress to
+gigabytes during mammoth parsing — that is **SEC-002** (open, escalated), not addressed here.
