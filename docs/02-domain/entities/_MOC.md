@@ -51,8 +51,8 @@ updated: 2026-05-25
 
 ## Knowledge Base
 
-- ⚪ [[article]] — procedure, troubleshooting note, runbook.
-- ⚪ [[article-category]] — grouping of articles.
-- ⚪ [[article-version]] — historical version of an article.
+- 🟢 [[article]] — knowledge-base document (markdown); simple wiki.
+- 🟢 [[article-category]] — user-managed grouping of articles.
+- ⚪ [[article-version]] — historical version of an article; deferred by [[0021-knowledge-base-design]].
 
 Model overview & order: [[02-domain/_MOC|Domain]]. Conventions: [[conventions]].
