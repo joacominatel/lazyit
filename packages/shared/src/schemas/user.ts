@@ -24,13 +24,16 @@ export const UserSchema = z.object({
   deletedAt: z.iso.datetime().nullable(),
 });
 
-/** Payload to create a User. A new user is always active (DB default). */
+/**
+ * Payload to create a User. A new user is always active (DB default). `externalId` is intentionally
+ * NOT accepted from the client: it is the IdP `sub` linkage (ADR-0016), provisioned server-side when
+ * auth is integrated. Letting a caller set it would allow pre-linking a local row to a future
+ * federated identity (SEC-006). The strictObject rejects it (and any other unknown key).
+ */
 export const CreateUserSchema = z.strictObject({
   email: z.email(),
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
-  // Optional: unset today; an IdP-provisioned user may carry its `sub`. See ADR-0016.
-  externalId: z.string().min(1).optional(),
 });
 
 /** Partial update; `isActive` toggles activation / offboarding. */
