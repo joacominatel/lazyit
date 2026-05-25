@@ -44,7 +44,7 @@ Orientation for working in the **lazyit** monorepo: *where things live* and *how
 | **What an entity is / its rules** | `docs/02-domain/entities/<entity>.md` — [[entities/_MOC\|Entities]] |
 | Domain/data conventions (IDs, soft delete, jsonb) | [[conventions]] |
 | App code conventions / Bun boundary / testing | [[code-conventions]] |
-| **How to develop (the workflow)** | [[claude-workflow]] |
+| **How to develop (the workflow)** | [[claude-workflow]] · git/PR mechanics → [[git-workflow]] |
 | Setup & commands | [[setup]] · [[workflows]] |
 | Operations / deploy | [[05-runbooks/_MOC\|Runbooks]] (stubs) |
 
@@ -54,7 +54,20 @@ Orientation for working in the **lazyit** monorepo: *where things live* and *how
 
 ## 2. Reasoning path for any task
 
-Follow this in order. Full rationale: [[claude-workflow]].
+Follow this in order. Full rationale: [[claude-workflow]]; the git/PR mechanics:
+[[git-workflow]].
+
+**Set up the work (git/GitHub) — before any code:**
+
+0a. **Find or open the issue.** `gh issue list --search "<keywords>"`. Reuse it if it exists;
+   if the scope is clear, `gh issue create` (label `auto-generated` for agent-opened issues);
+   if the scope is **not** clear → **ask the user**. The user owns principal issues.
+0b. **Branch off `dev`:**
+   `git fetch origin && git switch dev && git pull && git switch -c <prefix>/issue-<n>-<slug>`
+   — `<prefix>` is the commit prefix (`feat`/`fix`/`chore`/`del`/`updt`/`docs`), `<slug>` short
+   kebab-case English. **Never branch from `master`; never commit straight to `dev`/`master`.**
+
+**Do the work:**
 
 1. **Read the full request.** Don't start on a partial understanding.
 2. **Identify the domain entities/modules it touches** — map them against [[02-domain/_MOC|Domain]].
@@ -70,11 +83,22 @@ Follow this in order. Full rationale: [[claude-workflow]].
 7. **Implement**, following the conventions in §3.
 8. **Tests** per [[0012-testing-strategy]]: unit always; core/complex logic thoroughly.
 9. **Update `docs/`** if core logic/behavior changed (entity notes, ADRs, conventions, diagrams).
-10. **Commit file-by-file** with the right prefix (§3) — and **before committing, verify the
-    docs are in sync** (no references to removed files or a changed philosophy).
+10. **Commit file-by-file** with the right prefix (§3), **push** to your branch (`git push -u
+    origin <branch>` the first time) — and **before committing, verify the docs are in sync**
+    (no references to removed files or a changed philosophy).
+
+**Hand off (you do NOT merge):**
+
+11. **Tell the user you're done** with a short summary + how to test. **Do not open the PR
+    yet** — wait for them to try it.
+12. **On the user's OK, open the PR to `dev`:** `gh pr create --base dev` (body per the PR
+    template). On change requests, iterate on the **same branch/issue** and push again.
+13. **Never merge.** The user reviews, approves and merges into `dev`, and is the only one who
+    promotes `dev` → `master`.
 
 > **Trivial changes** (typos, formatting, single-line copy): you may skip steps 4–6, but
-> never skip step 9 (docs sync) if the change is user-facing.
+> never skip step 9 (docs sync) if the change is user-facing — and they still ride an issue
+> branch + PR (steps 0a–0b, 11–13).
 
 ## 3. Conventions to always respect
 
@@ -96,20 +120,24 @@ Summaries only — the linked doc is authoritative.
 - **Bun is scoped** — runtime/package-manager/tooling default; the app layer is NestJS +
   Prisma + Jest (don't "Bun-ify" it). Concretely: don't swap NestJS/Express for `Bun.serve`,
   Prisma for `Bun.sql`, or Jest for `bun test` in the apps. → [[0009-bun-first-vs-app-stack]]
-- **Commits** — file-by-file (docs may be grouped), prefixes `feat · fix · chore · del ·
-  updt · docs`. → [[claude-workflow]]
+- **Commits & branches** — work on an **issue branch off `dev`** (`<prefix>/issue-<n>-<slug>`),
+  commit **file-by-file** (docs may be grouped) with prefixes `feat · fix · chore · del · updt ·
+  docs`, push, then **open a PR to `dev` only after the user's OK**. Agents never merge.
+  → [[git-workflow]], [[claude-workflow]]
 
 ## 4. What NOT to do
 
 - ❌ **Don't make big decisions without asking the user.** When in doubt, ask.
 - ❌ **Don't mix backend and frontend in the same agent** — use separate subagents.
+- ❌ **Don't commit straight to `master` or `dev`, and don't branch from `master`.** All work is
+  on an **issue branch cut from `dev`** (§2). **Don't open the PR before the user's OK, and
+  never merge** — the user merges PRs into `dev` and promotes `dev` → `master`. → [[git-workflow]]
 - ❌ **Don't commit without checking coherence with `docs/`** (no stale/removed-file references).
-- ❌ **Never `git commit --amend`, `rebase`, or `reset` when other agents may be committing in
-  parallel.** They rewrite whatever `HEAD` is *now* — which a parallel agent may have just moved —
-  so you can silently clobber *their* commit (and change its hash). Use **only normal commits with
-  explicit per-file staging**: `git add <your-files>` then `git commit` — these stack on top of
-  `HEAD` and never rewrite anyone's work. Never `git add -A` / `git add .` (you'd capture another
-  agent's in-progress files).
+- ❌ **Never `git commit --amend`, `rebase`, or `reset`.** Each agent now works on its own issue
+  branch, so the old "parallel agents on a shared branch" clobber risk is mostly gone — but these
+  commands **rewrite history**, which breaks the PR's review trail and can drop pushed commits.
+  Use **only normal commits with explicit per-file staging**: `git add <your-files>` then
+  `git commit`. Never `git add -A` / `git add .` (you'd capture files you didn't mean to).
 - ❌ **Don't use an external library without checking its latest documentation** (Context7 / web).
 - ❌ **Don't create new files without confirming where they belong** per the structure in §1.
 - ❌ **Don't duplicate documentation content in code comments or other files** — link to
@@ -135,10 +163,13 @@ Shows the path works from zero:
    using a `PrismaService`.
 6. **Jest tests** for the service/controller; cover the core logic thoroughly.
 7. If this introduces/changes the `Ticket` model or rules → **update [[ticket]] and any ADR**.
-8. **Commit file-by-file**: `feat: add ticket zod schema to shared`, `feat: add tickets module`,
-   `docs: document Ticket fields`, etc.
+8. **On a branch off `dev`** (`feat/issue-<n>-add-tickets-endpoint` after finding/opening the
+   issue), **commit file-by-file**: `feat: add ticket zod schema to shared`, `feat: add tickets
+   module`, `docs: document Ticket fields`, etc. Push as you go.
+9. **Hand off**: summarize for the user and wait; on their OK, `gh pr create --base dev`. You
+   don't merge — the user does. → [[git-workflow]]
 
 ---
 
-Related entry points: [[claude-workflow]] · [[02-domain/_MOC|Domain]] ·
+Related entry points: [[git-workflow]] · [[claude-workflow]] · [[02-domain/_MOC|Domain]] ·
 [[03-decisions/_MOC|Decisions]] · [[code-conventions]] · root `CLAUDE.md`.
