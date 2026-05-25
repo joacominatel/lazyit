@@ -6,7 +6,6 @@ import {
   maxImportBytes,
   maxImportMb,
   parseImportFile,
-  sanitizeMarkdown,
   titleFromFilename,
 } from './article-import';
 
@@ -33,15 +32,17 @@ describe('article-import helpers', () => {
     });
   });
 
-  describe('sanitizeMarkdown', () => {
-    it('strips script/style blocks, inline handlers and javascript: URIs', () => {
-      const dirty =
-        '# Title\n<script>alert(1)</script>\n<div onclick="x()">hi</div>\n[x](javascript:alert(1))';
-      const clean = sanitizeMarkdown(dirty);
-      expect(clean).not.toMatch(/<script/i);
-      expect(clean).not.toMatch(/onclick=/i);
-      expect(clean).not.toMatch(/javascript:/i);
-      expect(clean).toContain('# Title');
+  describe('content is stored verbatim (SEC-003)', () => {
+    it('does not strip markup from imported content (sanitization is deferred to render time)', async () => {
+      const md = await parseImportFile({
+        originalname: 'note.md',
+        buffer: Buffer.from('# Title\n<script>alert(1)</script>\nbody'),
+      });
+      // Import is now consistent with create/update: content is stored raw. The bypassable,
+      // import-only regex strip was removed; the authoritative defense is render-time sanitization
+      // on the web app (ADR-0029). This asserts the strip is gone (the old code removed <script>).
+      expect(md).toContain('<script>alert(1)</script>');
+      expect(md).toContain('# Title');
     });
   });
 
