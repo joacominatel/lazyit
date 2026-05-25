@@ -2,13 +2,16 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import {
+  ApiConflictResponse,
   ApiCreatedResponse,
+  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -22,6 +25,15 @@ import {
   ReleaseAssetAssignmentDto,
   UpdateAssetAssignmentNotesDto,
 } from './asset-assignment.dto';
+
+// X-User-Id is the auth shim (ADR-0022). On assignment writes it's OPTIONAL and becomes the actor
+// (assignedById / releasedById); absent → null actor (system/unknown), allowed by design (ADR-0024).
+const ACTOR_USER_HEADER = {
+  name: 'X-User-Id',
+  required: false,
+  description:
+    'Caller user id (auth shim). Optional; recorded as the assigner/releaser (null if absent).',
+} as const;
 
 @ApiTags('asset-assignments')
 @Controller('asset-assignments')
@@ -63,18 +75,29 @@ export class AssetAssignmentsController {
 
   @Post()
   @ApiOperation({ summary: 'Open an assignment (assign a user to an asset)' })
+  @ApiHeader(ACTOR_USER_HEADER)
   @ApiCreatedResponse({ type: AssetAssignmentDto })
-  create(@Body() dto: CreateAssetAssignmentDto) {
-    return this.assignments.create(dto);
+  create(
+    @Body() dto: CreateAssetAssignmentDto,
+    @Headers('x-user-id') actorId?: string,
+  ) {
+    return this.assignments.create(dto, actorId);
   }
 
   @Patch(':id/release')
   @ApiOperation({
-    summary: 'Release an active assignment (sets releasedAt; 409 if already released)',
+    summary:
+      'Release an active assignment (sets releasedAt; 409 if already released)',
   })
+  @ApiHeader(ACTOR_USER_HEADER)
   @ApiOkResponse({ type: AssetAssignmentDto })
-  release(@Param('id') id: string, @Body() dto: ReleaseAssetAssignmentDto) {
-    return this.assignments.release(id, dto);
+  @ApiConflictResponse({ description: 'The assignment is already released' })
+  release(
+    @Param('id') id: string,
+    @Body() dto: ReleaseAssetAssignmentDto,
+    @Headers('x-user-id') actorId?: string,
+  ) {
+    return this.assignments.release(id, dto, actorId);
   }
 
   @Patch(':id/notes')
