@@ -82,5 +82,10 @@ today is operational: **do not expose `:3001` (or `:5432`) beyond localhost/trus
   validated vs pass-through) was reasoned, not exercised; `mammoth` internals (XML entity handling)
   were not deep-audited (Phase-3 deps); no dynamic testing (API not run).
 - **Out of scope this sweep:** frontend (`apps/web`), dependency CVEs, deploy infra (none exists).
+- **Landed during the sweep — unreviewed (next-pass target):** the Access pillar modules
+  `applications/`, `access-grants/`, `application-categories/` (+ nested `users`/`assets` wiring) were
+  committed by a parallel agent after this sweep's baseline. They are **not** covered here and are the
+  first thing to review next — expect the same classes (the `X-User-Id` shim or its absence on
+  `AccessGrant` writes, IDOR on nested routes, soft-delete, mass assignment, pagination).
 
 Related: [[deferred]] · [[06-security/_MOC|Security MOC]]
