@@ -9,6 +9,28 @@ Positioning: ServiceNow-grade capability, but modern, opinionated and IT-native.
 > **`docs/` is the source of truth.** When this file and the docs disagree, the docs win —
 > then update both. Start at `docs/README.md` (global map + an open-questions "Gaps" section).
 
+## How we work — workflow (READ FIRST)
+
+Default operating procedure for **every** change. Full version:
+`docs/04-development/claude-workflow.md`.
+
+1. **Context before code.** Before doing anything, investigate the codebase for what's asked
+   **and** search `docs/` for related material (affected entities, domain rules, ADRs,
+   conventions). Fully contextualize the change before touching code.
+2. **Ask, don't assume.** If a decision is needed and there's no clear reference, **ask the
+   user — for everything.** Anything that could be **critical** (data model, auth,
+   delete/migrate semantics, security, irreversible actions) → consult the user before acting.
+3. **Front/back via subagents.** When a task spans frontend and backend, delegate to
+   **separate subagents** (one frontend, one backend). Claude Code **orchestrates** — it
+   specifies tasks and contracts; it does not implement both sides itself.
+4. **Minimalist commits.** **One file per commit** (documentation may be grouped). Message
+   prefixes: `feat` · `fix` · `chore` · `del` · `updt` · `docs`.
+5. **Docs stay in sync.** Any change to the codebase — especially **core logic** — requires
+   reviewing `docs/`; if it lands, update the docs in the same change. **Before committing,
+   verify the docs don't reference removed files or a changed philosophy.**
+6. **External libraries → latest docs.** Check current official docs (e.g. Context7 / web)
+   before using or upgrading a library — don't rely on memory.
+
 ## Where things are (docs map)
 
 | You need… | Read |
@@ -17,7 +39,8 @@ Positioning: ServiceNow-grade capability, but modern, opinionated and IT-native.
 | Stack, monorepo, deployment | `docs/01-architecture/` |
 | Domain model & rules | `docs/02-domain/` + `docs/02-domain/entities/` (one note per entity) |
 | Why a decision was made | `docs/03-decisions/` — ADRs (MADR-lite) |
-| Set up & day-to-day work | `docs/04-development/` — setup, workflows, code-conventions |
+| Set up & day-to-day work | `docs/04-development/` — setup, workflows, code-conventions, claude-workflow |
+| What goes in `@lazyit/shared` | `docs/01-architecture/shared-package.md` |
 | Operations / deploy / backups | `docs/05-runbooks/` (stub until there's something to operate) |
 | Vocabulary | `docs/99-glossary/` |
 
@@ -71,9 +94,9 @@ bunx prisma migrate dev --name <change>
 bunx prisma generate        # client → apps/api/generated/prisma
 ```
 
-> **Setup gotcha:** `.env.example` does **not** yet include `DATABASE_URL` / `PORT`. The API
-> reads `DATABASE_URL` (Prisma, via `prisma.config.ts`) and `PORT` from `apps/api/.env`.
-> A fresh clone won't connect until that file exists. See `docs/04-development/setup.md`.
+> **Env:** one `.env` per scope, each with a committed `.env.example` to copy. Root `.env`
+> (Postgres, for compose) + `apps/api/.env` (`DATABASE_URL`, `PORT`). `apps/web` has none yet.
+> `cp .env.example .env` and `cp apps/api/.env.example apps/api/.env`. See `docs/04-development/setup.md`.
 
 ## Conventions
 
@@ -86,6 +109,14 @@ bunx prisma generate        # client → apps/api/generated/prisma
   `createdAt` only. → `docs/03-decisions/0006-soft-delete-and-auditing.md`
 - **Flexible asset specs:** type-specific attributes go in a `specs Json` (jsonb) field on
   `Asset`, validated by zod in `@lazyit/shared`. → `docs/03-decisions/0007-flexible-asset-specs-jsonb.md`
+- **`@lazyit/shared`:** only what both `web` and `api` must agree on — zod schemas, inferred
+  types, constants, **pure** framework-agnostic utils. No app deps, no framework code, no
+  Prisma types. → `docs/01-architecture/shared-package.md`
+- **Testing:** unit tests always; core/complex logic thoroughly. Jest (api), `bun test`
+  (shared); frontend unit tests and e2e deferred; no global coverage gate (rigor on core via
+  review). → `docs/03-decisions/0012-testing-strategy.md`
+- **Frontend:** Next.js (App Router) + Tailwind v4 (shadcn/ui planned).
+  → `docs/03-decisions/0010-nextjs-frontend.md`, `docs/03-decisions/0011-tailwind-styling.md`
 - **Domain build order:** User + Location → AssetModel + AssetCategory + Asset →
   AssetAssignment + AssetHistory → Ticket + TicketComment →
   Application + AccessGrant + AccessRequest → Consumable + ConsumableMovement →

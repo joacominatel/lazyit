@@ -17,9 +17,9 @@ Conventions for application code. Data-model conventions live in [[conventions]]
 ## TypeScript
 
 - **Strict** TypeScript across all workspaces.
-- Shared contracts (DTOs, zod schemas, types used by both web and api) live in
-  `@lazyit/shared` — one definition, imported via `workspace:*`. Never duplicate a contract
-  in an app ([[monorepo]]).
+- Shared contracts (zod schemas, inferred types, constants, pure utils used by both web and
+  api) live in `@lazyit/shared` — one definition, imported via `workspace:*`. Never duplicate
+  a contract in an app. What may live there is governed by a contract → [[shared-package]].
 
 ## Backend (NestJS)
 
@@ -31,7 +31,9 @@ Conventions for application code. Data-model conventions live in [[conventions]]
 
 ## Frontend (Next.js)
 
-- App Router, TypeScript, Tailwind v4. UI kit likely shadcn/ui (not yet decided — [[stack]]).
+- App Router, TypeScript, Tailwind v4 ([[0010-nextjs-frontend]], [[0011-tailwind-styling]]).
+  shadcn/ui is the planned component layer (not yet installed); document component
+  conventions here when UI work starts.
 
 ## The Bun-first boundary
 
@@ -45,6 +47,16 @@ Conventions for application code. Data-model conventions live in [[conventions]]
 
 ## Testing
 
-- API: Jest (`apps/api`). Shared/scripts: `bun test`.
+- Unit tests **always**; core/complex logic gets thorough, many-cased testing. Priority is
+  the application core, not scaffolding/UI. Full policy: [[0012-testing-strategy]].
+- Runners: **Jest** (`apps/api`) · **`bun test`** (`packages/shared`). Frontend unit tests and
+  e2e are **deferred**. No global coverage gate — rigor on the core via review.
 
-Related: [[workflows]] · [[setup]] · [[conventions]] · [[0009-bun-first-vs-app-stack]]
+## Workflow
+
+- Every change follows [[claude-workflow]]: context first, ask-don't-assume, front/back via
+  separate subagents, file-scoped commits, and **docs kept in sync** (review `docs/` on any
+  core change; never commit docs that reference removed files or a changed philosophy).
+
+Related: [[claude-workflow]] · [[workflows]] · [[setup]] · [[conventions]] · [[shared-package]] ·
+[[0009-bun-first-vs-app-stack]] · [[0012-testing-strategy]]

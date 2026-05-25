@@ -29,8 +29,9 @@ Versions below are **verified against the repository** as of 2026-05-25, not jus
 
 ## Decided but not yet implemented
 
+- **Frontend:** Next.js + Tailwind decided ([[0010-nextjs-frontend]], [[0011-tailwind-styling]]);
+  **shadcn/ui** is the intended component layer but not yet installed.
 - **Auth:** NextAuth vs better-auth — **undecided** (ADR pending, see [[03-decisions/_MOC|Decisions]]).
-- **UI kit:** likely shadcn/ui + Tailwind.
 - **Async workers:** likely BullMQ + Redis.
 
 > [!warning] Bun-first vs app stack
@@ -42,6 +43,7 @@ Versions below are **verified against the repository** as of 2026-05-25, not jus
 ## Why these
 
 Each significant choice has an ADR:
-[[0001-monorepo-bun-turborepo]] · [[0002-nestjs-backend]] · [[0003-prisma-orm]].
+[[0001-monorepo-bun-turborepo]] · [[0002-nestjs-backend]] · [[0003-prisma-orm]] ·
+[[0010-nextjs-frontend]] · [[0011-tailwind-styling]] · [[0012-testing-strategy]].
 
-Related: [[monorepo]] · [[deployment]]
+Related: [[monorepo]] · [[shared-package]] · [[deployment]]

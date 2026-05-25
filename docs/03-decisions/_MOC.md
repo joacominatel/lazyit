@@ -31,11 +31,15 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0007-flexible-asset-specs-jsonb]] | Flexible asset specs via jsonb | accepted |
 | [[0008-consumables-vs-assets]] | Consumables modeled separately from assets | accepted |
 | [[0009-bun-first-vs-app-stack]] | Bun-first guidance vs the chosen app stack | accepted |
+| [[0010-nextjs-frontend]] | Next.js for the frontend | accepted |
+| [[0011-tailwind-styling]] | Tailwind CSS + shadcn/ui for styling | accepted |
+| [[0012-testing-strategy]] | Testing strategy | accepted |
 
 ## Pending ADRs (to write when decided)
 
 - **Authentication** — NextAuth vs better-auth (see [[stack]]).
 - **Async workers** — BullMQ + Redis (note the [[0009-bun-first-vs-app-stack]] tension:
   BullMQ pulls in `ioredis`, which `CLAUDE.md` discourages).
-- **UI kit** — shadcn/ui + Tailwind.
 - **Deployment topology** — see [[deployment]].
+- **E2E tooling & frontend test runner** — deferred in [[0012-testing-strategy]]; choose when
+  UI/critical flows exist.

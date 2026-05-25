@@ -10,6 +10,8 @@ updated: 2026-05-25
 
 Everything a developer needs to work on lazyit.
 
+- [[claude-workflow]] — **how we develop** (context-first, ask-don't-assume, subagents,
+  commits, docs-sync). The default operating procedure for every change.
 - [[setup]] — get the repo running locally (Bun, Docker, Prisma).
 - [[workflows]] — day-to-day: dev servers, migrations, building, linting.
 - [[code-conventions]] — language, structure, testing, and the Bun-first boundary.

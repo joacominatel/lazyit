@@ -30,6 +30,7 @@ lazyit/
 - **`@lazyit/api`** — NestJS app + Prisma. Depends on `@lazyit/shared` via `workspace:*`.
 - **`@lazyit/shared`** — framework-agnostic TypeScript. Exposes its source directly
   (`main`/`types` → `./src/index.ts`); no build step. Currently exports only `APP_NAME`.
+  **What may live here is governed by a contract → [[shared-package]].**
 
 ## Orchestration
 

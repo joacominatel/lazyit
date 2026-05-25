@@ -19,6 +19,8 @@ frontmatter, and internal references use `[[wiki-links]]`.
 ## How to read these docs
 
 - New to the project? Start at [[vision]] → [[problem-space]] → [[asset-centric]].
+- **About to build something? Read [[claude-workflow]] first** — it's the default operating
+  procedure for every change (context-first, ask-don't-assume, subagents, commits, docs-sync).
 - Setting up your machine? Go to [[setup]].
 - Looking for *why* something is the way it is? See [[03-decisions/_MOC|Decisions (ADRs)]].
 
@@ -27,10 +29,10 @@ frontmatter, and internal references use `[[wiki-links]]`.
 | Section | Index | What lives here |
 | --- | --- | --- |
 | `00-overview` | [[00-overview/_MOC\|Overview]] | What lazyit is, the problem, the competition |
-| `01-architecture` | [[01-architecture/_MOC\|Architecture]] | Stack, monorepo layout, deployment |
+| `01-architecture` | [[01-architecture/_MOC\|Architecture]] | Stack, monorepo, `shared` contract, deployment |
 | `02-domain` | [[02-domain/_MOC\|Domain]] | The asset-centric model, entities, conventions |
 | `03-decisions` | [[03-decisions/_MOC\|Decisions]] | Architecture Decision Records (MADR-lite) |
-| `04-development` | [[04-development/_MOC\|Development]] | Local setup, workflows, code conventions |
+| `04-development` | [[04-development/_MOC\|Development]] | How we work, setup, workflows, code conventions |
 | `05-runbooks` | [[05-runbooks/_MOC\|Runbooks]] | Operations, deploy, troubleshooting |
 | `99-glossary` | [[99-glossary/_MOC\|Glossary]] | IT terms used across the docs |
 

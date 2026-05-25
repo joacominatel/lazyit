@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "01-architecture/monorepo.md",
+                "file": "03-decisions/0002-nestjs-backend.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "monorepo"
+              "title": "0002-nestjs-backend"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "01-architecture/monorepo.md",
+                "file": "03-decisions/0002-nestjs-backend.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for monorepo"
+              "title": "Backlinks for 0002-nestjs-backend"
             }
           },
           {
@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "01-architecture/monorepo.md",
+                "file": "03-decisions/0002-nestjs-backend.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from monorepo"
+              "title": "Outgoing links from 0002-nestjs-backend"
             }
           },
           {
@@ -156,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "01-architecture/monorepo.md",
+                "file": "03-decisions/0002-nestjs-backend.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of monorepo"
+              "title": "Outline of 0002-nestjs-backend"
             }
           }
         ]
@@ -185,22 +185,41 @@
   },
   "active": "59b44ef462c85802",
   "lastOpenFiles": [
-    "README.md.tmp.116084.84006b58d5bb",
-    "03-decisions/_MOC.md.tmp.116084.7d0a0ad089f4",
-    "02-domain/_MOC.md.tmp.116084.bc1668b3d8c2",
-    "03-decisions/0004-asset-centric-design.md.tmp.116084.63b95f62f410",
-    "02-domain/asset-centric.md.tmp.116084.bf7934ca1928",
-    "02-domain/entities/asset-history.md.tmp.116084.95bf47570cce",
-    "02-domain/conventions.md.tmp.116084.3337fdf7e8e2",
-    "02-domain/entities/asset-assignment.md.tmp.116084.b3a7dbd6db86",
-    "02-domain/entities/asset-assignment.md.tmp.116084.1dc8cb14e29d",
-    "03-decisions/0006-soft-delete-and-auditing.md.tmp.116084.e2c09e19f35d",
-    "03-decisions/0006-soft-delete-and-auditing.md.tmp.116084.6e8de7a14667",
-    "01-architecture/deployment.md",
-    "01-architecture/_MOC.md",
+    "README.md.tmp.116084.b459d8f51fc3",
+    "README.md.tmp.116084.a78d5c0cb16a",
+    "04-development/workflows.md.tmp.116084.ec7c88164b93",
+    "04-development/code-conventions.md.tmp.116084.761f15e9b209",
+    "04-development/code-conventions.md.tmp.116084.edf38a2d64de",
+    "04-development/code-conventions.md.tmp.116084.99739032ded1",
+    "01-architecture/stack.md.tmp.116084.7731b4a2f5b9",
+    "01-architecture/stack.md.tmp.116084.c5bd7aa01349",
+    "01-architecture/monorepo.md.tmp.116084.f15062ccc453",
+    "04-development/_MOC.md.tmp.116084.1a5e0e6c3844",
+    "01-architecture/_MOC.md.tmp.116084.c3aa3e80c2fe",
+    "03-decisions/0004-asset-centric-design.md",
+    "03-decisions/0005-id-strategy.md",
+    "03-decisions/0006-soft-delete-and-auditing.md",
+    "03-decisions/0007-flexible-asset-specs-jsonb.md",
+    "03-decisions/0008-consumables-vs-assets.md",
+    "03-decisions/0009-bun-first-vs-app-stack.md",
+    "03-decisions/0011-tailwind-styling.md",
+    "03-decisions/0012-testing-strategy.md",
     "00-overview/vision.md",
-    "00-overview/problem-space.md",
-    "00-overview/competitors.md",
-    "00-overview/_MOC.md"
+    "01-architecture/_MOC.md",
+    "01-architecture/deployment.md",
+    "01-architecture/shared-package.md",
+    "01-architecture/monorepo.md",
+    "01-architecture/stack.md",
+    "02-domain/conventions.md",
+    "04-development/claude-workflow.md",
+    "03-decisions/0010-nextjs-frontend.md",
+    "02-domain/asset-centric.md",
+    "02-domain/_MOC.md",
+    "02-domain/entities/ticket-comment.md",
+    "02-domain/entities/location.md",
+    "02-domain/entities/asset-history.md",
+    "02-domain/entities/asset-assignment.md",
+    "02-domain/entities/article-version.md",
+    "00-overview/problem-space.md"
   ]
 }

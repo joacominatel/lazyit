@@ -36,12 +36,19 @@ schemas in `@lazyit/shared` ([[monorepo]]).
 
 ## Testing
 
-- **API (`apps/api`):** Jest (`bun run test` → `jest`). See [[code-conventions]] for why
-  Jest here and not `bun test` ([[0009-bun-first-vs-app-stack]]).
+Policy in [[0012-testing-strategy]]: unit tests always; core/complex logic thoroughly.
+
+- **API (`apps/api`):** Jest (`bun run test` → `jest`). Why Jest and not `bun test`:
+  [[code-conventions]], [[0009-bun-first-vs-app-stack]].
 - **Shared / scripts:** `bun test`.
+- **Frontend / e2e:** deferred — no runner chosen yet.
 
 ## Git
 
 - Default branch for PRs is `main`. Branch before committing; commit/push only when asked.
+- **Commits are file-scoped and minimal** (docs may be grouped), prefixed
+  `feat` · `fix` · `chore` · `del` · `updt` · `docs`. Full workflow: [[claude-workflow]].
+- Before committing, **review `docs/` for sync** — no references to removed files or stale
+  philosophy ([[claude-workflow]]).
 
-Related: [[setup]] · [[code-conventions]] · [[monorepo]]
+Related: [[claude-workflow]] · [[setup]] · [[code-conventions]] · [[monorepo]] · [[0012-testing-strategy]]
