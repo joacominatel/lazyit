@@ -23,7 +23,8 @@ None of the list services bound their result set:
 
 - `users.service.ts:10` · `locations.service.ts:10` · `asset-categories.service.ts:10` ·
   `asset-models.service.ts:11` · `assets.service.ts:18` · `asset-assignments.service.ts:25` ·
-  `articles.service.ts:69` · `article-categories.service.ts:17`
+  `articles.service.ts:69` · `article-categories.service.ts:17` · `applications.service.ts:11` ·
+  `application-categories.service.ts:13` · `access-grants.service.ts:42`
 
 Each is `findMany({ where: { deletedAt: null }, orderBy: … })` with no limit. Filters narrow some, but
 `GET /users`, `GET /assets`, `GET /articles`, `GET /asset-assignments` can each return the full table.
@@ -42,7 +43,8 @@ response; there is no way to request a page.
 
 ## Affected
 
-- All eight `findAll` implementations listed above (transversal).
+- All eleven `findAll` implementations listed above (transversal). `GET /access-grants` is the most
+  sensitive unbounded list — it can dump every user↔application grant in one request.
 
 ## Recommendation
 
