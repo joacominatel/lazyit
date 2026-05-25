@@ -73,6 +73,9 @@ Follow this in order. Full rationale: [[claude-workflow]].
 10. **Commit file-by-file** with the right prefix (§3) — and **before committing, verify the
     docs are in sync** (no references to removed files or a changed philosophy).
 
+> **Trivial changes** (typos, formatting, single-line copy): you may skip steps 4–6, but
+> never skip step 9 (docs sync) if the change is user-facing.
+
 ## 3. Conventions to always respect
 
 Summaries only — the linked doc is authoritative.
@@ -91,7 +94,8 @@ Summaries only — the linked doc is authoritative.
 - **Testing** — unit always, core thorough; Jest (api), `bun test` (shared); FE & e2e
   deferred; no global coverage gate. → [[0012-testing-strategy]]
 - **Bun is scoped** — runtime/package-manager/tooling default; the app layer is NestJS +
-  Prisma + Jest (don't "Bun-ify" it). → [[0009-bun-first-vs-app-stack]]
+  Prisma + Jest (don't "Bun-ify" it). Concretely: don't swap NestJS/Express for `Bun.serve`,
+  Prisma for `Bun.sql`, or Jest for `bun test` in the apps. → [[0009-bun-first-vs-app-stack]]
 - **Commits** — file-by-file (docs may be grouped), prefixes `feat · fix · chore · del ·
   updt · docs`. → [[claude-workflow]]
 
@@ -102,6 +106,8 @@ Summaries only — the linked doc is authoritative.
 - ❌ **Don't commit without checking coherence with `docs/`** (no stale/removed-file references).
 - ❌ **Don't use an external library without checking its latest documentation** (Context7 / web).
 - ❌ **Don't create new files without confirming where they belong** per the structure in §1.
+- ❌ **Don't duplicate documentation content in code comments or other files** — link to
+  `docs/` instead.
 - ❌ **Don't hard-delete data**, don't renumber accepted ADRs, and don't duplicate a shared
   contract outside `@lazyit/shared`.
 
