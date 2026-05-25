@@ -16,9 +16,43 @@ const ApplicationMetadataSchema = z.record(z.string(), z.unknown());
 
 /**
  * `url` is stored as a free string, not strictly URL-validated: internal IT targets are often
- * scheme-less hosts (e.g. `vpn.corp.local`) that `z.url()` would reject. Kept lenient on purpose.
+ * scheme-less hosts (e.g. `vpn.corp.local`) that `z.url()` would reject. Kept lenient on purpose —
+ * but a value later rendered as a link href must not carry an executable scheme (SEC-008): a
+ * `javascript:` / `data:` url would be a stored XSS sink. So the leniency stays (scheme-less hosts,
+ * with or without a port, and http(s) urls) while any other scheme is rejected.
  */
-const ApplicationUrlSchema = z.string().trim().min(1).max(2048);
+
+/**
+ * True when `value` is safe to store as an `Application.url`: a scheme-less host/path (including
+ * `host:port`) or an `http`/`https` url. Any other scheme — notably `javascript:`, `data:`,
+ * `vbscript:`, `file:` — is rejected. Robust to whitespace/control-char obfuscation: TAB/LF/CR are
+ * stripped anywhere and any leading non-alphanumeric run is dropped (browsers ignore leading control
+ * chars and strip TAB/LF/CR before parsing the scheme), so `java\tscript:` and a leading control
+ * byte can't hide the scheme. Render-time code should additionally allow-list the href scheme.
+ */
+export function isSafeApplicationUrl(value: string): boolean {
+  const normalized = value
+    .replace(/[\t\n\r]/g, "")
+    .replace(/^[^a-zA-Z0-9]+/, "");
+  const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(normalized);
+  if (!match) return true; // scheme-less host/path, e.g. vpn.corp.local
+  const scheme = match[1].toLowerCase();
+  if (scheme === "http" || scheme === "https") return true;
+  // A scheme-less host with a port (vpn.corp.local:8080) is read as scheme=host by the regex above;
+  // allow it when what follows the first colon is only a port (+ optional path).
+  const afterColon = normalized.slice(match[0].length);
+  return /^\d+(\/.*)?$/.test(afterColon);
+}
+
+const ApplicationUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(2048)
+  .refine(isSafeApplicationUrl, {
+    message:
+      "url must be a scheme-less host or use http(s); javascript:, data:, vbscript: and file: are not allowed",
+  });
 
 /** The full persisted Application entity (API representation of the `applications` row). */
 export const ApplicationSchema = z.object({
