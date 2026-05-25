@@ -2,7 +2,7 @@
 id: SEC-005
 title: docker-compose publishes Postgres on all host interfaces with trivial example credentials
 severity: low
-status: open
+status: fixed
 cwe: CWE-1327
 discovered: 2026-05-25
 module: infra
@@ -71,3 +71,42 @@ compose/deploy review. Revisit in the deployment ADR.
 
 Out of lane → **DevOps**. `module: infra` (`docker-compose.yml` + `.env.example`) is owned by the
 parallel `lazyit-devops` agent, not the remediator. Not remediated here; routed to DevOps.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commits `e18576f` (dev DB → loopback) · `76e9eee` (root `.env.example` hardening
+note) · `f548ffc` (prod compose: Postgres on the internal network, no host port) · `7ffb099`
+(prod env template with `CHANGE_ME` placeholders) · `5f7f736` (ADR-0028 documents the practice)
+**Fixed by**: lazyit-devops
+**Date**: 2026-05-25
+
+### Changes
+
+Addresses all three of the finding's recommendations across both the dev and the new
+production-shaped stack ([[0028-secrets-and-config]]):
+
+- **Dev DB no longer binds all interfaces.** `docker-compose.yml` now publishes
+  `"127.0.0.1:5432:5432"` (loopback only) — the dev database is unreachable from the LAN, while
+  `localhost` connections are unchanged (zero developer impact). The running dev container keeps its
+  old mapping until its next recreate; the change applies on the next `up`.
+- **Production never exposes Postgres at all.** `infra/docker-compose.prod.yml` puts `db` (and
+  `api`/`web`) on an internal compose network with **no `ports:`** — only Caddy publishes host
+  ports. Verified live: `lazyit-prod-db-1` reports `5432/tcp` with the host mapping `null`.
+- **No trivial secrets in examples.** `infra/env/.env.prod.example` uses explicit `CHANGE_ME`
+  placeholders (real values go in the gitignored `infra/env/.env.prod`, `chmod 600`), and the root
+  `.env.example` now warns that production must never expose 5432 nor reuse example credentials.
+  Postgres still fails closed on an empty password.
+
+### Residual / out of lane
+
+- `apps/api/.env.example` still points the dev `DATABASE_URL` at `postgres:postgres`. That file is
+  in the **application** lane (not DevOps) and is a deliberate dev convenience; its LAN-exposure
+  vector is removed by the loopback bind above. Left for an in-lane agent if a non-trivial dev
+  example is wanted.
+
+### Re-verification
+
+Brought up the full prod-like stack (`infra/docker-compose.prod.yml`): `db` healthy with no host
+port mapping; the only host-published ports belong to Caddy (`8080`/`8443`). Dev `docker-compose.yml`
+still validates and the dev container is undisturbed.
