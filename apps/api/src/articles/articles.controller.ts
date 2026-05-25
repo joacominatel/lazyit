@@ -34,6 +34,7 @@ import {
 } from '@lazyit/shared';
 import { ArticlesService } from './articles.service';
 import { maxImportBytes } from './article-import';
+import { parseUuidQuery } from '../common/parse-uuid-query';
 
 class ArticleDto extends createZodDto(ArticleSchema) {}
 class CreateArticleDto extends createZodDto(CreateArticleSchema) {}
@@ -96,7 +97,12 @@ export class ArticlesController {
       parsedStatus = result.data;
     }
     return this.articles.findAll(
-      { categoryId, authorId, status: parsedStatus, q },
+      {
+        categoryId,
+        authorId: parseUuidQuery(authorId, 'authorId'),
+        status: parsedStatus,
+        q,
+      },
       userId,
     );
   }
