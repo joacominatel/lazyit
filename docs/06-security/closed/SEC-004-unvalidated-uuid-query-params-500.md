@@ -87,3 +87,54 @@ for uuid path params) so non-body input gets the same single-source-of-truth val
 
 - CWE-20: Improper Input Validation. CWE-755: Improper Handling of Exceptional Conditions.
 - ADR-0018 (global pipe / exception filter) · ADR-0005 (uuid vs cuid).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commits `1d9d523` (helper) · `b377c9d` (P2023→400 filter) · `978a2cf` (users path
+params) · `827842d` / `96e046e` / `a902816` (query filters)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-05-25
+
+### Changes
+
+Deterministic uuid validation at the request edge (the finding's primary recommendation), plus a
+transversal Prisma net:
+
+- `apps/api/src/common/parse-uuid-query.ts` (new): `parseUuidQuery(value, name)` validates an
+  optional uuid query filter with `z.uuid()` (mirrors the inline `status` check) — `undefined`
+  passes through, a well-formed uuid is returned, anything else is a 400.
+- `apps/api/src/users/users.controller.ts`: `ParseUUIDPipe` on every `:id` route (`findOne`,
+  `findAssignments`, `findAccessGrants`, `update`, `remove`) — a malformed `User.id` is rejected
+  with 400 at the edge, before the service/DB. This also fronts `/users/:id/assignments` and
+  `/users/:id/access-grants`.
+- `articles.controller.ts` (`authorId`), `asset-assignments.controller.ts` (`userId`),
+  `access-grants.controller.ts` (`userId`): each uuid query filter now goes through
+  `parseUuidQuery`. (`assetId`/`applicationId` are cuid and don't cast-error — left as-is, per the
+  finding.)
+- `apps/api/src/common/prisma-exception.filter.ts`: maps Prisma `P2023` ("inconsistent column
+  data") → 400 with a generic message (no column/value echoed). Transversal safety net for any
+  uuid input not guarded at the edge, and for future uuid columns.
+
+### Tests added
+
+- `common/prisma-exception.filter.spec.ts` — P2023→400; P2002/P2003/P2025 mappings unchanged; an
+  unmapped code still delegates to the base handler (500). Fails without the new P2023 case.
+- `common/parse-uuid-query.spec.ts` — undefined passes; a valid uuid returns unchanged; a malformed
+  value (and `""`) throws 400.
+- `users/users.controller.spec.ts` — `GET /users/not-a-uuid` → 400 and the service is never called;
+  a well-formed uuid reaches the service. Fails without ParseUUIDPipe (the request reaches the
+  service and returns 200).
+
+### Verification
+
+`bun test src/` → 168 pass / 17 files (was 158 / 13). Typecheck `tsc -p tsconfig.build.json
+--noEmit` clean. Because validation happens at the request edge, the fix does **not** depend on
+confirming Prisma's exact error code; the P2023 mapping is an additional net.
+
+### Residual risk
+
+The edge guards are per-parameter (not a global query-DTO pipe), so a *new* uuid query filter added
+later must call `parseUuidQuery` — otherwise the P2023 net catches it as a 400 fallback. The
+finding's broader "adopt a query DTO for single-source validation of non-body input" is hardening,
+not required to close this.
