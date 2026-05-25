@@ -13,6 +13,8 @@ export const UserSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   isActive: z.boolean(),
+  // IdP `sub` mapping; null until auth is integrated (no auth yet). See ADR-0016.
+  externalId: z.string().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
   deletedAt: z.date().nullable(),
@@ -23,6 +25,8 @@ export const CreateUserSchema = z.strictObject({
   email: z.email(),
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
+  // Optional: unset today; an IdP-provisioned user may carry its `sub`. See ADR-0016.
+  externalId: z.string().min(1).optional(),
 });
 
 /** Partial update; `isActive` toggles activation / offboarding. */
