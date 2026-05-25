@@ -45,18 +45,11 @@ export function titleFromFilename(filename: string): string {
   return (title || 'Untitled').slice(0, 200);
 }
 
-/**
- * Defense-in-depth strip of executable markup from imported content: <script>/<style> blocks,
- * inline event handlers, and javascript: URIs. The authoritative defense is render-time
- * sanitization on the frontend (deferred) — imported markdown is stored, not executed server-side.
- */
-export function sanitizeMarkdown(content: string): string {
-  return content
-    .replace(/<\s*(script|style)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
-    .replace(/<\s*\/?\s*(script|style)\b[^>]*>/gi, '')
-    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/javascript:/gi, '');
-}
+// Imported content is stored raw, exactly like POST/PATCH /articles (create/update never stripped
+// it either). A regex "sanitizer" used to run here on import only — it was bypassable and asymmetric
+// (import-only), giving false confidence (SEC-003). It has been removed: the authoritative defense is
+// render-time sanitization on the web app (deferred; no KB renderer exists yet — content is shown as
+// escaped text). See docs/03-decisions/0029-untrusted-content-sanitization.md.
 
 /**
  * Extract markdown from an uploaded file, dispatching by extension. Throws 400 on an unsupported
@@ -70,7 +63,7 @@ export async function parseImportFile(file: {
   switch (ext) {
     case 'md':
     case 'txt':
-      return sanitizeMarkdown(file.buffer.toString('utf-8'));
+      return file.buffer.toString('utf-8');
     case 'docx': {
       let value: string;
       try {
@@ -80,7 +73,7 @@ export async function parseImportFile(file: {
       } catch {
         throw new BadRequestException('Could not parse the .docx file');
       }
-      return sanitizeMarkdown(value);
+      return value;
     }
     default:
       throw new BadRequestException(
