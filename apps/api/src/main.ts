@@ -8,6 +8,16 @@ async function bootstrap() {
   // Ensure PrismaService.onModuleDestroy runs on SIGTERM/SIGINT (graceful $disconnect).
   app.enableShutdownHooks();
 
+  // CORS for the web app. Origin is read from WEB_ORIGIN (default: the Next.js dev server)
+  // so it is never hardcoded. credentials:true is set ahead of cookie/session auth (deferred,
+  // ADR-0016); with credentials the origin must be explicit, never "*". allowedHeaders is left
+  // unset so cors reflects the requested headers (covers Content-Type, Authorization, …).
+  app.enableCors({
+    origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    credentials: true,
+  });
+
   // OpenAPI: schemas come from the zod DTOs; cleanupOpenApiDoc is required for correct output.
   // Swagger UI at /api/docs, raw OpenAPI JSON at /api/docs-json. See ADR-0018.
   const config = new DocumentBuilder()
