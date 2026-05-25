@@ -1,36 +1,120 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# @lazyit/web
 
-## Getting Started
+Frontend for **lazyit** — the self-hosted IT management app. Next.js (App Router) +
+React + Tailwind v4 + shadcn/ui. Talks to `@lazyit/api` over HTTP; shared contracts
+live in `@lazyit/shared`. See the docs vault (`docs/`) for product and architecture
+context.
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+| Layer | Choice |
+| --- | --- |
+| Framework | Next.js 16 (App Router) + React 19 |
+| Styling | Tailwind CSS v4 |
+| Components | shadcn/ui (`radix-nova` style, `neutral` base color, CSS variables) |
+| Icons | **Heroicons only** (`@heroicons/react`) — see decision below |
+| Fonts | Geist + Geist Mono via `next/font/google` |
+| Theming | `next-themes` (system + manual, persisted) |
+| Data fetching | TanStack Query (`@tanstack/react-query`) + a thin typed `fetch` wrapper |
+| Toasts | `sonner` |
+
+## Folder structure
+
+```
+app/
+├── layout.tsx            # root layout — fonts, <Providers>, metadata
+├── providers.tsx         # QueryClientProvider + ThemeProvider + <Toaster>
+├── globals.css           # Tailwind v4 + shadcn theme tokens (neutral, oklch)
+├── (marketing)/          # public marketing routes (header + footer)
+│   ├── layout.tsx
+│   └── page.tsx          # landing ("coming soon")
+├── (auth)/               # public auth routes (centered, no chrome)
+│   ├── layout.tsx
+│   └── login/page.tsx    # placeholder — no real auth yet (ADR-0016)
+└── (app)/                # private app routes (sidebar + topbar)
+    ├── layout.tsx        # NOTE: no auth guard yet (deferred — ADR-0016)
+    └── dashboard/page.tsx
+
+components/
+├── ui/                   # shadcn/ui primitives (vendored, owned in-repo)
+├── theme-toggle.tsx      # light/dark switch (heroicons)
+└── user-menu.tsx         # topbar avatar + dropdown (placeholder)
+
+lib/
+├── utils.ts              # cn() helper
+└── api/
+    ├── client.ts         # typed fetch wrapper (apiFetch / ApiError)
+    └── hooks/use-health.ts  # example query hook (GET /users) — not wired to a page
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Route groups (`(marketing)`, `(auth)`, `(app)`) don't affect the URL — they only
+let each section have its own layout. `/` → marketing, `/login` → auth,
+`/dashboard` → app.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Commands
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Run from the repo root (preferred — uses Turborepo):
 
-## Learn More
+```sh
+bun run dev                         # web + api together
+bun run build                       # build all workspaces
+```
 
-To learn more about Next.js, take a look at the following resources:
+Or scoped to this app:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```sh
+bun run --filter @lazyit/web dev    # dev server on http://localhost:3000
+bun run --filter @lazyit/web build
+bun run --filter @lazyit/web lint
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Add a shadcn component (writes into `components/ui/`):
 
-## Deploy on Vercel
+```sh
+bunx shadcn@latest add <component>
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Environment variables
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+One `.env` per scope with a committed `.env.example` to copy:
+
+```sh
+cp .env.example .env
+```
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | Base URL of the lazyit API, read by `lib/api/client.ts`. `NEXT_PUBLIC_*` is inlined into the client bundle, so it must not hold secrets. |
+
+## Decisions
+
+- **Icons — Heroicons only.** App-authored UI uses `@heroicons/react` exclusively; do
+  **not** introduce `lucide-react`, `react-icons` or any other set in our own code.
+  `lucide-react` is installed, but only because the vendored shadcn/ui primitives use
+  it internally (e.g. the dialog close, dropdown chevrons/checks). Treat it as an
+  implementation detail of `components/ui/*` and never import it directly elsewhere.
+
+- **Typography — Geist (+ Geist Mono).** Sans-serif, neutral and technical, with
+  excellent legibility at small sizes — a good fit for the data-dense, "infrastructure"
+  feel of an IT tool. It ships with the Next.js font pipeline (`next/font/google`,
+  zero-CLS, self-hosted) and is the font the chosen shadcn `radix-nova` preset assumes.
+  Geist Mono is reserved for code / identifiers / monospace data.
+
+- **Dark mode — system + manual, persisted.** `next-themes` with
+  `defaultTheme="system"` + `enableSystem`, so the first visit follows the OS; the
+  `ThemeToggle` sets an explicit light/dark choice that persists in `localStorage`.
+  The theme class is applied to `<html>` (hence `suppressHydrationWarning` in the root
+  layout).
+
+- **shadcn/ui — `radix-nova` style, `neutral` base color.** Radix primitives (per
+  ADR-0011), with a neutral grayscale palette for a clean, minimal, non-flashy look.
+  Components are copied into `components/ui/` and owned here.
+
+## Status / caveats
+
+- **No authentication yet.** Auth is deferred to an external IdP (OIDC); the API is
+  open and dev-only. The `(app)` layout has no guard — see ADR-0016. The `/login` page
+  and `user-menu` are visual placeholders.
+- The example hook `lib/api/hooks/use-health.ts` validates the web → api chain but is
+  not yet used by any page. Calling the API from the browser will require CORS to be
+  enabled on the API (not yet configured).
