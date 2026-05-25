@@ -38,6 +38,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0014-shared-package-build]] | Build @lazyit/shared to CommonJS + declarations | accepted |
 | [[0015-deployment-model]] | Deployment model — self-hosted for IT teams | accepted |
 | [[0016-auth-strategy-deferred]] | Authentication deferred; external IdP when needed | accepted |
+| [[0017-location-type-enum]] | Location type as a hardcoded enum (user-managed types deferred) | accepted |
 
 ## Pending ADRs (to write when decided)
 
