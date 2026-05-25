@@ -26,6 +26,10 @@ the accepted baseline.
 - **Why not a finding:** explicitly decided and bounded to dev. **Trigger to revisit:** the first
   endpoint that needs real identity, or any plan to expose the build. If exposed publicly this is, in
   effect, Critical — that conditional severity is reflected in [[summary]], not re-filed here.
+- **Highest-sensitivity instance:** the Access pillar (ADR-0023). `GET /access-grants` exposes "who can
+  access what" — including `accessLevel: admin` on `isCritical` applications — to any caller. Under the
+  no-auth posture this is the same accepted root, but it is the most valuable recon target if exposed,
+  so it should be among the first endpoints placed behind auth.
 
 ## DEF-002 — `X-User-Id` is a forgeable identity shim
 
@@ -65,6 +69,10 @@ the accepted baseline.
   with no auth, the actor cannot be trusted.
 - **Why not a finding:** consistent with the accepted no-auth posture; when auth lands these should come
   from the verified caller, not the body (same fix shape as [[SEC-006|SEC-006]] / DEF-002).
+- **Now explicitly tracked by [[0023-access-management-design]]:** its "Follow-ups" call to *retrofit
+  AssetAssignment to the `X-User-Id` shim*. The newer AccessGrant already takes the actor from the shim
+  (validated, header-only — `access-grants.service.ts:154`), so AssetAssignment is the known laggard,
+  not a fresh divergence. Convergence is a planned task, not a finding.
 
 ---
 
