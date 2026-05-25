@@ -12,6 +12,9 @@ import { AssetsModule } from './assets/assets.module';
 import { AssetAssignmentsModule } from './asset-assignments/asset-assignments.module';
 import { ArticleCategoriesModule } from './article-categories/article-categories.module';
 import { ArticlesModule } from './articles/articles.module';
+import { ApplicationCategoriesModule } from './application-categories/application-categories.module';
+import { ApplicationsModule } from './applications/applications.module';
+import { AccessGrantsModule } from './access-grants/access-grants.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 
 @Module({
@@ -25,6 +28,9 @@ import { PrismaExceptionFilter } from './common/prisma-exception.filter';
     AssetAssignmentsModule,
     ArticleCategoriesModule,
     ArticlesModule,
+    ApplicationCategoriesModule,
+    ApplicationsModule,
+    AccessGrantsModule,
   ],
   controllers: [AppController],
   providers: [
