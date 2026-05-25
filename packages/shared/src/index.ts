@@ -9,6 +9,7 @@ export * from "./schemas/article-category";
 export * from "./schemas/asset";
 export * from "./schemas/asset-assignment";
 export * from "./schemas/asset-category";
+export * from "./schemas/asset-expanded";
 export * from "./schemas/asset-model";
 export * from "./schemas/location";
 export * from "./schemas/user";
