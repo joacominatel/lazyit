@@ -104,6 +104,12 @@ Summaries only — the linked doc is authoritative.
 - ❌ **Don't make big decisions without asking the user.** When in doubt, ask.
 - ❌ **Don't mix backend and frontend in the same agent** — use separate subagents.
 - ❌ **Don't commit without checking coherence with `docs/`** (no stale/removed-file references).
+- ❌ **Never `git commit --amend`, `rebase`, or `reset` when other agents may be committing in
+  parallel.** They rewrite whatever `HEAD` is *now* — which a parallel agent may have just moved —
+  so you can silently clobber *their* commit (and change its hash). Use **only normal commits with
+  explicit per-file staging**: `git add <your-files>` then `git commit` — these stack on top of
+  `HEAD` and never rewrite anyone's work. Never `git add -A` / `git add .` (you'd capture another
+  agent's in-progress files).
 - ❌ **Don't use an external library without checking its latest documentation** (Context7 / web).
 - ❌ **Don't create new files without confirming where they belong** per the structure in §1.
 - ❌ **Don't duplicate documentation content in code comments or other files** — link to
