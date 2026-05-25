@@ -6,7 +6,11 @@ import { z } from "zod";
  * (forms). See docs/02-domain/entities/user.md.
  */
 
-/** The full persisted User entity (mirrors the Prisma `users` row). */
+/**
+ * The full User entity as returned by the API. Date fields are ISO-8601 strings (the wire
+ * shape): the API serializes Prisma `DateTime`s to strings, and `z.date()` cannot be
+ * represented in JSON Schema / OpenAPI (see docs/03-decisions/0018-api-documentation-swagger.md).
+ */
 export const UserSchema = z.object({
   id: z.uuid(),
   email: z.email(),
@@ -15,9 +19,9 @@ export const UserSchema = z.object({
   isActive: z.boolean(),
   // IdP `sub` mapping; null until auth is integrated (no auth yet). See ADR-0016.
   externalId: z.string().nullable(),
-  createdAt: z.date(),
-  updatedAt: z.date(),
-  deletedAt: z.date().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  deletedAt: z.iso.datetime().nullable(),
 });
 
 /** Payload to create a User. A new user is always active (DB default). */
