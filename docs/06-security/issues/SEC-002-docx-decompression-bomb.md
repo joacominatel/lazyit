@@ -89,3 +89,12 @@ Options:
 
 Recommendation: (1) if `.docx` import must stay synchronous and robust now; otherwise (2) and
 document the residual. Either is an architectural choice → your call.
+
+## Decision (2026-05-25)
+
+User chose **(2) — defer to the future BullMQ/Redis async worker**: `.docx` parsing will move
+off the request path into a resource-budgeted worker, where a decompression bomb kills the worker,
+not the API. Until that worker exists, **SEC-001's interceptor cap is the interim bound** (the
+compressed upload is limited to `MAX_IMPORT_SIZE_MB`, ~5 MB). **SEC-002 stays open** as tracked,
+accepted debt, owned by the async-worker work (the "Async workers — BullMQ + Redis" pending ADR in
+[[03-decisions/_MOC|Decisions]]). No code change now.

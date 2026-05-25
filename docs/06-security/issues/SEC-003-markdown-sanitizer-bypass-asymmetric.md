@@ -101,3 +101,17 @@ Options:
 Recommendation: (1) — render-time is the authoritative layer and fits the deferred-frontend reality;
 pair it with removing/relabeling the misleading regex strip now. Record the choice as an ADR. This +
 SEC-008's render note are one "untrusted-string → web sink" policy for the frontend phase.
+
+## Decision (2026-05-25)
+
+User chose **(1) — render-time authoritative + clean the strip now**. Done in this pass:
+
+- The bypassable, import-only regex sanitizer was **removed** (commit `8e34074`); imported content is
+  now stored verbatim, consistent with create/update. A test asserts the strip is gone.
+- **[[0029-untrusted-content-sanitization|ADR-0029]]** records the policy: store raw, sanitize at
+  render time (allow-list), write-side guards only clearly-dangerous structured values (e.g. the
+  SEC-008 URL scheme).
+
+**SEC-003 stays open**: the authoritative render-time sanitizer lands with the web KB renderer, which
+does not exist yet (article content is shown as escaped text today → still latent). Do not add a
+raw-HTML/markdown renderer without the allow-list sanitizer in the same change. Tracked under ADR-0029.

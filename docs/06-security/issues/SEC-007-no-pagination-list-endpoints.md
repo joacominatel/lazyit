@@ -82,3 +82,12 @@ Options:
 Recommendation: define a shared `PageQuery` / `Page<T>` shape with a capped default (e.g. default 50,
 max 200) as an ADR; offset (2) is the pragmatic MVP choice, cursor (1) if the history tables will
 grow fast. If done incrementally, prioritize `GET /access-grants` (the most sensitive unbounded list).
+
+## Decision (2026-05-25)
+
+User chose **(1) offset contract via a new ADR, but defer the implementation**. Done in this pass:
+**[[0030-list-pagination-contract|ADR-0030]]** defines the offset `PageQuery` / `Page<T>` shape in
+`@lazyit/shared` (default 50, max 200). The 11 `findAll`s are **not** retrofitted now (MVP scale
+doesn't require it); new list endpoints adopt the contract, existing ones migrate when a list grows —
+prioritizing `GET /access-grants`. **SEC-007 stays open** as tracked, accepted, deferred debt under
+ADR-0030 (the cross-cutting + frontend implementation should be split into front/back subagents).
