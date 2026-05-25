@@ -47,8 +47,12 @@ validation, types, OpenAPI and response shape.
   redefined in the API.
 - **Validation** is nestjs-zod's `ZodValidationPipe`, registered globally (`APP_PIPE`). This
   **replaces** the custom pipe of [[0013-zod-validation-pipe]] (now deleted).
-- **Responses** use `@ZodResponse({ type: Dto })` + a global `ZodSerializerInterceptor`
-  (`APP_INTERCEPTOR`) so the documented response shape is enforced at runtime.
+- **Responses** are documented with `@nestjs/swagger`'s `@ApiOkResponse` / `@ApiCreatedResponse`
+  referencing `createZodDto` response DTOs; `cleanupOpenApiDoc` renders the zod schema as the
+  OpenAPI response shape. Runtime response *serialization* (nestjs-zod's `@ZodResponse` /
+  `ZodSerializerInterceptor`) is **deferred**: the service returns Prisma `Date` objects, which
+  conflict with the ISO-string DTOs, and Nest's default JSON serialization already emits ISO
+  strings that match the documented schema. Revisit with `z.codec` if we want runtime enforcement.
 - **The OpenAPI document** is built in `main.ts` (`DocumentBuilder` + `SwaggerModule`), passed
   through nestjs-zod's `cleanupOpenApiDoc()` (required for correct zod output), and served at
   **`GET /api/docs`** (Swagger UI) and **`GET /api/docs-json`** (raw JSON).

@@ -77,6 +77,8 @@ bun run dev              # web → :3000, api → :3001
 - API: hit the first real endpoint — `curl http://localhost:3001/users` returns `[]` (or the
   users you've created). `POST /users` with `{email, firstName, lastName}` creates one. See
   [[user]].
+- API docs: open `http://localhost:3001/api/docs` (Swagger UI); raw spec at `/api/docs-json`.
+  See [[0018-api-documentation-swagger]].
 - Web: open `http://localhost:3000`.
 
 > [!note] Prisma 7 runtime specifics
