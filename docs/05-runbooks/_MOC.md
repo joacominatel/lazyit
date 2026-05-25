@@ -21,13 +21,21 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
 - **[[prisma-migrations]]** — evolve the schema: the normal `migrate dev` flow, the non-TTY
   workaround (hand-written SQL + `migrate deploy`), partial indexes, drift checks, and the
   one-commit-per-migration convention.
+- **[[docker-prod-like-first-boot]]** — run the whole containerized stack locally (Postgres +
+  migrate + API + web + Caddy) with local HTTPS; verify it; routine ops.
+- **[[deploy-self-hosted]]** — install on a single host on a real domain: env/secrets, Let's
+  Encrypt, bring-up, updates, the reserved IdP slot.
+- **[[backups]]** — Postgres backup & restore (`pg_dump`/`pg_restore` via the compose network).
+- **[[docker-build-troubleshooting]]** — symptoms & fixes for building/booting the images.
 
 ## Planned runbooks (write when real)
 
-- **Deploy** — release the apps + run `prisma migrate deploy` (depends on [[deployment]]).
-- **Database backup & restore** — Postgres dump/restore strategy.
+- **Scheduled/offsite backup automation** — promote [[backups]] from manual to automated
+  (cron/sidecar + offsite copy) when there's a real deployment to protect.
 - **Local DB reset** — covered for now by [[prisma-migrations]] §4 (`migrate reset`); promote to
   its own runbook if reset needs more than a dev wipe.
 - **Incident / on-call** — once there's something in production.
+- **CD / image publishing** — when a deploy target exists ([[0027-ci-pipeline]]): publish to GHCR
+  + deploy flow.
 
 Deployment design context: [[deployment]].
