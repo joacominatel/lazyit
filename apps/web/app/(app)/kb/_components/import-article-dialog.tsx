@@ -28,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useActingUserId } from "@/lib/api/acting-user";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useImportArticle } from "@/lib/api/hooks/use-article-mutations";
 
@@ -55,6 +56,7 @@ export function ImportArticleDialog({
 }: ImportArticleDialogProps) {
   const router = useRouter();
   const { data: categories } = useArticleCategories();
+  const actingUserId = useActingUserId();
   const importArticle = useImportArticle();
 
   const [file, setFile] = useState<File | null>(null);
@@ -72,6 +74,10 @@ export function ImportArticleDialog({
   }
 
   function handleImport() {
+    if (!actingUserId) {
+      toast.error("Pick a user in the top-right switcher to import articles");
+      return;
+    }
     if (!file) {
       toast.error("Choose a file to import");
       return;
@@ -106,6 +112,13 @@ export function ImportArticleDialog({
             imported — the original file is not stored.
           </DialogDescription>
         </DialogHeader>
+
+        {!actingUserId && (
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+            You&apos;re browsing anonymously. Pick a user in the top-right
+            switcher to import articles.
+          </p>
+        )}
 
         <FieldGroup>
           <Field>
@@ -171,7 +184,7 @@ export function ImportArticleDialog({
           <Button
             type="button"
             onClick={handleImport}
-            disabled={importArticle.isPending}
+            disabled={importArticle.isPending || !actingUserId}
           >
             {importArticle.isPending && (
               <ArrowPathIcon className="animate-spin" />
