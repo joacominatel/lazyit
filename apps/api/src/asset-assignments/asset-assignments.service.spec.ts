@@ -111,6 +111,18 @@ describe('AssetAssignmentsService', () => {
     });
   });
 
+  it('findAll inlines the user only when includeUser is true', async () => {
+    assetAssignment.findMany.mockResolvedValue([]);
+
+    await service.findAll({ assetId: 'a1', includeUser: true });
+
+    expect(assetAssignment.findMany).toHaveBeenCalledWith({
+      where: { assetId: 'a1', releasedAt: null },
+      orderBy: { assignedAt: 'desc' },
+      include: { user: true },
+    });
+  });
+
   // --- findOne ------------------------------------------------------------
   it('returns an assignment by id when it exists', async () => {
     const found = { id: 'as1', releasedAt: null };
@@ -132,8 +144,14 @@ describe('AssetAssignmentsService', () => {
 
   // --- release ------------------------------------------------------------
   it('releases an active assignment by setting releasedAt (+ releasedById, notes)', async () => {
-    assetAssignment.findUnique.mockResolvedValue({ id: 'as1', releasedAt: null });
-    assetAssignment.update.mockResolvedValue({ id: 'as1', releasedAt: new Date() });
+    assetAssignment.findUnique.mockResolvedValue({
+      id: 'as1',
+      releasedAt: null,
+    });
+    assetAssignment.update.mockResolvedValue({
+      id: 'as1',
+      releasedAt: new Date(),
+    });
 
     await service.release('as1', { releasedById: 'u9', notes: 'returned' });
 
@@ -175,7 +193,10 @@ describe('AssetAssignmentsService', () => {
 
   // --- updateNotes --------------------------------------------------------
   it('updates only the notes after confirming the assignment exists', async () => {
-    assetAssignment.findUnique.mockResolvedValue({ id: 'as1', releasedAt: null });
+    assetAssignment.findUnique.mockResolvedValue({
+      id: 'as1',
+      releasedAt: null,
+    });
     assetAssignment.update.mockResolvedValue({ id: 'as1', notes: 'new note' });
 
     await service.updateNotes('as1', { notes: 'new note' });
@@ -187,7 +208,10 @@ describe('AssetAssignmentsService', () => {
   });
 
   it('clears the notes when passed null', async () => {
-    assetAssignment.findUnique.mockResolvedValue({ id: 'as1', releasedAt: null });
+    assetAssignment.findUnique.mockResolvedValue({
+      id: 'as1',
+      releasedAt: null,
+    });
     assetAssignment.update.mockResolvedValue({ id: 'as1', notes: null });
 
     await service.updateNotes('as1', { notes: null });
