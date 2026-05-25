@@ -19,6 +19,7 @@ import {
 } from '@nestjs/swagger';
 import { AccessGrantsService } from './access-grants.service';
 import { parseActiveOnly, parseIncludeExpired } from './query-params';
+import { parseUuidQuery } from '../common/parse-uuid-query';
 import {
   AccessGrantDto,
   CreateAccessGrantDto,
@@ -69,7 +70,7 @@ export class AccessGrantsController {
     @Query('includeExpired') includeExpired?: string,
   ) {
     return this.grants.findAll({
-      userId,
+      userId: parseUuidQuery(userId, 'userId'),
       applicationId,
       activeOnly: parseActiveOnly(activeOnly),
       includeExpired: parseIncludeExpired(includeExpired),
