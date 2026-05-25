@@ -73,3 +73,44 @@ tests with `javascript:`/`data:` vectors.
 
 - CWE-79: Improper Neutralization of Input During Web Page Generation (XSS). CWE-84 (encoded-URI in attribute).
 - OWASP XSS Prevention Cheat Sheet (URL contexts) · ADR-0023 (Application; lenient `url`) · SEC-003.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `4418945` (`fix: reject dangerous url schemes on Application.url (SEC-008)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-05-25
+
+### Changes
+
+- `packages/shared/src/schemas/application.ts`: `ApplicationUrlSchema` now `.refine()`s with a new
+  exported `isSafeApplicationUrl(value)` predicate — a value is accepted only if it is scheme-less
+  (an internal host/path, including `host:port`) or uses `http`/`https`; any other scheme
+  (`javascript:`, `data:`, `vbscript:`, `file:`, …) is rejected. The check normalizes the value the
+  way a browser does before reading the scheme (strips TAB/LF/CR anywhere and drops a leading
+  non-alphanumeric run), so `java\tscript:` or a leading control byte can't hide the scheme. The
+  predicate is **exported** so the future web render layer can reuse the same policy. Applies to
+  create and update (both go through `ApplicationUrlSchema`).
+- docs: ADR-0023 and the [[application]] entity note now state the scheme allow-list.
+
+### Tests added
+
+- `packages/shared/src/schemas/application.test.ts` — `isSafeApplicationUrl` allows http(s) +
+  scheme-less hosts (incl. `host:port`) and rejects `javascript:`/`data:`/`vbscript:`/`file:` plus
+  obfuscations (case, embedded TAB/LF, leading whitespace, a leading control byte). Schema-level:
+  `CreateApplicationSchema` rejects a `javascript:` url and accepts a scheme-less host / https url.
+  Fails without the refine (the lenient string accepted everything).
+
+### Verification
+
+`bun test src/` in packages/shared → 13 pass (9 prior + 4). Shared `tsc` build clean; api typecheck
+against the rebuilt shared dist clean.
+
+### Residual risk
+
+This is the **write-side** half. The authoritative defense is still **render-time** scheme
+allow-listing on the web app (deferred — no frontend yet); `isSafeApplicationUrl` is exported so the
+render layer reuses it. The `host:port` carve-out means a contrived `javascript:<digits>` (no call
+payload) would pass — harmless, no script executes. Same latent-XSS theme as
+[[SEC-003-markdown-sanitizer-bypass-asymmetric|SEC-003]] (open/escalated); together they are the
+"untrusted string → web sink" policy the frontend phase should formalize.
