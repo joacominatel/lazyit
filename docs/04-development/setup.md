@@ -32,9 +32,18 @@ bun run db:up            # docker compose up -d
 # 4. Apply migrations (from apps/api)
 cd apps/api && bunx prisma migrate dev
 
-# 5. Run everything (web + api) via Turbo
+# 5. Seed the initial data — asset categories (idempotent, safe to re-run)
+bunx prisma db seed
+
+# 6. Run everything (web + api) via Turbo
 bun run dev              # web → :3000, api → :3001
 ```
+
+> [!note] Seeding (Prisma 7)
+> The seed command lives in **`prisma.config.ts`** (`migrations.seed: "bun prisma/seed.ts"`),
+> not in `package.json` — Prisma 7 ignores the `package.json` `prisma` key when a Prisma config
+> file is present. `prisma/seed.ts` upserts the initial [[asset-category]] set by name, so it is
+> idempotent and never overwrites edits (categories are user-managed).
 
 ## Environment variables
 

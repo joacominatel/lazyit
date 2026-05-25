@@ -27,6 +27,7 @@ Day-to-day commands. Root scripts delegate to Turborepo ([[monorepo]]).
 | --- | --- |
 | Create + apply a migration (dev) | `bunx prisma migrate dev --name <change>` |
 | Apply migrations (prod) | `bunx prisma migrate deploy` |
+| Seed initial data | `bunx prisma db seed` (asset categories; idempotent — config in `prisma.config.ts`) |
 | Regenerate client | `bunx prisma generate` (→ `apps/api/generated/prisma`) |
 | Inspect data | `bunx prisma studio` |
 
