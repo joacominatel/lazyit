@@ -171,9 +171,9 @@ describe('ConsumablesService', () => {
 
     const calls = consumable.update.mock.calls as StockUpdateCall[];
     expect(calls[0][0].where).toEqual({ id: 'k1' });
-    expect((calls[0][0].data as { deletedAt: Date }).deletedAt).toBeInstanceOf(
-      Date,
-    );
+    expect(
+      (calls[0][0].data as unknown as { deletedAt: Date }).deletedAt,
+    ).toBeInstanceOf(Date);
   });
 
   it('does not soft-delete a missing consumable', async () => {
