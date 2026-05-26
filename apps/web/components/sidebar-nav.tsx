@@ -3,6 +3,7 @@
 import {
   BookOpenIcon,
   Cog6ToothIcon,
+  KeyIcon,
   MapPinIcon,
   ServerStackIcon,
   Squares2X2Icon,
@@ -20,6 +21,7 @@ const NAV = [
   { label: "Assets", href: "/assets", icon: ServerStackIcon },
   { label: "Tickets", href: "/tickets", icon: TicketIcon },
   { label: "Knowledge Base", href: "/kb", icon: BookOpenIcon },
+  { label: "Access", href: "/applications", icon: KeyIcon },
   { label: "Users", href: "/users", icon: UsersIcon },
   { label: "Locations", href: "/locations", icon: MapPinIcon },
   { label: "Settings", href: "/settings", icon: Cog6ToothIcon },
