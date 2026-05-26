@@ -39,13 +39,31 @@ When a task spans **both frontend and backend**:
   for each subagent; it does **not** implement both sides itself.
 - The shared contract between them lives in [[shared-package]] (zod schemas / types).
 
-## 4. Minimalist commits
+## 4. Branches, commits & pull requests
 
-- **One file per commit** — small, well-defined, reviewable. (Documentation is the
-  exception: doc changes may be grouped.)
-- **Message prefixes:** `feat` · `fix` · `chore` · `del` · `updt` · `docs`.
-- Example: `feat: add Asset model to prisma schema` · `updt: refine AssetAssignment rules` ·
-  `del: remove HealthCheck model` · `docs: document shared package contract`.
+Every change flows through GitHub: **issue → branch off `dev` → PR to `dev` → the user reviews
+and merges → the user promotes `dev` to `master`.** The step-by-step with real commands is the
+[[git-workflow]] runbook; this is the *why*.
+
+- **`master` is production, `dev` is integration.** `master` is protected and only ever
+  receives merges from `dev`; the **user** does that promotion. Every feature/fix/docs change
+  lands on `dev` first, via PR. This keeps `master` always-releasable and gives `dev` a place to
+  stabilize.
+- **One issue, one branch.** Start by finding the issue (`gh issue list --search …`); reuse it,
+  or open one if the scope is clear (agent-opened issues carry the `auto-generated` label), or
+  **ask the user** if it isn't. Cut the branch **from `dev`**, named `<prefix>/issue-<n>-<slug>`
+  — the prefix matches the commit prefix, so the branch announces the kind of change. Working on
+  separate branches means parallel work no longer collides; conflicts are resolved at merge time.
+- **One file per commit** — small, well-defined, reviewable. (Documentation is the exception:
+  doc changes may be grouped.) **Message prefixes:** `feat` · `fix` · `chore` · `del` · `updt` ·
+  `docs`. Example: `feat: add Asset model to prisma schema` · `updt: refine AssetAssignment
+  rules` · `del: remove HealthCheck model` · `docs: document shared package contract`.
+- **Agents hand off; they never merge.** Push the branch, tell the user it's done with a summary
+  and how to test, and **wait**. Only on their OK open the PR (`gh pr create --base dev`). The
+  user reviews, approves and merges. Iterate on the same branch if changes are requested.
+- **History stays append-only.** No `--amend` / `rebase` / `reset` (they rewrite the PR's review
+  trail), no `git add -A` / `add .` — stage explicit files. No `Co-Authored-By` / Claude
+  attribution trailers.
 
 ## 5. Docs stay in sync
 
@@ -68,4 +86,4 @@ A change is done when: code is in place, **tests** exist per [[0012-testing-stra
 always; core/complex logic thoroughly), `docs/` is updated and consistent, and commits are
 file-scoped with a correct prefix.
 
-Related: [[workflows]] · [[code-conventions]] · [[0012-testing-strategy]] · [[shared-package]]
+Related: [[git-workflow]] · [[workflows]] · [[code-conventions]] · [[0012-testing-strategy]] · [[shared-package]]
