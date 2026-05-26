@@ -73,7 +73,9 @@ logged (CRITICAL) and swallowed. If Meili is down, writes still succeed and sear
 
 - **DevOps:** add `meilisearch` to `infra/docker-compose.prod.yml` (+ `MEILI_MASTER_KEY` secret,
   `MEILI_ENV=production`, never publish the port) and run `reindex:all` once on first deploy.
-- **Frontend:** a global search box in the topbar consuming `GET /search`.
+- **Frontend:** _delivered_ (#21) — a ⌘K command palette in the topbar consuming `GET /search`
+  (`apps/web/components/global-search.tsx`); the response is typed in `@lazyit/shared` (`search`
+  schema). Results group by entity and degrade gracefully where no detail page exists yet.
 
 Related: [[asset]] · [[article]] · [[user]] · [[location]] · [[application]] ·
 [[0031-logging-strategy]] · [[0032-soft-delete-middleware]] · [[0028-secrets-and-config]] ·
