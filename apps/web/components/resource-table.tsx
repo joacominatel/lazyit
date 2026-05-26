@@ -7,6 +7,7 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import type { ComponentType, ReactNode } from "react";
+import { RequestIdNote } from "@/components/request-id-note";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ApiError } from "@/lib/api/client";
 
 /** A column definition for {@link ResourceTable} — header + loading skeleton. */
 export interface ResourceColumn {
@@ -182,15 +184,20 @@ export function ErrorState({
   title,
   description = "The API may be down or unreachable.",
   onRetry,
+  error,
 }: {
   title: string;
   description?: string;
   onRetry: () => void;
+  /** The failed query's error — its API request id (if any) is surfaced for reporting. */
+  error?: unknown;
 }) {
+  const requestId = error instanceof ApiError ? error.requestId : undefined;
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center">
       <p className="text-sm font-medium">{title}</p>
       <p className="text-sm text-muted-foreground">{description}</p>
+      <RequestIdNote requestId={requestId} />
       <Button variant="outline" onClick={onRetry}>
         <ArrowPathIcon />
         Retry
