@@ -57,10 +57,11 @@ app/
     ├── assets/           # fourth feature — Assets (expanded read; ADR-0020)
     │   ├── page.tsx               # list (inline relations, filters, stacked owners)
     │   ├── new/page.tsx           # create
-    │   ├── [id]/page.tsx          # detail (info / specs / owners / history)
+    │   ├── [id]/page.tsx          # detail (info / specs / owners / activity / ownership history)
     │   ├── [id]/edit/page.tsx     # edit
     │   └── _components/
     │       ├── asset-form.tsx            # create/edit (selects + JSON specs editor)
+    │       ├── asset-history-timeline.tsx # AssetHistory event log (timeline, ADR-0033)
     │       ├── asset-status-badge.tsx
     │       ├── assign-user-dialog.tsx
     │       └── stacked-owner-avatars.tsx
@@ -103,7 +104,7 @@ lib/
 │   └── use-debounced-value.ts  # debounce a value (search inputs + ⌘K palette)
 ├── utils/
 │   ├── index.ts          # cn() helper (importable as @/lib/utils)
-│   └── format.ts         # shared display formatters (formatDate)
+│   └── format.ts         # shared display formatters (formatDate, formatRelativeTime)
 └── api/
     ├── acting-user.ts    # dev X-User-Id store (acting user) + useActingUserId
     ├── client.ts         # typed fetch wrapper (apiFetch / ApiError; FormData + X-User-Id)
@@ -117,6 +118,7 @@ lib/
     │   ├── articles.ts
     │   ├── asset-assignments.ts   # assign / release / notes (writes)
     │   ├── asset-categories.ts
+    │   ├── asset-history.ts       # paginated event log (GET /assets/:id/history)
     │   ├── asset-models.ts
     │   ├── assets.ts              # reads return expanded AssetWithRelations
     │   ├── consumable-categories.ts
@@ -137,6 +139,7 @@ lib/
         ├── use-asset-mutations.ts     # create / update / delete
         ├── use-asset-assignment-mutations.ts  # assign / release / notes
         ├── use-asset-categories.ts
+        ├── use-asset-history.ts       # paginated event log (infinite query)
         ├── use-asset-models.ts
         ├── use-consumables.ts         # list + detail + movements + consumableKeys
         ├── use-consumable-mutations.ts     # create / update / delete
