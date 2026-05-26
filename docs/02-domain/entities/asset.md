@@ -102,12 +102,16 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 - `GET /assets/:id/assignments?activeOnly=` — the asset's ownership records, each with its `user`
   inlined (`AssetAssignmentWithUser[]`); `activeOnly` defaults to true, pass `false` for full
   history (active + released). See [[asset-assignment]].
-- `POST` · `PATCH /:id` · `DELETE /:id` (soft delete) — **unchanged**, lean `Asset` shape; an
-  invalid `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]).
+- `GET /assets/:id/history?limit=&before=` — the asset's append-only event log
+  (`AssetHistory[]`, newest first; cursor on the autoincrement id, `limit` default 50 / max 100).
+  `404` if missing/soft-deleted. See [[asset-history]].
+- `POST` · `PATCH /:id` · `DELETE /:id` (soft delete) — lean `Asset` shape; an invalid
+  `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]). Each write
+  takes an **optional `X-User-Id`** header (the actor) and emits an [[asset-history]] event
+  (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally ([[0033-asset-history-event-model]]).
 
 ## Not yet implemented (deferred)
 
-- [[asset-history]] (append-only audit log of asset state changes) — not yet built.
 - Dynamic per-category `specs` validation (see debt note above).
 - **Advanced asset search** — `?q=` today is a simple case-insensitive substring (ILIKE) over
   `name`/`serial`/`assetTag`, **unindexed** (fine at small-team scale). Full-text / indexed search
@@ -115,4 +119,4 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 
 Related: [[asset-model]] · [[location]] · [[asset-category]] · [[asset-assignment]] ·
 [[asset-history]] · [[asset-centric]] · [[0007-flexible-asset-specs-jsonb]] ·
-[[0018-api-documentation-swagger]]
+[[0018-api-documentation-swagger]] · [[0033-asset-history-event-model]]

@@ -54,6 +54,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0030-list-pagination-contract]] | List endpoint pagination contract (offset; implementation deferred) | accepted |
 | [[0031-logging-strategy]] | Structured logging strategy (Pino + nestjs-pino) | accepted |
 | [[0032-soft-delete-middleware]] | Soft-delete enforcement via a Prisma client extension | accepted |
+| [[0033-asset-history-event-model]] | AssetHistory event model (discrete events, explicit emission) | accepted |
 
 ## Pending ADRs (to write when decided)
 
