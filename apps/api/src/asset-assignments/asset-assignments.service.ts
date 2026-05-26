@@ -137,7 +137,7 @@ export class AssetAssignmentsService {
       throw new BadRequestException('X-User-Id is not a valid user id');
     }
     const user = await this.prisma.user.findFirst({
-      where: { id: actorId, deletedAt: null },
+      where: { id: actorId },
       select: { id: true },
     });
     if (!user) {
