@@ -11,7 +11,6 @@ export class AssetModelsService {
   findAll(categoryId?: string) {
     return this.prisma.assetModel.findMany({
       where: {
-        deletedAt: null,
         ...(categoryId ? { categoryId } : {}),
       },
       orderBy: { createdAt: 'desc' },
@@ -21,7 +20,7 @@ export class AssetModelsService {
   /** A single non-deleted model by id; throws 404 if missing or deleted. */
   async findOne(id: string) {
     const model = await this.prisma.assetModel.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
     });
     if (!model) {
       throw new NotFoundException(`AssetModel ${id} not found`);
