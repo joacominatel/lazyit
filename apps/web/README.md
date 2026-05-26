@@ -54,16 +54,26 @@ app/
     │       ├── article-form.tsx          # create/edit (per-mode schema)
     │       ├── article-status-badge.tsx
     │       └── import-article-dialog.tsx  # .md/.txt/.docx upload
-    └── assets/           # fourth feature — Assets (expanded read; ADR-0020)
-        ├── page.tsx               # list (inline relations, filters, stacked owners)
+    ├── assets/           # fourth feature — Assets (expanded read; ADR-0020)
+    │   ├── page.tsx               # list (inline relations, filters, stacked owners)
+    │   ├── new/page.tsx           # create
+    │   ├── [id]/page.tsx          # detail (info / specs / owners / history)
+    │   ├── [id]/edit/page.tsx     # edit
+    │   └── _components/
+    │       ├── asset-form.tsx            # create/edit (selects + JSON specs editor)
+    │       ├── asset-status-badge.tsx
+    │       ├── assign-user-dialog.tsx
+    │       └── stacked-owner-avatars.tsx
+    └── applications/     # fifth feature — Access (Applications + AccessGrants; ADR-0023)
+        ├── page.tsx               # list (category + active-grant avatars; client joins)
         ├── new/page.tsx           # create
-        ├── [id]/page.tsx          # detail (info / specs / owners / history)
+        ├── [id]/page.tsx          # detail (info / active grants / history; grant + revoke)
         ├── [id]/edit/page.tsx     # edit
         └── _components/
-            ├── asset-form.tsx            # create/edit (selects + JSON specs editor)
-            ├── asset-status-badge.tsx
-            ├── assign-user-dialog.tsx
-            └── stacked-owner-avatars.tsx
+            ├── application-form.tsx       # create/edit (selects + isCritical switch)
+            ├── grant-access-dialog.tsx    # grant a user access
+            ├── revoke-grant-dialog.tsx    # revoke confirmation (AlertDialog)
+            └── stacked-user-avatars.tsx   # overlapping grantee avatars (local)
 
 components/
 ├── ui/                        # shadcn/ui primitives (vendored, owned in-repo)
@@ -90,6 +100,9 @@ lib/
     ├── crud-endpoints.ts # createCrudEndpoints — the 5 REST bodies, per-resource generics
     ├── query-keys.ts     # createQueryKeys — the all/lists/detail key factory
     ├── endpoints/        # pure fetch functions per resource — the ONLY apiFetch callers
+    │   ├── access-grants.ts       # grant / revoke (writes) + filtered list
+    │   ├── application-categories.ts
+    │   ├── applications.ts        # CRUD + nested grants (raw; joined client-side)
     │   ├── article-categories.ts
     │   ├── articles.ts
     │   ├── asset-assignments.ts   # assign / release / notes (writes)
@@ -100,6 +113,11 @@ lib/
     │   ├── search.ts              # cross-entity search (GET /search)
     │   └── users.ts
     └── hooks/            # TanStack Query wrappers over the endpoints
+        ├── use-access-grants.ts       # active-grant lists (read)
+        ├── use-access-grant-mutations.ts  # grant / revoke
+        ├── use-applications.ts        # list + detail + grants + applicationKeys
+        ├── use-application-mutations.ts    # create / update / delete
+        ├── use-application-categories.ts
         ├── use-articles.ts            # filtered list + by-slug + articleKeys
         ├── use-article-categories.ts
         ├── use-article-mutations.ts   # create/update/delete/publish/unpublish/import
