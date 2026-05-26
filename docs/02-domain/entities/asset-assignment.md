@@ -108,6 +108,10 @@ Indexes: `@@index([assetId])`, `@@index([userId])`, plus the partial unique inde
 - `PATCH /asset-assignments/:id/notes` — body `{ notes }` (`null` clears). The only free edit.
 - **No `DELETE`** — by design (append-only).
 
+> [!note] Emits [[asset-history]] events
+> Opening an assignment records an `ASSIGNED` event and releasing one records `RELEASED` (with the
+> `X-User-Id` actor), transactionally with the change ([[0033-asset-history-event-model]]).
+
 Plus the natural sub-resource endpoints on the related entities:
 
 - `GET /assets/:id/assignments?activeOnly=` — assignments of one [[asset]] (`404` if the asset is
@@ -119,4 +123,4 @@ All documented via Swagger ([[0018-api-documentation-swagger]]).
 Related: [[asset]] · [[user]] · [[asset-history]] · [[asset-centric]] ·
 [[0004-asset-centric-design]] · [[0006-soft-delete-and-auditing]] ·
 [[0019-asset-assignment-integrity]] · [[0024-asset-assignment-actor-shim]] ·
-[[0022-draft-visibility-auth-shim]] · [[prisma-migrations]]
+[[0022-draft-visibility-auth-shim]] · [[0033-asset-history-event-model]] · [[prisma-migrations]]

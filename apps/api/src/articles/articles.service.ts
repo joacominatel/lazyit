@@ -13,6 +13,9 @@ import {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ActorService } from '../common/actor.service';
+import { SearchService } from '../search/search.service';
+import { projectArticle, type ArticleRow } from '../search/search.documents';
 import {
   maxImportBytes,
   maxImportMb,
@@ -35,17 +38,19 @@ export interface UploadedImportFile {
   size: number;
 }
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
  * Knowledge-base articles. Authorship/visibility (DRAFT private to its author; only the author may
- * write) is enforced here from the X-User-Id shim — when real auth lands, `currentUserId` comes from
- * the JWT and these methods are unchanged. See docs/03-decisions/0022-draft-visibility-auth-shim.md.
+ * write) is enforced here from the X-User-Id shim, resolved through the shared {@link ActorService} —
+ * when real auth lands, `currentUserId` comes from the JWT and these methods are unchanged. See
+ * docs/03-decisions/0022-draft-visibility-auth-shim.md.
  */
 @Injectable()
 export class ArticlesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly actor: ActorService,
+    private readonly search: SearchService,
+  ) {}
 
   /**
    * List non-deleted articles, newest-updated first. PUBLISHED is visible to all; DRAFT only to its
@@ -67,7 +72,7 @@ export class ArticlesService {
       });
     }
     return this.prisma.article.findMany({
-      where: { deletedAt: null, AND: and },
+      where: { AND: and },
       orderBy: { updatedAt: 'desc' },
     });
   }
@@ -76,7 +81,7 @@ export class ArticlesService {
   async findOne(id: string, currentUserId?: string) {
     const cu = await this.resolveCurrentUser(currentUserId);
     const article = await this.prisma.article.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
     });
     if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
       throw new NotFoundException(`Article ${id} not found`);
@@ -88,7 +93,7 @@ export class ArticlesService {
   async findBySlug(slug: string, currentUserId?: string) {
     const cu = await this.resolveCurrentUser(currentUserId);
     const article = await this.prisma.article.findFirst({
-      where: { slug, deletedAt: null },
+      where: { slug },
     });
     if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
       throw new NotFoundException(`Article with slug "${slug}" not found`);
@@ -101,7 +106,7 @@ export class ArticlesService {
     const authorId = await this.requireCurrentUser(currentUserId);
     await this.assertCategoryUsable(data.categoryId);
     const slug = data.slug ?? this.deriveSlug(data.title);
-    return this.prisma.article.create({
+    const article = await this.prisma.article.create({
       data: {
         slug,
         title: data.title,
@@ -116,6 +121,12 @@ export class ArticlesService {
           : {}),
       },
     });
+    // Index PUBLISHED only; a DRAFT is author-private (ADR-0022) so it must never be searchable —
+    // a new DRAFT is simply not indexed (nothing to do).
+    if (article.status === 'PUBLISHED') {
+      this.search.upsert('articles', projectArticle(article));
+    }
+    return article;
   }
 
   /** Partial update (author only). Records the editor; never changes status (use publish). */
@@ -124,7 +135,7 @@ export class ArticlesService {
     await this.loadOwned(id, cu);
     if (data.categoryId) await this.assertCategoryUsable(data.categoryId);
     const { metadata, ...rest } = data;
-    return this.prisma.article.update({
+    const article = await this.prisma.article.update({
       where: { id },
       data: {
         ...rest,
@@ -134,16 +145,23 @@ export class ArticlesService {
           : {}),
       },
     });
+    // update never changes status (publish/unpublish do), but re-sync defensively: upsert if the
+    // result is PUBLISHED, else remove — keeps the index honest about draft privacy (ADR-0035).
+    this.syncSearch(article);
+    return article;
   }
 
   /** Soft delete (author only). */
   async remove(id: string, currentUserId?: string) {
     const cu = await this.requireCurrentUser(currentUserId);
     await this.loadOwned(id, cu);
-    return this.prisma.article.update({
+    const article = await this.prisma.article.update({
       where: { id },
       data: { deletedAt: new Date(), lastEditedById: cu },
     });
+    // Drop from the index so soft-deleted articles never surface in search (ADR-0035).
+    this.search.remove('articles', id);
+    return article;
   }
 
   /** Publish (author only). Sets publishedAt on the first publish; idempotent if already published. */
@@ -151,7 +169,7 @@ export class ArticlesService {
     const cu = await this.requireCurrentUser(currentUserId);
     const article = await this.loadOwned(id, cu);
     if (article.status === 'PUBLISHED') return article;
-    return this.prisma.article.update({
+    const published = await this.prisma.article.update({
       where: { id },
       data: {
         status: 'PUBLISHED',
@@ -159,6 +177,9 @@ export class ArticlesService {
         lastEditedById: cu,
       },
     });
+    // Now searchable (ADR-0035).
+    this.search.upsert('articles', projectArticle(published));
+    return published;
   }
 
   /** Unpublish back to DRAFT (author only). Keeps publishedAt ("was published once"). */
@@ -166,10 +187,13 @@ export class ArticlesService {
     const cu = await this.requireCurrentUser(currentUserId);
     const article = await this.loadOwned(id, cu);
     if (article.status === 'DRAFT') return article;
-    return this.prisma.article.update({
+    const unpublished = await this.prisma.article.update({
       where: { id },
       data: { status: 'DRAFT', lastEditedById: cu },
     });
+    // Back to author-private — drop from the index (ADR-0035).
+    this.search.remove('articles', id);
+    return unpublished;
   }
 
   /** Import an article from an uploaded .md/.txt/.docx file. Author = caller. */
@@ -197,7 +221,7 @@ export class ArticlesService {
     }
     const title = fields.title ?? titleFromFilename(file.originalname);
     const slug = fields.slug ?? this.deriveSlug(title);
-    return this.prisma.article.create({
+    const article = await this.prisma.article.create({
       data: {
         slug,
         title,
@@ -208,9 +232,28 @@ export class ArticlesService {
         authorId,
       },
     });
+    // Same draft-privacy rule as create(): index PUBLISHED only (ADR-0022 / ADR-0035).
+    if (article.status === 'PUBLISHED') {
+      this.search.upsert('articles', projectArticle(article));
+    }
+    return article;
   }
 
   // --- internals -----------------------------------------------------------
+
+  /**
+   * Fire-and-forget search sync that honors draft privacy (ADR-0022 / ADR-0035): a PUBLISHED article
+   * is indexed (upsert), anything else (DRAFT) is removed — so DRAFTs are never searchable and an
+   * article edited while not PUBLISHED is dropped. Un-awaited, never throws, no-op when disabled.
+   * Used by update(), whose result may be PUBLISHED or DRAFT.
+   */
+  private syncSearch(article: ArticleRow): void {
+    if (article.status === 'PUBLISHED') {
+      this.search.upsert('articles', projectArticle(article));
+    } else {
+      this.search.remove('articles', article.id);
+    }
+  }
 
   /** PUBLISHED for everyone; plus the caller's own DRAFTs when there is a current user. */
   private visibilityWhere(currentUserId?: string): Prisma.ArticleWhereInput {
@@ -230,7 +273,7 @@ export class ArticlesService {
    */
   private async loadOwned(id: string, currentUserId: string) {
     const article = await this.prisma.article.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
     });
     if (!article) {
       throw new NotFoundException(`Article ${id} not found`);
@@ -244,24 +287,14 @@ export class ArticlesService {
     return article;
   }
 
-  /** Resolve the X-User-Id shim: undefined → anonymous; present must be a valid live user (400). */
-  private async resolveCurrentUser(
+  /**
+   * Resolve the X-User-Id shim: undefined → anonymous; present must be a valid live user (400).
+   * Delegates to the shared {@link ActorService} (ADR-0024) — the single actor/identity resolver.
+   */
+  private resolveCurrentUser(
     currentUserId?: string,
   ): Promise<string | undefined> {
-    if (currentUserId === undefined || currentUserId === '') return undefined;
-    if (!UUID_REGEX.test(currentUserId)) {
-      throw new BadRequestException('X-User-Id is not a valid user id');
-    }
-    const user = await this.prisma.user.findFirst({
-      where: { id: currentUserId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!user) {
-      throw new BadRequestException(
-        'X-User-Id does not reference a valid user',
-      );
-    }
-    return user.id;
+    return this.actor.resolve(currentUserId);
   }
 
   /** Like resolveCurrentUser but mandatory (writes): 400 if the header is absent. */
@@ -288,7 +321,7 @@ export class ArticlesService {
   /** 400 if categoryId doesn't reference a live (non-soft-deleted) category. */
   private async assertCategoryUsable(categoryId: string): Promise<void> {
     const category = await this.prisma.articleCategory.findFirst({
-      where: { id: categoryId, deletedAt: null },
+      where: { id: categoryId },
       select: { id: true },
     });
     if (!category) {

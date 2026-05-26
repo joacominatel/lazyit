@@ -2,11 +2,15 @@ import { Test } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { SearchService } from '../search/search.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
 }));
+// UsersService transitively imports the ESM `meilisearch` package (via SearchService); jest can't
+// transform it. SearchService is replaced by a mock below; this stub stops the real module loading.
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 type PrismaUserMock = {
   findMany: jest.Mock;
@@ -15,9 +19,12 @@ type PrismaUserMock = {
   update: jest.Mock;
 };
 
+type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
+
 describe('UsersService', () => {
   let service: UsersService;
   let user: PrismaUserMock;
+  let search: SearchMock;
 
   beforeEach(async () => {
     user = {
@@ -26,9 +33,14 @@ describe('UsersService', () => {
       create: jest.fn(),
       update: jest.fn(),
     };
+    search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
-      providers: [UsersService, { provide: PrismaService, useValue: { user } }],
+      providers: [
+        UsersService,
+        { provide: PrismaService, useValue: { user } },
+        { provide: SearchService, useValue: search },
+      ],
     }).compile();
 
     service = moduleRef.get(UsersService);
@@ -47,6 +59,14 @@ describe('UsersService', () => {
 
     await expect(service.create(dto)).resolves.toEqual(created);
     expect(user.create).toHaveBeenCalledWith({ data: dto });
+    // Fire-and-forget search sync (ADR-0035): the created user is upserted into the `users` index.
+    expect(search.upsert).toHaveBeenCalledWith('users', {
+      id: 'uuid-1',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'a@b.com',
+    });
+    expect(search.remove).not.toHaveBeenCalled();
   });
 
   // SEC-006: externalId is no longer a client-settable create field (it is server-owned, ADR-0016).
@@ -59,7 +79,7 @@ describe('UsersService', () => {
 
     await expect(service.findOne('uuid-1')).resolves.toEqual(found);
     expect(user.findFirst).toHaveBeenCalledWith({
-      where: { id: 'uuid-1', deletedAt: null },
+      where: { id: 'uuid-1' },
     });
   });
 
@@ -84,6 +104,8 @@ describe('UsersService', () => {
     >;
     expect(calls[0][0].where).toEqual({ id: 'uuid-1' });
     expect(calls[0][0].data.deletedAt).toBeInstanceOf(Date);
+    // Soft-delete drops the user from the search index (ADR-0035).
+    expect(search.remove).toHaveBeenCalledWith('users', 'uuid-1');
   });
 
   it('does not soft-delete a user that is missing', async () => {
@@ -93,6 +115,26 @@ describe('UsersService', () => {
       NotFoundException,
     );
     expect(user.update).not.toHaveBeenCalled();
+    expect(search.remove).not.toHaveBeenCalled();
+  });
+
+  it('re-indexes the user on update (upsert with the updated row)', async () => {
+    user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+    user.update.mockResolvedValue({
+      id: 'uuid-1',
+      firstName: 'Ada',
+      lastName: 'Byron',
+      email: 'a@b.com',
+    });
+
+    await service.update('uuid-1', { lastName: 'Byron' });
+
+    expect(search.upsert).toHaveBeenCalledWith('users', {
+      id: 'uuid-1',
+      firstName: 'Ada',
+      lastName: 'Byron',
+      email: 'a@b.com',
+    });
   });
 
   it('findAll excludes soft-deleted users', async () => {
@@ -101,7 +143,6 @@ describe('UsersService', () => {
     await service.findAll();
 
     expect(user.findMany).toHaveBeenCalledWith({
-      where: { deletedAt: null },
       orderBy: { createdAt: 'desc' },
     });
   });

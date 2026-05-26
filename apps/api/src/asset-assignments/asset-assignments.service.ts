@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -11,6 +10,8 @@ import type {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ActorService } from '../common/actor.service';
+import { AssetHistoryService } from '../asset-history/asset-history.service';
 
 /** Filters for listing assignments. `activeOnly` defaults to true (set at the controller). */
 export interface FindAssignmentsFilters {
@@ -21,18 +22,19 @@ export interface FindAssignmentsFilters {
   includeUser?: boolean;
 }
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
  * The actor (`assignedById` on create, `releasedById` on release) comes from the optional
- * `X-User-Id` shim — never the request body (ADR-0024, converging on the AccessGrant pattern of
- * ADR-0022/0023). When real auth lands, the actor comes from the JWT and these methods are
- * unchanged.
+ * `X-User-Id` shim via the shared {@link ActorService} — never the request body (ADR-0024). Opening
+ * and releasing also emit `ASSIGNED` / `RELEASED` asset-history events transactionally (ADR-0033).
+ * When real auth lands the actor comes from the JWT and these methods are unchanged.
  */
 @Injectable()
 export class AssetAssignmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly actor: ActorService,
+    private readonly history: AssetHistoryService,
+  ) {}
 
   /** Assignments, newest first; filter by asset/user and (by default) active only. */
   findAll({
@@ -73,7 +75,7 @@ export class AssetAssignmentsService {
    * `assignedById` is set from the `X-User-Id` shim when present (null = system/unknown).
    */
   async create(data: CreateAssetAssignment, actorId?: string) {
-    const assignedById = await this.resolveActor(actorId);
+    const assignedById = await this.actor.resolve(actorId);
     const existingActive = await this.prisma.assetAssignment.findFirst({
       where: { assetId: data.assetId, userId: data.userId, releasedAt: null },
     });
@@ -82,11 +84,20 @@ export class AssetAssignmentsService {
         'An active assignment already exists for this asset and user',
       );
     }
-    return this.prisma.assetAssignment.create({
-      data: {
-        ...data,
-        ...(assignedById !== undefined ? { assignedById } : {}),
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const assignment = await tx.assetAssignment.create({
+        data: {
+          ...data,
+          ...(assignedById !== undefined ? { assignedById } : {}),
+        },
+      });
+      await this.history.record(tx, {
+        assetId: data.assetId,
+        eventType: 'ASSIGNED',
+        payload: { userId: data.userId },
+        performedById: assignedById,
+      });
+      return assignment;
     });
   }
 
@@ -100,14 +111,22 @@ export class AssetAssignmentsService {
     if (assignment.releasedAt !== null) {
       throw new ConflictException(`AssetAssignment ${id} is already released`);
     }
-    const releasedById = await this.resolveActor(actorId);
-    return this.prisma.assetAssignment.update({
-      where: { id },
-      data: {
-        releasedAt: new Date(),
-        ...(releasedById !== undefined ? { releasedById } : {}),
-        ...(data.notes !== undefined ? { notes: data.notes } : {}),
-      },
+    const releasedById = await this.actor.resolve(actorId);
+    return this.prisma.$transaction(async (tx) => {
+      const released = await tx.assetAssignment.update({
+        where: { id },
+        data: {
+          releasedAt: new Date(),
+          ...(releasedById !== undefined ? { releasedById } : {}),
+          ...(data.notes !== undefined ? { notes: data.notes } : {}),
+        },
+      });
+      await this.history.record(tx, {
+        assetId: assignment.assetId,
+        eventType: 'RELEASED',
+        performedById: releasedById,
+      });
+      return released;
     });
   }
 
@@ -121,30 +140,5 @@ export class AssetAssignmentsService {
       where: { id },
       data: { notes: data.notes },
     });
-  }
-
-  // --- internals -----------------------------------------------------------
-
-  /**
-   * Resolve the optional `X-User-Id` actor: undefined/empty → undefined (system/unknown, leaves the
-   * FK null). A present value must be a valid live user, else 400 (don't silently drop a bad id; a
-   * soft-deleted user can't act as an actor). Mirrors AccessGrantsService.resolveActor — a shared
-   * helper is a future refactor candidate once a third caller appears.
-   */
-  private async resolveActor(actorId?: string): Promise<string | undefined> {
-    if (actorId === undefined || actorId === '') return undefined;
-    if (!UUID_REGEX.test(actorId)) {
-      throw new BadRequestException('X-User-Id is not a valid user id');
-    }
-    const user = await this.prisma.user.findFirst({
-      where: { id: actorId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!user) {
-      throw new BadRequestException(
-        'X-User-Id does not reference a valid user',
-      );
-    }
-    return user.id;
   }
 }

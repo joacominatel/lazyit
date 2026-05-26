@@ -6,12 +6,17 @@ import {
 } from '@nestjs/common';
 import { ArticlesService } from './articles.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ActorService } from '../common/actor.service';
+import { SearchService } from '../search/search.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {},
 }));
+// ArticlesService transitively imports the ESM `meilisearch` package (via SearchService); jest
+// can't transform it. SearchService is replaced by a mock below; this stub stops the real load.
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 const AUTHOR = '11111111-1111-1111-1111-111111111111';
 const OTHER = '22222222-2222-2222-2222-222222222222';
@@ -43,7 +48,10 @@ describe('ArticlesService', () => {
   let service: ArticlesService;
   let article: ArticleMock;
   let articleCategory: { findFirst: jest.Mock };
-  let user: { findFirst: jest.Mock };
+  // ActorService is mocked; X-User-Id validation lives in actor.service.spec.ts. By default it echoes
+  // a present id back (any well-formed caller "exists") and maps empty/undefined to anonymous.
+  let actor: { resolve: jest.Mock };
+  let search: { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
 
   beforeEach(async () => {
     article = {
@@ -62,24 +70,28 @@ describe('ArticlesService', () => {
           }),
         ),
     };
-    // Any well-formed uuid "exists" as a user; overridden per-test for the invalid case.
-    user = {
-      findFirst: jest
+    // Any present id resolves to itself (a live caller); empty/undefined → anonymous. Overridden
+    // per-test for the rejecting case.
+    actor = {
+      resolve: jest
         .fn()
-        .mockImplementation((args: { where: { id: string } }) => ({
-          id: args.where.id,
-        })),
+        .mockImplementation((id?: string) =>
+          Promise.resolve(id === undefined || id === '' ? undefined : id),
+        ),
     };
     // Category exists by default; overridden per-test.
     articleCategory = { findFirst: jest.fn().mockResolvedValue({ id: 'c1' }) };
+    search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         ArticlesService,
         {
           provide: PrismaService,
-          useValue: { article, articleCategory, user },
+          useValue: { article, articleCategory },
         },
+        { provide: ActorService, useValue: actor },
+        { provide: SearchService, useValue: search },
       ],
     }).compile();
 
@@ -111,6 +123,9 @@ describe('ArticlesService', () => {
       expect(data.slug).toBe('my-first-article');
       expect(data.status).toBe('DRAFT');
       expect(data.publishedAt).toBeNull();
+      // Draft privacy (ADR-0022/0035): a new DRAFT must NOT be indexed.
+      expect(search.upsert).not.toHaveBeenCalled();
+      expect(search.remove).not.toHaveBeenCalled();
     });
 
     it('sets publishedAt when created already PUBLISHED', async () => {
@@ -119,6 +134,16 @@ describe('ArticlesService', () => {
         AUTHOR,
       );
       expect(lastCreate().publishedAt).toBeInstanceOf(Date);
+      // A PUBLISHED article is indexed on create (ADR-0035).
+      expect(search.upsert).toHaveBeenCalledWith(
+        'articles',
+        expect.objectContaining({
+          id: 'art1',
+          title: 'Live',
+          slug: 'live',
+          status: 'PUBLISHED',
+        }),
+      );
     });
 
     it('uses an explicit slug when provided', async () => {
@@ -145,21 +170,16 @@ describe('ArticlesService', () => {
       expect(article.create).not.toHaveBeenCalled();
     });
 
-    it('rejects a malformed X-User-Id (400)', async () => {
+    it('propagates a 400 from the actor resolver (malformed / unknown X-User-Id)', async () => {
+      // The shim-validation detail is in actor.service.spec.ts; here a write must surface a rejecting
+      // resolve as a 400 (a required author can't be resolved).
+      actor.resolve.mockRejectedValueOnce(
+        new BadRequestException('X-User-Id is not a valid user id'),
+      );
       await expect(
         service.create(
           { title: 'X', content: 'b', categoryId: 'c1', status: 'DRAFT' },
-          'not-a-uuid',
-        ),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects an X-User-Id that is not a known user (400)', async () => {
-      user.findFirst.mockResolvedValueOnce(null);
-      await expect(
-        service.create(
-          { title: 'X', content: 'b', categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR,
+          'bad-actor',
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
@@ -182,7 +202,7 @@ describe('ArticlesService', () => {
     it('shows only PUBLISHED to anonymous callers', async () => {
       await service.findAll({}, undefined);
       expect(listWhere().AND[0]).toEqual({ status: 'PUBLISHED' });
-      expect(user.findFirst).not.toHaveBeenCalled();
+      expect(actor.resolve).toHaveBeenCalledWith(undefined);
     });
 
     it("shows PUBLISHED plus the caller's own DRAFTs when logged in", async () => {
@@ -263,11 +283,30 @@ describe('ArticlesService', () => {
         status: 'PUBLISHED',
         authorId: AUTHOR,
       });
+      // The real prisma.update returns the full row (status included); reflect that so the search
+      // sync sees the resulting status.
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'a-slug',
+        title: 'New title',
+        excerpt: null,
+        status: 'PUBLISHED',
+        lastEditedById: AUTHOR,
+      });
       await service.update('a', { title: 'New title' }, AUTHOR);
       expect(lastUpdate()).toEqual({
         title: 'New title',
         lastEditedById: AUTHOR,
       });
+      // A PUBLISHED article stays indexed after an edit (ADR-0035).
+      expect(search.upsert).toHaveBeenCalledWith('articles', {
+        id: 'a',
+        slug: 'a-slug',
+        title: 'New title',
+        excerpt: null,
+        status: 'PUBLISHED',
+      });
+      expect(search.remove).not.toHaveBeenCalled();
     });
 
     it('returns 403 for a non-author on a PUBLISHED article', async () => {
@@ -321,6 +360,12 @@ describe('ArticlesService', () => {
       expect(data.status).toBe('PUBLISHED');
       expect(data.publishedAt).toBeInstanceOf(Date);
       expect(data.lastEditedById).toBe(AUTHOR);
+      // Publishing makes the article searchable (ADR-0035).
+      expect(search.upsert).toHaveBeenCalledWith(
+        'articles',
+        expect.objectContaining({ id: 'a', status: 'PUBLISHED' }),
+      );
+      expect(search.remove).not.toHaveBeenCalled();
     });
 
     it('is a no-op when already PUBLISHED (no update)', async () => {
@@ -332,6 +377,8 @@ describe('ArticlesService', () => {
       });
       await service.publish('a', AUTHOR);
       expect(article.update).not.toHaveBeenCalled();
+      // Idempotent short-circuit: already indexed, no redundant sync.
+      expect(search.upsert).not.toHaveBeenCalled();
     });
 
     it('unpublishes a PUBLISHED article back to DRAFT but keeps publishedAt', async () => {
@@ -345,6 +392,9 @@ describe('ArticlesService', () => {
       const data = lastUpdate();
       expect(data.status).toBe('DRAFT');
       expect(data).not.toHaveProperty('publishedAt');
+      // Back to author-private: dropped from the index (ADR-0035).
+      expect(search.remove).toHaveBeenCalledWith('articles', 'a');
+      expect(search.upsert).not.toHaveBeenCalled();
     });
 
     it('blocks a non-author from publishing a DRAFT (404)', async () => {
@@ -372,6 +422,8 @@ describe('ArticlesService', () => {
       const data = lastUpdate();
       expect(data.deletedAt).toBeInstanceOf(Date);
       expect(data.lastEditedById).toBe(AUTHOR);
+      // Soft-delete drops the article from the index (ADR-0035).
+      expect(search.remove).toHaveBeenCalledWith('articles', 'a');
     });
 
     it('returns 403 for a non-author on a PUBLISHED article', async () => {
@@ -408,6 +460,20 @@ describe('ArticlesService', () => {
       expect(data.content).toContain('# Net');
       expect(data.authorId).toBe(AUTHOR);
       expect(data.publishedAt).toBeNull();
+      // Imported as DRAFT -> not indexed (draft privacy, ADR-0022/0035).
+      expect(search.upsert).not.toHaveBeenCalled();
+    });
+
+    it('indexes an imported article when imported as PUBLISHED', async () => {
+      await service.importArticle(
+        file('guide.md', '# Net'),
+        { categoryId: 'c1', status: 'PUBLISHED' },
+        AUTHOR,
+      );
+      expect(search.upsert).toHaveBeenCalledWith(
+        'articles',
+        expect.objectContaining({ status: 'PUBLISHED', slug: 'guide' }),
+      );
     });
 
     it('rejects a file over the size limit (400)', async () => {

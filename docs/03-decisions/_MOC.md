@@ -52,6 +52,12 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0028-secrets-and-config]] | Secrets & configuration management (env files per level) | accepted |
 | [[0029-untrusted-content-sanitization]] | Untrusted-content sanitization is render-time, not write-time | accepted |
 | [[0030-list-pagination-contract]] | List endpoint pagination contract (offset; implementation deferred) | accepted |
+| [[0031-logging-strategy]] | Structured logging strategy (Pino + nestjs-pino) | accepted |
+| [[0032-soft-delete-middleware]] | Soft-delete enforcement via a Prisma client extension | accepted |
+| [[0033-asset-history-event-model]] | AssetHistory event model (discrete events, explicit emission) | accepted |
+| [[0034-consumables-design]] | Consumables design (cached stock + append-only movements) | accepted |
+| [[0035-search-architecture]] | Cross-cutting search architecture (Meilisearch) | accepted |
+| [[0036-int4-bounded-integers]] | Integer fields bounded to the Postgres int4 range in shared schemas | accepted |
 
 ## Pending ADRs (to write when decided)
 

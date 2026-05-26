@@ -55,7 +55,6 @@ describe('ApplicationCategoriesService', () => {
     await service.findAll();
 
     expect(applicationCategory.findMany).toHaveBeenCalledWith({
-      where: { deletedAt: null },
       orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
     });
   });
@@ -66,7 +65,7 @@ describe('ApplicationCategoriesService', () => {
 
     await expect(service.findOne('c1')).resolves.toEqual(found);
     expect(applicationCategory.findFirst).toHaveBeenCalledWith({
-      where: { id: 'c1', deletedAt: null },
+      where: { id: 'c1' },
     });
   });
 

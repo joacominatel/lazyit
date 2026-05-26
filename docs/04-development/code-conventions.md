@@ -28,6 +28,28 @@ Conventions for application code. Data-model conventions live in [[conventions]]
 - Use dependency injection; e.g. a single injectable `PrismaService` (next code step after
   the domain model — [[0002-nestjs-backend]], [[0003-prisma-orm]]).
 - Validate input with zod schemas from `@lazyit/shared`.
+- **Integers backed by a Postgres `Int` column use `int4()`** from `@lazyit/shared`, never a bare
+  `z.number().int()` — the latter inherits zod's safe-integer bounds, which overflow the column
+  (P2020 → 500) and make Swagger UI autofill `MAX_SAFE_INTEGER` ([[0036-int4-bounded-integers]]).
+- **Soft delete is automatic** ([[0032-soft-delete-middleware]]): a Prisma `$extends` filter scopes
+  reads on soft-deletable models to `deletedAt: null` — don't re-add manual `where: { deletedAt: null }`
+  guards. Use `findFirst` (not `findUnique`) for soft-delete-aware lookups by id; pass
+  `{ includeSoftDeleted: true }` to bypass (restore / audit).
+
+## Observability — logging
+
+Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]]). In practice:
+
+- **Don't `console.log`.** Inject `PinoLogger` (or a Nest `Logger`) and log structured objects —
+  `this.logger.info({ assetId }, 'asset created')`. Nest's own logs already route through Pino.
+- **Levels are a four-word vocabulary** mapped onto Pino: `trace`/`debug` → **DEBUG**, `info` →
+  **INFO**, `warn` → **WARNING**, `error`/`fatal` → **CRITICAL**.
+- **Never log secrets or bodies.** `authorization`, `cookie` and the `x-user-id` header are redacted;
+  request/response bodies are not logged. The caller's id is logged as the `actor` field.
+- **Request id is automatic** — every line of a request carries it (honored from `X-Request-Id` or
+  generated, echoed on the response). Don't roll your own correlation id.
+- **Errors:** throwing is enough — the global `AllExceptionsFilter` logs ≥ 500 faults with their
+  stack. Don't `catch`-and-log-and-rethrow just to record an error.
 
 ## Frontend (Next.js)
 

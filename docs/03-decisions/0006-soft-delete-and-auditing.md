@@ -45,5 +45,6 @@ Split by mutability.
   semantics ([[conventions]]).
 - **Trade-offs:** queries must respect `deletedAt IS NULL` on mutable entities (consider a
   Prisma middleware/extension to enforce it).
-- **Follow-ups:** when models are implemented, give append-only tables `createdAt` only and
-  add a default `deletedAt IS NULL` scope on mutable entities (Prisma extension/middleware).
+- **Follow-ups:** append-only tables get `createdAt` only (done as the models landed). The default
+  `deletedAt IS NULL` scope on mutable entities is now enforced centrally by a Prisma client
+  extension — see [[0032-soft-delete-middleware]] (no more per-query guards).
