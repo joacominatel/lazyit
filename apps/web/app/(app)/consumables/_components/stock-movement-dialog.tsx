@@ -22,10 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useRecordMovement } from "@/lib/api/hooks/use-consumable-movement-mutations";
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
+import { notifyError } from "@/lib/api/notify-error";
 
 const COPY: Record<
   ConsumableMovementType,
@@ -113,7 +110,7 @@ export function StockMovementDialog({
           handleOpenChange(false);
         },
         onError: (error) =>
-          toast.error(errorMessage(error, "Couldn't update stock")),
+          notifyError(error, "Couldn't update stock"),
       },
     );
   }
