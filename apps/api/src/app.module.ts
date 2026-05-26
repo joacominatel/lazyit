@@ -16,6 +16,8 @@ import { ArticlesModule } from './articles/articles.module';
 import { ApplicationCategoriesModule } from './application-categories/application-categories.module';
 import { ApplicationsModule } from './applications/applications.module';
 import { AccessGrantsModule } from './access-grants/access-grants.module';
+import { AssetHistoryModule } from './asset-history/asset-history.module';
+import { CommonModule } from './common/common.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { buildLoggerParams } from './logging/logging.config';
@@ -25,6 +27,9 @@ import { buildLoggerParams } from './logging/logging.config';
     // Structured logging for the whole app (ADR-0031). First so it wraps every route.
     LoggerModule.forRoot(buildLoggerParams()),
     PrismaModule,
+    // Global cross-cutting providers (ActorService — the X-User-Id shim resolver, ADR-0033).
+    CommonModule,
+    AssetHistoryModule,
     UsersModule,
     LocationsModule,
     AssetCategoriesModule,

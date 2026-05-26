@@ -43,6 +43,9 @@ model User {
   accessGrantsGranted AccessGrant[] @relation("AccessGrantGrantedBy")
   accessGrantsRevoked AccessGrant[] @relation("AccessGrantRevokedBy")
 
+  // Asset events this user caused (AssetHistory.performedById). SetNull keeps the log on deletion.
+  assetHistoryActed AssetHistory[] @relation("AssetHistoryActor")
+
   @@map("users")
 }
 
@@ -146,6 +149,7 @@ model Asset {
   deletedAt    DateTime?
 
   assignments AssetAssignment[]
+  history     AssetHistory[]
 
   @@index([modelId])
   @@index([locationId])
@@ -195,6 +199,45 @@ model AssetAssignment {
   @@index([assetId])
   @@index([userId])
   @@map("asset_assignments")
+}
+
+/// Append-only log of discrete state changes for an Asset (ADR-0006 / ADR-0033). Written by explicit
+/// service calls (no interceptor), transactionally with the change. Rows are never updated or
+/// deleted. See docs/02-domain/entities/asset-history.md
+model AssetHistory {
+  // autoincrement: a log/history table, never exposed externally (ADR-0005).
+  id            Int                   @id @default(autoincrement())
+  // Required FK with Restrict: an asset with history cannot be hard-deleted (history is preserved),
+  // mirroring AssetAssignment. Soft delete (UPDATE deletedAt) bypasses it. See ADR-0019/0033.
+  assetId       String
+  asset         Asset                 @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  eventType     AssetHistoryEventType
+  // Contextual data (e.g. { from, to } on STATUS_CHANGED, { userId } on ASSIGNED). Unvalidated jsonb.
+  payload       Json?
+  // Who caused the change — from the X-User-Id shim (ADR-0022). SetNull: losing the actor never
+  // blocks deleting them and the log row survives. null = system/unknown. @db.Uuid to match User.id.
+  performedById String?               @db.Uuid
+  performedBy   User?                 @relation("AssetHistoryActor", fields: [performedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime              @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). (assetId, id) serves the per-asset timeline
+  // query (filter by asset, order by id desc, cursor on id).
+  @@index([assetId, id])
+  @@map("asset_history")
+}
+
+/// The discrete asset events recorded in AssetHistory (ADR-0033). RESTORED is reserved for a future
+/// restore action (no endpoint emits it yet).
+enum AssetHistoryEventType {
+  CREATED
+  STATUS_CHANGED
+  ASSIGNED
+  RELEASED
+  LOCATION_CHANGED
+  MODEL_CHANGED
+  SPECS_CHANGED
+  DELETED
+  RESTORED
 }
 
 /// User-managed grouping for knowledge-base Articles (Networking, Servers, Procedures, …). Like
