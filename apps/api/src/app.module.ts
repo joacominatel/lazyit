@@ -20,6 +20,7 @@ import { ConsumableCategoriesModule } from './consumable-categories/consumable-c
 import { ConsumablesModule } from './consumables/consumables.module';
 import { AssetHistoryModule } from './asset-history/asset-history.module';
 import { CommonModule } from './common/common.module';
+import { SearchModule } from './search/search.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { buildLoggerParams } from './logging/logging.config';
@@ -31,6 +32,9 @@ import { buildLoggerParams } from './logging/logging.config';
     PrismaModule,
     // Global cross-cutting providers (ActorService — the X-User-Id shim resolver, ADR-0033).
     CommonModule,
+    // Global cross-cutting search (ADR-0035): exports SearchService for fire-and-forget index sync,
+    // hosts GET /search. No-ops when MEILI_HOST is unset.
+    SearchModule,
     AssetHistoryModule,
     UsersModule,
     LocationsModule,
