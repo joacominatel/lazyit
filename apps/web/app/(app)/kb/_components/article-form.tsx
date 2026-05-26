@@ -35,6 +35,7 @@ import {
   useCreateArticle,
   useUpdateArticle,
 } from "@/lib/api/hooks/use-article-mutations";
+import { notifyError } from "@/lib/api/notify-error";
 
 const FORM_ID = "article-form";
 
@@ -55,10 +56,6 @@ function toFormValues(article?: Article): ArticleFormValues {
     };
   }
   return { title: "", categoryId: "", excerpt: undefined, content: "" };
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 /**
@@ -107,7 +104,7 @@ export function ArticleForm({ article }: { article?: Article }) {
             router.push(`/kb/${updated.slug}`);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't save the article")),
+            notifyError(error, "Couldn't save the article"),
         },
       );
     } else {
@@ -125,7 +122,7 @@ export function ArticleForm({ article }: { article?: Article }) {
             router.push(`/kb/${created.slug}`);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't create the article")),
+            notifyError(error, "Couldn't create the article"),
         },
       );
     }
