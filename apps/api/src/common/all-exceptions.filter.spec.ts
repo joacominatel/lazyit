@@ -5,6 +5,21 @@ import { Prisma } from '../../generated/prisma/client';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 import { PrismaExceptionFilter } from './prisma-exception.filter';
 
+// Mock the generated Prisma client so jest never loads its real ESM internals (its `./internal/*.js`
+// imports do not resolve under the jest resolver). The stub is a real class so the errors we build
+// below match the filter's `instanceof Prisma.PrismaClientKnownRequestError` check.
+jest.mock('../../generated/prisma/client', () => ({
+  Prisma: {
+    PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
+      code: string;
+      constructor(message: string, opts: { code: string }) {
+        super(message);
+        this.code = opts.code;
+      }
+    },
+  },
+}));
+
 describe('AllExceptionsFilter', () => {
   let logger: { error: jest.Mock; setContext: jest.Mock };
   let prismaFilter: { catch: jest.Mock };
