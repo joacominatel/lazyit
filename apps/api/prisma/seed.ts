@@ -58,6 +58,17 @@ const INITIAL_APPLICATION_CATEGORIES: { name: string; icon: string }[] = [
   { name: 'Other', icon: 'Squares2X2Icon' },
 ];
 
+// Initial consumable categories (stock-counted supplies — cables, adapters, …). Same user-managed,
+// non-special nature; `order` (seeded by position) sorts the listing — all editable afterwards.
+// Icons (heroicon names) are left unset for the frontend to assign. See ADR-0034.
+const INITIAL_CONSUMABLE_CATEGORIES = [
+  'Cables',
+  'Adapters',
+  'Peripherals',
+  'Office supplies',
+  'Other',
+];
+
 async function main() {
   for (const name of INITIAL_ASSET_CATEGORIES) {
     await prisma.assetCategory.upsert({
@@ -86,6 +97,17 @@ async function main() {
   }
   console.log(
     `Seeded ${INITIAL_APPLICATION_CATEGORIES.length} application categories.`,
+  );
+
+  for (const [index, name] of INITIAL_CONSUMABLE_CATEGORIES.entries()) {
+    await prisma.consumableCategory.upsert({
+      where: { name },
+      update: {}, // don't overwrite user edits on re-run
+      create: { name, order: index + 1 },
+    });
+  }
+  console.log(
+    `Seeded ${INITIAL_CONSUMABLE_CATEGORIES.length} consumable categories.`,
   );
 }
 

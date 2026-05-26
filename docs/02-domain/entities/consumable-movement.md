@@ -1,35 +1,39 @@
 ---
 title: ConsumableMovement
 tags: [domain, entity]
-status: draft
+status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-26
 ---
 
 # ConsumableMovement
 
-> ⚪ planned · Area: Consumables · Implementation order: 6
+> 🟢 implemented · Area: Consumables · Implementation order: 7 · see [[0034-consumables-design]]
 
 ## Purpose
 
-A single stock movement for a [[consumable]] — an entry (received) or exit (consumed/issued)
-with a quantity. The append-only ledger from which current stock is computed.
+An **append-only** ledger row recording a single change to a [[consumable]]'s stock. The ledger is
+the source of truth; `Consumable.currentStock` is a cache derived from it (kept in sync in the same
+transaction).
 
-## Relationships
+## Fields
 
-- **belongs to** one [[consumable]].
-- May reference the [[user]] who performed/received the movement.
+- `id` — `autoincrement()` (log entity, [[0005-id-strategy]]).
+- `consumableId` — FK → [[consumable]], required, `onDelete: Restrict` (a consumable with movement
+  history can't be hard-deleted).
+- `type` — `IN` (add) · `OUT` (subtract) · `ADJUSTMENT` (set absolute). See [[0034-consumables-design]].
+- `quantity` — Int, **always positive**.
+- `reason?`, `notes?`.
+- `performedById?` — FK → [[user]], `onDelete: SetNull`; the actor, from the `X-User-Id` shim
+  ([[0022-draft-visibility-auth-shim]]).
+- `createdAt` only — append-only ([[0006-soft-delete-and-auditing]]); no `updatedAt` / `deletedAt`.
 
 ## Business rules
 
-- **Append-only.** Movements are recorded, never edited — to keep stock auditable. A
-  correction is a new compensating movement, not an edit.
-- Sign/direction (in vs out) plus quantity define the delta.
+- **Append-only and immutable**; corrections are new movements (e.g. an `ADJUSTMENT`), never edits.
+- Each movement **transactionally** updates `Consumable.currentStock`: `IN` adds, `OUT` subtracts
+  (**409** if it would go negative — nothing is written), `ADJUSTMENT` sets the absolute counted
+  value. `quantity` is always positive.
 
-## Conventions
-
-- **ID:** `autoincrement()` — ledger/log entity ([[0005-id-strategy]]).
-- **Timestamps:** `createdAt` only (append-only → no `updatedAt`/`deletedAt`; see
-  [[0006-soft-delete-and-auditing]]).
-
-Related: [[consumable]] · [[user]] · [[0006-soft-delete-and-auditing]]
+Related: [[consumable]] · [[consumable-category]] · [[user]] · [[0034-consumables-design]] ·
+[[0006-soft-delete-and-auditing]] · [[0005-id-strategy]]

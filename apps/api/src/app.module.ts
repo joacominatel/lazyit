@@ -16,6 +16,8 @@ import { ArticlesModule } from './articles/articles.module';
 import { ApplicationCategoriesModule } from './application-categories/application-categories.module';
 import { ApplicationsModule } from './applications/applications.module';
 import { AccessGrantsModule } from './access-grants/access-grants.module';
+import { ConsumableCategoriesModule } from './consumable-categories/consumable-categories.module';
+import { ConsumablesModule } from './consumables/consumables.module';
 import { AssetHistoryModule } from './asset-history/asset-history.module';
 import { CommonModule } from './common/common.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
@@ -41,6 +43,8 @@ import { buildLoggerParams } from './logging/logging.config';
     ApplicationCategoriesModule,
     ApplicationsModule,
     AccessGrantsModule,
+    ConsumableCategoriesModule,
+    ConsumablesModule,
   ],
   controllers: [AppController],
   providers: [

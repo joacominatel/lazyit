@@ -55,6 +55,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0031-logging-strategy]] | Structured logging strategy (Pino + nestjs-pino) | accepted |
 | [[0032-soft-delete-middleware]] | Soft-delete enforcement via a Prisma client extension | accepted |
 | [[0033-asset-history-event-model]] | AssetHistory event model (discrete events, explicit emission) | accepted |
+| [[0034-consumables-design]] | Consumables design (cached stock + append-only movements) | accepted |
 
 ## Pending ADRs (to write when decided)
 
