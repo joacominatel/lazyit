@@ -57,6 +57,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0033-asset-history-event-model]] | AssetHistory event model (discrete events, explicit emission) | accepted |
 | [[0034-consumables-design]] | Consumables design (cached stock + append-only movements) | accepted |
 | [[0035-search-architecture]] | Cross-cutting search architecture (Meilisearch) | accepted |
+| [[0036-int4-bounded-integers]] | Integer fields bounded to the Postgres int4 range in shared schemas | accepted |
 
 ## Pending ADRs (to write when decided)
 
