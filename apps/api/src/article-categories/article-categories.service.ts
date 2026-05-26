@@ -16,7 +16,6 @@ export class ArticleCategoriesService {
   /** All non-deleted categories, ordered by `order` (nulls last) then name. */
   findAll() {
     return this.prisma.articleCategory.findMany({
-      where: { deletedAt: null },
       orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
     });
   }
@@ -24,7 +23,7 @@ export class ArticleCategoriesService {
   /** A single non-deleted category by id; throws 404 if missing or deleted. */
   async findOne(id: string) {
     const category = await this.prisma.articleCategory.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
     });
     if (!category) {
       throw new NotFoundException(`ArticleCategory ${id} not found`);
@@ -50,7 +49,7 @@ export class ArticleCategoriesService {
   async remove(id: string) {
     await this.findOne(id);
     const liveArticles = await this.prisma.article.count({
-      where: { categoryId: id, deletedAt: null },
+      where: { categoryId: id },
     });
     if (liveArticles > 0) {
       throw new ConflictException(
