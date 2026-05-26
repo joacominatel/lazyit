@@ -46,10 +46,16 @@ Policy in [[0012-testing-strategy]]: unit tests always; core/complex logic thoro
 
 ## Git
 
-- Default branch for PRs is `main`. Branch before committing; commit/push only when asked.
-- **Commits are file-scoped and minimal** (docs may be grouped), prefixed
-  `feat` · `fix` · `chore` · `del` · `updt` · `docs`. Full workflow: [[claude-workflow]].
+Full step-by-step with commands: [[git-workflow]]. The short version:
+
+- **Branches:** `master` = production (protected, user-only merges from `dev`), `dev` =
+  integration, work on `<prefix>/issue-<n>-<slug>` branches **cut from `dev`**.
+- **The loop:** find/open the issue (`gh issue list --search …`) → branch off `dev` → commit
+  file-by-file → push → **hand off to the user and wait** → on their OK, `gh pr create --base
+  dev`. **Agents never merge**; the user merges to `dev` and promotes `dev` → `master`.
+- **Commits are file-scoped and minimal** (docs may be grouped), prefixed `feat` · `fix` ·
+  `chore` · `del` · `updt` · `docs`. No `--amend`/`rebase`/`reset`, no `add -A`/`add .`.
 - Before committing, **review `docs/` for sync** — no references to removed files or stale
   philosophy ([[claude-workflow]]).
 
-Related: [[claude-workflow]] · [[setup]] · [[code-conventions]] · [[monorepo]] · [[0012-testing-strategy]]
+Related: [[git-workflow]] · [[claude-workflow]] · [[setup]] · [[code-conventions]] · [[monorepo]] · [[0012-testing-strategy]]
