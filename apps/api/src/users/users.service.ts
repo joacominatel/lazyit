@@ -9,7 +9,6 @@ export class UsersService {
   /** All users that have not been soft-deleted. */
   findAll() {
     return this.prisma.user.findMany({
-      where: { deletedAt: null },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -17,7 +16,7 @@ export class UsersService {
   /** A single non-deleted user by id; throws 404 if missing or deleted. */
   async findOne(id: string) {
     const user = await this.prisma.user.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
     });
     if (!user) {
       throw new NotFoundException(`User ${id} not found`);
