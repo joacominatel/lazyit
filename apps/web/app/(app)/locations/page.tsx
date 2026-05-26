@@ -67,7 +67,8 @@ const COLUMNS: ResourceColumn[] = [
 ];
 
 export default function LocationsPage() {
-  const { data: locations, isLoading, isError, refetch } = useLocations();
+  const { data: locations, isLoading, isError, error, refetch } =
+    useLocations();
   const deleteLocation = useDeleteLocation();
 
   const [search, setSearch] = useState("");
@@ -116,7 +117,11 @@ export default function LocationsPage() {
       {isLoading ? (
         <ResourceTable columns={COLUMNS} isLoading />
       ) : isError ? (
-        <ErrorState title="Could not load locations" onRetry={() => refetch()} />
+        <ErrorState
+          title="Could not load locations"
+          onRetry={() => refetch()}
+          error={error}
+        />
       ) : !hasData ? (
         <EmptyState
           icon={MapPinIcon}
