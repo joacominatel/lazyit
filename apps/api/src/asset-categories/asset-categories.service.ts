@@ -9,7 +9,6 @@ export class AssetCategoriesService {
   /** All categories that have not been soft-deleted, alphabetically (it's a reference list). */
   findAll() {
     return this.prisma.assetCategory.findMany({
-      where: { deletedAt: null },
       orderBy: { name: 'asc' },
     });
   }
@@ -17,7 +16,7 @@ export class AssetCategoriesService {
   /** A single non-deleted category by id; throws 404 if missing or deleted. */
   async findOne(id: string) {
     const category = await this.prisma.assetCategory.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
     });
     if (!category) {
       throw new NotFoundException(`AssetCategory ${id} not found`);
