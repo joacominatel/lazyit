@@ -105,6 +105,12 @@ instead of re-deriving:
   filtered-empty states) with `RowActions` / `EmptyState` / `ErrorState`; `<DeleteConfirmDialog>`
   (entity label + record name + a `mutateAsync` thunk — it owns the spinner, toasts and close);
   and `formatDate` in `lib/utils/format.ts`.
+- **Error UX (extracted across the screens):** `notifyError(error, fallback)`
+  (`lib/api/notify-error.ts`) is the single error-toast entry point — message + the API request id
+  (`ApiError.requestId`, captured by `apiFetch` from `X-Request-Id` — [[0031-logging-strategy]]) as a
+  copyable detail; it replaced the per-file `errorMessage()`/`toast.error` copies. Unexpected errors
+  hit the `(app)/error.tsx` boundary; `<RequestIdNote>` renders the id in both the boundary and
+  `ErrorState`. Recoverable (mutation/validation) → toast; unexpected (render/load) → boundary.
 
 **Deliberately _not_ extracted — a generic hooks factory.** A `createCrudHooks(...)` returning a
 fixed `useList` / `useDetail` / `useCreate` / … set was considered and rejected: (1) it erodes the

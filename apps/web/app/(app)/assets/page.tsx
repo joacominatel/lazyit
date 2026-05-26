@@ -8,7 +8,7 @@ import {
 import { type AssetStatus, AssetStatusSchema } from "@lazyit/shared";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import {
   EmptyState,
@@ -33,21 +33,13 @@ import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useDeleteAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useAssets } from "@/lib/api/hooks/use-assets";
 import { useLocations } from "@/lib/api/hooks/use-locations";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { formatDate } from "@/lib/utils/format";
 import { AssetStatusBadge, formatAssetStatus } from "./_components/asset-status-badge";
 import { StackedOwnerAvatars } from "./_components/stacked-owner-avatars";
 
 type StatusFilter = "ALL" | AssetStatus;
 type OwnershipFilter = "ALL" | "HAS" | "NONE";
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(id);
-  }, [value, delayMs]);
-  return debounced;
-}
 
 const COLUMNS: ResourceColumn[] = [
   { key: "name", header: "Name", skeleton: <Skeleton className="h-4 w-32" /> },
@@ -114,7 +106,8 @@ export default function AssetsPage() {
     [debouncedSearch, statusFilter, categoryFilter, locationFilter],
   );
 
-  const { data: assets, isLoading, isError, refetch } = useAssets(filters);
+  const { data: assets, isLoading, isError, error, refetch } =
+    useAssets(filters);
   const { data: categories } = useAssetCategories();
   const { data: locations } = useLocations();
   const deleteAsset = useDeleteAsset();
@@ -159,7 +152,11 @@ export default function AssetsPage() {
       {isLoading ? (
         <ResourceTable columns={COLUMNS} isLoading />
       ) : isError ? (
-        <ErrorState title="Could not load assets" onRetry={() => refetch()} />
+        <ErrorState
+          title="Could not load assets"
+          onRetry={() => refetch()}
+          error={error}
+        />
       ) : isEmpty && !filtersActive ? (
         <EmptyState
           icon={ServerStackIcon}

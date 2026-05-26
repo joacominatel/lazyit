@@ -10,6 +10,8 @@ import {
 import { useRouter } from "next/navigation";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { CreatableField } from "@/components/creatable-field";
+import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +35,7 @@ import {
   useCreateArticle,
   useUpdateArticle,
 } from "@/lib/api/hooks/use-article-mutations";
+import { notifyError } from "@/lib/api/notify-error";
 
 const FORM_ID = "article-form";
 
@@ -53,10 +56,6 @@ function toFormValues(article?: Article): ArticleFormValues {
     };
   }
   return { title: "", categoryId: "", excerpt: undefined, content: "" };
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 /**
@@ -105,7 +104,7 @@ export function ArticleForm({ article }: { article?: Article }) {
             router.push(`/kb/${updated.slug}`);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't save the article")),
+            notifyError(error, "Couldn't save the article"),
         },
       );
     } else {
@@ -123,7 +122,7 @@ export function ArticleForm({ article }: { article?: Article }) {
             router.push(`/kb/${created.slug}`);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't create the article")),
+            notifyError(error, "Couldn't create the article"),
         },
       );
     }
@@ -165,29 +164,41 @@ export function ArticleForm({ article }: { article?: Article }) {
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
               <FieldLabel htmlFor="categoryId">Category</FieldLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger
-                  id="categoryId"
-                  className="w-full sm:w-72"
-                  aria-invalid={fieldState.invalid || undefined}
-                >
-                  <SelectValue
-                    placeholder={
-                      hasCategories ? "Select a category" : "No categories yet"
-                    }
+              <CreatableField
+                label="category"
+                renderDialog={(dialog) => (
+                  <CreateCategoryDialog
+                    kind="article"
+                    open={dialog.open}
+                    onOpenChange={dialog.onOpenChange}
+                    onCreated={(category) => field.onChange(category.id)}
                   />
-                </SelectTrigger>
-                <SelectContent>
-                  {(categories ?? []).map((category) => (
-                    <SelectItem key={category.id} value={category.id}>
-                      {category.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                )}
+              >
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger
+                    id="categoryId"
+                    className="w-full sm:w-72"
+                    aria-invalid={fieldState.invalid || undefined}
+                  >
+                    <SelectValue
+                      placeholder={
+                        hasCategories ? "Select a category" : "No categories yet"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(categories ?? []).map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CreatableField>
               {!hasCategories && (
                 <FieldDescription>
-                  Categories are managed via the API/seed for now.
+                  No categories yet — use the + button to create one.
                 </FieldDescription>
               )}
               <FieldError errors={[fieldState.error]} />

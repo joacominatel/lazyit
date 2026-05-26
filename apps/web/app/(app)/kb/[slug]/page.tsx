@@ -26,12 +26,9 @@ import {
   useUnpublishArticle,
 } from "@/lib/api/hooks/use-article-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
+import { notifyError } from "@/lib/api/notify-error";
 import { formatDate } from "@/lib/utils/format";
 import { ArticleStatusBadge } from "../_components/article-status-badge";
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 export default function ArticleDetailPage() {
   const params = useParams<{ slug: string }>();
@@ -90,7 +87,7 @@ export default function ArticleDetailPage() {
     publishArticle.mutate(article.id, {
       onSuccess: () => toast.success("Article published"),
       onError: (error) =>
-        toast.error(errorMessage(error, "Couldn't publish the article")),
+        notifyError(error, "Couldn't publish the article"),
     });
   }
 
@@ -99,7 +96,7 @@ export default function ArticleDetailPage() {
     unpublishArticle.mutate(article.id, {
       onSuccess: () => toast.success("Moved back to draft"),
       onError: (error) =>
-        toast.error(errorMessage(error, "Couldn't unpublish the article")),
+        notifyError(error, "Couldn't unpublish the article"),
     });
   }
 

@@ -8,7 +8,7 @@ import {
 } from "@heroicons/react/24/outline";
 import type { ArticleStatus } from "@lazyit/shared";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { EmptyState, ErrorState } from "@/components/resource-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,21 +24,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useArticles } from "@/lib/api/hooks/use-articles";
 import { useUsers } from "@/lib/api/hooks/use-users";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { formatDate } from "@/lib/utils/format";
 import { ArticleStatusBadge } from "./_components/article-status-badge";
 import { ImportArticleDialog } from "./_components/import-article-dialog";
 
 type StatusFilter = "ALL" | ArticleStatus;
-
-/** Debounce a value so the `?q=` search doesn't fire a request per keystroke. */
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(id);
-  }, [value, delayMs]);
-  return debounced;
-}
 
 export default function KnowledgeBasePage() {
   const [search, setSearch] = useState("");
@@ -57,7 +48,8 @@ export default function KnowledgeBasePage() {
     [debouncedSearch, statusFilter, categoryFilter],
   );
 
-  const { data: articles, isLoading, isError, refetch } = useArticles(filters);
+  const { data: articles, isLoading, isError, error, refetch } =
+    useArticles(filters);
   const { data: categories } = useArticleCategories();
   const { data: users } = useUsers();
 
@@ -141,6 +133,7 @@ export default function KnowledgeBasePage() {
         <ErrorState
           title="Could not load articles"
           onRetry={() => refetch()}
+          error={error}
         />
       ) : isEmpty ? (
         filtersActive ? (

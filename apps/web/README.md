@@ -33,7 +33,8 @@ app/
 │   ├── layout.tsx
 │   └── login/page.tsx    # placeholder — no real auth yet (ADR-0016)
 └── (app)/                # private app routes (sidebar + topbar)
-    ├── layout.tsx        # shell; renders <SidebarNav>. No auth guard yet (ADR-0016)
+    ├── layout.tsx        # shell; <SidebarNav> + topbar <GlobalSearch>. No auth guard yet (ADR-0016)
+    ├── error.tsx         # segment error boundary — recover screen + request id (ADR-0031)
     ├── dashboard/page.tsx
     ├── locations/        # first CRUD feature — the template (ADR-0020)
     │   ├── page.tsx      # list + filters + table + states; orchestrates dialogs
@@ -54,22 +55,48 @@ app/
     │       ├── article-form.tsx          # create/edit (per-mode schema)
     │       ├── article-status-badge.tsx
     │       └── import-article-dialog.tsx  # .md/.txt/.docx upload
-    └── assets/           # fourth feature — Assets (expanded read; ADR-0020)
-        ├── page.tsx               # list (inline relations, filters, stacked owners)
+    ├── assets/           # fourth feature — Assets (expanded read; ADR-0020)
+    │   ├── page.tsx               # list (inline relations, filters, stacked owners)
+    │   ├── new/page.tsx           # create
+    │   ├── [id]/page.tsx          # detail (info / specs / owners / activity / ownership history)
+    │   ├── [id]/edit/page.tsx     # edit
+    │   └── _components/
+    │       ├── asset-form.tsx            # create/edit (selects + JSON specs editor)
+    │       ├── asset-history-timeline.tsx # AssetHistory event log (timeline, ADR-0033)
+    │       ├── asset-status-badge.tsx
+    │       ├── assign-user-dialog.tsx
+    │       └── stacked-owner-avatars.tsx
+    ├── applications/     # fifth feature — Access (Applications + AccessGrants; ADR-0023)
+    │   ├── page.tsx               # list (category + active-grant avatars; client joins)
+    │   ├── new/page.tsx           # create
+    │   ├── [id]/page.tsx          # detail (info / active grants / history; grant + revoke)
+    │   ├── [id]/edit/page.tsx     # edit
+    │   └── _components/
+    │       ├── application-form.tsx       # create/edit (selects + isCritical switch)
+    │       ├── grant-access-dialog.tsx    # grant a user access
+    │       ├── revoke-grant-dialog.tsx    # revoke confirmation (AlertDialog)
+    │       └── stacked-user-avatars.tsx   # overlapping grantee avatars (local)
+    └── consumables/      # sixth feature — Consumables (stock + movements; ADR-0034)
+        ├── page.tsx               # list (stock badge, category, low-stock filter)
         ├── new/page.tsx           # create
-        ├── [id]/page.tsx          # detail (info / specs / owners / history)
+        ├── [id]/page.tsx          # detail (stock panel + IN/OUT/ADJUST + movement ledger)
         ├── [id]/edit/page.tsx     # edit
         └── _components/
-            ├── asset-form.tsx            # create/edit (selects + JSON specs editor)
-            ├── asset-status-badge.tsx
-            ├── assign-user-dialog.tsx
-            └── stacked-owner-avatars.tsx
+            ├── consumable-form.tsx        # create/edit (no currentStock — movements only)
+            ├── stock-badge.tsx            # on-hand qty with status color
+            ├── movement-type-badge.tsx    # IN / OUT / ADJUSTMENT chip
+            └── stock-movement-dialog.tsx  # record a movement (one dialog, 3 types)
 
 components/
 ├── ui/                        # shadcn/ui primitives (vendored, owned in-repo)
+├── creatable-field.tsx        # a select + inline "+ New" create dialog (#25)
+├── create-asset-model-dialog.tsx  # inline quick-create for AssetModel
+├── create-category-dialog.tsx     # inline quick-create for any category kind
 ├── delete-confirm-dialog.tsx  # reusable soft-delete confirmation (any resource)
+├── global-search.tsx          # ⌘K command palette over GET /search (topbar, ADR-0035)
 ├── markdown-editor.tsx        # textarea + live preview (KB editor)
 ├── markdown-view.tsx          # react-markdown + gfm renderer (prose)
+├── request-id-note.tsx        # API request id + copy button (error boundary, list error states)
 ├── resource-table.tsx         # table shell + list states + RowActions (any resource)
 ├── sidebar-nav.tsx            # app navigation with active-route state (client)
 ├── theme-toggle.tsx           # light/dark switch (heroicons)
@@ -78,24 +105,40 @@ components/
 └── user-switcher.tsx          # dev "act as" picker for the X-User-Id shim
 
 lib/
+├── hooks/
+│   └── use-debounced-value.ts  # debounce a value (search inputs + ⌘K palette)
 ├── utils/
 │   ├── index.ts          # cn() helper (importable as @/lib/utils)
-│   └── format.ts         # shared display formatters (formatDate)
+│   └── format.ts         # shared display formatters (formatDate, formatRelativeTime)
 └── api/
     ├── acting-user.ts    # dev X-User-Id store (acting user) + useActingUserId
-    ├── client.ts         # typed fetch wrapper (apiFetch / ApiError; FormData + X-User-Id)
+    ├── client.ts         # typed fetch wrapper (apiFetch / ApiError; FormData + X-User-Id; captures X-Request-Id)
+    ├── notify-error.ts   # notifyError(error, fallback) — the single error-toast entry point (+ request id)
     ├── crud-endpoints.ts # createCrudEndpoints — the 5 REST bodies, per-resource generics
     ├── query-keys.ts     # createQueryKeys — the all/lists/detail key factory
     ├── endpoints/        # pure fetch functions per resource — the ONLY apiFetch callers
+    │   ├── access-grants.ts       # grant / revoke (writes) + filtered list
+    │   ├── application-categories.ts
+    │   ├── applications.ts        # CRUD + nested grants (raw; joined client-side)
     │   ├── article-categories.ts
     │   ├── articles.ts
     │   ├── asset-assignments.ts   # assign / release / notes (writes)
     │   ├── asset-categories.ts
+    │   ├── asset-history.ts       # paginated event log (GET /assets/:id/history)
     │   ├── asset-models.ts
     │   ├── assets.ts              # reads return expanded AssetWithRelations
+    │   ├── categories.ts          # name-only create for the 4 category kinds (#25)
+    │   ├── consumable-categories.ts
+    │   ├── consumables.ts         # CRUD + stock movements (nested ledger)
     │   ├── locations.ts
+    │   ├── search.ts              # cross-entity search (GET /search)
     │   └── users.ts
     └── hooks/            # TanStack Query wrappers over the endpoints
+        ├── use-access-grants.ts       # active-grant lists (read)
+        ├── use-access-grant-mutations.ts  # grant / revoke
+        ├── use-applications.ts        # list + detail + grants + applicationKeys
+        ├── use-application-mutations.ts    # create / update / delete
+        ├── use-application-categories.ts
         ├── use-articles.ts            # filtered list + by-slug + articleKeys
         ├── use-article-categories.ts
         ├── use-article-mutations.ts   # create/update/delete/publish/unpublish/import
@@ -103,9 +146,16 @@ lib/
         ├── use-asset-mutations.ts     # create / update / delete
         ├── use-asset-assignment-mutations.ts  # assign / release / notes
         ├── use-asset-categories.ts
+        ├── use-asset-history.ts       # paginated event log (infinite query)
         ├── use-asset-models.ts
+        ├── use-consumables.ts         # list + detail + movements + consumableKeys
+        ├── use-consumable-mutations.ts     # create / update / delete
+        ├── use-consumable-movement-mutations.ts  # record IN/OUT/ADJUSTMENT
+        ├── use-consumable-categories.ts
+        ├── use-create-category.ts     # inline create for any category kind (#25)
         ├── use-locations.ts           # queries + shared query keys
         ├── use-location-mutations.ts  # create / update / delete
+        ├── use-search.ts              # cross-entity search (read-only)
         ├── use-users.ts
         ├── use-user-mutations.ts
         └── use-health.ts              # minimal example (GET /users); unused
@@ -208,6 +258,43 @@ cp .env.example .env
 - **shadcn/ui — `radix-nova` style, `neutral` base color.** Radix primitives (per
   ADR-0011), with a neutral grayscale palette for a clean, minimal, non-flashy look.
   Components are copied into `components/ui/` and owned here.
+
+## Global search
+
+The topbar hosts a `⌘K` / `Ctrl+K` command palette (`components/global-search.tsx`) that queries the
+cross-cutting search endpoint (`GET /search`, Meilisearch — ADR-0035) through the `useSearch` hook.
+Filtering is **server-side** — the `cmdk` Command runs with `shouldFilter={false}` and we render the
+hits the API returns; cmdk still drives the keyboard navigation (↑/↓ + Enter). Results are grouped by
+entity (Assets · Articles · Users · Locations · Applications) and each navigates to its detail — or
+its list page where no detail exists yet (Users, Locations) and forward-compatibly to
+`/applications/[id]` (the Access screen lands that route). The response is typed in `@lazyit/shared`
+(`search` schema); search degrades to empty results when the API runs without `MEILI_HOST` (fail-soft).
+
+## Inline create
+
+Selects for related entities carry a "+ New" button (`components/creatable-field.tsx`) that opens a
+small create dialog and auto-selects the result — so a missing **location, category, model or user**
+can be created without leaving the form (#25). The existing `LocationFormDialog` / `UserFormDialog`
+are reused via an `onCreated` callback; categories and models get lean quick-create dialogs. Wired
+into the asset, application, consumable and KB forms and the grant / assign dialogs. (The asset
+*category* — selected only inside the model dialog — stays a plain select to avoid a nested dialog.)
+
+## Error handling
+
+The API stamps every response with an `X-Request-Id` (ADR-0031) and `apiFetch` captures it onto
+`ApiError.requestId`, so a failure can always be tied back to the structured server log. The UI
+surfaces it two ways:
+
+- **Recoverable errors** (a mutation/action that failed — validation, conflict, transient) →
+  `notifyError(error, fallback)` (`lib/api/notify-error.ts`), the single error-toast entry point.
+  It shows the message plus the request id as a copyable toast detail. Prefer it over
+  `toast.error(...)` in `onError` handlers; plain client-side validation messages stay `toast.error`.
+- **Unexpected errors** (a page throws during render or load) → the `(app)/error.tsx` boundary, a
+  recover screen (sidebar intact) with the request id and a retry. List screens also show the
+  failed load's request id through `<ErrorState>`.
+
+The request id is rendered by the shared `<RequestIdNote>` and only appears when present (it needs
+the API's CORS to expose `X-Request-Id` — set in `apps/api/src/main.ts`).
 
 ## Status / caveats
 

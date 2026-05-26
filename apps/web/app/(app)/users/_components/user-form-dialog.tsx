@@ -33,6 +33,7 @@ import {
   useCreateUser,
   useUpdateUser,
 } from "@/lib/api/hooks/use-user-mutations";
+import { notifyError } from "@/lib/api/notify-error";
 
 const FORM_ID = "user-form";
 
@@ -60,15 +61,13 @@ function toFormValues(user?: User): UserFormValues {
   return { email: "", firstName: "", lastName: "" };
 }
 
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
-
 interface UserFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Present → edit that user; absent → create a new one. */
   user?: User;
+  /** Called with the created user (create mode) — lets a caller select it inline (#25). */
+  onCreated?: (user: User) => void;
 }
 
 /**
@@ -82,6 +81,7 @@ export function UserFormDialog({
   open,
   onOpenChange,
   user,
+  onCreated,
 }: UserFormDialogProps) {
   const isEdit = user != null;
   const createUser = useCreateUser();
@@ -119,7 +119,7 @@ export function UserFormDialog({
             onOpenChange(false);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't update user")),
+            notifyError(error, "Couldn't update user"),
         },
       );
     } else {
@@ -130,12 +130,13 @@ export function UserFormDialog({
           lastName: values.lastName,
         },
         {
-          onSuccess: () => {
+          onSuccess: (created) => {
+            onCreated?.(created);
             toast.success("User created");
             onOpenChange(false);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't create user")),
+            notifyError(error, "Couldn't create user"),
         },
       );
     }

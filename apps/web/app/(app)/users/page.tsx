@@ -65,7 +65,7 @@ const COLUMNS: ResourceColumn[] = [
 ];
 
 export default function UsersPage() {
-  const { data: users, isLoading, isError, refetch } = useUsers();
+  const { data: users, isLoading, isError, error, refetch } = useUsers();
   const deleteUser = useDeleteUser();
 
   const [search, setSearch] = useState("");
@@ -117,7 +117,11 @@ export default function UsersPage() {
       {isLoading ? (
         <ResourceTable columns={COLUMNS} isLoading />
       ) : isError ? (
-        <ErrorState title="Could not load users" onRetry={() => refetch()} />
+        <ErrorState
+          title="Could not load users"
+          onRetry={() => refetch()}
+          error={error}
+        />
       ) : !hasData ? (
         <EmptyState
           icon={UserPlusIcon}

@@ -16,9 +16,12 @@ async function bootstrap() {
   // so it is never hardcoded. credentials:true is set ahead of cookie/session auth (deferred,
   // ADR-0016); with credentials the origin must be explicit, never "*". allowedHeaders is left
   // unset so cors reflects the requested headers (covers Content-Type, Authorization, …).
+  // exposedHeaders surfaces X-Request-Id (ADR-0031) to the browser so the client can quote it in
+  // error UX — cross-origin responses hide non-safelisted headers from JS unless exposed.
   app.enableCors({
     origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    exposedHeaders: ['X-Request-Id'],
     credentials: true,
   });
 

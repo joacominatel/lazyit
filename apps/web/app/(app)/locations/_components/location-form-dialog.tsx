@@ -39,6 +39,7 @@ import {
   useCreateLocation,
   useUpdateLocation,
 } from "@/lib/api/hooks/use-location-mutations";
+import { notifyError } from "@/lib/api/notify-error";
 import { formatLocationType } from "./location-type-badge";
 
 const FORM_ID = "location-form";
@@ -59,15 +60,13 @@ function toFormValues(location?: Location): CreateLocation {
   };
 }
 
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
-
 interface LocationFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Present → edit that location; absent → create a new one. */
   location?: Location;
+  /** Called with the created location (create mode) — lets a caller select it inline (#25). */
+  onCreated?: (location: Location) => void;
 }
 
 /**
@@ -79,6 +78,7 @@ export function LocationFormDialog({
   open,
   onOpenChange,
   location,
+  onCreated,
 }: LocationFormDialogProps) {
   const isEdit = location != null;
   const createLocation = useCreateLocation();
@@ -106,17 +106,18 @@ export function LocationFormDialog({
             onOpenChange(false);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't update location")),
+            notifyError(error, "Couldn't update location"),
         },
       );
     } else {
       createLocation.mutate(values, {
-        onSuccess: () => {
+        onSuccess: (created) => {
+          onCreated?.(created);
           toast.success("Location created");
           onOpenChange(false);
         },
         onError: (error) =>
-          toast.error(errorMessage(error, "Couldn't create location")),
+          notifyError(error, "Couldn't create location"),
       });
     }
   });

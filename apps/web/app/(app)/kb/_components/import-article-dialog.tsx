@@ -31,13 +31,10 @@ import {
 import { useActingUserId } from "@/lib/api/acting-user";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useImportArticle } from "@/lib/api/hooks/use-article-mutations";
+import { notifyError } from "@/lib/api/notify-error";
 
 /** Accepted upload types — the backend extracts markdown from each (ADR-0021). */
 const ACCEPT = ".md,.markdown,.txt,.docx";
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 interface ImportArticleDialogProps {
   open: boolean;
@@ -95,7 +92,7 @@ export function ImportArticleDialog({
           router.push(`/kb/${article.slug}`);
         },
         onError: (error) =>
-          toast.error(errorMessage(error, "Couldn't import the file")),
+          notifyError(error, "Couldn't import the file"),
       },
     );
   }
