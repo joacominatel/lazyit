@@ -29,6 +29,21 @@ Conventions for application code. Data-model conventions live in [[conventions]]
   the domain model — [[0002-nestjs-backend]], [[0003-prisma-orm]]).
 - Validate input with zod schemas from `@lazyit/shared`.
 
+## Observability — logging
+
+Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]]). In practice:
+
+- **Don't `console.log`.** Inject `PinoLogger` (or a Nest `Logger`) and log structured objects —
+  `this.logger.info({ assetId }, 'asset created')`. Nest's own logs already route through Pino.
+- **Levels are a four-word vocabulary** mapped onto Pino: `trace`/`debug` → **DEBUG**, `info` →
+  **INFO**, `warn` → **WARNING**, `error`/`fatal` → **CRITICAL**.
+- **Never log secrets or bodies.** `authorization`, `cookie` and the `x-user-id` header are redacted;
+  request/response bodies are not logged. The caller's id is logged as the `actor` field.
+- **Request id is automatic** — every line of a request carries it (honored from `X-Request-Id` or
+  generated, echoed on the response). Don't roll your own correlation id.
+- **Errors:** throwing is enough — the global `AllExceptionsFilter` logs ≥ 500 faults with their
+  stack. Don't `catch`-and-log-and-rethrow just to record an error.
+
 ## Frontend (Next.js)
 
 - App Router, TypeScript, Tailwind v4 ([[0010-nextjs-frontend]], [[0011-tailwind-styling]]).
