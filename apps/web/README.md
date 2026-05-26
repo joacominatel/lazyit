@@ -33,7 +33,7 @@ app/
 │   ├── layout.tsx
 │   └── login/page.tsx    # placeholder — no real auth yet (ADR-0016)
 └── (app)/                # private app routes (sidebar + topbar)
-    ├── layout.tsx        # shell; renders <SidebarNav>. No auth guard yet (ADR-0016)
+    ├── layout.tsx        # shell; <SidebarNav> + topbar <GlobalSearch>. No auth guard yet (ADR-0016)
     ├── dashboard/page.tsx
     ├── locations/        # first CRUD feature — the template (ADR-0020)
     │   ├── page.tsx      # list + filters + table + states; orchestrates dialogs
@@ -68,6 +68,7 @@ app/
 components/
 ├── ui/                        # shadcn/ui primitives (vendored, owned in-repo)
 ├── delete-confirm-dialog.tsx  # reusable soft-delete confirmation (any resource)
+├── global-search.tsx          # ⌘K command palette over GET /search (topbar, ADR-0035)
 ├── markdown-editor.tsx        # textarea + live preview (KB editor)
 ├── markdown-view.tsx          # react-markdown + gfm renderer (prose)
 ├── resource-table.tsx         # table shell + list states + RowActions (any resource)
@@ -78,6 +79,8 @@ components/
 └── user-switcher.tsx          # dev "act as" picker for the X-User-Id shim
 
 lib/
+├── hooks/
+│   └── use-debounced-value.ts  # debounce a value (search inputs + ⌘K palette)
 ├── utils/
 │   ├── index.ts          # cn() helper (importable as @/lib/utils)
 │   └── format.ts         # shared display formatters (formatDate)
@@ -94,6 +97,7 @@ lib/
     │   ├── asset-models.ts
     │   ├── assets.ts              # reads return expanded AssetWithRelations
     │   ├── locations.ts
+    │   ├── search.ts              # cross-entity search (GET /search)
     │   └── users.ts
     └── hooks/            # TanStack Query wrappers over the endpoints
         ├── use-articles.ts            # filtered list + by-slug + articleKeys
@@ -106,6 +110,7 @@ lib/
         ├── use-asset-models.ts
         ├── use-locations.ts           # queries + shared query keys
         ├── use-location-mutations.ts  # create / update / delete
+        ├── use-search.ts              # cross-entity search (read-only)
         ├── use-users.ts
         ├── use-user-mutations.ts
         └── use-health.ts              # minimal example (GET /users); unused
@@ -208,6 +213,17 @@ cp .env.example .env
 - **shadcn/ui — `radix-nova` style, `neutral` base color.** Radix primitives (per
   ADR-0011), with a neutral grayscale palette for a clean, minimal, non-flashy look.
   Components are copied into `components/ui/` and owned here.
+
+## Global search
+
+The topbar hosts a `⌘K` / `Ctrl+K` command palette (`components/global-search.tsx`) that queries the
+cross-cutting search endpoint (`GET /search`, Meilisearch — ADR-0035) through the `useSearch` hook.
+Filtering is **server-side** — the `cmdk` Command runs with `shouldFilter={false}` and we render the
+hits the API returns; cmdk still drives the keyboard navigation (↑/↓ + Enter). Results are grouped by
+entity (Assets · Articles · Users · Locations · Applications) and each navigates to its detail — or
+its list page where no detail exists yet (Users, Locations) and forward-compatibly to
+`/applications/[id]` (the Access screen lands that route). The response is typed in `@lazyit/shared`
+(`search` schema); search degrades to empty results when the API runs without `MEILI_HOST` (fail-soft).
 
 ## Status / caveats
 
