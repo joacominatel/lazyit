@@ -12,6 +12,7 @@ import type {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ActorService } from '../common/actor.service';
 
 /** Filters for listing grants. `activeOnly` / `includeExpired` default to true (set at the controller). */
 export interface FindAccessGrantsFilters {
@@ -21,18 +22,18 @@ export interface FindAccessGrantsFilters {
   includeExpired?: boolean;
 }
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
  * AccessGrant — the User↔Application access join (append-only, revoked via `revokedAt`; ADR-0023).
  * The actor (`grantedById` on create, `revokedById` on revoke) comes from the optional `X-User-Id`
- * shim — never the request body (ADR-0022). When real auth lands, the actor comes from the JWT and
- * these methods are unchanged.
+ * shim via the shared {@link ActorService} — never the request body (ADR-0022/0024). When real auth
+ * lands, the actor comes from the JWT and these methods are unchanged.
  */
 @Injectable()
 export class AccessGrantsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly actor: ActorService,
+  ) {}
 
   /**
    * Grants, newest first. Filters: user, application, `activeOnly` (only `revokedAt = null`,
@@ -75,7 +76,7 @@ export class AccessGrantsService {
    * `X-User-Id` shim when present (null = system/unknown).
    */
   async create(data: CreateAccessGrant, actorId?: string) {
-    const grantedById = await this.resolveActor(actorId);
+    const grantedById = await this.actor.resolve(actorId);
     await this.assertUserUsable(data.userId);
     await this.assertApplicationUsable(data.applicationId);
     return this.prisma.accessGrant.create({
@@ -107,7 +108,7 @@ export class AccessGrantsService {
     if (grant.revokedAt !== null) {
       throw new ConflictException(`AccessGrant ${id} is already revoked`);
     }
-    const revokedById = await this.resolveActor(actorId);
+    const revokedById = await this.actor.resolve(actorId);
     return this.prisma.accessGrant.update({
       where: { id },
       data: {
@@ -146,27 +147,6 @@ export class AccessGrantsService {
   }
 
   // --- internals -----------------------------------------------------------
-
-  /**
-   * Resolve the optional `X-User-Id` actor: undefined/empty → undefined (system/unknown, leaves the
-   * FK null). A present value must be a valid live user, else 400 (don't silently drop a bad id).
-   */
-  private async resolveActor(actorId?: string): Promise<string | undefined> {
-    if (actorId === undefined || actorId === '') return undefined;
-    if (!UUID_REGEX.test(actorId)) {
-      throw new BadRequestException('X-User-Id is not a valid user id');
-    }
-    const user = await this.prisma.user.findFirst({
-      where: { id: actorId },
-      select: { id: true },
-    });
-    if (!user) {
-      throw new BadRequestException(
-        'X-User-Id does not reference a valid user',
-      );
-    }
-    return user.id;
-  }
 
   /** 400 if userId doesn't reference a live (non-soft-deleted) user. */
   private async assertUserUsable(userId: string): Promise<void> {

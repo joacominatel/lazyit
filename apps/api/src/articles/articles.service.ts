@@ -13,6 +13,7 @@ import {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ActorService } from '../common/actor.service';
 import { SearchService } from '../search/search.service';
 import { projectArticle, type ArticleRow } from '../search/search.documents';
 import {
@@ -37,18 +38,17 @@ export interface UploadedImportFile {
   size: number;
 }
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
  * Knowledge-base articles. Authorship/visibility (DRAFT private to its author; only the author may
- * write) is enforced here from the X-User-Id shim — when real auth lands, `currentUserId` comes from
- * the JWT and these methods are unchanged. See docs/03-decisions/0022-draft-visibility-auth-shim.md.
+ * write) is enforced here from the X-User-Id shim, resolved through the shared {@link ActorService} —
+ * when real auth lands, `currentUserId` comes from the JWT and these methods are unchanged. See
+ * docs/03-decisions/0022-draft-visibility-auth-shim.md.
  */
 @Injectable()
 export class ArticlesService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly actor: ActorService,
     private readonly search: SearchService,
   ) {}
 
@@ -287,24 +287,14 @@ export class ArticlesService {
     return article;
   }
 
-  /** Resolve the X-User-Id shim: undefined → anonymous; present must be a valid live user (400). */
-  private async resolveCurrentUser(
+  /**
+   * Resolve the X-User-Id shim: undefined → anonymous; present must be a valid live user (400).
+   * Delegates to the shared {@link ActorService} (ADR-0024) — the single actor/identity resolver.
+   */
+  private resolveCurrentUser(
     currentUserId?: string,
   ): Promise<string | undefined> {
-    if (currentUserId === undefined || currentUserId === '') return undefined;
-    if (!UUID_REGEX.test(currentUserId)) {
-      throw new BadRequestException('X-User-Id is not a valid user id');
-    }
-    const user = await this.prisma.user.findFirst({
-      where: { id: currentUserId },
-      select: { id: true },
-    });
-    if (!user) {
-      throw new BadRequestException(
-        'X-User-Id does not reference a valid user',
-      );
-    }
-    return user.id;
+    return this.actor.resolve(currentUserId);
   }
 
   /** Like resolveCurrentUser but mandatory (writes): 400 if the header is absent. */

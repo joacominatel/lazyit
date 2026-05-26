@@ -3,7 +3,7 @@ title: "ADR-0024: Retrofit AssetAssignment actor to the X-User-Id shim"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -69,6 +69,12 @@ purely about *where the write reads the actor from*.
   `asset-assignments.service.ts` and `access-grants.service.ts`. Extracting a shared
   actor-resolution helper is a **future refactor candidate** once a third caller appears — not done
   now to avoid a premature, cross-cutting abstraction.
+  > [!done] Resolved — 2026-05-26 (issue #17)
+  > The third caller arrived with AssetHistory ([[0033-asset-history-event-model]]), so the resolver
+  > was extracted to a shared `ActorService` (`apps/api/src/common/actor.service.ts`, `@Global`).
+  > `AssetAssignment`, `Asset` and `Consumable` adopted it then; **`AccessGrant` and `Article`** (the
+  > latter's `resolveCurrentUser`) were migrated onto it in issue #17. `ActorService` is now the
+  > single actor/identity resolver — no inline `resolveActor`/`UUID_REGEX` copies remain.
 
 ## Related
 
