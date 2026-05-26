@@ -36,6 +36,7 @@ import {
   useCreateApplication,
   useUpdateApplication,
 } from "@/lib/api/hooks/use-application-mutations";
+import { notifyError } from "@/lib/api/notify-error";
 
 const FORM_ID = "application-form";
 /** Radix Select forbids an empty-string item value; use a sentinel for "no category". */
@@ -64,10 +65,6 @@ function toFormValues(application?: Application): ApplicationFormValues {
     };
   }
   return { name: "", isCritical: false };
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 /**
@@ -115,7 +112,7 @@ export function ApplicationForm({
             router.push(`/applications/${updated.id}`);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't save the application")),
+            notifyError(error, "Couldn't save the application"),
         },
       );
     } else {
@@ -125,7 +122,7 @@ export function ApplicationForm({
           router.push(`/applications/${created.id}`);
         },
         onError: (error) =>
-          toast.error(errorMessage(error, "Couldn't create the application")),
+          notifyError(error, "Couldn't create the application"),
       });
     }
   });
