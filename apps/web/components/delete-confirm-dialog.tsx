@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { notifyError } from "@/lib/api/notify-error";
 
 interface DeleteConfirmDialogProps {
   open: boolean;
@@ -33,10 +34,6 @@ interface DeleteConfirmDialogProps {
   children?: ReactNode;
   /** Side effect to run after a successful delete (e.g. clear a selection). */
   onDeleted?: () => void;
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function capitalize(value: string): string {
@@ -67,7 +64,7 @@ export function DeleteConfirmDialog({
       onOpenChange(false);
       onDeleted?.();
     } catch (error) {
-      toast.error(errorMessage(error, `Couldn't delete ${entityLabel}`));
+      notifyError(error, `Couldn't delete ${entityLabel}`);
     } finally {
       setIsPending(false);
     }
