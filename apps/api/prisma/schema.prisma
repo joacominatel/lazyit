@@ -46,6 +46,9 @@ model User {
   // Asset events this user caused (AssetHistory.performedById). SetNull keeps the log on deletion.
   assetHistoryActed AssetHistory[] @relation("AssetHistoryActor")
 
+  // Consumable stock movements this user performed (ConsumableMovement.performedById). SetNull.
+  consumableMovements ConsumableMovement[] @relation("ConsumableMovementActor")
+
   @@map("users")
 }
 
@@ -393,4 +396,86 @@ model AccessGrant {
   @@index([userId])
   @@index([applicationId])
   @@map("access_grants")
+}
+
+/// User-managed grouping for Consumables (Cables, Adapters, Peripherals, …). Like AssetCategory /
+/// ApplicationCategory: created, edited and soft-deleted from the app; the seed set is an initial,
+/// non-special list. See docs/02-domain/entities/consumable-category.md
+model ConsumableCategory {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  // Free string: a heroicon name for the web UI (e.g. "CpuChipIcon"). Not validated.
+  icon        String?
+  // Optional sort key for sidebar/listings (lower first); null sorts last.
+  order       Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  consumables Consumable[]
+
+  @@map("consumable_categories")
+}
+
+/// A stock-counted supply item (cables, adapters, toner, …). Distinct from Asset, which is tracked
+/// individually (ADR-0008). `currentStock` is a cache maintained transactionally by movements
+/// (ADR-0034). See docs/02-domain/entities/consumable.md
+model Consumable {
+  id           String              @id @default(cuid())
+  name         String
+  // Unique when present (Postgres treats NULLs as distinct), optional.
+  sku          String?             @unique
+  // Optional category; SetNull on delete so consumables survive (deleting a category detaches them).
+  categoryId   String?
+  category     ConsumableCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  description  String?
+  // Cached on-hand quantity, maintained transactionally by ConsumableMovement (ADR-0034). Never
+  // edited directly — only through movements.
+  currentStock Int                 @default(0)
+  // Optional reorder threshold for low-stock alerts (currentStock <= minStock).
+  minStock     Int?
+  // Free-form unit of measure ("units", "meters", "boxes", …). Not an enum on purpose.
+  unit         String              @default("units")
+  notes        String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  deletedAt    DateTime?
+
+  movements ConsumableMovement[]
+
+  @@index([categoryId])
+  @@map("consumables")
+}
+
+/// Append-only ledger of stock changes for a Consumable (ADR-0034). Each row adjusts the cached
+/// `Consumable.currentStock` transactionally. Rows are never updated or deleted.
+/// See docs/02-domain/entities/consumable-movement.md
+model ConsumableMovement {
+  // autoincrement: a log/history table, never exposed externally (ADR-0005).
+  id            Int                    @id @default(autoincrement())
+  // Required FK with Restrict: a consumable with movement history cannot be hard-deleted.
+  consumableId  String
+  consumable    Consumable             @relation(fields: [consumableId], references: [id], onDelete: Restrict)
+  type          ConsumableMovementType
+  // Always positive. IN adds, OUT subtracts (409 if it would go negative), ADJUSTMENT sets
+  // currentStock to this value (an absolute recount). See ADR-0034.
+  quantity      Int
+  reason        String?
+  // Who performed it — from the X-User-Id shim (ADR-0022). SetNull. @db.Uuid to match User.id.
+  performedById String?                @db.Uuid
+  performedBy   User?                  @relation("ConsumableMovementActor", fields: [performedById], references: [id], onDelete: SetNull)
+  notes         String?
+  createdAt     DateTime               @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). (consumableId, id) serves the ledger query.
+  @@index([consumableId, id])
+  @@map("consumable_movements")
+}
+
+/// Stock movement direction (ADR-0034).
+enum ConsumableMovementType {
+  IN
+  OUT
+  ADJUSTMENT
 }
