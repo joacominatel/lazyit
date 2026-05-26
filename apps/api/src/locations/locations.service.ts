@@ -9,7 +9,6 @@ export class LocationsService {
   /** All locations that have not been soft-deleted. */
   findAll() {
     return this.prisma.location.findMany({
-      where: { deletedAt: null },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -17,7 +16,7 @@ export class LocationsService {
   /** A single non-deleted location by id; throws 404 if missing or deleted. */
   async findOne(id: string) {
     const location = await this.prisma.location.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
     });
     if (!location) {
       throw new NotFoundException(`Location ${id} not found`);
