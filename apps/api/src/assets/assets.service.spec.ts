@@ -116,7 +116,7 @@ describe('AssetsService', () => {
     await service.findOne('a1');
 
     expect(asset.findFirst).toHaveBeenCalledWith({
-      where: { id: 'a1', deletedAt: null },
+      where: { id: 'a1' },
       include: EXPECTED_INCLUDE,
     });
   });
@@ -181,7 +181,7 @@ describe('AssetsService', () => {
     await service.findAll();
 
     expect(asset.findMany).toHaveBeenCalledWith({
-      where: { deletedAt: null },
+      where: {},
       orderBy: { createdAt: 'desc' },
       include: EXPECTED_INCLUDE,
     });
@@ -220,7 +220,7 @@ describe('AssetsService', () => {
     await service.findAll({ status: 'RETIRED', locationId: 'l1' });
 
     expect(asset.findMany).toHaveBeenCalledWith({
-      where: { deletedAt: null, locationId: 'l1', status: 'RETIRED' },
+      where: { locationId: 'l1', status: 'RETIRED' },
       orderBy: { createdAt: 'desc' },
       include: EXPECTED_INCLUDE,
     });
@@ -232,7 +232,7 @@ describe('AssetsService', () => {
     await service.findAll({ categoryId: 'c1' });
 
     expect(asset.findMany).toHaveBeenCalledWith({
-      where: { deletedAt: null, model: { categoryId: 'c1' } },
+      where: { model: { categoryId: 'c1' } },
       orderBy: { createdAt: 'desc' },
       include: EXPECTED_INCLUDE,
     });
@@ -247,7 +247,6 @@ describe('AssetsService', () => {
       [{ where: Record<string, unknown> }]
     >;
     expect(calls[0][0].where).toEqual({
-      deletedAt: null,
       OR: [
         { name: { contains: 'srv', mode: 'insensitive' } },
         { serial: { contains: 'srv', mode: 'insensitive' } },
