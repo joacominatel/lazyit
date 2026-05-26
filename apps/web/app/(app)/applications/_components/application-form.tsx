@@ -10,6 +10,8 @@ import {
 import { useRouter } from "next/navigation";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { CreatableField } from "@/components/creatable-field";
+import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -180,24 +182,36 @@ export function ApplicationForm({
             render={({ field }) => (
               <Field>
                 <FieldLabel htmlFor="categoryId">Category</FieldLabel>
-                <Select
-                  value={field.value ?? NONE}
-                  onValueChange={(value) =>
-                    field.onChange(value === NONE ? undefined : value)
-                  }
+                <CreatableField
+                  label="category"
+                  renderDialog={(dialog) => (
+                    <CreateCategoryDialog
+                      kind="application"
+                      open={dialog.open}
+                      onOpenChange={dialog.onOpenChange}
+                      onCreated={(category) => field.onChange(category.id)}
+                    />
+                  )}
                 >
-                  <SelectTrigger id="categoryId" className="w-full">
-                    <SelectValue placeholder="Select a category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>— None —</SelectItem>
-                    {(categories ?? []).map((category) => (
-                      <SelectItem key={category.id} value={category.id}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  <Select
+                    value={field.value ?? NONE}
+                    onValueChange={(value) =>
+                      field.onChange(value === NONE ? undefined : value)
+                    }
+                  >
+                    <SelectTrigger id="categoryId" className="w-full">
+                      <SelectValue placeholder="Select a category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>— None —</SelectItem>
+                      {(categories ?? []).map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </CreatableField>
               </Field>
             )}
           />

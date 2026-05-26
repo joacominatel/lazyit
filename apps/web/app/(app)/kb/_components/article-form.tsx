@@ -10,6 +10,8 @@ import {
 import { useRouter } from "next/navigation";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { CreatableField } from "@/components/creatable-field";
+import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
 import {
@@ -165,29 +167,41 @@ export function ArticleForm({ article }: { article?: Article }) {
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
               <FieldLabel htmlFor="categoryId">Category</FieldLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger
-                  id="categoryId"
-                  className="w-full sm:w-72"
-                  aria-invalid={fieldState.invalid || undefined}
-                >
-                  <SelectValue
-                    placeholder={
-                      hasCategories ? "Select a category" : "No categories yet"
-                    }
+              <CreatableField
+                label="category"
+                renderDialog={(dialog) => (
+                  <CreateCategoryDialog
+                    kind="article"
+                    open={dialog.open}
+                    onOpenChange={dialog.onOpenChange}
+                    onCreated={(category) => field.onChange(category.id)}
                   />
-                </SelectTrigger>
-                <SelectContent>
-                  {(categories ?? []).map((category) => (
-                    <SelectItem key={category.id} value={category.id}>
-                      {category.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                )}
+              >
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger
+                    id="categoryId"
+                    className="w-full sm:w-72"
+                    aria-invalid={fieldState.invalid || undefined}
+                  >
+                    <SelectValue
+                      placeholder={
+                        hasCategories ? "Select a category" : "No categories yet"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(categories ?? []).map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CreatableField>
               {!hasCategories && (
                 <FieldDescription>
-                  Categories are managed via the API/seed for now.
+                  No categories yet — use the + button to create one.
                 </FieldDescription>
               )}
               <FieldError errors={[fieldState.error]} />

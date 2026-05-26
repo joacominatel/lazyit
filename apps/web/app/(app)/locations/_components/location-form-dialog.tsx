@@ -68,6 +68,8 @@ interface LocationFormDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Present → edit that location; absent → create a new one. */
   location?: Location;
+  /** Called with the created location (create mode) — lets a caller select it inline (#25). */
+  onCreated?: (location: Location) => void;
 }
 
 /**
@@ -79,6 +81,7 @@ export function LocationFormDialog({
   open,
   onOpenChange,
   location,
+  onCreated,
 }: LocationFormDialogProps) {
   const isEdit = location != null;
   const createLocation = useCreateLocation();
@@ -111,7 +114,8 @@ export function LocationFormDialog({
       );
     } else {
       createLocation.mutate(values, {
-        onSuccess: () => {
+        onSuccess: (created) => {
+          onCreated?.(created);
           toast.success("Location created");
           onOpenChange(false);
         },

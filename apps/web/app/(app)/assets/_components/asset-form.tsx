@@ -13,6 +13,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { LocationFormDialog } from "@/app/(app)/locations/_components/location-form-dialog";
+import { CreatableField } from "@/components/creatable-field";
+import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -219,24 +222,35 @@ export function AssetForm({ asset }: { asset?: Asset }) {
             render={({ field }) => (
               <Field>
                 <FieldLabel htmlFor="modelId">Model</FieldLabel>
-                <Select
-                  value={field.value ?? NONE}
-                  onValueChange={(value) =>
-                    field.onChange(value === NONE ? undefined : value)
-                  }
+                <CreatableField
+                  label="model"
+                  renderDialog={(dialog) => (
+                    <CreateAssetModelDialog
+                      open={dialog.open}
+                      onOpenChange={dialog.onOpenChange}
+                      onCreated={(model) => field.onChange(model.id)}
+                    />
+                  )}
                 >
-                  <SelectTrigger id="modelId" className="w-full">
-                    <SelectValue placeholder="Select a model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>— None —</SelectItem>
-                    {(models ?? []).map((model) => (
-                      <SelectItem key={model.id} value={model.id}>
-                        {model.manufacturer} {model.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  <Select
+                    value={field.value ?? NONE}
+                    onValueChange={(value) =>
+                      field.onChange(value === NONE ? undefined : value)
+                    }
+                  >
+                    <SelectTrigger id="modelId" className="w-full">
+                      <SelectValue placeholder="Select a model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>— None —</SelectItem>
+                      {(models ?? []).map((model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          {model.manufacturer} {model.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </CreatableField>
               </Field>
             )}
           />
@@ -247,24 +261,35 @@ export function AssetForm({ asset }: { asset?: Asset }) {
             render={({ field }) => (
               <Field>
                 <FieldLabel htmlFor="locationId">Location</FieldLabel>
-                <Select
-                  value={field.value ?? NONE}
-                  onValueChange={(value) =>
-                    field.onChange(value === NONE ? undefined : value)
-                  }
+                <CreatableField
+                  label="location"
+                  renderDialog={(dialog) => (
+                    <LocationFormDialog
+                      open={dialog.open}
+                      onOpenChange={dialog.onOpenChange}
+                      onCreated={(location) => field.onChange(location.id)}
+                    />
+                  )}
                 >
-                  <SelectTrigger id="locationId" className="w-full">
-                    <SelectValue placeholder="Select a location" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>— None —</SelectItem>
-                    {(locations ?? []).map((location) => (
-                      <SelectItem key={location.id} value={location.id}>
-                        {location.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  <Select
+                    value={field.value ?? NONE}
+                    onValueChange={(value) =>
+                      field.onChange(value === NONE ? undefined : value)
+                    }
+                  >
+                    <SelectTrigger id="locationId" className="w-full">
+                      <SelectValue placeholder="Select a location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>— None —</SelectItem>
+                      {(locations ?? []).map((location) => (
+                        <SelectItem key={location.id} value={location.id}>
+                          {location.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </CreatableField>
               </Field>
             )}
           />
