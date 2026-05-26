@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -11,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
+  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -19,6 +21,8 @@ import {
 import { createZodDto } from 'nestjs-zod';
 import {
   AssetAssignmentWithUserSchema,
+  AssetHistoryQuerySchema,
+  AssetHistorySchema,
   AssetSchema,
   AssetStatusSchema,
   AssetWithRelationsSchema,
@@ -28,7 +32,17 @@ import {
 } from '@lazyit/shared';
 import { AssetsService } from './assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
+import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { parseActiveOnly } from '../asset-assignments/active-only';
+
+// X-User-Id is the auth shim (ADR-0022). On asset writes it's OPTIONAL and recorded as the actor
+// of the resulting history event (AssetHistory.performedById); absent → null actor (ADR-0033).
+const ACTOR_USER_HEADER = {
+  name: 'X-User-Id',
+  required: false,
+  description:
+    'Caller user id (auth shim). Optional; recorded as the actor of the asset history event.',
+} as const;
 
 // Writes keep the lean Asset shape; reads return the expanded AssetWithRelations.
 class AssetDto extends createZodDto(AssetSchema) {}
@@ -38,6 +52,7 @@ class AssetWithRelationsDto extends createZodDto(AssetWithRelationsSchema) {}
 class AssetAssignmentWithUserDto extends createZodDto(
   AssetAssignmentWithUserSchema,
 ) {}
+class AssetHistoryDto extends createZodDto(AssetHistorySchema) {}
 
 @ApiTags('assets')
 @Controller('assets')
@@ -45,6 +60,7 @@ export class AssetsController {
   constructor(
     private readonly assets: AssetsService,
     private readonly assignments: AssetAssignmentsService,
+    private readonly history: AssetHistoryService,
   ) {}
 
   @Get()
@@ -123,24 +139,64 @@ export class AssetsController {
     });
   }
 
+  @Get(':id/history')
+  @ApiOperation({
+    summary:
+      "List an asset's history (newest first; cursor pagination via `before`)",
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Default 50, max 100.',
+  })
+  @ApiQuery({
+    name: 'before',
+    required: false,
+    type: Number,
+    description: 'Cursor: return events with id < before.',
+  })
+  @ApiOkResponse({ type: [AssetHistoryDto] })
+  async findHistory(
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+    @Query('before') before?: string,
+  ) {
+    await this.assets.assertExists(id); // 404 if the asset is missing or soft-deleted
+    const parsed = AssetHistoryQuerySchema.safeParse({ limit, before });
+    if (!parsed.success) {
+      throw new BadRequestException(
+        'Invalid pagination: limit (1-100) and before (positive integer)',
+      );
+    }
+    return this.history.list(id, parsed.data);
+  }
+
   @Post()
   @ApiOperation({ summary: 'Create an asset' })
+  @ApiHeader(ACTOR_USER_HEADER)
   @ApiCreatedResponse({ type: AssetDto })
-  create(@Body() dto: CreateAssetDto) {
-    return this.assets.create(dto);
+  create(@Body() dto: CreateAssetDto, @Headers('x-user-id') actorId?: string) {
+    return this.assets.create(dto, actorId);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update an asset' })
+  @ApiHeader(ACTOR_USER_HEADER)
   @ApiOkResponse({ type: AssetDto })
-  update(@Param('id') id: string, @Body() dto: UpdateAssetDto) {
-    return this.assets.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateAssetDto,
+    @Headers('x-user-id') actorId?: string,
+  ) {
+    return this.assets.update(id, dto, actorId);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Soft-delete an asset' })
+  @ApiHeader(ACTOR_USER_HEADER)
   @ApiOkResponse({ type: AssetDto })
-  remove(@Param('id') id: string) {
-    return this.assets.remove(id);
+  remove(@Param('id') id: string, @Headers('x-user-id') actorId?: string) {
+    return this.assets.remove(id, actorId);
   }
 }
