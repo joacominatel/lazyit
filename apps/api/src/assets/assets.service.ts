@@ -7,6 +7,8 @@ import {
   AssetHistoryService,
   type RecordAssetEvent,
 } from '../asset-history/asset-history.service';
+import { SearchService } from '../search/search.service';
+import { projectAsset } from '../search/search.documents';
 
 /** Optional filters for listing assets. `categoryId` filters by the asset's model's category. */
 export interface AssetFilters {
@@ -40,6 +42,7 @@ export class AssetsService {
     private readonly prisma: PrismaService,
     private readonly actor: ActorService,
     private readonly history: AssetHistoryService,
+    private readonly search: SearchService,
   ) {}
 
   /**
@@ -90,9 +93,9 @@ export class AssetsService {
   async create(data: CreateAsset, actorId?: string) {
     const performedById = await this.actor.resolve(actorId);
     const { specs, ...rest } = data;
-    return this.prisma.$transaction(async (tx) => {
+    const asset = await this.prisma.$transaction(async (tx) => {
       // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
-      const asset = await tx.asset.create({
+      const created = await tx.asset.create({
         data: {
           ...rest,
           ...(specs !== undefined
@@ -101,12 +104,16 @@ export class AssetsService {
         },
       });
       await this.history.record(tx, {
-        assetId: asset.id,
+        assetId: created.id,
         eventType: 'CREATED',
         performedById,
       });
-      return asset;
+      return created;
     });
+    // Fire-and-forget search sync after the commit (ADR-0035): un-awaited, never throws, no-op when
+    // Meili is disabled. Outside the transaction so a search outage can't roll back the write.
+    this.search.upsert('assets', projectAsset(asset));
+    return asset;
   }
 
   /**
@@ -129,8 +136,8 @@ export class AssetsService {
       throw new NotFoundException(`Asset ${id} not found`);
     }
     const { specs, ...rest } = data;
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.asset.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.asset.update({
         where: { id },
         data: {
           ...rest,
@@ -139,19 +146,22 @@ export class AssetsService {
             : {}),
         },
       });
-      for (const event of this.changeEvents(before, updated, performedById)) {
+      for (const event of this.changeEvents(before, row, performedById)) {
         await this.history.record(tx, event);
       }
-      return updated;
+      return row;
     });
+    // Fire-and-forget search sync after the commit (ADR-0035): re-index the updated row.
+    this.search.upsert('assets', projectAsset(updated));
+    return updated;
   }
 
   /** Soft delete: set deletedAt (never hard-delete). Emits `DELETED` transactionally (ADR-0033). */
   async remove(id: string, actorId?: string) {
     const performedById = await this.actor.resolve(actorId);
     await this.assertExists(id);
-    return this.prisma.$transaction(async (tx) => {
-      const deleted = await tx.asset.update({
+    const deleted = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.asset.update({
         where: { id },
         data: { deletedAt: new Date() },
       });
@@ -160,8 +170,11 @@ export class AssetsService {
         eventType: 'DELETED',
         performedById,
       });
-      return deleted;
+      return row;
     });
+    // Drop from the index so soft-deleted assets never surface in search (ADR-0035).
+    this.search.remove('assets', id);
+    return deleted;
   }
 
   /** Lightweight 404 guard for writes and the nested assignments endpoint (no relation loading). */
