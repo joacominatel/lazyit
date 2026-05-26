@@ -4,6 +4,7 @@ import { AssetsService } from './assets.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
+import { SearchService } from '../search/search.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` only for types (erased at runtime), so an empty object is enough.
@@ -11,6 +12,9 @@ jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {},
 }));
+// AssetsService transitively imports the ESM `meilisearch` package (via SearchService); jest can't
+// transform it. SearchService is replaced by a mock below; this stub stops the real module loading.
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 type PrismaAssetMock = {
   findMany: jest.Mock;
@@ -97,6 +101,7 @@ describe('AssetsService', () => {
   };
   let actor: { resolve: jest.Mock };
   let history: { record: jest.Mock; list: jest.Mock };
+  let search: { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
 
   beforeEach(async () => {
     asset = {
@@ -117,6 +122,7 @@ describe('AssetsService', () => {
     // just steer resolve() and assert the service delegates to it. Default: no actor (undefined).
     actor = { resolve: jest.fn().mockResolvedValue(undefined) };
     history = { record: jest.fn(), list: jest.fn() };
+    search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -124,6 +130,7 @@ describe('AssetsService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ActorService, useValue: actor },
         { provide: AssetHistoryService, useValue: history },
+        { provide: SearchService, useValue: search },
       ],
     }).compile();
 
@@ -168,6 +175,15 @@ describe('AssetsService', () => {
       { asset: tx },
       { assetId: 'a1', eventType: 'CREATED', performedById: undefined },
     );
+    // Fire-and-forget search sync after the commit (ADR-0035): the new asset is upserted.
+    expect(search.upsert).toHaveBeenCalledWith('assets', {
+      id: 'a1',
+      name: 'SRV-01',
+      serial: undefined,
+      assetTag: undefined,
+      status: 'OPERATIONAL',
+      notes: undefined,
+    });
   });
 
   it('resolves the actor via ActorService and stamps it onto the CREATED event', async () => {
@@ -362,6 +378,11 @@ describe('AssetsService', () => {
       where: { id: 'a1' },
       data: { status: 'RETIRED' },
     });
+    // Re-index the updated asset after the commit (ADR-0035); projects the returned row.
+    expect(search.upsert).toHaveBeenCalledWith(
+      'assets',
+      expect.objectContaining({ id: 'a1', status: 'RETIRED' }),
+    );
   });
 
   it('update throws NotFound (and never opens a transaction) when the asset is missing', async () => {
@@ -515,6 +536,9 @@ describe('AssetsService', () => {
     const calls = tx.update.mock.calls as UpdateCall[];
     expect(calls[0][0].where).toEqual({ id: 'a1' });
     expect(calls[0][0].data.deletedAt).toBeInstanceOf(Date);
+    // Soft-delete drops the asset from the search index (ADR-0035).
+    expect(search.remove).toHaveBeenCalledWith('assets', 'a1');
+    expect(search.upsert).not.toHaveBeenCalled();
   });
 
   it('records a DELETED history event on soft delete', async () => {
@@ -540,5 +564,6 @@ describe('AssetsService', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(tx.update).not.toHaveBeenCalled();
     expect(history.record).not.toHaveBeenCalled();
+    expect(search.remove).not.toHaveBeenCalled();
   });
 });
