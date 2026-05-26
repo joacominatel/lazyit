@@ -73,6 +73,7 @@ export default function ConsumablesPage() {
     data: consumables,
     isLoading,
     isError,
+    error,
     refetch,
   } = useConsumables({ lowStock: stockFilter === "LOW" });
   const { data: categories } = useConsumableCategories();
@@ -126,6 +127,7 @@ export default function ConsumablesPage() {
         <ErrorState
           title="Could not load consumables"
           onRetry={() => refetch()}
+          error={error}
         />
       ) : isEmpty && !filtersActive ? (
         <EmptyState
