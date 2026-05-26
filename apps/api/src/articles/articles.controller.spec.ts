@@ -11,6 +11,9 @@ jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {},
 }));
+// ArticlesService transitively imports the ESM `meilisearch` package (via SearchService); jest
+// can't transform it. The service is mocked below, so this stub just stops the real module loading.
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 /**
  * SEC-001 — the import endpoint must cap the upload at the multer interceptor, so an oversized file

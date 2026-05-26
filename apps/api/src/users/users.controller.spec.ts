@@ -10,6 +10,9 @@ jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {},
 }));
+// UsersService transitively imports the ESM `meilisearch` package (via SearchService); jest can't
+// transform it. The service is mocked below, so this stub just stops the real module from loading.
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 /**
  * SEC-004 — `User.id` is a uuid PK. A malformed `:id` used to flow straight into Prisma and 500.

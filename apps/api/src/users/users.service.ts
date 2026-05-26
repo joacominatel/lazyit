@@ -1,10 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { CreateUser, UpdateUser } from '@lazyit/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { SearchService } from '../search/search.service';
+import { projectUser } from '../search/search.documents';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly search: SearchService,
+  ) {}
 
   /** All users that have not been soft-deleted. */
   findAll() {
@@ -24,21 +29,29 @@ export class UsersService {
     return user;
   }
 
-  create(data: CreateUser) {
-    return this.prisma.user.create({ data });
+  async create(data: CreateUser) {
+    const user = await this.prisma.user.create({ data });
+    // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
+    this.search.upsert('users', projectUser(user));
+    return user;
   }
 
   async update(id: string, data: UpdateUser) {
     await this.findOne(id); // 404 if missing or already soft-deleted
-    return this.prisma.user.update({ where: { id }, data });
+    const user = await this.prisma.user.update({ where: { id }, data });
+    this.search.upsert('users', projectUser(user));
+    return user;
   }
 
   /** Soft delete: set deletedAt. Never hard-delete (auditability is a first principle). */
   async remove(id: string) {
     await this.findOne(id);
-    return this.prisma.user.update({
+    const user = await this.prisma.user.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
+    // Drop from the index so soft-deleted users never surface in search (ADR-0035).
+    this.search.remove('users', id);
+    return user;
   }
 }

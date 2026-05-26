@@ -2,10 +2,15 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type { CreateApplication, UpdateApplication } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { SearchService } from '../search/search.service';
+import { projectApplication } from '../search/search.documents';
 
 @Injectable()
 export class ApplicationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly search: SearchService,
+  ) {}
 
   /** All non-deleted applications, alphabetically by name. */
   findAll() {
@@ -25,9 +30,9 @@ export class ApplicationsService {
     return application;
   }
 
-  create(data: CreateApplication) {
+  async create(data: CreateApplication) {
     const { metadata, ...rest } = data;
-    return this.prisma.application.create({
+    const application = await this.prisma.application.create({
       data: {
         ...rest,
         ...(metadata !== undefined
@@ -35,12 +40,15 @@ export class ApplicationsService {
           : {}),
       },
     });
+    // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
+    this.search.upsert('applications', projectApplication(application));
+    return application;
   }
 
   async update(id: string, data: UpdateApplication) {
     await this.findOne(id); // 404 if missing or already soft-deleted
     const { metadata, ...rest } = data;
-    return this.prisma.application.update({
+    const application = await this.prisma.application.update({
       where: { id },
       data: {
         ...rest,
@@ -49,6 +57,8 @@ export class ApplicationsService {
           : {}),
       },
     });
+    this.search.upsert('applications', projectApplication(application));
+    return application;
   }
 
   /**
@@ -58,9 +68,12 @@ export class ApplicationsService {
    */
   async remove(id: string) {
     await this.findOne(id);
-    return this.prisma.application.update({
+    const application = await this.prisma.application.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
+    // Drop from the index so soft-deleted applications never surface in search (ADR-0035).
+    this.search.remove('applications', id);
+    return application;
   }
 }

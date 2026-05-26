@@ -21,5 +21,20 @@ services:
       retries: 5
       start_period: 30s
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.12.3
+    restart: always
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: ${MEILI_ENV:-development}
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meili_data:/meili_data
+    ports:
+      # Loopback only — the dev search engine must not be reachable from the LAN (SEC-005, ADR-0028).
+      # Production runs Meilisearch in infra/docker-compose.prod.yml (DevOps), never published.
+      - "127.0.0.1:7700:7700"
+
 volumes:
   db_data:
+  meili_data:
