@@ -2,6 +2,11 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type { AssetStatus, CreateAsset, UpdateAsset } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ActorService } from '../common/actor.service';
+import {
+  AssetHistoryService,
+  type RecordAssetEvent,
+} from '../asset-history/asset-history.service';
 
 /** Optional filters for listing assets. `categoryId` filters by the asset's model's category. */
 export interface AssetFilters {
@@ -31,7 +36,11 @@ type AssetWithIncludes = Prisma.AssetGetPayload<{
 
 @Injectable()
 export class AssetsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly actor: ActorService,
+    private readonly history: AssetHistoryService,
+  ) {}
 
   /**
    * Non-deleted assets (expanded with model/category, location, activeAssignments+user), newest
@@ -74,40 +83,84 @@ export class AssetsService {
     return this.toExpanded(asset);
   }
 
-  /** Create. Invalid modelId/locationId hit the FK and are mapped to 400 by PrismaExceptionFilter. */
-  create(data: CreateAsset) {
+  /**
+   * Create. Emits a `CREATED` history event transactionally with the insert (ADR-0033); the actor
+   * comes from the X-User-Id shim. Invalid modelId/locationId hit the FK and are mapped to 400.
+   */
+  async create(data: CreateAsset, actorId?: string) {
+    const performedById = await this.actor.resolve(actorId);
     const { specs, ...rest } = data;
-    return this.prisma.asset.create({
+    return this.prisma.$transaction(async (tx) => {
       // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
-      data: {
-        ...rest,
-        ...(specs !== undefined
-          ? { specs: specs as Prisma.InputJsonValue }
-          : {}),
-      },
+      const asset = await tx.asset.create({
+        data: {
+          ...rest,
+          ...(specs !== undefined
+            ? { specs: specs as Prisma.InputJsonValue }
+            : {}),
+        },
+      });
+      await this.history.record(tx, {
+        assetId: asset.id,
+        eventType: 'CREATED',
+        performedById,
+      });
+      return asset;
     });
   }
 
-  async update(id: string, data: UpdateAsset) {
-    await this.assertExists(id); // 404 if missing or already soft-deleted
+  /**
+   * Partial update. Emits a discrete history event per changed dimension (status / location / model
+   * / specs), transactionally with the update (ADR-0033). 404 if missing or already soft-deleted.
+   */
+  async update(id: string, data: UpdateAsset, actorId?: string) {
+    const performedById = await this.actor.resolve(actorId);
+    const before = await this.prisma.asset.findFirst({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        locationId: true,
+        modelId: true,
+        specs: true,
+      },
+    });
+    if (!before) {
+      throw new NotFoundException(`Asset ${id} not found`);
+    }
     const { specs, ...rest } = data;
-    return this.prisma.asset.update({
-      where: { id },
-      data: {
-        ...rest,
-        ...(specs !== undefined
-          ? { specs: specs as Prisma.InputJsonValue }
-          : {}),
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.asset.update({
+        where: { id },
+        data: {
+          ...rest,
+          ...(specs !== undefined
+            ? { specs: specs as Prisma.InputJsonValue }
+            : {}),
+        },
+      });
+      for (const event of this.changeEvents(before, updated, performedById)) {
+        await this.history.record(tx, event);
+      }
+      return updated;
     });
   }
 
-  /** Soft delete: set deletedAt. Never hard-delete (auditability is a first principle). */
-  async remove(id: string) {
+  /** Soft delete: set deletedAt (never hard-delete). Emits `DELETED` transactionally (ADR-0033). */
+  async remove(id: string, actorId?: string) {
+    const performedById = await this.actor.resolve(actorId);
     await this.assertExists(id);
-    return this.prisma.asset.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    return this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.asset.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      await this.history.record(tx, {
+        assetId: id,
+        eventType: 'DELETED',
+        performedById,
+      });
+      return deleted;
     });
   }
 
@@ -126,5 +179,56 @@ export class AssetsService {
   private toExpanded(asset: AssetWithIncludes) {
     const { assignments, ...rest } = asset;
     return { ...rest, activeAssignments: assignments };
+  }
+
+  /** One discrete history event per field that actually changed in an update (ADR-0033). */
+  private changeEvents(
+    before: Pick<
+      Prisma.AssetGetPayload<{
+        select: {
+          status: true;
+          locationId: true;
+          modelId: true;
+          specs: true;
+        };
+      }>,
+      'status' | 'locationId' | 'modelId' | 'specs'
+    >,
+    updated: { id: string } & typeof before,
+    performedById?: string,
+  ): RecordAssetEvent[] {
+    const events: RecordAssetEvent[] = [];
+    const change = (
+      eventType: RecordAssetEvent['eventType'],
+      from: unknown,
+      to: unknown,
+    ) =>
+      events.push({
+        assetId: updated.id,
+        eventType,
+        payload: { from, to } as Prisma.InputJsonValue,
+        performedById,
+      });
+    if (before.status !== updated.status) {
+      change('STATUS_CHANGED', before.status, updated.status);
+    }
+    if (before.locationId !== updated.locationId) {
+      change('LOCATION_CHANGED', before.locationId, updated.locationId);
+    }
+    if (before.modelId !== updated.modelId) {
+      change('MODEL_CHANGED', before.modelId, updated.modelId);
+    }
+    if (
+      JSON.stringify(before.specs ?? null) !==
+      JSON.stringify(updated.specs ?? null)
+    ) {
+      // specs can be large; record the change without echoing both blobs into the payload.
+      events.push({
+        assetId: updated.id,
+        eventType: 'SPECS_CHANGED',
+        performedById,
+      });
+    }
+    return events;
   }
 }
