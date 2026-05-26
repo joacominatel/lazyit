@@ -32,6 +32,25 @@ Default operating procedure for **every** change. Full version:
 6. **External libraries → latest docs.** Check current official docs (e.g. Context7 / web)
    before using or upgrading a library — don't rely on memory.
 
+## Git workflow (READ FIRST)
+
+Every change rides a GitHub branch+PR flow. Full runbook: `docs/05-runbooks/git-workflow.md`
+(quick reference) — rationale in `docs/04-development/claude-workflow.md`.
+
+- **Branches.** `master` = production (protected; only the user merges `dev` → `master`).
+  `dev` = integration (every PR lands here first). Work happens on **issue branches cut from
+  `dev`**, named `<prefix>/issue-<n>-<slug>` where `<prefix>` is the commit prefix
+  (`feat`/`fix`/`chore`/`del`/`updt`/`docs`) and `<slug>` is short kebab-case English.
+- **Start every task by finding the issue.** `gh issue list --search "<keywords>"`. Reuse it if
+  it exists; if the scope is clear, `gh issue create` (label `auto-generated`); if it isn't,
+  **🚨 ask the user**. The user owns principal issues; agents may open technical sub-issues.
+- **The loop.** Branch off `dev` → commit file-by-file → push → **tell the user you're done and
+  wait** → on their OK, `gh pr create --base dev` → iterate on the same branch if they ask.
+- **Agents never merge.** The user reviews, approves and merges PRs into `dev`, and is the only
+  one who promotes `dev` → `master`. Agents do **not** open the PR until the user says so.
+- **Anti-clobber still holds** (now per branch): no `--amend` / `rebase` / `reset` / `add -A` /
+  `add .`; stage explicit files, commit file-by-file, no Claude attribution trailers.
+
 ## Where things are (docs map)
 
 | You need… | Read |
@@ -42,7 +61,7 @@ Default operating procedure for **every** change. Full version:
 | Why a decision was made | `docs/03-decisions/` — ADRs (MADR-lite) |
 | Set up & day-to-day work | `docs/04-development/` — setup, workflows, code-conventions, claude-workflow |
 | What goes in `@lazyit/shared` | `docs/01-architecture/shared-package.md` |
-| Operations / deploy / backups | `docs/05-runbooks/` (stub until there's something to operate) |
+| Operations / deploy / backups | `docs/05-runbooks/` — git workflow, Docker deploy, backups, troubleshooting |
 | Vocabulary | `docs/99-glossary/` |
 
 ## Philosophy

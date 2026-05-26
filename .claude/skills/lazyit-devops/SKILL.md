@@ -109,13 +109,18 @@ Key facts that shape the images (verified against the repo):
 - **Image tags**: `lazyit-api` / `lazyit-web` (+ `:dev` locally). Commit-SHA + `latest` for dev,
   semver for prod (future, with CD).
 - **English everywhere** in artifacts (code, configs, comments, docs) — repo convention.
+- **Branch + PR flow**: every change rides an issue branch cut from `dev`
+  (`<prefix>/issue-<n>-<slug>`); find or open the issue first, commit on the branch, push, then
+  (on the user's OK) open a PR to `dev`. The user reviews, merges into `dev`, and promotes
+  `dev` → `master`. **Agents never merge.** → [[git-workflow]].
 - **Commits are file-by-file**: `feat:` for new infra, `chore:` for CI/config, `docs:` for
-  runbooks/ADRs. Never `git add -A`/`.`, never `commit --amend`/`rebase`/`reset` (other agents
-  commit in parallel) — see [[claude-workflow]].
+  runbooks/ADRs. Never `git add -A`/`.`, never `commit --amend`/`rebase`/`reset` — we work on
+  separate branches, so conflicts are resolved at PR merge, and history rewrites break the PR's
+  review trail. See [[claude-workflow]].
 
 ## 5. CI/CD strategy
 
-CI runs on every **PR** and **push to `master`** (`.github/workflows/ci.yml`):
+CI runs on every **push to** and **PR targeting `master`/`dev`** (`.github/workflows/ci.yml`):
 1. Install (Bun, pinned `1.3.14`, cached on `bun.lock`).
 2. `prisma generate` (**before** typecheck/test — the generated client is imported in code and specs).
 3. Typecheck (`tsc --noEmit` per workspace).

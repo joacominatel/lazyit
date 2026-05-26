@@ -31,8 +31,12 @@ lane** (a parallel agent). A finding tagged `module: infra` (e.g. SEC-005) is **
 DevOps hand-off in the report; do not edit it. Never write in `.claude/skills/lazyit-sentinel/**` or
 `lazyit-navigator/**`.
 
-**Git:** only `git add <explicit-file>` + `git commit`. **Never** `git add -A`/`add .`/`commit --amend`/
-`rebase`/`reset` — other agents commit in parallel; rewriting HEAD clobbers their work. **Never** run the
+**Git:** work on an issue branch cut from `dev` (`fix/issue-<n>-<slug>` — find or open the finding's
+issue first), commit there, push, and **on the user's OK** open a PR to `dev`; the move of the finding
+from `issues/` to `closed/` **rides the same branch/PR**. Agents never merge — the user does
+(→ [[git-workflow]]). Only `git add <explicit-file>` + `git commit`. **Never** `git add -A`/`add .`/
+`commit --amend`/`rebase`/`reset` — we work on separate branches, so conflicts resolve at PR merge, and
+rewriting HEAD breaks the PR's review trail. **Never** run the
 repo-wide `bun run lint` (it `eslint --fix`es files you don't own). Scope any lint to your own paths.
 Bun for package management (repo default) — never npm/yarn/pnpm. Boot the API only if a fix needs a live
 check, on a port **other than 3001/3000** (e.g. 3010); kill it by port when done.
