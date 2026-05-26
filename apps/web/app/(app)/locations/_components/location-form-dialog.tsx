@@ -39,6 +39,7 @@ import {
   useCreateLocation,
   useUpdateLocation,
 } from "@/lib/api/hooks/use-location-mutations";
+import { notifyError } from "@/lib/api/notify-error";
 import { formatLocationType } from "./location-type-badge";
 
 const FORM_ID = "location-form";
@@ -57,10 +58,6 @@ function toFormValues(location?: Location): CreateLocation {
     floor: location?.floor ?? undefined,
     notes: location?.notes ?? undefined,
   };
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 interface LocationFormDialogProps {
@@ -109,7 +106,7 @@ export function LocationFormDialog({
             onOpenChange(false);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't update location")),
+            notifyError(error, "Couldn't update location"),
         },
       );
     } else {
@@ -120,7 +117,7 @@ export function LocationFormDialog({
           onOpenChange(false);
         },
         onError: (error) =>
-          toast.error(errorMessage(error, "Couldn't create location")),
+          notifyError(error, "Couldn't create location"),
       });
     }
   });

@@ -75,7 +75,13 @@ export default function ApplicationsPage() {
 
   const debouncedSearch = useDebouncedValue(search.trim().toLowerCase(), 300);
 
-  const { data: applications, isLoading, isError, refetch } = useApplications();
+  const {
+    data: applications,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useApplications();
   const { data: categories } = useApplicationCategories();
   // All active grants across apps + all users — joined client-side for the counts/avatars (ADR-0020).
   const { data: activeGrants } = useAccessGrants({ activeOnly: true });
@@ -150,6 +156,7 @@ export default function ApplicationsPage() {
         <ErrorState
           title="Could not load applications"
           onRetry={() => refetch()}
+          error={error}
         />
       ) : isEmpty && !filtersActive ? (
         <EmptyState

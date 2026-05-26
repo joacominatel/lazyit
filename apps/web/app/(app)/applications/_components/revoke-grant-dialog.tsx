@@ -13,10 +13,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
+import { notifyError } from "@/lib/api/notify-error";
 
 interface RevokeGrantDialogProps {
   open: boolean;
@@ -51,7 +48,7 @@ export function RevokeGrantDialog({
       toast.success("Access revoked");
       onOpenChange(false);
     } catch (error) {
-      toast.error(errorMessage(error, "Couldn't revoke access"));
+      notifyError(error, "Couldn't revoke access");
     } finally {
       setIsPending(false);
     }

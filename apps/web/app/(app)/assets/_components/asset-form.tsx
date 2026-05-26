@@ -36,6 +36,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useLocations } from "@/lib/api/hooks/use-locations";
+import { notifyError } from "@/lib/api/notify-error";
 import { formatAssetStatus } from "./asset-status-badge";
 
 const FORM_ID = "asset-form";
@@ -79,10 +80,6 @@ function toFormValues(asset?: Asset): AssetFormValues {
     };
   }
   return { name: "", status: "OPERATIONAL" };
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 /**
@@ -155,7 +152,7 @@ export function AssetForm({ asset }: { asset?: Asset }) {
             router.push(`/assets/${updated.id}`);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't save the asset")),
+            notifyError(error, "Couldn't save the asset"),
         },
       );
     } else {
@@ -165,7 +162,7 @@ export function AssetForm({ asset }: { asset?: Asset }) {
           router.push(`/assets/${created.id}`);
         },
         onError: (error) =>
-          toast.error(errorMessage(error, "Couldn't create the asset")),
+          notifyError(error, "Couldn't create the asset"),
       });
     }
   });

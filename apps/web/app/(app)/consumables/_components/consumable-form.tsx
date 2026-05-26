@@ -34,6 +34,7 @@ import {
   useCreateConsumable,
   useUpdateConsumable,
 } from "@/lib/api/hooks/use-consumable-mutations";
+import { notifyError } from "@/lib/api/notify-error";
 
 const FORM_ID = "consumable-form";
 /** Radix Select forbids an empty-string item value; use a sentinel for "no category". */
@@ -62,10 +63,6 @@ function toFormValues(consumable?: Consumable): ConsumableFormValues {
     };
   }
   return { name: "", unit: "units" };
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 /**
@@ -108,7 +105,7 @@ export function ConsumableForm({ consumable }: { consumable?: Consumable }) {
             router.push(`/consumables/${updated.id}`);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't save the consumable")),
+            notifyError(error, "Couldn't save the consumable"),
         },
       );
     } else {
@@ -118,7 +115,7 @@ export function ConsumableForm({ consumable }: { consumable?: Consumable }) {
           router.push(`/consumables/${created.id}`);
         },
         onError: (error) =>
-          toast.error(errorMessage(error, "Couldn't create the consumable")),
+          notifyError(error, "Couldn't create the consumable"),
       });
     }
   });

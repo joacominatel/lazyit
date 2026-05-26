@@ -106,7 +106,8 @@ export default function AssetsPage() {
     [debouncedSearch, statusFilter, categoryFilter, locationFilter],
   );
 
-  const { data: assets, isLoading, isError, refetch } = useAssets(filters);
+  const { data: assets, isLoading, isError, error, refetch } =
+    useAssets(filters);
   const { data: categories } = useAssetCategories();
   const { data: locations } = useLocations();
   const deleteAsset = useDeleteAsset();
@@ -151,7 +152,11 @@ export default function AssetsPage() {
       {isLoading ? (
         <ResourceTable columns={COLUMNS} isLoading />
       ) : isError ? (
-        <ErrorState title="Could not load assets" onRetry={() => refetch()} />
+        <ErrorState
+          title="Could not load assets"
+          onRetry={() => refetch()}
+          error={error}
+        />
       ) : isEmpty && !filtersActive ? (
         <EmptyState
           icon={ServerStackIcon}
