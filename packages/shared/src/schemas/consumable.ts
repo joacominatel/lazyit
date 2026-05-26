@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { int4 } from "./primitives";
 
 /**
  * Consumable — a stock-counted supply item (cables, adapters, toner, …). Distinct from Asset, which
@@ -18,9 +19,9 @@ export const ConsumableSchema = z.object({
   categoryId: z.cuid().nullable(),
   description: z.string().nullable(),
   // Cached on-hand quantity (ADR-0034). Maintained only through movements.
-  currentStock: z.number().int(),
+  currentStock: int4({ min: 0 }),
   // Optional reorder threshold for low-stock alerts (currentStock <= minStock).
-  minStock: z.number().int().nullable(),
+  minStock: int4({ min: 0 }).nullable(),
   // Free-form unit of measure ("units", "meters", "boxes", …). Not an enum on purpose.
   unit: z.string(),
   notes: z.string().nullable(),
@@ -38,7 +39,7 @@ export const CreateConsumableSchema = z.strictObject({
   sku: z.string().trim().min(1).max(100).optional(),
   categoryId: z.cuid().optional(),
   description: z.string().trim().min(1).max(1000).optional(),
-  minStock: z.number().int().min(0).optional(),
+  minStock: int4({ min: 0, example: 5 }).optional(),
   unit: z.string().trim().min(1).max(50).default("units"),
   notes: z.string().trim().min(1).max(2000).optional(),
 });
@@ -50,7 +51,7 @@ export const UpdateConsumableSchema = z
     sku: z.string().trim().min(1).max(100),
     categoryId: z.cuid(),
     description: z.string().trim().min(1).max(1000),
-    minStock: z.number().int().min(0),
+    minStock: int4({ min: 0, example: 5 }),
     unit: z.string().trim().min(1).max(50),
     notes: z.string().trim().min(1).max(2000),
   })

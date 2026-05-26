@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { int4 } from "./primitives";
 
 /**
  * AssetHistory — an append-only log of discrete state changes for an Asset (ADR-0033). Single
@@ -25,7 +26,7 @@ const AssetHistoryPayloadSchema = z.record(z.string(), z.unknown());
 
 /** A single AssetHistory row (API representation of the `asset_history` row). */
 export const AssetHistorySchema = z.object({
-  id: z.number().int(),
+  id: int4(),
   assetId: z.cuid(),
   eventType: AssetHistoryEventTypeSchema,
   payload: AssetHistoryPayloadSchema.nullable(),

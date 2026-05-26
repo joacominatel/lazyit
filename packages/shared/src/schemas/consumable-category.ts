@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { int4 } from "./primitives";
 
 /**
  * ConsumableCategory — user-managed grouping for Consumables (Cables, Adapters, Peripherals, …).
@@ -17,7 +18,7 @@ export const ConsumableCategorySchema = z.object({
   // Free string: a heroicon name for the web UI (e.g. "CpuChipIcon"). Not validated.
   icon: z.string().nullable(),
   // Optional sort key for the listing (lower first); null sorts last.
-  order: z.number().int().nullable(),
+  order: int4().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
@@ -28,7 +29,7 @@ export const CreateConsumableCategorySchema = z.strictObject({
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().min(1).max(1000).optional(),
   icon: z.string().trim().min(1).max(100).optional(),
-  order: z.number().int().optional(),
+  order: int4({ example: 0 }).optional(),
 });
 
 /** Partial update; any subset of the editable fields. */
@@ -37,7 +38,7 @@ export const UpdateConsumableCategorySchema = z
     name: z.string().trim().min(1).max(100),
     description: z.string().trim().min(1).max(1000),
     icon: z.string().trim().min(1).max(100),
-    order: z.number().int(),
+    order: int4({ example: 0 }),
   })
   .partial();
 

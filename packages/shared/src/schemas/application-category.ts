@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { int4 } from "./primitives";
 
 /**
  * ApplicationCategory — user-managed grouping for Applications (SaaS, Internal, Service, …).
@@ -18,7 +19,7 @@ export const ApplicationCategorySchema = z.object({
   // Free string: a heroicon name for the web UI (e.g. "CloudIcon"). Not validated.
   icon: z.string().nullable(),
   // Optional sort key for the listing (lower first); null sorts last.
-  order: z.number().int().nullable(),
+  order: int4().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
@@ -29,7 +30,7 @@ export const CreateApplicationCategorySchema = z.strictObject({
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().min(1).max(1000).optional(),
   icon: z.string().trim().min(1).max(100).optional(),
-  order: z.number().int().optional(),
+  order: int4({ example: 0 }).optional(),
 });
 
 /** Partial update; any subset of the editable fields. */
@@ -38,7 +39,7 @@ export const UpdateApplicationCategorySchema = z
     name: z.string().trim().min(1).max(100),
     description: z.string().trim().min(1).max(1000),
     icon: z.string().trim().min(1).max(100),
-    order: z.number().int(),
+    order: int4({ example: 0 }),
   })
   .partial();
 
