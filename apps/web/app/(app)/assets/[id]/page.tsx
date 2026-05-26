@@ -20,14 +20,11 @@ import { UserAvatar } from "@/components/user-avatar";
 import { useAsset, useAssetAssignments } from "@/lib/api/hooks/use-assets";
 import { useDeleteAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
+import { notifyError } from "@/lib/api/notify-error";
 import { formatDate } from "@/lib/utils/format";
 import { AssetHistoryTimeline } from "../_components/asset-history-timeline";
 import { AssetStatusBadge } from "../_components/asset-status-badge";
 import { AssignUserDialog } from "../_components/assign-user-dialog";
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 function ownerName(assignment: AssetAssignmentWithUser): string {
   return `${assignment.user.firstName} ${assignment.user.lastName}`;
@@ -89,7 +86,7 @@ export default function AssetDetailPage() {
           setReleasingId(null);
         },
         onError: (error) => {
-          toast.error(errorMessage(error, "Couldn't release the owner"));
+          notifyError(error, "Couldn't release the owner");
           setReleasingId(null);
         },
       },
