@@ -31,10 +31,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useGrantAccess } from "@/lib/api/hooks/use-access-grant-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
+import { notifyError } from "@/lib/api/notify-error";
 
 /** "YYYY-MM-DD" from a date input → ISO datetime (undefined when empty). */
 function dateInputToIso(value: string): string | undefined {
@@ -96,7 +93,7 @@ export function GrantAccessDialog({
           handleOpenChange(false);
         },
         onError: (error) =>
-          toast.error(errorMessage(error, "Couldn't grant access")),
+          notifyError(error, "Couldn't grant access"),
       },
     );
   }
