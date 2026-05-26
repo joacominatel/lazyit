@@ -48,7 +48,8 @@ export default function KnowledgeBasePage() {
     [debouncedSearch, statusFilter, categoryFilter],
   );
 
-  const { data: articles, isLoading, isError, refetch } = useArticles(filters);
+  const { data: articles, isLoading, isError, error, refetch } =
+    useArticles(filters);
   const { data: categories } = useArticleCategories();
   const { data: users } = useUsers();
 
@@ -132,6 +133,7 @@ export default function KnowledgeBasePage() {
         <ErrorState
           title="Could not load articles"
           onRetry={() => refetch()}
+          error={error}
         />
       ) : isEmpty ? (
         filtersActive ? (
