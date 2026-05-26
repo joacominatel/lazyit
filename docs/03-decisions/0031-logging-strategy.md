@@ -55,7 +55,9 @@ ordering ambiguity, no change to the Prisma mapping.
   `buildLoggerParams(nodeEnv)` (`apps/api/src/logging/logging.config.ts`), unit-tested in isolation.
 - **Request id:** `genReqId` honors an inbound `X-Request-Id` (else generates a `uuid`) and **echoes
   it on the response** `X-Request-Id` header; nestjs-pino then stamps it on every log line of the
-  request.
+  request. CORS **exposes** that header (`exposedHeaders: ['X-Request-Id']` in `main.ts`) so the
+  browser can read it cross-origin — the web client captures it onto `ApiError.requestId` and shows
+  it in its error UX ([[0020-frontend-data-layer]]).
 - **Actor:** `customProps` surfaces the `X-User-Id` shim value as a clean `actor` field (null when
   absent); the raw `x-user-id` header is **redacted** from the logged headers.
 - **Redaction:** `req.headers.authorization`, `req.headers.cookie`, `req.headers["x-user-id"]`.

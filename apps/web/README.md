@@ -34,6 +34,7 @@ app/
 │   └── login/page.tsx    # placeholder — no real auth yet (ADR-0016)
 └── (app)/                # private app routes (sidebar + topbar)
     ├── layout.tsx        # shell; <SidebarNav> + topbar <GlobalSearch>. No auth guard yet (ADR-0016)
+    ├── error.tsx         # segment error boundary — recover screen + request id (ADR-0031)
     ├── dashboard/page.tsx
     ├── locations/        # first CRUD feature — the template (ADR-0020)
     │   ├── page.tsx      # list + filters + table + states; orchestrates dialogs
@@ -95,6 +96,7 @@ components/
 ├── global-search.tsx          # ⌘K command palette over GET /search (topbar, ADR-0035)
 ├── markdown-editor.tsx        # textarea + live preview (KB editor)
 ├── markdown-view.tsx          # react-markdown + gfm renderer (prose)
+├── request-id-note.tsx        # API request id + copy button (error boundary, list error states)
 ├── resource-table.tsx         # table shell + list states + RowActions (any resource)
 ├── sidebar-nav.tsx            # app navigation with active-route state (client)
 ├── theme-toggle.tsx           # light/dark switch (heroicons)
@@ -110,7 +112,8 @@ lib/
 │   └── format.ts         # shared display formatters (formatDate, formatRelativeTime)
 └── api/
     ├── acting-user.ts    # dev X-User-Id store (acting user) + useActingUserId
-    ├── client.ts         # typed fetch wrapper (apiFetch / ApiError; FormData + X-User-Id)
+    ├── client.ts         # typed fetch wrapper (apiFetch / ApiError; FormData + X-User-Id; captures X-Request-Id)
+    ├── notify-error.ts   # notifyError(error, fallback) — the single error-toast entry point (+ request id)
     ├── crud-endpoints.ts # createCrudEndpoints — the 5 REST bodies, per-resource generics
     ├── query-keys.ts     # createQueryKeys — the all/lists/detail key factory
     ├── endpoints/        # pure fetch functions per resource — the ONLY apiFetch callers
@@ -275,6 +278,23 @@ can be created without leaving the form (#25). The existing `LocationFormDialog`
 are reused via an `onCreated` callback; categories and models get lean quick-create dialogs. Wired
 into the asset, application, consumable and KB forms and the grant / assign dialogs. (The asset
 *category* — selected only inside the model dialog — stays a plain select to avoid a nested dialog.)
+
+## Error handling
+
+The API stamps every response with an `X-Request-Id` (ADR-0031) and `apiFetch` captures it onto
+`ApiError.requestId`, so a failure can always be tied back to the structured server log. The UI
+surfaces it two ways:
+
+- **Recoverable errors** (a mutation/action that failed — validation, conflict, transient) →
+  `notifyError(error, fallback)` (`lib/api/notify-error.ts`), the single error-toast entry point.
+  It shows the message plus the request id as a copyable toast detail. Prefer it over
+  `toast.error(...)` in `onError` handlers; plain client-side validation messages stay `toast.error`.
+- **Unexpected errors** (a page throws during render or load) → the `(app)/error.tsx` boundary, a
+  recover screen (sidebar intact) with the request id and a retry. List screens also show the
+  failed load's request id through `<ErrorState>`.
+
+The request id is rendered by the shared `<RequestIdNote>` and only appears when present (it needs
+the API's CORS to expose `X-Request-Id` — set in `apps/api/src/main.ts`).
 
 ## Status / caveats
 
