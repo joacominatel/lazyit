@@ -3,6 +3,8 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
 import { toast } from "sonner";
+import { UserFormDialog } from "@/app/(app)/users/_components/user-form-dialog";
+import { CreatableField } from "@/components/creatable-field";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -97,24 +99,35 @@ export function AssignUserDialog({
         <FieldGroup>
           <Field>
             <FieldLabel htmlFor="assign-user">User</FieldLabel>
-            <Select value={userId} onValueChange={setUserId}>
-              <SelectTrigger id="assign-user" className="w-full">
-                <SelectValue
-                  placeholder={
-                    available.length > 0
-                      ? "Select a user"
-                      : "No assignable users"
-                  }
+            <CreatableField
+              label="user"
+              renderDialog={(dialog) => (
+                <UserFormDialog
+                  open={dialog.open}
+                  onOpenChange={dialog.onOpenChange}
+                  onCreated={(user) => setUserId(user.id)}
                 />
-              </SelectTrigger>
-              <SelectContent>
-                {available.map((user) => (
-                  <SelectItem key={user.id} value={user.id}>
-                    {user.firstName} {user.lastName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              )}
+            >
+              <Select value={userId} onValueChange={setUserId}>
+                <SelectTrigger id="assign-user" className="w-full">
+                  <SelectValue
+                    placeholder={
+                      available.length > 0
+                        ? "Select a user"
+                        : "No assignable users"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {available.map((user) => (
+                    <SelectItem key={user.id} value={user.id}>
+                      {user.firstName} {user.lastName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CreatableField>
           </Field>
 
           <Field>
