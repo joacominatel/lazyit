@@ -48,7 +48,6 @@ describe('ApplicationsService', () => {
     await service.findAll();
 
     expect(application.findMany).toHaveBeenCalledWith({
-      where: { deletedAt: null },
       orderBy: { name: 'asc' },
     });
   });
@@ -82,7 +81,7 @@ describe('ApplicationsService', () => {
 
     await expect(service.findOne('app1')).resolves.toEqual(found);
     expect(application.findFirst).toHaveBeenCalledWith({
-      where: { id: 'app1', deletedAt: null },
+      where: { id: 'app1' },
     });
   });
 
