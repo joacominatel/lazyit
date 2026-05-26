@@ -1,10 +1,11 @@
-# lazyit — production-like / self-hosted stack. See ADR-0025/0026/0028 and docs/05-runbooks/.
+# lazyit — production-like / self-hosted stack. See ADR-0025/0026/0028/0037 and docs/05-runbooks/.
 #
 # Bring up (from the repo ROOT), after `cp infra/env/.env.prod.example infra/env/.env.prod`:
 #   docker compose -f infra/docker-compose.prod.yml up -d --build
 #
-# Only Caddy publishes host ports (8080/8443 by default). db/api/web stay on the internal
-# network — Postgres is NEVER exposed to the host (SEC-005 / ADR-0028).
+# Only Caddy publishes host ports (8080/8443 by default). db/api/web/zitadel stay on the
+# internal network — neither Postgres instance is ever exposed to the host (SEC-005 / ADR-0028).
+# Zitadel is served at auth.{LAZYIT_DOMAIN} via Caddy (ADR-0037 / ADR-0026).
 
 name: lazyit-prod
 
@@ -66,6 +67,50 @@ services:
     restart: unless-stopped
     networks: [internal]
 
+  # --- Zitadel's own PostgreSQL — separate from the app DB (ADR-0037) -----
+  # Hard requirement: Zitadel does aggressive schema migrations. Separate DB means
+  # independent backups and a clean BYOI removal path (remove zitadel + zitadel_db,
+  # change OIDC_ISSUER — no impact on the app DB).
+  # Never published to the host — internal network only (ADR-0028).
+  zitadel_db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    shm_size: 64mb
+    env_file: [env/.env.prod]
+    volumes:
+      - zitadel_db_data:/var/lib/postgresql
+    healthcheck:
+      # $$ escapes compose interpolation so the check reads the container's env at runtime.
+      test: ["CMD-SHELL", "pg_isready -U $${ZITADEL_DB_USER:-zitadel} -d $${ZITADEL_DB_NAME:-zitadel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [internal]
+
+  # --- Zitadel IdP (prod) — internal only; Caddy terminates TLS at auth.{domain} --------
+  # Admin console: https://auth.yourdomain.com/ui/console
+  # OIDC discovery: https://auth.yourdomain.com/.well-known/openid-configuration
+  # EXTERNALSECURE=true tells Zitadel it is behind an HTTPS proxy (Caddy) — ADR-0037.
+  # First start runs `start-from-init`: initialises the DB schema + creates the admin user.
+  # See docs/05-runbooks/auth-bootstrap.md for the full bootstrap procedure.
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:v2.68.0
+    command: start-from-init --masterkey "${ZITADEL_MASTERKEY}" --tlsMode disabled
+    restart: unless-stopped
+    env_file: [env/.env.prod]
+    depends_on:
+      zitadel_db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/debug/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    # No published ports — Caddy reaches Zitadel on the internal network (ADR-0028).
+    networks: [internal]
+
   # --- Caddy reverse proxy + automatic HTTPS — the only public surface -----
   caddy:
     image: caddy:2-alpine
@@ -87,6 +132,7 @@ services:
 
 volumes:
   db_data:
+  zitadel_db_data:
   caddy_data:
   caddy_config:
 
