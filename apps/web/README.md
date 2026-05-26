@@ -64,16 +64,26 @@ app/
     │       ├── asset-status-badge.tsx
     │       ├── assign-user-dialog.tsx
     │       └── stacked-owner-avatars.tsx
-    └── applications/     # fifth feature — Access (Applications + AccessGrants; ADR-0023)
-        ├── page.tsx               # list (category + active-grant avatars; client joins)
+    ├── applications/     # fifth feature — Access (Applications + AccessGrants; ADR-0023)
+    │   ├── page.tsx               # list (category + active-grant avatars; client joins)
+    │   ├── new/page.tsx           # create
+    │   ├── [id]/page.tsx          # detail (info / active grants / history; grant + revoke)
+    │   ├── [id]/edit/page.tsx     # edit
+    │   └── _components/
+    │       ├── application-form.tsx       # create/edit (selects + isCritical switch)
+    │       ├── grant-access-dialog.tsx    # grant a user access
+    │       ├── revoke-grant-dialog.tsx    # revoke confirmation (AlertDialog)
+    │       └── stacked-user-avatars.tsx   # overlapping grantee avatars (local)
+    └── consumables/      # sixth feature — Consumables (stock + movements; ADR-0034)
+        ├── page.tsx               # list (stock badge, category, low-stock filter)
         ├── new/page.tsx           # create
-        ├── [id]/page.tsx          # detail (info / active grants / history; grant + revoke)
+        ├── [id]/page.tsx          # detail (stock panel + IN/OUT/ADJUST + movement ledger)
         ├── [id]/edit/page.tsx     # edit
         └── _components/
-            ├── application-form.tsx       # create/edit (selects + isCritical switch)
-            ├── grant-access-dialog.tsx    # grant a user access
-            ├── revoke-grant-dialog.tsx    # revoke confirmation (AlertDialog)
-            └── stacked-user-avatars.tsx   # overlapping grantee avatars (local)
+            ├── consumable-form.tsx        # create/edit (no currentStock — movements only)
+            ├── stock-badge.tsx            # on-hand qty with status color
+            ├── movement-type-badge.tsx    # IN / OUT / ADJUSTMENT chip
+            └── stock-movement-dialog.tsx  # record a movement (one dialog, 3 types)
 
 components/
 ├── ui/                        # shadcn/ui primitives (vendored, owned in-repo)
@@ -109,6 +119,8 @@ lib/
     │   ├── asset-categories.ts
     │   ├── asset-models.ts
     │   ├── assets.ts              # reads return expanded AssetWithRelations
+    │   ├── consumable-categories.ts
+    │   ├── consumables.ts         # CRUD + stock movements (nested ledger)
     │   ├── locations.ts
     │   ├── search.ts              # cross-entity search (GET /search)
     │   └── users.ts
@@ -126,6 +138,10 @@ lib/
         ├── use-asset-assignment-mutations.ts  # assign / release / notes
         ├── use-asset-categories.ts
         ├── use-asset-models.ts
+        ├── use-consumables.ts         # list + detail + movements + consumableKeys
+        ├── use-consumable-mutations.ts     # create / update / delete
+        ├── use-consumable-movement-mutations.ts  # record IN/OUT/ADJUSTMENT
+        ├── use-consumable-categories.ts
         ├── use-locations.ts           # queries + shared query keys
         ├── use-location-mutations.ts  # create / update / delete
         ├── use-search.ts              # cross-entity search (read-only)
