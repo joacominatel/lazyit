@@ -69,6 +69,8 @@ interface UserFormDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Present → edit that user; absent → create a new one. */
   user?: User;
+  /** Called with the created user (create mode) — lets a caller select it inline (#25). */
+  onCreated?: (user: User) => void;
 }
 
 /**
@@ -82,6 +84,7 @@ export function UserFormDialog({
   open,
   onOpenChange,
   user,
+  onCreated,
 }: UserFormDialogProps) {
   const isEdit = user != null;
   const createUser = useCreateUser();
@@ -130,7 +133,8 @@ export function UserFormDialog({
           lastName: values.lastName,
         },
         {
-          onSuccess: () => {
+          onSuccess: (created) => {
+            onCreated?.(created);
             toast.success("User created");
             onOpenChange(false);
           },
