@@ -1,10 +1,14 @@
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { cleanupOpenApiDoc } from 'nestjs-zod';
+import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // Route Nest's own logs through Pino (structured logging — ADR-0031). bufferLogs holds the
+  // bootstrap logs until the Pino logger is attached, so nothing is lost or double-formatted.
+  app.useLogger(app.get(Logger));
   // Ensure PrismaService.onModuleDestroy runs on SIGTERM/SIGINT (graceful $disconnect).
   app.enableShutdownHooks();
 
@@ -22,7 +26,9 @@ async function bootstrap() {
   // Swagger UI at /api/docs, raw OpenAPI JSON at /api/docs-json. See ADR-0018.
   const config = new DocumentBuilder()
     .setTitle('lazyit API')
-    .setDescription('Self-hosted IT asset, access, ticket and knowledge-base API.')
+    .setDescription(
+      'Self-hosted IT asset, access, ticket and knowledge-base API.',
+    )
     .setVersion('0.1')
     .build();
   const document = cleanupOpenApiDoc(SwaggerModule.createDocument(app, config));
