@@ -24,13 +24,10 @@ import {
 } from "@/components/ui/select";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useCreateAssetModel } from "@/lib/api/hooks/use-asset-models";
+import { notifyError } from "@/lib/api/notify-error";
 
 /** Radix Select forbids an empty-string item value; sentinel for "no category". */
 const NONE = "__none__";
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 interface CreateAssetModelDialogProps {
   open: boolean;
@@ -85,7 +82,7 @@ export function CreateAssetModelDialog({
           handleOpenChange(false);
         },
         onError: (error) =>
-          toast.error(errorMessage(error, "Couldn't create the model")),
+          notifyError(error, "Couldn't create the model"),
       },
     );
   }
