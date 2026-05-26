@@ -33,6 +33,7 @@ import {
   useCreateUser,
   useUpdateUser,
 } from "@/lib/api/hooks/use-user-mutations";
+import { notifyError } from "@/lib/api/notify-error";
 
 const FORM_ID = "user-form";
 
@@ -58,10 +59,6 @@ function toFormValues(user?: User): UserFormValues {
     };
   }
   return { email: "", firstName: "", lastName: "" };
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 interface UserFormDialogProps {
@@ -122,7 +119,7 @@ export function UserFormDialog({
             onOpenChange(false);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't update user")),
+            notifyError(error, "Couldn't update user"),
         },
       );
     } else {
@@ -139,7 +136,7 @@ export function UserFormDialog({
             onOpenChange(false);
           },
           onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't create user")),
+            notifyError(error, "Couldn't create user"),
         },
       );
     }
