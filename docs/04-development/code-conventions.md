@@ -28,6 +28,10 @@ Conventions for application code. Data-model conventions live in [[conventions]]
 - Use dependency injection; e.g. a single injectable `PrismaService` (next code step after
   the domain model — [[0002-nestjs-backend]], [[0003-prisma-orm]]).
 - Validate input with zod schemas from `@lazyit/shared`.
+- **Soft delete is automatic** ([[0032-soft-delete-middleware]]): a Prisma `$extends` filter scopes
+  reads on soft-deletable models to `deletedAt: null` — don't re-add manual `where: { deletedAt: null }`
+  guards. Use `findFirst` (not `findUnique`) for soft-delete-aware lookups by id; pass
+  `{ includeSoftDeleted: true }` to bypass (restore / audit).
 
 ## Observability — logging
 
