@@ -88,6 +88,9 @@ app/
 
 components/
 ├── ui/                        # shadcn/ui primitives (vendored, owned in-repo)
+├── creatable-field.tsx        # a select + inline "+ New" create dialog (#25)
+├── create-asset-model-dialog.tsx  # inline quick-create for AssetModel
+├── create-category-dialog.tsx     # inline quick-create for any category kind
 ├── delete-confirm-dialog.tsx  # reusable soft-delete confirmation (any resource)
 ├── global-search.tsx          # ⌘K command palette over GET /search (topbar, ADR-0035)
 ├── markdown-editor.tsx        # textarea + live preview (KB editor)
@@ -121,6 +124,7 @@ lib/
     │   ├── asset-history.ts       # paginated event log (GET /assets/:id/history)
     │   ├── asset-models.ts
     │   ├── assets.ts              # reads return expanded AssetWithRelations
+    │   ├── categories.ts          # name-only create for the 4 category kinds (#25)
     │   ├── consumable-categories.ts
     │   ├── consumables.ts         # CRUD + stock movements (nested ledger)
     │   ├── locations.ts
@@ -145,6 +149,7 @@ lib/
         ├── use-consumable-mutations.ts     # create / update / delete
         ├── use-consumable-movement-mutations.ts  # record IN/OUT/ADJUSTMENT
         ├── use-consumable-categories.ts
+        ├── use-create-category.ts     # inline create for any category kind (#25)
         ├── use-locations.ts           # queries + shared query keys
         ├── use-location-mutations.ts  # create / update / delete
         ├── use-search.ts              # cross-entity search (read-only)
@@ -261,6 +266,15 @@ entity (Assets · Articles · Users · Locations · Applications) and each navig
 its list page where no detail exists yet (Users, Locations) and forward-compatibly to
 `/applications/[id]` (the Access screen lands that route). The response is typed in `@lazyit/shared`
 (`search` schema); search degrades to empty results when the API runs without `MEILI_HOST` (fail-soft).
+
+## Inline create
+
+Selects for related entities carry a "+ New" button (`components/creatable-field.tsx`) that opens a
+small create dialog and auto-selects the result — so a missing **location, category, model or user**
+can be created without leaving the form (#25). The existing `LocationFormDialog` / `UserFormDialog`
+are reused via an `onCreated` callback; categories and models get lean quick-create dialogs. Wired
+into the asset, application, consumable and KB forms and the grant / assign dialogs. (The asset
+*category* — selected only inside the model dialog — stays a plain select to avoid a nested dialog.)
 
 ## Status / caveats
 
