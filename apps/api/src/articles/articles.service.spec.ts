@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ArticlesService } from './articles.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ActorService } from '../common/actor.service';
 import { SearchService } from '../search/search.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
@@ -47,7 +48,9 @@ describe('ArticlesService', () => {
   let service: ArticlesService;
   let article: ArticleMock;
   let articleCategory: { findFirst: jest.Mock };
-  let user: { findFirst: jest.Mock };
+  // ActorService is mocked; X-User-Id validation lives in actor.service.spec.ts. By default it echoes
+  // a present id back (any well-formed caller "exists") and maps empty/undefined to anonymous.
+  let actor: { resolve: jest.Mock };
   let search: { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
 
   beforeEach(async () => {
@@ -67,13 +70,14 @@ describe('ArticlesService', () => {
           }),
         ),
     };
-    // Any well-formed uuid "exists" as a user; overridden per-test for the invalid case.
-    user = {
-      findFirst: jest
+    // Any present id resolves to itself (a live caller); empty/undefined → anonymous. Overridden
+    // per-test for the rejecting case.
+    actor = {
+      resolve: jest
         .fn()
-        .mockImplementation((args: { where: { id: string } }) => ({
-          id: args.where.id,
-        })),
+        .mockImplementation((id?: string) =>
+          Promise.resolve(id === undefined || id === '' ? undefined : id),
+        ),
     };
     // Category exists by default; overridden per-test.
     articleCategory = { findFirst: jest.fn().mockResolvedValue({ id: 'c1' }) };
@@ -84,8 +88,9 @@ describe('ArticlesService', () => {
         ArticlesService,
         {
           provide: PrismaService,
-          useValue: { article, articleCategory, user },
+          useValue: { article, articleCategory },
         },
+        { provide: ActorService, useValue: actor },
         { provide: SearchService, useValue: search },
       ],
     }).compile();
@@ -165,21 +170,16 @@ describe('ArticlesService', () => {
       expect(article.create).not.toHaveBeenCalled();
     });
 
-    it('rejects a malformed X-User-Id (400)', async () => {
+    it('propagates a 400 from the actor resolver (malformed / unknown X-User-Id)', async () => {
+      // The shim-validation detail is in actor.service.spec.ts; here a write must surface a rejecting
+      // resolve as a 400 (a required author can't be resolved).
+      actor.resolve.mockRejectedValueOnce(
+        new BadRequestException('X-User-Id is not a valid user id'),
+      );
       await expect(
         service.create(
           { title: 'X', content: 'b', categoryId: 'c1', status: 'DRAFT' },
-          'not-a-uuid',
-        ),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects an X-User-Id that is not a known user (400)', async () => {
-      user.findFirst.mockResolvedValueOnce(null);
-      await expect(
-        service.create(
-          { title: 'X', content: 'b', categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR,
+          'bad-actor',
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
@@ -202,7 +202,7 @@ describe('ArticlesService', () => {
     it('shows only PUBLISHED to anonymous callers', async () => {
       await service.findAll({}, undefined);
       expect(listWhere().AND[0]).toEqual({ status: 'PUBLISHED' });
-      expect(user.findFirst).not.toHaveBeenCalled();
+      expect(actor.resolve).toHaveBeenCalledWith(undefined);
     });
 
     it("shows PUBLISHED plus the caller's own DRAFTs when logged in", async () => {
