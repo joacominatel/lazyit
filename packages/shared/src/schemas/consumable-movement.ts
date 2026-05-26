@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { int4 } from "./primitives";
 
 /**
  * ConsumableMovement — an append-only ledger of stock changes for a Consumable (ADR-0034). Each row
@@ -16,10 +17,10 @@ export const ConsumableMovementTypeSchema = z.enum(["IN", "OUT", "ADJUSTMENT"]);
 
 /** A single ConsumableMovement row (API representation of the `consumable_movements` row). */
 export const ConsumableMovementSchema = z.object({
-  id: z.number().int(),
+  id: int4(),
   consumableId: z.cuid(),
   type: ConsumableMovementTypeSchema,
-  quantity: z.number().int(),
+  quantity: int4({ min: 1 }),
   reason: z.string().nullable(),
   performedById: z.uuid().nullable(),
   notes: z.string().nullable(),
@@ -33,7 +34,7 @@ export const ConsumableMovementSchema = z.object({
  */
 export const CreateConsumableMovementSchema = z.strictObject({
   type: ConsumableMovementTypeSchema,
-  quantity: z.number().int().min(1),
+  quantity: int4({ min: 1, example: 1 }),
   reason: z.string().trim().min(1).max(500).optional(),
   notes: z.string().trim().min(1).max(2000).optional(),
 });
