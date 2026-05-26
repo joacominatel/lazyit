@@ -17,6 +17,11 @@ export class ApiError extends Error {
     readonly status: number,
     message: string,
     readonly body?: unknown,
+    /**
+     * The API's `X-Request-Id` for this response (ADR-0031), when the server sent it and CORS
+     * exposed it. Surfaced in the error UX so a user can quote it when reporting a failure.
+     */
+    readonly requestId?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -65,7 +70,9 @@ export async function apiFetch<T>(
     const message =
       (payload as { message?: string } | undefined)?.message ??
       `API request failed: ${res.status} ${res.statusText}`;
-    throw new ApiError(res.status, message, payload);
+    // Header lookup is case-insensitive; the API sends it as `X-Request-Id`.
+    const requestId = res.headers.get("x-request-id") ?? undefined;
+    throw new ApiError(res.status, message, payload, requestId);
   }
 
   return payload as T;
