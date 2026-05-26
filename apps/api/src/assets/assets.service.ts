@@ -42,7 +42,6 @@ export class AssetsService {
     const { categoryId, locationId, status, q } = filters;
     const assets = await this.prisma.asset.findMany({
       where: {
-        deletedAt: null,
         ...(locationId ? { locationId } : {}),
         ...(status ? { status } : {}),
         // Category lives on the model, not the asset: match assets whose model is in it.
@@ -66,7 +65,7 @@ export class AssetsService {
   /** A single non-deleted asset by id, expanded with its relations; 404 if missing or deleted. */
   async findOne(id: string) {
     const asset = await this.prisma.asset.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
       include: ASSET_RELATIONS,
     });
     if (!asset) {
@@ -115,7 +114,7 @@ export class AssetsService {
   /** Lightweight 404 guard for writes and the nested assignments endpoint (no relation loading). */
   async assertExists(id: string): Promise<void> {
     const asset = await this.prisma.asset.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
       select: { id: true },
     });
     if (!asset) {

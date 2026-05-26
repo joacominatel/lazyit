@@ -55,7 +55,6 @@ describe('ArticleCategoriesService', () => {
     await service.findAll();
 
     expect(articleCategory.findMany).toHaveBeenCalledWith({
-      where: { deletedAt: null },
       orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
     });
   });
@@ -66,7 +65,7 @@ describe('ArticleCategoriesService', () => {
 
     await expect(service.findOne('c1')).resolves.toEqual(found);
     expect(articleCategory.findFirst).toHaveBeenCalledWith({
-      where: { id: 'c1', deletedAt: null },
+      where: { id: 'c1' },
     });
   });
 
@@ -89,7 +88,7 @@ describe('ArticleCategoriesService', () => {
     await service.remove('c1');
 
     expect(article.count).toHaveBeenCalledWith({
-      where: { categoryId: 'c1', deletedAt: null },
+      where: { categoryId: 'c1' },
     });
     const calls = articleCategory.update.mock.calls as Array<
       [{ where: { id: string }; data: { deletedAt: Date } }]

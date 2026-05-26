@@ -157,7 +157,7 @@ export class AccessGrantsService {
       throw new BadRequestException('X-User-Id is not a valid user id');
     }
     const user = await this.prisma.user.findFirst({
-      where: { id: actorId, deletedAt: null },
+      where: { id: actorId },
       select: { id: true },
     });
     if (!user) {
@@ -171,7 +171,7 @@ export class AccessGrantsService {
   /** 400 if userId doesn't reference a live (non-soft-deleted) user. */
   private async assertUserUsable(userId: string): Promise<void> {
     const user = await this.prisma.user.findFirst({
-      where: { id: userId, deletedAt: null },
+      where: { id: userId },
       select: { id: true },
     });
     if (!user) {
@@ -184,7 +184,7 @@ export class AccessGrantsService {
   /** 400 if applicationId doesn't reference a live (non-soft-deleted) application. */
   private async assertApplicationUsable(applicationId: string): Promise<void> {
     const application = await this.prisma.application.findFirst({
-      where: { id: applicationId, deletedAt: null },
+      where: { id: applicationId },
       select: { id: true },
     });
     if (!application) {

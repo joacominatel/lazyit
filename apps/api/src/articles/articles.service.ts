@@ -67,7 +67,7 @@ export class ArticlesService {
       });
     }
     return this.prisma.article.findMany({
-      where: { deletedAt: null, AND: and },
+      where: { AND: and },
       orderBy: { updatedAt: 'desc' },
     });
   }
@@ -76,7 +76,7 @@ export class ArticlesService {
   async findOne(id: string, currentUserId?: string) {
     const cu = await this.resolveCurrentUser(currentUserId);
     const article = await this.prisma.article.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
     });
     if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
       throw new NotFoundException(`Article ${id} not found`);
@@ -88,7 +88,7 @@ export class ArticlesService {
   async findBySlug(slug: string, currentUserId?: string) {
     const cu = await this.resolveCurrentUser(currentUserId);
     const article = await this.prisma.article.findFirst({
-      where: { slug, deletedAt: null },
+      where: { slug },
     });
     if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
       throw new NotFoundException(`Article with slug "${slug}" not found`);
@@ -230,7 +230,7 @@ export class ArticlesService {
    */
   private async loadOwned(id: string, currentUserId: string) {
     const article = await this.prisma.article.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
     });
     if (!article) {
       throw new NotFoundException(`Article ${id} not found`);
@@ -253,7 +253,7 @@ export class ArticlesService {
       throw new BadRequestException('X-User-Id is not a valid user id');
     }
     const user = await this.prisma.user.findFirst({
-      where: { id: currentUserId, deletedAt: null },
+      where: { id: currentUserId },
       select: { id: true },
     });
     if (!user) {
@@ -288,7 +288,7 @@ export class ArticlesService {
   /** 400 if categoryId doesn't reference a live (non-soft-deleted) category. */
   private async assertCategoryUsable(categoryId: string): Promise<void> {
     const category = await this.prisma.articleCategory.findFirst({
-      where: { id: categoryId, deletedAt: null },
+      where: { id: categoryId },
       select: { id: true },
     });
     if (!category) {

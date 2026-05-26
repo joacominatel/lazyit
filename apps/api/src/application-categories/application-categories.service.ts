@@ -12,7 +12,6 @@ export class ApplicationCategoriesService {
   /** All non-deleted categories, ordered by `order` (nulls last) then name. */
   findAll() {
     return this.prisma.applicationCategory.findMany({
-      where: { deletedAt: null },
       orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
     });
   }
@@ -20,7 +19,7 @@ export class ApplicationCategoriesService {
   /** A single non-deleted category by id; throws 404 if missing or deleted. */
   async findOne(id: string) {
     const category = await this.prisma.applicationCategory.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
     });
     if (!category) {
       throw new NotFoundException(`ApplicationCategory ${id} not found`);

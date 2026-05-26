@@ -10,7 +10,6 @@ export class ApplicationsService {
   /** All non-deleted applications, alphabetically by name. */
   findAll() {
     return this.prisma.application.findMany({
-      where: { deletedAt: null },
       orderBy: { name: 'asc' },
     });
   }
@@ -18,7 +17,7 @@ export class ApplicationsService {
   /** A single non-deleted application by id; throws 404 if missing or deleted. */
   async findOne(id: string) {
     const application = await this.prisma.application.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
     });
     if (!application) {
       throw new NotFoundException(`Application ${id} not found`);

@@ -97,7 +97,7 @@ describe('AssetAssignmentsService', () => {
     await service.create(dto, ACTOR_ID);
 
     expect(user.findFirst).toHaveBeenCalledWith({
-      where: { id: ACTOR_ID, deletedAt: null }, // deletedAt:null is what excludes soft-deleted actors
+      where: { id: ACTOR_ID }, // the soft-delete extension adds deletedAt:null to exclude deleted actors
       select: { id: true },
     });
     expect(assetAssignment.create).toHaveBeenCalledWith({

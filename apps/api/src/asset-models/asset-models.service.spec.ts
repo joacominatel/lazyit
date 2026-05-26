@@ -70,7 +70,7 @@ describe('AssetModelsService', () => {
 
     await expect(service.findOne('m1')).resolves.toEqual(found);
     expect(assetModel.findFirst).toHaveBeenCalledWith({
-      where: { id: 'm1', deletedAt: null },
+      where: { id: 'm1' },
     });
   });
 
@@ -123,7 +123,7 @@ describe('AssetModelsService', () => {
     await service.findAll();
 
     expect(assetModel.findMany).toHaveBeenCalledWith({
-      where: { deletedAt: null },
+      where: {},
       orderBy: { createdAt: 'desc' },
     });
   });
@@ -134,7 +134,7 @@ describe('AssetModelsService', () => {
     await service.findAll('cat1');
 
     expect(assetModel.findMany).toHaveBeenCalledWith({
-      where: { deletedAt: null, categoryId: 'cat1' },
+      where: { categoryId: 'cat1' },
       orderBy: { createdAt: 'desc' },
     });
   });

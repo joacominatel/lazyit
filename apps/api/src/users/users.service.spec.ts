@@ -59,7 +59,7 @@ describe('UsersService', () => {
 
     await expect(service.findOne('uuid-1')).resolves.toEqual(found);
     expect(user.findFirst).toHaveBeenCalledWith({
-      where: { id: 'uuid-1', deletedAt: null },
+      where: { id: 'uuid-1' },
     });
   });
 
@@ -101,7 +101,6 @@ describe('UsersService', () => {
     await service.findAll();
 
     expect(user.findMany).toHaveBeenCalledWith({
-      where: { deletedAt: null },
       orderBy: { createdAt: 'desc' },
     });
   });
