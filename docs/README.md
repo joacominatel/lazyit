@@ -71,8 +71,9 @@ Open items and assumptions. Resolve and then delete the entry.
 
 - **Diagrams = Mermaid.** Chosen over Obsidian `.canvas` for portability and
   text-diffability. Flip to `.canvas` if you want freeform visual maps instead.
-- **Doc versioning = `status` + `created`/`updated` in frontmatter.** No links to
-  commits/PRs yet. Add commit/PR backlinks later if traceability becomes a need.
+- **Doc versioning = `status` + `created`/`updated` in frontmatter.** Doc notes don't backlink
+  to the commits/PRs that changed them. Repo-level traceability now lives in the GitHub
+  issue/PR flow ([[git-workflow]]); add per-note commit/PR backlinks later only if needed.
 
 ### Resolved (briefing questions — decision log)
 
