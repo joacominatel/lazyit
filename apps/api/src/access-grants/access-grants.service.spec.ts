@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { AccessGrantsService } from './access-grants.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ActorService } from '../common/actor.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` only for types (erased at runtime), so an empty object is enough.
@@ -46,6 +47,9 @@ describe('AccessGrantsService', () => {
   let accessGrant: GrantMock;
   let user: { findFirst: jest.Mock };
   let application: { findFirst: jest.Mock };
+  // ActorService is mocked; the X-User-Id validation detail lives in actor.service.spec.ts. Here we
+  // steer resolve() and assert the service delegates to it. Default: no actor (undefined).
+  let actor: { resolve: jest.Mock };
 
   beforeEach(async () => {
     accessGrant = {
@@ -56,6 +60,7 @@ describe('AccessGrantsService', () => {
     };
     user = { findFirst: jest.fn() };
     application = { findFirst: jest.fn() };
+    actor = { resolve: jest.fn().mockResolvedValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -64,13 +69,14 @@ describe('AccessGrantsService', () => {
           provide: PrismaService,
           useValue: { accessGrant, user, application },
         },
+        { provide: ActorService, useValue: actor },
       ],
     }).compile();
 
     service = moduleRef.get(AccessGrantsService);
   });
 
-  /** user.findFirst echoes the queried id back as a live user (both actor + grantee lookups pass). */
+  /** user.findFirst echoes the queried id back as a live user (grantee/application lookups pass). */
   const allUsersLive = () =>
     user.findFirst.mockImplementation((args: { where: { id: string } }) =>
       Promise.resolve({ id: args.where.id }),
@@ -94,12 +100,14 @@ describe('AccessGrantsService', () => {
     allUsersLive();
     application.findFirst.mockResolvedValue({ id: APP_ID });
     accessGrant.create.mockResolvedValue({ id: 'g1' });
+    actor.resolve.mockResolvedValue(VALID_ACTOR);
 
     await service.create(
       { userId: USER_ID, applicationId: APP_ID },
       VALID_ACTOR,
     );
 
+    expect(actor.resolve).toHaveBeenCalledWith(VALID_ACTOR);
     const calls = accessGrant.create.mock.calls as CreateCall[];
     expect(calls[0][0].data.grantedById).toBe(VALID_ACTOR);
   });
@@ -165,21 +173,18 @@ describe('AccessGrantsService', () => {
     expect(accessGrant.create).not.toHaveBeenCalled();
   });
 
-  it('rejects (400) when the actor header is not a valid uuid', async () => {
+  it('propagates a 400 from the actor resolver and short-circuits (no create, no app lookup)', async () => {
+    // A bad/unknown X-User-Id makes ActorService.resolve throw; create() resolves the actor first,
+    // so it must surface that 400 before touching the grantee/application checks.
+    actor.resolve.mockRejectedValue(
+      new BadRequestException('X-User-Id is not a valid user id'),
+    );
+
     await expect(
-      service.create({ userId: USER_ID, applicationId: APP_ID }, 'not-a-uuid'),
+      service.create({ userId: USER_ID, applicationId: APP_ID }, 'bad-actor'),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(accessGrant.create).not.toHaveBeenCalled();
     expect(application.findFirst).not.toHaveBeenCalled();
-  });
-
-  it('rejects (400) when the actor header references no live user', async () => {
-    user.findFirst.mockResolvedValue(null); // actor lookup fails first
-
-    await expect(
-      service.create({ userId: USER_ID, applicationId: APP_ID }, VALID_ACTOR),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(accessGrant.create).not.toHaveBeenCalled();
   });
 
   // --- findAll ------------------------------------------------------------
@@ -255,11 +260,12 @@ describe('AccessGrantsService', () => {
   // --- revoke -------------------------------------------------------------
   it('revokes an active grant: sets revokedAt + revokedById (from actor) + notes', async () => {
     accessGrant.findUnique.mockResolvedValue({ id: 'g1', revokedAt: null });
-    allUsersLive();
+    actor.resolve.mockResolvedValue(VALID_ACTOR);
     accessGrant.update.mockResolvedValue({ id: 'g1', revokedAt: new Date() });
 
     await service.revoke('g1', { notes: 'left the company' }, VALID_ACTOR);
 
+    expect(actor.resolve).toHaveBeenCalledWith(VALID_ACTOR);
     const calls = accessGrant.update.mock.calls as UpdateCall[];
     expect(calls[0][0].where).toEqual({ id: 'g1' });
     expect(calls[0][0].data.revokedAt).toBeInstanceOf(Date);
