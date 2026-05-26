@@ -61,7 +61,7 @@ Every change rides a GitHub branch+PR flow. Full runbook: `docs/05-runbooks/git-
 | Why a decision was made | `docs/03-decisions/` — ADRs (MADR-lite) |
 | Set up & day-to-day work | `docs/04-development/` — setup, workflows, code-conventions, claude-workflow |
 | What goes in `@lazyit/shared` | `docs/01-architecture/shared-package.md` |
-| Operations / deploy / backups | `docs/05-runbooks/` (stub until there's something to operate) |
+| Operations / deploy / backups | `docs/05-runbooks/` — git workflow, Docker deploy, backups, troubleshooting |
 | Vocabulary | `docs/99-glossary/` |
 
 ## Philosophy

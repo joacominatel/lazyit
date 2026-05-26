@@ -46,7 +46,7 @@ Orientation for working in the **lazyit** monorepo: *where things live* and *how
 | App code conventions / Bun boundary / testing | [[code-conventions]] |
 | **How to develop (the workflow)** | [[claude-workflow]] · git/PR mechanics → [[git-workflow]] |
 | Setup & commands | [[setup]] · [[workflows]] |
-| Operations / deploy | [[05-runbooks/_MOC\|Runbooks]] (stubs) |
+| Operations / deploy | [[05-runbooks/_MOC\|Runbooks]] — deploy, backups, troubleshooting |
 
 > **The "contract" of an endpoint is not in one file** — it's the composition of: its
 > **ADR** (if a decision applies) + the **entity note(s)** in `docs/02-domain/entities/` +
