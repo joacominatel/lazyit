@@ -82,7 +82,7 @@ describe('LocationsService', () => {
       service.findOne('clh000000000000000000000'),
     ).resolves.toEqual(found);
     expect(location.findFirst).toHaveBeenCalledWith({
-      where: { id: 'clh000000000000000000000', deletedAt: null },
+      where: { id: 'clh000000000000000000000' },
     });
   });
 
@@ -145,7 +145,6 @@ describe('LocationsService', () => {
     await service.findAll();
 
     expect(location.findMany).toHaveBeenCalledWith({
-      where: { deletedAt: null },
       orderBy: { createdAt: 'desc' },
     });
   });
