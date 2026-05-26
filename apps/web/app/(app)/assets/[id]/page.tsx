@@ -21,6 +21,7 @@ import { useAsset, useAssetAssignments } from "@/lib/api/hooks/use-assets";
 import { useDeleteAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { formatDate } from "@/lib/utils/format";
+import { AssetHistoryTimeline } from "../_components/asset-history-timeline";
 import { AssetStatusBadge } from "../_components/asset-status-badge";
 import { AssignUserDialog } from "../_components/assign-user-dialog";
 
@@ -253,8 +254,12 @@ export default function AssetDetailPage() {
         )}
       </Panel>
 
+      <Panel title="Activity">
+        <AssetHistoryTimeline assetId={asset.id} />
+      </Panel>
+
       {history.length > 0 && (
-        <Panel title="History">
+        <Panel title="Ownership history">
           <ul className="divide-y text-sm">
             {history.map((assignment) => (
               <li
