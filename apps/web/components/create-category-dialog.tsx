@@ -16,6 +16,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import type { CategoryKind, CreatedCategory } from "@/lib/api/endpoints/categories";
 import { useCreateCategory } from "@/lib/api/hooks/use-create-category";
+import { notifyError } from "@/lib/api/notify-error";
 
 const LABEL: Record<CategoryKind, string> = {
   asset: "asset category",
@@ -23,10 +24,6 @@ const LABEL: Record<CategoryKind, string> = {
   consumable: "consumable category",
   article: "article category",
 };
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 interface CreateCategoryDialogProps {
   kind: CategoryKind;
@@ -68,7 +65,7 @@ export function CreateCategoryDialog({
         handleOpenChange(false);
       },
       onError: (error) =>
-        toast.error(errorMessage(error, "Couldn't create the category")),
+        notifyError(error, "Couldn't create the category"),
     });
   }
 
