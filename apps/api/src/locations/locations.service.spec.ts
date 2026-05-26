@@ -2,11 +2,15 @@ import { Test } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { LocationsService } from './locations.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { SearchService } from '../search/search.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
 }));
+// LocationsService transitively imports the ESM `meilisearch` package (via SearchService); jest
+// can't transform it. SearchService is replaced by a mock below; this stub stops the real load.
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 type PrismaLocationMock = {
   findMany: jest.Mock;
@@ -15,9 +19,12 @@ type PrismaLocationMock = {
   update: jest.Mock;
 };
 
+type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
+
 describe('LocationsService', () => {
   let service: LocationsService;
   let location: PrismaLocationMock;
+  let search: SearchMock;
 
   beforeEach(async () => {
     location = {
@@ -26,11 +33,13 @@ describe('LocationsService', () => {
       create: jest.fn(),
       update: jest.fn(),
     };
+    search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         LocationsService,
         { provide: PrismaService, useValue: { location } },
+        { provide: SearchService, useValue: search },
       ],
     }).compile();
 
@@ -52,6 +61,14 @@ describe('LocationsService', () => {
 
     await expect(service.create(dto)).resolves.toEqual(created);
     expect(location.create).toHaveBeenCalledWith({ data: dto });
+    // Fire-and-forget search sync (ADR-0035): the created location is upserted into `locations`.
+    expect(search.upsert).toHaveBeenCalledWith('locations', {
+      id: 'clh000000000000000000000',
+      name: 'HQ',
+      type: 'OFFICE',
+      address: null,
+      floor: null,
+    });
   });
 
   it('creates a location with the optional fields populated', async () => {
@@ -78,9 +95,9 @@ describe('LocationsService', () => {
     };
     location.findFirst.mockResolvedValue(found);
 
-    await expect(
-      service.findOne('clh000000000000000000000'),
-    ).resolves.toEqual(found);
+    await expect(service.findOne('clh000000000000000000000')).resolves.toEqual(
+      found,
+    );
     expect(location.findFirst).toHaveBeenCalledWith({
       where: { id: 'clh000000000000000000000' },
     });
@@ -103,6 +120,14 @@ describe('LocationsService', () => {
     expect(location.update).toHaveBeenCalledWith({
       where: { id: 'clh1' },
       data: { name: 'HQ renamed' },
+    });
+    // Re-index the updated location (ADR-0035).
+    expect(search.upsert).toHaveBeenCalledWith('locations', {
+      id: 'clh1',
+      name: 'HQ renamed',
+      type: undefined,
+      address: undefined,
+      floor: undefined,
     });
   });
 
@@ -128,6 +153,8 @@ describe('LocationsService', () => {
     >;
     expect(calls[0][0].where).toEqual({ id: 'clh1' });
     expect(calls[0][0].data.deletedAt).toBeInstanceOf(Date);
+    // Soft-delete drops the location from the search index (ADR-0035).
+    expect(search.remove).toHaveBeenCalledWith('locations', 'clh1');
   });
 
   it('does not soft-delete a location that is missing', async () => {
@@ -137,6 +164,7 @@ describe('LocationsService', () => {
       NotFoundException,
     );
     expect(location.update).not.toHaveBeenCalled();
+    expect(search.remove).not.toHaveBeenCalled();
   });
 
   it('findAll excludes soft-deleted locations', async () => {
