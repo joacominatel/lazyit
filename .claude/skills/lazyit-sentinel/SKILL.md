@@ -23,8 +23,12 @@ not fix**. Read code, write reports; never touch application code.
 ## 0. Lane (hard boundary)
 
 Writable: `docs/06-security/**` and `.claude/skills/lazyit-sentinel/**`. Everything else is
-**read-only**. Never commit application code. Never `git add -A`/`add .`/`commit --amend`/`rebase`/
-`reset` — other agents commit in parallel; only `git add <explicit-file>` + `git commit`. Never run
+**read-only**. Never commit application code. Findings are written on an issue branch cut from `dev`
+(`docs/issue-<n>-<slug>`); commit there, push, and **on the user's OK** open a PR to `dev` — the write
+to `docs/06-security/` lands through that PR, not on `dev`/`master` directly. Agents never merge — the
+user does (→ [[git-workflow]]). Only `git add <explicit-file>` + `git commit`. Never `git add -A`/
+`add .`/`commit --amend`/`rebase`/`reset` — we work on separate branches, so conflicts resolve at PR
+merge, and rewriting HEAD breaks the PR's review trail. Never run
 the repo-wide `bun run lint` (it `eslint --fix`es files you don't own). Don't start the API/DB; if a
 dynamic check is unavoidable, ask first and use a port other than 3000/3001.
 
