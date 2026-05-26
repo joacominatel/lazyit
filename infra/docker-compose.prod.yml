@@ -126,6 +126,25 @@ services:
     # No published ports — Caddy reaches Zitadel on the internal network (ADR-0028).
     networks: [internal]
 
+  # --- Meilisearch — internal network only, no published port ---------------
+  # ADR-0035: cross-entity search engine. Fail-soft: the API SearchService no-ops when Meili is
+  # down, so no depends_on from api → meilisearch is needed.
+  # First deploy: run `docker compose -f infra/docker-compose.prod.yml exec api bun run reindex:all`
+  # once after the stack is healthy to populate the search indices.
+  meilisearch:
+    image: getmeili/meilisearch:v1.12.3
+    restart: unless-stopped
+    env_file: [env/.env.prod]
+    volumes:
+      - meili_data:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:7700/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [internal]
+
   # --- Caddy reverse proxy + automatic HTTPS — the only public surface -----
   caddy:
     image: caddy:2-alpine
@@ -148,6 +167,7 @@ services:
 volumes:
   db_data:
   zitadel_db_data:
+  meili_data:
   caddy_data:
   caddy_config:
 

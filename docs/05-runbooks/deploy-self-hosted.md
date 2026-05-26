@@ -58,6 +58,20 @@ docker compose -f infra/docker-compose.prod.yml ps          # all healthy; migra
 Caddy obtains a certificate automatically (Let's Encrypt for a public FQDN on :443, or its internal
 CA otherwise). The one-shot `migrate` service applies migrations and seeds before the API starts.
 
+## 2a. Populate search indices (first deploy only)
+
+After the stack is healthy (all services up, `migrate` exited 0), run the full re-index once to
+populate Meilisearch with existing data ([[0035-search-architecture]]):
+
+```sh
+docker compose -f infra/docker-compose.prod.yml exec api bun run reindex:all
+```
+
+This is a one-time step on first deploy, or after adding Meilisearch to an existing instance.
+Subsequent deploys do not need it — the API keeps Meili in sync incrementally. The API's
+`SearchService` is fail-soft: if Meilisearch is unreachable, search calls no-op and the app
+continues to function ([[0035-search-architecture]]).
+
 ## 3. Verify
 
 ```sh
