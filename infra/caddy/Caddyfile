@@ -1,6 +1,9 @@
-# lazyit reverse proxy — Caddy. See ADR-0026.
+# lazyit reverse proxy — Caddy. See ADR-0026, ADR-0037.
 #
-# One HTTPS entry point in front of the web (:3000) and API (:3001) containers.
+# Two HTTPS site blocks:
+#   1. {$LAZYIT_SITE_ADDRESS} — the lazyit web app + API (same-origin routing, ADR-0026).
+#   2. auth.{$LAZYIT_DOMAIN}  — Zitadel IdP; Caddy auto-TLS covers it (ADR-0037).
+#
 # Automatic HTTPS: Caddy's INTERNAL CA for `localhost` (local prod-like), and Let's Encrypt
 # for a real domain. Routing is SAME-ORIGIN: the browser calls /api/* and Caddy forwards it
 # to the API, so the web image is domain-portable (NEXT_PUBLIC_API_URL=/api, baked at build).
@@ -9,6 +12,15 @@
 	admin off
 	# Real domain (Let's Encrypt): set an ACME contact email. Leave commented for local.
 	# email {$LAZYIT_TLS_EMAIL}
+}
+
+# --- Zitadel IdP — auth subdomain (ADR-0037) -------------------------------------
+# Zitadel runs on the internal Docker network without its own TLS (--tlsMode disabled).
+# Caddy terminates HTTPS here and proxies to Zitadel's internal HTTP listener.
+# Set LAZYIT_DOMAIN to your base domain (e.g. "lazyit.example.com") in .env.prod.
+# Local prod-like: set LAZYIT_DOMAIN=localhost — Caddy uses its internal CA.
+auth.{$LAZYIT_DOMAIN:localhost} {
+	reverse_proxy zitadel:8080
 }
 
 # Site address. Local prod-like: unset -> "localhost" (internal CA, served on :443 -> host :8443).
@@ -30,12 +42,6 @@
 		uri strip_prefix /api
 		reverse_proxy api:3001
 	}
-
-	# --- Future IdP slot (ADR-0016) — reserved, NOT configured. Uncomment when auth lands. ---
-	# @auth path /auth/*
-	# handle @auth {
-	# 	reverse_proxy idp:9000
-	# }
 
 	# Everything else -> the Next.js web app (least specific: catch-all).
 	handle {
