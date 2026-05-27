@@ -80,6 +80,13 @@ services:
     restart: unless-stopped
     shm_size: 64mb
     env_file: [env/.env.prod]
+    # environment: overrides the POSTGRES_* vars that env_file inherits from the shared
+    # .env.prod (which sets POSTGRES_USER=lazyit for the app DB). Without this block,
+    # Postgres would initialize with the wrong credentials and Zitadel auth would fail.
+    environment:
+      POSTGRES_USER: ${ZITADEL_DB_USER:-zitadel}
+      POSTGRES_PASSWORD: ${ZITADEL_DB_PASSWORD}
+      POSTGRES_DB: ${ZITADEL_DB_NAME:-zitadel}
     volumes:
       - zitadel_db_data:/var/lib/postgresql
     healthcheck:
