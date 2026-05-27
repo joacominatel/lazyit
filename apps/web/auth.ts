@@ -22,7 +22,7 @@
  * See ADR-0039 for the full rationale.
  */
 
-import NextAuth from "next-auth";
+import NextAuth, { customFetch } from "next-auth";
 
 declare module "next-auth" {
   interface Session {
@@ -41,6 +41,26 @@ declare module "next-auth" {
 
 const internalIssuer = process.env.AUTH_INTERNAL_ISSUER;
 const externalIssuer = process.env.AUTH_ISSUER;
+
+/**
+ * Zitadel resolves its instance/tenant from the forwarded host. When OIDC calls are routed to
+ * the internal Docker URL (AUTH_INTERNAL_ISSUER), Zitadel would otherwise see Host "zitadel:8080"
+ * and fail instance resolution (404 "Instance not found"). Inject X-Forwarded-* derived from the
+ * external issuer so discovery / token / userinfo all resolve to the canonical origin and the
+ * matching issuer. Values come from AUTH_ISSUER — never hardcoded, never a new env var.
+ */
+const forwardedFetch: typeof fetch = Object.assign(
+  (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const ext = new URL(externalIssuer!);
+    const headers = new Headers(init?.headers);
+    headers.set("X-Forwarded-Host", ext.host);
+    headers.set("X-Forwarded-Proto", ext.protocol.replace(":", ""));
+    return fetch(input, { ...init, headers });
+  },
+  // `typeof fetch` carries a `preconnect` member in this lib config; delegate to the global
+  // so the wrapper structurally satisfies the type expected by Auth.js's customFetch slot.
+  { preconnect: fetch.preconnect },
+);
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   /**
@@ -69,6 +89,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             wellKnown: `${internalIssuer}/.well-known/openid-configuration`,
             token: `${internalIssuer}/oauth/v2/token`,
             userinfo: `${internalIssuer}/oidc/v1/userinfo`,
+            // Inject X-Forwarded-Host / -Proto (from AUTH_ISSUER) on every server-side OIDC
+            // HTTP call so Zitadel resolves the correct instance for the internal hostname.
+            [customFetch]: forwardedFetch,
           }
         : {}),
     },
