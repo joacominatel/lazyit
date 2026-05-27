@@ -83,9 +83,8 @@ export class JwtAuthGuard implements CanActivate {
 
     // Lazy-init the JWKS key set (one per app lifetime; jose caches fetched keys).
     if (!this.jwks) {
-      this.jwks = createRemoteJWKSet(
-        new URL(`${issuer}/.well-known/jwks.json`),
-      );
+      const jwksUri = process.env.OIDC_JWKS_URI ?? `${issuer}/.well-known/jwks.json`;
+      this.jwks = createRemoteJWKSet(new URL(jwksUri));
     }
 
     let payload: JWTPayload;
