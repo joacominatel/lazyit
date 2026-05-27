@@ -1,4 +1,6 @@
-import { signIn } from "@/auth";
+import { redirect } from "next/navigation";
+
+import { auth, signIn } from "@/auth";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -20,10 +22,27 @@ import {
  *
  * The layout (auth)/layout.tsx provides the centered card container.
  *
+ * Redirect handling: `proxy.ts` sends unauthenticated visitors here with a
+ * `callbackUrl` query param (their intended destination). We forward that to
+ * `signIn` via `redirectTo` so a successful login lands in the app, and we
+ * bounce already-authenticated visitors straight there (default `/dashboard`).
+ *
  * BYOI: the IdP label ("Your organization") comes from the provider `name` in
  * auth.ts. Operators with a branded IdP can change it there — no UI code to touch.
  */
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ callbackUrl?: string }>;
+}) {
+  const { callbackUrl } = await searchParams;
+  const destination = callbackUrl ?? "/dashboard";
+
+  // Already signed in → skip the login screen.
+  if (await auth()) {
+    redirect(destination);
+  }
+
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
@@ -43,7 +62,7 @@ export default function LoginPage() {
         <form
           action={async () => {
             "use server";
-            await signIn("oidc");
+            await signIn("oidc", { redirectTo: destination });
           }}
           className="w-full"
         >
