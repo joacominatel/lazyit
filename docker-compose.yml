@@ -40,7 +40,7 @@ services:
   # independent backups and a clean removal path when a customer brings their own IdP.
   # No published port — Zitadel connects to this within the Docker Compose default network.
   zitadel_db:
-    image: postgres:18-alpine
+    image: postgres:16-alpine
     restart: always
     shm_size: 64mb
     environment:
