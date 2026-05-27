@@ -29,6 +29,7 @@
     "@nestjs/swagger": "^11.4.4",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "jose": "^6.2.3",
     "mammoth": "^1.12.0",
     "meilisearch": "^0.58.0",
     "nestjs-pino": "^4.6.1",
