@@ -1,5 +1,8 @@
 /**
- * Auth.js v5 route-protection middleware — ADR-0039.
+ * Auth.js v5 route-protection proxy — ADR-0039.
+ *
+ * Named `proxy.ts` per the Next.js 16 file convention (renamed from `middleware.ts`
+ * — see https://nextjs.org/docs/messages/middleware-to-proxy).
  *
  * Protects all routes under the (app) group. Unauthenticated visitors are
  * redirected to /login. The (auth) group routes (/login, /api/auth/**) remain
@@ -9,7 +12,7 @@
  * false redirects to the configured `pages.signIn` (set to "/login" in auth.ts).
  *
  * Matcher: The Next.js config `matcher` below excludes static assets, the
- * Auth.js endpoints, the login page, and Next.js internals from the middleware
+ * Auth.js endpoints, the login page, and Next.js internals from the proxy
  * entirely, keeping overhead minimal.
  */
 import { auth } from "@/auth";
