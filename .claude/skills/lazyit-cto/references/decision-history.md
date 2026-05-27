@@ -115,7 +115,21 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 **ADR-0035** — *Cross-cutting search architecture (Meilisearch)*
 **Status**: accepted
 **One-liner**: Meilisearch for unified cross-entity search; service-layer sync (fire-and-forget); fail-soft.
-**CTO note**: Meilisearch is in dev compose; **NOT in prod compose yet** (DevOps hand-off). `GET /search?q=&entities=&limit=20`.
+**CTO note**: Meilisearch now in both dev and prod compose (PR #38). `GET /search?q=&entities=&limit=20`.
+
+---
+
+**ADR-0037** — *IdP choice (Zitadel) + BYOI pattern*
+**Status**: accepted (2026-05-27)
+**One-liner**: Zitadel as bundled default OIDC IdP; its own Postgres; BYOI via 3 env vars (OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET).
+**CTO note**: backend speaks generic OIDC — zero Zitadel-specific code. Caddy routes `auth.{LAZYIT_DOMAIN}` → Zitadel. Bootstrap runbook at `docs/05-runbooks/auth-bootstrap.md`. CEO decisions: own Postgres for Zitadel (clean removal path), BYOI is load-bearing (3 env vars = full swap).
+
+---
+
+**ADR-0038** — *JIT user provisioning on first OIDC login*
+**Status**: accepted (2026-05-27)
+**One-liner**: auto-provision User from OIDC claims on first login; assumes trusted IdP; no pre-registration in lazyit needed.
+**CTO note**: CEO chose Option 1 (auto-provision). Claims mapping: sub→externalId, email, given_name+family_name→firstName/lastName. Future opt-in: `USER_PROVISIONING_MODE=manual` for stricter control. Guard uses `jose`, no Passport. `AUTH_MODE=shim` retained for dev/tests.
 
 ---
 
@@ -215,30 +229,30 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 ---
 
 **ADR-0016** — *Authentication deferred; external IdP when needed*
-**Status**: accepted (temporary — to be superseded by auth implementation ADR)
+**Status**: accepted → **superseded in practice by ADR-0037 + ADR-0038** (2026-05-27)
 **One-liner**: no auth yet; endpoints are unauthenticated; future auth = OIDC with self-hosted IdP; `User.externalId` reserved for `sub`.
-**CTO note**: this ADR is the biggest pending work. The entire X-User-Id shim ecosystem is temporary scaffolding pointing at this ADR.
+**CTO note**: now resolved. Backend auth (Phase 2) complete. Phase 3 (frontend) pending.
 
 ---
 
 **ADR-0022** — *Draft visibility & the X-User-Id auth shim*
-**Status**: accepted (temporary — to be superseded when ADR-0016 is resolved)
+**Status**: accepted → **superseded in the OIDC path by ADR-0038** (2026-05-27). Preserved as `AUTH_MODE=shim` for dev/tests.
 **One-liner**: `X-User-Id` header simulates the caller; present+valid → actor, absent → anonymous, invalid → 400.
-**CTO note**: authorization rules (draft privacy, author-only writes) are already built — only the source of currentUser changes when auth lands.
+**CTO note**: shim is now the guard's `AUTH_MODE=shim` branch. Authorization rules (draft privacy, author-only writes) still use `@CurrentUser()` — same logic, different source.
 
 ---
 
 **ADR-0023** — *Access management design (Application + AccessGrant)*
 **Status**: accepted
-**One-liner**: append-only AccessGrant per user+app; no uniqueness constraint (multi-grant allowed); revokedAt closes grant; actor from X-User-Id shim.
+**One-liner**: append-only AccessGrant per user+app; no uniqueness constraint (multi-grant allowed); revokedAt closes grant; actor from @CurrentUser().
 **CTO note**: `GET /access-grants` is the most sensitive list endpoint (exposes all user↔app grants). First to paginate when SEC-007 is addressed.
 
 ---
 
 **ADR-0024** — *Retrofit AssetAssignment actor to the X-User-Id shim*
-**Status**: accepted (partially supersedes actor source in ADR-0019)
-**One-liner**: removed `assignedById`/`releasedById` from request body; actor now comes from ActorService (validated X-User-Id shim).
-**CTO note**: body-supplied-actor divergence between AssetAssignment and AccessGrant is resolved. Both use ActorService.
+**Status**: accepted → **superseded in the OIDC path by ADR-0038** (2026-05-27). Shim path preserved via `AUTH_MODE=shim`.
+**One-liner**: removed `assignedById`/`releasedById` from request body; actor now comes from ActorService (resolved User from @CurrentUser()).
+**CTO note**: body-supplied-actor divergence between AssetAssignment and AccessGrant is resolved. Both use ActorService (now trivial: `user?.id`).
 
 ---
 

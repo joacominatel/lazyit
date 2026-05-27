@@ -40,6 +40,7 @@ Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` (loopback) · 
 
 | Module | Folder | Primary entities | Status |
 |--------|--------|-----------------|--------|
+| AuthModule | `auth/` | JwtAuthGuard (global APP_GUARD), @CurrentUser() decorator | stable — Phase 2 complete |
 | CommonModule | `common/` | ActorService, AllExceptionsFilter, PrismaExceptionFilter, ParseUuidQuery | stable |
 | PrismaModule | `prisma/` | PrismaService + soft-delete extension | stable |
 | SearchModule | `search/` | SearchService (Meilisearch), GET /search | stable |
@@ -64,7 +65,9 @@ Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` (loopback) · 
 - **ZodValidationPipe** (global, APP_PIPE) — validates every `@Body` typed with `createZodDto`
 - **AllExceptionsFilter** (global, APP_FILTER) — logs >=500 errors with stack; delegates Prisma errors to PrismaExceptionFilter
 - **PrismaExceptionFilter** — maps P2002→409, P2003/P2023→400, P2025→404
-- **ActorService** (from CommonModule, exported globally) — resolves `X-User-Id` header → validated User. Used by: AssetAssignments, AccessGrants, Articles, AssetHistory, Consumables
+- **JwtAuthGuard** (from AuthModule, global APP_GUARD) — validates OIDC Bearer JWT via JWKS or reads X-User-Id in `AUTH_MODE=shim`. Sets `request.user` (User entity). JIT-provisions User on first OIDC login (ADR-0038)
+- **@CurrentUser()** (param decorator) — extracts `User | undefined` from `request.user`; used by all actor-tracked controllers
+- **ActorService** (from CommonModule, exported globally) — now trivial: `resolve(user?: User) → user?.id`. DB lookup removed (guard handles it). Used by: Assets, AssetAssignments, AccessGrants, Articles, Consumables
 - **Pino / nestjs-pino** — structured logging; X-Request-Id propagated end-to-end
 - **Soft-delete Prisma extension** — automatically adds `deletedAt: null` to every `findMany`/`findFirst`/`findUnique` query
 - **CORS** — origin from `WEB_ORIGIN` env (default `http://localhost:3000`); `credentials: true`; exposes `X-Request-Id`
@@ -81,12 +84,14 @@ Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` (loopback) · 
 
 ### Auth status
 
-- **Pre-auth**. No guards. All endpoints open (ADR-0016, DEF-001).
-- Shim header `X-User-Id` carries a `User.id`; ActorService resolves it (valid uuid + live user → actor, else 400)
-- KB (articles) has draft visibility and authorship rules enforced via the shim (ADR-0022)
-- AssetAssignments and AccessGrants read actor from shim via ActorService (ADR-0024)
-- `User.externalId` is nullable+unique; reserved for OIDC `sub` (ADR-0016). SEC-006 was closed: `externalId` is NOT accepted from request body (`CreateUserSchema` uses `z.strictObject`)
-- Login placeholder at `apps/web/app/(auth)/login/page.tsx` — non-functional
+- **Phase 2 complete** (2026-05-27). `JwtAuthGuard` is global. All endpoints protected.
+- `AUTH_MODE=shim` (default in `apps/api/.env.example`) → reads `X-User-Id` header; preserves dev/test behavior; no 401 on missing header
+- OIDC mode (production) → validates Bearer JWT via JWKS from `OIDC_ISSUER/.well-known/jwks.json` using `jose`; JIT-provisions User on first login; 401 on missing/invalid token
+- `User.externalId` — written on first OIDC login (`sub` claim). Nullable+unique in schema (ADR-0016). `CreateUserSchema` rejects it from request body (SEC-006 closed)
+- All 5 actor-tracked controllers migrated to `@CurrentUser()`: assets, asset-assignments, access-grants, consumables, articles
+- New env vars: `AUTH_MODE`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` (apps/api/.env.example)
+- **Phase 3 pending**: frontend login flow (Auth.js v5 or equivalent), Bearer token injection in API client, `UserSwitcher`/`acting-user.ts` removal
+- Login placeholder at `apps/web/app/(auth)/login/page.tsx` — still non-functional (Phase 3)
 
 ---
 
@@ -191,17 +196,18 @@ All schemas are `z.strictObject` or equivalent — unknown keys rejected at the 
 ### Local dev
 
 - `docker-compose.yml` at the repo root
-- Services: Postgres (`127.0.0.1:5432`), Meilisearch (`127.0.0.1:7700`)
-- Both loopback-only (SEC-005 fix — ADR-0028)
+- Services: Postgres (`127.0.0.1:5432`), Meilisearch (`127.0.0.1:7700`), Zitadel DB (internal), Zitadel (`127.0.0.1:8080`)
+- All loopback-only or internal (SEC-005 — ADR-0028)
 - `bun run dev` runs api + web natively; expects compose to be up
 
 ### Production
 
 - `infra/docker-compose.prod.yml`
-- Services: db (internal only), migrate (one-shot), api, web, caddy (8080/8443 external)
-- **⚠️ Meilisearch is NOT in prod compose yet** — ADR-0035 identified this as a DevOps hand-off; still pending
+- Services: db (internal), migrate (one-shot), api, web, meilisearch (internal), zitadel_db (internal), zitadel (internal), caddy (8080/8443 external)
+- Caddy routes: `/api` → api, `/` → web, `auth.{LAZYIT_DOMAIN}` → zitadel (ADR-0026/0037)
 - Caddy handles TLS + same-origin `/api` routing (ADR-0026)
 - Secrets via `infra/env/.env.prod` (ADR-0028)
+- Bootstrap runbook: `docs/05-runbooks/auth-bootstrap.md`
 
 ### Docker images
 
