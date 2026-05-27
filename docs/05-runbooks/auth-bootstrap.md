@@ -122,18 +122,34 @@ Zitadel organises clients as **Applications** inside a **Project**. Do this once
 4. Select application type: **Web**. Click **Continue**.
 5. Select authentication method: **Code** (Authorization Code flow with client secret — correct
    for a server-side Next.js / NestJS backend). Click **Continue**.
-6. Set the redirect URI (the Auth.js callback URL):
+6. Set the redirect URI (the Auth.js callback URL). The path is `/api/auth/callback/<provider-id>`
+   and lazyit's provider id is **`oidc`** (see `apps/web/auth.ts`):
    ```
-   https://yourdomain.com/api/auth/callback/zitadel
+   https://yourdomain.com/api/auth/callback/oidc
    ```
    For local prod-like:
    ```
-   https://localhost:8443/api/auth/callback/zitadel
+   https://localhost:8443/api/auth/callback/oidc
    ```
    Click **Add** then **Continue**.
 7. Review the summary and click **Create**.
 
-### 4c. Copy the credentials
+### 4c. Configure token settings (REQUIRED — the app does not work without this)
+
+Open the `lazyit-web` application → **Token Settings** and set:
+
+1. **Auth Token Type → `JWT`** (default is `Bearer Token`, which is **opaque**). The lazyit API
+   validates the access token as a JWT against Zitadel's JWKS (ADR-0038). An opaque token cannot
+   be verified and every API call returns `401`. This must be **JWT**.
+2. **User Info inside ID Token → enabled.** By default Zitadel keeps profile claims (name, email)
+   in the userinfo endpoint only, so the ID token carries just `sub` and the app shows an empty
+   user. Enabling this asserts the profile/email claims into the ID token so Auth.js populates the
+   session user.
+
+Click **Save**. If users were already signed in, they must sign out and back in to receive
+freshly-shaped tokens.
+
+### 4d. Copy the credentials
 
 After creation, Zitadel shows the **Client ID** and **Client Secret** exactly once.
 Copy both values immediately — the client secret is not shown again.

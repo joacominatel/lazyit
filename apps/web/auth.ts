@@ -9,10 +9,10 @@
  * Optional Docker DNS workaround:
  *   AUTH_INTERNAL_ISSUER — Internal base URL reachable from within the Docker network
  *                          (e.g. http://zitadel:8080). When set, server-side OIDC calls
- *                          (JWKS fetch, token exchange, userinfo) are routed through this
- *                          URL instead of AUTH_ISSUER, which may not resolve inside the
- *                          container. The browser-facing authorization redirect continues
- *                          to use the external AUTH_ISSUER.
+ *                          (discovery, token exchange, userinfo) have their request URL
+ *                          rewritten from the external AUTH_ISSUER origin to this internal
+ *                          origin, which may not resolve inside the container otherwise. The
+ *                          browser-facing authorization redirect continues to use AUTH_ISSUER.
  *
  * The IdP is Zitadel by default (ADR-0037), but any OIDC-compliant provider works
  * with no code changes — BYOI by env vars.
@@ -22,7 +22,7 @@
  * See ADR-0039 for the full rationale.
  */
 
-import NextAuth from "next-auth";
+import NextAuth, { customFetch } from "next-auth";
 
 declare module "next-auth" {
   interface Session {
@@ -42,16 +42,42 @@ declare module "next-auth" {
 const internalIssuer = process.env.AUTH_INTERNAL_ISSUER;
 const externalIssuer = process.env.AUTH_ISSUER;
 
+// Auth.js / oauth4webapi runs OIDC discovery, token exchange and userinfo server-side against
+// the provider `issuer` and the endpoints in its discovery document — all at the external auth
+// origin (e.g. https://auth.localhost:8443), which does NOT resolve inside the Docker network.
+// When AUTH_INTERNAL_ISSUER is set, this wrapper rewrites those requests to the internal Docker
+// origin (e.g. http://zitadel:8080) and sets X-Forwarded-* so Zitadel resolves the right instance
+// and keeps emitting the canonical external issuer. The browser-facing authorization redirect is
+// built from the discovery document and never passes through this fetch, so it stays external.
+const forwardedFetch: typeof fetch = Object.assign(
+  (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const ext = new URL(externalIssuer!);
+    const int = new URL(internalIssuer!);
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    if (url.host === ext.host) {
+      url.protocol = int.protocol;
+      url.host = int.host;
+    }
+    const headers = new Headers(init?.headers);
+    headers.set("X-Forwarded-Host", ext.host);
+    headers.set("X-Forwarded-Proto", ext.protocol.replace(":", ""));
+    return fetch(url, { ...init, headers });
+  },
+  // `typeof fetch` carries a `preconnect` member in this lib config; delegate to the global
+  // so the wrapper structurally satisfies the type expected by Auth.js's customFetch slot.
+  { preconnect: fetch.preconnect },
+);
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   /**
-   * Generic OIDC provider. Auth.js infers the discovery document from `issuer`
+   * Generic OIDC provider. Auth.js runs discovery from `issuer`
    * (`{issuer}/.well-known/openid-configuration`) — no Zitadel-specific code.
    * BYOI: replace these three env vars to swap IdPs.
    *
-   * When AUTH_INTERNAL_ISSUER is set, wellKnown / token / userinfo are overridden
-   * to use the internal Docker hostname. The `authorization` endpoint is intentionally
-   * left unset so Auth.js derives it from the discovery document fetched via wellKnown —
-   * that value still points at the external URL the browser can reach.
+   * When AUTH_INTERNAL_ISSUER is set, the custom fetch (above) rewrites server-side OIDC
+   * request URLs from the external issuer origin to the internal Docker origin. We rely on
+   * discovery + that rewriting fetch alone: oauth4webapi's discovery is driven by `issuer`,
+   * so wellKnown / token / userinfo overrides would be ignored and only add confusion.
    */
   providers: [
     {
@@ -61,16 +87,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       issuer: externalIssuer,
       clientId: process.env.AUTH_CLIENT_ID,
       clientSecret: process.env.AUTH_CLIENT_SECRET,
-      ...(internalIssuer
-        ? {
-            // Server-side calls go through the internal Docker hostname (Docker DNS resolves
-            // "zitadel" but not "auth.localhost"). Browser-facing authorization redirect
-            // still uses the external issuer (the browser has a hosts entry for auth.localhost).
-            wellKnown: `${internalIssuer}/.well-known/openid-configuration`,
-            token: `${internalIssuer}/oauth/v2/token`,
-            userinfo: `${internalIssuer}/oidc/v1/userinfo`,
-          }
-        : {}),
+      ...(internalIssuer ? { [customFetch]: forwardedFetch } : {}),
     },
   ],
 

@@ -74,6 +74,10 @@ services:
     environment:
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_TRUST_HOST: "true"            # trust Caddy's X-Forwarded-Host (behind reverse proxy)
+      # Canonical public origin. Pins the OIDC redirect_uri to the external URL
+      # (https://host/api/auth/callback/oidc); without it Auth.js infers the container's own
+      # 0.0.0.0:3000 and the redirect_uri won't match what's registered in the IdP.
+      AUTH_URL: ${WEB_ORIGIN}
       AUTH_ISSUER: ${AUTH_ISSUER}
       AUTH_CLIENT_ID: ${AUTH_CLIENT_ID}
       AUTH_CLIENT_SECRET: ${AUTH_CLIENT_SECRET}
