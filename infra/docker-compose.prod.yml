@@ -1,7 +1,10 @@
 # lazyit — production-like / self-hosted stack. See ADR-0025/0026/0028/0037 and docs/05-runbooks/.
 #
 # Bring up (from the repo ROOT), after `cp infra/env/.env.prod.example infra/env/.env.prod`:
-#   docker compose -f infra/docker-compose.prod.yml up -d --build
+#   docker compose -f infra/docker-compose.prod.yml --env-file infra/env/.env.prod up -d --build
+#
+# --env-file is required: the `environment:` blocks use ${VAR} interpolation resolved by
+# Compose at parse time (from shell or --env-file), NOT from the service's env_file directive.
 #
 # Only Caddy publishes host ports (8080/8443 by default). db/api/web/zitadel stay on the
 # internal network — neither Postgres instance is ever exposed to the host (SEC-005 / ADR-0028).
@@ -77,6 +80,13 @@ services:
     restart: unless-stopped
     shm_size: 64mb
     env_file: [env/.env.prod]
+    # environment: overrides the POSTGRES_* vars that env_file inherits from the shared
+    # .env.prod (which sets POSTGRES_USER=lazyit for the app DB). Without this block,
+    # Postgres would initialize with the wrong credentials and Zitadel auth would fail.
+    environment:
+      POSTGRES_USER: ${ZITADEL_DB_USER:-zitadel}
+      POSTGRES_PASSWORD: ${ZITADEL_DB_PASSWORD}
+      POSTGRES_DB: ${ZITADEL_DB_NAME:-zitadel}
     volumes:
       - zitadel_db_data:/var/lib/postgresql
     healthcheck:
