@@ -20,16 +20,13 @@ declare module "next-auth" {
   interface Session {
     /** IdP access token, forwarded as `Authorization: Bearer` on API calls. */
     accessToken: string;
-    /**
-     * The lazyit User.id resolved by the backend on JIT provisioning (ADR-0038).
-     * Absent until a successful API round-trip populates it — callers that need
-     * the lazyit id should treat it as optional.
-     */
   }
-}
 
-declare module "next-auth/jwt" {
   interface JWT {
+    /**
+     * IdP access token, stored in the encrypted session cookie on first sign-in
+     * so it can be forwarded to the API on every request (ADR-0039).
+     */
     accessToken?: string;
   }
 }
@@ -73,7 +70,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      * `useSession()` and `auth()` so components and server code can read it.
      */
     session({ session, token }) {
-      session.accessToken = token.accessToken ?? "";
+      // token.accessToken is set in the jwt callback above.
+      // The cast is required because the session callback's `token` type
+      // does not automatically merge the augmented JWT interface in all
+      // TypeScript configurations.
+      const accessToken = (token as { accessToken?: string }).accessToken;
+      session.accessToken = accessToken ?? "";
       return session;
     },
   },
