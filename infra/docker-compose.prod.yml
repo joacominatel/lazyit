@@ -68,6 +68,16 @@ services:
         NEXT_PUBLIC_API_URL: /api
     image: lazyit-web:dev
     restart: unless-stopped
+    # Auth.js runs server-side and reads these at RUNTIME (ADR-0039). Scoped explicitly rather
+    # than env_file so the web container never sees the DB / Zitadel / Meili secrets it has no
+    # use for (ADR-0028 least-privilege). Requires --env-file for the ${...} interpolation.
+    environment:
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_TRUST_HOST: "true"            # trust Caddy's X-Forwarded-Host (behind reverse proxy)
+      AUTH_ISSUER: ${AUTH_ISSUER}
+      AUTH_CLIENT_ID: ${AUTH_CLIENT_ID}
+      AUTH_CLIENT_SECRET: ${AUTH_CLIENT_SECRET}
+      AUTH_INTERNAL_ISSUER: ${AUTH_INTERNAL_ISSUER}
     networks: [internal]
 
   # --- Zitadel's own PostgreSQL — separate from the app DB (ADR-0037) -----
