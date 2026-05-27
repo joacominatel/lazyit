@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { UnauthorizedException } from '@nestjs/common';
+import { Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -36,9 +36,45 @@ function makeCtx(req: Record<string, unknown>) {
   } as never;
 }
 
+// A minimal Response-like shape for the mocked global.fetch.
+interface FakeResponse {
+  ok: boolean;
+  status: number;
+  json: () => Promise<unknown>;
+}
+
+// Build a Response-like object for the mocked global.fetch.
+function jsonResponse(body: unknown, ok = true, status = 200): FakeResponse {
+  return {
+    ok,
+    status,
+    json: () => Promise.resolve(body),
+  };
+}
+
+// Typed accessor for a recorded fetch call: [url, init].
+type FetchCall = [unknown, RequestInit | undefined];
+function findCall(mock: jest.Mock, fragment: string): FetchCall | undefined {
+  return (mock.mock.calls as FetchCall[]).find((c) =>
+    String(c[0]).includes(fragment),
+  );
+}
+
+// prisma.user.create stub: echo the created row back (DB_USER overlaid with the `data` payload),
+// so request.user reflects what was persisted.
+function echoCreatedUser(args: { data: Record<string, unknown> }) {
+  return { ...DB_USER, ...args.data };
+}
+
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
   let prismaUser: { findFirst: jest.Mock; create: jest.Mock };
+  let fetchMock: jest.Mock;
+  const originalFetch = global.fetch;
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+  });
 
   beforeEach(async () => {
     prismaUser = { findFirst: jest.fn(), create: jest.fn() };
@@ -55,6 +91,22 @@ describe('JwtAuthGuard', () => {
 
     guard = moduleRef.get(JwtAuthGuard);
     guard.resetJwks();
+
+    // Mock global.fetch (discovery + userinfo). Default: discovery resolves the userinfo endpoint
+    // and userinfo returns no profile, so the OIDC tests that don't override it keep their old
+    // token-claim behaviour. Individual tests override per call as needed.
+    fetchMock = jest.fn((input: unknown): Promise<FakeResponse> => {
+      const url = String(input);
+      if (url.includes('/.well-known/openid-configuration')) {
+        return Promise.resolve(
+          jsonResponse({
+            userinfo_endpoint: 'https://auth.example.com/oidc/v1/userinfo',
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
 
     // Reset jose mocks between tests.
     jest.clearAllMocks();
@@ -158,9 +210,7 @@ describe('JwtAuthGuard', () => {
     });
 
     it('throws UnauthorizedException when token is invalid or expired', async () => {
-      (jose.jwtVerify as jest.Mock).mockRejectedValue(
-        new Error('JWTExpired'),
-      );
+      (jose.jwtVerify as jest.Mock).mockRejectedValue(new Error('JWTExpired'));
       const req: Record<string, unknown> = {
         headers: { authorization: 'Bearer bad.token.here' },
       };
@@ -203,7 +253,14 @@ describe('JwtAuthGuard', () => {
       });
       // No existing user by externalId.
       prismaUser.findFirst.mockResolvedValue(null);
-      const newUser = { ...DB_USER, id: 'new-uuid', externalId: 'oidc-sub-new', email: 'bob@example.com', firstName: 'Bob', lastName: 'Jones' };
+      const newUser = {
+        ...DB_USER,
+        id: 'new-uuid',
+        externalId: 'oidc-sub-new',
+        email: 'bob@example.com',
+        firstName: 'Bob',
+        lastName: 'Jones',
+      };
       prismaUser.create.mockResolvedValue(newUser);
 
       const req: Record<string, unknown> = {
@@ -234,17 +291,26 @@ describe('JwtAuthGuard', () => {
         },
       });
       prismaUser.findFirst.mockResolvedValue(null);
-      prismaUser.create.mockResolvedValue({ ...DB_USER, externalId: 'oidc-sub-x' });
+      prismaUser.create.mockResolvedValue({
+        ...DB_USER,
+        externalId: 'oidc-sub-x',
+      });
 
-      await guard.canActivate(makeCtx({
-        headers: { authorization: 'Bearer t' },
-      }));
-
-      expect(prismaUser.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ firstName: 'Carol', lastName: 'Chen' }),
+      await guard.canActivate(
+        makeCtx({
+          headers: { authorization: 'Bearer t' },
         }),
       );
+
+      expect(prismaUser.create).toHaveBeenCalledWith({
+        data: {
+          externalId: 'oidc-sub-x',
+          email: 'carol@example.com',
+          firstName: 'Carol',
+          lastName: 'Chen',
+          isActive: true,
+        },
+      });
     });
 
     it('uses email local-part as firstName when neither name nor given_name present', async () => {
@@ -255,17 +321,26 @@ describe('JwtAuthGuard', () => {
         },
       });
       prismaUser.findFirst.mockResolvedValue(null);
-      prismaUser.create.mockResolvedValue({ ...DB_USER, externalId: 'oidc-sub-y' });
+      prismaUser.create.mockResolvedValue({
+        ...DB_USER,
+        externalId: 'oidc-sub-y',
+      });
 
-      await guard.canActivate(makeCtx({
-        headers: { authorization: 'Bearer t' },
-      }));
-
-      expect(prismaUser.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ firstName: 'dana', lastName: '' }),
+      await guard.canActivate(
+        makeCtx({
+          headers: { authorization: 'Bearer t' },
         }),
       );
+
+      expect(prismaUser.create).toHaveBeenCalledWith({
+        data: {
+          externalId: 'oidc-sub-y',
+          email: 'dana@example.com',
+          firstName: 'dana',
+          lastName: '',
+          isActive: true,
+        },
+      });
     });
 
     it('throws UnauthorizedException when OIDC_ISSUER is not configured', async () => {
@@ -277,6 +352,234 @@ describe('JwtAuthGuard', () => {
       await expect(guard.canActivate(makeCtx(req))).rejects.toBeInstanceOf(
         UnauthorizedException,
       );
+    });
+
+    // -----------------------------------------------------------------------
+    // userinfo enrichment on the JIT path (ADR-0038, issue #59)
+    // -----------------------------------------------------------------------
+
+    describe('userinfo enrichment (JIT path)', () => {
+      const originalJwksUri = process.env.OIDC_JWKS_URI;
+
+      afterEach(() => {
+        if (originalJwksUri === undefined) {
+          delete process.env.OIDC_JWKS_URI;
+        } else {
+          process.env.OIDC_JWKS_URI = originalJwksUri;
+        }
+      });
+
+      it('uses the real profile from userinfo when the access token lacks profile claims', async () => {
+        delete process.env.OIDC_JWKS_URI;
+        // Access token carries authorization only (sub), no email/name.
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-jit' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.create.mockImplementation(echoCreatedUser);
+
+        // discovery → userinfo_endpoint; userinfo → full profile.
+        fetchMock.mockImplementation(
+          (input: unknown): Promise<FakeResponse> => {
+            const url = String(input);
+            if (url.includes('/.well-known/openid-configuration')) {
+              return Promise.resolve(
+                jsonResponse({
+                  userinfo_endpoint:
+                    'https://auth.example.com/oidc/v1/userinfo',
+                }),
+              );
+            }
+            return Promise.resolve(
+              jsonResponse({
+                sub: 'oidc-sub-jit',
+                email: 'real.user@corp.com',
+                given_name: 'Real',
+                family_name: 'User',
+              }),
+            );
+          },
+        );
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        expect(prismaUser.create).toHaveBeenCalledWith({
+          data: {
+            externalId: 'oidc-sub-jit',
+            email: 'real.user@corp.com',
+            firstName: 'Real',
+            lastName: 'User',
+            isActive: true,
+          },
+        });
+        // userinfo was called with the access token as Bearer.
+        const userinfoCall = findCall(fetchMock, '/oidc/v1/userinfo');
+        expect(userinfoCall).toBeDefined();
+        expect(userinfoCall![1]?.headers).toMatchObject({
+          Authorization: 'Bearer access.token',
+        });
+      });
+
+      it('falls back to placeholders and warns when userinfo returns non-2xx (provisioning still succeeds)', async () => {
+        delete process.env.OIDC_JWKS_URI;
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-fail' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.create.mockImplementation(echoCreatedUser);
+
+        const warnSpy = jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined);
+
+        fetchMock.mockImplementation(
+          (input: unknown): Promise<FakeResponse> => {
+            const url = String(input);
+            if (url.includes('/.well-known/openid-configuration')) {
+              return Promise.resolve(
+                jsonResponse({
+                  userinfo_endpoint:
+                    'https://auth.example.com/oidc/v1/userinfo',
+                }),
+              );
+            }
+            return Promise.resolve(jsonResponse({}, false, 401));
+          },
+        );
+
+        const result = await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        expect(result).toBe(true);
+        // Placeholder fallback from the bare sub.
+        expect(prismaUser.create).toHaveBeenCalledWith({
+          data: {
+            externalId: 'oidc-sub-fail',
+            email: 'oidc-sub-fail@unknown',
+            firstName: 'oidc-sub-fail',
+            lastName: '',
+            isActive: true,
+          },
+        });
+        expect(warnSpy).toHaveBeenCalled();
+        warnSpy.mockRestore();
+      });
+
+      it('falls back to placeholders and warns when the userinfo fetch rejects', async () => {
+        delete process.env.OIDC_JWKS_URI;
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-throw' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.create.mockImplementation(echoCreatedUser);
+
+        const warnSpy = jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined);
+
+        fetchMock.mockImplementation(
+          (input: unknown): Promise<FakeResponse> => {
+            const url = String(input);
+            if (url.includes('/.well-known/openid-configuration')) {
+              return Promise.resolve(
+                jsonResponse({
+                  userinfo_endpoint:
+                    'https://auth.example.com/oidc/v1/userinfo',
+                }),
+              );
+            }
+            return Promise.reject(new Error('ECONNREFUSED'));
+          },
+        );
+
+        const result = await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        expect(result).toBe(true);
+        expect(prismaUser.create).toHaveBeenCalledWith({
+          data: {
+            externalId: 'oidc-sub-throw',
+            email: 'oidc-sub-throw@unknown',
+            firstName: 'oidc-sub-throw',
+            lastName: '',
+            isActive: true,
+          },
+        });
+        expect(warnSpy).toHaveBeenCalled();
+        warnSpy.mockRestore();
+      });
+
+      it('does not call discovery or userinfo for a known externalId (no JIT)', async () => {
+        delete process.env.OIDC_JWKS_URI;
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-001' },
+        });
+        prismaUser.findFirst.mockResolvedValue(DB_USER);
+
+        const result = await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        expect(result).toBe(true);
+        expect(prismaUser.create).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
+      });
+
+      it('rewrites discovery + userinfo to the internal origin with X-Forwarded-* when OIDC_JWKS_URI is set', async () => {
+        process.env.OIDC_JWKS_URI = 'http://zitadel:8080/oauth/v2/keys';
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-internal' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.create.mockImplementation(echoCreatedUser);
+
+        fetchMock.mockImplementation(
+          (input: unknown): Promise<FakeResponse> => {
+            const url = String(input);
+            if (url.includes('/.well-known/openid-configuration')) {
+              // Discovery advertises the EXTERNAL userinfo endpoint.
+              return Promise.resolve(
+                jsonResponse({
+                  userinfo_endpoint:
+                    'https://auth.example.com/oidc/v1/userinfo',
+                }),
+              );
+            }
+            return Promise.resolve(
+              jsonResponse({ email: 'internal@corp.com' }),
+            );
+          },
+        );
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        // Both requests must target the internal origin (zitadel:8080), not auth.example.com.
+        const discoveryCall = findCall(
+          fetchMock,
+          '/.well-known/openid-configuration',
+        );
+        const userinfoCall = findCall(fetchMock, '/oidc/v1/userinfo');
+        expect(String(discoveryCall![0])).toBe(
+          'http://zitadel:8080/.well-known/openid-configuration',
+        );
+        expect(String(userinfoCall![0])).toBe(
+          'http://zitadel:8080/oidc/v1/userinfo',
+        );
+        // X-Forwarded-* derived from the external issuer host.
+        expect(discoveryCall![1]?.headers).toMatchObject({
+          'X-Forwarded-Host': 'auth.example.com',
+        });
+        expect(userinfoCall![1]?.headers).toMatchObject({
+          'X-Forwarded-Host': 'auth.example.com',
+          Authorization: 'Bearer access.token',
+        });
+      });
     });
   });
 });
