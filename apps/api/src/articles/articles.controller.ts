@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -14,10 +13,10 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  ApiBearerAuth,
   ApiBody,
   ApiConsumes,
   ApiCreatedResponse,
-  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -35,26 +34,15 @@ import {
 import { ArticlesService } from './articles.service';
 import { maxImportBytes } from './article-import';
 import { parseUuidQuery } from '../common/parse-uuid-query';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { User } from '../../generated/prisma/client';
 
 class ArticleDto extends createZodDto(ArticleSchema) {}
 class CreateArticleDto extends createZodDto(CreateArticleSchema) {}
 class UpdateArticleDto extends createZodDto(UpdateArticleSchema) {}
 class ImportArticleDto extends createZodDto(ImportArticleSchema) {}
 
-// X-User-Id is the auth shim (ADR-0022): on reads it reveals the caller's own drafts; on writes it
-// is required and becomes the author/editor. Declared per-endpoint with the right `required` flag.
-const READ_USER_HEADER = {
-  name: 'X-User-Id',
-  required: false,
-  description: "Caller user id (auth shim). Reveals the caller's own drafts.",
-} as const;
-const WRITE_USER_HEADER = {
-  name: 'X-User-Id',
-  required: true,
-  description:
-    'Caller user id (auth shim). Required; becomes the author/editor.',
-} as const;
-
+@ApiBearerAuth()
 @ApiTags('articles')
 @Controller('articles')
 export class ArticlesController {
@@ -65,7 +53,6 @@ export class ArticlesController {
     summary:
       'List articles (excludes soft-deleted). Drafts are visible only to their author.',
   })
-  @ApiHeader(READ_USER_HEADER)
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'authorId', required: false })
   @ApiQuery({
@@ -80,7 +67,7 @@ export class ArticlesController {
   })
   @ApiOkResponse({ type: [ArticleDto] })
   findAll(
-    @Headers('x-user-id') userId?: string,
+    @CurrentUser() user: User | undefined,
     @Query('categoryId') categoryId?: string,
     @Query('authorId') authorId?: string,
     @Query('status') status?: string,
@@ -103,40 +90,36 @@ export class ArticlesController {
         status: parsedStatus,
         q,
       },
-      userId,
+      user,
     );
   }
 
   @Get('by-slug/:slug')
   @ApiOperation({ summary: 'Get an article by slug' })
-  @ApiHeader(READ_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
   findBySlug(
     @Param('slug') slug: string,
-    @Headers('x-user-id') userId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.articles.findBySlug(slug, userId);
+    return this.articles.findBySlug(slug, user);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get an article by id' })
-  @ApiHeader(READ_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
-  findOne(@Param('id') id: string, @Headers('x-user-id') userId?: string) {
-    return this.articles.findOne(id, userId);
+  findOne(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.findOne(id, user);
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an article (author = X-User-Id)' })
-  @ApiHeader(WRITE_USER_HEADER)
+  @ApiOperation({ summary: 'Create an article (author = current user)' })
   @ApiCreatedResponse({ type: ArticleDto })
-  create(@Body() dto: CreateArticleDto, @Headers('x-user-id') userId?: string) {
-    return this.articles.create(dto, userId);
+  create(@Body() dto: CreateArticleDto, @CurrentUser() user?: User) {
+    return this.articles.create(dto, user);
   }
 
   @Post('import')
   @ApiOperation({ summary: 'Import an article from a .md, .txt or .docx file' })
-  @ApiHeader(WRITE_USER_HEADER)
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -163,23 +146,22 @@ export class ArticlesController {
   importArticle(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: ImportArticleDto,
-    @Headers('x-user-id') userId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.articles.importArticle(file, dto, userId);
+    return this.articles.importArticle(file, dto, user);
   }
 
   @Patch(':id')
   @ApiOperation({
     summary: 'Update an article (author only; never changes status)',
   })
-  @ApiHeader(WRITE_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
   update(
     @Param('id') id: string,
     @Body() dto: UpdateArticleDto,
-    @Headers('x-user-id') userId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.articles.update(id, dto, userId);
+    return this.articles.update(id, dto, user);
   }
 
   @Post(':id/publish')
@@ -187,10 +169,9 @@ export class ArticlesController {
     summary:
       'Publish an article (author only). Sets publishedAt on first publish.',
   })
-  @ApiHeader(WRITE_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
-  publish(@Param('id') id: string, @Headers('x-user-id') userId?: string) {
-    return this.articles.publish(id, userId);
+  publish(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.publish(id, user);
   }
 
   @Post(':id/unpublish')
@@ -198,17 +179,15 @@ export class ArticlesController {
     summary:
       'Unpublish an article back to DRAFT (author only). Keeps publishedAt.',
   })
-  @ApiHeader(WRITE_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
-  unpublish(@Param('id') id: string, @Headers('x-user-id') userId?: string) {
-    return this.articles.unpublish(id, userId);
+  unpublish(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.unpublish(id, user);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Soft-delete an article (author only)' })
-  @ApiHeader(WRITE_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
-  remove(@Param('id') id: string, @Headers('x-user-id') userId?: string) {
-    return this.articles.remove(id, userId);
+  remove(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.remove(id, user);
   }
 }
