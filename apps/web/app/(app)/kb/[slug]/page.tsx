@@ -9,6 +9,7 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -17,7 +18,6 @@ import { MarkdownView } from "@/components/markdown-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useActingUserId } from "@/lib/api/acting-user";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useArticleBySlug } from "@/lib/api/hooks/use-articles";
 import {
@@ -38,7 +38,7 @@ export default function ArticleDetailPage() {
   const { data: article, isLoading, isError } = useArticleBySlug(slug);
   const { data: categories } = useArticleCategories();
   const { data: users } = useUsers();
-  const actingUserId = useActingUserId();
+  const { data: session } = useSession();
 
   const publishArticle = usePublishArticle();
   const unpublishArticle = useUnpublishArticle();
@@ -79,7 +79,12 @@ export default function ArticleDetailPage() {
 
   const category = categories?.find((item) => item.id === article.categoryId);
   const author = users?.find((item) => item.id === article.authorId);
-  const canWrite = actingUserId != null && actingUserId === article.authorId;
+  /**
+   * Edit controls: shown to any authenticated user. The API enforces authorship —
+   * only the article's author can publish/unpublish/delete (returns 403 otherwise).
+   * The frontend shows the controls optimistically; the server is the authority.
+   */
+  const canWrite = session != null;
   const isDraft = article.status === "DRAFT";
 
   function handlePublish() {
