@@ -84,14 +84,21 @@ Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` (loopback) · 
 
 ### Auth status
 
-- **Phase 2 complete** (2026-05-27). `JwtAuthGuard` is global. All endpoints protected.
+- **Phases 1–3 complete + prod OIDC wiring verified working end-to-end (2026-05-27, PR #58 pending merge).** Full browser login → JWT → API → JIT provisioning confirmed live against the prod compose stack.
 - `AUTH_MODE=shim` (default in `apps/api/.env.example`) → reads `X-User-Id` header; preserves dev/test behavior; no 401 on missing header
-- OIDC mode (production) → validates Bearer JWT via JWKS from `OIDC_ISSUER/.well-known/jwks.json` using `jose`; JIT-provisions User on first login; 401 on missing/invalid token
+- OIDC mode (production) → validates Bearer JWT via JWKS using `jose`; JIT-provisions User on first login; 401 on missing/invalid token
 - `User.externalId` — written on first OIDC login (`sub` claim). Nullable+unique in schema (ADR-0016). `CreateUserSchema` rejects it from request body (SEC-006 closed)
 - All 5 actor-tracked controllers migrated to `@CurrentUser()`: assets, asset-assignments, access-grants, consumables, articles
-- New env vars: `AUTH_MODE`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` (apps/api/.env.example)
-- **Phase 3 pending**: frontend login flow (Auth.js v5 or equivalent), Bearer token injection in API client, `UserSwitcher`/`acting-user.ts` removal
-- Login placeholder at `apps/web/app/(auth)/login/page.tsx` — still non-functional (Phase 3)
+- **Phase 3 (frontend)**: Auth.js v5 (`apps/web/auth.ts`), login flow works (`(auth)/login/page.tsx` redirects to IdP then to `/dashboard`), `proxy.ts` route guard, Bearer injection via `session-token` store + `SessionTokenSync`. `UserSwitcher`/`acting-user.ts` shim removed.
+- **Prod-stack gotchas fixed this session (PR #58 + #46/#48/#50/#52/#54/#56)** — see [[prod-oidc-stack]] memory:
+  - Caddy MERGES byte-identical `handle` blocks → never give `/api/auth/*` a dedicated `handle` identical to the catch-all; exclude it from `@api` (`not path`) and let the catch-all forward to web.
+  - Auth.js/oauth4webapi discovery uses `provider.issuer` (ignores `wellKnown`) → `customFetch` must REWRITE the URL to the internal Docker origin, not just add headers.
+  - Zitadel resolves its instance from the host → internal calls (web `customFetch`, api `createRemoteJWKSet`) must send `X-Forwarded-Host`/`X-Forwarded-Proto` derived from the external issuer.
+  - `AUTH_URL` (=`WEB_ORIGIN`) required or Auth.js builds `redirect_uri` from `0.0.0.0:3000`.
+  - `zitadel_db` needs its own `POSTGRES_*` env block; `zitadel` needs `--tlsMode external` (not `disabled`) + `ZITADEL_EXTERNALPORT=${LAZYIT_HTTPS_PORT}`; prod compose needs `--env-file`.
+- **Required Zitadel app config (now in auth-bootstrap runbook §4c)**: Auth Token Type = **JWT** (default opaque token can't be `jwtVerify`'d), and **User Info inside ID Token** = on (else `session.user` is empty). Redirect URI is `/api/auth/callback/oidc`.
+- New env vars: `AUTH_MODE`, `OIDC_ISSUER`, `OIDC_JWKS_URI`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` (api); `AUTH_SECRET`, `AUTH_TRUST_HOST`, `AUTH_URL`, `AUTH_ISSUER`, `AUTH_INTERNAL_ISSUER`, `AUTH_CLIENT_ID/SECRET` (web).
+- **Known limitation (#59 follow-up)**: JIT provisioning reads profile from the access token, which carries only `sub`/`aud`/`client_id` (no email/name) → auto-created users get `sub`-based placeholder name + `sub@unknown` email. Fix = enrich from the userinfo endpoint.
 
 ---
 
@@ -204,7 +211,7 @@ All schemas are `z.strictObject` or equivalent — unknown keys rejected at the 
 
 - `infra/docker-compose.prod.yml`
 - Services: db (internal), migrate (one-shot), api, web, meilisearch (internal), zitadel_db (internal), zitadel (internal), caddy (8080/8443 external)
-- Caddy routes: `/api` → api, `/` → web, `auth.{LAZYIT_DOMAIN}` → zitadel (ADR-0026/0037)
+- Caddy routes: `/api/docs*` → api (no strip), `/api/auth/*` → web (Auth.js, no strip — excluded from `@api`), `/api/*` → api (strip `/api`), `/` → web, `auth.{LAZYIT_DOMAIN}` → zitadel (ADR-0026/0037)
 - Caddy handles TLS + same-origin `/api` routing (ADR-0026)
 - Secrets via `infra/env/.env.prod` (ADR-0028)
 - Bootstrap runbook: `docs/05-runbooks/auth-bootstrap.md`
