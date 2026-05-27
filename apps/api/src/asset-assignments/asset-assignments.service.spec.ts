@@ -34,8 +34,11 @@ type AssignmentData = Record<string, unknown>;
 type CreateCall = [{ data: AssignmentData }];
 type UpdateCall = [{ where: { id: string }; data: AssignmentData }];
 
-// A well-formed UUID used as the X-User-Id actor in the shim tests.
+// A well-formed UUID used as the actor in tests.
 const ACTOR_ID = '11111111-1111-1111-1111-111111111111';
+// Minimal User shape for tests — the full Prisma User type, but only id matters here.
+type MinimalUser = { id: string };
+const ACTOR_USER: MinimalUser = { id: ACTOR_ID };
 
 describe('AssetAssignmentsService', () => {
   let service: AssetAssignmentsService;
@@ -64,9 +67,10 @@ describe('AssetAssignmentsService', () => {
           cb({ assetAssignment: tx }),
       ),
     };
-    // ActorService is mocked; shim-validation detail lives in actor.service.spec.ts. Here we steer
-    // resolve() and assert the service delegates to it. Default: no actor (undefined).
-    actor = { resolve: jest.fn().mockResolvedValue(undefined) };
+    // ActorService is mocked; the guard validation detail lives in jwt-auth.guard.spec.ts. Here we
+    // steer resolve() and assert the service delegates to it. Default: no actor (undefined).
+    // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
+    actor = { resolve: jest.fn().mockReturnValue(undefined) };
     history = { record: jest.fn(), list: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
@@ -139,16 +143,16 @@ describe('AssetAssignmentsService', () => {
     );
   });
 
-  // --- create: actor via the X-User-Id shim -------------------------------
+  // --- create: actor via the authenticated User ---------------------------
   it('records assignedById from the resolved actor and stamps it on the ASSIGNED event', async () => {
-    actor.resolve.mockResolvedValue(ACTOR_ID);
+    actor.resolve.mockReturnValue(ACTOR_ID);
     assetAssignment.findFirst.mockResolvedValue(null);
     const dto = { assetId: 'a1', userId: 'u1' };
     tx.create.mockResolvedValue({ id: 'as1', ...dto });
 
-    await service.create(dto, ACTOR_ID);
+    await service.create(dto, ACTOR_USER as never);
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_ID);
+    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     expect(tx.create).toHaveBeenCalledWith({
       data: { ...dto, assignedById: ACTOR_ID },
     });
@@ -163,8 +167,8 @@ describe('AssetAssignmentsService', () => {
     );
   });
 
-  it('leaves assignedById absent when the actor resolves to undefined (no header)', async () => {
-    actor.resolve.mockResolvedValue(undefined);
+  it('leaves assignedById absent when the actor resolves to undefined (no user)', async () => {
+    actor.resolve.mockReturnValue(undefined);
     assetAssignment.findFirst.mockResolvedValue(null);
     const dto = { assetId: 'a1', userId: 'u1' };
     tx.create.mockResolvedValue({ id: 'as1', ...dto });
@@ -176,11 +180,11 @@ describe('AssetAssignmentsService', () => {
     expect(calls[0][0].data).not.toHaveProperty('assignedById');
   });
 
-  it('propagates a BadRequest from the actor shim and never opens the transaction', async () => {
-    actor.resolve.mockRejectedValue(new BadRequestException());
+  it('propagates a thrown error from the actor resolver and never opens the transaction', async () => {
+    actor.resolve.mockImplementation(() => { throw new BadRequestException(); });
 
     await expect(
-      service.create({ assetId: 'a1', userId: 'u1' }, 'not-a-uuid'),
+      service.create({ assetId: 'a1', userId: 'u1' }, ACTOR_USER as never),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(assetAssignment.findFirst).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
@@ -252,9 +256,9 @@ describe('AssetAssignmentsService', () => {
     );
   });
 
-  // --- release (actor via the X-User-Id shim) -----------------------------
+  // --- release (actor via the authenticated User) -------------------------
   it('releases an active assignment (in a transaction), recording releasedById + notes', async () => {
-    actor.resolve.mockResolvedValue(ACTOR_ID);
+    actor.resolve.mockReturnValue(ACTOR_ID);
     assetAssignment.findUnique.mockResolvedValue({
       id: 'as1',
       assetId: 'a1',
@@ -262,9 +266,9 @@ describe('AssetAssignmentsService', () => {
     });
     tx.update.mockResolvedValue({ id: 'as1', releasedAt: new Date() });
 
-    await service.release('as1', { notes: 'returned' }, ACTOR_ID);
+    await service.release('as1', { notes: 'returned' }, ACTOR_USER as never);
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_ID);
+    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.update).toHaveBeenCalledTimes(1);
     const calls = tx.update.mock.calls as UpdateCall[];
@@ -274,8 +278,8 @@ describe('AssetAssignmentsService', () => {
     expect(calls[0][0].data.notes).toBe('returned');
   });
 
-  it('records a RELEASED history event for the assignment’s asset', async () => {
-    actor.resolve.mockResolvedValue(ACTOR_ID);
+  it("records a RELEASED history event for the assignment's asset", async () => {
+    actor.resolve.mockReturnValue(ACTOR_ID);
     assetAssignment.findUnique.mockResolvedValue({
       id: 'as1',
       assetId: 'a1',
@@ -283,7 +287,7 @@ describe('AssetAssignmentsService', () => {
     });
     tx.update.mockResolvedValue({ id: 'as1', releasedAt: new Date() });
 
-    await service.release('as1', {}, ACTOR_ID);
+    await service.release('as1', {}, ACTOR_USER as never);
 
     expect(history.record).toHaveBeenCalledTimes(1);
     expect(history.record).toHaveBeenCalledWith(
@@ -292,8 +296,8 @@ describe('AssetAssignmentsService', () => {
     );
   });
 
-  it('leaves releasedById absent when the actor resolves to undefined (no header)', async () => {
-    actor.resolve.mockResolvedValue(undefined);
+  it('leaves releasedById absent when the actor resolves to undefined (no user)', async () => {
+    actor.resolve.mockReturnValue(undefined);
     assetAssignment.findUnique.mockResolvedValue({
       id: 'as1',
       assetId: 'a1',
@@ -307,16 +311,16 @@ describe('AssetAssignmentsService', () => {
     expect(calls[0][0].data).not.toHaveProperty('releasedById');
   });
 
-  it('propagates a BadRequest from the actor shim on release and never opens the transaction', async () => {
+  it('propagates a thrown error from the actor resolver on release and never opens the transaction', async () => {
     assetAssignment.findUnique.mockResolvedValue({
       id: 'as1',
       assetId: 'a1',
       releasedAt: null,
     });
-    actor.resolve.mockRejectedValue(new BadRequestException());
+    actor.resolve.mockImplementation(() => { throw new BadRequestException(); });
 
     await expect(
-      service.release('as1', {}, 'not-a-uuid'),
+      service.release('as1', {}, ACTOR_USER as never),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(tx.update).not.toHaveBeenCalled();
