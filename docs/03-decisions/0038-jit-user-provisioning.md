@@ -15,6 +15,11 @@ accepted — 2026-05-27. Implements Phase 2 of the auth plan outlined in [[0037-
 and replaces the `X-User-Id` shim ([[0022-draft-visibility-auth-shim]], [[0024-asset-assignment-actor-shim]])
 for all actor-tracked operations.
 
+> **Amendment 2026-05-27 — userinfo enrichment (issue #59).** The JIT path now enriches the new
+> User's profile from the standard OIDC **userinfo endpoint**, because an OAuth *access token*
+> carries authorization, not identity (only `sub`/`aud`/`client_id`/`exp` — not `email`/`name`).
+> See the "userinfo enrichment" subsection under Decision below.
+
 ## Context
 
 [[0016-auth-strategy-deferred]] established that `User.externalId` (nullable, unique) is reserved for
@@ -69,7 +74,34 @@ and skip creation.
 | `given_name` | `firstName` | split `name`; email local-part |
 | `family_name` | `lastName` | remainder after first word of `name`; `""` |
 
-**Library**: `jose` (standard OIDC / JWKS; no Passport, no NestJS-passport).
+**userinfo enrichment (amended 2026-05-27, issue #59):**
+
+The OIDC *access token* validated by the guard is an authorization credential — per OIDC Core it
+carries `sub`/`aud`/`client_id`/`exp`, **not** the profile claims (`email`/`name`/`given_name`/
+`family_name`). Provisioning from the token alone therefore produced placeholders (`firstName = sub`,
+`email = sub@unknown`). To get real identity, on the **JIT path only** (unknown `sub`) the guard now
+calls the standard OIDC **userinfo endpoint** with the access token as Bearer, merges those claims
+*over* the token claims, and then applies the same resolution in the table above.
+
+- **Endpoint discovery, not a hardcoded path.** The userinfo endpoint is resolved from the OIDC
+  Discovery document (`${OIDC_ISSUER}/.well-known/openid-configuration` → `userinfo_endpoint`),
+  consistent with [[0037-idp-choice-zitadel-byoi]] §3 (the backend speaks generic OIDC; no
+  vendor-specific path). The resolved endpoint is cached at guard-instance scope (like the JWKS set),
+  so repeated provisions do not re-run discovery.
+- **No new env var.** The internal-origin rewrite reuses the existing `OIDC_JWKS_URI` signal: when it
+  is set (the Docker split-DNS case where the API reaches the IdP at an internal URL), the discovery
+  and userinfo requests are rewritten to `new URL(OIDC_JWKS_URI).origin` and carry `X-Forwarded-Host`/
+  `X-Forwarded-Proto` derived from `OIDC_ISSUER` (so the IdP resolves its instance from the canonical
+  host). When `OIDC_JWKS_URI` is unset, the externally-advertised endpoint is used directly with no
+  rewrite and no forwarded headers — mirroring exactly the guard's existing JWKS conditional.
+- **Fail-soft.** Any discovery/userinfo failure (network error, non-2xx, malformed JSON, missing
+  `userinfo_endpoint`) is logged at **warn** level and falls back to the current placeholder behavior.
+  Login is never blocked by a userinfo failure.
+- **Existing users skip it entirely.** A request whose `sub` already maps to a `User.externalId`
+  returns the existing row without any discovery/userinfo round-trip.
+
+**Library**: `jose` (standard OIDC / JWKS; no Passport, no NestJS-passport). userinfo + discovery
+use the runtime's `fetch` directly — no additional dependency.
 
 **Guard strategy**: a plain `CanActivate` guard registered globally via `APP_GUARD` in `AuthModule`.
 
@@ -94,11 +126,15 @@ the Future option below.
 - **Negative / trade-offs:**
   - **Trusted-IdP assumption**: if the IdP admin grants someone an account, lazyit grants them access.
     There is no per-application "allowlist" in lazyit itself.
-  - A user's `firstName`/`lastName` are sourced from OIDC claims at provisioning time and are **not**
-    automatically synced on subsequent logins (updating those fields is out of scope for Phase 2).
-  - If `email` is absent from the token, a placeholder (`sub@unknown`) is used; this may create a
-    user with an invalid email that must be corrected manually. Operators should ensure their IdP
-    includes `email` in the token.
+  - A user's `firstName`/`lastName`/`email` are sourced from OIDC claims (token + userinfo) at
+    provisioning time and are **not** automatically synced on subsequent logins (updating those
+    fields is out of scope for Phase 2).
+  - Placeholders (`firstName = sub`, `email = sub@unknown`) are now only used if **both** the access
+    token and the userinfo response lack the profile/email claims (or userinfo is unreachable). For
+    real profiles the operator must ensure the IdP grants the `profile`+`email` scopes so userinfo
+    returns them (the default Zitadel setup does).
+  - The JIT path performs **two extra HTTP calls** on first login per user (discovery — cached after
+    the first — and userinfo). These are off the hot path: existing users never trigger them.
 
 - **Follow-ups:**
   - **Phase 3 (frontend)**: wire Auth.js (or equivalent) in the Next.js app to initiate the OIDC flow
