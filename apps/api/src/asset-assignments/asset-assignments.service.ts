@@ -24,10 +24,9 @@ export interface FindAssignmentsFilters {
 }
 
 /**
- * The actor (`assignedById` on create, `releasedById` on release) comes from the optional
- * `X-User-Id` shim via the shared {@link ActorService} — never the request body (ADR-0024). Opening
- * and releasing also emit `ASSIGNED` / `RELEASED` asset-history events transactionally (ADR-0033).
- * When real auth lands the actor comes from the JWT and these methods are unchanged.
+ * The actor (`assignedById` on create, `releasedById` on release) comes from the authenticated User
+ * resolved by JwtAuthGuard (@CurrentUser()) — never the request body (ADR-0024/0038). Opening and
+ * releasing also emit `ASSIGNED` / `RELEASED` asset-history events transactionally (ADR-0033).
  */
 @Injectable()
 export class AssetAssignmentsService {

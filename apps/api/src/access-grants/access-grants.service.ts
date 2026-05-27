@@ -25,9 +25,8 @@ export interface FindAccessGrantsFilters {
 
 /**
  * AccessGrant — the User↔Application access join (append-only, revoked via `revokedAt`; ADR-0023).
- * The actor (`grantedById` on create, `revokedById` on revoke) comes from the optional `X-User-Id`
- * shim via the shared {@link ActorService} — never the request body (ADR-0022/0024). When real auth
- * lands, the actor comes from the JWT and these methods are unchanged.
+ * The actor (`grantedById` on create, `revokedById` on revoke) comes from the authenticated User
+ * resolved by JwtAuthGuard (@CurrentUser()) — never the request body (ADR-0022/0024/0038).
  */
 @Injectable()
 export class AccessGrantsService {
