@@ -28,30 +28,30 @@ auth.{$LAZYIT_DOMAIN:localhost} {
 {$LAZYIT_SITE_ADDRESS:localhost} {
 	encode zstd gzip
 
-	# Auth.js (v5) routes live on the Next.js side at /api/auth/* — forward to the WEB app
-	# WITHOUT stripping. This must win over @api below; Caddy sorts handle blocks by matcher
-	# specificity, so the more specific /api/auth/* path is always tried first (ADR-0039).
-	@authjs path /api/auth/*
-	handle @authjs {
-		reverse_proxy web:3000
-	}
-
 	# Swagger UI + raw OpenAPI live at the API's OWN /api/docs* — forward WITHOUT stripping.
 	@apidocs path /api/docs*
 	handle @apidocs {
 		reverse_proxy api:3001
 	}
 
-	# Everything else under /api/* -> API, stripping the /api prefix (API routes are at root,
-	# e.g. /api/users -> /users). Caddy evaluates handle blocks by matcher specificity, so the
-	# more specific @apidocs / @authjs above are always tried first.
-	@api path /api/*
+	# /api/* -> API, stripping the /api prefix (e.g. /api/users -> /users), EXCEPT Auth.js
+	# routes (/api/auth/*) which the Next.js web app owns (ADR-0039). They are excluded here
+	# and fall through to the catch-all below -> web:3000.
+	#
+	# Why not a dedicated `handle @authjs { reverse_proxy web:3000 }`? It would be byte-identical
+	# to the catch-all, and Caddy's Caddyfile adapter MERGES identical handle blocks — silently
+	# dropping the /api/auth/* matcher, so those requests fall to @api and hit the API as 404.
+	# Verified with `caddy adapt`. Excluding the path from @api is the reliable construction.
+	@api {
+		path /api/*
+		not path /api/auth/*
+	}
 	handle @api {
 		uri strip_prefix /api
 		reverse_proxy api:3001
 	}
 
-	# Everything else -> the Next.js web app (least specific: catch-all).
+	# Everything else — the web UI AND Auth.js's /api/auth/* — -> the Next.js web app.
 	handle {
 		reverse_proxy web:3000
 	}
