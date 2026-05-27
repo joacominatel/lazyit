@@ -2,13 +2,16 @@
  * Thin, typed fetch wrapper for the lazyit API.
  *
  * Base URL comes from NEXT_PUBLIC_API_URL (see .env.example). Authentication is
- * handled by Auth.js v5 (ADR-0039): callers supply the Bearer token from their
- * session via the optional `token` option. When omitted the request is sent
- * unauthenticated (public/health endpoints only).
+ * handled by Auth.js v5 (ADR-0039): the Bearer token is resolved in this order:
+ *   1. Explicit `token` option passed by the caller (server components use `await auth()`)
+ *   2. Client-side session-token store (populated by SessionTokenSync in the app layout)
+ *   3. Unauthenticated (public/health endpoints only)
  *
  * The former `X-User-Id` dev shim (ADR-0022) has been removed. The backend
  * now validates OIDC Bearer JWTs via its global auth guard (ADR-0038).
  */
+
+import { getSessionToken } from "./session-token";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -50,6 +53,9 @@ export async function apiFetch<T>(
   // FormData (file uploads) must be sent as-is so the browser sets the
   // multipart boundary; only plain values are JSON-serialized.
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+  // Explicit token takes priority; fall back to the client-side session store
+  // (populated by SessionTokenSync) so hooks don't need to thread the token manually.
+  const resolvedToken = token ?? getSessionToken();
 
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -57,7 +63,7 @@ export async function apiFetch<T>(
       ...(body !== undefined && !isFormData
         ? { "Content-Type": "application/json" }
         : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}),
       ...headers,
     },
     body:

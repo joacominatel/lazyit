@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/auth";
 import { GlobalSearch } from "@/components/global-search";
+import { SessionTokenSync } from "@/components/session-token-sync";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/user-menu";
@@ -40,6 +41,8 @@ export default async function AppLayout({
             <UserMenu />
           </div>
         </header>
+        {/* Syncs Auth.js access token into the client-side store so apiFetch sends Bearer automatically. */}
+        <SessionTokenSync />
         <main className="flex-1 p-6">{children}</main>
       </div>
     </div>
