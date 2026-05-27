@@ -5,6 +5,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
+import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { LocationsModule } from './locations/locations.module';
 import { AssetCategoriesModule } from './asset-categories/asset-categories.module';
@@ -30,7 +31,10 @@ import { buildLoggerParams } from './logging/logging.config';
     // Structured logging for the whole app (ADR-0031). First so it wraps every route.
     LoggerModule.forRoot(buildLoggerParams()),
     PrismaModule,
-    // Global cross-cutting providers (ActorService — the X-User-Id shim resolver, ADR-0033).
+    // Global auth guard (ADR-0038): JwtAuthGuard runs on every request.
+    // AUTH_MODE=shim → reads X-User-Id; default → validates OIDC Bearer JWT + JIT provisions User.
+    AuthModule,
+    // Global cross-cutting providers (ActorService — resolves actor id from User entity, ADR-0038).
     CommonModule,
     // Global cross-cutting search (ADR-0035): exports SearchService for fire-and-forget index sync,
     // hosts GET /search. No-ops when MEILI_HOST is unset.
