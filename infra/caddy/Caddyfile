@@ -28,6 +28,14 @@ auth.{$LAZYIT_DOMAIN:localhost} {
 {$LAZYIT_SITE_ADDRESS:localhost} {
 	encode zstd gzip
 
+	# Auth.js (v5) routes live on the Next.js side at /api/auth/* — forward to the WEB app
+	# WITHOUT stripping. This must win over @api below; Caddy sorts handle blocks by matcher
+	# specificity, so the more specific /api/auth/* path is always tried first (ADR-0039).
+	@authjs path /api/auth/*
+	handle @authjs {
+		reverse_proxy web:3000
+	}
+
 	# Swagger UI + raw OpenAPI live at the API's OWN /api/docs* — forward WITHOUT stripping.
 	@apidocs path /api/docs*
 	handle @apidocs {
@@ -36,7 +44,7 @@ auth.{$LAZYIT_DOMAIN:localhost} {
 
 	# Everything else under /api/* -> API, stripping the /api prefix (API routes are at root,
 	# e.g. /api/users -> /users). Caddy evaluates handle blocks by matcher specificity, so the
-	# more specific @apidocs above is always tried first.
+	# more specific @apidocs / @authjs above are always tried first.
 	@api path /api/*
 	handle @api {
 		uri strip_prefix /api
