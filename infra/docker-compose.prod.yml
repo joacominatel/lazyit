@@ -73,7 +73,7 @@ services:
   # change OIDC_ISSUER — no impact on the app DB).
   # Never published to the host — internal network only (ADR-0028).
   zitadel_db:
-    image: postgres:18-alpine
+    image: postgres:16-alpine
     restart: unless-stopped
     shm_size: 64mb
     env_file: [env/.env.prod]
