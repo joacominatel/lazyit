@@ -101,12 +101,14 @@ services:
   # --- Zitadel IdP (prod) — internal only; Caddy terminates TLS at auth.{domain} --------
   # Admin console: https://auth.yourdomain.com/ui/console
   # OIDC discovery: https://auth.yourdomain.com/.well-known/openid-configuration
-  # EXTERNALSECURE=true tells Zitadel it is behind an HTTPS proxy (Caddy) — ADR-0037.
+  # --tlsMode external: Caddy terminates TLS and Zitadel serves HTTP internally, but Zitadel
+  # generates https:// URLs for clients (and sets ExternalSecure=true). `disabled` would emit
+  # http:// URLs the browser blocks via CSP — see ADR-0037 and Zitadel TLS modes docs.
   # First start runs `start-from-init`: initialises the DB schema + creates the admin user.
   # See docs/05-runbooks/auth-bootstrap.md for the full bootstrap procedure.
   zitadel:
     image: ghcr.io/zitadel/zitadel:v2.68.0
-    command: start-from-init --masterkey "${ZITADEL_MASTERKEY}" --tlsMode disabled
+    command: start-from-init --masterkey "${ZITADEL_MASTERKEY}" --tlsMode external
     restart: unless-stopped
     env_file: [env/.env.prod]
     environment:
