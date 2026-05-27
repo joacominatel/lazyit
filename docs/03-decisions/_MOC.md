@@ -3,7 +3,7 @@ title: Decisions (ADRs) — MOC
 tags: [moc, adr]
 status: draft
 created: 2026-05-25
-updated: 2026-05-26
+updated: 2026-05-27
 ---
 
 # Decisions (ADRs) — Map of Content
@@ -59,6 +59,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0035-search-architecture]] | Cross-cutting search architecture (Meilisearch) | accepted |
 | [[0036-int4-bounded-integers]] | Integer fields bounded to the Postgres int4 range in shared schemas | accepted |
 | [[0037-idp-choice-zitadel-byoi]] | IdP choice — Zitadel, BYOI strategy, own Postgres | accepted |
+| [[0038-jit-user-provisioning]] | JIT user provisioning on first OIDC login | accepted |
 
 ## Pending ADRs (to write when decided)
 - **Async workers** — BullMQ + Redis (note the [[0009-bun-first-vs-app-stack]] tension:

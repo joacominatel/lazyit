@@ -9,6 +9,7 @@ import type {
   UpdateAssetAssignmentNotes,
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
+import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
@@ -23,10 +24,9 @@ export interface FindAssignmentsFilters {
 }
 
 /**
- * The actor (`assignedById` on create, `releasedById` on release) comes from the optional
- * `X-User-Id` shim via the shared {@link ActorService} — never the request body (ADR-0024). Opening
- * and releasing also emit `ASSIGNED` / `RELEASED` asset-history events transactionally (ADR-0033).
- * When real auth lands the actor comes from the JWT and these methods are unchanged.
+ * The actor (`assignedById` on create, `releasedById` on release) comes from the authenticated User
+ * resolved by JwtAuthGuard (@CurrentUser()) — never the request body (ADR-0024/0038). Opening and
+ * releasing also emit `ASSIGNED` / `RELEASED` asset-history events transactionally (ADR-0033).
  */
 @Injectable()
 export class AssetAssignmentsService {
@@ -72,10 +72,10 @@ export class AssetAssignmentsService {
    * pair with 409 — a friendly pre-check; the partial unique index is the race-proof backstop
    * (also surfaces as 409 via PrismaExceptionFilter). An invalid assetId/userId hits the FK and
    * is mapped to 400 (P2003). A different user on the same asset is allowed (multi-owner).
-   * `assignedById` is set from the `X-User-Id` shim when present (null = system/unknown).
+   * `assignedById` is set from the authenticated User when present (null = system/unknown).
    */
-  async create(data: CreateAssetAssignment, actorId?: string) {
-    const assignedById = await this.actor.resolve(actorId);
+  async create(data: CreateAssetAssignment, user?: User) {
+    const assignedById = this.actor.resolve(user);
     const existingActive = await this.prisma.assetAssignment.findFirst({
       where: { assetId: data.assetId, userId: data.userId, releasedAt: null },
     });
@@ -102,16 +102,16 @@ export class AssetAssignmentsService {
   }
 
   /**
-   * Release an active assignment: set `releasedAt = now()` (+ `releasedById` from the shim,
-   * optional `notes`). 404 if missing; 409 if already released (release is not repeatable).
+   * Release an active assignment: set `releasedAt = now()` (+ `releasedById` from the authenticated
+   * User, optional `notes`). 404 if missing; 409 if already released (release is not repeatable).
    * Releasing one owner does not affect any other active assignment on the same asset.
    */
-  async release(id: string, data: ReleaseAssetAssignment, actorId?: string) {
+  async release(id: string, data: ReleaseAssetAssignment, user?: User) {
     const assignment = await this.findOne(id);
     if (assignment.releasedAt !== null) {
       throw new ConflictException(`AssetAssignment ${id} is already released`);
     }
-    const releasedById = await this.actor.resolve(actorId);
+    const releasedById = this.actor.resolve(user);
     return this.prisma.$transaction(async (tx) => {
       const released = await tx.assetAssignment.update({
         where: { id },

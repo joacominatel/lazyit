@@ -27,12 +27,14 @@ async function bootstrap() {
 
   // OpenAPI: schemas come from the zod DTOs; cleanupOpenApiDoc is required for correct output.
   // Swagger UI at /api/docs, raw OpenAPI JSON at /api/docs-json. See ADR-0018.
+  // addBearerAuth() surfaces the Authorization: Bearer <token> scheme in the Swagger UI (ADR-0038).
   const config = new DocumentBuilder()
     .setTitle('lazyit API')
     .setDescription(
       'Self-hosted IT asset, access, ticket and knowledge-base API.',
     )
     .setVersion('0.1')
+    .addBearerAuth()
     .build();
   const document = cleanupOpenApiDoc(SwaggerModule.createDocument(app, config));
   SwaggerModule.setup('api/docs', app, document);

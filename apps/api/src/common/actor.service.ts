@@ -1,37 +1,19 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { Injectable } from '@nestjs/common';
+import type { User } from '../../generated/prisma/client';
 
 /**
- * Resolves the `X-User-Id` auth-shim actor (ADR-0022) — the single, shared implementation behind
- * AccessGrant's `grantedById`, AssetAssignment's `assignedById` / `releasedById` and AssetHistory's
- * `performedById` (the third caller anticipated by [[0024-asset-assignment-actor-shim]]).
+ * Resolves the actor id from a User entity (ADR-0038). The guard (JwtAuthGuard) already
+ * validates and resolves the User, so this service simply extracts the id.
  *
- * - `undefined` / empty → `undefined` (system / unknown actor; the optional FK stays null).
- * - A present value must be a **valid live user**, else `400` — soft-deleted users are filtered out
- *   by the soft-delete extension (ADR-0032), so they 400 too. When real auth lands the id comes from
- *   the JWT and this resolution is unchanged.
+ * The old X-User-Id shim logic (UUID validation + DB lookup) has moved into JwtAuthGuard, which
+ * runs in AUTH_MODE=shim and sets request.user before the controller is reached. Services receive
+ * a `user?: User` and delegate to this method to obtain `string | undefined` for FK writes.
+ *
+ * `undefined` → system/unknown actor; the optional FK stays null (ADR-0022 / ADR-0024).
  */
 @Injectable()
 export class ActorService {
-  constructor(private readonly prisma: PrismaService) {}
-
-  async resolve(actorId?: string): Promise<string | undefined> {
-    if (actorId === undefined || actorId === '') return undefined;
-    if (!UUID_REGEX.test(actorId)) {
-      throw new BadRequestException('X-User-Id is not a valid user id');
-    }
-    const user = await this.prisma.user.findFirst({
-      where: { id: actorId },
-      select: { id: true },
-    });
-    if (!user) {
-      throw new BadRequestException(
-        'X-User-Id does not reference a valid user',
-      );
-    }
-    return user.id;
+  resolve(user?: User): string | undefined {
+    return user?.id;
   }
 }

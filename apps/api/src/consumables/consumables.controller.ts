@@ -4,15 +4,14 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiCreatedResponse,
-  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -29,15 +28,8 @@ import {
   UpdateConsumableSchema,
 } from '@lazyit/shared';
 import { ConsumablesService } from './consumables.service';
-
-// X-User-Id is the auth shim (ADR-0022). On a movement it's OPTIONAL and recorded as the actor who
-// performed it (ConsumableMovement.performedById); absent → null actor (ADR-0034).
-const ACTOR_USER_HEADER = {
-  name: 'X-User-Id',
-  required: false,
-  description:
-    'Caller user id (auth shim). Optional; recorded as the actor who performed the movement.',
-} as const;
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { User } from '../../generated/prisma/client';
 
 class ConsumableDto extends createZodDto(ConsumableSchema) {}
 class CreateConsumableDto extends createZodDto(CreateConsumableSchema) {}
@@ -47,6 +39,7 @@ class CreateConsumableMovementDto extends createZodDto(
   CreateConsumableMovementSchema,
 ) {}
 
+@ApiBearerAuth()
 @ApiTags('consumables')
 @Controller('consumables')
 export class ConsumablesController {
@@ -135,13 +128,12 @@ export class ConsumablesController {
     summary:
       'Record a stock movement (IN adds, OUT subtracts, ADJUSTMENT sets)',
   })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiCreatedResponse({ type: ConsumableMovementDto })
   createMovement(
     @Param('id') id: string,
     @Body() dto: CreateConsumableMovementDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.consumables.createMovement(id, dto, actorId);
+    return this.consumables.createMovement(id, dto, user);
   }
 }
