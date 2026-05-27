@@ -55,8 +55,9 @@ COPY --from=builder   /app/apps/api/package.json       ./apps/api/package.json
 USER node
 EXPOSE 3001
 
-# Liveness: the API answers GET / ("Hello World!") without touching the DB.
+# Liveness: the API process is alive if it responds with any non-5xx status.
+# GET / returns 401 (JwtAuthGuard is global — ADR-0038); that is expected and healthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||3001)+'/',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))"
+  CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||3001)+'/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
 
 CMD ["node", "apps/api/dist/src/main"]
