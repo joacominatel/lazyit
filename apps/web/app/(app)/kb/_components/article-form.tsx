@@ -7,6 +7,7 @@ import {
   CreateArticleSchema,
   UpdateArticleSchema,
 } from "@lazyit/shared";
+import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -29,7 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useActingUserId } from "@/lib/api/acting-user";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import {
   useCreateArticle,
@@ -65,15 +65,18 @@ function toFormValues(article?: Article): ArticleFormValues {
  * separate route, so each mounts fresh and the resolver is fixed. `status` is not
  * edited here — new articles are born DRAFT and publishing is a detail-view
  * action (ADR-0021). `slug` is auto-derived from the title by the API.
+ *
+ * Authorship is enforced server-side via the OIDC Bearer token (ADR-0038/0039).
  */
 export function ArticleForm({ article }: { article?: Article }) {
   const isEdit = article != null;
   const router = useRouter();
+  const { data: session } = useSession();
   const { data: categories } = useArticleCategories();
-  const actingUserId = useActingUserId();
   const createArticle = useCreateArticle();
   const updateArticle = useUpdateArticle();
   const isPending = createArticle.isPending || updateArticle.isPending;
+  const isAuthenticated = session != null;
 
   const form = useForm<ArticleFormValues>({
     resolver: zodResolver(
@@ -83,8 +86,8 @@ export function ArticleForm({ article }: { article?: Article }) {
   });
 
   const onSubmit = form.handleSubmit((values) => {
-    if (!actingUserId) {
-      toast.error("Pick a user in the top-right switcher to author articles");
+    if (!isAuthenticated) {
+      toast.error("You must be signed in to author articles");
       return;
     }
     if (article) {
@@ -132,12 +135,6 @@ export function ArticleForm({ article }: { article?: Article }) {
 
   return (
     <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
-      {!actingUserId && (
-        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
-          You&apos;re browsing anonymously. Pick a user in the top-right switcher
-          to author articles.
-        </p>
-      )}
       <FieldGroup>
         <Controller
           control={form.control}
@@ -261,7 +258,7 @@ export function ArticleForm({ article }: { article?: Article }) {
         <Button
           type="submit"
           form={FORM_ID}
-          disabled={isPending || !actingUserId}
+          disabled={isPending || !isAuthenticated}
         >
           {isPending && <ArrowPathIcon className="animate-spin" />}
           {isEdit ? "Save changes" : "Create draft"}
