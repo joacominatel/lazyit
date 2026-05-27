@@ -8,7 +8,7 @@ import { apiFetch } from "../client";
 /**
  * Data-access for AccessGrant — the append-only user↔application join (ADR-0023). There is **no
  * delete**: a grant is ended by revoking it. The actor (`grantedById` / `revokedById`) is set by
- * the API from the `X-User-Id` header (optional), never the body. Reads of one application's grants
+ * the API from the authenticated user's identity (Bearer token, ADR-0039), never the body. Reads of one application's grants
  * live in endpoints/applications.ts; the filtered list here backs the all-apps active-grant counts.
  */
 

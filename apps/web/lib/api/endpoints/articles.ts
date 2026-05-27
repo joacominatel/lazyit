@@ -14,8 +14,8 @@ import { createCrudEndpoints } from "../crud-endpoints";
  * by-slug, publish/unpublish, multipart import) are hand-written alongside —
  * the "spread the factory + add bespoke endpoints" pattern from ADR-0020.
  *
- * Authorship/visibility is driven by `X-User-Id` (ADR-0022), which `apiFetch`
- * attaches from the acting-user store — so these functions don't deal with it.
+ * Authorship/visibility is enforced by the API via the Bearer token (ADR-0038/0039).
+ * These functions don't deal with auth directly — the token flows from the session.
  */
 
 const BASE = "/articles";
