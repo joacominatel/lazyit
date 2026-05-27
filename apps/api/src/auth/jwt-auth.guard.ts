@@ -84,7 +84,20 @@ export class JwtAuthGuard implements CanActivate {
     // Lazy-init the JWKS key set (one per app lifetime; jose caches fetched keys).
     if (!this.jwks) {
       const jwksUri = process.env.OIDC_JWKS_URI ?? `${issuer}/.well-known/jwks.json`;
-      this.jwks = createRemoteJWKSet(new URL(jwksUri));
+      // When JWKS is fetched from an internal Docker URL, Zitadel still resolves its instance
+      // from the forwarded host. Inject X-Forwarded-* derived from the external issuer so the
+      // fetch reaches the right instance (otherwise Zitadel returns 404 "Instance not found").
+      let options: Parameters<typeof createRemoteJWKSet>[1] | undefined;
+      if (process.env.OIDC_JWKS_URI) {
+        const ext = new URL(issuer);
+        options = {
+          headers: {
+            'X-Forwarded-Host': ext.host,
+            'X-Forwarded-Proto': ext.protocol.replace(':', ''),
+          },
+        };
+      }
+      this.jwks = createRemoteJWKSet(new URL(jwksUri), options);
     }
 
     let payload: JWTPayload;
