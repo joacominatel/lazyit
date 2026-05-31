@@ -12,6 +12,7 @@
     "db:down": "docker compose down"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-code": "^2.1.158",
     "@types/bun": "latest",
     "shadcn": "^4.8.0",
     "turbo": "^2.9.14"
