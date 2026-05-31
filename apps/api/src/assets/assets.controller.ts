@@ -23,10 +23,12 @@ import {
   AssetAssignmentWithUserSchema,
   AssetHistoryQuerySchema,
   AssetHistorySchema,
+  AssetListPageSchema,
   AssetSchema,
   AssetStatusSchema,
   AssetWithRelationsSchema,
   CreateAssetSchema,
+  MAX_PAGE_LIMIT,
   UpdateAssetSchema,
   type AssetStatus,
 } from '@lazyit/shared';
@@ -34,6 +36,7 @@ import { AssetsService } from './assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { parseActiveOnly } from '../asset-assignments/active-only';
+import { parsePageQuery } from '../access-grants/query-params';
 
 // X-User-Id is the auth shim (ADR-0022). On asset writes it's OPTIONAL and recorded as the actor
 // of the resulting history event (AssetHistory.performedById); absent → null actor (ADR-0033).
@@ -49,6 +52,8 @@ class AssetDto extends createZodDto(AssetSchema) {}
 class CreateAssetDto extends createZodDto(CreateAssetSchema) {}
 class UpdateAssetDto extends createZodDto(UpdateAssetSchema) {}
 class AssetWithRelationsDto extends createZodDto(AssetWithRelationsSchema) {}
+// The paginated GET /assets envelope: a page of lean rows (no `specs`) — ADR-0030 / SEC-007.
+class AssetListPageDto extends createZodDto(AssetListPageSchema) {}
 class AssetAssignmentWithUserDto extends createZodDto(
   AssetAssignmentWithUserSchema,
 ) {}
@@ -66,7 +71,7 @@ export class AssetsController {
   @Get()
   @ApiOperation({
     summary:
-      'List assets (expanded with model/category, location, activeAssignments). Excludes soft-deleted.',
+      'List assets (lean rows: model/category, location, activeAssignments — no specs). Paginated, excludes soft-deleted.',
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'locationId', required: false })
@@ -81,12 +86,33 @@ export class AssetsController {
     description:
       'Case-insensitive substring match on name, serial and assetTag',
   })
-  @ApiOkResponse({ type: [AssetWithRelationsDto] })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: `Page size. Default 50, max ${MAX_PAGE_LIMIT}.`,
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: '0-based row offset. Mutually exclusive with `page` (offset wins).',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to `offset`).',
+  })
+  @ApiOkResponse({ type: AssetListPageDto })
   findAll(
     @Query('categoryId') categoryId?: string,
     @Query('locationId') locationId?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
   ) {
     let parsedStatus: AssetStatus | undefined;
     if (status !== undefined) {
@@ -98,12 +124,15 @@ export class AssetsController {
       }
       parsedStatus = result.data;
     }
-    return this.assets.findAll({
-      categoryId,
-      locationId,
-      status: parsedStatus,
-      q,
-    });
+    return this.assets.findPage(
+      {
+        categoryId,
+        locationId,
+        status: parsedStatus,
+        q,
+      },
+      parsePageQuery({ limit, offset, page }),
+    );
   }
 
   @Get(':id')
