@@ -30,7 +30,11 @@ type MovementModelMock = {
 
 // The transaction client the movement goes through; $transaction runs the callback with it.
 type TxMock = {
-  consumable: { findFirst: jest.Mock; update: jest.Mock };
+  consumable: {
+    findFirst: jest.Mock;
+    update: jest.Mock;
+    updateMany: jest.Mock;
+  };
   consumableMovement: { create: jest.Mock };
 };
 
@@ -68,7 +72,11 @@ describe('ConsumablesService', () => {
     };
     consumableMovement = { findMany: jest.fn(), create: jest.fn() };
     tx = {
-      consumable: { findFirst: jest.fn(), update: jest.fn() },
+      consumable: {
+        findFirst: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
       consumableMovement: { create: jest.fn() },
     };
     prisma = {
@@ -186,16 +194,18 @@ describe('ConsumablesService', () => {
   });
 
   // --- createMovement: stock math -----------------------------------------
-  it('IN adds to currentStock and persists the movement in a transaction', async () => {
-    tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 5 });
+  it('IN atomically increments currentStock and persists the movement in a transaction', async () => {
+    tx.consumable.findFirst.mockResolvedValue({ currentStock: 5 });
+    tx.consumable.update.mockResolvedValue({ id: 'k1' });
     tx.consumableMovement.create.mockResolvedValue({ id: 1 });
 
     await service.createMovement('k1', { type: 'IN', quantity: 3 });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    // Atomic increment, not a JS read-modify-write of an absolute value.
     expect(tx.consumable.update).toHaveBeenCalledWith({
       where: { id: 'k1' },
-      data: { currentStock: 8 },
+      data: { currentStock: { increment: 3 } },
     });
     const calls = tx.consumableMovement.create.mock
       .calls as CreateMovementCall[];
@@ -206,42 +216,64 @@ describe('ConsumablesService', () => {
     });
   });
 
-  it('OUT subtracts from currentStock', async () => {
-    tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 5 });
+  it('OUT decrements via a guarded updateMany (gte + live row) and records the movement', async () => {
+    tx.consumable.updateMany.mockResolvedValue({ count: 1 });
     tx.consumableMovement.create.mockResolvedValue({ id: 2 });
 
     await service.createMovement('k1', { type: 'OUT', quantity: 2 });
 
-    expect(tx.consumable.update).toHaveBeenCalledWith({
-      where: { id: 'k1' },
-      data: { currentStock: 3 },
+    expect(tx.consumable.updateMany).toHaveBeenCalledWith({
+      where: { id: 'k1', deletedAt: null, currentStock: { gte: 2 } },
+      data: { currentStock: { decrement: 2 } },
+    });
+    // No JS read-modify-write `update` on the OUT path.
+    expect(tx.consumable.update).not.toHaveBeenCalled();
+    const calls = tx.consumableMovement.create.mock
+      .calls as CreateMovementCall[];
+    expect(calls[0][0].data).toMatchObject({
+      consumableId: 'k1',
+      type: 'OUT',
+      quantity: 2,
     });
   });
 
-  it('OUT to exactly zero is allowed', async () => {
-    tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 4 });
+  it('OUT whose guarded updateMany matches a row (down to zero) succeeds', async () => {
+    tx.consumable.updateMany.mockResolvedValue({ count: 1 });
     tx.consumableMovement.create.mockResolvedValue({ id: 3 });
 
     await service.createMovement('k1', { type: 'OUT', quantity: 4 });
 
-    expect(tx.consumable.update).toHaveBeenCalledWith({
-      where: { id: 'k1' },
-      data: { currentStock: 0 },
+    expect(tx.consumable.updateMany).toHaveBeenCalledWith({
+      where: { id: 'k1', deletedAt: null, currentStock: { gte: 4 } },
+      data: { currentStock: { decrement: 4 } },
     });
+    expect(tx.consumableMovement.create).toHaveBeenCalledTimes(1);
   });
 
-  it('OUT that would go negative throws 409 and persists nothing', async () => {
-    tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 1 });
+  it('OUT that matches no live row with enough stock (count 0) throws 409 and persists nothing', async () => {
+    // The guarded decrement updated zero rows: insufficient stock under concurrency. The follow-up
+    // findFirst proves the row exists, so this is a 409 (not a 404).
+    tx.consumable.updateMany.mockResolvedValue({ count: 0 });
+    tx.consumable.findFirst.mockResolvedValue({ currentStock: 1 });
 
     await expect(
       service.createMovement('k1', { type: 'OUT', quantity: 2 }),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(tx.consumable.update).not.toHaveBeenCalled();
+    expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+  });
+
+  it('OUT with count 0 against a missing/soft-deleted consumable throws 404', async () => {
+    tx.consumable.updateMany.mockResolvedValue({ count: 0 });
+    tx.consumable.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.createMovement('missing', { type: 'OUT', quantity: 1 }),
+    ).rejects.toBeInstanceOf(NotFoundException);
     expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
 
   it('ADJUSTMENT sets currentStock to the absolute quantity (even below current)', async () => {
-    tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 50 });
+    tx.consumable.update.mockResolvedValue({ id: 'k1' });
     tx.consumableMovement.create.mockResolvedValue({ id: 4 });
 
     await service.createMovement('k1', { type: 'ADJUSTMENT', quantity: 7 });
@@ -252,7 +284,18 @@ describe('ConsumablesService', () => {
     });
   });
 
-  it('404 when the consumable is missing — nothing is updated or recorded', async () => {
+  it('IN whose result would exceed int4 (INT4_MAX) throws 409 and persists nothing', async () => {
+    const INT4_MAX = 2_147_483_647;
+    tx.consumable.findFirst.mockResolvedValue({ currentStock: INT4_MAX - 1 });
+
+    await expect(
+      service.createMovement('k1', { type: 'IN', quantity: 5 }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.consumable.update).not.toHaveBeenCalled();
+    expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+  });
+
+  it('IN 404 when the consumable is missing — nothing is updated or recorded', async () => {
     tx.consumable.findFirst.mockResolvedValue(null);
 
     await expect(
