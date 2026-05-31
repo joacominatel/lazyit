@@ -1,6 +1,12 @@
 import { Test } from '@nestjs/testing';
-import { Logger, UnauthorizedException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import {
+  ForbiddenException,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { IS_PUBLIC_KEY } from './public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 
 // Prevent the real jose / generated prisma client from loading in unit tests.
@@ -29,10 +35,13 @@ const DB_USER = {
   deletedAt: null,
 };
 
-// Build a fake ExecutionContext wrapping the given request object.
+// Build a fake ExecutionContext wrapping the given request object. getHandler/getClass return
+// stable stubs so the (default, non-mocked) Reflector reads no @Public() metadata off them.
 function makeCtx(req: Record<string, unknown>) {
   return {
     switchToHttp: () => ({ getRequest: () => req }),
+    getHandler: () => function handler() {},
+    getClass: () => class Controller {},
   } as never;
 }
 
@@ -60,15 +69,15 @@ function findCall(mock: jest.Mock, fragment: string): FetchCall | undefined {
   );
 }
 
-// prisma.user.create stub: echo the created row back (DB_USER overlaid with the `data` payload),
-// so request.user reflects what was persisted.
-function echoCreatedUser(args: { data: Record<string, unknown> }) {
-  return { ...DB_USER, ...args.data };
+// prisma.user.upsert stub: echo the would-be-created row back (DB_USER overlaid with the `create`
+// payload), so request.user reflects what was persisted on first login.
+function echoUpsertedUser(args: { create: Record<string, unknown> }) {
+  return { ...DB_USER, ...args.create };
 }
 
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
-  let prismaUser: { findFirst: jest.Mock; create: jest.Mock };
+  let prismaUser: { findFirst: jest.Mock; upsert: jest.Mock };
   let fetchMock: jest.Mock;
   const originalFetch = global.fetch;
 
@@ -77,11 +86,12 @@ describe('JwtAuthGuard', () => {
   });
 
   beforeEach(async () => {
-    prismaUser = { findFirst: jest.fn(), create: jest.fn() };
+    prismaUser = { findFirst: jest.fn(), upsert: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         JwtAuthGuard,
+        Reflector,
         {
           provide: PrismaService,
           useValue: { user: prismaUser },
@@ -110,6 +120,25 @@ describe('JwtAuthGuard', () => {
 
     // Reset jose mocks between tests.
     jest.clearAllMocks();
+  });
+
+  // -------------------------------------------------------------------------
+  // @Public() bypass (applies in every mode)
+  // -------------------------------------------------------------------------
+
+  it('lets a @Public() route through without auth (no token, no DB lookup)', async () => {
+    // Flag the handler with the @Public() metadata the guard reads via Reflector.
+    function publicHandler() {}
+    Reflect.defineMetadata(IS_PUBLIC_KEY, true, publicHandler);
+
+    const ctx = {
+      switchToHttp: () => ({ getRequest: () => ({ headers: {} }) }),
+      getHandler: () => publicHandler,
+      getClass: () => class PublicController {},
+    } as never;
+
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(prismaUser.findFirst).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -165,6 +194,18 @@ describe('JwtAuthGuard', () => {
 
     it('sets request.user = undefined when the UUID does not match a live user', async () => {
       prismaUser.findFirst.mockResolvedValue(null);
+      const req: Record<string, unknown> = {
+        headers: { 'x-user-id': DB_USER.id },
+      };
+
+      const result = await guard.canActivate(makeCtx(req));
+
+      expect(result).toBe(true);
+      expect(req.user).toBeUndefined();
+    });
+
+    it('treats a disabled (isActive=false) account as anonymous (shim never 401s)', async () => {
+      prismaUser.findFirst.mockResolvedValue({ ...DB_USER, isActive: false });
       const req: Record<string, unknown> = {
         headers: { 'x-user-id': DB_USER.id },
       };
@@ -239,10 +280,68 @@ describe('JwtAuthGuard', () => {
 
       expect(result).toBe(true);
       expect(req.user).toEqual(DB_USER);
-      expect(prismaUser.create).not.toHaveBeenCalled();
+      expect(prismaUser.upsert).not.toHaveBeenCalled();
+      // The existing-user lookup INCLUDES soft-deleted rows (no-resurrect).
+      expect(prismaUser.findFirst).toHaveBeenCalledWith({
+        where: { externalId: 'oidc-sub-001' },
+        includeSoftDeleted: true,
+      });
     });
 
-    it('JIT-creates a new User when sub is unknown (first login)', async () => {
+    it('pins the JWT verification algorithm to RS256', async () => {
+      (jose.jwtVerify as jest.Mock).mockResolvedValue({
+        payload: { sub: 'oidc-sub-001' },
+      });
+      prismaUser.findFirst.mockResolvedValue(DB_USER);
+
+      await guard.canActivate(
+        makeCtx({ headers: { authorization: 'Bearer valid.token.here' } }),
+      );
+
+      const verifyOptions = (jose.jwtVerify as jest.Mock).mock
+        .calls[0][2] as Record<string, unknown>;
+      expect(verifyOptions.algorithms).toEqual(['RS256']);
+    });
+
+    it('rejects a disabled (isActive=false) account with 401 (offboarding/disable sticks)', async () => {
+      (jose.jwtVerify as jest.Mock).mockResolvedValue({
+        payload: { sub: 'oidc-sub-001' },
+      });
+      // A live but deactivated user.
+      prismaUser.findFirst.mockResolvedValue({ ...DB_USER, isActive: false });
+
+      const req: Record<string, unknown> = {
+        headers: { authorization: 'Bearer valid.token.here' },
+      };
+
+      await expect(guard.canActivate(makeCtx(req))).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      expect(req.user).toBeUndefined();
+    });
+
+    it('returns 403 (no re-provision) when the externalId matches a SOFT-DELETED user', async () => {
+      (jose.jwtVerify as jest.Mock).mockResolvedValue({
+        payload: { sub: 'oidc-sub-001' },
+      });
+      // The soft-delete escape hatch surfaces the offboarded row (deletedAt set).
+      prismaUser.findFirst.mockResolvedValue({
+        ...DB_USER,
+        deletedAt: new Date(),
+      });
+
+      const req: Record<string, unknown> = {
+        headers: { authorization: 'Bearer valid.token.here' },
+      };
+
+      await expect(guard.canActivate(makeCtx(req))).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      // Must NOT resurrect the account.
+      expect(prismaUser.upsert).not.toHaveBeenCalled();
+    });
+
+    it('JIT-creates a new User (via upsert) when sub is unknown (first login)', async () => {
       (jose.jwtVerify as jest.Mock).mockResolvedValue({
         payload: {
           sub: 'oidc-sub-new',
@@ -261,7 +360,7 @@ describe('JwtAuthGuard', () => {
         firstName: 'Bob',
         lastName: 'Jones',
       };
-      prismaUser.create.mockResolvedValue(newUser);
+      prismaUser.upsert.mockResolvedValue(newUser);
 
       const req: Record<string, unknown> = {
         headers: { authorization: 'Bearer valid.token.here' },
@@ -271,14 +370,17 @@ describe('JwtAuthGuard', () => {
 
       expect(result).toBe(true);
       expect(req.user).toEqual(newUser);
-      expect(prismaUser.create).toHaveBeenCalledWith({
-        data: {
+      // Race-proof upsert on externalId (not a check-then-act create).
+      expect(prismaUser.upsert).toHaveBeenCalledWith({
+        where: { externalId: 'oidc-sub-new' },
+        create: {
           externalId: 'oidc-sub-new',
           email: 'bob@example.com',
           firstName: 'Bob',
           lastName: 'Jones',
           isActive: true,
         },
+        update: {},
       });
     });
 
@@ -291,7 +393,7 @@ describe('JwtAuthGuard', () => {
         },
       });
       prismaUser.findFirst.mockResolvedValue(null);
-      prismaUser.create.mockResolvedValue({
+      prismaUser.upsert.mockResolvedValue({
         ...DB_USER,
         externalId: 'oidc-sub-x',
       });
@@ -302,14 +404,16 @@ describe('JwtAuthGuard', () => {
         }),
       );
 
-      expect(prismaUser.create).toHaveBeenCalledWith({
-        data: {
+      expect(prismaUser.upsert).toHaveBeenCalledWith({
+        where: { externalId: 'oidc-sub-x' },
+        create: {
           externalId: 'oidc-sub-x',
           email: 'carol@example.com',
           firstName: 'Carol',
           lastName: 'Chen',
           isActive: true,
         },
+        update: {},
       });
     });
 
@@ -321,7 +425,7 @@ describe('JwtAuthGuard', () => {
         },
       });
       prismaUser.findFirst.mockResolvedValue(null);
-      prismaUser.create.mockResolvedValue({
+      prismaUser.upsert.mockResolvedValue({
         ...DB_USER,
         externalId: 'oidc-sub-y',
       });
@@ -332,14 +436,16 @@ describe('JwtAuthGuard', () => {
         }),
       );
 
-      expect(prismaUser.create).toHaveBeenCalledWith({
-        data: {
+      expect(prismaUser.upsert).toHaveBeenCalledWith({
+        where: { externalId: 'oidc-sub-y' },
+        create: {
           externalId: 'oidc-sub-y',
           email: 'dana@example.com',
           firstName: 'dana',
           lastName: '',
           isActive: true,
         },
+        update: {},
       });
     });
 
@@ -376,7 +482,7 @@ describe('JwtAuthGuard', () => {
           payload: { sub: 'oidc-sub-jit' },
         });
         prismaUser.findFirst.mockResolvedValue(null);
-        prismaUser.create.mockImplementation(echoCreatedUser);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
 
         // discovery → userinfo_endpoint; userinfo → full profile.
         fetchMock.mockImplementation(
@@ -405,14 +511,16 @@ describe('JwtAuthGuard', () => {
           makeCtx({ headers: { authorization: 'Bearer access.token' } }),
         );
 
-        expect(prismaUser.create).toHaveBeenCalledWith({
-          data: {
+        expect(prismaUser.upsert).toHaveBeenCalledWith({
+          where: { externalId: 'oidc-sub-jit' },
+          create: {
             externalId: 'oidc-sub-jit',
             email: 'real.user@corp.com',
             firstName: 'Real',
             lastName: 'User',
             isActive: true,
           },
+          update: {},
         });
         // userinfo was called with the access token as Bearer.
         const userinfoCall = findCall(fetchMock, '/oidc/v1/userinfo');
@@ -428,7 +536,7 @@ describe('JwtAuthGuard', () => {
           payload: { sub: 'oidc-sub-fail' },
         });
         prismaUser.findFirst.mockResolvedValue(null);
-        prismaUser.create.mockImplementation(echoCreatedUser);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
 
         const warnSpy = jest
           .spyOn(Logger.prototype, 'warn')
@@ -455,14 +563,16 @@ describe('JwtAuthGuard', () => {
 
         expect(result).toBe(true);
         // Placeholder fallback from the bare sub.
-        expect(prismaUser.create).toHaveBeenCalledWith({
-          data: {
+        expect(prismaUser.upsert).toHaveBeenCalledWith({
+          where: { externalId: 'oidc-sub-fail' },
+          create: {
             externalId: 'oidc-sub-fail',
             email: 'oidc-sub-fail@unknown',
             firstName: 'oidc-sub-fail',
             lastName: '',
             isActive: true,
           },
+          update: {},
         });
         expect(warnSpy).toHaveBeenCalled();
         warnSpy.mockRestore();
@@ -474,7 +584,7 @@ describe('JwtAuthGuard', () => {
           payload: { sub: 'oidc-sub-throw' },
         });
         prismaUser.findFirst.mockResolvedValue(null);
-        prismaUser.create.mockImplementation(echoCreatedUser);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
 
         const warnSpy = jest
           .spyOn(Logger.prototype, 'warn')
@@ -500,14 +610,16 @@ describe('JwtAuthGuard', () => {
         );
 
         expect(result).toBe(true);
-        expect(prismaUser.create).toHaveBeenCalledWith({
-          data: {
+        expect(prismaUser.upsert).toHaveBeenCalledWith({
+          where: { externalId: 'oidc-sub-throw' },
+          create: {
             externalId: 'oidc-sub-throw',
             email: 'oidc-sub-throw@unknown',
             firstName: 'oidc-sub-throw',
             lastName: '',
             isActive: true,
           },
+          update: {},
         });
         expect(warnSpy).toHaveBeenCalled();
         warnSpy.mockRestore();
@@ -525,7 +637,7 @@ describe('JwtAuthGuard', () => {
         );
 
         expect(result).toBe(true);
-        expect(prismaUser.create).not.toHaveBeenCalled();
+        expect(prismaUser.upsert).not.toHaveBeenCalled();
         expect(fetchMock).not.toHaveBeenCalled();
       });
 
@@ -535,7 +647,7 @@ describe('JwtAuthGuard', () => {
           payload: { sub: 'oidc-sub-internal' },
         });
         prismaUser.findFirst.mockResolvedValue(null);
-        prismaUser.create.mockImplementation(echoCreatedUser);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
 
         fetchMock.mockImplementation(
           (input: unknown): Promise<FakeResponse> => {
