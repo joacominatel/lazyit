@@ -20,6 +20,7 @@ import { AccessGrantsModule } from './access-grants/access-grants.module';
 import { ConsumableCategoriesModule } from './consumable-categories/consumable-categories.module';
 import { ConsumablesModule } from './consumables/consumables.module';
 import { AssetHistoryModule } from './asset-history/asset-history.module';
+import { HealthModule } from './health/health.module';
 import { CommonModule } from './common/common.module';
 import { SearchModule } from './search/search.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
@@ -39,6 +40,8 @@ import { buildLoggerParams } from './logging/logging.config';
     // Global cross-cutting search (ADR-0035): exports SearchService for fire-and-forget index sync,
     // hosts GET /search. No-ops when MEILI_HOST is unset.
     SearchModule,
+    // Operational health probes (@Public() /health/live + /health/ready). Hand-rolled, no terminus.
+    HealthModule,
     AssetHistoryModule,
     UsersModule,
     LocationsModule,
