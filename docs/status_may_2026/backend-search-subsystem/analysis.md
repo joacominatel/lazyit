@@ -252,3 +252,56 @@ script is **additive-only** (no `deleteAllDocuments` / index swap).
    teams actually store there. (finding 7)
 4. **Owner of the index-settings layer:** is relevance tuning (searchable attributes / ranking) a
    backend-app concern or a DevOps/ops concern? It needs a home before it's built. (finding 3)
+
+---
+
+## Round 1 implementation (CTO proposal)
+
+Branch `feat/search-hardening` — closes the two correctness/exposure findings that need **no schema
+change** (findings 1 and 2; the honest-success part of finding 6 rides along). Findings 3, 4, 7, 8
+remain deferred (they need index-settings/RBAC/DevOps work out of this round's scope).
+
+### 1. Authoritative reindex — ghosts are now evicted (finding 1, + finding 6's task-wait)
+
+- **What:** `scripts/reindex-all.ts` no longer does additive-only `addDocuments` (an upsert by
+  primary key that could never delete). A new framework-agnostic helper
+  `src/search/reindex.ts` (`reindexIndex`) rebuilds each index **authoritatively and zero-downtime**
+  via the analyst-preferred swap path: ensure the live index exists (first-deploy safe) → build a
+  fresh temp index from the live set in `REINDEX_BATCH_SIZE` (1000) batches, awaiting each Meili task
+  → atomically `swapIndexes` the temp into place → drop the temp index. The script now calls it per
+  index sequentially and prints "full rebuild — stale documents evicted".
+- **Why:** the old additive reindex left soft-deleted **USER PII** and unpublished/deleted **DRAFT
+  articles** searchable forever whenever a fire-and-forget `remove()` was dropped, and gave operators
+  false confidence that `reindex:all` repaired drift. The swap makes the live index contain *exactly*
+  the live set (every ghost evicted) without an empty/half-built window. The live set keeps the
+  existing visibility filters — `deletedAt: null` for all five entities and `status: PUBLISHED` for
+  articles — i.e. the same visibility the read path enforces.
+- **Honesty (finding 6):** every task is awaited via `.waitTask()`; a failed Meili task now propagates
+  and the script exits non-zero, instead of printing "enqueued" over a silently partial rebuild. The
+  temp index is always disposed in a `finally`, so a failure never leaks it.
+
+### 2. Fail-soft reads — a Meili outage no longer 500s `/search` (finding 2)
+
+- **What:** `SearchService.search()` now wraps the `multiSearch` await in try/catch. On rejection it
+  logs (`error`) and returns `emptyResults(requested)` — the exact same shape disabled mode returns.
+- **Why:** writes were already fire-and-forget fail-soft (ADR-0035), but a configured-but-unhealthy
+  engine (down after construction, or a revoked key) turned every read into a 500 the frontend
+  surfaced as "Couldn't run the search". Reads now mirror the write-side posture: a search outage
+  degrades search to empty results, it never takes the app down.
+
+### Tests
+
+- `src/search/reindex.spec.ts` (new): asserts the create-temp → add-to-temp → swap → drop-temp
+  sequence, that documents only ever hit the temp index (the live index is replaced wholesale, so
+  ghosts are evicted), empty-live-set still swaps, idempotent ensure when the live index already
+  exists, `REINDEX_BATCH_SIZE` batching, and that a failed task propagates while the temp index is
+  still disposed.
+- `src/search/search.service.spec.ts` (extended): a rejected `multiSearch` resolves to empty blocks
+  (not a throw) and is logged, for both an explicit entity subset and the all-five default.
+- Verified: `tsc -p tsconfig.json --noEmit` clean; the four `src/search` Jest suites pass (37 tests).
+
+### Out of scope / deferred
+
+No schema or migration change. Index settings (finding 3), per-caller authorization (finding 4,
+gated on RBAC), the `asset.notes` exposure decision (finding 7), a scoped Meili key (finding 8,
+DevOps), and a scheduled DB-vs-index reconciliation (finding 1's durable follow-up) are untouched.

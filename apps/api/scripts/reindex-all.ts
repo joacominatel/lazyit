@@ -7,11 +7,19 @@
  * null` explicitly; articles are additionally restricted to PUBLISHED to honor draft privacy
  * (ADR-0022) — soft-deleted/draft rows must never end up in the index.
  *
+ * AUTHORITATIVE REBUILD: each index is rebuilt via {@link reindexIndex} (build a fresh temp index
+ * from the live set, then atomically swap it into place). Unlike the previous additive-only
+ * `addDocuments`, this **evicts ghost documents** — soft-deleted USER PII or unpublished/deleted
+ * articles whose fire-and-forget `remove()` was dropped — instead of leaving them searchable
+ * forever. Every Meili task is awaited, so the script reports honest success/failure and exits
+ * non-zero if any index fails to rebuild.
+ *
  * Run from apps/api: `bun run reindex:all`. Bun auto-loads `.env` (DATABASE_URL, MEILI_*).
  */
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Meilisearch } from 'meilisearch';
 import { PrismaClient } from '../generated/prisma/client';
+import { reindexIndex, type ReindexClient } from '../src/search/reindex';
 import {
   projectApplication,
   projectArticle,
@@ -47,25 +55,22 @@ async function reindex(): Promise<void> {
     prisma.application.findMany({ where: { deletedAt: null } }),
   ]);
 
-  await Promise.all([
-    meili
-      .index('assets')
-      .addDocuments(assets.map(projectAsset), { primaryKey: 'id' }),
-    meili
-      .index('articles')
-      .addDocuments(articles.map(projectArticle), { primaryKey: 'id' }),
-    meili
-      .index('users')
-      .addDocuments(users.map(projectUser), { primaryKey: 'id' }),
-    meili
-      .index('locations')
-      .addDocuments(locations.map(projectLocation), { primaryKey: 'id' }),
-    meili
-      .index('applications')
-      .addDocuments(applications.map(projectApplication), { primaryKey: 'id' }),
-  ]);
+  // `Meilisearch` structurally satisfies the small ReindexClient surface reindexIndex depends on.
+  const client = meili as unknown as ReindexClient;
 
-  console.log('Reindex enqueued:');
+  // Rebuild each index authoritatively (temp index + atomic swap → ghosts evicted). Sequential so a
+  // failure is attributable and we never run five concurrent rebuilds against a recovering engine.
+  await reindexIndex(client, 'assets', assets.map(projectAsset));
+  await reindexIndex(client, 'articles', articles.map(projectArticle));
+  await reindexIndex(client, 'users', users.map(projectUser));
+  await reindexIndex(client, 'locations', locations.map(projectLocation));
+  await reindexIndex(
+    client,
+    'applications',
+    applications.map(projectApplication),
+  );
+
+  console.log('Reindex complete (full rebuild — stale documents evicted):');
   console.log(`  assets:       ${assets.length}`);
   console.log(`  articles:     ${articles.length} (PUBLISHED only)`);
   console.log(`  users:        ${users.length}`);
