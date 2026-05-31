@@ -446,3 +446,50 @@ data and must survive disk loss, operator turnover, and version upgrades).
 6. **Align the two bundled Postgres majors (16 + 18)?** Bumping Zitadel's DB to Postgres 18 simplifies
    the volume-mount/upgrade matrix — acceptable to verify Zitadel v2.68 support and standardize, or
    keep them independent for blast-radius isolation?
+
+---
+
+## Round 1 implementation (CTO proposal)
+
+Schema-free infra/DR/ops hardening landed on `chore/infra-dr-hardening` (DevOps lane only:
+`infra/**`, `docs/05-runbooks/**`, root `docker-compose.yml`). No schema/migration change.
+
+1. **DR / backups rewrite** (`backups.md`, Findings #1/#3) — rewrote the runbook as a complete DR
+   inventory with a "what to back up" table: app DB **and** Zitadel DB dumps, `.env.prod` /
+   `ZITADEL_MASTERKEY` / `AUTH_SECRET` off-host, and the call-out that Meili is rebuildable
+   (reindex) and Caddy state re-issuable. Added the **restore order** (env → zitadel_db → app db →
+   `up -d` → reindex), a new **Restore Zitadel** subsection, and **fixed the destructive restore
+   step**: replaced `down -v` (wipes all 5 volumes incl. the IdP) with targeted
+   `docker volume rm lazyit-prod_db_data`, and corrected the inaccurate "removes db_data" comment.
+   Mirrored the `down -v` clarification into `docker-prod-like-first-boot.md`.
+2. **Automated backup sidecar** (Finding #2) — added an opt-in `backup` service
+   (`profiles: [backup]`) to `docker-compose.prod.yml`: cron + `pg_dump` for **both** DBs to a
+   host-mounted `./backups` with `BACKUP_RETENTION_DAYS` pruning and an OFF-by-default
+   `BACKUP_OFFSITE_CMD` hook (no mandatory cloud). Documented + env vars added to
+   `.env.prod.example`.
+3. **Image digest-pinning** (ADR-0025 follow-up) — pinned **every** base image by `@sha256` (3
+   Dockerfiles + all compose service images, prod and dev), human tag kept in a comment, with a
+   re-pin command. Real digests resolved from the registries (not invented).
+4. **Resource & log safety** (Findings #4/#5) — added a shared `logging:` rotation anchor
+   (json-file, 10m × 3) and a modest `mem_limit`/`cpus` to every long-running prod service; added a
+   sizing note to `deploy-self-hosted.md`.
+5. **Caddy hardening** — added baseline security headers (`X-Content-Type-Options: nosniff`,
+   `Referrer-Policy`, `X-Frame-Options`, `-Server`) and a JSON access-log block via reusable
+   snippets; HSTS provided as an `(hsts)` snippet that's uncommented for real domains only (never
+   localhost). Switched Caddy's `depends_on` for api/web to `condition: service_healthy`. Validated
+   with `caddy validate`.
+6. **Health & reindex** (Finding #6 + reindex bug) — repointed the API Dockerfile HEALTHCHECK to
+   `GET /health/live` (public liveness, added by a parallel PR — stable path). Fixed the broken
+   first-deploy reindex: the Node runtime image has no Bun, so `reindex:all` now runs via the
+   Bun-based `migrate` image (`docker compose run --rm migrate bun run reindex:all`); the migrate
+   Dockerfile now carries `src/` + `scripts/` for it. Strengthened the `chmod 600 .env.prod`
+   guidance (why + `stat` check) and a `POSTGRES_PASSWORD` generation recipe.
+
+Bonus doc-sync (lane = `docs/05-runbooks/**`): corrected the stale "auth is not implemented — do
+not expose" warning in `deploy-self-hosted.md` and the "No IdP is wired" section in `infra/README.md`
+to the shipped OIDC/Zitadel posture, updated the verify steps to expect 401 (guard active) + 200 on
+`/health/live`, and fixed the wrong "edit + up -d" DB-password rotation guidance.
+
+Deferred (needs CEO/ADR or out of this lane): upgrade/rollback + secrets-rotation runbooks (Findings
+#7/#8/#12), release-tag pinning vs `:dev` (ADR-0027 / CD), self-observability metrics (#15), and
+aligning the two Postgres majors (#13) — all schema-free but larger/decision-gated.
