@@ -3,7 +3,7 @@ title: "ADR-0022: Draft visibility & the X-User-Id auth shim"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-30
 deciders: [Joaquín Minatel]
 ---
 
@@ -14,6 +14,13 @@ deciders: [Joaquín Minatel]
 accepted — 2026-05-25, **temporary**. Stands on [[0016-auth-strategy-deferred]] (no real auth
 yet) and is scoped to the Knowledge Base ([[0021-knowledge-base-design]]). **To be revisited when
 auth lands** — when [[0016-auth-strategy-deferred]] is resolved, this ADR is reviewed.
+
+> [!note] Shim path preserved; superseded in the OIDC path by [[0038-jit-user-provisioning]]
+> Auth has since landed ([[0016-auth-strategy-deferred]] is superseded). In **OIDC mode** the
+> actor is the OIDC-authenticated caller (`sub`→[[user]]) resolved by the global guard, not the
+> `X-User-Id` header; the **draft-visibility authorization rules below are unchanged** — only the
+> source of "who is calling" moved to a verified token. The `X-User-Id` header survives **only**
+> under `AUTH_MODE=shim` (dev/test). See [[0038-jit-user-provisioning]] / [[0039-authjs-v5-frontend-oidc]].
 
 ## Context
 

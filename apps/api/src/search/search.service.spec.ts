@@ -255,6 +255,42 @@ describe('SearchService', () => {
       });
       expect(result.users).toEqual({ hits: [], total: 0 });
     });
+
+    // --- fail-soft reads (ADR-0035): configured-but-unhealthy engine ---------
+    it('search returns empty blocks (not a throw) when multiSearch rejects, and logs it', async () => {
+      const boom = new Error('meili unreachable');
+      client.multiSearch.mockRejectedValueOnce(boom);
+
+      const result = await service.search({
+        q: 'srv',
+        entities: ['assets', 'users'],
+        limit: 20,
+      });
+
+      // Fail-soft: empty blocks for every requested entity, no exception bubbles to the controller.
+      expect(result).toEqual({
+        assets: { hits: [], total: 0 },
+        users: { hits: [], total: 0 },
+      });
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      const [meta] = logger.error.mock.calls[0] as [{ err: unknown }];
+      expect(meta.err).toBe(boom);
+    });
+
+    it('search fail-soft defaults to empty blocks for all five indexes when entities omitted', async () => {
+      client.multiSearch.mockRejectedValueOnce(new Error('meili down'));
+
+      const result = await service.search({ q: 'x', limit: 20 });
+
+      expect(Object.keys(result).sort()).toEqual([
+        'applications',
+        'articles',
+        'assets',
+        'locations',
+        'users',
+      ]);
+      expect(result.assets).toEqual({ hits: [], total: 0 });
+    });
   });
 
   // Guards the DI token wiring: the provider resolves with the real PinoLogger token shape.

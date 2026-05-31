@@ -61,7 +61,7 @@ export function getConsumableMovements(
 /**
  * Record a stock movement (IN adds, OUT subtracts, ADJUSTMENT sets the absolute count). `quantity`
  * is positive; the direction is the `type`. The API maintains `currentStock` transactionally and
- * returns 409 if an OUT would go negative. `performedById` is set from the X-User-Id shim.
+ * returns 409 if an OUT would go negative. `performedById` is set from the authenticated user (Bearer token, ADR-0038).
  */
 export function createConsumableMovement(
   consumableId: string,

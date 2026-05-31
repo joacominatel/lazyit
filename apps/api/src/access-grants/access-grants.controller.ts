@@ -2,16 +2,15 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
-  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -27,16 +26,10 @@ import {
   UpdateAccessGrantExpiryDto,
   UpdateAccessGrantNotesDto,
 } from './access-grant.dto';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { User } from '../../generated/prisma/client';
 
-// X-User-Id is the auth shim (ADR-0022). On grant writes it's OPTIONAL and becomes the actor
-// (grantedById / revokedById); absent → null actor (system/unknown), allowed by design (ADR-0023).
-const ACTOR_USER_HEADER = {
-  name: 'X-User-Id',
-  required: false,
-  description:
-    'Caller user id (auth shim). Optional; recorded as the grantor/revoker (null if absent).',
-} as const;
-
+@ApiBearerAuth()
 @ApiTags('access-grants')
 @Controller('access-grants')
 export class AccessGrantsController {
@@ -88,28 +81,26 @@ export class AccessGrantsController {
   @ApiOperation({
     summary: 'Open a grant (give a user access to an application)',
   })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiCreatedResponse({ type: AccessGrantDto })
   create(
     @Body() dto: CreateAccessGrantDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.grants.create(dto, actorId);
+    return this.grants.create(dto, user);
   }
 
   @Patch(':id/revoke')
   @ApiOperation({
     summary: 'Revoke an active grant (sets revokedAt; 409 if already revoked)',
   })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiOkResponse({ type: AccessGrantDto })
   @ApiConflictResponse({ description: 'The grant is already revoked' })
   revoke(
     @Param('id') id: string,
     @Body() dto: RevokeAccessGrantDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.grants.revoke(id, dto, actorId);
+    return this.grants.revoke(id, dto, user);
   }
 
   @Patch(':id/notes')

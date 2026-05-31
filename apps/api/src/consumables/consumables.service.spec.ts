@@ -30,7 +30,11 @@ type MovementModelMock = {
 
 // The transaction client the movement goes through; $transaction runs the callback with it.
 type TxMock = {
-  consumable: { findFirst: jest.Mock; update: jest.Mock };
+  consumable: {
+    findFirst: jest.Mock;
+    update: jest.Mock;
+    updateMany: jest.Mock;
+  };
   consumableMovement: { create: jest.Mock };
 };
 
@@ -43,8 +47,11 @@ type StockUpdateCall = [
 // A sentinel object standing in for the Prisma FieldRef; we only assert identity.
 const MIN_STOCK_FIELD = { __fieldRef: 'minStock' };
 
-// A well-formed UUID used as the X-User-Id actor in the shim tests.
+// A well-formed UUID used as the actor in tests.
 const ACTOR_ID = '11111111-1111-1111-1111-111111111111';
+// Minimal User shape for tests — the full Prisma User type, but only id matters here.
+type MinimalUser = { id: string };
+const ACTOR_USER: MinimalUser = { id: ACTOR_ID };
 
 describe('ConsumablesService', () => {
   let service: ConsumablesService;
@@ -68,7 +75,11 @@ describe('ConsumablesService', () => {
     };
     consumableMovement = { findMany: jest.fn(), create: jest.fn() };
     tx = {
-      consumable: { findFirst: jest.fn(), update: jest.fn() },
+      consumable: {
+        findFirst: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
       consumableMovement: { create: jest.fn() },
     };
     prisma = {
@@ -76,8 +87,9 @@ describe('ConsumablesService', () => {
       consumableMovement,
       $transaction: jest.fn((cb: (client: TxMock) => unknown) => cb(tx)),
     };
-    // ActorService is mocked; shim-validation detail lives in actor.service.spec.ts. Default: no actor.
-    actor = { resolve: jest.fn().mockResolvedValue(undefined) };
+    // ActorService is mocked; guard validation detail lives in jwt-auth.guard.spec.ts. Default: no actor.
+    // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
+    actor = { resolve: jest.fn().mockReturnValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -186,16 +198,18 @@ describe('ConsumablesService', () => {
   });
 
   // --- createMovement: stock math -----------------------------------------
-  it('IN adds to currentStock and persists the movement in a transaction', async () => {
-    tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 5 });
+  it('IN atomically increments currentStock and persists the movement in a transaction', async () => {
+    tx.consumable.findFirst.mockResolvedValue({ currentStock: 5 });
+    tx.consumable.update.mockResolvedValue({ id: 'k1' });
     tx.consumableMovement.create.mockResolvedValue({ id: 1 });
 
     await service.createMovement('k1', { type: 'IN', quantity: 3 });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    // Atomic increment, not a JS read-modify-write of an absolute value.
     expect(tx.consumable.update).toHaveBeenCalledWith({
       where: { id: 'k1' },
-      data: { currentStock: 8 },
+      data: { currentStock: { increment: 3 } },
     });
     const calls = tx.consumableMovement.create.mock
       .calls as CreateMovementCall[];
@@ -206,42 +220,64 @@ describe('ConsumablesService', () => {
     });
   });
 
-  it('OUT subtracts from currentStock', async () => {
-    tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 5 });
+  it('OUT decrements via a guarded updateMany (gte + live row) and records the movement', async () => {
+    tx.consumable.updateMany.mockResolvedValue({ count: 1 });
     tx.consumableMovement.create.mockResolvedValue({ id: 2 });
 
     await service.createMovement('k1', { type: 'OUT', quantity: 2 });
 
-    expect(tx.consumable.update).toHaveBeenCalledWith({
-      where: { id: 'k1' },
-      data: { currentStock: 3 },
+    expect(tx.consumable.updateMany).toHaveBeenCalledWith({
+      where: { id: 'k1', deletedAt: null, currentStock: { gte: 2 } },
+      data: { currentStock: { decrement: 2 } },
+    });
+    // No JS read-modify-write `update` on the OUT path.
+    expect(tx.consumable.update).not.toHaveBeenCalled();
+    const calls = tx.consumableMovement.create.mock
+      .calls as CreateMovementCall[];
+    expect(calls[0][0].data).toMatchObject({
+      consumableId: 'k1',
+      type: 'OUT',
+      quantity: 2,
     });
   });
 
-  it('OUT to exactly zero is allowed', async () => {
-    tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 4 });
+  it('OUT whose guarded updateMany matches a row (down to zero) succeeds', async () => {
+    tx.consumable.updateMany.mockResolvedValue({ count: 1 });
     tx.consumableMovement.create.mockResolvedValue({ id: 3 });
 
     await service.createMovement('k1', { type: 'OUT', quantity: 4 });
 
-    expect(tx.consumable.update).toHaveBeenCalledWith({
-      where: { id: 'k1' },
-      data: { currentStock: 0 },
+    expect(tx.consumable.updateMany).toHaveBeenCalledWith({
+      where: { id: 'k1', deletedAt: null, currentStock: { gte: 4 } },
+      data: { currentStock: { decrement: 4 } },
     });
+    expect(tx.consumableMovement.create).toHaveBeenCalledTimes(1);
   });
 
-  it('OUT that would go negative throws 409 and persists nothing', async () => {
-    tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 1 });
+  it('OUT that matches no live row with enough stock (count 0) throws 409 and persists nothing', async () => {
+    // The guarded decrement updated zero rows: insufficient stock under concurrency. The follow-up
+    // findFirst proves the row exists, so this is a 409 (not a 404).
+    tx.consumable.updateMany.mockResolvedValue({ count: 0 });
+    tx.consumable.findFirst.mockResolvedValue({ currentStock: 1 });
 
     await expect(
       service.createMovement('k1', { type: 'OUT', quantity: 2 }),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(tx.consumable.update).not.toHaveBeenCalled();
+    expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+  });
+
+  it('OUT with count 0 against a missing/soft-deleted consumable throws 404', async () => {
+    tx.consumable.updateMany.mockResolvedValue({ count: 0 });
+    tx.consumable.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.createMovement('missing', { type: 'OUT', quantity: 1 }),
+    ).rejects.toBeInstanceOf(NotFoundException);
     expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
 
   it('ADJUSTMENT sets currentStock to the absolute quantity (even below current)', async () => {
-    tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 50 });
+    tx.consumable.update.mockResolvedValue({ id: 'k1' });
     tx.consumableMovement.create.mockResolvedValue({ id: 4 });
 
     await service.createMovement('k1', { type: 'ADJUSTMENT', quantity: 7 });
@@ -252,7 +288,18 @@ describe('ConsumablesService', () => {
     });
   });
 
-  it('404 when the consumable is missing — nothing is updated or recorded', async () => {
+  it('IN whose result would exceed int4 (INT4_MAX) throws 409 and persists nothing', async () => {
+    const INT4_MAX = 2_147_483_647;
+    tx.consumable.findFirst.mockResolvedValue({ currentStock: INT4_MAX - 1 });
+
+    await expect(
+      service.createMovement('k1', { type: 'IN', quantity: 5 }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.consumable.update).not.toHaveBeenCalled();
+    expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+  });
+
+  it('IN 404 when the consumable is missing — nothing is updated or recorded', async () => {
     tx.consumable.findFirst.mockResolvedValue(null);
 
     await expect(
@@ -262,19 +309,19 @@ describe('ConsumablesService', () => {
     expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
 
-  // --- createMovement: actor via the X-User-Id shim -----------------------
+  // --- createMovement: actor via the authenticated User -------------------
   it('resolves the actor and stamps performedById on the movement', async () => {
-    actor.resolve.mockResolvedValue(ACTOR_ID);
+    actor.resolve.mockReturnValue(ACTOR_ID);
     tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 0 });
     tx.consumableMovement.create.mockResolvedValue({ id: 5 });
 
     await service.createMovement(
       'k1',
       { type: 'IN', quantity: 1, reason: 'restock', notes: 'box A' },
-      ACTOR_ID,
+      ACTOR_USER as never,
     );
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_ID);
+    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     const calls = tx.consumableMovement.create.mock
       .calls as CreateMovementCall[];
     expect(calls[0][0].data).toEqual({
@@ -287,8 +334,8 @@ describe('ConsumablesService', () => {
     });
   });
 
-  it('leaves performedById absent when the actor resolves to undefined (no header)', async () => {
-    actor.resolve.mockResolvedValue(undefined);
+  it('leaves performedById absent when the actor resolves to undefined (no user)', async () => {
+    actor.resolve.mockReturnValue(undefined);
     tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 0 });
     tx.consumableMovement.create.mockResolvedValue({ id: 6 });
 
@@ -301,11 +348,11 @@ describe('ConsumablesService', () => {
     expect(calls[0][0].data).not.toHaveProperty('notes');
   });
 
-  it('propagates a BadRequest from the actor shim and never opens the transaction', async () => {
-    actor.resolve.mockRejectedValue(new BadRequestException());
+  it('propagates a thrown error from the actor resolver and never opens the transaction', async () => {
+    actor.resolve.mockImplementation(() => { throw new BadRequestException(); });
 
     await expect(
-      service.createMovement('k1', { type: 'IN', quantity: 1 }, 'not-a-uuid'),
+      service.createMovement('k1', { type: 'IN', quantity: 1 }, ACTOR_USER as never),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });

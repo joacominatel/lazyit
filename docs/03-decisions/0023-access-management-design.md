@@ -3,7 +3,7 @@ title: "ADR-0023: Access management design (Application + AccessGrant)"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-30
 deciders: [Joaquín Minatel]
 ---
 
@@ -15,6 +15,12 @@ accepted — 2026-05-25. Third pillar of the MVP backend (after assets and the k
 mirrors the lifecycle-join pattern of [[0019-asset-assignment-integrity]], builds on
 [[0006-soft-delete-and-auditing]] and [[0005-id-strategy]], and adopts the `X-User-Id` shim from
 [[0022-draft-visibility-auth-shim]] for the "who acted" fields.
+
+> [!note] Shim path preserved; superseded in the OIDC path by [[0038-jit-user-provisioning]]
+> Auth has landed since this ADR ([[0016-auth-strategy-deferred]] is superseded). The access-
+> management **design here is unchanged**; only the "who acted" source moved: in **OIDC mode**
+> the actor is the OIDC-authenticated caller (`sub`→[[user]]) resolved by the global guard, and
+> the `X-User-Id` header survives **only** under `AUTH_MODE=shim` (dev/test).
 
 ## Context
 

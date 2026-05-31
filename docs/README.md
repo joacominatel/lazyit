@@ -3,7 +3,7 @@ title: lazyit Documentation
 tags: [moc, root]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-26
 ---
 
 # lazyit — Documentation
@@ -34,6 +34,7 @@ frontmatter, and internal references use `[[wiki-links]]`.
 | `03-decisions` | [[03-decisions/_MOC\|Decisions]] | Architecture Decision Records (MADR-lite) |
 | `04-development` | [[04-development/_MOC\|Development]] | How we work, setup, workflows, code conventions |
 | `05-runbooks` | [[05-runbooks/_MOC\|Runbooks]] | Operations, deploy, troubleshooting |
+| `06-security` | [[06-security/_MOC\|Security]] | Vulnerability findings, sentinel sweeps, deferred risks |
 | `99-glossary` | [[99-glossary/_MOC\|Glossary]] | IT terms used across the docs |
 
 ## Doc conventions (this vault)

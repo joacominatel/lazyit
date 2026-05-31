@@ -43,6 +43,12 @@ describe('PrismaExceptionFilter', () => {
     expect((ex as BadRequestException).getStatus()).toBe(400);
   });
 
+  it('maps P2020 (value out of range, e.g. int4 overflow) to 400', () => {
+    const ex = mapAndGet('P2020');
+    expect(ex).toBeInstanceOf(BadRequestException);
+    expect((ex as BadRequestException).getStatus()).toBe(400);
+  });
+
   it('still maps P2002 -> 409, P2003 -> 400, P2025 -> 404', () => {
     expect(mapAndGet('P2002')).toBeInstanceOf(ConflictException);
     expect(mapAndGet('P2003')).toBeInstanceOf(BadRequestException);

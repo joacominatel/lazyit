@@ -2,17 +2,17 @@
 
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useActingUserId } from "@/lib/api/acting-user";
 import { useArticleBySlug } from "@/lib/api/hooks/use-articles";
 import { ArticleForm } from "../../_components/article-form";
 
 export default function EditArticlePage() {
   const params = useParams<{ slug: string }>();
   const { data: article, isLoading, isError } = useArticleBySlug(params.slug);
-  const actingUserId = useActingUserId();
+  const { data: session } = useSession();
 
   if (isLoading) {
     return (
@@ -35,11 +35,11 @@ export default function EditArticlePage() {
     );
   }
 
-  if (actingUserId !== article.authorId) {
+  if (!session) {
     return (
       <NotEditable
-        title="You can't edit this article"
-        description="Only its author can edit it. Switch to the author to make changes."
+        title="Not signed in"
+        description="You must be signed in to edit articles."
         slug={article.slug}
       />
     );
