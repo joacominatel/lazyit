@@ -1,6 +1,10 @@
+# lazyit — DEV stack (Postgres + Meilisearch + Zitadel). The apps run natively via `bun run dev`.
+# Base images are digest-pinned (@sha256) for reproducibility; the human tag is kept inline. Re-pin
+# after a deliberate bump: `docker buildx imagetools inspect <image>:<tag> --format '{{.Manifest.Digest}}'`.
 services:
   db:
-    image: postgres:18-alpine
+    # postgres:18-alpine — pinned by digest (rolling tag).
+    image: postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88
     restart: always
     shm_size: 256mb
     environment:
@@ -22,7 +26,8 @@ services:
       start_period: 30s
 
   meilisearch:
-    image: getmeili/meilisearch:v1.12.3
+    # getmeili/meilisearch:v1.12.3 — pinned by digest.
+    image: getmeili/meilisearch:v1.12.3@sha256:4acfcbbb9e089aa1aac838cfda3fba7f07aaaef044c23da8acbe0ab741400dac
     restart: always
     environment:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
@@ -35,6 +40,61 @@ services:
       # Production runs Meilisearch in infra/docker-compose.prod.yml (DevOps), never published.
       - "127.0.0.1:7700:7700"
 
+  # --- Zitadel's own PostgreSQL — separate from the app DB (ADR-0037) -------------------
+  # Hard requirement: Zitadel does aggressive schema migrations. Clean separation means
+  # independent backups and a clean removal path when a customer brings their own IdP.
+  # No published port — Zitadel connects to this within the Docker Compose default network.
+  zitadel_db:
+    # postgres:16-alpine — pinned by digest (NOTE: PG16, distinct from the app's PG18 db).
+    image: postgres:16-alpine@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
+    restart: always
+    shm_size: 64mb
+    environment:
+      POSTGRES_USER: ${ZITADEL_DB_USER:-zitadel}
+      POSTGRES_PASSWORD: ${ZITADEL_DB_PASSWORD}
+      POSTGRES_DB: ${ZITADEL_DB_NAME:-zitadel}
+    volumes:
+      - zitadel_db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ZITADEL_DB_USER:-zitadel} -d ${ZITADEL_DB_NAME:-zitadel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # --- Zitadel IdP (dev) — loopback :8080, no TLS (Caddy terminates in prod) -----------
+  # Admin console: http://localhost:8080/ui/console
+  # OIDC discovery: http://localhost:8080/.well-known/openid-configuration
+  # First start runs `start-from-init`: initialises the DB schema + creates the admin user.
+  # See docs/05-runbooks/auth-bootstrap.md for the full bootstrap procedure.
+  zitadel:
+    # ghcr.io/zitadel/zitadel:v2.68.0 — pinned by digest.
+    image: ghcr.io/zitadel/zitadel:v2.68.0@sha256:9e0e672e4467fd5b1ad07acf206d61e096886e44ca1347c2deef8b65f8ace2b5
+    command: start-from-init --masterkey "${ZITADEL_MASTERKEY}" --tlsMode disabled
+    restart: unless-stopped
+    environment:
+      ZITADEL_DATABASE_POSTGRES_HOST: zitadel_db
+      ZITADEL_DATABASE_POSTGRES_PORT: "5432"
+      ZITADEL_DATABASE_POSTGRES_DATABASE: ${ZITADEL_DB_NAME:-zitadel}
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: ${ZITADEL_DB_USER:-zitadel}
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: ${ZITADEL_DB_PASSWORD}
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: ${ZITADEL_DB_USER:-zitadel}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${ZITADEL_DB_PASSWORD}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+      ZITADEL_EXTERNALSECURE: "false"       # dev: no HTTPS; Caddy handles TLS in prod
+      ZITADEL_EXTERNALPORT: "8080"
+      ZITADEL_EXTERNALDOMAIN: ${ZITADEL_EXTERNALDOMAIN:-localhost}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: ${ZITADEL_ADMIN_USERNAME:-admin}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASSWORD}
+    depends_on:
+      zitadel_db:
+        condition: service_healthy
+    ports:
+      # Loopback only in dev — Zitadel admin console and OIDC endpoints at localhost:8080.
+      - "127.0.0.1:8080:8080"
+
 volumes:
   db_data:
   meili_data:
+  zitadel_db_data:

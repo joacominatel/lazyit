@@ -20,6 +20,10 @@ jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 const AUTHOR = '11111111-1111-1111-1111-111111111111';
 const OTHER = '22222222-2222-2222-2222-222222222222';
+// Minimal User shapes for tests — the full Prisma User type, but only id matters here.
+type MinimalUser = { id: string };
+const AUTHOR_USER: MinimalUser = { id: AUTHOR };
+const OTHER_USER: MinimalUser = { id: OTHER };
 
 // Shapes we assert against the recorded Prisma calls (the jest.Mock arrays are otherwise `any`).
 type ArticleData = {
@@ -48,8 +52,8 @@ describe('ArticlesService', () => {
   let service: ArticlesService;
   let article: ArticleMock;
   let articleCategory: { findFirst: jest.Mock };
-  // ActorService is mocked; X-User-Id validation lives in actor.service.spec.ts. By default it echoes
-  // a present id back (any well-formed caller "exists") and maps empty/undefined to anonymous.
+  // ActorService is mocked; guard validation lives in jwt-auth.guard.spec.ts. By default it echoes
+  // a present user's id back (any caller with a User "exists") and maps undefined to anonymous.
   let actor: { resolve: jest.Mock };
   let search: { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
 
@@ -70,14 +74,12 @@ describe('ArticlesService', () => {
           }),
         ),
     };
-    // Any present id resolves to itself (a live caller); empty/undefined → anonymous. Overridden
-    // per-test for the rejecting case.
+    // Any present User resolves to its id; undefined → anonymous (no user).
+    // resolve() is now synchronous — returns string | undefined directly.
     actor = {
       resolve: jest
         .fn()
-        .mockImplementation((id?: string) =>
-          Promise.resolve(id === undefined || id === '' ? undefined : id),
-        ),
+        .mockImplementation((u?: MinimalUser) => u?.id),
     };
     // Category exists by default; overridden per-test.
     articleCategory = { findFirst: jest.fn().mockResolvedValue({ id: 'c1' }) };
@@ -108,7 +110,7 @@ describe('ArticlesService', () => {
   // --- create --------------------------------------------------------------
 
   describe('create', () => {
-    it('sets author from X-User-Id, autogenerates the slug, leaves a DRAFT unpublished', async () => {
+    it('sets author from current user, autogenerates the slug, leaves a DRAFT unpublished', async () => {
       await service.create(
         {
           title: 'My First Article',
@@ -116,7 +118,7 @@ describe('ArticlesService', () => {
           categoryId: 'c1',
           status: 'DRAFT',
         },
-        AUTHOR,
+        AUTHOR_USER as never,
       );
       const data = lastCreate();
       expect(data.authorId).toBe(AUTHOR);
@@ -131,7 +133,7 @@ describe('ArticlesService', () => {
     it('sets publishedAt when created already PUBLISHED', async () => {
       await service.create(
         { title: 'Live', content: 'b', categoryId: 'c1', status: 'PUBLISHED' },
-        AUTHOR,
+        AUTHOR_USER as never,
       );
       expect(lastCreate().publishedAt).toBeInstanceOf(Date);
       // A PUBLISHED article is indexed on create (ADR-0035).
@@ -155,12 +157,12 @@ describe('ArticlesService', () => {
           categoryId: 'c1',
           status: 'DRAFT',
         },
-        AUTHOR,
+        AUTHOR_USER as never,
       );
       expect(lastCreate().slug).toBe('custom-slug');
     });
 
-    it('rejects when X-User-Id is missing (400)', async () => {
+    it('rejects when current user is missing (400)', async () => {
       await expect(
         service.create(
           { title: 'X', content: 'b', categoryId: 'c1', status: 'DRAFT' },
@@ -170,16 +172,14 @@ describe('ArticlesService', () => {
       expect(article.create).not.toHaveBeenCalled();
     });
 
-    it('propagates a 400 from the actor resolver (malformed / unknown X-User-Id)', async () => {
-      // The shim-validation detail is in actor.service.spec.ts; here a write must surface a rejecting
-      // resolve as a 400 (a required author can't be resolved).
-      actor.resolve.mockRejectedValueOnce(
-        new BadRequestException('X-User-Id is not a valid user id'),
-      );
+    it('propagates a thrown error from the actor resolver (a required author can\'t be resolved)', async () => {
+      actor.resolve.mockImplementationOnce(() => {
+        throw new BadRequestException('actor error');
+      });
       await expect(
         service.create(
           { title: 'X', content: 'b', categoryId: 'c1', status: 'DRAFT' },
-          'bad-actor',
+          AUTHOR_USER as never,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
@@ -189,7 +189,7 @@ describe('ArticlesService', () => {
       await expect(
         service.create(
           { title: 'X', content: 'b', categoryId: 'gone', status: 'DRAFT' },
-          AUTHOR,
+          AUTHOR_USER as never,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(article.create).not.toHaveBeenCalled();
@@ -206,7 +206,7 @@ describe('ArticlesService', () => {
     });
 
     it("shows PUBLISHED plus the caller's own DRAFTs when logged in", async () => {
-      await service.findAll({}, AUTHOR);
+      await service.findAll({}, AUTHOR_USER as never);
       expect(listWhere().AND[0]).toEqual({
         OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: AUTHOR }],
       });
@@ -250,7 +250,7 @@ describe('ArticlesService', () => {
         status: 'DRAFT',
         authorId: AUTHOR,
       });
-      await expect(service.findOne('a', OTHER)).rejects.toBeInstanceOf(
+      await expect(service.findOne('a', OTHER_USER as never)).rejects.toBeInstanceOf(
         NotFoundException,
       );
     });
@@ -261,14 +261,14 @@ describe('ArticlesService', () => {
         status: 'DRAFT',
         authorId: AUTHOR,
       });
-      await expect(service.findOne('a', AUTHOR)).resolves.toMatchObject({
+      await expect(service.findOne('a', AUTHOR_USER as never)).resolves.toMatchObject({
         id: 'a',
       });
     });
 
     it('404s when the article is missing', async () => {
       article.findFirst.mockResolvedValue(null);
-      await expect(service.findBySlug('nope', AUTHOR)).rejects.toBeInstanceOf(
+      await expect(service.findBySlug('nope', AUTHOR_USER as never)).rejects.toBeInstanceOf(
         NotFoundException,
       );
     });
@@ -293,7 +293,7 @@ describe('ArticlesService', () => {
         status: 'PUBLISHED',
         lastEditedById: AUTHOR,
       });
-      await service.update('a', { title: 'New title' }, AUTHOR);
+      await service.update('a', { title: 'New title' }, AUTHOR_USER as never);
       expect(lastUpdate()).toEqual({
         title: 'New title',
         lastEditedById: AUTHOR,
@@ -316,7 +316,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
       });
       await expect(
-        service.update('a', { title: 'x' }, OTHER),
+        service.update('a', { title: 'x' }, OTHER_USER as never),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(article.update).not.toHaveBeenCalled();
     });
@@ -328,7 +328,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
       });
       await expect(
-        service.update('a', { title: 'x' }, OTHER),
+        service.update('a', { title: 'x' }, OTHER_USER as never),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -340,7 +340,7 @@ describe('ArticlesService', () => {
       });
       articleCategory.findFirst.mockResolvedValueOnce(null);
       await expect(
-        service.update('a', { categoryId: 'gone' }, AUTHOR),
+        service.update('a', { categoryId: 'gone' }, AUTHOR_USER as never),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
@@ -355,7 +355,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
         publishedAt: null,
       });
-      await service.publish('a', AUTHOR);
+      await service.publish('a', AUTHOR_USER as never);
       const data = lastUpdate();
       expect(data.status).toBe('PUBLISHED');
       expect(data.publishedAt).toBeInstanceOf(Date);
@@ -375,7 +375,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
         publishedAt: new Date(),
       });
-      await service.publish('a', AUTHOR);
+      await service.publish('a', AUTHOR_USER as never);
       expect(article.update).not.toHaveBeenCalled();
       // Idempotent short-circuit: already indexed, no redundant sync.
       expect(search.upsert).not.toHaveBeenCalled();
@@ -388,7 +388,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
         publishedAt: new Date(),
       });
-      await service.unpublish('a', AUTHOR);
+      await service.unpublish('a', AUTHOR_USER as never);
       const data = lastUpdate();
       expect(data.status).toBe('DRAFT');
       expect(data).not.toHaveProperty('publishedAt');
@@ -403,7 +403,7 @@ describe('ArticlesService', () => {
         status: 'DRAFT',
         authorId: AUTHOR,
       });
-      await expect(service.publish('a', OTHER)).rejects.toBeInstanceOf(
+      await expect(service.publish('a', OTHER_USER as never)).rejects.toBeInstanceOf(
         NotFoundException,
       );
     });
@@ -418,7 +418,7 @@ describe('ArticlesService', () => {
         status: 'PUBLISHED',
         authorId: AUTHOR,
       });
-      await service.remove('a', AUTHOR);
+      await service.remove('a', AUTHOR_USER as never);
       const data = lastUpdate();
       expect(data.deletedAt).toBeInstanceOf(Date);
       expect(data.lastEditedById).toBe(AUTHOR);
@@ -432,7 +432,7 @@ describe('ArticlesService', () => {
         status: 'PUBLISHED',
         authorId: AUTHOR,
       });
-      await expect(service.remove('a', OTHER)).rejects.toBeInstanceOf(
+      await expect(service.remove('a', OTHER_USER as never)).rejects.toBeInstanceOf(
         ForbiddenException,
       );
       expect(article.update).not.toHaveBeenCalled();
@@ -452,7 +452,7 @@ describe('ArticlesService', () => {
       await service.importArticle(
         file('network-guide.md', '# Net'),
         { categoryId: 'c1', status: 'DRAFT' },
-        AUTHOR,
+        AUTHOR_USER as never,
       );
       const data = lastCreate();
       expect(data.title).toBe('network guide');
@@ -468,7 +468,7 @@ describe('ArticlesService', () => {
       await service.importArticle(
         file('guide.md', '# Net'),
         { categoryId: 'c1', status: 'PUBLISHED' },
-        AUTHOR,
+        AUTHOR_USER as never,
       );
       expect(search.upsert).toHaveBeenCalledWith(
         'articles',
@@ -486,7 +486,7 @@ describe('ArticlesService', () => {
         service.importArticle(
           big,
           { categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR,
+          AUTHOR_USER as never,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(article.create).not.toHaveBeenCalled();
@@ -497,7 +497,7 @@ describe('ArticlesService', () => {
         service.importArticle(
           undefined,
           { categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR,
+          AUTHOR_USER as never,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
@@ -507,13 +507,13 @@ describe('ArticlesService', () => {
         service.importArticle(
           file('empty.txt', '   '),
           { categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR,
+          AUTHOR_USER as never,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(article.create).not.toHaveBeenCalled();
     });
 
-    it('requires X-User-Id (400)', async () => {
+    it('requires current user (400 when user is undefined)', async () => {
       await expect(
         service.importArticle(
           file('a.md', '# x'),

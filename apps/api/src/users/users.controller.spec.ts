@@ -5,6 +5,7 @@ import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
+import { ActorService } from '../common/actor.service';
 
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
@@ -38,6 +39,10 @@ describe('UsersController :id uuid validation (SEC-004)', () => {
         },
         { provide: AssetAssignmentsService, useValue: { findAll: jest.fn() } },
         { provide: AccessGrantsService, useValue: { findAll: jest.fn() } },
+        {
+          provide: ActorService,
+          useValue: { resolve: jest.fn().mockReturnValue(undefined) },
+        },
       ],
     }).compile();
     app = moduleRef.createNestApplication();

@@ -8,6 +8,7 @@ import type {
   CreateConsumableMovement,
   UpdateConsumable,
 } from '@lazyit/shared';
+import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 
@@ -86,15 +87,15 @@ export class ConsumablesService {
 
   /**
    * Record a stock movement and adjust the cached `currentStock` atomically (ADR-0034). The actor
-   * comes from the X-User-Id shim. IN adds, OUT subtracts (409 if it would go negative — nothing is
-   * persisted), ADJUSTMENT sets `currentStock` to the absolute `quantity`. Returns the ledger row.
+   * comes from the authenticated User. IN adds, OUT subtracts (409 if it would go negative — nothing
+   * is persisted), ADJUSTMENT sets `currentStock` to the absolute `quantity`. Returns the ledger row.
    */
   async createMovement(
     consumableId: string,
     data: CreateConsumableMovement,
-    actorId?: string,
+    user?: User,
   ) {
-    const performedById = await this.actor.resolve(actorId);
+    const performedById = this.actor.resolve(user);
     const { type, quantity, reason, notes } = data;
 
     return this.prisma.$transaction(async (tx) => {

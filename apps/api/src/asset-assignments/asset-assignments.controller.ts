@@ -2,16 +2,15 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
-  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -26,16 +25,10 @@ import {
   ReleaseAssetAssignmentDto,
   UpdateAssetAssignmentNotesDto,
 } from './asset-assignment.dto';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { User } from '../../generated/prisma/client';
 
-// X-User-Id is the auth shim (ADR-0022). On assignment writes it's OPTIONAL and becomes the actor
-// (assignedById / releasedById); absent → null actor (system/unknown), allowed by design (ADR-0024).
-const ACTOR_USER_HEADER = {
-  name: 'X-User-Id',
-  required: false,
-  description:
-    'Caller user id (auth shim). Optional; recorded as the assigner/releaser (null if absent).',
-} as const;
-
+@ApiBearerAuth()
 @ApiTags('asset-assignments')
 @Controller('asset-assignments')
 export class AssetAssignmentsController {
@@ -76,13 +69,12 @@ export class AssetAssignmentsController {
 
   @Post()
   @ApiOperation({ summary: 'Open an assignment (assign a user to an asset)' })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiCreatedResponse({ type: AssetAssignmentDto })
   create(
     @Body() dto: CreateAssetAssignmentDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.assignments.create(dto, actorId);
+    return this.assignments.create(dto, user);
   }
 
   @Patch(':id/release')
@@ -90,15 +82,14 @@ export class AssetAssignmentsController {
     summary:
       'Release an active assignment (sets releasedAt; 409 if already released)',
   })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiOkResponse({ type: AssetAssignmentDto })
   @ApiConflictResponse({ description: 'The assignment is already released' })
   release(
     @Param('id') id: string,
     @Body() dto: ReleaseAssetAssignmentDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.assignments.release(id, dto, actorId);
+    return this.assignments.release(id, dto, user);
   }
 
   @Patch(':id/notes')

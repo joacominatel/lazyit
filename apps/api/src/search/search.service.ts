@@ -108,6 +108,12 @@ export class SearchService {
    * Cross-entity search via Meili `multiSearch`. Searches the requested `entities` (defaults to all
    * five) and returns one `{ hits, total }` block per requested entity. In disabled mode every
    * requested entity gets an empty block (no engine call).
+   *
+   * **Fail-soft (ADR-0035):** reads mirror the write-side posture — if Meili is configured but
+   * currently unreachable / rejecting (the engine went down or the key was revoked after
+   * construction), the rejected `multiSearch` is caught, logged (error), and the call resolves to
+   * empty blocks instead of bubbling a 500. A search outage degrades search; it never takes the app
+   * down.
    */
   async search({ q, entities, limit }: SearchArgs): Promise<SearchResults> {
     const requested: SearchIndex[] =
@@ -120,22 +126,32 @@ export class SearchService {
     const params: MultiSearchParams = {
       queries: requested.map((indexUid) => ({ indexUid, q, limit })),
     };
-    const response = await this.client.multiSearch(params);
 
-    // Start from empty blocks for every requested index so a missing result (or a per-index error
-    // surfaced as a skipped result) still yields a well-formed, empty block rather than undefined.
-    const results = this.emptyResults(requested);
-    for (const result of response.results) {
-      const index = result.indexUid as SearchIndex;
-      if (!requested.includes(index)) continue;
-      results[index] = {
-        hits: result.hits,
-        // `estimatedTotalHits` is Meili's count for the (default, infinite-pagination) query; fall
-        // back to the number of returned hits if the engine omits it.
-        total: result.estimatedTotalHits ?? result.hits.length,
-      };
+    try {
+      const response = await this.client.multiSearch(params);
+
+      // Start from empty blocks for every requested index so a missing result (or a per-index error
+      // surfaced as a skipped result) still yields a well-formed, empty block rather than undefined.
+      const results = this.emptyResults(requested);
+      for (const result of response.results) {
+        const index = result.indexUid as SearchIndex;
+        if (!requested.includes(index)) continue;
+        results[index] = {
+          hits: result.hits,
+          // `estimatedTotalHits` is Meili's count for the (default, infinite-pagination) query; fall
+          // back to the number of returned hits if the engine omits it.
+          total: result.estimatedTotalHits ?? result.hits.length,
+        };
+      }
+      return results;
+    } catch (err: unknown) {
+      // Fail-soft (ADR-0035): a configured-but-unhealthy engine returns empty results, never a 500.
+      this.logger.error(
+        { err, entities: requested, q, limit },
+        'Meilisearch multiSearch failed — returning empty search results (fail-soft)',
+      );
+      return this.emptyResults(requested);
     }
-    return results;
   }
 
   /** A `{ hits: [], total: 0 }` block for each requested index (disabled mode / seed for search). */

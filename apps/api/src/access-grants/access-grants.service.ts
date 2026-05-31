@@ -11,6 +11,7 @@ import type {
   UpdateAccessGrantNotes,
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
+import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 
@@ -24,9 +25,8 @@ export interface FindAccessGrantsFilters {
 
 /**
  * AccessGrant — the User↔Application access join (append-only, revoked via `revokedAt`; ADR-0023).
- * The actor (`grantedById` on create, `revokedById` on revoke) comes from the optional `X-User-Id`
- * shim via the shared {@link ActorService} — never the request body (ADR-0022/0024). When real auth
- * lands, the actor comes from the JWT and these methods are unchanged.
+ * The actor (`grantedById` on create, `revokedById` on revoke) comes from the authenticated User
+ * resolved by JwtAuthGuard (@CurrentUser()) — never the request body (ADR-0022/0024/0038).
  */
 @Injectable()
 export class AccessGrantsService {
@@ -73,10 +73,10 @@ export class AccessGrantsService {
    * Open a grant (give a user access to an application). `userId` and `applicationId` must reference
    * **live** (non-soft-deleted) rows → 400 otherwise (don't grant access to a decommissioned app or
    * a departed user). Multi-grant is allowed: no uniqueness check. `grantedById` is set from the
-   * `X-User-Id` shim when present (null = system/unknown).
+   * authenticated User when present (null = system/unknown).
    */
-  async create(data: CreateAccessGrant, actorId?: string) {
-    const grantedById = await this.actor.resolve(actorId);
+  async create(data: CreateAccessGrant, user?: User) {
+    const grantedById = this.actor.resolve(user);
     await this.assertUserUsable(data.userId);
     await this.assertApplicationUsable(data.applicationId);
     return this.prisma.accessGrant.create({
@@ -99,16 +99,16 @@ export class AccessGrantsService {
   }
 
   /**
-   * Revoke an active grant: set `revokedAt = now()` (+ `revokedById` from the shim, optional `notes`).
-   * 404 if missing; 409 if already revoked (revoke is not repeatable). Revoking one grant does not
-   * affect any other grant the same user holds on the same application.
+   * Revoke an active grant: set `revokedAt = now()` (+ `revokedById` from the authenticated User,
+   * optional `notes`). 404 if missing; 409 if already revoked (revoke is not repeatable). Revoking
+   * one grant does not affect any other grant the same user holds on the same application.
    */
-  async revoke(id: string, data: RevokeAccessGrant, actorId?: string) {
+  async revoke(id: string, data: RevokeAccessGrant, user?: User) {
     const grant = await this.findOne(id);
     if (grant.revokedAt !== null) {
       throw new ConflictException(`AccessGrant ${id} is already revoked`);
     }
-    const revokedById = await this.actor.resolve(actorId);
+    const revokedById = this.actor.resolve(user);
     return this.prisma.accessGrant.update({
       where: { id },
       data: {

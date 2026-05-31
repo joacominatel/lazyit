@@ -1,14 +1,61 @@
-# lazyit reverse proxy — Caddy. See ADR-0026.
+# lazyit reverse proxy — Caddy. See ADR-0026, ADR-0037.
 #
-# One HTTPS entry point in front of the web (:3000) and API (:3001) containers.
+# Two HTTPS site blocks:
+#   1. {$LAZYIT_SITE_ADDRESS} — the lazyit web app + API (same-origin routing, ADR-0026).
+#   2. auth.{$LAZYIT_DOMAIN}  — Zitadel IdP; Caddy auto-TLS covers it (ADR-0037).
+#
 # Automatic HTTPS: Caddy's INTERNAL CA for `localhost` (local prod-like), and Let's Encrypt
 # for a real domain. Routing is SAME-ORIGIN: the browser calls /api/* and Caddy forwards it
 # to the API, so the web image is domain-portable (NEXT_PUBLIC_API_URL=/api, baked at build).
-
 {
 	admin off
 	# Real domain (Let's Encrypt): set an ACME contact email. Leave commented for local.
 	# email {$LAZYIT_TLS_EMAIL}
+}
+
+# --- Reusable snippets ------------------------------------------------------
+# Baseline response security headers applied to every site. Defensive defaults that do not
+# depend on the deployment hostname (so they're safe on localhost AND a real domain):
+#   - X-Content-Type-Options: nosniff  — stop MIME-type sniffing.
+#   - Referrer-Policy: strict-origin-when-cross-origin — don't leak full URLs cross-origin.
+#   - X-Frame-Options: DENY — defense-in-depth against clickjacking (CSP frame-ancestors is the
+#     modern control; this covers older browsers without weakening anything).
+# `-Server` strips Caddy's Server header (don't advertise the proxy/version).
+(security_headers) {
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		-Server
+	}
+}
+
+# HSTS — enable ONLY for a real, publicly-trusted domain. Tells browsers to force HTTPS for the
+# next year (incl. subdomains). MUST NOT be set on localhost/internal-CA deployments: it would pin
+# the developer's browser to HTTPS-only for `localhost` across every project. Uncomment the
+# `import hsts` line in the site block below once you serve on a Let's-Encrypt FQDN.
+(hsts) {
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}
+
+# JSON access log to stdout — captured by Docker's json-file driver + rotation
+# (infra/docker-compose.prod.yml). Structured logs pair with the API's Pino logs (ADR-0031).
+(access_log) {
+	log {
+		output stdout
+		format json
+	}
+}
+
+# --- Zitadel IdP — auth subdomain (ADR-0037) -------------------------------------
+# Zitadel runs on the internal Docker network without its own TLS (--tlsMode external; Caddy
+# terminates HTTPS here and proxies to Zitadel's internal HTTP listener).
+# Set LAZYIT_DOMAIN to your base domain (e.g. "lazyit.example.com") in .env.prod.
+# Local prod-like: set LAZYIT_DOMAIN=localhost — Caddy uses its internal CA.
+auth.{$LAZYIT_DOMAIN:localhost} {
+	import security_headers
+	import access_log
+	reverse_proxy zitadel:8080
 }
 
 # Site address. Local prod-like: unset -> "localhost" (internal CA, served on :443 -> host :8443).
@@ -16,28 +63,38 @@
 {$LAZYIT_SITE_ADDRESS:localhost} {
 	encode zstd gzip
 
+	import security_headers
+	import access_log
+
+	# HSTS — UNCOMMENT only on a real, publicly-trusted (Let's Encrypt) FQDN. Leave commented for
+	# the local prod-like / internal-CA stack: HSTS on `localhost` pins the developer's browser to
+	# HTTPS-only for every localhost project. See the (hsts) snippet note above.
+	# import hsts
+
 	# Swagger UI + raw OpenAPI live at the API's OWN /api/docs* — forward WITHOUT stripping.
 	@apidocs path /api/docs*
 	handle @apidocs {
 		reverse_proxy api:3001
 	}
 
-	# Everything else under /api/* -> API, stripping the /api prefix (API routes are at root,
-	# e.g. /api/users -> /users). Caddy evaluates handle blocks by matcher specificity, so the
-	# more specific @apidocs above is always tried first.
-	@api path /api/*
+	# /api/* -> API, stripping the /api prefix (e.g. /api/users -> /users), EXCEPT Auth.js
+	# routes (/api/auth/*) which the Next.js web app owns (ADR-0039). They are excluded here
+	# and fall through to the catch-all below -> web:3000.
+	#
+	# Why not a dedicated `handle @authjs { reverse_proxy web:3000 }`? It would be byte-identical
+	# to the catch-all, and Caddy's Caddyfile adapter MERGES identical handle blocks — silently
+	# dropping the /api/auth/* matcher, so those requests fall to @api and hit the API as 404.
+	# Verified with `caddy adapt`. Excluding the path from @api is the reliable construction.
+	@api {
+		path /api/*
+		not path /api/auth/*
+	}
 	handle @api {
 		uri strip_prefix /api
 		reverse_proxy api:3001
 	}
 
-	# --- Future IdP slot (ADR-0016) — reserved, NOT configured. Uncomment when auth lands. ---
-	# @auth path /auth/*
-	# handle @auth {
-	# 	reverse_proxy idp:9000
-	# }
-
-	# Everything else -> the Next.js web app (least specific: catch-all).
+	# Everything else — the web UI AND Auth.js's /api/auth/* — -> the Next.js web app.
 	handle {
 		reverse_proxy web:3000
 	}
