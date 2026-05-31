@@ -1,5 +1,6 @@
 import type {
   AccessGrant,
+  AccessGrantListPage,
   CreateAccessGrant,
   RevokeAccessGrant,
 } from "@lazyit/shared";
@@ -10,6 +11,11 @@ import { apiFetch } from "../client";
  * delete**: a grant is ended by revoking it. The actor (`grantedById` / `revokedById`) is set by
  * the API from the authenticated user's identity (Bearer token, ADR-0039), never the body. Reads of one application's grants
  * live in endpoints/applications.ts; the filtered list here backs the all-apps active-grant counts.
+ *
+ * The top-level list is **paginated** (ADR-0030): `GET /access-grants` returns a
+ * `Page<AccessGrant>` envelope (the row is already lean — no relations inlined) and
+ * `getAccessGrants` unwraps `.items`. The nested per-user / per-application grant
+ * lists (in endpoints/applications.ts and endpoints/users.ts) stay bare arrays.
  */
 
 const BASE = "/access-grants";
@@ -23,8 +29,13 @@ export interface AccessGrantFilters {
   includeExpired?: boolean;
 }
 
-/** List grants (newest first), filtered. */
-export function getAccessGrants(
+/**
+ * List grants (newest first), filtered. `GET /access-grants` returns a paginated
+ * `Page<AccessGrant>` envelope (ADR-0030); we unwrap `.items` so callers keep an
+ * array. The default page size (50) applies — the Access list's counts/avatars
+ * are built from the first page only until the UI paginates.
+ */
+export async function getAccessGrants(
   filters: AccessGrantFilters = {},
 ): Promise<AccessGrant[]> {
   const params = new URLSearchParams();
@@ -35,7 +46,8 @@ export function getAccessGrants(
   if (filters.includeExpired !== undefined)
     params.set("includeExpired", String(filters.includeExpired));
   const qs = params.toString();
-  return apiFetch<AccessGrant[]>(qs ? `${BASE}?${qs}` : BASE);
+  const page = await apiFetch<AccessGrantListPage>(qs ? `${BASE}?${qs}` : BASE);
+  return page.items;
 }
 
 /** Open a grant (give a user access to an application). 400 if the user/app isn't live. */
