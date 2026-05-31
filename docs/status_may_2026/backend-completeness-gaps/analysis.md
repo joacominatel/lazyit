@@ -368,3 +368,44 @@ Mission: finish the three pillars first, then grow. Suggested order (dependencie
 6. AccessRequest vs Ticket: The domain notes flag a possible overlap (access-request.md:37-39,
    ticket.md:32-36). Distinct entity or ticket subtype? I recommend distinct (specialized
    request→approve→grant workflow), but it's a design decision you own.
+
+---
+
+## Round 1 implementation (CTO proposal)
+
+Implemented the **dashboard metrics endpoint** (finding §"dashboard/metrics" of this pass) — a
+read-only, schema-free aggregation that turns the placeholder `apps/web/.../dashboard/page.tsx` into
+something with real data to render. Branch `feat/dashboard-metrics`.
+
+What landed:
+
+- **`GET /dashboard/summary`** — a new `DashboardModule` (`apps/api/src/dashboard/`,
+  controller + service) returning a single typed `DashboardSummary` composing cheap aggregates
+  across the three pillars:
+  - **Inventory**: total live assets, `byStatus` (a zero-filled `groupBy` over every `AssetStatus`),
+    and `assigned` = distinct assets holding ≥1 active assignment (`groupBy assetId WHERE releasedAt IS NULL`).
+  - **Access**: `activeGrants` (`revokedAt IS NULL`), `expiringSoon` (active grants with
+    `now < expiresAt <= now + N days`, `N` = `expiringWithinDays`, default 30, clamped 1–365 at the
+    controller), and `onCriticalApps` (active grants on `isCritical` applications). `expiresAt`
+    stays informative-only per ADR-0023 — nothing auto-revokes.
+  - **Consumables**: total live + `lowStock` (`currentStock <= minStock`, only where `minStock`
+    is set; Prisma can't compare two columns so the small candidate set is post-filtered in-process).
+  - **Knowledge**: articles total / published / draft (draft derived as total − published).
+  - **Recent activity**: the latest 10 `AssetHistory` rows (newest-first), flattened.
+  - `generatedAt` ISO timestamp stamping the point-in-time snapshot.
+- All queries fan out in one `Promise.all`. **No schema change**: soft-deletable models (Asset,
+  Application, Consumable, Article) are auto-scoped to `deletedAt: null` by the ADR-0032 extension;
+  the lifecycle joins (AssetAssignment, AccessGrant) are filtered explicitly on their close markers.
+- **Shared contract**: `DashboardSummarySchema` + inferred types in
+  `packages/shared/src/schemas/dashboard.ts`, exported from the barrel — the single source of truth
+  the (separately-owned) web dashboard consumes. Reuses `AssetStatusSchema` /
+  `AssetHistoryEventTypeSchema` rather than re-declaring enums.
+- **Tests**: `dashboard.service.spec.ts` (mocked Prisma) asserts the composed shape validates
+  against `DashboardSummarySchema` and pins the non-trivial derivations (zero-fill, distinct
+  assigned count, low-stock post-filter, expiry window, critical filter, draft = total − published).
+  Full API suite green (287 tests), strict `tsc` clean.
+
+Why this first: it is the highest-value win that needs **zero** schema work, gives the frontend a
+clean read-only contract today, and stays strictly inside the three-pillar discipline (no new
+entity, no anti-goal drift). The heavyweight completeness items (RBAC, Tickets, AccessRequest,
+ArticleVersion, async-worker infra) remain Round 2 / open-questions above — untouched here.

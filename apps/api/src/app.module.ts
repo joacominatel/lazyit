@@ -20,6 +20,7 @@ import { AccessGrantsModule } from './access-grants/access-grants.module';
 import { ConsumableCategoriesModule } from './consumable-categories/consumable-categories.module';
 import { ConsumablesModule } from './consumables/consumables.module';
 import { AssetHistoryModule } from './asset-history/asset-history.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { HealthModule } from './health/health.module';
 import { CommonModule } from './common/common.module';
 import { SearchModule } from './search/search.module';
@@ -56,6 +57,8 @@ import { buildLoggerParams } from './logging/logging.config';
     AccessGrantsModule,
     ConsumableCategoriesModule,
     ConsumablesModule,
+    // Read-only cross-pillar aggregation for the web dashboard (CTO Round 1). Additive — no schema.
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [
