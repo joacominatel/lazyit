@@ -104,6 +104,7 @@ export function ResourceTable({
               <TableCell
                 colSpan={columns.length}
                 className="h-24 text-center text-muted-foreground"
+                aria-live="polite"
               >
                 {filteredEmptyMessage}
               </TableCell>
@@ -166,7 +167,10 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed py-16 text-center">
+    <div
+      className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed py-16 text-center"
+      aria-live="polite"
+    >
       <div className="flex size-12 items-center justify-center rounded-full bg-muted">
         <Icon className="size-6 text-muted-foreground" />
       </div>
@@ -194,7 +198,11 @@ export function ErrorState({
 }) {
   const requestId = error instanceof ApiError ? error.requestId : undefined;
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center">
+    <div
+      className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
+      role="status"
+      aria-live="polite"
+    >
       <p className="text-sm font-medium">{title}</p>
       <p className="text-sm text-muted-foreground">{description}</p>
       <RequestIdNote requestId={requestId} />
