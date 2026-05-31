@@ -18,6 +18,9 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import { CreateUserSchema, UpdateUserSchema, UserSchema } from '@lazyit/shared';
+import type { User } from '../../generated/prisma/client';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { ActorService } from '../common/actor.service';
 import { UsersService } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { parseActiveOnly } from '../asset-assignments/active-only';
@@ -42,6 +45,7 @@ export class UsersController {
     private readonly users: UsersService,
     private readonly assignments: AssetAssignmentsService,
     private readonly grants: AccessGrantsService,
+    private readonly actor: ActorService,
   ) {}
 
   @Get()
@@ -126,9 +130,49 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete a user' })
-  @ApiOkResponse({ type: UserDto })
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.users.remove(id);
+  @ApiOperation({
+    summary: 'Offboard (soft-delete) a user',
+    description:
+      'Soft-deletes the user and, in one transaction, revokes all their active access grants and ' +
+      'releases all their active asset assignments (with RELEASED history). Returns the offboarding ' +
+      'summary (released assignments + revoked-grant count).',
+  })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        userId: '00000000-0000-0000-0000-000000000000',
+        releasedAssignments: [{ id: 'clx…', assetId: 'cla…' }],
+        revokedGrants: 2,
+      },
+    },
+  })
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor?: User,
+  ): ReturnType<UsersService['remove']> {
+    return this.users.remove(id, this.actor.resolve(actor));
+  }
+
+  @Post(':id/offboard')
+  @ApiOperation({
+    summary: 'Offboard a user (explicit alias of DELETE /users/:id)',
+    description:
+      'Same effect as DELETE /users/:id: soft-delete + revoke grants + release assignments, all in ' +
+      'one transaction. Provided as an intention-revealing verb for the offboarding flow.',
+  })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        userId: '00000000-0000-0000-0000-000000000000',
+        releasedAssignments: [{ id: 'clx…', assetId: 'cla…' }],
+        revokedGrants: 2,
+      },
+    },
+  })
+  offboard(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor?: User,
+  ): ReturnType<UsersService['remove']> {
+    return this.users.remove(id, this.actor.resolve(actor));
   }
 }

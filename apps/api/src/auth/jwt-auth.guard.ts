@@ -1,14 +1,17 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
-import type { User } from '../../generated/prisma/client';
+import type { Prisma, User } from '../../generated/prisma/client';
+import { IS_PUBLIC_KEY } from './public.decorator';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -49,9 +52,22 @@ export class JwtAuthGuard implements CanActivate {
   // JIT provisions do not re-run discovery. Null = not yet resolved (or last resolution failed).
   private userinfoEndpoint: string | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly reflector: Reflector,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    // Routes flagged with @Public() bypass auth entirely (e.g. the health probes). A method-level
+    // decorator overrides a class-level one (getAllAndOverride).
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) {
+      return true;
+    }
+
     const request = context
       .switchToHttp()
       .getRequest<Request & { user?: User }>();
@@ -81,7 +97,10 @@ export class JwtAuthGuard implements CanActivate {
     }
     const user = await this.prisma.user.findFirst({ where: { id: rawId } });
     // Soft-deleted users are filtered by the Prisma extension, so findFirst returns null for them.
-    request.user = user ?? undefined;
+    // A disabled (isActive=false) account is treated as anonymous in shim mode: the shim never 401s
+    // (its whole posture is "missing/invalid actor → anonymous"), so a deactivated user must not keep
+    // an authenticated context either.
+    request.user = user && user.isActive ? user : undefined;
     return true;
   }
 
@@ -119,6 +138,9 @@ export class JwtAuthGuard implements CanActivate {
     try {
       ({ payload } = await jwtVerify(token, this.jwks, {
         issuer,
+        // Pin the signature algorithm to RS256 so a token can never be verified under a weaker or
+        // attacker-chosen `alg` (alg-confusion / "none" downgrade). Zitadel signs OIDC tokens RS256.
+        algorithms: ['RS256'],
         // audience validation: omit if OIDC_CLIENT_ID is unset so the guard does not fail when
         // access tokens carry a resource audience rather than the client id.
         ...(process.env.OIDC_CLIENT_ID
@@ -138,26 +160,49 @@ export class JwtAuthGuard implements CanActivate {
     // so the JIT path can enrich the profile from the OIDC userinfo endpoint (the token itself
     // carries authorization, not identity).
     const user = await this.jitProvision(sub, token, payload);
+
+    // Enforce account state: a deactivated lazyit account must lose API access even while its IdP
+    // token is still live (broken-offboarding fix). The JIT path never returns a soft-deleted user
+    // (it 403s instead), so only the active flag is checked here.
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account disabled');
+    }
+
     request.user = user;
     return true;
   }
 
   /**
-   * JIT provisioning (ADR-0038). If a User with `externalId = sub` already exists, return it
-   * (no discovery / userinfo call). Otherwise, on the first login only, enrich the access token's
-   * claims with the OIDC userinfo profile (the access token alone lacks email/name), then create
-   * the User: sub → externalId, email, given_name + family_name → firstName/lastName (falls back
-   * to splitting `name`, then the email local-part).
+   * JIT provisioning (ADR-0038). The lookup INCLUDES soft-deleted rows so offboarding sticks:
+   *  - a live User with `externalId = sub` → returned as-is (no discovery / userinfo call);
+   *  - a *soft-deleted* User with that sub → 403 (do NOT re-provision): re-creating a fresh row
+   *    would silently resurrect an offboarded account and orphan its old User.id audit links;
+   *  - no row at all → first login: enrich the access token's claims with the OIDC userinfo profile
+   *    (the access token alone lacks email/name) and create the User. sub → externalId, email,
+   *    given_name + family_name → firstName/lastName (falls back to splitting `name`, then the
+   *    email local-part).
+   *
+   * The create is a real upsert on the `externalId` unique key (was a check-then-act findFirst+create
+   * race): parallel first-login requests for the same fresh token can no longer both create and
+   * collide on the unique constraint with an intermittent 500.
    */
   private async jitProvision(
     sub: string,
     accessToken: string,
     claims: JWTPayload,
   ): Promise<User> {
+    // includeSoftDeleted: bypass the soft-delete read filter so an offboarded user is still seen
+    // here. Without it the filtered findFirst returns null and the guard would JIT-re-provision a
+    // brand-new row, resurrecting the account. The flag is a custom arg the Prisma extension strips
+    // (soft-delete.extension.ts), so it is not part of the generated type — hence the local cast.
     const existing = await this.prisma.user.findFirst({
       where: { externalId: sub },
-    });
+      includeSoftDeleted: true,
+    } as Prisma.UserFindFirstArgs);
     if (existing) {
+      if (existing.deletedAt !== null) {
+        throw new ForbiddenException('Account has been deactivated');
+      }
       return existing;
     }
 
@@ -199,14 +244,20 @@ export class JwtAuthGuard implements CanActivate {
       }
     }
 
-    return this.prisma.user.create({
-      data: {
+    // Upsert on the externalId unique key (race-proof): if a parallel first-login request already
+    // created the row, the `update: {}` no-op returns it instead of throwing P2002. `where` targets
+    // only `externalId`, so the soft-deleted case is already handled above (we 403 before reaching
+    // here) and an upsert can never silently revive a deleted row.
+    return this.prisma.user.upsert({
+      where: { externalId: sub },
+      create: {
         externalId: sub,
         email,
         firstName,
         lastName,
         isActive: true,
       },
+      update: {},
     });
   }
 

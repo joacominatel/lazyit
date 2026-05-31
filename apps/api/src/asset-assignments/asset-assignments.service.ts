@@ -131,6 +131,45 @@ export class AssetAssignmentsService {
   }
 
   /**
+   * Release EVERY active assignment owned by `userId`, atomically with the caller's transaction
+   * (used by user offboarding — users.service.remove). Mirrors {@link release}: stamps
+   * `releasedAt = now()` + `releasedById = actorId` on each open assignment and emits one `RELEASED`
+   * asset-history event per asset (ADR-0033) so the audit trail stays complete.
+   *
+   * Takes the caller's `$transaction` client so the releases, the history rows and the user
+   * soft-delete all commit together (or all roll back). No-op (returns []) when the user owns no
+   * active assignment. The history client is structurally typed; the tx client satisfies it.
+   *
+   * @returns the released assignment ids (reclaimed assets), for the offboarding summary.
+   */
+  async releaseAllForUser(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    actorId?: string,
+  ): Promise<{ id: string; assetId: string }[]> {
+    const active = await tx.assetAssignment.findMany({
+      where: { userId, releasedAt: null },
+      select: { id: true, assetId: true },
+    });
+    const now = new Date();
+    for (const assignment of active) {
+      await tx.assetAssignment.update({
+        where: { id: assignment.id },
+        data: {
+          releasedAt: now,
+          ...(actorId !== undefined ? { releasedById: actorId } : {}),
+        },
+      });
+      await this.history.record(tx, {
+        assetId: assignment.assetId,
+        eventType: 'RELEASED',
+        performedById: actorId,
+      });
+    }
+    return active;
+  }
+
+  /**
    * Update only the notes (the one mutable field besides releasedAt; identity is immutable).
    * Allowed even after release; `null` clears the note. 404 if missing.
    */

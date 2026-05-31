@@ -117,4 +117,60 @@
 
 ---
 
+## Round 1 implementation (CTO proposal)
+
+> Branch `fix/auth-ops-integrity` — schema-free hardening of the auth boundary, offboarding
+> integrity and ops-boot/health. Landed findings **2, 3, 6** in full and the related quick wins
+> (isActive, RS256, no-resurrect, shim prod guard); findings **1, 4, 5, 7, 8, 9, 10** are deferred
+> (RBAC / email-uniqueness / audience policy / refresh need an ADR or a schema change → Round 2).
+
+**1. Offboarding integrity (the audit gap).** `users.service.remove(id, actorId?)` now runs ONE
+`prisma.$transaction` that (a) revokes every active `AccessGrant` of the user via
+`accessGrant.updateMany` (`revokedAt`, `revokedById=actor`, `notes='auto: offboarded'`) — done inline
+(not via access-grants.service, which another agent owns); (b) releases every active
+`AssetAssignment` and appends a `RELEASED` `AssetHistory` row per asset, via a new
+`AssetAssignmentsService.releaseAllForUser(tx, userId, actorId)` bulk helper that mirrors the
+existing `release` logic and reuses `AssetHistoryService.record`; (c) stamps `deletedAt`. All-or-
+nothing — a user is never left half-offboarded. `DELETE /users/:id` returns the offboarding summary
+(`releasedAssignments` + `revokedGrants`), and `POST /users/:id/offboard` is an intention-revealing
+alias. Actor comes from `@CurrentUser()` via `ActorService.resolve`.
+
+**2. Guard `isActive` enforcement.** After resolving the User in both modes: OIDC →
+`UnauthorizedException('Account disabled')`; shim → treated as anonymous (`request.user = undefined`,
+no 401, preserving the shim's existing posture).
+
+**3. JIT no-resurrect + race fix.** The `externalId` lookup now passes `includeSoftDeleted: true`
+(the soft-delete extension's escape hatch) so an offboarded row is visible; a soft-deleted match →
+`ForbiddenException` (no re-provision — offboarding sticks, old `User.id` audit links survive). The
+check-then-act `findFirst → create` is replaced by `prisma.user.upsert` on `externalId`
+(`update: {}`), removing the intermittent first-login 500.
+
+**4. JWT hardening.** `jwtVerify` now pins `algorithms: ['RS256']` (alg-confusion / "none" downgrade).
+
+**5. `@Public()` decorator.** `SetMetadata(IS_PUBLIC_KEY, true)`; the guard reads it via
+`Reflector.getAllAndOverride` (method overrides class) and bypasses auth — used by the health probes.
+
+**6. Fail-loud boot config.** `apps/api/src/auth/boot-config.ts` — one zod schema validated in
+`main.ts` before `NestFactory.create`. `DATABASE_URL` always required; OIDC mode (AUTH_MODE ≠ "shim")
+additionally requires `OIDC_ISSUER` + `OIDC_JWKS_URI`; `WEB_ORIGIN` must be a URL when set;
+`MEILI_HOST` / `MAX_IMPORT_SIZE_MB` stay optional so the example .env still boots. On failure:
+CRITICAL log naming every bad var, then `process.exit(1)`.
+
+**7. AUTH_MODE=shim prod safeguard.** The boot config refuses to start when
+`AUTH_MODE==='shim' && NODE_ENV==='production'`. (Commenting out `AUTH_MODE=shim` in `.env.example`
+is the docs agent's lane — left to them.)
+
+**8. Health module (new, hand-rolled — no `@nestjs/terminus`).** `apps/api/src/health/` registered
+in `app.module`. `@Public() GET /health/live` → always 200; `@Public() GET /health/ready` →
+`prisma.$queryRaw\`SELECT 1\`` (200 when up, 503 with the per-check report otherwise). Meilisearch is
+deliberately NOT a readiness gate (degraded-not-unready per ADR-0035 fail-soft).
+
+**Tests.** Extended `jwt-auth.guard.spec.ts` (isActive both modes, no-resurrect 403, RS256 pin,
+@Public bypass, upsert), new `boot-config.spec.ts`, new `health.{service,controller}.spec.ts`,
+rewrote the offboarding cases in `users.service.spec.ts`, added a `releaseAllForUser` block to
+`asset-assignments.service.spec.ts`. Full API suite: 311 tests green; `tsc -p tsconfig.json` and
+`nest build` clean.
+
+---
+
 _Note: this document was materialized from the analyst's structured digest. The four analyses with full long-form write-ups on disk (backend-completeness-gaps, backend-observability-ops, backend-search-subsystem, infra-ops-reliability) include extra Method / Strategic-recommendations / Open-questions sections; the rest carry the digest above._
