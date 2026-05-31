@@ -42,12 +42,18 @@ type ArticleMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
 };
 
 describe('ArticlesService', () => {
   let service: ArticlesService;
   let article: ArticleMock;
   let articleCategory: { findFirst: jest.Mock };
+  let prisma: {
+    article: ArticleMock;
+    articleCategory: { findFirst: jest.Mock };
+    $transaction: jest.Mock;
+  };
   // ActorService is mocked; X-User-Id validation lives in actor.service.spec.ts. By default it echoes
   // a present id back (any well-formed caller "exists") and maps empty/undefined to anonymous.
   let actor: { resolve: jest.Mock };
@@ -69,6 +75,7 @@ describe('ArticlesService', () => {
             ...args.data,
           }),
         ),
+      count: jest.fn().mockResolvedValue(0),
     };
     // Any present id resolves to itself (a live caller); empty/undefined → anonymous. Overridden
     // per-test for the rejecting case.
@@ -82,14 +89,17 @@ describe('ArticlesService', () => {
     // Category exists by default; overridden per-test.
     articleCategory = { findFirst: jest.fn().mockResolvedValue({ id: 'c1' }) };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
+    // findPage runs [findMany, count] in a batch $transaction — resolve the promise array together.
+    prisma = {
+      article,
+      articleCategory,
+      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         ArticlesService,
-        {
-          provide: PrismaService,
-          useValue: { article, articleCategory },
-        },
+        { provide: PrismaService, useValue: prisma },
         { provide: ActorService, useValue: actor },
         { provide: SearchService, useValue: search },
       ],
@@ -196,25 +206,28 @@ describe('ArticlesService', () => {
     });
   });
 
-  // --- listing visibility --------------------------------------------------
+  // --- listing visibility + pagination (ADR-0030) --------------------------
 
-  describe('findAll visibility', () => {
+  const DEFAULT_PAGE = { limit: 50, offset: undefined, page: undefined } as const;
+
+  describe('findPage visibility', () => {
     it('shows only PUBLISHED to anonymous callers', async () => {
-      await service.findAll({}, undefined);
+      await service.findPage({}, DEFAULT_PAGE, undefined);
       expect(listWhere().AND[0]).toEqual({ status: 'PUBLISHED' });
       expect(actor.resolve).toHaveBeenCalledWith(undefined);
     });
 
     it("shows PUBLISHED plus the caller's own DRAFTs when logged in", async () => {
-      await service.findAll({}, AUTHOR);
+      await service.findPage({}, DEFAULT_PAGE, AUTHOR);
       expect(listWhere().AND[0]).toEqual({
         OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: AUTHOR }],
       });
     });
 
     it('applies category / author / status / q filters', async () => {
-      await service.findAll(
+      await service.findPage(
         { categoryId: 'c1', authorId: AUTHOR, status: 'PUBLISHED', q: 'vpn' },
+        DEFAULT_PAGE,
         undefined,
       );
       const and = listWhere().AND;
@@ -227,6 +240,50 @@ describe('ArticlesService', () => {
           { excerpt: { contains: 'vpn', mode: 'insensitive' } },
         ],
       });
+    });
+  });
+
+  describe('findPage lean projection + envelope', () => {
+    it('omits the markdown `content` from the list select (keeps `excerpt`)', async () => {
+      await service.findPage({}, DEFAULT_PAGE, undefined);
+      const select = (
+        article.findMany.mock.calls as Array<[{ select: Record<string, unknown> }]>
+      )[0][0].select;
+      expect(select).not.toHaveProperty('content');
+      expect(select.excerpt).toBe(true);
+      expect(select.title).toBe(true);
+    });
+
+    it('returns a Page envelope (items + total + effective limit/offset)', async () => {
+      article.findMany.mockResolvedValueOnce([
+        { id: 'a1', slug: 's', title: 'T', excerpt: null, status: 'PUBLISHED' },
+      ]);
+      article.count.mockResolvedValueOnce(42);
+
+      const result = await service.findPage(
+        {},
+        { limit: 10, offset: 20, page: undefined },
+        undefined,
+      );
+
+      expect(result.total).toBe(42);
+      expect(result.limit).toBe(10);
+      expect(result.offset).toBe(20);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).not.toHaveProperty('content');
+    });
+
+    it('applies the offset/limit window and counts with the same where', async () => {
+      await service.findPage({ status: 'PUBLISHED' }, { limit: 25, offset: 50, page: undefined }, undefined);
+      const findManyArg = (
+        article.findMany.mock.calls as Array<[{ where: unknown; take: number; skip: number }]>
+      )[0][0];
+      const countWhere = (
+        article.count.mock.calls as Array<[{ where: unknown }]>
+      )[0][0].where;
+      expect(findManyArg.take).toBe(25);
+      expect(findManyArg.skip).toBe(50);
+      expect(countWhere).toEqual(findManyArg.where);
     });
   });
 
