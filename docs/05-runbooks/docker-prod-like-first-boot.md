@@ -43,14 +43,17 @@ docker compose -f infra/docker-compose.prod.yml logs -f migrate   # Ctrl-C after
 
 ```sh
 # Web (Caddy serves the Next.js app). Caddy uses its internal CA locally -> -k accepts the cert.
-curl -sko /dev/null -w "web: %{http_code}\n"      https://localhost:8443/
-curl -sk            -w "\napi: %{http_code}\n"    https://localhost:8443/api/users      # -> []
-curl -sko /dev/null -w "docs: %{http_code}\n"     https://localhost:8443/api/docs       # Swagger
+curl -sko /dev/null -w "web:    %{http_code}\n"   https://localhost:8443/
+curl -sko /dev/null -w "health: %{http_code}\n"   https://localhost:8443/api/health/live  # -> 200
+curl -sko /dev/null -w "api:    %{http_code}\n"   https://localhost:8443/api/users         # -> 401
+curl -sko /dev/null -w "docs:   %{http_code}\n"   https://localhost:8443/api/docs          # Swagger
 ```
 
-Expected: `web: 200`, `api: 200` with `[]`, `docs: 200`. In a browser open
-**https://localhost:8443** (accept / trust Caddy's local CA — see the troubleshooting runbook to
-trust it and remove the warning). The acting-user switcher and all screens work the same as in dev.
+Expected: `web: 200`, `health: 200`, `docs: 200`, and `api: 401`. The **401 is correct**: the
+global OIDC guard is active (ADR-0038), so `/api/users` rejects unauthenticated calls — it is not a
+broken install. To see data you must bootstrap Zitadel and log in via the web UI
+([[auth-bootstrap]]); JIT provisioning creates your `User` row on first login. In a browser open
+**https://localhost:8443** (accept / trust Caddy's local CA — see the troubleshooting runbook).
 
 > [!info] Migrations & seed run automatically
 > The one-shot `migrate` service runs `prisma migrate deploy` then the idempotent seed
@@ -63,14 +66,17 @@ trust it and remove the warning). The acting-user switcher and all screens work 
 docker compose -f infra/docker-compose.prod.yml logs -f api          # follow API logs
 docker compose -f infra/docker-compose.prod.yml restart api          # restart one service
 docker compose -f infra/docker-compose.prod.yml up -d --build        # rebuild after a code change
-docker compose -f infra/docker-compose.prod.yml down                 # stop (keeps the db volume)
-docker compose -f infra/docker-compose.prod.yml down -v              # stop AND delete data (clean slate)
+docker compose -f infra/docker-compose.prod.yml down                 # stop (keeps ALL volumes)
+docker compose -f infra/docker-compose.prod.yml down -v              # stop AND delete ALL 5 volumes
 ```
 
 ## Teardown
 
-`down` keeps the named `db_data` volume (your data survives). `down -v` removes the volumes —
-use it only when you want a fresh database.
+`down` keeps every named volume (your data survives). `down -v` removes **all five** volumes —
+`db_data`, `zitadel_db_data` (the whole IdP: users + OIDC client), `meili_data`, `caddy_data`,
+`caddy_config` — a full clean slate. Use it for a local reset only. To restore a real deployment do
+**not** use `down -v`: remove just the targeted volume (`docker volume rm lazyit-prod_db_data`) —
+see [[backups]].
 
 Problems building or booting? → [[docker-build-troubleshooting]]. Real deployment → [[deploy-self-hosted]].
 

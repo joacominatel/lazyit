@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-30
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -12,10 +12,12 @@ Install lazyit on a single host (one company = one instance — [[0015-deploymen
 domain with publicly-trusted HTTPS. Same compose as the [[docker-prod-like-first-boot|prod-like
 runbook]]; the differences are a real domain, real secrets, and backups.
 
-> [!warning] Auth is not implemented yet
-> The current build is **unauthenticated** ([[0016-auth-strategy-deferred]]); the `X-User-Id` shim
-> is forgeable by design ([[0022-draft-visibility-auth-shim]]). **Do not expose this build on the
-> public internet** until the IdP integration lands. Deploy it on a private network / VPN only.
+> [!info] Auth is wired (OIDC via Zitadel)
+> This build authenticates via OIDC against a bundled Zitadel IdP (ADR-0037/0038/0039). The API
+> validates OIDC tokens behind a global guard; the web app uses Auth.js. **Bootstrap Zitadel and
+> register the OIDC client before first real login** — follow [[auth-bootstrap]] (and the `OIDC_*`
+> / `AUTH_*` vars in `.env.prod`). The legacy `X-User-Id` shim is dev-only (`AUTH_MODE=shim`) and
+> must never be enabled in production.
 
 ## Prerequisites
 
@@ -28,8 +30,15 @@ runbook]]; the differences are a real domain, real secrets, and backups.
 
 ```sh
 cp infra/env/.env.prod.example infra/env/.env.prod
-chmod 600 infra/env/.env.prod        # restrict on the host — secrets live here (ADR-0028)
+chmod 600 infra/env/.env.prod        # OWNER read/write only — see why below (ADR-0028)
 ```
+
+> [!danger] `chmod 600 infra/env/.env.prod` is not optional
+> This single file is the master key to everything: the DB password, the `ZITADEL_MASTERKEY`
+> (the DR linchpin — see [[backups]]), `AUTH_SECRET`, and the OIDC client secret. The default
+> `0644` is **world-readable** — any local user or a compromised low-privilege process can read
+> every secret. Set `0600` (owner-only) and confirm with `stat -c '%a' infra/env/.env.prod` → `600`.
+> Back the file up off-host, encrypted (it's gitignored and never committed).
 
 Edit `infra/env/.env.prod`:
 
@@ -38,15 +47,22 @@ Edit `infra/env/.env.prod`:
 - `LAZYIT_SITE_ADDRESS` — your FQDN (e.g. `lazyit.example.com`).
 - `WEB_ORIGIN` — `https://lazyit.example.com` (no trailing slash).
 - `LAZYIT_TLS_EMAIL` — your ops email, **and** uncomment the `email` line in `infra/caddy/Caddyfile`
-  to enable Let's Encrypt. (Skip both to keep Caddy's internal CA on a private network.)
+  to enable Let's Encrypt. For a real public domain also uncomment `import hsts` in the Caddyfile
+  site block (HSTS; never on a localhost/internal-CA install). (Skip both to keep Caddy's internal CA.)
 - Ports: keep `LAZYIT_HTTP_PORT=80` / `LAZYIT_HTTPS_PORT=443` for a public host (override the
   high-port defaults), or keep the high ports behind another proxy.
+- `LAZYIT_DOMAIN`, `ZITADEL_*`, `OIDC_*`, `AUTH_*` — auth (Zitadel IdP). Set strong values for
+  `ZITADEL_DB_PASSWORD`, `ZITADEL_MASTERKEY` (≥32 chars), `ZITADEL_ADMIN_PASSWORD`, `AUTH_SECRET`;
+  the `OIDC_*`/`AUTH_CLIENT_*` values are filled **after** the IdP bootstrap (step 3a, [[auth-bootstrap]]).
 
 > [!info] Secrets handling
 > `.env.prod` is gitignored and never committed. There is no Docker secrets block or external
-> manager by decision ([[0028-secrets-and-config]]); protect the file with host permissions and
-> back it up out-of-band. Rotating a secret = edit the file + `up -d` to recreate the affected
-> services.
+> manager by decision ([[0028-secrets-and-config]]); protect the file with host permissions
+> (`chmod 600`, above) and back it up out-of-band. Rotating *most* secrets = edit the file +
+> `up -d` to recreate the affected services. **Exception — the DB password:** Postgres only reads
+> `POSTGRES_PASSWORD` on *first* init, so editing the env file alone does **not** change the live
+> role password. Rotate it with `ALTER USER ... PASSWORD ...` inside the `db` container, then update
+> **both** `POSTGRES_PASSWORD` and the password embedded in `DATABASE_URL`, then `up -d db api migrate`.
 
 ## 2. Bring it up
 
@@ -64,8 +80,15 @@ After the stack is healthy (all services up, `migrate` exited 0), run the full r
 populate Meilisearch with existing data ([[0035-search-architecture]]):
 
 ```sh
-docker compose -f infra/docker-compose.prod.yml exec api bun run reindex:all
+docker compose -f infra/docker-compose.prod.yml run --rm migrate bun run reindex:all
 ```
+
+> [!important] Run reindex via the `migrate` job, not the API container
+> The API **runtime** image is minimal Node (`node:26-alpine`) — it has **no Bun** and ships only
+> compiled `dist/`, so `exec api bun run reindex:all` fails (no `bun`, no `.ts`). The `migrate`
+> image is Bun-based and carries the script + the generated Prisma client, so the one-off
+> `run --rm migrate bun run reindex:all` runs the standalone reindex (it gets `DATABASE_URL` and
+> `MEILI_*` from `.env.prod` and exits when done).
 
 This is a one-time step on first deploy, or after adding Meilisearch to an existing instance.
 Subsequent deploys do not need it — the API keeps Meili in sync incrementally. The API's
@@ -75,9 +98,21 @@ continues to function ([[0035-search-architecture]]).
 ## 3. Verify
 
 ```sh
-curl -so /dev/null -w "web: %{http_code}\n"  https://lazyit.example.com/
-curl -s            -w "\napi: %{http_code}\n" https://lazyit.example.com/api/users
+curl -so /dev/null -w "web:    %{http_code}\n" https://lazyit.example.com/
+curl -so /dev/null -w "health: %{http_code}\n" https://lazyit.example.com/api/health/live   # expect 200
+curl -so /dev/null -w "api:    %{http_code}\n" https://lazyit.example.com/api/users          # expect 401
 ```
+
+`GET /api/health/live` is the public liveness endpoint (200; the Docker/compose healthchecks use
+it). `GET /api/users` now returns **401** unauthenticated — that is the *correct* response with the
+global OIDC guard active (ADR-0038), not a broken install. To see data, bootstrap the IdP and log
+in via the web UI.
+
+## 3a. Bootstrap auth & first login
+
+Auth is OIDC via the bundled Zitadel IdP. **Before the first real login**, register the OIDC client
+and create your first user, then fill the `OIDC_*` / `AUTH_*` values in `.env.prod` and `up -d`.
+Full procedure: **[[auth-bootstrap]]**. JIT provisioning creates the `User` row on first login.
 
 ## 4. Updating to a new version
 
@@ -90,17 +125,21 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 `prisma migrate deploy` — never `migrate dev`/`reset` in production; [[prisma-migrations]]).
 **Back up the database before any update** ([[backups]]).
 
-## 5. Backups
+## 5. Backups & disaster recovery
 
-Configure database backups before real use — see **[[backups]]** (pg_dump/restore). Also back up
-`infra/env/.env.prod` (secrets) somewhere safe and access-controlled.
+Configure backups before real use — see **[[backups]]**. The prod stack has **two** databases (the
+app DB **and** Zitadel's), and the DR linchpin `ZITADEL_MASTERKEY` lives in `infra/env/.env.prod`:
+back up **both** DBs **and** `.env.prod` off-host, or "restored the backup, nobody can log in." An
+opt-in `backup` profile sidecar automates the two DB dumps with retention (see [[backups]]).
 
-## Reserved for later — the IdP
+## 6. Resource sizing & limits
 
-When auth lands ([[0016-auth-strategy-deferred]]): a self-hosted IdP (Authentik/Keycloak/Zitadel —
-TBD) gets a service in the compose file and a route in the `Caddyfile` (a commented stub is already
-there), and the API validates OIDC tokens, mapping the IdP `sub` to `User.externalId`. The
-`OIDC_*` placeholders in `.env.prod.example` are reserved for that. No action needed now.
+The compose file sets a modest `mem_limit`/`cpus` per service (and `logging:` rotation so logs can't
+fill the disk). They cap a runaway service from OOM-ing the host; tune them to your box. The stack
+runs **seven** long-running containers (db, api, web, zitadel, zitadel_db, meilisearch, caddy) plus
+the one-shot migrate. Suggested minimum host for a small team (≤50 assets): **2 vCPU / 4 GB RAM /
+20 GB disk**, growing with data and search volume. Watch `docker stats` and raise the limits if a
+service is constrained.
 
 Build/boot problems → [[docker-build-troubleshooting]].
 
