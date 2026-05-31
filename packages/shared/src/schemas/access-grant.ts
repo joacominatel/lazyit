@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pageSchema } from "./pagination";
 
 /**
  * AccessGrant — the timestamped join recording that a User has access to an Application, over time
@@ -76,7 +77,15 @@ export const UpdateAccessGrantExpirySchema = z.strictObject({
   expiresAt: z.iso.datetime().nullable(),
 });
 
+/**
+ * The paginated `GET /access-grants` response envelope (ADR-0030): a page of grants plus `total`
+ * and the effective `limit`/`offset`. The nested `/users/:id/access-grants` and
+ * `/applications/:id/access-grants` lists stay unpaginated arrays (already user/app-scoped).
+ */
+export const AccessGrantPageSchema = pageSchema(AccessGrantSchema);
+
 export type AccessGrant = z.infer<typeof AccessGrantSchema>;
+export type AccessGrantPage = z.infer<typeof AccessGrantPageSchema>;
 export type CreateAccessGrant = z.infer<typeof CreateAccessGrantSchema>;
 export type RevokeAccessGrant = z.infer<typeof RevokeAccessGrantSchema>;
 export type UpdateAccessGrantNotes = z.infer<
