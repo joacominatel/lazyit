@@ -5,6 +5,7 @@ import { AssetCategorySchema } from "./asset-category";
 import { LocationSchema } from "./location";
 import { AssetAssignmentSchema } from "./asset-assignment";
 import { UserSchema } from "./user";
+import { pageSchema } from "./pagination";
 
 /**
  * Expanded read shapes for Asset — the relations inlined, so the web can render a table/detail
@@ -40,6 +41,58 @@ export const AssetWithRelationsSchema = AssetSchema.extend({
   activeAssignments: z.array(AssetAssignmentWithUserSchema),
 });
 
+// --- Lean list projection (GET /assets) ------------------------------------
+// The list does not need the full relation graph or the `specs` jsonb (which can be large and is
+// only rendered on the detail view). It ships just the columns a table row renders, with each
+// relation trimmed to its label fields — see docs/03-decisions/0030-list-pagination-contract.md.
+// The full shape (AssetWithRelationsSchema, incl. `specs`) is still returned by GET /assets/:id.
+
+/** The minimal AssetModel a list row renders (no `specs`/`sku`/timestamps), with its category label. */
+export const AssetModelListItemSchema = AssetModelSchema.pick({
+  id: true,
+  name: true,
+  manufacturer: true,
+}).extend({
+  category: AssetCategorySchema.pick({ id: true, name: true }).nullable(),
+});
+
+/** The minimal Location a list row renders (label fields only). */
+export const LocationListItemSchema = LocationSchema.pick({
+  id: true,
+  name: true,
+  type: true,
+});
+
+/** The minimal owner a list row renders — the user's identity fields, no timestamps/flags. */
+export const AssetAssignmentUserListItemSchema = AssetAssignmentSchema.pick({
+  id: true,
+  assetId: true,
+  userId: true,
+  assignedAt: true,
+}).extend({
+  user: UserSchema.pick({
+    id: true,
+    firstName: true,
+    lastName: true,
+    email: true,
+  }),
+});
+
+/**
+ * The lean Asset row returned by `GET /assets`: the asset's own columns **minus the `specs` jsonb**,
+ * with `model`/`location`/`activeAssignments` trimmed to the fields a table renders. The full
+ * `specs` and the complete relation graph are returned only by `GET /assets/:id`
+ * ({@link AssetWithRelationsSchema}).
+ */
+export const AssetListItemSchema = AssetSchema.omit({ specs: true }).extend({
+  model: AssetModelListItemSchema.nullable(),
+  location: LocationListItemSchema.nullable(),
+  activeAssignments: z.array(AssetAssignmentUserListItemSchema),
+});
+
+/** The paginated `GET /assets` response: a page of lean {@link AssetListItemSchema} rows. */
+export const AssetListPageSchema = pageSchema(AssetListItemSchema);
+
 export type AssetModelWithCategory = z.infer<
   typeof AssetModelWithCategorySchema
 >;
@@ -47,3 +100,10 @@ export type AssetAssignmentWithUser = z.infer<
   typeof AssetAssignmentWithUserSchema
 >;
 export type AssetWithRelations = z.infer<typeof AssetWithRelationsSchema>;
+export type AssetModelListItem = z.infer<typeof AssetModelListItemSchema>;
+export type LocationListItem = z.infer<typeof LocationListItemSchema>;
+export type AssetAssignmentUserListItem = z.infer<
+  typeof AssetAssignmentUserListItemSchema
+>;
+export type AssetListItem = z.infer<typeof AssetListItemSchema>;
+export type AssetListPage = z.infer<typeof AssetListPageSchema>;
