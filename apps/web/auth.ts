@@ -87,6 +87,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       issuer: externalIssuer,
       clientId: process.env.AUTH_CLIENT_ID,
       clientSecret: process.env.AUTH_CLIENT_SECRET,
+      // Request the standard identity scopes so the IdP returns the user's
+      // `name`/`email` claims — without this the provider asks for `openid` only
+      // and `session.user.name` stays empty (the topbar shows "—"). NB: the IdP
+      // (e.g. Zitadel) must also grant these scopes and emit the claims (for
+      // Zitadel: enable "User Info inside ID Token" on the app) — see ADR-0037/0039.
+      authorization: { params: { scope: "openid profile email" } },
+      // Map the OIDC standard claims to the Auth.js user. Fall back to
+      // `preferred_username` / a `given_name + family_name` join when an IdP omits
+      // the composite `name` claim, so the topbar never falls back to "—".
+      profile(profile) {
+        const fullName =
+          profile.name ??
+          [profile.given_name, profile.family_name]
+            .filter(Boolean)
+            .join(" ") ??
+          profile.preferred_username ??
+          null;
+        return {
+          id: profile.sub,
+          name: fullName || profile.preferred_username || null,
+          email: profile.email ?? null,
+        };
+      },
       ...(internalIssuer ? { [customFetch]: forwardedFetch } : {}),
     },
   ],
@@ -99,26 +122,42 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     /**
      * Persist the IdP access token in the JWT cookie on first sign-in so it can
-     * be forwarded to the API as a Bearer token on every request.
+     * be forwarded to the API as a Bearer token on every request. Also carry the
+     * user's `name`/`email` (from the OIDC `profile()` mapping) onto the token so
+     * the stateless JWT session can re-hydrate `session.user` on every request.
      */
-    jwt({ token, account }) {
+    jwt({ token, account, user }) {
       if (account?.access_token) {
         token.accessToken = account.access_token;
+      }
+      // `user` is only present on the initial sign-in; persist identity on the token.
+      if (user) {
+        token.name = user.name ?? token.name;
+        token.email = user.email ?? token.email;
       }
       return token;
     },
 
     /**
-     * Expose the access token on the client-side session object returned by
-     * `useSession()` and `auth()` so components and server code can read it.
+     * Expose the access token AND the user identity on the client-side session
+     * returned by `useSession()` / `auth()`. This callback overrides Auth.js's
+     * default session shaping, so it must explicitly carry `name`/`email` from the
+     * token onto `session.user` (the topbar `UserMenu` reads those).
      */
     session({ session, token }) {
-      // token.accessToken is set in the jwt callback above.
-      // The cast is required because the session callback's `token` type
-      // does not automatically merge the augmented JWT interface in all
-      // TypeScript configurations.
-      const accessToken = (token as { accessToken?: string }).accessToken;
-      session.accessToken = accessToken ?? "";
+      // token.accessToken / name / email are set in the jwt callback above.
+      // The cast is required because the session callback's `token` type does not
+      // automatically merge the augmented JWT interface in all TS configurations.
+      const t = token as {
+        accessToken?: string;
+        name?: string | null;
+        email?: string | null;
+      };
+      session.accessToken = t.accessToken ?? "";
+      if (session.user) {
+        session.user.name = t.name ?? session.user.name;
+        session.user.email = t.email ?? session.user.email;
+      }
       return session;
     },
   },
