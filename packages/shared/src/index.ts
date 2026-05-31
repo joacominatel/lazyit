@@ -16,6 +16,7 @@ export * from "./schemas/consumable";
 export * from "./schemas/consumable-category";
 export * from "./schemas/consumable-movement";
 export * from "./schemas/location";
+export * from "./schemas/pagination";
 export * from "./schemas/primitives";
 export * from "./schemas/search";
 export * from "./schemas/user";
