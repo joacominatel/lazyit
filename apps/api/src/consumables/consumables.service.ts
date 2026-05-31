@@ -11,6 +11,13 @@ import type {
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 
+/**
+ * PostgreSQL `int4` upper bound — the max value a Prisma `Int` column (here `currentStock`) can
+ * hold. A computed stock above this would overflow the column at write time (Prisma P2020), so we
+ * reject it as a 409 before touching the row. Mirrors `INT4_MAX` in `@lazyit/shared` primitives.
+ */
+const INT4_MAX = 2_147_483_647;
+
 /** Optional filters for listing consumables. */
 export interface ConsumableFilters {
   /** When true, return only items at or below their reorder threshold (minStock set). */
@@ -85,9 +92,21 @@ export class ConsumablesService {
   }
 
   /**
-   * Record a stock movement and adjust the cached `currentStock` atomically (ADR-0034). The actor
-   * comes from the X-User-Id shim. IN adds, OUT subtracts (409 if it would go negative — nothing is
-   * persisted), ADJUSTMENT sets `currentStock` to the absolute `quantity`. Returns the ledger row.
+   * Record a stock movement and adjust the cached `currentStock` atomically (ADR-0034), in the same
+   * transaction as the ledger insert so the cache and the ledger never diverge. The actor comes from
+   * the X-User-Id shim.
+   *
+   * The cache write is done with **atomic, conditional SQL** rather than a JS read-modify-write, so
+   * two concurrent movements can't lost-update each other under Read Committed:
+   *   - IN          → `increment` (a single `UPDATE ... SET currentStock = currentStock + qty`).
+   *   - OUT         → a **guarded** `updateMany` that decrements only while `currentStock >= qty`
+   *                   (and the row is live); if it matches 0 rows the stock is insufficient (or the
+   *                   row vanished) → **409**, and the whole transaction rolls back.
+   *   - ADJUSTMENT  → set `currentStock` to the absolute `quantity` (a physical recount).
+   *
+   * Overflow guard: an IN whose result would exceed int4 (`> INT4_MAX`) is rejected as a **409**
+   * before any write, so the cache can never silently wrap or hit a P2020 mid-transaction. Returns
+   * the ledger row.
    */
   async createMovement(
     consumableId: string,
@@ -98,33 +117,52 @@ export class ConsumablesService {
     const { type, quantity, reason, notes } = data;
 
     return this.prisma.$transaction(async (tx) => {
-      const consumable = await tx.consumable.findFirst({
-        where: { id: consumableId },
-        select: { id: true, currentStock: true },
-      });
-      if (!consumable) {
-        throw new NotFoundException(`Consumable ${consumableId} not found`);
-      }
-
-      let nextStock: number;
       if (type === 'IN') {
-        nextStock = consumable.currentStock + quantity;
+        // Read only to enforce the int4 ceiling and a clean 404; the write itself is atomic.
+        const consumable = await tx.consumable.findFirst({
+          where: { id: consumableId },
+          select: { currentStock: true },
+        });
+        if (!consumable) {
+          throw new NotFoundException(`Consumable ${consumableId} not found`);
+        }
+        if (consumable.currentStock + quantity > INT4_MAX) {
+          throw new ConflictException(
+            `Stock would exceed the maximum of ${INT4_MAX}`,
+          );
+        }
+        await tx.consumable.update({
+          where: { id: consumableId },
+          data: { currentStock: { increment: quantity } },
+        });
       } else if (type === 'OUT') {
-        nextStock = consumable.currentStock - quantity;
-        if (nextStock < 0) {
+        // Guarded decrement: only succeeds while the live row still has enough stock. This is the
+        // atomic check-and-act that closes the lost-update race — no row matched ⇒ 409 + rollback.
+        const result = await tx.consumable.updateMany({
+          where: { id: consumableId, deletedAt: null, currentStock: { gte: quantity } },
+          data: { currentStock: { decrement: quantity } },
+        });
+        if (result.count === 0) {
+          // Distinguish "no such (live) consumable" (404) from "not enough stock" (409).
+          const consumable = await tx.consumable.findFirst({
+            where: { id: consumableId },
+            select: { currentStock: true },
+          });
+          if (!consumable) {
+            throw new NotFoundException(`Consumable ${consumableId} not found`);
+          }
           throw new ConflictException(
             `Insufficient stock: have ${consumable.currentStock}, cannot remove ${quantity}`,
           );
         }
       } else {
-        // ADJUSTMENT: an absolute recount.
-        nextStock = quantity;
+        // ADJUSTMENT: an absolute recount. quantity is bounded to int4 by the shared schema, so no
+        // overflow is possible here. `update` 404s (P2025) if the row is missing/soft-deleted.
+        await tx.consumable.update({
+          where: { id: consumableId },
+          data: { currentStock: quantity },
+        });
       }
-
-      await tx.consumable.update({
-        where: { id: consumableId },
-        data: { currentStock: nextStock },
-      });
 
       return tx.consumableMovement.create({
         data: {
