@@ -22,6 +22,7 @@ import {
   AssetAssignmentWithUserSchema,
   AssetHistoryQuerySchema,
   AssetHistorySchema,
+  AssetListPageSchema,
   AssetSchema,
   AssetStatusSchema,
   AssetWithRelationsSchema,
@@ -33,14 +34,17 @@ import { AssetsService } from './assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { parseActiveOnly } from '../asset-assignments/active-only';
+import { parsePageQuery } from '../common/parse-page-query';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { User } from '../../generated/prisma/client';
 
-// Writes keep the lean Asset shape; reads return the expanded AssetWithRelations.
+// Writes keep the lean Asset shape; the detail read returns the expanded AssetWithRelations, while
+// the (paginated) list returns the trimmed AssetListItem envelope.
 class AssetDto extends createZodDto(AssetSchema) {}
 class CreateAssetDto extends createZodDto(CreateAssetSchema) {}
 class UpdateAssetDto extends createZodDto(UpdateAssetSchema) {}
 class AssetWithRelationsDto extends createZodDto(AssetWithRelationsSchema) {}
+class AssetListPageDto extends createZodDto(AssetListPageSchema) {}
 class AssetAssignmentWithUserDto extends createZodDto(
   AssetAssignmentWithUserSchema,
 ) {}
@@ -59,7 +63,7 @@ export class AssetsController {
   @Get()
   @ApiOperation({
     summary:
-      'List assets (expanded with model/category, location, activeAssignments). Excludes soft-deleted.',
+      'List assets (paginated; lean: model/category, location, activeAssignments — no specs). Excludes soft-deleted.',
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'locationId', required: false })
@@ -74,12 +78,33 @@ export class AssetsController {
     description:
       'Case-insensitive substring match on name, serial and assetTag',
   })
-  @ApiOkResponse({ type: [AssetWithRelationsDto] })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: AssetListPageDto })
   findAll(
     @Query('categoryId') categoryId?: string,
     @Query('locationId') locationId?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
   ) {
     let parsedStatus: AssetStatus | undefined;
     if (status !== undefined) {
@@ -91,12 +116,15 @@ export class AssetsController {
       }
       parsedStatus = result.data;
     }
-    return this.assets.findAll({
-      categoryId,
-      locationId,
-      status: parsedStatus,
-      q,
-    });
+    return this.assets.findPage(
+      {
+        categoryId,
+        locationId,
+        status: parsedStatus,
+        q,
+      },
+      parsePageQuery({ limit, offset, page }),
+    );
   }
 
   @Get(':id')
