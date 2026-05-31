@@ -130,3 +130,47 @@
 ---
 
 _Note: this document was materialized from the analyst's structured digest. The four analyses with full long-form write-ups on disk (backend-completeness-gaps, backend-observability-ops, backend-search-subsystem, infra-ops-reliability) include extra Method / Strategic-recommendations / Open-questions sections; the rest carry the digest above._
+
+---
+
+## Round 1 implementation (CTO proposal)
+
+Schema-free truth-in-advertising pass — closes the high/medium docs-drift findings that ship with
+the operator (findings 1, 2, 5, 8, 9, 10). Branch `docs/fix-auth-and-env-drift`.
+
+- **Finding 1 — README auth posture (high).** Replaced the false "auth deferred / unauthenticated /
+  must not be exposed publicly" blockquote with an **Authentication** section stating the real
+  posture: OIDC via bundled Zitadel, BYOI by 3 env vars, `AUTH_MODE=shim` as the zero-config dev
+  default, links to ADR-0037/0039 + `auth-bootstrap.md`, and a kept "never run prod with
+  `AUTH_MODE=shim`" warning. Also corrected the stale per-env-file comments in the Develop block.
+- **Finding 2 — setup.md no longer yields a working dev env (high).** Rewrote the Steps + Environment
+  sections: all **3** env files, `MEILI_MASTER_KEY` + the `ZITADEL_*` block in root `.env`, a note
+  that `bun run db:up` now starts Postgres + Meilisearch + Zitadel (+ its own Postgres), the seed
+  step, an `AUTH_MODE=shim` dev-default callout linking `auth-bootstrap`, and a complete env-var
+  table. Bumped `updated:` to 2026-05-30.
+- **Finding 5 — ADR-0016 supersession (medium).** Set ADR-0016 status to `superseded` (frontmatter +
+  Status section) with a "Superseded by 0037/0039" banner and a warning that its body describes a
+  pre-auth world; the historical decision body is untouched (vault convention). Updated
+  `docs/03-decisions/_MOC.md` row 0016 to match the 0013/0019 annotation style.
+- **ADR-0022/0023/0024 banners.** Added "shim path preserved; superseded in OIDC path by 0038"
+  callouts to each (matching the 0013/0019 convention), annotated their `_MOC.md` rows, and bumped
+  their `updated:` dates. Authorization rules unchanged — only the actor *source* moved to a
+  verified token in OIDC mode; `X-User-Id` survives only under `AUTH_MODE=shim`.
+- **Finding 8 — apps/api/.env.example (low).** Added `OIDC_JWKS_URI` (commented; explains the Docker
+  split-DNS internal-JWKS case read by `jwt-auth.guard.ts`, otherwise derived from `OIDC_ISSUER`),
+  documented `OIDC_CLIENT_ID` audience behaviour, and replaced the unused `OIDC_CLIENT_SECRET` with a
+  note that the API reads no client secret (it lives in the web's `AUTH_CLIENT_SECRET`).
+- **Finding 9 — apps/web/.env.example (low).** Renamed v4-era `NEXTAUTH_URL` → `AUTH_URL`, added
+  `AUTH_TRUST_HOST=true`, and added a commented `AUTH_INTERNAL_ISSUER` documenting the Docker
+  external→internal issuer rewrite read by `apps/web/auth.ts`.
+- **Finding 10 — code-conventions.md (low).** Marked shadcn/ui **installed** (vendored in
+  `components/ui/*`) and documented the load-bearing **heroicons-only** rule (lucide stays inside
+  `components/ui/*`; no third icon set), which previously lived only in the CTO system-map. Bumped
+  `updated:`.
+
+Verified all new wiki-links and README relative links resolve. **No schema/migration change.**
+
+Out of scope here (other lanes / deferred): finding 3 (CTO system-map, `.claude/` — not in this
+lane), finding 4 (ArticleVersion, system-map), finding 6 (`docs/06-security/**` — security lane),
+finding 7 (entity docs under `docs/02-domain/**` — separate mechanical PR), finding 11
+(`docs/status_may_2026/_MOC` + per-analysis frontmatter — vault-hygiene follow-up).

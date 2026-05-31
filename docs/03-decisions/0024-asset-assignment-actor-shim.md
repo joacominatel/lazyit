@@ -3,7 +3,7 @@ title: "ADR-0024: Retrofit AssetAssignment actor to the X-User-Id shim"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-26
+updated: 2026-05-30
 deciders: [Joaquín Minatel]
 ---
 
@@ -15,6 +15,12 @@ accepted — 2026-05-25. **Supersedes in part** [[0019-asset-assignment-integrit
 *actor source*, decision bullet 2 — everything else there stands) and **closes** the "retrofit
 AssetAssignment to the `X-User-Id` shim" follow-up of [[0023-access-management-design]]. Builds on
 [[0022-draft-visibility-auth-shim]].
+
+> [!note] Shim path preserved; superseded in the OIDC path by [[0038-jit-user-provisioning]]
+> Auth has landed since this ADR ([[0016-auth-strategy-deferred]] is superseded). The actor FKs
+> (`assignedById` / `releasedById`) and their lifecycle are **unchanged**; only the source moved:
+> in **OIDC mode** the actor is the OIDC-authenticated caller (`sub`→[[user]]) resolved by the
+> global guard, and the `X-User-Id` header survives **only** under `AUTH_MODE=shim` (dev/test).
 
 ## Context
 
