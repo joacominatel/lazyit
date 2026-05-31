@@ -41,9 +41,6 @@ export function UserMenu() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled>Profile</DropdownMenuItem>
-        <DropdownMenuItem disabled>Settings</DropdownMenuItem>
-        <DropdownMenuSeparator />
         <DropdownMenuItem disabled>Sign out</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
