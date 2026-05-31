@@ -21,6 +21,7 @@ type PrismaAssetMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
 };
 
 // The transaction client the service writes through. $transaction is mocked to invoke the callback
@@ -52,6 +53,73 @@ const EXPECTED_INCLUDE = {
     include: { user: true },
   },
 };
+
+// The lean projection the paginated LIST (findPage) requests. Mirrors ASSET_LIST_SELECT in the
+// service: every column EXCEPT the `specs` jsonb, plus trimmed joins (model+category, location,
+// active owners). This is what asserts the lean select (no specs, trimmed relations).
+const EXPECTED_LIST_SELECT = {
+  id: true,
+  name: true,
+  serial: true,
+  assetTag: true,
+  status: true,
+  notes: true,
+  purchaseDate: true,
+  warrantyEnd: true,
+  modelId: true,
+  locationId: true,
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+  model: {
+    select: {
+      id: true,
+      name: true,
+      manufacturer: true,
+      category: { select: { id: true, name: true } },
+    },
+  },
+  location: { select: { id: true, name: true, type: true } },
+  assignments: {
+    where: { releasedAt: null },
+    orderBy: { assignedAt: 'desc' },
+    select: {
+      id: true,
+      userId: true,
+      user: {
+        select: { id: true, firstName: true, lastName: true, email: true },
+      },
+    },
+  },
+};
+
+// A lean row as the LIST query returns it (no `specs`; trimmed joins) before the service renames
+// `assignments` -> `activeAssignments`. Overridable per test.
+const leanRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 'a1',
+  name: 'SRV-01',
+  serial: null,
+  assetTag: null,
+  status: 'OPERATIONAL',
+  notes: null,
+  purchaseDate: null,
+  warrantyEnd: null,
+  modelId: 'm1',
+  locationId: 'l1',
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  deletedAt: null,
+  model: { id: 'm1', name: 'Latitude', manufacturer: 'Dell', category: null },
+  location: { id: 'l1', name: 'HQ', type: 'OFFICE' },
+  assignments: [
+    {
+      id: 'as1',
+      userId: 'u1',
+      user: { id: 'u1', firstName: 'A', lastName: 'B', email: 'a@b.co' },
+    },
+  ],
+  ...overrides,
+});
 
 // A raw Prisma row as returned by findMany/findFirst with the include (before the service maps
 // `assignments` -> `activeAssignments`). Overridable per test.
@@ -112,13 +180,21 @@ describe('AssetsService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
     };
     // The transaction client the writes go through; $transaction runs the callback with it.
     tx = { create: jest.fn(), update: jest.fn() };
     prisma = {
       asset,
-      $transaction: jest.fn((cb: (client: { asset: TxAssetMock }) => unknown) =>
-        cb({ asset: tx }),
+      // create/update/remove pass a CALLBACK (interactive tx); findPage passes an ARRAY of two
+      // promises (findMany + count). Support both forms.
+      $transaction: jest.fn(
+        (
+          arg:
+            | ((client: { asset: TxAssetMock }) => unknown)
+            | Array<Promise<unknown>>,
+        ) =>
+          Array.isArray(arg) ? Promise.all(arg) : arg({ asset: tx }),
       ),
     };
     // ActorService is mocked; the guard validation detail lives in jwt-auth.guard.spec.ts. Here we
@@ -279,74 +355,103 @@ describe('AssetsService', () => {
     );
   });
 
-  // --- findAll (expanded) -------------------------------------------------
-  it('findAll without filters: excludes soft-deleted, newest first, with relations', async () => {
+  // --- findPage (paginated, lean) -----------------------------------------
+  it('findPage uses the LEAN select (no specs; trimmed joins), newest first, with take/skip', async () => {
     asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
 
-    await service.findAll();
+    await service.findPage({}, { limit: 50, offset: 0 });
 
     expect(asset.findMany).toHaveBeenCalledWith({
       where: {},
       orderBy: { createdAt: 'desc' },
-      include: EXPECTED_INCLUDE,
+      take: 50,
+      skip: 0,
+      select: EXPECTED_LIST_SELECT,
     });
+    // The lean select must NOT request the specs jsonb (the whole point of the projection).
+    const selectArg = (
+      asset.findMany.mock.calls as Array<
+        [{ select: Record<string, unknown> }]
+      >
+    )[0][0].select;
+    expect(selectArg).not.toHaveProperty('specs');
   });
 
-  it('findAll maps each row assignments -> activeAssignments', async () => {
+  it('findPage runs findMany + count over the SAME where inside one $transaction', async () => {
+    asset.findMany.mockResolvedValue([leanRow()]);
+    asset.count.mockResolvedValue(7);
+
+    const result = await service.findPage(
+      { status: 'RETIRED', locationId: 'l1' },
+      { limit: 10, offset: 20 },
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: unknown; take: number; skip: number }]>
+    )[0][0];
+    const countArgs = (
+      asset.count.mock.calls as Array<[{ where: unknown }]>
+    )[0][0];
+    // Identical where feeds both queries; take/skip come from the window.
+    expect(findManyArgs.where).toEqual({ locationId: 'l1', status: 'RETIRED' });
+    expect(findManyArgs.take).toBe(10);
+    expect(findManyArgs.skip).toBe(20);
+    expect(countArgs.where).toEqual({ locationId: 'l1', status: 'RETIRED' });
+    // The envelope echoes the window and carries the total.
+    expect(result.total).toBe(7);
+    expect(result.limit).toBe(10);
+    expect(result.offset).toBe(20);
+  });
+
+  it('findPage maps each lean row assignments -> activeAssignments (no `assignments` key leaks)', async () => {
     asset.findMany.mockResolvedValue([
-      rawRow({
+      leanRow({
         assignments: [
-          { id: 'as1', releasedAt: null, user: { id: 'u1' } },
-          { id: 'as2', releasedAt: null, user: { id: 'u2' } },
+          { id: 'as1', userId: 'u1', user: { id: 'u1' } },
+          { id: 'as2', userId: 'u2', user: { id: 'u2' } },
         ],
       }),
     ]);
+    asset.count.mockResolvedValue(1);
 
-    const result = await service.findAll();
+    const result = await service.findPage({}, { limit: 50, offset: 0 });
 
-    expect(result[0]).not.toHaveProperty('assignments');
-    expect(result[0].activeAssignments).toHaveLength(2);
+    expect(result.items[0]).not.toHaveProperty('assignments');
+    expect(result.items[0]).not.toHaveProperty('specs');
+    expect(result.items[0].activeAssignments).toHaveLength(2);
   });
 
-  it('the assignments include filters to active (releasedAt null) so released owners are excluded', async () => {
+  it('the lean assignments select filters to active (releasedAt null) so released owners are excluded', async () => {
     asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
 
-    await service.findAll();
+    await service.findPage({}, { limit: 50, offset: 0 });
 
     const calls = asset.findMany.mock.calls as Array<
-      [{ include: { assignments: { where: unknown } } }]
+      [{ select: { assignments: { where: unknown } } }]
     >;
-    expect(calls[0][0].include.assignments.where).toEqual({ releasedAt: null });
+    expect(calls[0][0].select.assignments.where).toEqual({ releasedAt: null });
   });
 
-  it('findAll filters by status and locationId', async () => {
+  it('findPage filters by categoryId through the related model', async () => {
     asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
 
-    await service.findAll({ status: 'RETIRED', locationId: 'l1' });
+    await service.findPage({ categoryId: 'c1' }, { limit: 50, offset: 0 });
 
-    expect(asset.findMany).toHaveBeenCalledWith({
-      where: { locationId: 'l1', status: 'RETIRED' },
-      orderBy: { createdAt: 'desc' },
-      include: EXPECTED_INCLUDE,
-    });
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({ model: { categoryId: 'c1' } });
   });
 
-  it('findAll filters by categoryId through the related model', async () => {
+  it('findPage filters by q (case-insensitive OR over name/serial/assetTag)', async () => {
     asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
 
-    await service.findAll({ categoryId: 'c1' });
-
-    expect(asset.findMany).toHaveBeenCalledWith({
-      where: { model: { categoryId: 'c1' } },
-      orderBy: { createdAt: 'desc' },
-      include: EXPECTED_INCLUDE,
-    });
-  });
-
-  it('findAll filters by q (case-insensitive OR over name/serial/assetTag)', async () => {
-    asset.findMany.mockResolvedValue([]);
-
-    await service.findAll({ q: 'srv' });
+    await service.findPage({ q: 'srv' }, { limit: 50, offset: 0 });
 
     const calls = asset.findMany.mock.calls as Array<
       [{ where: Record<string, unknown> }]

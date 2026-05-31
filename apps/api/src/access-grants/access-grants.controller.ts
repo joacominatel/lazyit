@@ -19,8 +19,10 @@ import {
 import { AccessGrantsService } from './access-grants.service';
 import { parseActiveOnly, parseIncludeExpired } from './query-params';
 import { parseUuidQuery } from '../common/parse-uuid-query';
+import { parsePageQuery } from '../common/parse-page-query';
 import {
   AccessGrantDto,
+  AccessGrantListPageDto,
   CreateAccessGrantDto,
   RevokeAccessGrantDto,
   UpdateAccessGrantExpiryDto,
@@ -38,7 +40,7 @@ export class AccessGrantsController {
   @Get()
   @ApiOperation({
     summary:
-      'List grants; filter by userId / applicationId. Active-only by default.',
+      'List grants (paginated; newest first); filter by userId / applicationId. Active-only by default.',
   })
   @ApiQuery({ name: 'userId', required: false })
   @ApiQuery({ name: 'applicationId', required: false })
@@ -55,19 +57,43 @@ export class AccessGrantsController {
     description:
       'Default true. Pass false to hide active grants already past their expiresAt.',
   })
-  @ApiOkResponse({ type: [AccessGrantDto] })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: AccessGrantListPageDto })
   findAll(
     @Query('userId') userId?: string,
     @Query('applicationId') applicationId?: string,
     @Query('activeOnly') activeOnly?: string,
     @Query('includeExpired') includeExpired?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
   ) {
-    return this.grants.findAll({
-      userId: parseUuidQuery(userId, 'userId'),
-      applicationId,
-      activeOnly: parseActiveOnly(activeOnly),
-      includeExpired: parseIncludeExpired(includeExpired),
-    });
+    return this.grants.findPage(
+      {
+        userId: parseUuidQuery(userId, 'userId'),
+        applicationId,
+        activeOnly: parseActiveOnly(activeOnly),
+        includeExpired: parseIncludeExpired(includeExpired),
+      },
+      parsePageQuery({ limit, offset, page }),
+    );
   }
 
   @Get(':id')

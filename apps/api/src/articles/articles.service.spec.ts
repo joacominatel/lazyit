@@ -46,12 +46,14 @@ type ArticleMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
 };
 
 describe('ArticlesService', () => {
   let service: ArticlesService;
   let article: ArticleMock;
   let articleCategory: { findFirst: jest.Mock };
+  let prisma: { $transaction: jest.Mock };
   // ActorService is mocked; guard validation lives in jwt-auth.guard.spec.ts. By default it echoes
   // a present user's id back (any caller with a User "exists") and maps undefined to anonymous.
   let actor: { resolve: jest.Mock };
@@ -61,6 +63,7 @@ describe('ArticlesService', () => {
     article = {
       findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
       create: jest.fn().mockImplementation((args: { data: ArticleData }) => ({
         id: 'art1',
         ...args.data,
@@ -73,6 +76,10 @@ describe('ArticlesService', () => {
             ...args.data,
           }),
         ),
+    };
+    // findPage uses the array form of $transaction (findMany + count); the mock awaits the tuple.
+    prisma = {
+      $transaction: jest.fn((ops: Array<Promise<unknown>>) => Promise.all(ops)),
     };
     // Any present User resolves to its id; undefined → anonymous (no user).
     // resolve() is now synchronous — returns string | undefined directly.
@@ -90,7 +97,7 @@ describe('ArticlesService', () => {
         ArticlesService,
         {
           provide: PrismaService,
-          useValue: { article, articleCategory },
+          useValue: { article, articleCategory, ...prisma },
         },
         { provide: ActorService, useValue: actor },
         { provide: SearchService, useValue: search },
@@ -196,25 +203,28 @@ describe('ArticlesService', () => {
     });
   });
 
-  // --- listing visibility --------------------------------------------------
+  // --- listing visibility (paginated, lean) --------------------------------
 
-  describe('findAll visibility', () => {
+  describe('findPage visibility', () => {
+    const PAGE = { limit: 50, offset: 0 };
+
     it('shows only PUBLISHED to anonymous callers', async () => {
-      await service.findAll({}, undefined);
+      await service.findPage({}, PAGE, undefined);
       expect(listWhere().AND[0]).toEqual({ status: 'PUBLISHED' });
       expect(actor.resolve).toHaveBeenCalledWith(undefined);
     });
 
     it("shows PUBLISHED plus the caller's own DRAFTs when logged in", async () => {
-      await service.findAll({}, AUTHOR_USER as never);
+      await service.findPage({}, PAGE, AUTHOR_USER as never);
       expect(listWhere().AND[0]).toEqual({
         OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: AUTHOR }],
       });
     });
 
     it('applies category / author / status / q filters', async () => {
-      await service.findAll(
+      await service.findPage(
         { categoryId: 'c1', authorId: AUTHOR, status: 'PUBLISHED', q: 'vpn' },
+        PAGE,
         undefined,
       );
       const and = listWhere().AND;
@@ -226,6 +236,68 @@ describe('ArticlesService', () => {
           { title: { contains: 'vpn', mode: 'insensitive' } },
           { excerpt: { contains: 'vpn', mode: 'insensitive' } },
         ],
+      });
+    });
+  });
+
+  describe('findPage pagination & lean projection', () => {
+    // Asserts the lean select omits the markdown `content` (and keeps `excerpt`), runs findMany +
+    // count over the same where in one $transaction, and returns the Page<T> envelope.
+    const listArgs = (): {
+      where: unknown;
+      orderBy: unknown;
+      take: number;
+      skip: number;
+      select: Record<string, unknown>;
+    } =>
+      (
+        article.findMany.mock.calls as Array<
+          [
+            {
+              where: unknown;
+              orderBy: unknown;
+              take: number;
+              skip: number;
+              select: Record<string, unknown>;
+            },
+          ]
+        >
+      )[0][0];
+
+    it('uses the LEAN select: omits `content`, keeps `excerpt`', async () => {
+      await service.findPage({}, { limit: 50, offset: 0 }, undefined);
+      const select = listArgs().select;
+      expect(select).not.toHaveProperty('content');
+      expect(select.excerpt).toBe(true);
+      expect(select.title).toBe(true);
+    });
+
+    it('runs findMany(take/skip) + count over the SAME where inside one $transaction', async () => {
+      article.findMany.mockResolvedValueOnce([{ id: 'art1' }]);
+      article.count.mockResolvedValueOnce(9);
+
+      const result = await service.findPage(
+        { status: 'PUBLISHED' },
+        { limit: 5, offset: 10 },
+        undefined,
+      );
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      const fm = listArgs();
+      const countWhere = (
+        article.count.mock.calls as Array<[{ where: unknown }]>
+      )[0][0].where;
+      expect(fm.take).toBe(5);
+      expect(fm.skip).toBe(10);
+      expect(fm.orderBy).toEqual({ updatedAt: 'desc' });
+      // count's where is identical to the page's where (so total can't drift from the page).
+      expect(countWhere).toEqual(fm.where);
+      // The Page<T> envelope.
+      expect(result).toEqual({
+        items: [{ id: 'art1' }],
+        total: 9,
+        limit: 5,
+        offset: 10,
       });
     });
   });

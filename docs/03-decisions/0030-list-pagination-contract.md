@@ -3,17 +3,23 @@ title: "ADR-0030: List endpoint pagination contract (offset; implementation defe
 tags: [adr, security, api]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-30
 deciders: [Joaquín Minatel]
 ---
 
-# ADR-0030: List endpoint pagination contract (offset; implementation deferred)
+# ADR-0030: List endpoint pagination contract (offset; partially implemented)
 
 ## Status
 
-accepted — 2026-05-25. The **contract** is decided now; **implementation is deferred**. Raised by
-[[SEC-007-no-pagination-list-endpoints|SEC-007]]; the response shape would live alongside
-[[0018-api-documentation-swagger]] and be consumed by the frontend data layer
+accepted — 2026-05-25; **partially implemented 2026-05-30** (Round 1, backend). The contract was
+decided 2026-05-25 with implementation deferred. It now lives in `@lazyit/shared`
+(`schemas/pagination.ts`: `PageQuery`/`Page<T>` + `offsetOf`/`pageOf` helpers, default 50 / hard
+max 200, over-max rejected with 400) and the three heaviest/most-sensitive lists are paginated:
+**`GET /access-grants`**, **`GET /assets`** and **`GET /articles`** each gained a service
+`findPage(...)` (`findMany`+`count` over one `where` in a `$transaction`). The remaining lists
+(small reference tables + the inherently-scoped nested grant/assignment lists) stay unpaginated for
+now. Raised by [[SEC-007-no-pagination-list-endpoints|SEC-007]]; the response shape lives alongside
+[[0018-api-documentation-swagger]] and is consumed by the frontend data layer
 ([[0020-frontend-data-layer]]).
 
 ## Context
@@ -37,23 +43,29 @@ eleven lists plus the frontend data layer today.
 
 - Adopt an **offset/limit** contract, defined **once in `@lazyit/shared`**: a `PageQuery`
   (`{ limit, offset }`, or `{ page, limit }`) and a `Page<T>` envelope
-  (`{ items, total, limit, offset }`). **Default page size 50, hard maximum 200.**
-- **Implementation is deferred.** Existing lists are **not** retrofitted now — MVP scale does not
-  require it, and the change spans every list service + the frontend data layer. **New** list
-  endpoints should adopt the contract from the start; existing ones are migrated when a list grows or
-  a screen needs it. When migration starts, prioritize **`GET /access-grants`** (the most sensitive
-  unbounded list — it can dump every user↔application grant).
+  (`{ items, total, limit, offset }`). **Default page size 50, hard maximum 200** — a `limit` over
+  the max is **rejected (400)**, never silently clamped.
+- **Migration is incremental, highest-risk first.** Round 1 (2026-05-30) implemented the contract
+  and paginated the three heaviest/most-sensitive lists — **`GET /access-grants`** (the most
+  sensitive unbounded list — it can dump every user↔application grant), **`GET /assets`** (the
+  heaviest) and **`GET /articles`** — each via a service `findPage(...)` that runs `findMany` +
+  `count` over the same `where` in one `$transaction`. The remaining small reference lists and the
+  inherently-scoped nested grant/assignment lists stay unpaginated for now; **new** list endpoints
+  adopt the contract from the start.
 - When implemented, it spans backend **and** frontend (TanStack Query, [[0020-frontend-data-layer]])
   → split into separate front/back subagents per the workflow, not done piecemeal.
 
 ## Consequences
 
-- **Positive:** the pagination contract is decided and discoverable; no premature eleven-endpoint
-  refactor; new endpoints inherit a capped page size by default.
-- **Residual (tracked):** existing lists stay unbounded until migrated — [[SEC-007-no-pagination-list-endpoints|SEC-007]]
-  remains **open** as deferred, accepted debt, bounded today only by data scale. Offset pagination's
-  deep-page cost and insert-instability are accepted at this scale; revisit **cursor** (option 2) if a
-  history table grows fast.
+- **Positive:** the pagination contract is decided, discoverable and now enforced on the three
+  highest-risk lists; the heaviest payloads are also trimmed (lean `select`s: `GET /articles` drops
+  the markdown `content`, `GET /assets` drops the `specs` blob + trims joins). New endpoints inherit
+  a capped page size by default.
+- **Residual (tracked):** the remaining (small / inherently-scoped) lists stay unbounded until
+  migrated — [[SEC-007-no-pagination-list-endpoints|SEC-007]] remains **open** as bounded, accepted
+  debt. Offset pagination's deep-page cost and insert-instability are accepted at this scale; revisit
+  **cursor** (option 2) if a history table grows fast. Matching **partial `deletedAt` indexes** for
+  the now-bounded hot lists are a Round 2 follow-up (no migration landed in Round 1).
 - The hard max (200) caps the worst-case response size for any endpoint that adopts the contract.
 
 ## References

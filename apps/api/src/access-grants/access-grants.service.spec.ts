@@ -20,6 +20,7 @@ type GrantMock = {
   findUnique: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
 };
 
 // Shapes the create/update calls are cast to, so assertions stay type-safe (no-unsafe-* lint).
@@ -50,6 +51,7 @@ describe('AccessGrantsService', () => {
   let accessGrant: GrantMock;
   let user: { findFirst: jest.Mock };
   let application: { findFirst: jest.Mock };
+  let prisma: { $transaction: jest.Mock };
   // ActorService is mocked; the X-User-Id validation detail lives in actor.service.spec.ts. Here we
   // steer resolve() and assert the service delegates to it. Default: no actor (undefined).
   let actor: { resolve: jest.Mock };
@@ -60,9 +62,15 @@ describe('AccessGrantsService', () => {
       findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
     };
     user = { findFirst: jest.fn() };
     application = { findFirst: jest.fn() };
+    // findPage uses the array form of $transaction (a tuple of two queries). The mock simply awaits
+    // the promises the service passes in (findMany + count), preserving their resolved order.
+    prisma = {
+      $transaction: jest.fn((ops: Array<Promise<unknown>>) => Promise.all(ops)),
+    };
     // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
     actor = { resolve: jest.fn().mockReturnValue(undefined) };
 
@@ -71,7 +79,7 @@ describe('AccessGrantsService', () => {
         AccessGrantsService,
         {
           provide: PrismaService,
-          useValue: { accessGrant, user, application },
+          useValue: { accessGrant, user, application, ...prisma },
         },
         { provide: ActorService, useValue: actor },
       ],
@@ -240,6 +248,55 @@ describe('AccessGrantsService', () => {
     expect(where.OR[0]).toEqual({ expiresAt: null });
     const future = where.OR[1].expiresAt as { gt: Date };
     expect(future.gt).toBeInstanceOf(Date);
+  });
+
+  // --- findPage (paginated) -----------------------------------------------
+  it('findPage runs findMany(take/skip) + count over the SAME where inside one $transaction', async () => {
+    accessGrant.findMany.mockResolvedValue([{ id: 'g1' }, { id: 'g2' }]);
+    accessGrant.count.mockResolvedValue(42);
+
+    const result = await service.findPage(
+      { userId: USER_ID },
+      { limit: 2, offset: 4 },
+    );
+
+    // One transaction wrapping both queries (count can't drift from the page).
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    const findManyArgs = (accessGrant.findMany.mock.calls as FindManyCall[])[0][0];
+    const countArgs = (
+      accessGrant.count.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    // take/skip come from the page window.
+    expect(findManyArgs).toEqual({
+      where: { userId: USER_ID, revokedAt: null },
+      orderBy: { grantedAt: 'desc' },
+      take: 2,
+      skip: 4,
+    });
+    // count uses the identical where (no take/skip/orderBy).
+    expect(countArgs.where).toEqual({ userId: USER_ID, revokedAt: null });
+    // The envelope: items + total + the echoed window.
+    expect(result).toEqual({
+      items: [{ id: 'g1' }, { id: 'g2' }],
+      total: 42,
+      limit: 2,
+      offset: 4,
+    });
+  });
+
+  it('findPage defaults to active-only and newest-first like findAll', async () => {
+    accessGrant.findMany.mockResolvedValue([]);
+    accessGrant.count.mockResolvedValue(0);
+
+    await service.findPage({}, { limit: 50, offset: 0 });
+
+    const findManyArgs = (accessGrant.findMany.mock.calls as FindManyCall[])[0][0];
+    expect(findManyArgs).toMatchObject({
+      where: { revokedAt: null },
+      orderBy: { grantedAt: 'desc' },
+      take: 50,
+      skip: 0,
+    });
   });
 
   // --- findOne ------------------------------------------------------------

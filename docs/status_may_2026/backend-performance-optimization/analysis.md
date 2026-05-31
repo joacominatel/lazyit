@@ -116,4 +116,50 @@
 
 ---
 
+## Round 1 implementation (CTO proposal)
+
+> Landed on branch `perf/list-pagination` (issue #69). Addresses findings **#1, #2, #3** — the
+> three highest-priority items. No `schema.prisma`/migration change; DB indexes (#5) are **deferred
+> to Round 2**.
+
+**Shared contract (ADR-0030).** `packages/shared/src/schemas/pagination.ts` now defines the
+offset-pagination contract once: `PageQuerySchema` accepts either `{ limit, offset }` or
+`{ page, limit }` and **normalizes** to a canonical `{ limit, offset }` (offset wins if both are
+given); `limit` defaults to **50** and is **hard-capped at 200 — a larger value is rejected (400),
+never silently clamped**. A generic `Page<T>` envelope (`{ items, total, limit, offset }`) via the
+`pageSchema(item)` factory + `PageMetaSchema`, plus helpers `offsetOf(query) -> { take, skip }` and
+`pageOf(items, total, query) -> Page<T>`. Unit-tested in `pagination.test.ts` (`bun test`).
+
+**Lean list schemas.** `ArticleListItem` (= `ArticleSchema` **minus `content`**, `excerpt` kept) and
+a lean `AssetListItem` (omits the `specs` jsonb; trims `model`+`category`/`location`/active-owner
+joins to the fields the table renders) + their `Page` wrappers, plus an `AccessGrantListPage`
+envelope. All additive to the barrel.
+
+**Paginated endpoints.** `GET /access-grants` (most sensitive), `GET /assets` (heaviest) and
+`GET /articles` each gained a service `findPage(filters, page, currentUser?)` that runs
+`findMany(take/skip)` + `count` over the **same `where` inside one `$transaction`** (count can't
+drift from the page). The unpaginated `findAll` stays on `AccessGrantsService` for the
+inherently-scoped nested lists (`/users/:id/access-grants`, `/applications/:id/access-grants`); the
+asset/article `findAll` had no other caller and was replaced by `findPage`. Controllers parse the
+pagination query via a reusable `apps/api/src/common/parse-page-query.ts` (bad pagination → 400) and
+keep using `@CurrentUser()`.
+
+**Lean projections.** `GET /articles` no longer ships the markdown `content` per row (lean `select`,
+`excerpt` kept); `GET /assets` list uses a lean `select` (no `specs`, trimmed joins) while
+`findOne` keeps the full relation graph incl. `specs`.
+
+**Deferred to Round 2 (DB indexes, finding #5).** Recommended raw-SQL **partial indexes** matching
+the now-bounded hot lists, following the assignment partial-unique-index precedent (migration
+`20260526120000`):
+- `assets (status) WHERE deletedAt IS NULL` and `assets (createdAt) WHERE deletedAt IS NULL` (the
+  list orders by `createdAt desc`); consider `assets (locationId) WHERE deletedAt IS NULL`.
+- `articles (categoryId, status) WHERE deletedAt IS NULL` and an `articles (updatedAt)` index (the
+  list orders by `updatedAt desc`).
+- `access_grants (grantedAt)` to back the `ORDER BY grantedAt DESC` + a partial index on
+  `(revokedAt)` for the active-only filter.
+- The free-text `q` filter is still un-indexed `ILIKE '%…%'` — route to Meili (already built) or add
+  a `pg_trgm` GIN index (also Round 2 / search lane).
+
+---
+
 _Note: this document was materialized from the analyst's structured digest. The four analyses with full long-form write-ups on disk (backend-completeness-gaps, backend-observability-ops, backend-search-subsystem, infra-ops-reliability) include extra Method / Strategic-recommendations / Open-questions sections; the rest carry the digest above._
