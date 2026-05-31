@@ -391,6 +391,89 @@ describe('AssetAssignmentsService', () => {
     expect(assetAssignment.update).not.toHaveBeenCalled();
   });
 
+  // --- releaseAllForUser (bulk release on offboarding) --------------------
+  // The helper takes the caller's transaction client directly (it is invoked from inside the
+  // users.service offboarding $transaction), so the tests pass a hand-built tx client.
+  describe('releaseAllForUser', () => {
+    type BulkTx = {
+      assetAssignment: { findMany: jest.Mock; update: jest.Mock };
+    };
+    let bulkTx: BulkTx;
+
+    beforeEach(() => {
+      bulkTx = {
+        assetAssignment: { findMany: jest.fn(), update: jest.fn() },
+      };
+    });
+
+    it('releases every active assignment and emits one RELEASED event per asset', async () => {
+      bulkTx.assetAssignment.findMany.mockResolvedValue([
+        { id: 'as1', assetId: 'a1' },
+        { id: 'as2', assetId: 'a2' },
+      ]);
+
+      const released = await service.releaseAllForUser(
+        bulkTx as never,
+        'u1',
+        ACTOR_ID,
+      );
+
+      // Only the user's ACTIVE assignments are targeted.
+      expect(bulkTx.assetAssignment.findMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', releasedAt: null },
+        select: { id: true, assetId: true },
+      });
+      // Each is stamped releasedAt + releasedById = actor.
+      expect(bulkTx.assetAssignment.update).toHaveBeenCalledTimes(2);
+      const calls = bulkTx.assetAssignment.update.mock.calls as Array<
+        [{ where: { id: string }; data: { releasedAt: Date; releasedById?: string } }]
+      >;
+      expect(calls[0][0].where).toEqual({ id: 'as1' });
+      expect(calls[0][0].data.releasedAt).toBeInstanceOf(Date);
+      expect(calls[0][0].data.releasedById).toBe(ACTOR_ID);
+      expect(calls[1][0].where).toEqual({ id: 'as2' });
+      // One RELEASED history event per asset, on the SAME tx client.
+      expect(history.record).toHaveBeenCalledTimes(2);
+      expect(history.record).toHaveBeenNthCalledWith(1, bulkTx, {
+        assetId: 'a1',
+        eventType: 'RELEASED',
+        performedById: ACTOR_ID,
+      });
+      expect(history.record).toHaveBeenNthCalledWith(2, bulkTx, {
+        assetId: 'a2',
+        eventType: 'RELEASED',
+        performedById: ACTOR_ID,
+      });
+      expect(released).toEqual([
+        { id: 'as1', assetId: 'a1' },
+        { id: 'as2', assetId: 'a2' },
+      ]);
+    });
+
+    it('omits releasedById when no actor is given', async () => {
+      bulkTx.assetAssignment.findMany.mockResolvedValue([
+        { id: 'as1', assetId: 'a1' },
+      ]);
+
+      await service.releaseAllForUser(bulkTx as never, 'u1');
+
+      const calls = bulkTx.assetAssignment.update.mock.calls as Array<
+        [{ data: Record<string, unknown> }]
+      >;
+      expect(calls[0][0].data).not.toHaveProperty('releasedById');
+    });
+
+    it('is a no-op (returns []) when the user owns no active assignment', async () => {
+      bulkTx.assetAssignment.findMany.mockResolvedValue([]);
+
+      const released = await service.releaseAllForUser(bulkTx as never, 'u1');
+
+      expect(released).toEqual([]);
+      expect(bulkTx.assetAssignment.update).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+  });
+
   // NOTE: two rules are enforced at the DB layer and verified against Postgres rather than here
   // (mocked unit tests have no DB — ADR-0012): (1) a duplicate *active* (asset, user) pair, via
   // the partial unique index -> P2002 -> 409; (2) hard-deleting an asset/user that has
