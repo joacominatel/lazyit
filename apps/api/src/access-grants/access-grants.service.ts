@@ -6,11 +6,15 @@ import {
 } from '@nestjs/common';
 import type {
   CreateAccessGrant,
+  Page,
+  PageQuery,
   RevokeAccessGrant,
   UpdateAccessGrantExpiry,
   UpdateAccessGrantNotes,
 } from '@lazyit/shared';
+import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
+import type { AccessGrant } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 
@@ -39,14 +43,51 @@ export class AccessGrantsService {
    * Grants, newest first. Filters: user, application, `activeOnly` (only `revokedAt = null`,
    * default true) and `includeExpired` (default true; when false, hides grants already past their
    * `expiresAt`). `expiresAt` never changes activeness — it's informative (ADR-0023).
+   *
+   * Unbounded by design: used by the **nested** `/users/:id/access-grants` and
+   * `/applications/:id/access-grants` lists, which are already scoped to a single user/application.
+   * The top-level `/access-grants` list — the most sensitive, it can dump every grant in the org —
+   * paginates via {@link findPage} (ADR-0030 / SEC-007).
    */
-  findAll({
+  findAll(filters: FindAccessGrantsFilters) {
+    return this.prisma.accessGrant.findMany({
+      where: this.buildWhere(filters),
+      orderBy: { grantedAt: 'desc' },
+    });
+  }
+
+  /**
+   * The paginated top-level grants list (ADR-0030): the same filters as {@link findAll} plus an
+   * offset/limit window, returned as a `Page` envelope (`items` + `total` + `limit`/`offset`).
+   * `total` counts every grant matching the filters (ignoring the window) so the client can page.
+   * One `where` shape feeds both the page query and the count — they never drift apart.
+   */
+  async findPage(
+    filters: FindAccessGrantsFilters,
+    page: PageQuery,
+  ): Promise<Page<AccessGrant>> {
+    const where = this.buildWhere(filters);
+    const { take, skip } = offsetOf(page);
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.accessGrant.findMany({
+        where,
+        orderBy: { grantedAt: 'desc' },
+        take,
+        skip,
+      }),
+      this.prisma.accessGrant.count({ where }),
+    ]);
+    return pageOf(items, total, page);
+  }
+
+  /** The shared `where` for both grant lists — keeps {@link findAll}, {@link findPage} and its count consistent. */
+  private buildWhere({
     userId,
     applicationId,
     activeOnly = true,
     includeExpired = true,
-  }: FindAccessGrantsFilters) {
-    const where: Prisma.AccessGrantWhereInput = {
+  }: FindAccessGrantsFilters): Prisma.AccessGrantWhereInput {
+    return {
       ...(userId ? { userId } : {}),
       ...(applicationId ? { applicationId } : {}),
       ...(activeOnly ? { revokedAt: null } : {}),
@@ -54,10 +95,6 @@ export class AccessGrantsService {
         ? {}
         : { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }),
     };
-    return this.prisma.accessGrant.findMany({
-      where,
-      orderBy: { grantedAt: 'desc' },
-    });
   }
 
   /** A single grant by id; throws 404 if missing. (No soft delete — none to filter.) */
