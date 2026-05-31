@@ -25,18 +25,23 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ArticleListPageSchema,
   ArticleSchema,
   ArticleStatusSchema,
   CreateArticleSchema,
   ImportArticleSchema,
+  MAX_PAGE_LIMIT,
   UpdateArticleSchema,
   type ArticleStatus,
 } from '@lazyit/shared';
 import { ArticlesService } from './articles.service';
 import { maxImportBytes } from './article-import';
 import { parseUuidQuery } from '../common/parse-uuid-query';
+import { parsePageQuery } from '../access-grants/query-params';
 
 class ArticleDto extends createZodDto(ArticleSchema) {}
+// The paginated GET /articles envelope: a page of content-less rows — ADR-0030 / SEC-007.
+class ArticleListPageDto extends createZodDto(ArticleListPageSchema) {}
 class CreateArticleDto extends createZodDto(CreateArticleSchema) {}
 class UpdateArticleDto extends createZodDto(UpdateArticleSchema) {}
 class ImportArticleDto extends createZodDto(ImportArticleSchema) {}
@@ -63,7 +68,7 @@ export class ArticlesController {
   @Get()
   @ApiOperation({
     summary:
-      'List articles (excludes soft-deleted). Drafts are visible only to their author.',
+      'List articles (lean rows: no content body). Paginated, excludes soft-deleted. Drafts visible only to their author.',
   })
   @ApiHeader(READ_USER_HEADER)
   @ApiQuery({ name: 'categoryId', required: false })
@@ -78,13 +83,34 @@ export class ArticlesController {
     required: false,
     description: 'Case-insensitive substring match on title and excerpt',
   })
-  @ApiOkResponse({ type: [ArticleDto] })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: `Page size. Default 50, max ${MAX_PAGE_LIMIT}.`,
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: '0-based row offset. Mutually exclusive with `page` (offset wins).',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to `offset`).',
+  })
+  @ApiOkResponse({ type: ArticleListPageDto })
   findAll(
     @Headers('x-user-id') userId?: string,
     @Query('categoryId') categoryId?: string,
     @Query('authorId') authorId?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
   ) {
     let parsedStatus: ArticleStatus | undefined;
     if (status !== undefined) {
@@ -96,13 +122,14 @@ export class ArticlesController {
       }
       parsedStatus = result.data;
     }
-    return this.articles.findAll(
+    return this.articles.findPage(
       {
         categoryId,
         authorId: parseUuidQuery(authorId, 'authorId'),
         status: parsedStatus,
         q,
       },
+      parsePageQuery({ limit, offset, page }),
       userId,
     );
   }
