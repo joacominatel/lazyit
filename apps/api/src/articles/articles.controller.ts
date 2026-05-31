@@ -24,6 +24,7 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ArticleListPageSchema,
   ArticleSchema,
   ArticleStatusSchema,
   CreateArticleSchema,
@@ -34,13 +35,17 @@ import {
 import { ArticlesService } from './articles.service';
 import { maxImportBytes } from './article-import';
 import { parseUuidQuery } from '../common/parse-uuid-query';
+import { parsePageQuery } from '../common/parse-page-query';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { User } from '../../generated/prisma/client';
 
+// The detail reads return the full Article (with `content`); the paginated list returns the lean
+// ArticleListItem envelope (content omitted, excerpt kept).
 class ArticleDto extends createZodDto(ArticleSchema) {}
 class CreateArticleDto extends createZodDto(CreateArticleSchema) {}
 class UpdateArticleDto extends createZodDto(UpdateArticleSchema) {}
 class ImportArticleDto extends createZodDto(ImportArticleSchema) {}
+class ArticleListPageDto extends createZodDto(ArticleListPageSchema) {}
 
 @ApiBearerAuth()
 @ApiTags('articles')
@@ -51,7 +56,7 @@ export class ArticlesController {
   @Get()
   @ApiOperation({
     summary:
-      'List articles (excludes soft-deleted). Drafts are visible only to their author.',
+      'List articles (paginated; lean — no markdown content, excerpt kept). Excludes soft-deleted; drafts are visible only to their author.',
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'authorId', required: false })
@@ -65,13 +70,34 @@ export class ArticlesController {
     required: false,
     description: 'Case-insensitive substring match on title and excerpt',
   })
-  @ApiOkResponse({ type: [ArticleDto] })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: ArticleListPageDto })
   findAll(
     @CurrentUser() user: User | undefined,
     @Query('categoryId') categoryId?: string,
     @Query('authorId') authorId?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
   ) {
     let parsedStatus: ArticleStatus | undefined;
     if (status !== undefined) {
@@ -83,13 +109,14 @@ export class ArticlesController {
       }
       parsedStatus = result.data;
     }
-    return this.articles.findAll(
+    return this.articles.findPage(
       {
         categoryId,
         authorId: parseUuidQuery(authorId, 'authorId'),
         status: parsedStatus,
         q,
       },
+      parsePageQuery({ limit, offset, page }),
       user,
     );
   }
