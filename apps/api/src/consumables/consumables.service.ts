@@ -8,6 +8,7 @@ import type {
   CreateConsumableMovement,
   UpdateConsumable,
 } from '@lazyit/shared';
+import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 
@@ -94,7 +95,7 @@ export class ConsumablesService {
   /**
    * Record a stock movement and adjust the cached `currentStock` atomically (ADR-0034), in the same
    * transaction as the ledger insert so the cache and the ledger never diverge. The actor comes from
-   * the X-User-Id shim.
+   * the authenticated User.
    *
    * The cache write is done with **atomic, conditional SQL** rather than a JS read-modify-write, so
    * two concurrent movements can't lost-update each other under Read Committed:
@@ -111,9 +112,9 @@ export class ConsumablesService {
   async createMovement(
     consumableId: string,
     data: CreateConsumableMovement,
-    actorId?: string,
+    user?: User,
   ) {
-    const performedById = await this.actor.resolve(actorId);
+    const performedById = this.actor.resolve(user);
     const { type, quantity, reason, notes } = data;
 
     return this.prisma.$transaction(async (tx) => {

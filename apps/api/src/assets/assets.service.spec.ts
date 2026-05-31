@@ -35,8 +35,11 @@ type AssetData = Record<string, unknown>;
 type CreateCall = [{ data: AssetData }];
 type UpdateCall = [{ where: { id: string }; data: AssetData }];
 
-// A well-formed UUID used as the X-User-Id actor where a resolved actor matters.
+// A well-formed UUID used as the actor where a resolved actor matters.
 const ACTOR_ID = '11111111-1111-1111-1111-111111111111';
+// Minimal User shape for tests — the full Prisma User type, but only id matters here.
+type MinimalUser = { id: string };
+const ACTOR_USER: MinimalUser = { id: ACTOR_ID };
 
 // The nested relations the expanded reads request. Mirrors ASSET_RELATIONS in the service: model
 // (+category), location, and the active owners (releasedAt null) each with their user.
@@ -118,9 +121,10 @@ describe('AssetsService', () => {
         cb({ asset: tx }),
       ),
     };
-    // ActorService is mocked; the shim-validation details live in actor.service.spec.ts. Here we
+    // ActorService is mocked; the guard validation detail lives in jwt-auth.guard.spec.ts. Here we
     // just steer resolve() and assert the service delegates to it. Default: no actor (undefined).
-    actor = { resolve: jest.fn().mockResolvedValue(undefined) };
+    // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
+    actor = { resolve: jest.fn().mockReturnValue(undefined) };
     history = { record: jest.fn(), list: jest.fn() };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
@@ -187,24 +191,24 @@ describe('AssetsService', () => {
   });
 
   it('resolves the actor via ActorService and stamps it onto the CREATED event', async () => {
-    actor.resolve.mockResolvedValue(ACTOR_ID);
+    actor.resolve.mockReturnValue(ACTOR_ID);
     const dto = { name: 'SRV-01', status: 'OPERATIONAL' as const };
     tx.create.mockResolvedValue({ id: 'a1', ...dto });
 
-    await service.create(dto, ACTOR_ID);
+    await service.create(dto, ACTOR_USER as never);
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_ID);
+    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     expect(history.record).toHaveBeenCalledWith(
       { asset: tx },
       { assetId: 'a1', eventType: 'CREATED', performedById: ACTOR_ID },
     );
   });
 
-  it('propagates a BadRequest from the actor shim and never opens the transaction', async () => {
-    actor.resolve.mockRejectedValue(new BadRequestException());
+  it('propagates a thrown error from the actor resolver and never opens the transaction', async () => {
+    actor.resolve.mockImplementation(() => { throw new BadRequestException(); });
 
     await expect(
-      service.create({ name: 'SRV-01', status: 'OPERATIONAL' }, 'bad'),
+      service.create({ name: 'SRV-01', status: 'OPERATIONAL' }, ACTOR_USER as never),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(tx.create).not.toHaveBeenCalled();
@@ -396,13 +400,13 @@ describe('AssetsService', () => {
   });
 
   it('update resolves the actor via ActorService before opening the transaction', async () => {
-    actor.resolve.mockResolvedValue(ACTOR_ID);
+    actor.resolve.mockReturnValue(ACTOR_ID);
     asset.findFirst.mockResolvedValue(beforeRow());
     tx.update.mockResolvedValue(beforeRow({ status: 'RETIRED' }));
 
-    await service.update('a1', { status: 'RETIRED' }, ACTOR_ID);
+    await service.update('a1', { status: 'RETIRED' }, ACTOR_USER as never);
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_ID);
+    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     const calls = history.record.mock.calls as Array<
       [unknown, { performedById?: string }]
     >;
@@ -542,11 +546,11 @@ describe('AssetsService', () => {
   });
 
   it('records a DELETED history event on soft delete', async () => {
-    actor.resolve.mockResolvedValue(ACTOR_ID);
+    actor.resolve.mockReturnValue(ACTOR_ID);
     asset.findFirst.mockResolvedValue({ id: 'a1' });
     tx.update.mockResolvedValue({ id: 'a1', deletedAt: new Date() });
 
-    await service.remove('a1', ACTOR_ID);
+    await service.remove('a1', ACTOR_USER as never);
 
     expect(history.record).toHaveBeenCalledTimes(1);
     expect(history.record).toHaveBeenCalledWith(

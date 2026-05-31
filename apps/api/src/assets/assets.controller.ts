@@ -4,15 +4,14 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiCreatedResponse,
-  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -34,15 +33,8 @@ import { AssetsService } from './assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { parseActiveOnly } from '../asset-assignments/active-only';
-
-// X-User-Id is the auth shim (ADR-0022). On asset writes it's OPTIONAL and recorded as the actor
-// of the resulting history event (AssetHistory.performedById); absent → null actor (ADR-0033).
-const ACTOR_USER_HEADER = {
-  name: 'X-User-Id',
-  required: false,
-  description:
-    'Caller user id (auth shim). Optional; recorded as the actor of the asset history event.',
-} as const;
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { User } from '../../generated/prisma/client';
 
 // Writes keep the lean Asset shape; reads return the expanded AssetWithRelations.
 class AssetDto extends createZodDto(AssetSchema) {}
@@ -54,6 +46,7 @@ class AssetAssignmentWithUserDto extends createZodDto(
 ) {}
 class AssetHistoryDto extends createZodDto(AssetHistorySchema) {}
 
+@ApiBearerAuth()
 @ApiTags('assets')
 @Controller('assets')
 export class AssetsController {
@@ -174,29 +167,26 @@ export class AssetsController {
 
   @Post()
   @ApiOperation({ summary: 'Create an asset' })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiCreatedResponse({ type: AssetDto })
-  create(@Body() dto: CreateAssetDto, @Headers('x-user-id') actorId?: string) {
-    return this.assets.create(dto, actorId);
+  create(@Body() dto: CreateAssetDto, @CurrentUser() user?: User) {
+    return this.assets.create(dto, user);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update an asset' })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiOkResponse({ type: AssetDto })
   update(
     @Param('id') id: string,
     @Body() dto: UpdateAssetDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.assets.update(id, dto, actorId);
+    return this.assets.update(id, dto, user);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Soft-delete an asset' })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiOkResponse({ type: AssetDto })
-  remove(@Param('id') id: string, @Headers('x-user-id') actorId?: string) {
-    return this.assets.remove(id, actorId);
+  remove(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.assets.remove(id, user);
   }
 }

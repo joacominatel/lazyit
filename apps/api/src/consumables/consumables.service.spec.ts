@@ -47,8 +47,11 @@ type StockUpdateCall = [
 // A sentinel object standing in for the Prisma FieldRef; we only assert identity.
 const MIN_STOCK_FIELD = { __fieldRef: 'minStock' };
 
-// A well-formed UUID used as the X-User-Id actor in the shim tests.
+// A well-formed UUID used as the actor in tests.
 const ACTOR_ID = '11111111-1111-1111-1111-111111111111';
+// Minimal User shape for tests — the full Prisma User type, but only id matters here.
+type MinimalUser = { id: string };
+const ACTOR_USER: MinimalUser = { id: ACTOR_ID };
 
 describe('ConsumablesService', () => {
   let service: ConsumablesService;
@@ -84,8 +87,9 @@ describe('ConsumablesService', () => {
       consumableMovement,
       $transaction: jest.fn((cb: (client: TxMock) => unknown) => cb(tx)),
     };
-    // ActorService is mocked; shim-validation detail lives in actor.service.spec.ts. Default: no actor.
-    actor = { resolve: jest.fn().mockResolvedValue(undefined) };
+    // ActorService is mocked; guard validation detail lives in jwt-auth.guard.spec.ts. Default: no actor.
+    // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
+    actor = { resolve: jest.fn().mockReturnValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -305,19 +309,19 @@ describe('ConsumablesService', () => {
     expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
 
-  // --- createMovement: actor via the X-User-Id shim -----------------------
+  // --- createMovement: actor via the authenticated User -------------------
   it('resolves the actor and stamps performedById on the movement', async () => {
-    actor.resolve.mockResolvedValue(ACTOR_ID);
+    actor.resolve.mockReturnValue(ACTOR_ID);
     tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 0 });
     tx.consumableMovement.create.mockResolvedValue({ id: 5 });
 
     await service.createMovement(
       'k1',
       { type: 'IN', quantity: 1, reason: 'restock', notes: 'box A' },
-      ACTOR_ID,
+      ACTOR_USER as never,
     );
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_ID);
+    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     const calls = tx.consumableMovement.create.mock
       .calls as CreateMovementCall[];
     expect(calls[0][0].data).toEqual({
@@ -330,8 +334,8 @@ describe('ConsumablesService', () => {
     });
   });
 
-  it('leaves performedById absent when the actor resolves to undefined (no header)', async () => {
-    actor.resolve.mockResolvedValue(undefined);
+  it('leaves performedById absent when the actor resolves to undefined (no user)', async () => {
+    actor.resolve.mockReturnValue(undefined);
     tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 0 });
     tx.consumableMovement.create.mockResolvedValue({ id: 6 });
 
@@ -344,11 +348,11 @@ describe('ConsumablesService', () => {
     expect(calls[0][0].data).not.toHaveProperty('notes');
   });
 
-  it('propagates a BadRequest from the actor shim and never opens the transaction', async () => {
-    actor.resolve.mockRejectedValue(new BadRequestException());
+  it('propagates a thrown error from the actor resolver and never opens the transaction', async () => {
+    actor.resolve.mockImplementation(() => { throw new BadRequestException(); });
 
     await expect(
-      service.createMovement('k1', { type: 'IN', quantity: 1 }, 'not-a-uuid'),
+      service.createMovement('k1', { type: 'IN', quantity: 1 }, ACTOR_USER as never),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });

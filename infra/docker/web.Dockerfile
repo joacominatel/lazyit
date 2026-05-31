@@ -4,8 +4,12 @@
 # Build from the repo ROOT:  docker build -f infra/docker/web.Dockerfile -t lazyit-web:dev .
 # Rationale: ADR-0025 (standalone output) + ADR-0026 (NEXT_PUBLIC_API_URL=/api -> domain-portable).
 
+# Base images are digest-pinned (@sha256) for reproducibility (ADR-0025 follow-up); human tag kept
+# in the comment. Re-pin: docker buildx imagetools inspect <image>:<tag> --format '{{.Manifest.Digest}}'.
+
 # ---- Builder: Bun (Debian) builds @lazyit/shared then the Next.js standalone bundle ----
-FROM oven/bun:1.3.14 AS builder
+# oven/bun:1.3.14
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS builder
 WORKDIR /app
 
 # NEXT_PUBLIC_* is inlined at BUILD time. Default "/api" makes the image domain-portable:
@@ -27,7 +31,8 @@ RUN bun run --filter @lazyit/shared build
 RUN bun run --filter @lazyit/web build      # next build -> apps/web/.next (standalone)
 
 # ---- Runtime: minimal Node (Alpine), runs the standalone server ----
-FROM node:26-alpine AS runtime
+# node:26-alpine — pinned by digest (26-alpine is a ROLLING tag; this closes the ADR-0025 follow-up).
+FROM node:26-alpine@sha256:7c6af15abe4e3de859690e7db171d0d711bf37d27528eddfe625b2fe89e097f8 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 # Next standalone server reads HOSTNAME/PORT; bind all interfaces so Caddy can reach it.

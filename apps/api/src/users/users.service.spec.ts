@@ -3,6 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
+import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -19,12 +20,20 @@ type PrismaUserMock = {
   update: jest.Mock;
 };
 
+// The transaction client the offboarding writes go through; $transaction runs the callback with it.
+type TxMock = {
+  user: { update: jest.Mock };
+  accessGrant: { updateMany: jest.Mock };
+};
+
 type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
 
 describe('UsersService', () => {
   let service: UsersService;
   let user: PrismaUserMock;
   let search: SearchMock;
+  let tx: TxMock;
+  let assignments: { releaseAllForUser: jest.Mock };
 
   beforeEach(async () => {
     user = {
@@ -33,13 +42,26 @@ describe('UsersService', () => {
       create: jest.fn(),
       update: jest.fn(),
     };
+    tx = {
+      user: { update: jest.fn() },
+      accessGrant: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    };
+    const prisma = {
+      user,
+      // $transaction runs the callback with the tx client (synchronously resolved here).
+      $transaction: jest.fn((cb: (client: TxMock) => unknown) => cb(tx)),
+    };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
+    // AssetAssignmentsService is mocked; its own logic is covered in its spec. Default: no active
+    // assignments to release.
+    assignments = { releaseAllForUser: jest.fn().mockResolvedValue([]) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         UsersService,
-        { provide: PrismaService, useValue: { user } },
+        { provide: PrismaService, useValue: prisma },
         { provide: SearchService, useValue: search },
+        { provide: AssetAssignmentsService, useValue: assignments },
       ],
     }).compile();
 
@@ -91,30 +113,68 @@ describe('UsersService', () => {
     );
   });
 
-  it('soft-deletes by setting deletedAt (never hard delete)', async () => {
+  it('offboards: soft-deletes (deletedAt) + revokes grants + releases assignments, in one tx', async () => {
     user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
-    user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
+    tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
+    tx.accessGrant.updateMany.mockResolvedValue({ count: 2 });
+    assignments.releaseAllForUser.mockResolvedValue([
+      { id: 'assign-1', assetId: 'asset-1' },
+    ]);
 
-    await service.remove('uuid-1');
+    const result = await service.remove('uuid-1', 'actor-99');
 
     // Soft delete = an UPDATE that stamps deletedAt, never a hard delete().
-    expect(user.update).toHaveBeenCalledTimes(1);
-    const calls = user.update.mock.calls as Array<
+    expect(tx.user.update).toHaveBeenCalledTimes(1);
+    const updateCalls = tx.user.update.mock.calls as Array<
       [{ where: { id: string }; data: { deletedAt: Date } }]
     >;
-    expect(calls[0][0].where).toEqual({ id: 'uuid-1' });
-    expect(calls[0][0].data.deletedAt).toBeInstanceOf(Date);
+    expect(updateCalls[0][0].where).toEqual({ id: 'uuid-1' });
+    expect(updateCalls[0][0].data.deletedAt).toBeInstanceOf(Date);
+
+    // Active grants are revoked inline (revokedAt + actor + audit note).
+    const grantCalls = tx.accessGrant.updateMany.mock.calls as Array<
+      [
+        {
+          where: { userId: string; revokedAt: null };
+          data: { revokedAt: Date; revokedById?: string; notes: string };
+        },
+      ]
+    >;
+    expect(grantCalls[0][0].where).toEqual({
+      userId: 'uuid-1',
+      revokedAt: null,
+    });
+    expect(grantCalls[0][0].data.revokedAt).toBeInstanceOf(Date);
+    expect(grantCalls[0][0].data.revokedById).toBe('actor-99');
+    expect(grantCalls[0][0].data.notes).toBe('auto: offboarded');
+
+    // Active assignments are released through the bulk helper with the actor.
+    expect(assignments.releaseAllForUser).toHaveBeenCalledWith(
+      tx,
+      'uuid-1',
+      'actor-99',
+    );
+
     // Soft-delete drops the user from the search index (ADR-0035).
     expect(search.remove).toHaveBeenCalledWith('users', 'uuid-1');
+
+    // The offboarding summary is returned.
+    expect(result).toEqual({
+      userId: 'uuid-1',
+      releasedAssignments: [{ id: 'assign-1', assetId: 'asset-1' }],
+      revokedGrants: 2,
+    });
   });
 
-  it('does not soft-delete a user that is missing', async () => {
+  it('does not offboard a user that is missing', async () => {
     user.findFirst.mockResolvedValue(null);
 
     await expect(service.remove('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
-    expect(user.update).not.toHaveBeenCalled();
+    expect(tx.user.update).not.toHaveBeenCalled();
+    expect(tx.accessGrant.updateMany).not.toHaveBeenCalled();
+    expect(assignments.releaseAllForUser).not.toHaveBeenCalled();
     expect(search.remove).not.toHaveBeenCalled();
   });
 

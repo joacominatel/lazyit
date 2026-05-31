@@ -1,9 +1,9 @@
 ---
 title: "ADR-0016: Authentication deferred; external IdP when needed"
 tags: [adr]
-status: accepted
+status: superseded
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-30
 deciders: [Joaquín Minatel]
 ---
 
@@ -11,9 +11,22 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-accepted — reframes the earlier "NextAuth vs better-auth" open question noted in [[stack]] and
-[[0010-nextjs-frontend]]: we will **not** build our own auth with those; we integrate with an
-external IdP. Follows the deployment model in [[0015-deployment-model]].
+superseded by [[0037-idp-choice-zitadel-byoi]] / [[0039-authjs-v5-frontend-oidc]] (auth
+implemented) — the deferral this ADR described is over. lazyit now authenticates via **OIDC**:
+Zitadel is the bundled default IdP with a BYOI contract ([[0037-idp-choice-zitadel-byoi]]), the
+API validates Bearer JWTs and JIT-provisions users ([[0038-jit-user-provisioning]]), and the
+Next.js frontend logs in via Auth.js v5 ([[0039-authjs-v5-frontend-oidc]]). The IdP `sub`→
+`User.externalId` mapping and `externalId` being server-owned (decided below) were carried
+forward unchanged. The decision body is kept for the historical record.
+
+> [!warning] Body describes a pre-auth world
+> This ADR says "no authentication yet / endpoints are open / do not expose this build publicly".
+> That posture **no longer holds** — see the auth trio above. The `AUTH_MODE=shim` dev path is
+> the only place the old unauthenticated behaviour survives, and it is dev/test only.
+
+The deferral originally reframed the earlier "NextAuth vs better-auth" open question noted in
+[[stack]] and [[0010-nextjs-frontend]]: we will **not** build our own auth with those; we
+integrate with an external IdP. Follows the deployment model in [[0015-deployment-model]].
 
 ## Context
 

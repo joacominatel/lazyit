@@ -48,7 +48,7 @@ interface GrantAccessDialogProps {
  * Grant a user access to an application (opens an AccessGrant). Multi-grant is allowed, so users are
  * not filtered out by existing grants. `accessLevel` is free-form (each app owns its vocabulary);
  * `expiresAt` is informative only (no auto-revoke — ADR-0023). The grantor (`grantedById`) comes
- * from the `X-User-Id` shim and may be null (anonymous) by design.
+ * from the authenticated user's identity (Bearer token, ADR-0038/0039).
  */
 export function GrantAccessDialog({
   open,

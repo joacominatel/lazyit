@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-26
 ---
 
 # Security summary
@@ -19,6 +19,9 @@ Snapshot of the security review. Updated each sweep. Method:
 2. **2026-05-25 — Access pillar pass.** `applications`, `application-categories`, `access-grants`
    (+ nested `/users/:id/access-grants`, `/applications/:id/access-grants`), schema/migration and
    ADR-0023. → SEC-008; broadened SEC-004 (uuid path params) and SEC-007 (three more list endpoints).
+3. **2026-05-26 — Post-sweep remediation.** SEC-001, SEC-004, SEC-005, SEC-006, SEC-008 were
+   fixed by the remediator and moved to `docs/06-security/closed/`. Remaining open: SEC-002,
+   SEC-003, SEC-007.
 
 Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 
@@ -28,10 +31,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 2 |
-| Low | 6 |
+| Medium | 1 |
+| Low | 2 |
 | Info | 0 |
-| **Total open** | **8** |
+| **Total open** | **3** |
 
 Deferred (accepted ADR debt, not findings): **5** — see [[deferred]].
 
@@ -39,32 +42,20 @@ Deferred (accepted ADR debt, not findings): **5** — see [[deferred]].
 
 | ID | Sev | Module | Title |
 | --- | --- | --- | --- |
-| [[SEC-001-import-unbounded-upload-dos\|SEC-001]] | 🟠 Medium | articles | Unbounded multipart upload buffered before the size check (DoS) |
 | [[SEC-002-docx-decompression-bomb\|SEC-002]] | 🟠 Medium | articles | `.docx` decompression bomb (compressed size is checked, not expanded) |
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
-| [[SEC-004-unvalidated-uuid-query-params-500\|SEC-004]] | 🟡 Low | transversal | Malformed uuid inputs (query + `User.id` path params) → unhandled 500 |
-| [[SEC-005-postgres-exposed-all-interfaces\|SEC-005]] | 🟡 Low | infra | Postgres on `0.0.0.0:5432` + trivial example creds |
-| [[SEC-006-client-settable-external-id\|SEC-006]] | 🟡 Low | users | Client-settable `externalId` (future IdP pre-linking) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
-| [[SEC-008-application-url-href-xss-sink\|SEC-008]] | 🟡 Low | applications | `Application.url` stored unvalidated → `javascript:`/`data:` href XSS sink (latent) |
 
 ## Top findings
 
-1. **SEC-001 / SEC-002 — import DoS (two mechanisms).** One unauthenticated request can OOM the API:
-   the upload is buffered with no `multer` size limit (SEC-001), and even a limit-compliant `.docx`
-   can decompress to gigabytes during mammoth parsing (SEC-002). Distinct fixes; both on
-   `POST /articles/import`.
-2. **SEC-003 / SEC-008 — latent stored XSS, two sinks.** Untrusted strings are stored unsanitized and
-   become XSS the moment the (deferred) frontend renders them: KB markdown (SEC-003) and an
-   application's `url` as a link href (SEC-008). Both **escalate to High** when the web app renders
-   them — hand both to the Phase-3 frontend review as one "untrusted-string → web sink" policy.
-3. **SEC-006 — `externalId` is client-settable.** The field the future OIDC integration keys on
-   (`sub → externalId`) is accepted from `POST /users`, enabling account pre-linking once auth lands.
-4. **SEC-005 — DB exposed on all interfaces with `postgres:postgres`.** Dev hardening, but a real
-   exposure on shared networks and a default that must not reach production.
-5. **SEC-004 / SEC-007 — input & resource hygiene.** Malformed uuid inputs throw 500s instead of
-   400/404 (SEC-004, now incl. every `/users/:id` route); no list endpoint paginates (SEC-007, incl.
-   the sensitive `GET /access-grants`). Low now, both grow with exposure/data.
+1. **SEC-002 — `.docx` decompression bomb.** A limit-compliant `.docx` can decompress to gigabytes
+   during mammoth parsing on `POST /articles/import`. The compressed size is checked; the expanded
+   size is not. Fix: enforce an expanded-size cap before/during parsing.
+2. **SEC-003 — latent stored XSS (markdown sink).** KB markdown is stored unsanitized and
+   **escalates to High** the moment the frontend renders it. Hand to the Phase-3 frontend review as
+   part of the "untrusted-string → web sink" policy.
+3. **SEC-007 — unbounded list responses.** No list endpoint paginates (incl. the sensitive
+   `GET /access-grants`). Low now, grows with exposure/data volume.
 
 ## Posture context (not a finding — see [[deferred]])
 
@@ -89,8 +80,7 @@ important guardrail today is operational: **do not expose `:3001` (or `:5432`) b
 - **Lighter / worth a second pass:** the `nestjs-zod` global pipe boundary (exactly which params are
   validated vs pass-through) was reasoned, not exercised; `mammoth` internals (XML entity handling)
   were not deep-audited (Phase-3 deps); no dynamic testing (API not run).
-- **Out of scope:** frontend (`apps/web`, the render sink for SEC-003 / SEC-008), dependency CVEs,
-  deploy infra (none exists). The `docs/README.md` root MOC does not yet list `06-security` (one line,
-  outside the sentinel lane — left for an in-lane agent).
+- **Out of scope:** frontend (`apps/web`, the render sink for SEC-003), dependency CVEs,
+  deploy infra (covered by lazyit-devops; SEC-005 now closed).
 
 Related: [[deferred]] · [[06-security/_MOC|Security MOC]]
