@@ -5,10 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  offsetOf,
+  pageOf,
   slugify,
   type ArticleStatus,
   type CreateArticle,
   type ImportArticle,
+  type PageQuery,
   type UpdateArticle,
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
@@ -39,6 +42,26 @@ export interface UploadedImportFile {
   size: number;
 }
 
+// Lean projection for the LIST (GET /articles, paginated): every Article column EXCEPT `content` —
+// the full Markdown body, the largest column, which a list view never renders (`excerpt` is kept).
+// The detail reads (findOne / findBySlug) still return the full Article incl. `content`. See
+// packages/shared/src/schemas/article-list.ts and ADR-0030 / the perf analysis (#3).
+const ARTICLE_LIST_SELECT = {
+  id: true,
+  slug: true,
+  title: true,
+  excerpt: true,
+  status: true,
+  categoryId: true,
+  authorId: true,
+  lastEditedById: true,
+  publishedAt: true,
+  metadata: true,
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+} satisfies Prisma.ArticleSelect;
+
 /**
  * Knowledge-base articles. Authorship/visibility (DRAFT private to its author; only the author may
  * write) is enforced here from the authenticated User (ADR-0038). The guard (JwtAuthGuard) already
@@ -54,11 +77,43 @@ export class ArticlesService {
   ) {}
 
   /**
-   * List non-deleted articles, newest-updated first. PUBLISHED is visible to all; DRAFT only to its
-   * author (the current user). Optional filters: category, author, status, and a substring `q` over
-   * title/excerpt.
+   * A single page of non-deleted articles, newest-updated first. PUBLISHED is visible to all; DRAFT
+   * only to its author (the current user). Uses the LEAN projection ({@link ARTICLE_LIST_SELECT}):
+   * the full Markdown `content` is omitted (`excerpt` kept) — the detail reads still return it. Runs
+   * the page `findMany(take/skip)` and the `count` over the **same** `where` inside one
+   * `$transaction`, so the `total` can't drift from the page. Optional filters: category, author,
+   * status, and a substring `q` over title/excerpt.
    */
-  async findAll(filters: ArticleListFilters, currentUser?: User) {
+  async findPage(
+    filters: ArticleListFilters,
+    page: PageQuery,
+    currentUser?: User,
+  ) {
+    const where = this.buildWhere(filters, currentUser);
+    const { take, skip } = offsetOf(page);
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.article.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        take,
+        skip,
+        select: ARTICLE_LIST_SELECT,
+      }),
+      this.prisma.article.count({ where }),
+    ]);
+    // The lean rows carry `Date`s; the API serializes them to ISO strings at the HTTP boundary (same
+    // as findOne) — the ArticleListPage DTO documents the resulting wire shape (content omitted).
+    return pageOf(items, total, page);
+  }
+
+  /**
+   * The shared `where` for the article list — used identically by findPage and its count. Combines
+   * the visibility rule (PUBLISHED for all; the caller's own DRAFTs) with the optional filters.
+   */
+  private buildWhere(
+    filters: ArticleListFilters,
+    currentUser?: User,
+  ): Prisma.ArticleWhereInput {
     const cu = this.resolveCurrentUser(currentUser);
     const and: Prisma.ArticleWhereInput[] = [this.visibilityWhere(cu)];
     if (filters.categoryId) and.push({ categoryId: filters.categoryId });
@@ -72,10 +127,7 @@ export class ArticlesService {
         ],
       });
     }
-    return this.prisma.article.findMany({
-      where: { AND: and },
-      orderBy: { updatedAt: 'desc' },
-    });
+    return { AND: and };
   }
 
   /** A readable article by id (404 if missing, deleted, or a draft the caller doesn't own). */
