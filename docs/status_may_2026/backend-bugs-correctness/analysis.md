@@ -119,3 +119,54 @@
 ---
 
 _Note: this document was materialized from the analyst's structured digest. The four analyses with full long-form write-ups on disk (backend-completeness-gaps, backend-observability-ops, backend-search-subsystem, infra-ops-reliability) include extra Method / Strategic-recommendations / Open-questions sections; the rest carry the digest above._
+
+---
+
+## Round 1 implementation (CTO proposal)
+
+Branch `fix/consumable-stock-race` — closes finding **#2** (consumable stock lost-update race + int4
+overflow). No schema or migration change.
+
+### What changed
+
+- **`apps/api/src/consumables/consumables.service.ts` — `createMovement`.** Replaced the
+  JS read-modify-write of `currentStock` (SELECT → compute → UPDATE absolute) with **atomic,
+  conditional SQL inside the same transaction** as the ledger insert, so two concurrent movements
+  can no longer lost-update each other under Read Committed:
+  - **IN** → `update` with `currentStock: { increment: qty }` (a single atomic `UPDATE`). A
+    short read still runs first, but only to enforce a clean 404 and the int4 ceiling.
+  - **OUT** → a **guarded** `updateMany({ where: { id, deletedAt: null, currentStock: { gte: qty } },
+    data: { currentStock: { decrement: qty } } })`. If it matches **0 rows** the decrement was not
+    applied (insufficient stock under concurrency, or the row is missing/soft-deleted); we then do a
+    single read to disambiguate **404** (no live row) from **409** (insufficient stock) and roll the
+    whole transaction back. This is the atomic check-and-act that closes the race — the previous
+    `nextStock < 0` JS guard could be passed by two concurrent OUTs and drive stock negative / diverge
+    the cache from the ledger.
+  - **ADJUSTMENT** → unchanged semantics: set `currentStock` to the absolute `quantity` (a physical
+    recount); `quantity` is already int4-bounded by the shared zod schema, so no overflow is possible.
+  - **int4 overflow guard:** an IN whose result would exceed `INT4_MAX` (2_147_483_647) is rejected as
+    a **409 ConflictException** *before* any write, so the cache can never silently wrap or hit a
+    P2020 mid-transaction.
+
+- **`apps/api/src/common/prisma-exception.filter.ts`.** Added a **P2020 → 400** mapping (value out of
+  range for a column type, e.g. a residual int4 overflow). Together with ADR-0036's zod bounds and the
+  new stock guard this is the transversal safety net so any overflow that slips through is a clean 400,
+  not a 500. Message stays generic (no column/value echo).
+
+### Why
+
+The ledger (`ConsumableMovement`) is the source of truth and `currentStock` is a cache that ADR-0034
+promises is "maintained transactionally … cache and ledger can't diverge within a request". The old
+read-modify-write honored that only single-threaded; the atomic ops make the promise hold under
+concurrency without a schema change (no `SELECT ... FOR UPDATE`, no version column — Round 2 territory).
+
+### Testing
+
+- `consumables.service.spec.ts` extended: IN asserts the atomic `increment`; OUT asserts the guarded
+  `updateMany` shape (gte + `deletedAt: null`); guarded-OUT `count: 0` → **409** (row present) and →
+  **404** (row absent); IN overflow at `INT4_MAX` → **409**.
+- `prisma-exception.filter.spec.ts` extended: **P2020 → 400**.
+- `bunx tsc -p tsconfig.json --noEmit` clean; targeted Jest suites green (28 + full consumables 24).
+
+A true multi-connection concurrency integration test (two real transactions racing one OUT) is
+deferred to Round 2 — unit tests prove the guarded-update branch here.
