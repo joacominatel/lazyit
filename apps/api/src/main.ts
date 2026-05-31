@@ -3,8 +3,13 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { cleanupOpenApiDoc } from 'nestjs-zod';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import { validateBootConfig } from './auth/boot-config';
 
 async function bootstrap() {
+  // Fail-loud config (ops-boot integrity): validate before NestFactory.create so a misconfigured
+  // server refuses to start with a CRITICAL log, instead of booting half-wired. See boot-config.ts.
+  validateBootConfig();
+
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   // Route Nest's own logs through Pino (structured logging — ADR-0031). bufferLogs holds the
   // bootstrap logs until the Pino logger is attached, so nothing is lost or double-formatted.
@@ -41,4 +46,9 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3001);
 }
-void bootstrap();
+
+// Only boot when run as the entry point (e.g. `nest start`); importing this module (config specs)
+// must not start the server. Under ts-jest (CommonJS) `require.main` is the jest runner, not main.ts.
+if (require.main === module) {
+  void bootstrap();
+}
