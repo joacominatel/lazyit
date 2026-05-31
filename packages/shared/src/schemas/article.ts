@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SLUG_MAX_LENGTH, SLUG_REGEX } from "../utils/slug";
+import { pageSchema } from "./pagination";
 
 /**
  * Article — a knowledge-base document (markdown). Simple wiki: no versioning/tags/FTS
@@ -88,8 +89,22 @@ export const ImportArticleSchema = z.strictObject({
   slug: SlugSchema.optional(),
 });
 
+/**
+ * The lean row returned by `GET /articles` — the full {@link ArticleSchema} **minus `content`**.
+ * Article bodies are arbitrarily large markdown; shipping every one in a list is the unbounded
+ * payload SEC-007/ADR-0030 warn about. The list keeps `excerpt` (the rendered summary) and every
+ * other column; the full `content` is fetched on demand via `GET /articles/:id` (or `by-slug`).
+ * Single source of truth for the list response in api and web.
+ */
+export const ArticleListItemSchema = ArticleSchema.omit({ content: true });
+
+/** The paginated `GET /articles` response: a page of content-less {@link ArticleListItemSchema} rows. */
+export const ArticleListPageSchema = pageSchema(ArticleListItemSchema);
+
 export type ArticleStatus = z.infer<typeof ArticleStatusSchema>;
 export type Article = z.infer<typeof ArticleSchema>;
+export type ArticleListItem = z.infer<typeof ArticleListItemSchema>;
+export type ArticleListPage = z.infer<typeof ArticleListPageSchema>;
 export type CreateArticle = z.infer<typeof CreateArticleSchema>;
 export type UpdateArticle = z.infer<typeof UpdateArticleSchema>;
 export type ImportArticle = z.infer<typeof ImportArticleSchema>;
