@@ -1,13 +1,17 @@
 /**
  * Thin, typed fetch wrapper for the lazyit API.
  *
- * Base URL comes from NEXT_PUBLIC_API_URL (see .env.example). The API is
- * currently open / unauthenticated and intended for local dev only — see
- * ADR-0016 (auth is deferred to an external IdP). Until then, the dev "acting
- * user" (ADR-0022) is attached as `X-User-Id` on every request when set.
+ * Base URL comes from NEXT_PUBLIC_API_URL (see .env.example). Authentication is
+ * handled by Auth.js v5 (ADR-0039): the Bearer token is resolved in this order:
+ *   1. Explicit `token` option passed by the caller (server components use `await auth()`)
+ *   2. Client-side session-token store (populated by SessionTokenSync in the app layout)
+ *   3. Unauthenticated (public/health endpoints only)
+ *
+ * The former `X-User-Id` dev shim (ADR-0022) has been removed. The backend
+ * now validates OIDC Bearer JWTs via its global auth guard (ADR-0038).
  */
 
-import { getActingUserId } from "./acting-user";
+import { getSessionToken } from "./session-token";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -31,6 +35,11 @@ export class ApiError extends Error {
 export interface ApiFetchOptions extends Omit<RequestInit, "body"> {
   /** Plain value serialized to JSON. Omit for bodyless requests (GET/DELETE). */
   body?: unknown;
+  /**
+   * Bearer token for the API. Comes from the Auth.js session (`session.accessToken`).
+   * Omit only for genuinely public endpoints (e.g. health check).
+   */
+  token?: string;
 }
 
 /**
@@ -39,12 +48,14 @@ export interface ApiFetchOptions extends Omit<RequestInit, "body"> {
  */
 export async function apiFetch<T>(
   path: string,
-  { body, headers, ...init }: ApiFetchOptions = {},
+  { body, token, headers, ...init }: ApiFetchOptions = {},
 ): Promise<T> {
   // FormData (file uploads) must be sent as-is so the browser sets the
   // multipart boundary; only plain values are JSON-serialized.
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
-  const actingUserId = getActingUserId();
+  // Explicit token takes priority; fall back to the client-side session store
+  // (populated by SessionTokenSync) so hooks don't need to thread the token manually.
+  const resolvedToken = token ?? getSessionToken();
 
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -52,7 +63,7 @@ export async function apiFetch<T>(
       ...(body !== undefined && !isFormData
         ? { "Content-Type": "application/json" }
         : {}),
-      ...(actingUserId ? { "X-User-Id": actingUserId } : {}),
+      ...(resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}),
       ...headers,
     },
     body:

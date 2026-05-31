@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { AssetStatus, CreateAsset, UpdateAsset } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
+import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import {
@@ -88,10 +89,10 @@ export class AssetsService {
 
   /**
    * Create. Emits a `CREATED` history event transactionally with the insert (ADR-0033); the actor
-   * comes from the X-User-Id shim. Invalid modelId/locationId hit the FK and are mapped to 400.
+   * comes from the authenticated User (ADR-0038). Invalid modelId/locationId hit the FK → 400.
    */
-  async create(data: CreateAsset, actorId?: string) {
-    const performedById = await this.actor.resolve(actorId);
+  async create(data: CreateAsset, user?: User) {
+    const performedById = this.actor.resolve(user);
     const { specs, ...rest } = data;
     const asset = await this.prisma.$transaction(async (tx) => {
       // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
@@ -120,8 +121,8 @@ export class AssetsService {
    * Partial update. Emits a discrete history event per changed dimension (status / location / model
    * / specs), transactionally with the update (ADR-0033). 404 if missing or already soft-deleted.
    */
-  async update(id: string, data: UpdateAsset, actorId?: string) {
-    const performedById = await this.actor.resolve(actorId);
+  async update(id: string, data: UpdateAsset, user?: User) {
+    const performedById = this.actor.resolve(user);
     const before = await this.prisma.asset.findFirst({
       where: { id },
       select: {
@@ -157,8 +158,8 @@ export class AssetsService {
   }
 
   /** Soft delete: set deletedAt (never hard-delete). Emits `DELETED` transactionally (ADR-0033). */
-  async remove(id: string, actorId?: string) {
-    const performedById = await this.actor.resolve(actorId);
+  async remove(id: string, user?: User) {
+    const performedById = this.actor.resolve(user);
     await this.assertExists(id);
     const deleted = await this.prisma.$transaction(async (tx) => {
       const row = await tx.asset.update({

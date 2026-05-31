@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-30
 ---
 
 # Code Conventions
@@ -54,8 +54,17 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
 ## Frontend (Next.js)
 
 - App Router, TypeScript, Tailwind v4 ([[0010-nextjs-frontend]], [[0011-tailwind-styling]]).
-  shadcn/ui is the planned component layer (not yet installed); document component
-  conventions here when UI work starts.
+- **shadcn/ui is installed** ([[0011-tailwind-styling]]). Its generated primitives live in
+  `apps/web/components/ui/*` (copy-in, not a dependency) and are composed by app components in
+  `apps/web/components/` and the route trees. Treat `components/ui/*` as vendored: regenerate via
+  the shadcn CLI rather than hand-editing, and build features by composing those primitives.
+- **Icons: heroicons only in app code; lucide stays inside `components/ui/*`.** Use
+  `@heroicons/react` (`/24/outline`, `/24/solid`) for every icon you place in pages, layouts and
+  app components — it is the project's single icon vocabulary. `lucide-react` is a transitive
+  dependency of shadcn/ui primitives (e.g. the chevrons baked into `command`, `select`,
+  `dropdown-menu`); leave those as generated. **Do not import `lucide-react` outside
+  `components/ui/*`, and do not introduce a third icon set** — mixing icon families is the most
+  common visual-inconsistency drift on the [[0020-frontend-data-layer]] screens.
 
 ## The Bun-first boundary
 
