@@ -1,5 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { AssetStatus, CreateAsset, UpdateAsset } from '@lazyit/shared';
+import type {
+  AssetStatus,
+  CreateAsset,
+  PageQuery,
+  UpdateAsset,
+} from '@lazyit/shared';
+import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -37,6 +43,50 @@ type AssetWithIncludes = Prisma.AssetGetPayload<{
   include: typeof ASSET_RELATIONS;
 }>;
 
+// Lean projection for the LIST (GET /assets, paginated). Unlike the detail graph it (1) omits the
+// `specs` jsonb blob the table never renders and (2) trims each join (model+category, location,
+// active owners) to only the fields the list shows — not the full related rows. Keeps the full graph
+// on findOne. See packages/shared/src/schemas/asset-list.ts and ADR-0030 / the perf analysis (#2).
+const ASSET_LIST_SELECT = {
+  id: true,
+  name: true,
+  serial: true,
+  assetTag: true,
+  status: true,
+  notes: true,
+  purchaseDate: true,
+  warrantyEnd: true,
+  modelId: true,
+  locationId: true,
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+  model: {
+    select: {
+      id: true,
+      name: true,
+      manufacturer: true,
+      category: { select: { id: true, name: true } },
+    },
+  },
+  location: { select: { id: true, name: true, type: true } },
+  assignments: {
+    where: { releasedAt: null },
+    orderBy: { assignedAt: 'desc' },
+    select: {
+      id: true,
+      userId: true,
+      user: {
+        select: { id: true, firstName: true, lastName: true, email: true },
+      },
+    },
+  },
+} satisfies Prisma.AssetSelect;
+
+type AssetWithLeanSelect = Prisma.AssetGetPayload<{
+  select: typeof ASSET_LIST_SELECT;
+}>;
+
 @Injectable()
 export class AssetsService {
   constructor(
@@ -47,32 +97,55 @@ export class AssetsService {
   ) {}
 
   /**
-   * Non-deleted assets (expanded with model/category, location, activeAssignments+user), newest
-   * first. Optional filters: category (via the model), location, status, and `q` (substring over
+   * A single page of non-deleted assets (the inventory pillar's main, heaviest list), newest first.
+   * Uses the LEAN projection ({@link ASSET_LIST_SELECT}): no `specs` blob and trimmed joins — the
+   * full relation graph stays on {@link findOne}. Runs the page `findMany(take/skip)` and the `count`
+   * over the **same** `where` inside one `$transaction`, so the `total` can't drift from the page.
+   * Optional filters: category (via the model), location, status, and `q` (substring over
    * name/serial/assetTag).
    */
-  async findAll(filters: AssetFilters = {}) {
-    const { categoryId, locationId, status, q } = filters;
-    const assets = await this.prisma.asset.findMany({
-      where: {
-        ...(locationId ? { locationId } : {}),
-        ...(status ? { status } : {}),
-        // Category lives on the model, not the asset: match assets whose model is in it.
-        ...(categoryId ? { model: { categoryId } } : {}),
-        ...(q
-          ? {
-              OR: [
-                { name: { contains: q, mode: 'insensitive' } },
-                { serial: { contains: q, mode: 'insensitive' } },
-                { assetTag: { contains: q, mode: 'insensitive' } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      include: ASSET_RELATIONS,
-    });
-    return assets.map((asset) => this.toExpanded(asset));
+  async findPage(filters: AssetFilters = {}, page: PageQuery) {
+    const where = this.buildWhere(filters);
+    const { take, skip } = offsetOf(page);
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.asset.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take,
+        skip,
+        select: ASSET_LIST_SELECT,
+      }),
+      this.prisma.asset.count({ where }),
+    ]);
+    // The lean rows carry `Date`s; the API serializes them to ISO strings at the HTTP boundary (same
+    // as findOne) — the AssetListPage DTO documents the resulting wire shape (specs omitted, joins
+    // trimmed). The `assignments` relation is renamed to `activeAssignments` for the response.
+    const items = rows.map((row) => this.toLeanListItem(row));
+    return pageOf(items, total, page);
+  }
+
+  /** The shared `where` for the asset list — used identically by findPage and its count. */
+  private buildWhere({
+    categoryId,
+    locationId,
+    status,
+    q,
+  }: AssetFilters): Prisma.AssetWhereInput {
+    return {
+      ...(locationId ? { locationId } : {}),
+      ...(status ? { status } : {}),
+      // Category lives on the model, not the asset: match assets whose model is in it.
+      ...(categoryId ? { model: { categoryId } } : {}),
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { serial: { contains: q, mode: 'insensitive' } },
+              { assetTag: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
   }
 
   /** A single non-deleted asset by id, expanded with its relations; 404 if missing or deleted. */
@@ -191,6 +264,12 @@ export class AssetsService {
 
   /** Rename the Prisma `assignments` relation (filtered to active) to the response's `activeAssignments`. */
   private toExpanded(asset: AssetWithIncludes) {
+    const { assignments, ...rest } = asset;
+    return { ...rest, activeAssignments: assignments };
+  }
+
+  /** Same `assignments` -> `activeAssignments` rename for the lean LIST row (AssetListItem). */
+  private toLeanListItem(asset: AssetWithLeanSelect) {
     const { assignments, ...rest } = asset;
     return { ...rest, activeAssignments: assignments };
   }
