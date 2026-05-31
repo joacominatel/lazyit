@@ -6,10 +6,12 @@ import {
 } from '@nestjs/common';
 import type {
   CreateAccessGrant,
+  PageQuery,
   RevokeAccessGrant,
   UpdateAccessGrantExpiry,
   UpdateAccessGrantNotes,
 } from '@lazyit/shared';
+import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -39,14 +41,48 @@ export class AccessGrantsService {
    * Grants, newest first. Filters: user, application, `activeOnly` (only `revokedAt = null`,
    * default true) and `includeExpired` (default true; when false, hides grants already past their
    * `expiresAt`). `expiresAt` never changes activeness — it's informative (ADR-0023).
+   *
+   * Unpaginated — still used by the inherently-scoped nested lists (`/users/:id/access-grants`,
+   * `/applications/:id/access-grants`). The top-level `GET /access-grants` uses {@link findPage}.
    */
-  findAll({
+  findAll(filters: FindAccessGrantsFilters) {
+    return this.prisma.accessGrant.findMany({
+      where: this.buildWhere(filters),
+      orderBy: { grantedAt: 'desc' },
+    });
+  }
+
+  /**
+   * A single page of grants (newest first) for the top-level `GET /access-grants` — the most
+   * sensitive unbounded list (ADR-0030/SEC-007). Runs the page `findMany(take/skip)` and the `count`
+   * over the **same** `where` inside one `$transaction`, so the `total` can't drift from the page
+   * under concurrent inserts/revokes. Same filters as {@link findAll}.
+   */
+  async findPage(filters: FindAccessGrantsFilters, page: PageQuery) {
+    const where = this.buildWhere(filters);
+    const { take, skip } = offsetOf(page);
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.accessGrant.findMany({
+        where,
+        orderBy: { grantedAt: 'desc' },
+        take,
+        skip,
+      }),
+      this.prisma.accessGrant.count({ where }),
+    ]);
+    // The Prisma rows carry `Date`s; the API serializes them to the ISO-string wire shape at the
+    // HTTP boundary (same as findAll/findOne) — the AccessGrantListPage DTO documents that shape.
+    return pageOf(items, total, page);
+  }
+
+  /** The shared `where` for the grant lists — used identically by findAll, findPage and its count. */
+  private buildWhere({
     userId,
     applicationId,
     activeOnly = true,
     includeExpired = true,
-  }: FindAccessGrantsFilters) {
-    const where: Prisma.AccessGrantWhereInput = {
+  }: FindAccessGrantsFilters): Prisma.AccessGrantWhereInput {
+    return {
       ...(userId ? { userId } : {}),
       ...(applicationId ? { applicationId } : {}),
       ...(activeOnly ? { revokedAt: null } : {}),
@@ -54,10 +90,6 @@ export class AccessGrantsService {
         ? {}
         : { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }),
     };
-    return this.prisma.accessGrant.findMany({
-      where,
-      orderBy: { grantedAt: 'desc' },
-    });
   }
 
   /** A single grant by id; throws 404 if missing. (No soft delete — none to filter.) */
