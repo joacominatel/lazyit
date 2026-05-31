@@ -21,6 +21,7 @@ type PrismaAssetMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
 };
 
 // The transaction client the service writes through. $transaction is mocked to invoke the callback
@@ -109,13 +110,17 @@ describe('AssetsService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
     };
     // The transaction client the writes go through; $transaction runs the callback with it.
     tx = { create: jest.fn(), update: jest.fn() };
     prisma = {
       asset,
-      $transaction: jest.fn((cb: (client: { asset: TxAssetMock }) => unknown) =>
-        cb({ asset: tx }),
+      // Two transaction forms: the writes use the interactive (callback) form; the paginated list
+      // (findPage) uses the array/batch form ([findMany, count]) — resolve those promises together.
+      $transaction: jest.fn(
+        (arg: ((client: { asset: TxAssetMock }) => unknown) | Promise<unknown>[]) =>
+          Array.isArray(arg) ? Promise.all(arg) : arg({ asset: tx }),
       ),
     };
     // ActorService is mocked; the shim-validation details live in actor.service.spec.ts. Here we
@@ -275,78 +280,118 @@ describe('AssetsService', () => {
     );
   });
 
-  // --- findAll (expanded) -------------------------------------------------
-  it('findAll without filters: excludes soft-deleted, newest first, with relations', async () => {
-    asset.findMany.mockResolvedValue([]);
-
-    await service.findAll();
-
-    expect(asset.findMany).toHaveBeenCalledWith({
-      where: {},
-      orderBy: { createdAt: 'desc' },
-      include: EXPECTED_INCLUDE,
-    });
+  // --- findPage (lean, paginated — ADR-0030) ------------------------------
+  // A lean list row: the `specs` jsonb is omitted and the relations are trimmed; `assignments` is
+  // still renamed to `activeAssignments` by the service. Default page (no offset/page) → skip 0.
+  const DEFAULT_PAGE = { limit: 50, offset: undefined, page: undefined } as const;
+  const leanRow = (overrides: Record<string, unknown> = {}) => ({
+    id: 'a1',
+    name: 'SRV-01',
+    serial: null,
+    assetTag: null,
+    status: 'OPERATIONAL',
+    notes: null,
+    purchaseDate: null,
+    warrantyEnd: null,
+    modelId: 'm1',
+    locationId: 'l1',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+    model: { id: 'm1', name: 'Latitude', manufacturer: 'Dell', category: null },
+    location: { id: 'l1', name: 'HQ', type: 'OFFICE' },
+    assignments: [
+      { id: 'as1', assetId: 'a1', userId: 'u1', assignedAt: new Date(), user: { id: 'u1' } },
+    ],
+    ...overrides,
   });
 
-  it('findAll maps each row assignments -> activeAssignments', async () => {
-    asset.findMany.mockResolvedValue([
-      rawRow({
-        assignments: [
-          { id: 'as1', releasedAt: null, user: { id: 'u1' } },
-          { id: 'as2', releasedAt: null, user: { id: 'u2' } },
-        ],
-      }),
-    ]);
-
-    const result = await service.findAll();
-
-    expect(result[0]).not.toHaveProperty('assignments');
-    expect(result[0].activeAssignments).toHaveLength(2);
-  });
-
-  it('the assignments include filters to active (releasedAt null) so released owners are excluded', async () => {
+  it('findPage without filters: default window (take 50, skip 0), newest first, lean select', async () => {
     asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
 
-    await service.findAll();
+    await service.findPage({}, DEFAULT_PAGE);
 
     const calls = asset.findMany.mock.calls as Array<
-      [{ include: { assignments: { where: unknown } } }]
+      [{ where: unknown; orderBy: unknown; select: unknown; take: number; skip: number }]
     >;
-    expect(calls[0][0].include.assignments.where).toEqual({ releasedAt: null });
+    expect(calls[0][0].where).toEqual({});
+    expect(calls[0][0].orderBy).toEqual({ createdAt: 'desc' });
+    expect(calls[0][0].take).toBe(50);
+    expect(calls[0][0].skip).toBe(0);
+    // Lean select: no `specs`, and it is a `select` (not an `include`).
+    expect(calls[0][0]).not.toHaveProperty('include');
+    const select = calls[0][0].select as Record<string, unknown>;
+    expect(select).not.toHaveProperty('specs');
+    expect(select.id).toBe(true);
   });
 
-  it('findAll filters by status and locationId', async () => {
-    asset.findMany.mockResolvedValue([]);
+  it('findPage returns a Page envelope: items mapped + the matching total', async () => {
+    asset.findMany.mockResolvedValue([leanRow()]);
+    asset.count.mockResolvedValue(7);
 
-    await service.findAll({ status: 'RETIRED', locationId: 'l1' });
+    const result = await service.findPage({}, { limit: 50, offset: 0, page: undefined });
 
-    expect(asset.findMany).toHaveBeenCalledWith({
-      where: { locationId: 'l1', status: 'RETIRED' },
-      orderBy: { createdAt: 'desc' },
-      include: EXPECTED_INCLUDE,
-    });
+    expect(result.total).toBe(7);
+    expect(result.limit).toBe(50);
+    expect(result.offset).toBe(0);
+    expect(result.items[0]).not.toHaveProperty('assignments');
+    expect(result.items[0]).not.toHaveProperty('specs');
+    expect(result.items[0].activeAssignments).toHaveLength(1);
   });
 
-  it('findAll filters by categoryId through the related model', async () => {
+  it('findPage applies an explicit limit/offset window', async () => {
     asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
 
-    await service.findAll({ categoryId: 'c1' });
+    await service.findPage({}, { limit: 10, offset: 20, page: undefined });
 
-    expect(asset.findMany).toHaveBeenCalledWith({
-      where: { model: { categoryId: 'c1' } },
-      orderBy: { createdAt: 'desc' },
-      include: EXPECTED_INCLUDE,
-    });
+    const calls = asset.findMany.mock.calls as Array<[{ take: number; skip: number }]>;
+    expect(calls[0][0].take).toBe(10);
+    expect(calls[0][0].skip).toBe(20);
   });
 
-  it('findAll filters by q (case-insensitive OR over name/serial/assetTag)', async () => {
+  it('the assignments select filters to active (releasedAt null) so released owners are excluded', async () => {
     asset.findMany.mockResolvedValue([]);
 
-    await service.findAll({ q: 'srv' });
+    await service.findPage({}, DEFAULT_PAGE);
 
     const calls = asset.findMany.mock.calls as Array<
-      [{ where: Record<string, unknown> }]
+      [{ select: { assignments: { where: unknown } } }]
     >;
+    expect(calls[0][0].select.assignments.where).toEqual({ releasedAt: null });
+  });
+
+  it('findPage filters by status and locationId (same where feeds findMany and count)', async () => {
+    asset.findMany.mockResolvedValue([]);
+
+    await service.findPage({ status: 'RETIRED', locationId: 'l1' }, DEFAULT_PAGE);
+
+    const findManyWhere = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0].where;
+    const countWhere = (
+      asset.count.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0].where;
+    expect(findManyWhere).toEqual({ locationId: 'l1', status: 'RETIRED' });
+    expect(countWhere).toEqual(findManyWhere);
+  });
+
+  it('findPage filters by categoryId through the related model', async () => {
+    asset.findMany.mockResolvedValue([]);
+
+    await service.findPage({ categoryId: 'c1' }, DEFAULT_PAGE);
+
+    const calls = asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>;
+    expect(calls[0][0].where).toEqual({ model: { categoryId: 'c1' } });
+  });
+
+  it('findPage filters by q (case-insensitive OR over name/serial/assetTag)', async () => {
+    asset.findMany.mockResolvedValue([]);
+
+    await service.findPage({ q: 'srv' }, DEFAULT_PAGE);
+
+    const calls = asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>;
     expect(calls[0][0].where).toEqual({
       OR: [
         { name: { contains: 'srv', mode: 'insensitive' } },
