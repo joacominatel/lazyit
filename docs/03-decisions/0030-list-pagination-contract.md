@@ -53,7 +53,12 @@ eleven lists plus the frontend data layer today.
   inherently-scoped nested grant/assignment lists stay unpaginated for now; **new** list endpoints
   adopt the contract from the start.
 - When implemented, it spans backend **and** frontend (TanStack Query, [[0020-frontend-data-layer]])
-  → split into separate front/back subagents per the workflow, not done piecemeal.
+  → split into separate front/back subagents per the workflow, not done piecemeal. **Frontend
+  follow-up (2026-05-31):** the three list fetchers (`getAssets` / `getArticles` /
+  `getAccessGrants`) now request the `Page<T>` envelope and **unwrap `.items`**, typed with the lean
+  list-item types (`AssetListItem` / `ArticleListItem`), so the components keep their array contract.
+  Only the first page (default size 50) is shown until the UI gains real pagination — `total` is
+  available on the envelope for a future count/page control.
 
 ## Consequences
 
@@ -65,7 +70,10 @@ eleven lists plus the frontend data layer today.
   migrated — [[SEC-007-no-pagination-list-endpoints|SEC-007]] remains **open** as bounded, accepted
   debt. Offset pagination's deep-page cost and insert-instability are accepted at this scale; revisit
   **cursor** (option 2) if a history table grows fast. Matching **partial `deletedAt` indexes** for
-  the now-bounded hot lists are a Round 2 follow-up (no migration landed in Round 1).
+  the now-bounded hot lists are a Round 2 follow-up (no migration landed in Round 1). The lean
+  `GET /assets` row also **drops `activeAssignments[].user.deletedAt`**, so the asset list can no
+  longer dim a departed (soft-deleted) owner's avatar — re-add that field to `AssetListAssignment`
+  (backend) if list-level dimming is wanted; the detail read (`GET /assets/:id`) still carries it.
 - The hard max (200) caps the worst-case response size for any endpoint that adopts the contract.
 
 ## References
