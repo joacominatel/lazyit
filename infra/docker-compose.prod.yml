@@ -9,17 +9,43 @@
 # Only Caddy publishes host ports (8080/8443 by default). db/api/web/zitadel stay on the
 # internal network — neither Postgres instance is ever exposed to the host (SEC-005 / ADR-0028).
 # Zitadel is served at auth.{LAZYIT_DOMAIN} via Caddy (ADR-0037 / ADR-0026).
+#
+# Image digest-pinning (ADR-0025 follow-up): every base image is pinned by @sha256 so a deploy is
+# byte-reproducible and a re-pulled rolling tag (node:26-alpine, caddy:2-alpine) can't silently
+# change underneath the operator. The human-readable tag is kept in a comment beside each digest;
+# re-pin after a deliberate upgrade with the command noted at the bottom of this file.
+#
+# Log rotation + resource limits: every long-running service gets the shared `logging` anchor
+# (json-file, 10m x 3) so container logs can't fill the disk over months, plus a modest
+# mem_limit/cpus ceiling so one runaway service can't OOM/CPU-starve the single host. Tune the
+# limits to your box; the sizing table lives in docs/05-runbooks/deploy-self-hosted.md.
 
 name: lazyit-prod
+
+# Shared log-rotation policy — referenced by every long-running service via `logging: *default-logging`.
+# Caps each container's json-file log at 10 MB x 3 files (30 MB), preventing unbounded growth on a
+# long-lived single host (would otherwise fill /var/lib/docker and crash the Docker daemon).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   # --- PostgreSQL — internal network only, no published port ---------------
   db:
-    image: postgres:18-alpine
+    # postgres:18-alpine — pinned by digest (rolling tag; re-pin on a deliberate bump).
+    image: postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88
     restart: unless-stopped
     shm_size: 256mb
+    logging: *default-logging
+    # Holds ALL app data — give it the most RAM headroom on the host.
+    mem_limit: 1g
+    cpus: 1.5
     env_file: [env/.env.prod]
     volumes:
+      # postgres:18 mounts the volume parent (PGDATA = /var/lib/postgresql/18/docker). Keep this
+      # path tracking the major version on any upgrade — see docs/05-runbooks/backups.md.
       - db_data:/var/lib/postgresql
     healthcheck:
       # $$ escapes compose interpolation so the check reads the container's env at runtime.
@@ -37,6 +63,9 @@ services:
       dockerfile: infra/docker/migrate.Dockerfile
     image: lazyit-migrate:dev
     restart: "no"
+    logging: *default-logging
+    mem_limit: 512m
+    cpus: 1.0
     env_file: [env/.env.prod]
     depends_on:
       db:
@@ -50,6 +79,9 @@ services:
       dockerfile: infra/docker/api.Dockerfile
     image: lazyit-api:dev
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 512m
+    cpus: 1.0
     env_file: [env/.env.prod]
     depends_on:
       db:
@@ -68,6 +100,9 @@ services:
         NEXT_PUBLIC_API_URL: /api
     image: lazyit-web:dev
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 256m
+    cpus: 0.5
     # Auth.js runs server-side and reads these at RUNTIME (ADR-0039). Scoped explicitly rather
     # than env_file so the web container never sees the DB / Zitadel / Meili secrets it has no
     # use for (ADR-0028 least-privilege). Requires --env-file for the ${...} interpolation.
@@ -90,9 +125,14 @@ services:
   # change OIDC_ISSUER — no impact on the app DB).
   # Never published to the host — internal network only (ADR-0028).
   zitadel_db:
-    image: postgres:16-alpine
+    # postgres:16-alpine — pinned by digest. NOTE: this is Postgres 16 (PGDATA layout differs
+    # from the app's PG18 db). Re-pin on a deliberate bump; see docs/05-runbooks/backups.md.
+    image: postgres:16-alpine@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
     restart: unless-stopped
     shm_size: 64mb
+    logging: *default-logging
+    mem_limit: 256m
+    cpus: 0.5
     env_file: [env/.env.prod]
     # environment: overrides the POSTGRES_* vars that env_file inherits from the shared
     # .env.prod (which sets POSTGRES_USER=lazyit for the app DB). Without this block,
@@ -102,6 +142,8 @@ services:
       POSTGRES_PASSWORD: ${ZITADEL_DB_PASSWORD}
       POSTGRES_DB: ${ZITADEL_DB_NAME:-zitadel}
     volumes:
+      # postgres:16 default PGDATA = /var/lib/postgresql/data; the data/ subdir lands inside this
+      # mounted parent so it persists, but the path must track the major version on any upgrade.
       - zitadel_db_data:/var/lib/postgresql
     healthcheck:
       # $$ escapes compose interpolation so the check reads the container's env at runtime.
@@ -121,9 +163,14 @@ services:
   # First start runs `start-from-init`: initialises the DB schema + creates the admin user.
   # See docs/05-runbooks/auth-bootstrap.md for the full bootstrap procedure.
   zitadel:
-    image: ghcr.io/zitadel/zitadel:v2.68.0
+    # ghcr.io/zitadel/zitadel:v2.68.0 — pinned by digest. Always back up zitadel_db AND keep the
+    # matching ZITADEL_MASTERKEY before a deliberate bump (see docs/05-runbooks/backups.md).
+    image: ghcr.io/zitadel/zitadel:v2.68.0@sha256:9e0e672e4467fd5b1ad07acf206d61e096886e44ca1347c2deef8b65f8ace2b5
     command: start-from-init --masterkey "${ZITADEL_MASTERKEY}" --tlsMode external
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 512m
+    cpus: 1.0
     env_file: [env/.env.prod]
     environment:
       ZITADEL_DATABASE_POSTGRES_HOST: zitadel_db
@@ -157,11 +204,17 @@ services:
   # --- Meilisearch — internal network only, no published port ---------------
   # ADR-0035: cross-entity search engine. Fail-soft: the API SearchService no-ops when Meili is
   # down, so no depends_on from api → meilisearch is needed.
-  # First deploy: run `docker compose -f infra/docker-compose.prod.yml exec api bun run reindex:all`
-  # once after the stack is healthy to populate the search indices.
+  # First deploy: run the one-off reindex once after the stack is healthy to populate the indices
+  # — see docs/05-runbooks/deploy-self-hosted.md §2a (the API runtime has no Bun; reindex runs in
+  # the Bun-based migrate image).
   meilisearch:
-    image: getmeili/meilisearch:v1.12.3
+    # getmeili/meilisearch:v1.12.3 — pinned by digest. Meili data is rebuildable via reindex,
+    # so the volume need not be backed up (see docs/05-runbooks/backups.md).
+    image: getmeili/meilisearch:v1.12.3@sha256:4acfcbbb9e089aa1aac838cfda3fba7f07aaaef044c23da8acbe0ab741400dac
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 512m
+    cpus: 1.0
     env_file: [env/.env.prod]
     volumes:
       - meili_data:/meili_data
@@ -175,8 +228,12 @@ services:
 
   # --- Caddy reverse proxy + automatic HTTPS — the only public surface -----
   caddy:
-    image: caddy:2-alpine
+    # caddy:2-alpine — pinned by digest (rolling tag; re-pin on a deliberate bump).
+    image: caddy:2-alpine@sha256:86deaf5e3d3408a6ccec08fbb79989783dd26e206ae10bcf78a801dc8c9ab794
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 128m
+    cpus: 0.5
     env_file: [env/.env.prod]
     ports:
       - "${LAZYIT_HTTP_PORT:-8080}:80"
@@ -186,10 +243,96 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
+      # Gate on real readiness (service_healthy), not mere process start, so Caddy doesn't
+      # publish 502s while the API/web are still booting. Both expose a Dockerfile HEALTHCHECK.
       api:
-        condition: service_started
+        condition: service_healthy
       web:
-        condition: service_started
+        condition: service_healthy
+    networks: [internal]
+
+  # --- Backup sidecar (OPT-IN) — cron + pg_dump for BOTH databases ----------
+  # Disabled by default; enable with the `backup` profile:
+  #   docker compose -f infra/docker-compose.prod.yml --env-file infra/env/.env.prod \
+  #     --profile backup up -d backup
+  # Dumps the app DB and the Zitadel DB on a schedule to the host-mounted ./backups dir, prunes
+  # dumps older than the retention window, and (optional, OFF by default) runs an offsite hook.
+  # Respects "no mandatory cloud" — local-disk only unless you wire BACKUP_OFFSITE_CMD.
+  # Full DR procedure (what/order/restore): docs/05-runbooks/backups.md.
+  backup:
+    profiles: [backup]
+    # Same Postgres major as the app DB so pg_dump's client matches the server (avoids version
+    # mismatch errors). Pinned by digest to match the `db` service.
+    image: postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 256m
+    cpus: 0.5
+    env_file: [env/.env.prod]
+    environment:
+      # Cron schedule (crontab syntax). Default: daily at 02:30.
+      BACKUP_CRON: ${BACKUP_CRON:-30 2 * * *}
+      # Keep dumps newer than this many days; older ones are pruned after each run.
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      # App DB connection (reuses the shared POSTGRES_* + the `db` service name).
+      PGHOST: db
+      # Zitadel DB connection (the `zitadel_db` service uses its own credentials).
+      ZITADEL_DB_HOST: zitadel_db
+      ZITADEL_DB_USER: ${ZITADEL_DB_USER:-zitadel}
+      ZITADEL_DB_PASSWORD: ${ZITADEL_DB_PASSWORD}
+      ZITADEL_DB_NAME: ${ZITADEL_DB_NAME:-zitadel}
+      # OPTIONAL offsite copy — OFF unless set. Receives the dump path as $1 (e.g. an rclone/scp
+      # one-liner). Leave unset to keep backups local-disk only (no mandatory cloud).
+      BACKUP_OFFSITE_CMD: ${BACKUP_OFFSITE_CMD:-}
+    volumes:
+      # Dumps land on the host (repo-root ./backups; this path is relative to infra/) so they
+      # survive `down`/recreate and can be copied off-host. ./backups is gitignored.
+      - ../backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+      zitadel_db:
+        condition: service_healthy
+    # Generate a crontab, then run cron in the foreground. Every shell `$` is written as `$$` so
+    # Compose's parse-time ${...} interpolation leaves them intact for the container shell at
+    # RUNTIME. PGPASSWORD/POSTGRES_* come from env_file; ZITADEL_* are passed explicitly above. The
+    # job writes timestamped custom-format (-Fc) dumps and prunes by mtime. `crond -f -d 8` keeps
+    # the container alive and logs to stdout (captured by the json-file driver + rotation).
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /backups
+        cat > /usr/local/bin/lazyit-backup <<'SCRIPT'
+        #!/bin/sh
+        set -eu
+        TS="$$(date +%Y%m%d-%H%M%S)"
+        echo "[lazyit-backup] starting run $$TS"
+        # App DB — POSTGRES_USER/PASSWORD/DB come from the shared .env.prod (env_file).
+        PGPASSWORD="$$POSTGRES_PASSWORD" pg_dump -h "$$PGHOST" -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc \
+          > "/backups/app-$${TS}.dump"
+        echo "[lazyit-backup] app DB -> /backups/app-$${TS}.dump"
+        # Zitadel DB — its own credentials.
+        PGPASSWORD="$$ZITADEL_DB_PASSWORD" pg_dump -h "$$ZITADEL_DB_HOST" -U "$$ZITADEL_DB_USER" -d "$$ZITADEL_DB_NAME" -Fc \
+          > "/backups/zitadel-$${TS}.dump"
+        echo "[lazyit-backup] zitadel DB -> /backups/zitadel-$${TS}.dump"
+        # Retention sweep — delete dumps older than BACKUP_RETENTION_DAYS.
+        find /backups -name '*.dump' -type f -mtime "+$${BACKUP_RETENTION_DAYS}" -print -delete || true
+        # Optional offsite hook (OFF unless BACKUP_OFFSITE_CMD is set). Receives each dump path as $$1.
+        if [ -n "$${BACKUP_OFFSITE_CMD:-}" ]; then
+          for f in "/backups/app-$${TS}.dump" "/backups/zitadel-$${TS}.dump"; do
+            sh -c "$$BACKUP_OFFSITE_CMD \"\$$1\"" _ "$$f" || echo "[lazyit-backup] offsite hook failed for $$f"
+          done
+        fi
+        echo "[lazyit-backup] run $$TS complete"
+        SCRIPT
+        chmod +x /usr/local/bin/lazyit-backup
+        # Export the runtime env into the cron job's environment (cron runs with a bare env).
+        printenv | sed 's/^/export /' > /etc/lazyit-backup.env
+        echo "$$BACKUP_CRON . /etc/lazyit-backup.env; /usr/local/bin/lazyit-backup >> /proc/1/fd/1 2>&1" > /etc/crontabs/root
+        echo "[lazyit-backup] scheduled: $$BACKUP_CRON (retention $${BACKUP_RETENTION_DAYS}d) -> /backups"
+        exec crond -f -d 8
     networks: [internal]
 
 volumes:
@@ -202,3 +345,12 @@ volumes:
 networks:
   internal:
     driver: bridge
+
+# -----------------------------------------------------------------------------
+# Re-pinning an image digest after a deliberate upgrade (ADR-0025 follow-up):
+#   docker pull <image>:<tag>
+#   docker buildx imagetools inspect <image>:<tag> --format '{{.Manifest.Digest}}'
+# (or, with `skopeo inspect docker://<image>:<tag> | jq -r .Digest`). Replace the @sha256:...
+# beside the matching tag comment. Always re-pin via a deliberate bump — never let a rolling tag
+# (node:26-alpine, caddy:2-alpine) drift silently.
+# -----------------------------------------------------------------------------
