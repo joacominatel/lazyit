@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   type ArticleFilters,
   getArticle,
@@ -21,11 +21,16 @@ export const articleKeys = {
   bySlug: (slug: string) => [...articleKeys.all, "by-slug", slug] as const,
 };
 
-/** List articles visible to the acting user, with optional server-side filters. */
+/**
+ * List articles visible to the acting user, with optional server-side filters.
+ * `keepPreviousData` keeps the current list on screen while a new filter query
+ * resolves, so typing in the filter bar doesn't flash the skeleton.
+ */
 export function useArticles(filters: ArticleFilters = {}) {
   return useQuery({
     queryKey: articleKeys.list(filters),
     queryFn: () => getArticles(filters),
+    placeholderData: keepPreviousData,
   });
 }
 
