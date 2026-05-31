@@ -5,10 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  offsetOf,
+  pageOf,
   slugify,
   type ArticleStatus,
   type CreateArticle,
   type ImportArticle,
+  type PageQuery,
   type UpdateArticle,
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
@@ -30,6 +33,26 @@ export interface ArticleListFilters {
   status?: ArticleStatus;
   q?: string;
 }
+
+// Lean projection for the LIST (GET /articles): every Article column EXCEPT `content` (the full
+// markdown body, arbitrarily large — shipping it for every row is the unbounded payload SEC-007 /
+// ADR-0030 warn about). The list keeps `excerpt` (the rendered summary); the body is fetched on
+// demand via GET /articles/:id (or by-slug). Mirrors ArticleListItemSchema in @lazyit/shared.
+const ARTICLE_LIST_SELECT = {
+  id: true,
+  slug: true,
+  title: true,
+  excerpt: true,
+  status: true,
+  categoryId: true,
+  authorId: true,
+  lastEditedById: true,
+  publishedAt: true,
+  metadata: true,
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+} satisfies Prisma.ArticleSelect;
 
 /** The subset of a multer file the import needs. The controller passes Express.Multer.File. */
 export interface UploadedImportFile {
@@ -53,13 +76,42 @@ export class ArticlesService {
   ) {}
 
   /**
-   * List non-deleted articles, newest-updated first. PUBLISHED is visible to all; DRAFT only to its
+   * Paginated list of non-deleted articles (ADR-0030), newest-updated first, as a `Page` envelope.
+   * Each row is **lean** — the full markdown `content` is omitted ({@link ARTICLE_LIST_SELECT}); the
+   * body is fetched on demand via `GET /articles/:id`. PUBLISHED is visible to all; DRAFT only to its
    * author (the current user). Optional filters: category, author, status, and a substring `q` over
-   * title/excerpt.
+   * title/excerpt. `total` counts every visible match, ignoring the page window.
    */
-  async findAll(filters: ArticleListFilters, currentUserId?: string) {
+  async findPage(
+    filters: ArticleListFilters,
+    page: PageQuery,
+    currentUserId?: string,
+  ) {
     const cu = await this.resolveCurrentUser(currentUserId);
-    const and: Prisma.ArticleWhereInput[] = [this.visibilityWhere(cu)];
+    const where = this.buildWhere(filters, cu);
+    const { take, skip } = offsetOf(page);
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.article.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        select: ARTICLE_LIST_SELECT,
+        take,
+        skip,
+      }),
+      this.prisma.article.count({ where }),
+    ]);
+    return pageOf(items, total, page);
+  }
+
+  /**
+   * The visible-articles `where` for the list: the caller's visibility window (PUBLISHED + own
+   * DRAFTs) ANDed with the optional filters. Feeds both the page query and its count (ADR-0030).
+   */
+  private buildWhere(
+    filters: ArticleListFilters,
+    currentUserId?: string,
+  ): Prisma.ArticleWhereInput {
+    const and: Prisma.ArticleWhereInput[] = [this.visibilityWhere(currentUserId)];
     if (filters.categoryId) and.push({ categoryId: filters.categoryId });
     if (filters.authorId) and.push({ authorId: filters.authorId });
     if (filters.status) and.push({ status: filters.status });
@@ -71,10 +123,7 @@ export class ArticlesService {
         ],
       });
     }
-    return this.prisma.article.findMany({
-      where: { AND: and },
-      orderBy: { updatedAt: 'desc' },
-    });
+    return { AND: and };
   }
 
   /** A readable article by id (404 if missing, deleted, or a draft the caller doesn't own). */
