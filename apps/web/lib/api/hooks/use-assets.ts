@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   type AssetFilters,
   getAsset,
@@ -21,11 +21,16 @@ export const assetKeys = {
     [...assetKeys.all, "detail", assetId, "assignments", activeOnly] as const,
 };
 
-/** List assets, optionally filtered by category / location / status. */
+/**
+ * List assets, optionally filtered by category / location / status.
+ * `keepPreviousData` holds the last result on screen while a new filter query
+ * resolves, so changing a filter doesn't flash the table skeleton.
+ */
 export function useAssets(filters: AssetFilters = {}) {
   return useQuery({
     queryKey: assetKeys.list(filters),
     queryFn: () => getAssets(filters),
+    placeholderData: keepPreviousData,
   });
 }
 

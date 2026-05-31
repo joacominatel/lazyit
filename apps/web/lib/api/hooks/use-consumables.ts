@@ -1,5 +1,5 @@
 import type { ConsumableMovementQuery } from "@lazyit/shared";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   type ConsumableFilters,
   getConsumable,
@@ -21,11 +21,16 @@ export const consumableKeys = {
     [...consumableKeys.all, "detail", id, "movements", query] as const,
 };
 
-/** List consumables (raw; category joined client-side), optionally only low-stock items. */
+/**
+ * List consumables (raw; category joined client-side), optionally only low-stock
+ * items. `keepPreviousData` holds the current list while a new filter query
+ * resolves, avoiding a skeleton flash on each filter change.
+ */
 export function useConsumables(filters: ConsumableFilters = {}) {
   return useQuery({
     queryKey: consumableKeys.list(filters),
     queryFn: () => getConsumables(filters),
+    placeholderData: keepPreviousData,
   });
 }
 

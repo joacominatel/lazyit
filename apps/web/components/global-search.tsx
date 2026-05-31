@@ -155,7 +155,9 @@ export function GlobalSearch() {
               ))}
             </div>
 
-            <CommandList>
+            {/* Politely announce result/status changes (count, empty, error)
+                to assistive tech as the debounced query resolves (WCAG 4.1.3). */}
+            <CommandList aria-live="polite">
               {!hasQuery ? (
                 <StatusRow>Start typing to search…</StatusRow>
               ) : isError ? (

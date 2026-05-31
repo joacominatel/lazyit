@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/auth";
 import { GlobalSearch } from "@/components/global-search";
+import { MobileNav } from "@/components/mobile-nav";
 import { SessionTokenSync } from "@/components/session-token-sync";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -22,6 +23,14 @@ export default async function AppLayout({
 
   return (
     <div className="flex min-h-svh">
+      {/* Skip link: first focusable element, jumps keyboard/AT users past the
+          chrome straight to the page content (WCAG 2.4.1). */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        Skip to content
+      </a>
       <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground md:flex">
         <div className="flex h-14 items-center border-b border-border px-4">
           <Link
@@ -35,6 +44,7 @@ export default async function AppLayout({
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 items-center gap-2 border-b border-border px-4">
+          <MobileNav />
           <GlobalSearch />
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />
@@ -43,7 +53,9 @@ export default async function AppLayout({
         </header>
         {/* Syncs Auth.js access token into the client-side store so apiFetch sends Bearer automatically. */}
         <SessionTokenSync />
-        <main className="flex-1 p-6">{children}</main>
+        <main id="main-content" className="flex-1 p-6">
+          {children}
+        </main>
       </div>
     </div>
   );

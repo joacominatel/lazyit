@@ -2,31 +2,28 @@
 
 import {
   BookOpenIcon,
-  Cog6ToothIcon,
   CubeIcon,
   KeyIcon,
   MapPinIcon,
   ServerStackIcon,
   Squares2X2Icon,
-  TicketIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-// App navigation. Most targets are placeholders until each domain area is built
-// out; /dashboard and /locations are implemented.
+// App navigation across the three pillars (Inventory / Access / Knowledge) plus
+// the supporting Users + Locations registries. Every target is an implemented
+// route; dead links (Tickets, Settings) were removed — see ADR-0016, no ticketing.
 const NAV = [
   { label: "Dashboard", href: "/dashboard", icon: Squares2X2Icon },
   { label: "Assets", href: "/assets", icon: ServerStackIcon },
-  { label: "Tickets", href: "/tickets", icon: TicketIcon },
   { label: "Knowledge Base", href: "/kb", icon: BookOpenIcon },
   { label: "Access", href: "/applications", icon: KeyIcon },
   { label: "Consumables", href: "/consumables", icon: CubeIcon },
   { label: "Users", href: "/users", icon: UsersIcon },
   { label: "Locations", href: "/locations", icon: MapPinIcon },
-  { label: "Settings", href: "/settings", icon: Cog6ToothIcon },
 ] as const;
 
 export function SidebarNav() {
@@ -43,7 +40,9 @@ export function SidebarNav() {
             href={href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
+              // min-h-11 gives a ~44px tap target on touch; md:min-h-9 restores
+              // desktop density on the always-visible rail.
+              "flex min-h-11 items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors md:min-h-9",
               active
                 ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
                 : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",

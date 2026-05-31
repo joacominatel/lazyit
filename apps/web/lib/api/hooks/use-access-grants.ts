@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   type AccessGrantFilters,
   getAccessGrants,
@@ -14,10 +14,15 @@ export const accessGrantKeys = {
     [...accessGrantKeys.all, "list", filters] as const,
 };
 
-/** List grants, filtered (e.g. all active grants for the Access list's counts/avatars). */
+/**
+ * List grants, filtered (e.g. all active grants for the Access list's
+ * counts/avatars). `keepPreviousData` holds the current grants while a new
+ * filter query resolves, avoiding a skeleton flash on filter changes.
+ */
 export function useAccessGrants(filters: AccessGrantFilters = {}) {
   return useQuery({
     queryKey: accessGrantKeys.list(filters),
     queryFn: () => getAccessGrants(filters),
+    placeholderData: keepPreviousData,
   });
 }
