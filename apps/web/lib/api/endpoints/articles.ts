@@ -1,5 +1,7 @@
 import type {
   Article,
+  ArticleListItem,
+  ArticleListPage,
   ArticleStatus,
   CreateArticle,
   ImportArticle,
@@ -13,6 +15,11 @@ import { createCrudEndpoints } from "../crud-endpoints";
  * come from `createCrudEndpoints`; the KB-specific routes (filtered list,
  * by-slug, publish/unpublish, multipart import) are hand-written alongside —
  * the "spread the factory + add bespoke endpoints" pattern from ADR-0020.
+ *
+ * The list read is **lean and paginated** (ADR-0030): `GET /articles` returns a
+ * `Page<ArticleListItem>` envelope (the markdown `content` is omitted; `excerpt`
+ * is kept) and `getArticles` unwraps `.items`. The detail reads (`getArticle`,
+ * `getArticleBySlug`) still return the full `Article` with `content`.
  *
  * Authorship/visibility is enforced by the API via the Bearer token (ADR-0038/0039).
  * These functions don't deal with auth directly — the token flows from the session.
@@ -34,15 +41,24 @@ export interface ArticleFilters {
   q?: string;
 }
 
-/** List articles the caller may see, with optional server-side filters. */
-export function getArticles(filters: ArticleFilters = {}): Promise<Article[]> {
+/**
+ * List articles the caller may see (lean), with optional server-side filters.
+ * `GET /articles` returns a paginated `Page<ArticleListItem>` envelope (ADR-0030;
+ * `content` omitted); we unwrap `.items` so the list keeps consuming an array.
+ * The default page size (50) applies — the UI does not yet page, so for now only
+ * the first page is shown.
+ */
+export async function getArticles(
+  filters: ArticleFilters = {},
+): Promise<ArticleListItem[]> {
   const params = new URLSearchParams();
   if (filters.categoryId) params.set("categoryId", filters.categoryId);
   if (filters.authorId) params.set("authorId", filters.authorId);
   if (filters.status) params.set("status", filters.status);
   if (filters.q) params.set("q", filters.q);
   const qs = params.toString();
-  return apiFetch<Article[]>(qs ? `${BASE}?${qs}` : BASE);
+  const page = await apiFetch<ArticleListPage>(qs ? `${BASE}?${qs}` : BASE);
+  return page.items;
 }
 
 /** Fetch a single article by its slug (the public/detail lookup). */

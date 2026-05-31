@@ -1,6 +1,8 @@
 import type {
   Asset,
   AssetAssignmentWithUser,
+  AssetListItem,
+  AssetListPage,
   AssetStatus,
   AssetWithRelations,
   CreateAsset,
@@ -11,10 +13,13 @@ import { createCrudEndpoints } from "../crud-endpoints";
 
 /**
  * Data-access for the Asset resource. Writes use the raw `Asset` shape (CRUD via
- * `createCrudEndpoints`); reads return the **expanded** `AssetWithRelations`
- * (model + nested category, location, and active owners with their user inline),
- * so the list/detail render without client-side joins. The nested assignments
- * route also inlines `user`. See `@lazyit/shared` `asset-expanded.ts`.
+ * `createCrudEndpoints`); the detail read returns the **expanded**
+ * `AssetWithRelations` (model + nested category, location, and active owners with
+ * their user inline). The list read is **lean and paginated** (ADR-0030): the API
+ * returns a `Page<AssetListItem>` envelope (`specs` omitted; relations trimmed to
+ * label fields) and `getAssets` unwraps `.items` so callers keep an array. The
+ * nested assignments route still inlines the full `user`. See `@lazyit/shared`
+ * `asset-expanded.ts` / `asset-list.ts`.
  */
 
 const BASE = "/assets";
@@ -33,17 +38,23 @@ export interface AssetFilters {
   status?: AssetStatus;
 }
 
-/** List non-deleted assets (expanded), optionally filtered. */
-export function getAssets(
+/**
+ * List non-deleted assets (lean), optionally filtered. `GET /assets` returns a
+ * paginated `Page<AssetListItem>` envelope (ADR-0030); we unwrap `.items` so the
+ * table keeps consuming an array. The default page size (50) applies — the UI
+ * does not yet page, so for now only the first page is shown.
+ */
+export async function getAssets(
   filters: AssetFilters = {},
-): Promise<AssetWithRelations[]> {
+): Promise<AssetListItem[]> {
   const params = new URLSearchParams();
   if (filters.q) params.set("q", filters.q);
   if (filters.categoryId) params.set("categoryId", filters.categoryId);
   if (filters.locationId) params.set("locationId", filters.locationId);
   if (filters.status) params.set("status", filters.status);
   const qs = params.toString();
-  return apiFetch<AssetWithRelations[]>(qs ? `${BASE}?${qs}` : BASE);
+  const page = await apiFetch<AssetListPage>(qs ? `${BASE}?${qs}` : BASE);
+  return page.items;
 }
 
 /** A single expanded asset by id. */
