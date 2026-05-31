@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import {
+  AccessGrantPageSchema,
   AccessGrantSchema,
   CreateAccessGrantSchema,
   RevokeAccessGrantSchema,
@@ -12,6 +13,8 @@ import {
 // /applications/:id/access-grants endpoints — one class per schema keeps a single OpenAPI schema
 // name. See docs/03-decisions/0018-api-documentation-swagger.md.
 export class AccessGrantDto extends createZodDto(AccessGrantSchema) {}
+// The paginated GET /access-grants envelope ({ items, total, limit, offset }) — ADR-0030.
+export class AccessGrantPageDto extends createZodDto(AccessGrantPageSchema) {}
 export class CreateAccessGrantDto extends createZodDto(
   CreateAccessGrantSchema,
 ) {}
