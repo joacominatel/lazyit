@@ -16,6 +16,7 @@ import { Prisma } from '../../generated/prisma/client';
  *   P2003  FK constraint failed     -> 400 Bad Request (e.g. an invalid locationId/modelId/categoryId)
  *   P2025  record not found         -> 404 Not Found
  *   P2023  inconsistent column data -> 400 Bad Request (e.g. a malformed value for a uuid column)
+ *   P2020  value out of range       -> 400 Bad Request (e.g. an int4 overflow that slipped past zod)
  *
  * Anything else is delegated to Nest's default handler (500). Only Prisma known errors are
  * caught, so validation (pipe) and our own HttpExceptions are untouched.
@@ -52,6 +53,15 @@ export class PrismaExceptionFilter extends BaseExceptionFilter {
         // validate uuids up front (ParseUUIDPipe on path params, parseUuidQuery on query filters).
         return super.catch(
           new BadRequestException('Invalid input format for one or more fields'),
+          host,
+        );
+      case 'P2020':
+        // A value out of range for its column type (e.g. an int4 overflow). int4-bounded zod
+        // (ADR-0036) and the consumable stock overflow guard should stop this up front; this is the
+        // transversal safety net so any residual overflow is a clean 400, not a 500. The message is
+        // generic on purpose — it must not echo the offending column or value.
+        return super.catch(
+          new BadRequestException('A value is out of the allowed range'),
           host,
         );
       default:
