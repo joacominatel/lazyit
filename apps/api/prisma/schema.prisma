@@ -47,6 +47,11 @@ model User {
   articlesAuthored Article[] @relation("ArticleAuthor")
   articlesEdited   Article[] @relation("ArticleLastEditor")
 
+  // KB versioning (ADR-0042): article snapshots this user produced (ArticleVersion.editedById,
+  // SetNull) and article<->asset/application links this user created (ArticleLink.createdById, SetNull).
+  articleVersionsEdited ArticleVersion[] @relation("ArticleVersionEditor")
+  articleLinksCreated   ArticleLink[]    @relation("ArticleLinkCreator")
+
   // Access management: applications this user holds grants on, plus grants they granted/revoked.
   accessGrants        AccessGrant[] @relation("AccessGrantUser")
   accessGrantsGranted AccessGrant[] @relation("AccessGrantGrantedBy")
@@ -181,6 +186,8 @@ model Asset {
 
   assignments AssetAssignment[]
   history     AssetHistory[]
+  // KB links (ADR-0042): knowledge-base articles linked to this asset ("the runbook for THIS server").
+  articleLinks ArticleLink[]
 
   @@index([modelId])
   @@index([locationId])
@@ -294,9 +301,10 @@ model ArticleCategory {
   @@map("article_categories")
 }
 
-/// A knowledge-base document (markdown). Simple wiki: no versioning/tags/FTS (ADR-0021).
-/// DRAFT is author-private, PUBLISHED is team-visible; authorship/visibility rules live in the
-/// service (ADR-0022). See docs/02-domain/entities/article.md
+/// A knowledge-base document (markdown). Append-only versioning + asset/application linking
+/// (ADR-0042); still no tags. DRAFT is author-private, PUBLISHED is team-visible; authorship/
+/// visibility rules live in the service (ADR-0022). Content is indexed in search (ADR-0035).
+/// See docs/02-domain/entities/article.md
 model Article {
   id String @id @default(cuid())
   // Short, memorable, unique among LIVE rows. Format/length validated in @lazyit/shared (lowercase,
@@ -330,6 +338,11 @@ model Article {
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
 
+  // Append-only edit history (ADR-0042): every create/edit snapshots a new ArticleVersion.
+  versions ArticleVersion[]
+  // Article<->Asset/Application associations (ADR-0042): "the runbook for THIS server/app".
+  links    ArticleLink[]
+
   // (categoryId, status): per-category filtered listings. (status, publishedAt): "latest published".
   @@index([categoryId, status])
   @@index([status, publishedAt])
@@ -340,6 +353,71 @@ model Article {
 enum ArticleStatus {
   DRAFT
   PUBLISHED
+}
+
+/// Append-only snapshot of an Article's editable state, written on every create/edit that changes
+/// title/content/excerpt/status (ADR-0042). This restores the auditability principle (ADR-0006):
+/// editing an article no longer destroys the prior body. Rows are NEVER updated, deleted or
+/// soft-deleted — a pure log, like AssetHistory. `version` increments per article (1 on create).
+/// See docs/02-domain/entities/article-version.md
+model ArticleVersion {
+  // autoincrement: an append-only history table, never exposed externally (ADR-0005), mirroring
+  // AssetHistory. The externally meaningful key is (articleId, version), enforced unique below.
+  id         Int           @id @default(autoincrement())
+  // Required FK with Restrict: an article with version history cannot be hard-deleted (history is
+  // preserved), mirroring AssetHistory/AssetAssignment. Soft delete (UPDATE deletedAt) bypasses it.
+  articleId  String
+  article    Article       @relation(fields: [articleId], references: [id], onDelete: Restrict)
+  // Monotonic per-article revision number (1 on create, then 2, 3, …). Allocated in the same
+  // transaction as the article write, so the snapshot can't drift from the article it describes.
+  version    Int
+  // Frozen copy of the article's editable state at this revision.
+  title      String
+  content    String
+  excerpt    String?
+  status     ArticleStatus
+  // Who produced this revision (the editor / creator) — from the auth shim (ADR-0022). SetNull:
+  // losing the actor never blocks deleting them and the log row survives. @db.Uuid to match User.id.
+  editedById String?       @db.Uuid
+  editedBy   User?         @relation("ArticleVersionEditor", fields: [editedById], references: [id], onDelete: SetNull)
+  createdAt  DateTime      @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). (articleId, version) is the natural unique key
+  // and also serves the per-article version timeline query (filter by article, order by version).
+  @@unique([articleId, version])
+  @@map("article_versions")
+}
+
+/// Associates an Article with EITHER an Asset OR an Application — exactly one target (ADR-0042),
+/// making the KB IT-native ("the runbook for THIS server / this app"). A pure association join (NOT
+/// soft-deletable and NOT an audit log): add via POST, remove via DELETE. A DB CHECK enforces
+/// exactly-one-target and partial unique indexes prevent duplicate links (raw SQL in the migration).
+/// See docs/02-domain/entities/article-link.md
+model ArticleLink {
+  id            String       @id @default(cuid())
+  // The linked article. Cascade: the link is meaningless without its article and carries no audit
+  // value, so a (rare) hard-delete of the article removes its links. Articles normally soft-delete.
+  articleId     String
+  article       Article      @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  // Exactly one of assetId / applicationId is set (enforced by a CHECK constraint in the migration).
+  // Cascade on both targets for the same reason as the article side.
+  assetId       String?
+  asset         Asset?       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  // Who created the link — from the auth shim (ADR-0022). SetNull: losing the actor never blocks
+  // deleting them and the link survives. @db.Uuid to match User.id.
+  createdById   String?      @db.Uuid
+  createdBy     User?        @relation("ArticleLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
+
+  // No updatedAt / deletedAt: a link is current-state, created or removed (hard delete), never
+  // edited or soft-deleted. Duplicate-link prevention is two PARTIAL unique indexes (one per target,
+  // WHERE the target IS NOT NULL) added as raw SQL in the migration — Prisma can't express them.
+  @@index([articleId])
+  @@index([assetId])
+  @@index([applicationId])
+  @@map("article_links")
 }
 
 /// User-managed grouping for Applications (SaaS, Internal, Service, …). Like AssetCategory /
@@ -391,6 +469,8 @@ model Application {
   deletedAt   DateTime?
 
   grants AccessGrant[]
+  // KB links (ADR-0042): knowledge-base articles linked to this application ("the runbook for THIS app").
+  articleLinks ArticleLink[]
 
   @@index([categoryId])
   @@map("applications")
