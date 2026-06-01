@@ -93,6 +93,8 @@ Indexes: `@@index([categoryId])`.
 - `POST /applications` — create.
 - `PATCH /applications/:id` — partial update.
 - `DELETE /applications/:id` — soft delete.
+- `POST /applications/:id/restore` — ADMIN-only restore (clears `deletedAt`; re-indexes for search).
+  See [[0041-soft-delete-reuse-and-restore]].
 
 ## Not yet implemented (deferred)
 

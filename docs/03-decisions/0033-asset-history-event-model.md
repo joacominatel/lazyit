@@ -52,8 +52,9 @@ event, **transactionally** (`$transaction`) so the log row commits atomically wi
 - **Emission** is explicit and transactional: the **[[asset]] service** emits `CREATED`, the per-field
   `STATUS_CHANGED` / `LOCATION_CHANGED` / `MODEL_CHANGED` / `SPECS_CHANGED` (diffing the row before vs
   after the update; `SPECS_CHANGED` carries no payload as specs can be large), and `DELETED`; the
-  **[[asset-assignment]] service** emits `ASSIGNED` and `RELEASED`. `RESTORED` is reserved (no restore
-  endpoint emits it yet).
+  **[[asset-assignment]] service** emits `ASSIGNED` and `RELEASED`. `RESTORED` is emitted by the asset
+  restore endpoint (`POST /assets/:id/restore`, [[0041-soft-delete-reuse-and-restore]]) — the
+  counterpart of `DELETED`. (It was reserved-without-emitter until ADR-0041.)
 - **`AssetHistoryService`** owns `record(client, event)` (called with the transaction client) and
   `list(assetId, { limit, before })`.
 - **Actor via the shared `ActorService`** (`apps/api/src/common/actor.service.ts`): resolves the
@@ -73,8 +74,9 @@ event, **transactionally** (`$transaction`) so the log row commits atomically wi
 - **`payload` is unvalidated jsonb** — the same debt as `Asset.specs` ([[0007-flexible-asset-specs-jsonb]]).
 - **No nested-history pruning / retention** — the log grows unbounded; a retention policy is a future
   decision (acceptable at small-team scale).
-- **`RESTORED` has no emitter** until a restore endpoint exists (the soft-delete escape hatch of
-  [[0032-soft-delete-middleware]] makes restore feasible later).
+- **`RESTORED` now has an emitter** — the asset restore endpoint ([[0041-soft-delete-reuse-and-restore]])
+  clears `deletedAt` and records `RESTORED` transactionally, using the `includeSoftDeleted` escape
+  hatch of [[0032-soft-delete-middleware]] to find the deleted row. (It was unemitted until ADR-0041.)
 - **Follow-up:** migrate `AccessGrantsService` to `ActorService` (finishing the
   [[0024-asset-assignment-actor-shim]] dedupe); a frontend timeline on the asset detail page.
 

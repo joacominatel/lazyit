@@ -22,10 +22,11 @@ and soft-deleted from the app; the seed set is just an initial, non-special list
 
 ## Business rules
 
-- `name` is **unique**.
+- `name` is unique among **live** rows only; a soft-deleted name is freed for reuse / restore
+  ([[0041-soft-delete-reuse-and-restore]]).
 - Seeded with eight starter categories (Networking, Servers, Access Management, Datacenter,
   Procedures, Troubleshooting, Onboarding, Tools) with heroicon `icon`s and a `order`. The seed is
-  idempotent (upsert by `name`, never clobbers edits) — see `apps/api/prisma/seed.ts`.
+  idempotent (find-among-live-then-create, never clobbers edits) — see `apps/api/prisma/seed.ts`.
 - **Deleting a category that still has live articles is refused with `409`.** `categoryId` is a
   required FK, so orphaning is impossible; reassign or delete those articles first.
 - Soft delete ([[0006-soft-delete-and-auditing]]).
@@ -51,7 +52,7 @@ Prisma model `ArticleCategory` → table `article_categories`. Validation schema
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `cuid` | `@default(cuid())`. |
-| `name` | `string` | `@unique`, required. |
+| `name` | `string` | Required. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted name is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
 | `description` | `string?` | optional. |
 | `icon` | `string?` | a heroicon name for the web UI (e.g. "ServerStackIcon"). Not validated. |
 | `order` | `int?` | optional sort key for sidebar/listings; nulls sort last. |
@@ -63,7 +64,8 @@ Prisma model `ArticleCategory` → table `article_categories`. Validation schema
 
 `apps/api/src/article-categories/` (`ArticleCategoriesModule`): `GET /article-categories` (excludes
 soft-deleted, ordered by `order` then `name`), `GET /article-categories/:id`, `POST`,
-`PATCH /:id`, `DELETE /:id` (soft delete; `409` if the category still has live articles). Bodies
+`PATCH /:id`, `DELETE /:id` (soft delete; `409` if the category still has live articles),
+`POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]). Bodies
 validated against the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).
 
 Related: [[article]] · [[asset-category]] · [[shared-package]] ·
