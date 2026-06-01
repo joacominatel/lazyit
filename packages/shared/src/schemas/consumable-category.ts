@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { int4 } from "./primitives";
+import { int4, requireAtLeastOneKey } from "./primitives";
 
 /**
  * ConsumableCategory — user-managed grouping for Consumables (Cables, Adapters, Peripherals, …).
@@ -32,15 +32,17 @@ export const CreateConsumableCategorySchema = z.strictObject({
   order: int4({ example: 0 }).optional(),
 });
 
-/** Partial update; any subset of the editable fields. */
-export const UpdateConsumableCategorySchema = z
-  .strictObject({
-    name: z.string().trim().min(1).max(100),
-    description: z.string().trim().min(1).max(1000),
-    icon: z.string().trim().min(1).max(100),
-    order: int4({ example: 0 }),
-  })
-  .partial();
+/** Partial update; any subset of the editable fields (an empty body is rejected). */
+export const UpdateConsumableCategorySchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      name: z.string().trim().min(1).max(100),
+      description: z.string().trim().min(1).max(1000),
+      icon: z.string().trim().min(1).max(100),
+      order: int4({ example: 0 }),
+    })
+    .partial(),
+);
 
 export type ConsumableCategory = z.infer<typeof ConsumableCategorySchema>;
 export type CreateConsumableCategory = z.infer<
