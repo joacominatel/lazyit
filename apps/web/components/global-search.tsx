@@ -109,10 +109,14 @@ export function GlobalSearch() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex h-9 w-full max-w-xs items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+        // Below sm the trigger collapses to an icon-only square so the topbar
+        // stays uncluttered on phones; from sm up it expands to the labelled
+        // search affordance. aria-label keeps it named in the collapsed state.
+        aria-label="Search"
+        className="inline-flex size-9 shrink-0 items-center justify-center gap-2 rounded-md border border-input bg-background text-sm text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground sm:size-auto sm:h-9 sm:w-full sm:max-w-xs sm:justify-start sm:px-3"
       >
         <MagnifyingGlassIcon className="size-4 shrink-0" />
-        <span className="flex-1 text-left">Search…</span>
+        <span className="hidden flex-1 text-left sm:inline">Search…</span>
         <kbd className="pointer-events-none hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium sm:inline-flex">
           ⌘K
         </kbd>

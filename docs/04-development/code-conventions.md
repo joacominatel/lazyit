@@ -73,6 +73,23 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
   `dropdown-menu`); leave those as generated. **Do not import `lucide-react` outside
   `components/ui/*`, and do not introduce a third icon set** — mixing icon families is the most
   common visual-inconsistency drift on the [[0020-frontend-data-layer]] screens.
+- **Chrome primitives — compose, don't re-implement.** The page-frame patterns were copy-pasted
+  ~16× and drifted (title scale `text-2xl` vs `text-3xl`; ad-hoc "Back to X" ghost buttons;
+  unnamed search/filter inputs). Three shared primitives now own them:
+  - `components/page-header.tsx` — `PageHeader` ({ `title`, `subtitle?`, `breadcrumb?`,
+    `actions?`, `badge?` }). The **only** sanctioned page title; the scale is fixed inside it.
+    Never hand-roll an `<h1 className="text-2xl/3xl …">` page title — compose this.
+  - `components/breadcrumb.tsx` — `Breadcrumb` (route-driven via `usePathname`; pass explicit
+    `items` on detail pages to surface a record's real name). Rendered once at the app-shell
+    layout level; it **replaces** per-page "Back to X" buttons.
+  - `components/search-input.tsx` — `SearchInput` ({ `value`, `onChange`, optional
+    `debounceMs`+`onDebouncedChange`, `label` (default "Search"), `placeholder`, clearable }).
+    Carries an accessible name by default — list filters must name their search box.
+- **Navigation IA — three pillars + Manage.** `components/sidebar-nav.tsx` groups nav into
+  **Inventory** (Assets, Consumables) · **Access** (Applications) · **Knowledge** (Knowledge
+  Base) · **Manage** (Users, Locations), with Dashboard ungrouped on top. The user-facing noun
+  is **Applications** (route stays `/applications`); **Access** is the pillar name, not a nav
+  label. `mobile-nav.tsx` reuses `SidebarNav`, so it inherits the grouping.
 
 ## The Bun-first boundary
 
