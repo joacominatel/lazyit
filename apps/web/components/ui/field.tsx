@@ -100,8 +100,17 @@ function FieldContent({ className, ...props }: React.ComponentProps<"div">) {
 
 function FieldLabel({
   className,
+  required = false,
+  children,
   ...props
-}: React.ComponentProps<typeof Label>) {
+}: React.ComponentProps<typeof Label> & {
+  /**
+   * When true, append a destructive-colored asterisk after the label text — the standard
+   * required-field affordance the full-page forms and dialogs share. The asterisk is `aria-hidden`
+   * (a visual cue); the field's own validation is what conveys requiredness to assistive tech.
+   */
+  required?: boolean
+}) {
   return (
     <Label
       data-slot="field-label"
@@ -111,7 +120,14 @@ function FieldLabel({
         className
       )}
       {...props}
-    />
+    >
+      {children}
+      {required ? (
+        <span aria-hidden="true" className="text-destructive">
+          *
+        </span>
+      ) : null}
+    </Label>
   )
 }
 
