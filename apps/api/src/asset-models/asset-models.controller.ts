@@ -22,6 +22,7 @@ import {
   UpdateAssetModelSchema,
 } from '@lazyit/shared';
 import { AssetModelsService } from './asset-models.service';
+import { Roles } from '../auth/roles.decorator';
 
 class AssetModelDto extends createZodDto(AssetModelSchema) {}
 class CreateAssetModelDto extends createZodDto(CreateAssetModelSchema) {}
@@ -50,21 +51,24 @@ export class AssetModelsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an asset model' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create an asset model (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: AssetModelDto })
   create(@Body() dto: CreateAssetModelDto) {
     return this.models.create(dto);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an asset model' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Update an asset model (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: AssetModelDto })
   update(@Param('id') id: string, @Body() dto: UpdateAssetModelDto) {
     return this.models.update(id, dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete an asset model' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Soft-delete an asset model — ADMIN only' })
   @ApiOkResponse({ type: AssetModelDto })
   remove(@Param('id') id: string) {
     return this.models.remove(id);
