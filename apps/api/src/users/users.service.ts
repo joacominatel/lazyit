@@ -6,16 +6,36 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import type { CreateUser, UpdateUser } from '@lazyit/shared';
+import type { CreateUser, PageQuery, UpdateUser } from '@lazyit/shared';
+import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma, Role } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectUser } from '../search/search.documents';
+import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import {
   IDENTITY_PROVIDER,
   type IdentityProvider,
 } from '../auth/identity/identity-provider.interface';
+
+/** Optional filters for listing users. */
+export interface UserFilters {
+  /** Case-insensitive substring over firstName / lastName / email (OR). */
+  q?: string;
+}
+
+/**
+ * Server-side sort allowlist for `GET /users` (ADR-0030 amendment). Maps each PUBLIC `?sort=` key to
+ * the Prisma column. Unknown key → 400. With no `sort`, the list keeps its default `createdAt desc`.
+ */
+export const USER_SORT_ALLOWLIST = {
+  firstName: 'firstName',
+  lastName: 'lastName',
+  email: 'email',
+  role: 'role',
+  createdAt: 'createdAt',
+} as const;
 
 /** What an offboarding reclaimed/revoked, for the response + the audit story. */
 export interface OffboardResult {
@@ -41,11 +61,39 @@ export class UsersService {
     private readonly logger: PinoLogger,
   ) {}
 
-  /** All users that have not been soft-deleted. */
-  findAll() {
-    return this.prisma.user.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
+  /**
+   * A single page of non-deleted users (default `createdAt desc`). Server-side `q` search (over
+   * firstName/lastName/email) and an allowlisted sort make the list authoritative — migrated off the
+   * raw-array contract that filtered client-side and silently truncated past the window (ADR-0030).
+   * Runs `findMany(take/skip)` + `count` over the same `where` in one `$transaction`.
+   */
+  async findPage(filters: UserFilters, page: PageQuery) {
+    const where = this.buildWhere(filters);
+    const { take, skip } = offsetOf(page);
+    const orderBy =
+      resolveSortOrBadRequest<Prisma.UserOrderByWithRelationInput>(
+        page,
+        USER_SORT_ALLOWLIST,
+      ) ??
+      ({ createdAt: 'desc' } satisfies Prisma.UserOrderByWithRelationInput);
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.user.findMany({ where, orderBy, take, skip }),
+      this.prisma.user.count({ where }),
+    ]);
+    return pageOf(items, total, page);
+  }
+
+  /** The shared `where` for the user list — used identically by findPage and its count. */
+  private buildWhere({ q }: UserFilters): Prisma.UserWhereInput {
+    return q
+      ? {
+          OR: [
+            { firstName: { contains: q, mode: 'insensitive' } },
+            { lastName: { contains: q, mode: 'insensitive' } },
+            { email: { contains: q, mode: 'insensitive' } },
+          ],
+        }
+      : {};
   }
 
   /** A single non-deleted user by id; throws 404 if missing or deleted. */

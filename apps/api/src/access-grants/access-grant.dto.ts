@@ -2,6 +2,8 @@ import { createZodDto } from 'nestjs-zod';
 import {
   AccessGrantListPageSchema,
   AccessGrantSchema,
+  BatchResultSchema,
+  BatchRevokeGrantsSchema,
   CreateAccessGrantSchema,
   RevokeAccessGrantSchema,
   UpdateAccessGrantExpirySchema,
@@ -29,3 +31,8 @@ export class UpdateAccessGrantNotesDto extends createZodDto(
 export class UpdateAccessGrantExpiryDto extends createZodDto(
   UpdateAccessGrantExpirySchema,
 ) {}
+// Bulk revoke (ADR-0030 amendment): the ids+notes payload and the per-item batch result envelope.
+export class BatchRevokeGrantsDto extends createZodDto(
+  BatchRevokeGrantsSchema,
+) {}
+export class BatchResultDto extends createZodDto(BatchResultSchema) {}

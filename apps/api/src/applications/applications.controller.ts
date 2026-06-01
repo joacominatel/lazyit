@@ -17,19 +17,29 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ApplicationListPageSchema,
   ApplicationSchema,
+  ArticleListItemSchema,
   CreateApplicationSchema,
   UpdateApplicationSchema,
 } from '@lazyit/shared';
-import { ApplicationsService } from './applications.service';
+import {
+  ApplicationsService,
+  APPLICATION_SORT_ALLOWLIST,
+} from './applications.service';
+import { ArticlesService } from '../articles/articles.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
+import { parsePageQuery } from '../common/parse-page-query';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
 import { Roles } from '../auth/roles.decorator';
 
 class ApplicationDto extends createZodDto(ApplicationSchema) {}
+class ApplicationListPageDto extends createZodDto(ApplicationListPageSchema) {}
 class CreateApplicationDto extends createZodDto(CreateApplicationSchema) {}
 class UpdateApplicationDto extends createZodDto(UpdateApplicationSchema) {}
+// Reverse KB lookup (ADR-0042): the lean article-list shape for GET /applications/:id/articles.
+class ArticleListItemDto extends createZodDto(ArticleListItemSchema) {}
 
 @ApiTags('applications')
 @Controller('applications')
@@ -37,13 +47,64 @@ export class ApplicationsController {
   constructor(
     private readonly applications: ApplicationsService,
     private readonly grants: AccessGrantsService,
+    private readonly articles: ArticlesService,
   ) {}
 
   @Get()
-  @ApiOperation({ summary: 'List all applications (excludes soft-deleted)' })
-  @ApiOkResponse({ type: [ApplicationDto] })
-  findAll() {
-    return this.applications.findAll();
+  @ApiOperation({
+    summary:
+      'List applications (paginated; excludes soft-deleted). Server-side q search + sort.',
+  })
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description:
+      'Case-insensitive substring match on name, vendor, url and description',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: Object.keys(APPLICATION_SORT_ALLOWLIST),
+    description:
+      'Server-side sort field. Unknown field → 400. Default: name asc.',
+  })
+  @ApiQuery({
+    name: 'dir',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default asc when sort is set).',
+  })
+  @ApiOkResponse({ type: ApplicationListPageDto })
+  findAll(
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
+  ) {
+    return this.applications.findPage(
+      { q },
+      parsePageQuery({ limit, offset, page, sort, dir }),
+    );
   }
 
   @Get(':id')
@@ -82,6 +143,17 @@ export class ApplicationsController {
       activeOnly: parseBooleanQuery(activeOnly, true),
       includeExpired: parseBooleanQuery(includeExpired, true),
     });
+  }
+
+  @Get(':id/articles')
+  @ApiOperation({
+    summary:
+      "List the PUBLISHED knowledge-base articles linked to this application ('the runbook for THIS app'). (ADR-0042)",
+  })
+  @ApiOkResponse({ type: [ArticleListItemDto] })
+  async findArticles(@Param('id') id: string) {
+    await this.applications.findOne(id); // 404 if the application is missing or soft-deleted
+    return this.articles.findArticlesForApplication(id);
   }
 
   @Post()

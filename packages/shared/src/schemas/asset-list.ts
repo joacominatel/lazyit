@@ -40,7 +40,11 @@ const AssetListLocationSchema = z.object({
   type: z.string(),
 });
 
-/** Trimmed owner ([[user]]) for an active assignment — identity only, no audit/IdP fields. */
+/**
+ * Trimmed owner ([[user]]) for an active assignment — identity only, no IdP fields. `deletedAt` is
+ * carried so the list can dim a departed (soft-deleted) owner's avatar, matching the detail read
+ * (re-added per the ADR-0030 amendment, 2026-06-01 — it was dropped in Round 1).
+ */
 const AssetListAssignmentSchema = z.object({
   id: z.cuid(),
   userId: z.uuid(),
@@ -49,6 +53,8 @@ const AssetListAssignmentSchema = z.object({
     firstName: z.string(),
     lastName: z.string(),
     email: z.email(),
+    // null = a live owner; a timestamp = a soft-deleted (departed) owner the list should dim.
+    deletedAt: z.iso.datetime().nullable(),
   }),
 });
 

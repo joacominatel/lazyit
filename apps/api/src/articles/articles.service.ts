@@ -218,7 +218,12 @@ export class ArticlesService {
       // Snapshot only when a versioned field actually changed (avoids a noise version on a
       // metadata-only or idempotent PATCH). status is never changed here (publish/unpublish do that).
       if (this.versionedFieldsChanged(current, updated)) {
-        await this.snapshotVersion(tx, updated, await this.nextVersion(tx, id), cu);
+        await this.snapshotVersion(
+          tx,
+          updated,
+          await this.nextVersion(tx, id),
+          cu,
+        );
       }
       return updated;
     });
@@ -421,7 +426,11 @@ export class ArticlesService {
    * duplicate link (same article+target) is rejected (409 via the partial unique index, mapped by
    * the global PrismaExceptionFilter).
    */
-  async addLink(articleId: string, data: CreateArticleLink, currentUser?: User) {
+  async addLink(
+    articleId: string,
+    data: CreateArticleLink,
+    currentUser?: User,
+  ) {
     const cu = this.requireCurrentUser(currentUser);
     await this.loadOwned(articleId, cu);
     if (data.assetId) {
@@ -474,6 +483,20 @@ export class ArticlesService {
   async findArticlesForAsset(assetId: string) {
     return this.prisma.article.findMany({
       where: { status: 'PUBLISHED', links: { some: { assetId } } },
+      orderBy: { updatedAt: 'desc' },
+      select: ARTICLE_LIST_SELECT,
+    });
+  }
+
+  /**
+   * Reverse lookup: the PUBLISHED articles linked to a given application
+   * (`GET /applications/:id/articles` — "the runbook for THIS app"). Mirrors
+   * {@link findArticlesForAsset}: DRAFTs are excluded (a draft is author-private; this list is
+   * application-scoped, not author-scoped), and it returns the lean article list shape (no content).
+   */
+  async findArticlesForApplication(applicationId: string) {
+    return this.prisma.article.findMany({
+      where: { status: 'PUBLISHED', links: { some: { applicationId } } },
       orderBy: { updatedAt: 'desc' },
       select: ARTICLE_LIST_SELECT,
     });

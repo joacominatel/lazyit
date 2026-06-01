@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApplicationsService } from './applications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
@@ -19,12 +19,16 @@ type ApplicationMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
 };
 
 type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
 
 type DataCall = [{ data: Record<string, unknown> }];
 type UpdateCall = [{ where: { id: string }; data: Record<string, unknown> }];
+type FindManyCall = [
+  { where?: Record<string, unknown>; orderBy?: Record<string, unknown> },
+];
 
 describe('ApplicationsService', () => {
   let service: ApplicationsService;
@@ -37,13 +41,20 @@ describe('ApplicationsService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
     };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
+
+    // findPage runs [findMany, count] inside $transaction(array) — resolve each promise in the array.
+    const prisma = {
+      application,
+      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         ApplicationsService,
-        { provide: PrismaService, useValue: { application } },
+        { provide: PrismaService, useValue: prisma },
         { provide: SearchService, useValue: search },
       ],
     }).compile();
@@ -51,14 +62,61 @@ describe('ApplicationsService', () => {
     service = moduleRef.get(ApplicationsService);
   });
 
-  it('findAll excludes soft-deleted, ordered by name', async () => {
-    application.findMany.mockResolvedValue([]);
+  it('findPage defaults to name asc, no where, and returns the Page envelope', async () => {
+    application.findMany.mockResolvedValue([{ id: 'app1' }]);
+    application.count.mockResolvedValue(1);
 
-    await service.findAll();
+    const page = await service.findPage({}, { limit: 50, offset: 0 });
 
-    expect(application.findMany).toHaveBeenCalledWith({
-      orderBy: { name: 'asc' },
+    const calls = application.findMany.mock.calls as FindManyCall[];
+    expect(calls[0][0].orderBy).toEqual({ name: 'asc' });
+    expect(calls[0][0].where).toEqual({});
+    expect(page).toEqual({
+      items: [{ id: 'app1' }],
+      total: 1,
+      limit: 50,
+      offset: 0,
     });
+  });
+
+  it('findPage applies a case-insensitive q over name/vendor/url/description', async () => {
+    application.findMany.mockResolvedValue([]);
+    application.count.mockResolvedValue(0);
+
+    await service.findPage({ q: 'jira' }, { limit: 50, offset: 0 });
+
+    const calls = application.findMany.mock.calls as FindManyCall[];
+    expect(calls[0][0].where).toEqual({
+      OR: [
+        { name: { contains: 'jira', mode: 'insensitive' } },
+        { vendor: { contains: 'jira', mode: 'insensitive' } },
+        { url: { contains: 'jira', mode: 'insensitive' } },
+        { description: { contains: 'jira', mode: 'insensitive' } },
+      ],
+    });
+  });
+
+  it('findPage honors an allowlisted sort field + dir', async () => {
+    application.findMany.mockResolvedValue([]);
+    application.count.mockResolvedValue(0);
+
+    await service.findPage(
+      {},
+      { limit: 50, offset: 0, sort: 'vendor', dir: 'desc' },
+    );
+
+    const calls = application.findMany.mock.calls as FindManyCall[];
+    expect(calls[0][0].orderBy).toEqual({ vendor: 'desc' });
+  });
+
+  it('findPage rejects an unknown sort field with 400', async () => {
+    await expect(
+      service.findPage(
+        {},
+        { limit: 50, offset: 0, sort: 'secret', dir: 'asc' },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(application.findMany).not.toHaveBeenCalled();
   });
 
   it('creates an application (no metadata key when omitted)', async () => {

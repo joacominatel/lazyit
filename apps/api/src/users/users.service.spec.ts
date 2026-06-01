@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -79,8 +80,12 @@ describe('UsersService', () => {
     };
     const prisma = {
       user,
-      // $transaction runs the callback with the tx client (synchronously resolved here).
-      $transaction: jest.fn((cb: (client: TxMock) => unknown) => cb(tx)),
+      // Handles BOTH forms: callback (offboard) with the tx client, and array (findPage's
+      // [findMany, count]) which resolves each promise in the array.
+      $transaction: jest.fn(
+        (arg: ((client: TxMock) => unknown) | Promise<unknown>[]) =>
+          Array.isArray(arg) ? Promise.all(arg) : arg(tx),
+      ),
     };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
     // AssetAssignmentsService is mocked; its own logic is covered in its spec. Default: no active
@@ -500,13 +505,66 @@ describe('UsersService', () => {
     });
   });
 
-  it('findAll excludes soft-deleted users', async () => {
-    user.findMany.mockResolvedValue([]);
+  describe('findPage', () => {
+    it('defaults to createdAt desc, no where, and returns the Page envelope', async () => {
+      user.findMany.mockResolvedValue([{ id: 'u1' }]);
+      user.count.mockResolvedValue(1);
 
-    await service.findAll();
+      const page = await service.findPage({}, { limit: 50, offset: 0 });
 
-    expect(user.findMany).toHaveBeenCalledWith({
-      orderBy: { createdAt: 'desc' },
+      expect(user.findMany).toHaveBeenCalledWith({
+        where: {},
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        skip: 0,
+      });
+      expect(page).toEqual({
+        items: [{ id: 'u1' }],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      });
+    });
+
+    it('applies a case-insensitive q over firstName/lastName/email', async () => {
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage({ q: 'bob' }, { limit: 50, offset: 0 });
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      expect(call.where).toEqual({
+        OR: [
+          { firstName: { contains: 'bob', mode: 'insensitive' } },
+          { lastName: { contains: 'bob', mode: 'insensitive' } },
+          { email: { contains: 'bob', mode: 'insensitive' } },
+        ],
+      });
+    });
+
+    it('honors an allowlisted sort and rejects an unknown one (400)', async () => {
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, sort: 'email', dir: 'asc' },
+      );
+      const call = (
+        user.findMany.mock.calls as Array<
+          [{ orderBy: Record<string, unknown> }]
+        >
+      )[0][0];
+      expect(call.orderBy).toEqual({ email: 'asc' });
+
+      await expect(
+        service.findPage(
+          {},
+          { limit: 50, offset: 0, sort: 'password', dir: 'asc' },
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 

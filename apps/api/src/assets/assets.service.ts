@@ -1,11 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type {
   AssetStatus,
+  BatchResult,
   CreateAsset,
   PageQuery,
   UpdateAsset,
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
+import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { Prisma } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -26,6 +28,20 @@ export interface AssetFilters {
   /** Case-insensitive substring over name / serial / assetTag (OR). */
   q?: string;
 }
+
+/**
+ * Server-side sort allowlist for `GET /assets` (ADR-0030 amendment). Maps each PUBLIC `?sort=` key to
+ * the Prisma column to order by — bounding the sortable surface to a curated set. An unknown key is a
+ * 400 (resolveSortOrBadRequest). With no `sort`, the list keeps its default `createdAt desc` order.
+ */
+export const ASSET_SORT_ALLOWLIST = {
+  name: 'name',
+  assetTag: 'assetTag',
+  serial: 'serial',
+  status: 'status',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+} as const;
 
 // Inline relations for the expanded reads (GET /assets, GET /assets/:id): the model (+ its
 // category, which lives on the model), the location, and the *active* owners (releasedAt = null)
@@ -78,7 +94,15 @@ const ASSET_LIST_SELECT = {
       id: true,
       userId: true,
       user: {
-        select: { id: true, firstName: true, lastName: true, email: true },
+        // `deletedAt` is carried so the LIST can dim a departed (soft-deleted) owner's avatar,
+        // matching the detail read (ADR-0030 amendment, 2026-06-01 — re-added after Round 1 dropped it).
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          deletedAt: true,
+        },
       },
     },
   },
@@ -108,10 +132,18 @@ export class AssetsService {
   async findPage(filters: AssetFilters = {}, page: PageQuery) {
     const where = this.buildWhere(filters);
     const { take, skip } = offsetOf(page);
+    // Server-side sort over the FULL result set (not page-local) via the per-resource allowlist
+    // (ADR-0030 amendment). No `sort` ⇒ undefined ⇒ the default `createdAt desc` order below.
+    const orderBy =
+      resolveSortOrBadRequest<Prisma.AssetOrderByWithRelationInput>(
+        page,
+        ASSET_SORT_ALLOWLIST,
+      ) ??
+      ({ createdAt: 'desc' } satisfies Prisma.AssetOrderByWithRelationInput);
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.asset.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         take,
         skip,
         select: ASSET_LIST_SELECT,
@@ -290,6 +322,145 @@ export class AssetsService {
     this.search.upsert('assets', projectAsset(restored));
     // Return the expanded relation graph (same shape as findOne), consistent with the no-op branch.
     return this.findOne(id);
+  }
+
+  // --- batch (bulk) actions (ADR-0030 amendment) ---------------------------
+  // Each batch runs in ONE transaction but keeps PER-ENTITY auditability: one AssetHistory event per
+  // item, exactly as the single-item action records it — never one event for the whole batch. A
+  // batch is a convenience over N single actions, not a different audit event. Ids that are a no-op
+  // (already deleted/restored, already in the target status, or not found) are SKIPPED (reported in
+  // the result), never an error, so a partial multi-select still commits. Search sync is fired once
+  // per mutated row after the commit (same fire-and-forget contract as the single-item paths).
+
+  /**
+   * Bulk soft-delete (ADMIN). For each live id: stamp `deletedAt` + emit a `DELETED` history event,
+   * all inside one `$transaction`. An id that is missing or already soft-deleted is skipped (not an
+   * error). Returns the per-id outcome. Drops each mutated id from the search index after the commit.
+   */
+  async batchRemove(ids: string[], user?: User): Promise<BatchResult> {
+    const performedById = this.actor.resolve(user);
+    const live = await this.prisma.asset.findMany({
+      where: { id: { in: ids } },
+      select: { id: true },
+    });
+    const liveIds = new Set(live.map((a) => a.id));
+    const succeeded = [...liveIds];
+    const skipped = ids
+      .filter((id) => !liveIds.has(id))
+      .map((id) => ({ id, reason: 'not_found' }));
+
+    if (succeeded.length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        for (const id of succeeded) {
+          await tx.asset.update({
+            where: { id },
+            data: { deletedAt: new Date() },
+          });
+          await this.history.record(tx, {
+            assetId: id,
+            eventType: 'DELETED',
+            performedById,
+          });
+        }
+      });
+      for (const id of succeeded) this.search.remove('assets', id);
+    }
+    return { requested: ids.length, succeeded, skipped };
+  }
+
+  /**
+   * Bulk restore (ADMIN). For each soft-deleted id: clear `deletedAt` + emit a `RESTORED` history
+   * event, all inside one `$transaction`. An id that is missing or already live is skipped. Returns
+   * the per-id outcome and re-indexes each restored row after the commit. A unique-constraint clash
+   * on a freed serial/assetTag surfaces as the usual 409 (the whole batch rolls back).
+   */
+  async batchRestore(ids: string[], user?: User): Promise<BatchResult> {
+    const performedById = this.actor.resolve(user);
+    const rows = await this.prisma.asset.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, deletedAt: true },
+      includeSoftDeleted: true,
+    } as Prisma.AssetFindManyArgs);
+    const found = new Map(rows.map((r) => [r.id, r.deletedAt]));
+    const succeeded: string[] = [];
+    const skipped: { id: string; reason: string }[] = [];
+    for (const id of ids) {
+      if (!found.has(id)) skipped.push({ id, reason: 'not_found' });
+      else if (found.get(id) === null)
+        skipped.push({ id, reason: 'already_in_state' });
+      else succeeded.push(id);
+    }
+
+    if (succeeded.length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        for (const id of succeeded) {
+          await tx.asset.update({
+            where: { id },
+            data: { deletedAt: null },
+          });
+          await this.history.record(tx, {
+            assetId: id,
+            eventType: 'RESTORED',
+            performedById,
+          });
+        }
+      });
+      for (const id of succeeded) {
+        const row = await this.prisma.asset.findFirst({ where: { id } });
+        if (row) this.search.upsert('assets', projectAsset(row));
+      }
+    }
+    return { requested: ids.length, succeeded, skipped };
+  }
+
+  /**
+   * Bulk status-change (ADMIN). For each live id whose status DIFFERS from the target: set the new
+   * status + emit a `STATUS_CHANGED` history event ({ from, to }) — identical to the single-item
+   * update path — inside one `$transaction`. An id already at the target status is skipped (no event,
+   * matching the no-op semantics of `update`). Missing/soft-deleted ids are skipped as not found.
+   * Re-indexes each changed row after the commit.
+   */
+  async batchSetStatus(
+    ids: string[],
+    status: AssetStatus,
+    user?: User,
+  ): Promise<BatchResult> {
+    const performedById = this.actor.resolve(user);
+    const live = await this.prisma.asset.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, status: true },
+    });
+    const current = new Map(live.map((a) => [a.id, a.status]));
+    const succeeded: string[] = [];
+    const skipped: { id: string; reason: string }[] = [];
+    for (const id of ids) {
+      if (!current.has(id)) skipped.push({ id, reason: 'not_found' });
+      else if (current.get(id) === status)
+        skipped.push({ id, reason: 'already_in_state' });
+      else succeeded.push(id);
+    }
+
+    if (succeeded.length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        for (const id of succeeded) {
+          await tx.asset.update({ where: { id }, data: { status } });
+          await this.history.record(tx, {
+            assetId: id,
+            eventType: 'STATUS_CHANGED',
+            payload: {
+              from: current.get(id),
+              to: status,
+            },
+            performedById,
+          });
+        }
+      });
+      for (const id of succeeded) {
+        const row = await this.prisma.asset.findFirst({ where: { id } });
+        if (row) this.search.upsert('assets', projectAsset(row));
+      }
+    }
+    return { requested: ids.length, succeeded, skipped };
   }
 
   /** Lightweight 404 guard for writes and the nested assignments endpoint (no relation loading). */

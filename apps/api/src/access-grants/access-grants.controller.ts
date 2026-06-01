@@ -23,6 +23,8 @@ import { parsePageQuery } from '../common/parse-page-query';
 import {
   AccessGrantDto,
   AccessGrantListPageDto,
+  BatchResultDto,
+  BatchRevokeGrantsDto,
   CreateAccessGrantDto,
   RevokeAccessGrantDto,
   UpdateAccessGrantExpiryDto,
@@ -96,6 +98,17 @@ export class AccessGrantsController {
     );
   }
 
+  @Post('batch/revoke')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Bulk revoke active grants (per-grant revokedAt/revokedById; one transaction) — ADMIN only',
+  })
+  @ApiOkResponse({ type: BatchResultDto })
+  batchRevoke(@Body() dto: BatchRevokeGrantsDto, @CurrentUser() user?: User) {
+    return this.grants.batchRevoke(dto.ids, dto.notes, user);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get a grant by id' })
   @ApiOkResponse({ type: AccessGrantDto })
@@ -109,10 +122,7 @@ export class AccessGrantsController {
     summary: 'Open a grant (give a user access to an application) — ADMIN only',
   })
   @ApiCreatedResponse({ type: AccessGrantDto })
-  create(
-    @Body() dto: CreateAccessGrantDto,
-    @CurrentUser() user?: User,
-  ) {
+  create(@Body() dto: CreateAccessGrantDto, @CurrentUser() user?: User) {
     return this.grants.create(dto, user);
   }
 
@@ -145,7 +155,8 @@ export class AccessGrantsController {
   @Patch(':id/expiry')
   @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Change the expiry of a grant (null makes it permanent) — ADMIN only',
+    summary:
+      'Change the expiry of a grant (null makes it permanent) — ADMIN only',
   })
   @ApiOkResponse({ type: AccessGrantDto })
   updateExpiry(

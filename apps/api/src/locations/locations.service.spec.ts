@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { LocationsService } from './locations.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
@@ -17,6 +17,7 @@ type PrismaLocationMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
 };
 
 type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
@@ -32,13 +33,19 @@ describe('LocationsService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
     };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
+
+    const prisma = {
+      location,
+      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         LocationsService,
-        { provide: PrismaService, useValue: { location } },
+        { provide: PrismaService, useValue: prisma },
         { provide: SearchService, useValue: search },
       ],
     }).compile();
@@ -167,13 +174,64 @@ describe('LocationsService', () => {
     expect(search.remove).not.toHaveBeenCalled();
   });
 
-  it('findAll excludes soft-deleted locations', async () => {
-    location.findMany.mockResolvedValue([]);
+  it('findPage defaults to createdAt desc and returns the Page envelope', async () => {
+    location.findMany.mockResolvedValue([{ id: 'loc1' }]);
+    location.count.mockResolvedValue(1);
 
-    await service.findAll();
+    const page = await service.findPage({}, { limit: 50, offset: 0 });
 
     expect(location.findMany).toHaveBeenCalledWith({
+      where: {},
       orderBy: { createdAt: 'desc' },
+      take: 50,
+      skip: 0,
     });
+    expect(page).toEqual({
+      items: [{ id: 'loc1' }],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+  });
+
+  it('findPage applies a case-insensitive q over name/address/floor/description', async () => {
+    location.findMany.mockResolvedValue([]);
+    location.count.mockResolvedValue(0);
+
+    await service.findPage({ q: 'hq' }, { limit: 50, offset: 0 });
+
+    const call = (
+      location.findMany.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.where).toEqual({
+      OR: [
+        { name: { contains: 'hq', mode: 'insensitive' } },
+        { address: { contains: 'hq', mode: 'insensitive' } },
+        { floor: { contains: 'hq', mode: 'insensitive' } },
+        { description: { contains: 'hq', mode: 'insensitive' } },
+      ],
+    });
+  });
+
+  it('findPage honors an allowlisted sort and rejects an unknown one (400)', async () => {
+    location.findMany.mockResolvedValue([]);
+    location.count.mockResolvedValue(0);
+
+    await service.findPage(
+      {},
+      { limit: 50, offset: 0, sort: 'name', dir: 'asc' },
+    );
+    const call = (
+      location.findMany.mock.calls as Array<
+        [{ orderBy: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.orderBy).toEqual({ name: 'asc' });
+
+    await expect(
+      service.findPage({}, { limit: 50, offset: 0, sort: 'nope', dir: 'asc' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

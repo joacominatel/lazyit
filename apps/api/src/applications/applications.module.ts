@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 import { ApplicationsController } from './applications.controller';
 import { ApplicationsService } from './applications.service';
 import { AccessGrantsModule } from '../access-grants/access-grants.module';
+import { ArticlesModule } from '../articles/articles.module';
 
 @Module({
-  // Imports AccessGrantsModule for the nested /applications/:id/access-grants endpoint.
-  imports: [AccessGrantsModule],
+  // AccessGrantsModule → nested /applications/:id/access-grants; ArticlesModule → ArticlesService for
+  // the reverse GET /applications/:id/articles (ADR-0042).
+  imports: [AccessGrantsModule, ArticlesModule],
   controllers: [ApplicationsController],
   providers: [ApplicationsService],
   exports: [ApplicationsService],

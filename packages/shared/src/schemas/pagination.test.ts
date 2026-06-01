@@ -5,9 +5,11 @@ import {
   MAX_PAGE_LIMIT,
   PageQuerySchema,
   PageMetaSchema,
+  UnknownSortFieldError,
   offsetOf,
   pageOf,
   pageSchema,
+  resolveSort,
   type PageQuery,
 } from "./pagination";
 
@@ -77,6 +79,90 @@ describe("PageQuerySchema — page ↔ offset normalization", () => {
 
   test("rejects page < 1", () => {
     expect(PageQuerySchema.safeParse({ page: 0 }).success).toBe(false);
+  });
+});
+
+describe("PageQuerySchema — sort & dir (ADR-0030 amendment)", () => {
+  test("no sort → no sort/dir on the normalized window", () => {
+    expect(parse({ limit: 10 })).toEqual({ limit: 10, offset: 0 });
+  });
+
+  test("sort with no dir defaults dir to asc", () => {
+    expect(parse({ sort: "name" })).toEqual({
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+      sort: "name",
+      dir: "asc",
+    });
+  });
+
+  test("sort + explicit dir is carried through verbatim", () => {
+    expect(parse({ sort: "createdAt", dir: "desc" })).toEqual({
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+      sort: "createdAt",
+      dir: "desc",
+    });
+  });
+
+  test("dir without sort is dropped (no sort ⇒ no dir ⇒ service default order)", () => {
+    expect(parse({ dir: "desc" })).toEqual({
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+    });
+  });
+
+  test("rejects an invalid dir", () => {
+    expect(
+      PageQuerySchema.safeParse({ sort: "name", dir: "sideways" }).success,
+    ).toBe(false);
+  });
+
+  test("rejects an empty sort string", () => {
+    expect(PageQuerySchema.safeParse({ sort: "" }).success).toBe(false);
+  });
+});
+
+describe("resolveSort — per-resource allowlist", () => {
+  const allow = { name: "name", updated: "updatedAt" };
+
+  test("no sort on the query → undefined (use the service default order)", () => {
+    expect(resolveSort({ sort: undefined, dir: undefined }, allow)).toBe(
+      undefined,
+    );
+  });
+
+  test("an allowed key maps to its Prisma field with the direction", () => {
+    expect(resolveSort({ sort: "name", dir: "asc" }, allow)).toEqual({
+      name: "asc",
+    });
+    expect(resolveSort({ sort: "updated", dir: "desc" }, allow)).toEqual({
+      updatedAt: "desc",
+    });
+  });
+
+  test("a wire key may differ from its Prisma column", () => {
+    expect(resolveSort({ sort: "updated", dir: "asc" }, allow)).toEqual({
+      updatedAt: "asc",
+    });
+  });
+
+  test("defaults dir to asc when omitted", () => {
+    expect(resolveSort({ sort: "name", dir: undefined }, allow)).toEqual({
+      name: "asc",
+    });
+  });
+
+  test("an unknown key throws UnknownSortFieldError listing the allowed fields", () => {
+    expect(() => resolveSort({ sort: "secret", dir: "asc" }, allow)).toThrow(
+      UnknownSortFieldError,
+    );
+    try {
+      resolveSort({ sort: "secret", dir: "asc" }, allow);
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnknownSortFieldError);
+      expect((err as UnknownSortFieldError).allowed).toEqual(["name", "updated"]);
+    }
   });
 });
 

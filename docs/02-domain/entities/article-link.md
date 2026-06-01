@@ -80,8 +80,9 @@ unique indexes (one per target); `@@index` on `articleId`, `assetId`, `applicati
   Author-only, `ADMIN`/`MEMBER`.
 - `GET /articles/:id/links` — list an article's links (any reader of the article).
 - `GET /assets/:id/articles` — reverse lookup: the **PUBLISHED** articles linked to an asset (lean
-  list shape, no `content`). The application reverse (`GET /applications/:id/articles`) is a deferred
-  trivial follow-up.
+  list shape, no `content`).
+- `GET /applications/:id/articles` — the application reverse lookup, symmetric to the asset one
+  (PUBLISHED only, lean list shape). Shipped in the ADR-0030 amendment (2026-06-01).
 
 Related: [[article]] · [[article-version]] · [[asset]] · [[application]] · [[user]] ·
 [[0042-article-versioning-and-linking]] · [[0021-knowledge-base-design]] · [[0005-id-strategy]] ·
