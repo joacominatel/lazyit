@@ -18,6 +18,15 @@ export const RoleSchema = z.enum(["ADMIN", "MEMBER", "VIEWER"]);
 export type Role = z.infer<typeof RoleSchema>;
 
 /**
+ * A normalized email for WRITE payloads (ADR-0041). Email is case-insensitive end-to-end: the DB
+ * column is `citext` and the live-row unique index is case-insensitive, so input is canonicalized
+ * (trim + lowercase) before it is stored. This makes "Bob@x" and "bob@x" the same address on input,
+ * matching the citext column, and keeps the stored value tidy. The read `UserSchema.email` stays a
+ * plain `z.email()` — the value coming back is already normalized.
+ */
+export const EmailSchema = z.string().trim().toLowerCase().pipe(z.email());
+
+/**
  * The full User entity as returned by the API. Date fields are ISO-8601 strings (the wire
  * shape): the API serializes Prisma `DateTime`s to strings, and `z.date()` cannot be
  * represented in JSON Schema / OpenAPI (see docs/03-decisions/0018-api-documentation-swagger.md).
@@ -44,7 +53,8 @@ export const UserSchema = z.object({
  * federated identity (SEC-006). The strictObject rejects it (and any other unknown key).
  */
 export const CreateUserSchema = z.strictObject({
-  email: z.email(),
+  // Normalized (trim + lowercase) so the stored value matches the citext column (ADR-0041).
+  email: EmailSchema,
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
   // RBAC role (ADR-0040). Optional; omitted → server default MEMBER. Accepting it here is SAFE only
@@ -56,7 +66,8 @@ export const CreateUserSchema = z.strictObject({
 /** Partial update; `isActive` toggles activation / offboarding. `role` changes a user's RBAC role. */
 export const UpdateUserSchema = z
   .strictObject({
-    email: z.email(),
+    // Normalized (trim + lowercase) so the stored value matches the citext column (ADR-0041).
+    email: EmailSchema,
     firstName: z.string().trim().min(1).max(100),
     lastName: z.string().trim().min(1).max(100),
     isActive: z.boolean(),
