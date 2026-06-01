@@ -73,4 +73,14 @@ export class AssetModelsController {
   remove(@Param('id') id: string) {
     return this.models.remove(id);
   }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore a soft-deleted asset model — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: AssetModelDto })
+  restore(@Param('id') id: string) {
+    return this.models.restore(id);
+  }
 }
