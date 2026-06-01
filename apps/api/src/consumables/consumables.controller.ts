@@ -127,6 +127,16 @@ export class ConsumablesController {
     return this.consumables.remove(id);
   }
 
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore a soft-deleted consumable — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: ConsumableDto })
+  restore(@Param('id') id: string) {
+    return this.consumables.restore(id);
+  }
+
   @Post(':id/movements')
   @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
