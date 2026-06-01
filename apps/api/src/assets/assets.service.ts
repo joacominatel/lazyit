@@ -10,6 +10,7 @@ import { Prisma } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import { jsonDeepEqual } from '../common/deep-equal';
 import {
   AssetHistoryService,
   type RecordAssetEvent,
@@ -351,10 +352,9 @@ export class AssetsService {
     if (before.modelId !== updated.modelId) {
       change('MODEL_CHANGED', before.modelId, updated.modelId);
     }
-    if (
-      JSON.stringify(before.specs ?? null) !==
-      JSON.stringify(updated.specs ?? null)
-    ) {
+    if (!jsonDeepEqual(before.specs, updated.specs)) {
+      // Order-insensitive deep compare (not JSON.stringify): jsonb does not preserve object key
+      // order, so reordered specs keys must not emit a spurious SPECS_CHANGED (see deep-equal.ts).
       // specs can be large; record the change without echoing both blobs into the payload.
       events.push({
         assetId: updated.id,

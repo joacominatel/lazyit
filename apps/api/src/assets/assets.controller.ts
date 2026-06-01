@@ -10,7 +10,6 @@ import {
   Query,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -35,7 +34,8 @@ import { AssetsService } from './assets.service';
 import { ArticlesService } from '../articles/articles.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
-import { parseActiveOnly } from '../asset-assignments/active-only';
+import { parseBooleanQuery } from '../common/parse-boolean-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
@@ -55,7 +55,6 @@ class AssetHistoryDto extends createZodDto(AssetHistorySchema) {}
 // Reverse KB lookup (ADR-0042): the lean article-list shape for GET /assets/:id/articles.
 class ArticleListItemDto extends createZodDto(ArticleListItemSchema) {}
 
-@ApiBearerAuth()
 @ApiTags('assets')
 @Controller('assets')
 export class AssetsController {
@@ -124,8 +123,8 @@ export class AssetsController {
     }
     return this.assets.findPage(
       {
-        categoryId,
-        locationId,
+        categoryId: parseCuidQuery(categoryId, 'categoryId'),
+        locationId: parseCuidQuery(locationId, 'locationId'),
         status: parsedStatus,
         q,
       },
@@ -161,7 +160,7 @@ export class AssetsController {
     await this.assets.assertExists(id); // 404 if the asset is missing or soft-deleted
     return this.assignments.findAll({
       assetId: id,
-      activeOnly: parseActiveOnly(activeOnly),
+      activeOnly: parseBooleanQuery(activeOnly, true),
       includeUser: true,
     });
   }

@@ -8,7 +8,6 @@ import {
   Query,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
@@ -17,8 +16,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { AccessGrantsService } from './access-grants.service';
-import { parseActiveOnly, parseIncludeExpired } from './query-params';
+import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseUuidQuery } from '../common/parse-uuid-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import {
   AccessGrantDto,
@@ -32,7 +32,6 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
 
-@ApiBearerAuth()
 @ApiTags('access-grants')
 @Controller('access-grants')
 export class AccessGrantsController {
@@ -89,9 +88,9 @@ export class AccessGrantsController {
     return this.grants.findPage(
       {
         userId: parseUuidQuery(userId, 'userId'),
-        applicationId,
-        activeOnly: parseActiveOnly(activeOnly),
-        includeExpired: parseIncludeExpired(includeExpired),
+        applicationId: parseCuidQuery(applicationId, 'applicationId'),
+        activeOnly: parseBooleanQuery(activeOnly, true),
+        includeExpired: parseBooleanQuery(includeExpired, true),
       },
       parsePageQuery({ limit, offset, page }),
     );

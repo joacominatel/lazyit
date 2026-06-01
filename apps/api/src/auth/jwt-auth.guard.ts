@@ -260,6 +260,17 @@ export class JwtAuthGuard implements CanActivate {
       }
     }
 
+    // Harden the JIT row against the @lazyit/shared User contract (firstName/lastName are
+    // .min(1).max(100); ADR-0040/0038). The resolution above can still yield an empty field — a
+    // whitespace-only given_name, a single-token `name`, or the email-local-part path (no last
+    // name) — which would persist a row the API/zod schema would reject, leaving the user broken in
+    // the directory. Coerce both to a non-empty, trimmed, ≤100-char value, falling back to the
+    // email local-part (then the sub) so the JIT row always satisfies the same constraints as an
+    // API-created user. The IdP claims still take precedence whenever they are usable.
+    const fallback = (email.split('@')[0] || sub).slice(0, 100);
+    firstName = this.coerceName(firstName, fallback);
+    lastName = this.coerceName(lastName, fallback);
+
     // Upsert on the externalId unique key (race-proof): if a parallel first-login request already
     // created the row, the `update: {}` no-op returns it instead of throwing P2002. `where` targets
     // only `externalId`, so the soft-deleted case is already handled above (we 403 before reaching
@@ -276,6 +287,17 @@ export class JwtAuthGuard implements CanActivate {
       },
       update: {},
     });
+  }
+
+  /**
+   * Coerce a JIT-resolved name field to a value that satisfies the @lazyit/shared User contract
+   * (trimmed, non-empty, ≤100 chars). Trims the candidate; if it is empty after trimming, uses the
+   * supplied non-empty fallback (the email local-part, then the sub). Both inputs are then capped at
+   * 100 to match the schema's `.max(100)`. Keeps the JIT row consistent with an API-created user.
+   */
+  private coerceName(candidate: string, fallback: string): string {
+    const trimmed = candidate.trim();
+    return (trimmed.length > 0 ? trimmed : fallback).slice(0, 100);
   }
 
   /**

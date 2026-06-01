@@ -13,7 +13,6 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
-  ApiBearerAuth,
   ApiBody,
   ApiConsumes,
   ApiCreatedResponse,
@@ -39,6 +38,7 @@ import {
 import { ArticlesService } from './articles.service';
 import { maxImportBytes } from './article-import';
 import { parseUuidQuery } from '../common/parse-uuid-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
@@ -57,7 +57,6 @@ class ArticleVersionPageDto extends createZodDto(ArticleVersionPageSchema) {}
 class ArticleLinkDto extends createZodDto(ArticleLinkSchema) {}
 class CreateArticleLinkDto extends createZodDto(CreateArticleLinkSchema) {}
 
-@ApiBearerAuth()
 @ApiTags('articles')
 @Controller('articles')
 export class ArticlesController {
@@ -121,7 +120,7 @@ export class ArticlesController {
     }
     return this.articles.findPage(
       {
-        categoryId,
+        categoryId: parseCuidQuery(categoryId, 'categoryId'),
         authorId: parseUuidQuery(authorId, 'authorId'),
         status: parsedStatus,
         q,

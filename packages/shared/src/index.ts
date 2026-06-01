@@ -3,6 +3,7 @@
 export * from "./constants/app";
 export * from "./schemas/access-grant";
 export * from "./schemas/access-grant-list";
+export * from "./schemas/api-error";
 export * from "./schemas/application";
 export * from "./schemas/application-category";
 export * from "./schemas/article";

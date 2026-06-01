@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { int4 } from "./primitives";
+import { int4, requireAtLeastOneKey } from "./primitives";
 
 /**
  * ApplicationCategory — user-managed grouping for Applications (SaaS, Internal, Service, …).
@@ -33,15 +33,17 @@ export const CreateApplicationCategorySchema = z.strictObject({
   order: int4({ example: 0 }).optional(),
 });
 
-/** Partial update; any subset of the editable fields. */
-export const UpdateApplicationCategorySchema = z
-  .strictObject({
-    name: z.string().trim().min(1).max(100),
-    description: z.string().trim().min(1).max(1000),
-    icon: z.string().trim().min(1).max(100),
-    order: int4({ example: 0 }),
-  })
-  .partial();
+/** Partial update; any subset of the editable fields (an empty body is rejected). */
+export const UpdateApplicationCategorySchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      name: z.string().trim().min(1).max(100),
+      description: z.string().trim().min(1).max(1000),
+      icon: z.string().trim().min(1).max(100),
+      order: int4({ example: 0 }),
+    })
+    .partial(),
+);
 
 export type ApplicationCategory = z.infer<typeof ApplicationCategorySchema>;
 export type CreateApplicationCategory = z.infer<

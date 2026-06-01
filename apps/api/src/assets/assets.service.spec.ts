@@ -623,12 +623,23 @@ describe('AssetsService', () => {
     expect(history.record).not.toHaveBeenCalled();
   });
 
-  it('does not emit SPECS_CHANGED when specs are deep-equal (compared by JSON)', async () => {
+  it('does not emit SPECS_CHANGED when the specs are structurally equal', async () => {
     const specs = { ram: '64GB' };
     asset.findFirst.mockResolvedValue(beforeRow({ specs }));
     tx.update.mockResolvedValue(beforeRow({ specs: { ram: '64GB' } }));
 
     await service.update('a1', { specs: { ram: '64GB' } });
+
+    expect(history.record).not.toHaveBeenCalled();
+  });
+
+  it('does not emit a spurious SPECS_CHANGED when only the jsonb key ORDER differs', async () => {
+    // jsonb does not preserve key order, so a re-save can come back with keys reordered. The deep
+    // compare must treat this as no change (the false-positive this fix removes — see deep-equal.ts).
+    asset.findFirst.mockResolvedValue(beforeRow({ specs: { cpu: 'i7', ram: '64GB' } }));
+    tx.update.mockResolvedValue(beforeRow({ specs: { ram: '64GB', cpu: 'i7' } }));
+
+    await service.update('a1', { specs: { ram: '64GB', cpu: 'i7' } });
 
     expect(history.record).not.toHaveBeenCalled();
   });

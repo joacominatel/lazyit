@@ -23,7 +23,8 @@ the "what changed, when, by whom?" trail that auditing requires ([[problem-space
   hard-deleted; soft delete bypasses it).
 - `eventType` — `AssetHistoryEventType` enum (below).
 - `payload` — optional jsonb; contextual data (e.g. `{ from, to }` on `STATUS_CHANGED`,
-  `{ userId }` on `ASSIGNED`). Unvalidated, same debt as `Asset.specs` ([[0007-flexible-asset-specs-jsonb]]).
+  `{ userId }` on **both `ASSIGNED` and `RELEASED`** — so a multi-owner asset's timeline can tell
+  which owner was assigned/released). Unvalidated, same debt as `Asset.specs` ([[0007-flexible-asset-specs-jsonb]]).
 - `performedById` — optional FK → [[user]], `onDelete: SetNull`; the actor, from the `X-User-Id`
   shim ([[0022-draft-visibility-auth-shim]]). `null` = system / unknown.
 - `createdAt` only — append-only ([[0006-soft-delete-and-auditing]]).

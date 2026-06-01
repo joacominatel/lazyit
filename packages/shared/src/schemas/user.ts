@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requireAtLeastOneKey } from "./primitives";
 
 /**
  * User — a person in the organization.
@@ -63,19 +64,24 @@ export const CreateUserSchema = z.strictObject({
   role: RoleSchema.optional(),
 });
 
-/** Partial update; `isActive` toggles activation / offboarding. `role` changes a user's RBAC role. */
-export const UpdateUserSchema = z
-  .strictObject({
-    // Normalized (trim + lowercase) so the stored value matches the citext column (ADR-0041).
-    email: EmailSchema,
-    firstName: z.string().trim().min(1).max(100),
-    lastName: z.string().trim().min(1).max(100),
-    isActive: z.boolean(),
-    // RBAC role (ADR-0040). Same ADMIN-gated safety as CreateUserSchema: only an ADMIN can reach the
-    // Users controller, so a non-admin can never escalate their own (or anyone's) role.
-    role: RoleSchema,
-  })
-  .partial();
+/**
+ * Partial update (an empty body is rejected); `isActive` toggles activation / offboarding. `role`
+ * changes a user's RBAC role.
+ */
+export const UpdateUserSchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      // Normalized (trim + lowercase) so the stored value matches the citext column (ADR-0041).
+      email: EmailSchema,
+      firstName: z.string().trim().min(1).max(100),
+      lastName: z.string().trim().min(1).max(100),
+      isActive: z.boolean(),
+      // RBAC role (ADR-0040). Same ADMIN-gated safety as CreateUserSchema: only an ADMIN can reach
+      // the Users controller, so a non-admin can never escalate their own (or anyone's) role.
+      role: RoleSchema,
+    })
+    .partial(),
+);
 
 export type User = z.infer<typeof UserSchema>;
 export type CreateUser = z.infer<typeof CreateUserSchema>;

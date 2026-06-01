@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { int4, INT4_MAX, INT4_MIN } from "./primitives";
+import {
+  int4,
+  INT4_MAX,
+  INT4_MIN,
+  requireAtLeastOneKey,
+} from "./primitives";
 
 describe("int4()", () => {
   test("accepts the int4 boundary values", () => {
@@ -42,5 +47,27 @@ describe("int4()", () => {
       unrepresentable: "any",
     }) as { properties: { n: { example?: number } } };
     expect(json.properties.n.example).toBe(5);
+  });
+});
+
+describe("requireAtLeastOneKey() — reject empty PATCH bodies", () => {
+  const Update = requireAtLeastOneKey(
+    z.strictObject({ name: z.string(), notes: z.string().nullable() }).partial(),
+  );
+
+  test("rejects an empty body", () => {
+    expect(Update.safeParse({}).success).toBe(false);
+  });
+
+  test("accepts a body with at least one field", () => {
+    expect(Update.safeParse({ name: "x" }).success).toBe(true);
+  });
+
+  test("counts a field explicitly set to null as a change (clearing a field)", () => {
+    expect(Update.safeParse({ notes: null }).success).toBe(true);
+  });
+
+  test("still enforces the wrapped shape (a bad value fails)", () => {
+    expect(Update.safeParse({ name: 123 }).success).toBe(false);
   });
 });

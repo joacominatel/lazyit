@@ -23,10 +23,7 @@ import {
 } from '@lazyit/shared';
 import { ApplicationsService } from './applications.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
-import {
-  parseActiveOnly,
-  parseIncludeExpired,
-} from '../access-grants/query-params';
+import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
 import { Roles } from '../auth/roles.decorator';
 
@@ -82,8 +79,8 @@ export class ApplicationsController {
     await this.applications.findOne(id); // 404 if the application is missing or soft-deleted
     return this.grants.findAll({
       applicationId: id,
-      activeOnly: parseActiveOnly(activeOnly),
-      includeExpired: parseIncludeExpired(includeExpired),
+      activeOnly: parseBooleanQuery(activeOnly, true),
+      includeExpired: parseBooleanQuery(includeExpired, true),
     });
   }
 
