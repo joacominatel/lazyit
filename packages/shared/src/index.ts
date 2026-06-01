@@ -18,6 +18,7 @@ export * from "./schemas/asset-expanded";
 export * from "./schemas/asset-history";
 export * from "./schemas/asset-list";
 export * from "./schemas/asset-model";
+export * from "./schemas/config";
 export * from "./schemas/consumable";
 export * from "./schemas/consumable-category";
 export * from "./schemas/consumable-movement";

@@ -20,11 +20,14 @@ import { auth } from "@/auth";
 export default auth((req) => {
   const { nextUrl, auth: session } = req;
 
-  // /api/auth/** and /login are always public — handled by matcher exclusion below,
-  // but we add an explicit guard here as belt-and-suspenders.
+  // /api/auth/**, /login and /setup are always public — handled by matcher exclusion below, but we
+  // add an explicit guard here as belt-and-suspenders. /setup is the first-run wizard (ADR-0043
+  // Phase 3): it MUST be reachable before any login exists (no ADMIN yet → no session), so it cannot
+  // sit behind the (app) auth guard. It self-locks server-side once an ADMIN exists.
   const isPublic =
     nextUrl.pathname.startsWith("/api/auth") ||
     nextUrl.pathname === "/login" ||
+    nextUrl.pathname === "/setup" ||
     nextUrl.pathname === "/";
 
   if (!isPublic && !session) {
@@ -42,8 +45,9 @@ export const config = {
    * - Static files (favicon, images, fonts, etc.)
    * - Auth.js OIDC endpoints (/api/auth/*)
    * - The login page itself (/login)
+   * - The first-run setup wizard (/setup) — public, pre-login (ADR-0043 Phase 3)
    */
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/auth|login|$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/auth|login|setup|$).*)",
   ],
 };

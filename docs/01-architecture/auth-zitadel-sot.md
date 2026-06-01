@@ -374,22 +374,45 @@ zitadel_db (healthy) → zitadel (healthy) → zitadel-bootstrap (completed) →
 
 ### 5a. Detection endpoint
 
+> **Implemented (PR 3.2, ConfigModule).** The status payload carries the dev-posture flag and a CSRF
+> token; `integrationMode` is `zitadel | generic-oidc` (the IdP factory's two values), not `byoi`.
+
 ```
 GET /config/status   @Public()
-→ { isConfigured: boolean, adminCount: number, integrationMode: 'zitadel' | 'byoi' }
+→ {
+    isConfigured: boolean,          // adminCount > 0 (derived, never a stored flag — no migration)
+    adminCount: number,             // live ADMINs only (soft-delete-filtered)
+    integrationMode: 'zitadel' | 'generic-oidc',  // from IDENTITY_PROVIDER_TYPE
+    devMode: boolean,               // AUTH_MODE=shim || NODE_ENV!=production (topbar banner)
+    csrfToken: string               // echoed on POST /config/setup (§5b)
+  }
+GET /config/csrf   @Public()  → { csrfToken }   // a standalone token without the full status
 ```
 
-`isConfigured = adminCount > 0`. `integrationMode` is inferred from env (bundled Zitadel issuer vs.
-external). Public so the wizard can poll it before any login exists.
+`isConfigured = adminCount > 0`. `integrationMode` / `devMode` are read from env. Public so the wizard
+can poll it before any login exists. No secrets in the payload.
 
 ### 5b. Setup endpoint
 
+> **Implemented (PR 3.2).** At first-run NO ADMIN (hence no session) exists, so the endpoint cannot be
+> `@Roles('ADMIN')`-gated — it is **`@Public()`**, protected instead by Fork #7's three guards (the
+> §6.3 "public-but-logged + rate-limited" posture). The CSRF token rides the `X-CSRF-Token` header
+> (double-submit), not an `X-Idempotency-Key`. The role is locked to ADMIN (not client-settable).
+
 ```
-POST /config/setup   @Roles('ADMIN')   X-Idempotency-Key: <uuid>
-body: { adminEmail, adminFirstName, adminLastName, zitadelConfig?: {…} }
-→ 200 { success, message, setupCompletedAt }
-   409 already configured · 403 not ADMIN · 400 validation
+POST /config/setup   @Public()   X-CSRF-Token: <token>
+body: { email, firstName, lastName }     // role locked to ADMIN
+→ 201 { success, adminId, email, mirrored, setupCompletedAt }
+   409 already configured (any ADMIN exists — the one-time gate)
+   403 invalid/missing CSRF token · 429 rate-limited · 400 validation
 ```
+
+Guards: (1) the idempotent any-ADMIN gate (409 once configured), (2) a required CSRF token
+(`SetupCsrfService`, stateless HMAC), (3) a per-IP rate limit (`SetupRateLimitGuard`). Every admin
+creation is audited (structured Pino: op, email, ip). When `integrationMode='zitadel'` and a
+Management credential is present the new ADMIN is mirrored into Zitadel (`mirrored: true`); a
+Management failure **degrades to a local-only ADMIN** (`mirrored: false`, a warn is logged) rather
+than hard-blocking first-run — the operator can repair Zitadel afterwards (per §6 #4).
 
 Idempotency-gated on "any ADMIN exists"; CSRF token required; rate-limited (security §6.3). Creates the
 first ADMIN local row (and, if `integrationMode='zitadel'` and a Management credential is present,
@@ -426,8 +449,9 @@ caller's role from `GET /users/me` (**never the token** — matches §6.1). This
 
 | Endpoint | Method | Auth | Purpose |
 | --- | --- | --- | --- |
-| `/config/status` | GET | `@Public()` | first-run detection |
-| `/config/setup` | POST | `@Roles('ADMIN')` + idempotency | create first ADMIN, mark configured |
+| `/config/status` | GET | `@Public()` | first-run detection (+ devMode + a CSRF token) |
+| `/config/csrf` | GET | `@Public()` | issue a standalone CSRF token for the setup POST |
+| `/config/setup` | POST | `@Public()` + any-ADMIN gate + CSRF + rate-limit | create the first ADMIN |
 | `/users/me` | GET | any auth | caller + role (UI gating; never the token) |
 | `/users` | POST | `@Roles('ADMIN')` | create user (**default VIEWER**) + IdP write-back |
 | `/users/:id` | PATCH | `@Roles('ADMIN')` | update incl. role; last-admin + no-self guards; write-back |
@@ -559,11 +583,14 @@ M2  (optional) add_config_settings   CREATE TABLE config_settings        ← Pha
     `infra/docker-compose.prod.yaml`), placing the `zitadel-bootstrap` sidecar in the `prod` profile.
     Backward-compatible (§9d). The three deferred sub-questions (§9e: secrets-volume persistence,
     `.env.prod` ownership, convenience alias) are settled here. **Owner: devops-infra.**
-- **PR 3.2 (backend):** `ConfigModule` — `GET /config/status` (`@Public()`) + `POST /config/setup`
-  (`@Roles('ADMIN')`, idempotency gate, CSRF, rate-limit, audit) + (optional) `config_settings` table
-  (M2). **Depends on:** 1.x.
-- **PR 3.3 (frontend):** `/setup` route + 4-step wizard + `config` endpoints/hooks (ADR-0020) + Users
-  default-VIEWER selector + BYOI banner. **Depends on:** 3.2.
+- **PR 3.2 (backend) — ✅ DONE:** `ConfigModule` — `GET /config/status` + `GET /config/csrf`
+  (`@Public()`) + `POST /config/setup` (`@Public()` gated by the idempotent any-ADMIN check + a CSRF
+  token + a per-IP rate limit + audit). NO `config_settings` table / migration — "configured" is
+  derived from whether any ADMIN exists, integrationMode/devMode from env. The Management mirror on
+  setup **degrades to local-only** (never hard-blocks first-run). **Depends on:** 1.x.
+- **PR 3.3 (frontend) — ✅ DONE:** public `/setup` route (outside the `(app)` auth group) + the 4-step
+  wizard + `config` endpoints/hooks (ADR-0020) + the dev-mode topbar banner + the Users-page BYOI
+  graceful-degradation banner. **Depends on:** 3.2.
 
 ### Phase 4 — Hardening & docs *(owner: security + devops + each lane)*
 

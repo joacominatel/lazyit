@@ -31,6 +31,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { useDeleteUser } from "@/lib/api/hooks/use-user-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { formatDate } from "@/lib/utils/format";
+import { ByoiBanner } from "./_components/byoi-banner";
 import { UserFormDialog } from "./_components/user-form-dialog";
 import { UserRoleSelect } from "./_components/user-role-select";
 import { UserStatusBadge } from "./_components/user-status-badge";
@@ -120,6 +121,8 @@ export default function UsersPage() {
           New user
         </Button>
       </div>
+
+      <ByoiBanner />
 
       {isLoading ? (
         <ResourceTable columns={COLUMNS} isLoading />
