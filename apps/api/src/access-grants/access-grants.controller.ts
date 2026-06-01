@@ -8,7 +8,6 @@ import {
   Query,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
@@ -17,8 +16,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { AccessGrantsService } from './access-grants.service';
-import { parseActiveOnly, parseIncludeExpired } from './query-params';
+import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseUuidQuery } from '../common/parse-uuid-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import {
   AccessGrantDto,
@@ -29,9 +29,9 @@ import {
   UpdateAccessGrantNotesDto,
 } from './access-grant.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
 
-@ApiBearerAuth()
 @ApiTags('access-grants')
 @Controller('access-grants')
 export class AccessGrantsController {
@@ -88,9 +88,9 @@ export class AccessGrantsController {
     return this.grants.findPage(
       {
         userId: parseUuidQuery(userId, 'userId'),
-        applicationId,
-        activeOnly: parseActiveOnly(activeOnly),
-        includeExpired: parseIncludeExpired(includeExpired),
+        applicationId: parseCuidQuery(applicationId, 'applicationId'),
+        activeOnly: parseBooleanQuery(activeOnly, true),
+        includeExpired: parseBooleanQuery(includeExpired, true),
       },
       parsePageQuery({ limit, offset, page }),
     );
@@ -104,8 +104,9 @@ export class AccessGrantsController {
   }
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Open a grant (give a user access to an application)',
+    summary: 'Open a grant (give a user access to an application) — ADMIN only',
   })
   @ApiCreatedResponse({ type: AccessGrantDto })
   create(
@@ -116,8 +117,10 @@ export class AccessGrantsController {
   }
 
   @Patch(':id/revoke')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Revoke an active grant (sets revokedAt; 409 if already revoked)',
+    summary:
+      'Revoke an active grant (sets revokedAt; 409 if already revoked) — ADMIN only',
   })
   @ApiOkResponse({ type: AccessGrantDto })
   @ApiConflictResponse({ description: 'The grant is already revoked' })
@@ -130,15 +133,19 @@ export class AccessGrantsController {
   }
 
   @Patch(':id/notes')
-  @ApiOperation({ summary: 'Update only the notes of a grant (null clears)' })
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Update only the notes of a grant (null clears) — ADMIN only',
+  })
   @ApiOkResponse({ type: AccessGrantDto })
   updateNotes(@Param('id') id: string, @Body() dto: UpdateAccessGrantNotesDto) {
     return this.grants.updateNotes(id, dto);
   }
 
   @Patch(':id/expiry')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Change the expiry of a grant (null makes it permanent)',
+    summary: 'Change the expiry of a grant (null makes it permanent) — ADMIN only',
   })
   @ApiOkResponse({ type: AccessGrantDto })
   updateExpiry(

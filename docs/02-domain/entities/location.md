@@ -67,8 +67,9 @@ for both api and web ([[shared-package]], [[0013-zod-validation-pipe]]).
 
 `apps/api/src/locations/` (`LocationsModule`): `GET /locations` (excludes soft-deleted),
 `GET /locations/:id`, `POST /locations`, `PATCH /locations/:id`, `DELETE /locations/:id`
-(soft delete). Bodies validated against the shared schemas and documented via Swagger
-([[0018-api-documentation-swagger]]).
+(soft delete), `POST /locations/:id/restore` (ADMIN-only — clears `deletedAt`,
+[[0041-soft-delete-reuse-and-restore]]). Bodies validated against the shared schemas and documented
+via Swagger ([[0018-api-documentation-swagger]]).
 
 Related: [[asset]] · [[conventions]] · [[shared-package]] · [[0013-zod-validation-pipe]] ·
 [[0017-location-type-enum]]

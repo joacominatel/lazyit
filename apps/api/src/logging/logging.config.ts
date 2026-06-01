@@ -22,8 +22,24 @@ function resolveRequestId(req: IncomingMessage, res: ServerResponse): string {
   return id;
 }
 
-/** Surface the X-User-Id auth shim (ADR-0022) as a clean `actor` field; the raw header is redacted. */
+/**
+ * Surface the authenticated actor as a clean `actor` field (the raw `x-user-id` header is redacted).
+ *
+ * `customProps` runs when the request log line is written — at response time, AFTER JwtAuthGuard has
+ * resolved the caller and stamped `request.user` (in BOTH modes: OIDC validates the Bearer token and
+ * JIT-provisions the User; shim resolves the X-User-Id header to a User). So the canonical source is
+ * `request.user.id` — it works under OIDC, where there is no `x-user-id` header at all (the old
+ * header-only read made every prod log line `actor:null` — the regression this fixes; ADR-0038).
+ *
+ * The pino-http types declare `req` as a bare `IncomingMessage`, but at runtime nestjs-pino passes
+ * the same Express request the guard augmented, so we narrow to read `.user`. The `x-user-id` header
+ * is kept only as a fallback for the rare case the field is read before/without the guard.
+ */
 function resolveActor(req: IncomingMessage): { actor: string | null } {
+  const user = (req as IncomingMessage & { user?: { id?: unknown } }).user;
+  if (user && typeof user.id === 'string') {
+    return { actor: user.id };
+  }
   const header = req.headers[ACTOR_HEADER];
   return { actor: typeof header === 'string' ? header : null };
 }

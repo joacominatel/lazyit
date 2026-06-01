@@ -36,6 +36,9 @@ erDiagram
     Consumable ||--o{ ConsumableMovement : tracks
     ArticleCategory ||--o{ Article : groups
     Article ||--o{ ArticleVersion : versioned-by
+    Article ||--o{ ArticleLink : links
+    Asset ||--o{ ArticleLink : "documented by"
+    Application ||--o{ ArticleLink : "documented by"
 ```
 
 > [!note] Conceptual ERD. Relationships only — no fields. `Asset ↔ User` via
@@ -52,7 +55,7 @@ The model is organized in loosely-coupled areas:
 3. **Tickets** — [[ticket]], [[ticket-comment]] (cross-cutting).
 4. **Access** — [[application]], [[application-category]], [[access-grant]], [[access-request]].
 5. **Consumables** — [[consumable]], [[consumable-movement]].
-6. **Knowledge base** — [[article]], [[article-category]], [[article-version]].
+6. **Knowledge base** — [[article]], [[article-category]], [[article-version]], [[article-link]].
 
 ## Implementation order
 
@@ -64,6 +67,6 @@ The model is built atomic-first (see each entity note for status):
 4. [[ticket]] + [[ticket-comment]].
 5. [[application]] + [[application-category]] + [[access-grant]] + [[access-request]].
 6. [[consumable]] + [[consumable-movement]].
-7. [[article]] + [[article-category]] + [[article-version]].
+7. [[article]] + [[article-category]] + [[article-version]] + [[article-link]].
 
 Why asset-centric? → [[0004-asset-centric-design]].

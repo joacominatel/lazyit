@@ -24,10 +24,11 @@ initial, non-special list.
 
 ## Business rules
 
-- `name` is **unique**.
+- `name` is unique among **live** rows only; a soft-deleted name is freed for reuse / restore
+  ([[0041-soft-delete-reuse-and-restore]]).
 - Seeded with six starter categories (SaaS, Internal, Service, Third Party, Infrastructure, Other)
-  with heroicon `icon`s and an `order`. The seed is idempotent (upsert by `name`, never clobbers
-  edits) — see `apps/api/prisma/seed.ts`.
+  with heroicon `icon`s and an `order`. The seed is idempotent (find-among-live-then-create, never
+  clobbers edits) — see `apps/api/prisma/seed.ts`.
 - **Deleting a category is always allowed** (soft delete). Because `Application.categoryId` is an
   optional `SetNull` FK, deleting a category simply **detaches** its applications — it never orphans
   a required relation, so there is **no `409` guard** (contrast [[article-category]], whose FK is
@@ -48,7 +49,7 @@ live in `@lazyit/shared` (`packages/shared/src/schemas/application-category.ts`)
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `cuid` | `@default(cuid())`. |
-| `name` | `string` | `@unique`, required. |
+| `name` | `string` | Required. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted name is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
 | `description` | `string?` | optional. |
 | `icon` | `string?` | a heroicon name for the web UI (e.g. "CloudIcon"). Not validated. |
 | `order` | `int?` | optional sort key for listings; nulls sort last. |
@@ -60,8 +61,9 @@ live in `@lazyit/shared` (`packages/shared/src/schemas/application-category.ts`)
 
 `apps/api/src/application-categories/` (`ApplicationCategoriesModule`): `GET /application-categories`
 (excludes soft-deleted, ordered by `order` then `name`), `GET /application-categories/:id`, `POST`,
-`PATCH /:id`, `DELETE /:id` (soft delete; detaches its applications). Bodies validated against the
-shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).
+`PATCH /:id`, `DELETE /:id` (soft delete; detaches its applications), `POST /:id/restore`
+(ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]). Bodies validated against
+the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).
 
 Related: [[application]] · [[asset-category]] · [[article-category]] · [[shared-package]] ·
 [[0023-access-management-design]] · [[0006-soft-delete-and-auditing]] ·

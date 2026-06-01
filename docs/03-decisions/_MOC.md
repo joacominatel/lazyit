@@ -3,7 +3,7 @@ title: Decisions (ADRs) — MOC
 tags: [moc, adr]
 status: draft
 created: 2026-05-25
-updated: 2026-05-30
+updated: 2026-06-01
 ---
 
 # Decisions (ADRs) — Map of Content
@@ -61,6 +61,8 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0037-idp-choice-zitadel-byoi]] | IdP choice — Zitadel, BYOI strategy, own Postgres | accepted |
 | [[0038-jit-user-provisioning]] | JIT user provisioning on first OIDC login | accepted |
 | [[0039-authjs-v5-frontend-oidc]] | Auth.js v5 for frontend OIDC login | accepted |
+| [[0040-rbac-roles]] | Minimal RBAC — ADMIN/MEMBER/VIEWER role on User | accepted |
+| [[0042-article-versioning-and-linking]] | KB depth — append-only ArticleVersion + article↔asset/application linking + content search | accepted |
 
 ## Pending ADRs (to write when decided)
 - **Async workers** — BullMQ + Redis (note the [[0009-bun-first-vs-app-stack]] tension:

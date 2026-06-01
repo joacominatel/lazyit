@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -68,14 +69,17 @@ export class AssetAssignmentsService {
   }
 
   /**
-   * Open an assignment (assign a user to an asset). Rejects a duplicate *active* (asset, user)
-   * pair with 409 — a friendly pre-check; the partial unique index is the race-proof backstop
-   * (also surfaces as 409 via PrismaExceptionFilter). An invalid assetId/userId hits the FK and
-   * is mapped to 400 (P2003). A different user on the same asset is allowed (multi-owner).
+   * Open an assignment (assign a user to an asset). `assetId` and `userId` must reference **live**
+   * (non-soft-deleted) rows → 400 otherwise (don't assign a decommissioned asset or a departed user;
+   * mirrors AccessGrantsService.create). Rejects a duplicate *active* (asset, user) pair with 409 —
+   * a friendly pre-check; the partial unique index is the race-proof backstop (also surfaces as 409
+   * via PrismaExceptionFilter). A different user on the same asset is allowed (multi-owner).
    * `assignedById` is set from the authenticated User when present (null = system/unknown).
    */
   async create(data: CreateAssetAssignment, user?: User) {
     const assignedById = this.actor.resolve(user);
+    await this.assertAssetUsable(data.assetId);
+    await this.assertUserUsable(data.userId);
     const existingActive = await this.prisma.assetAssignment.findFirst({
       where: { assetId: data.assetId, userId: data.userId, releasedAt: null },
     });
@@ -124,6 +128,9 @@ export class AssetAssignmentsService {
       await this.history.record(tx, {
         assetId: assignment.assetId,
         eventType: 'RELEASED',
+        // Mirror ASSIGNED's {userId}: a multi-owner asset can release one of several owners, so the
+        // released owner must be on the RELEASED row to disambiguate the timeline.
+        payload: { userId: assignment.userId },
         performedById: releasedById,
       });
       return released;
@@ -163,6 +170,8 @@ export class AssetAssignmentsService {
       await this.history.record(tx, {
         assetId: assignment.assetId,
         eventType: 'RELEASED',
+        // Stamp the released owner (same as release()): the RELEASED rows are attributable per owner.
+        payload: { userId },
         performedById: actorId,
       });
     }
@@ -179,5 +188,40 @@ export class AssetAssignmentsService {
       where: { id },
       data: { notes: data.notes },
     });
+  }
+
+  // --- internals -----------------------------------------------------------
+
+  /**
+   * 400 if assetId doesn't reference a live (non-soft-deleted) asset. The soft-delete read filter
+   * hides deleted assets, so findFirst returns null for them — assigning a decommissioned asset is
+   * a client error, not a 500 at the FK. Mirrors AccessGrantsService.assertApplicationUsable.
+   */
+  private async assertAssetUsable(assetId: string): Promise<void> {
+    const asset = await this.prisma.asset.findFirst({
+      where: { id: assetId },
+      select: { id: true },
+    });
+    if (!asset) {
+      throw new BadRequestException(
+        `assetId ${assetId} does not reference a live asset`,
+      );
+    }
+  }
+
+  /**
+   * 400 if userId doesn't reference a live (non-soft-deleted) user — don't assign an asset to a
+   * departed/offboarded user. Mirrors AccessGrantsService.assertUserUsable.
+   */
+  private async assertUserUsable(userId: string): Promise<void> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) {
+      throw new BadRequestException(
+        `userId ${userId} does not reference a live user`,
+      );
+    }
   }
 }

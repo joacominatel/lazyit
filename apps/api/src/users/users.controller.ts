@@ -20,16 +20,13 @@ import { createZodDto } from 'nestjs-zod';
 import { CreateUserSchema, UpdateUserSchema, UserSchema } from '@lazyit/shared';
 import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
 import { ActorService } from '../common/actor.service';
 import { UsersService } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
-import { parseActiveOnly } from '../asset-assignments/active-only';
+import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { AssetAssignmentDto } from '../asset-assignments/asset-assignment.dto';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
-import {
-  parseActiveOnly as parseGrantActiveOnly,
-  parseIncludeExpired,
-} from '../access-grants/query-params';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
 
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe), TS types and the
@@ -80,7 +77,7 @@ export class UsersController {
     await this.users.findOne(id); // 404 if the user is missing or soft-deleted
     return this.assignments.findAll({
       userId: id,
-      activeOnly: parseActiveOnly(activeOnly),
+      activeOnly: parseBooleanQuery(activeOnly, true),
     });
   }
 
@@ -110,28 +107,31 @@ export class UsersController {
     await this.users.findOne(id); // 404 if the user is missing or soft-deleted
     return this.grants.findAll({
       userId: id,
-      activeOnly: parseGrantActiveOnly(activeOnly),
-      includeExpired: parseIncludeExpired(includeExpired),
+      activeOnly: parseBooleanQuery(activeOnly, true),
+      includeExpired: parseBooleanQuery(includeExpired, true),
     });
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a user' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Create a user — ADMIN only (can set the RBAC role)' })
   @ApiCreatedResponse({ type: UserDto })
   create(@Body() dto: CreateUserDto) {
     return this.users.create(dto);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a user' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Update a user — ADMIN only (can change the RBAC role)' })
   @ApiOkResponse({ type: UserDto })
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto) {
     return this.users.update(id, dto);
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Offboard (soft-delete) a user',
+    summary: 'Offboard (soft-delete) a user — ADMIN only',
     description:
       'Soft-deletes the user and, in one transaction, revokes all their active access grants and ' +
       'releases all their active asset assignments (with RELEASED history). Returns the offboarding ' +
@@ -154,8 +154,9 @@ export class UsersController {
   }
 
   @Post(':id/offboard')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Offboard a user (explicit alias of DELETE /users/:id)',
+    summary: 'Offboard a user (explicit alias of DELETE /users/:id) — ADMIN only',
     description:
       'Same effect as DELETE /users/:id: soft-delete + revoke grants + release assignments, all in ' +
       'one transaction. Provided as an intention-revealing verb for the offboarding flow.',
@@ -174,5 +175,18 @@ export class UsersController {
     @CurrentUser() actor?: User,
   ): ReturnType<UsersService['remove']> {
     return this.users.remove(id, this.actor.resolve(actor));
+  }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore (re-onboard) a soft-deleted user — ADMIN only (ADR-0041)',
+    description:
+      'Clears deletedAt so the account exists and can log in again. Does NOT re-grant the access or ' +
+      're-assign the assets that offboarding revoked/released — those are separate, intentional acts.',
+  })
+  @ApiOkResponse({ type: UserDto })
+  restore(@Param('id', ParseUUIDPipe) id: string) {
+    return this.users.restore(id);
   }
 }

@@ -8,6 +8,7 @@ import type {
   CreateConsumableMovement,
   UpdateConsumable,
 } from '@lazyit/shared';
+import { Prisma } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
@@ -89,6 +90,29 @@ export class ConsumablesService {
     return this.prisma.consumable.update({
       where: { id },
       data: { deletedAt: new Date() },
+    });
+  }
+
+  /**
+   * Restore a soft-deleted consumable: clear `deletedAt` (ADR-0041). Found via the
+   * `includeSoftDeleted` escape hatch (the read filter would hide it). 404 if it never existed;
+   * idempotent if already live. The partial unique index frees `sku` on delete, so a restore can 409
+   * if another live consumable took the sku in the meantime (mapped by the PrismaExceptionFilter).
+   */
+  async restore(id: string) {
+    const consumable = await this.prisma.consumable.findFirst({
+      where: { id },
+      includeSoftDeleted: true,
+    } as Prisma.ConsumableFindFirstArgs);
+    if (!consumable) {
+      throw new NotFoundException(`Consumable ${id} not found`);
+    }
+    if (consumable.deletedAt === null) {
+      return consumable; // already live — idempotent
+    }
+    return this.prisma.consumable.update({
+      where: { id },
+      data: { deletedAt: null },
     });
   }
 

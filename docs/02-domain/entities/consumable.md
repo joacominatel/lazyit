@@ -19,7 +19,9 @@ individually), a consumable is a quantity on hand: we care about *how many*, not
 ## Fields
 
 - `id` — `cuid()`.
-- `name`, `sku?` (unique when present), `description?`, `notes?`.
+- `name`, `sku?` (unique among **live** rows when present — a PARTIAL unique index
+  `WHERE "deletedAt" IS NULL`, freed for reuse / restore on soft delete,
+  [[0041-soft-delete-reuse-and-restore]]), `description?`, `notes?`.
 - `categoryId?` — FK → [[consumable-category]], `onDelete: SetNull`.
 - `currentStock` — Int, **cached** on-hand quantity (default 0). **Never edited directly** — only
   through a [[consumable-movement]], maintained transactionally ([[0034-consumables-design]]). The
@@ -34,8 +36,9 @@ individually), a consumable is a quantity on hand: we care about *how many*, not
 
 - `GET /consumables?lowStock=true` — list (alphabetical); `lowStock=true` returns only items at/under
   their `minStock`.
-- `GET /consumables/:id` · `POST` · `PATCH /:id` · `DELETE /:id` (soft delete). Create/update do
-  **not** accept `currentStock` (it starts at 0 and changes only via movements).
+- `GET /consumables/:id` · `POST` · `PATCH /:id` · `DELETE /:id` (soft delete) ·
+  `POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]).
+  Create/update do **not** accept `currentStock` (it starts at 0 and changes only via movements).
 - `POST /consumables/:id/movements` — record a stock movement ([[consumable-movement]]); optional
   `X-User-Id` → `performedById`.
 - `GET /consumables/:id/movements?type=&from=&to=` — the movement ledger.

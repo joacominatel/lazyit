@@ -10,7 +10,6 @@ import {
   Query,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -28,7 +27,9 @@ import {
   UpdateConsumableSchema,
 } from '@lazyit/shared';
 import { ConsumablesService } from './consumables.service';
+import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
 
 class ConsumableDto extends createZodDto(ConsumableSchema) {}
@@ -39,7 +40,6 @@ class CreateConsumableMovementDto extends createZodDto(
   CreateConsumableMovementSchema,
 ) {}
 
-@ApiBearerAuth()
 @ApiTags('consumables')
 @Controller('consumables')
 export class ConsumablesController {
@@ -55,7 +55,7 @@ export class ConsumablesController {
   })
   @ApiOkResponse({ type: [ConsumableDto] })
   findAll(@Query('lowStock') lowStock?: string) {
-    return this.consumables.findAll({ lowStock: lowStock === 'true' });
+    return this.consumables.findAll({ lowStock: parseBooleanQuery(lowStock) });
   }
 
   @Get(':id')
@@ -101,15 +101,17 @@ export class ConsumablesController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a consumable (stock starts at 0)' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create a consumable (stock starts at 0) (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: ConsumableDto })
   create(@Body() dto: CreateConsumableDto) {
     return this.consumables.create(dto);
   }
 
   @Patch(':id')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
-    summary: 'Update a consumable (currentStock is not editable)',
+    summary: 'Update a consumable (currentStock is not editable) (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ConsumableDto })
   update(@Param('id') id: string, @Body() dto: UpdateConsumableDto) {
@@ -117,16 +119,28 @@ export class ConsumablesController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete a consumable' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Soft-delete a consumable — ADMIN only' })
   @ApiOkResponse({ type: ConsumableDto })
   remove(@Param('id') id: string) {
     return this.consumables.remove(id);
   }
 
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore a soft-deleted consumable — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: ConsumableDto })
+  restore(@Param('id') id: string) {
+    return this.consumables.restore(id);
+  }
+
   @Post(':id/movements')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
     summary:
-      'Record a stock movement (IN adds, OUT subtracts, ADJUSTMENT sets)',
+      'Record a stock movement (IN adds, OUT subtracts, ADJUSTMENT sets) (ADMIN or MEMBER)',
   })
   @ApiCreatedResponse({ type: ConsumableMovementDto })
   createMovement(

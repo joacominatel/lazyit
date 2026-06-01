@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requireAtLeastOneKey } from "./primitives";
 
 /**
  * Asset — the first-class citizen: a single tracked thing, a concrete instance of an AssetModel
@@ -58,21 +59,23 @@ export const CreateAssetSchema = z.strictObject({
   locationId: z.cuid().optional(),
 });
 
-/** Partial update; any subset of the editable fields. */
-export const UpdateAssetSchema = z
-  .strictObject({
-    name: z.string().trim().min(1).max(200),
-    serial: z.string().trim().min(1).max(200),
-    assetTag: z.string().trim().min(1).max(200),
-    status: AssetStatusSchema,
-    specs: AssetSpecsSchema,
-    notes: z.string().trim().min(1).max(2000),
-    purchaseDate: z.iso.datetime(),
-    warrantyEnd: z.iso.datetime(),
-    modelId: z.cuid(),
-    locationId: z.cuid(),
-  })
-  .partial();
+/** Partial update; any subset of the editable fields (an empty body is rejected). */
+export const UpdateAssetSchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      name: z.string().trim().min(1).max(200),
+      serial: z.string().trim().min(1).max(200),
+      assetTag: z.string().trim().min(1).max(200),
+      status: AssetStatusSchema,
+      specs: AssetSpecsSchema,
+      notes: z.string().trim().min(1).max(2000),
+      purchaseDate: z.iso.datetime(),
+      warrantyEnd: z.iso.datetime(),
+      modelId: z.cuid(),
+      locationId: z.cuid(),
+    })
+    .partial(),
+);
 
 export type AssetStatus = z.infer<typeof AssetStatusSchema>;
 export type Asset = z.infer<typeof AssetSchema>;
