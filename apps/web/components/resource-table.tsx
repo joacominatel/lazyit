@@ -10,6 +10,7 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/16/solid";
+import Link from "next/link";
 import type { ComponentType, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { RequestIdNote } from "@/components/request-id-note";
@@ -49,6 +50,9 @@ export interface ResourceColumn {
 const DEFAULT_SKELETON_ROWS = 5;
 const SKELETON_ROW_KEYS = ["a", "b", "c", "d", "e", "f", "g", "h"] as const;
 
+/** Number of mobile skeleton cards to mirror the loading state below `md`. */
+const SKELETON_CARD_KEYS = ["a", "b", "c"] as const;
+
 interface ResourceTableProps {
   columns: ResourceColumn[];
   /** Show skeleton rows instead of content (initial load). */
@@ -59,15 +63,33 @@ interface ResourceTableProps {
   isFilteredEmpty?: boolean;
   /** Message for the filtered-empty row. */
   filteredEmptyMessage?: string;
-  /** The table rows, rendered when not loading / filtered-empty. */
+  /**
+   * Optional "Clear filters" affordance shown alongside {@link filteredEmptyMessage} on the
+   * filtered-empty row, so a user who filtered everything out can recover in place. Pass a `<button>`
+   * / `<Link>` node (the page owns the clear handler).
+   */
+  filteredEmptyAction?: ReactNode;
+  /** The table rows, rendered (at `md` and up) when not loading / filtered-empty. */
   children?: ReactNode;
+  /**
+   * Optional mobile card list, rendered *below* `md` in place of the table. Pass the SAME rows
+   * already filtered/sorted/paged, re-laid-out as stacked cards (see {@link ResourceCard}) so each
+   * list becomes touch-friendly on narrow viewports. When omitted, the table just scrolls
+   * horizontally as before. Loading and filtered-empty states are mirrored automatically.
+   */
+  mobileChildren?: ReactNode;
 }
 
 /**
- * Bordered table shell with a header derived from `columns`, plus the two
- * in-table states (loading skeletons and filtered-empty). Pages own the rows,
- * the filter bar and the no-data / error branches (via EmptyState/ErrorState).
- * The shared scaffolding behind every resource list — see ADR-0020.
+ * Bordered table shell with a header derived from `columns`, plus the two in-table states (loading
+ * skeletons and filtered-empty). Pages own the rows, the filter bar and the no-data / error branches
+ * (via EmptyState/ErrorState). The shared scaffolding behind every resource list — see ADR-0020.
+ *
+ * Responsive (the follow-on bulk-action wave consumes this API): the `<table>` renders at `md` and
+ * up; below `md`, if `mobileChildren` is supplied, it renders instead as a stacked card list (built
+ * from {@link ResourceCard}). Both branches receive the same already-filtered/sorted/paged rows, so
+ * the page builds its data once and hands the table a desktop (`children`) and a mobile
+ * (`mobileChildren`) projection of it.
  */
 export function ResourceTable({
   columns,
@@ -75,50 +97,178 @@ export function ResourceTable({
   skeletonRows = DEFAULT_SKELETON_ROWS,
   isFilteredEmpty = false,
   filteredEmptyMessage = "No matching results.",
+  filteredEmptyAction,
   children,
+  mobileChildren,
 }: ResourceTableProps) {
+  const hasMobile = mobileChildren !== undefined;
   return (
-    <div className="rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {columns.map((column) => (
-              <TableHead key={column.key} className={column.headClassName}>
-                {column.srOnlyHeader ? (
-                  <span className="sr-only">{column.header}</span>
-                ) : (
-                  column.header
-                )}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading ? (
-            SKELETON_ROW_KEYS.slice(0, skeletonRows).map((rowKey) => (
-              <TableRow key={rowKey}>
-                {columns.map((column) => (
-                  <TableCell key={column.key}>
-                    {column.skeleton ?? <Skeleton className="h-4 w-24" />}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))
-          ) : isFilteredEmpty ? (
+    <>
+      <div className={cn("rounded-lg border", hasMobile && "hidden md:block")}>
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell
-                colSpan={columns.length}
-                className="h-24 text-center text-muted-foreground"
-                aria-live="polite"
-              >
-                {filteredEmptyMessage}
-              </TableCell>
+              {columns.map((column) => (
+                <TableHead key={column.key} className={column.headClassName}>
+                  {column.srOnlyHeader ? (
+                    <span className="sr-only">{column.header}</span>
+                  ) : (
+                    column.header
+                  )}
+                </TableHead>
+              ))}
             </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              SKELETON_ROW_KEYS.slice(0, skeletonRows).map((rowKey) => (
+                <TableRow key={rowKey}>
+                  {columns.map((column) => (
+                    <TableCell key={column.key}>
+                      {column.skeleton ?? <Skeleton className="h-4 w-24" />}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            ) : isFilteredEmpty ? (
+              <TableRow>
+                <TableCell
+                  colSpan={columns.length}
+                  className="h-24 text-center text-muted-foreground"
+                  aria-live="polite"
+                >
+                  <FilteredEmpty
+                    message={filteredEmptyMessage}
+                    action={filteredEmptyAction}
+                  />
+                </TableCell>
+              </TableRow>
+            ) : (
+              children
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {hasMobile ? (
+        <div className="space-y-3 md:hidden">
+          {isLoading ? (
+            SKELETON_CARD_KEYS.slice(0, Math.min(skeletonRows, 3)).map(
+              (key) => (
+                <div key={key} className="space-y-3 rounded-lg border p-4">
+                  <Skeleton className="h-5 w-1/2" />
+                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className="h-4 w-1/3" />
+                </div>
+              ),
+            )
+          ) : isFilteredEmpty ? (
+            <div
+              className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground"
+              aria-live="polite"
+            >
+              <FilteredEmpty
+                message={filteredEmptyMessage}
+                action={filteredEmptyAction}
+              />
+            </div>
           ) : (
-            children
+            mobileChildren
           )}
-        </TableBody>
-      </Table>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** The filtered-empty message + an optional inline "Clear filters" recovery action. */
+function FilteredEmpty({
+  message,
+  action,
+}: {
+  message: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <span className="inline-flex flex-col items-center gap-1">
+      <span>{message}</span>
+      {action}
+    </span>
+  );
+}
+
+/**
+ * One mobile card for the {@link ResourceTable}'s `mobileChildren` slot — a stacked, touch-friendly
+ * projection of a table row for viewports below `md`. The card's whole surface links to the row's
+ * detail (pass `href`); status badges, owner avatars and quick-adjust controls go in `meta` and
+ * `actions` so they stay visible and ≥44px-tappable. Per-row Edit/Delete and the like go in
+ * `actions` (rendered as a sibling footer, not nested in the anchor, to avoid an
+ * interactive-element-in-anchor violation).
+ */
+export function ResourceCard({
+  href,
+  title,
+  badge,
+  meta,
+  actions,
+}: {
+  /** Detail route the card body links to. Omit for a non-navigable card. */
+  href?: string;
+  /** The primary label (e.g. the resource name). */
+  title: ReactNode;
+  /** Optional trailing badge beside the title (e.g. a StatusBadge). */
+  badge?: ReactNode;
+  /** Secondary key/value lines (category, stock, owners, updated, …). */
+  meta?: ReactNode;
+  /** Row of controls (quick-adjust, RowActions) pinned to the card footer. */
+  actions?: ReactNode;
+}) {
+  const header = (
+    <div className="flex items-start justify-between gap-2">
+      <span className="min-w-0 font-medium break-words">{title}</span>
+      {badge ? <span className="shrink-0">{badge}</span> : null}
+    </div>
+  );
+  return (
+    <div className="rounded-lg border p-4">
+      {href ? (
+        <Link
+          href={href}
+          className="block rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {header}
+        </Link>
+      ) : (
+        header
+      )}
+      {meta ? (
+        <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
+          {meta}
+        </dl>
+      ) : null}
+      {actions ? (
+        <div className="mt-3 flex items-center justify-end gap-2 border-t pt-3">
+          {actions}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** A single key/value line inside a {@link ResourceCard}'s `meta` grid. */
+export function ResourceCardMeta({
+  label,
+  children,
+  className,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex flex-col gap-0.5", className)}>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="text-sm">{children}</dd>
     </div>
   );
 }
@@ -301,9 +451,11 @@ export function Pagination({
 export type SortDirection = "asc" | "desc";
 
 /**
- * A sortable column header — a button that toggles asc/desc and shows the direction. Sorting here is
- * **client-side over the current page** (the `Page<T>` contract carries no server sort param,
- * ADR-0030), so it reorders only the rows on screen. Use inside a `ResourceColumn.header`.
+ * A sortable column header — a button that toggles asc/desc and shows the direction. Sorting is
+ * **server-side and authoritative** across the full result set (ADR-0030 amendment): wire the
+ * `onToggle` to `useListParams().toggleSort(field)` so the order is recomputed by the API over every
+ * row, not just the page on screen. Only expose columns in the resource's server sort allowlist as
+ * sortable. Use inside a `ResourceColumn.header`.
  */
 export function SortableHeader({
   label,
