@@ -6,10 +6,18 @@ DevOps lane (skill: `.claude/skills/lazyit-devops/SKILL.md`); the source of trut
 
 ## Layout
 
+The canonical Compose definition is a single **`compose.yaml` at the repo root** (all services;
+prod-only ones gated behind `profiles: [prod]`), with a committed root `compose.override.yaml` for
+dev tuning. This folder keeps only the **thin prod override**. See
+[[auth-zitadel-sot#9-compose-structure-decided|dossier §9]].
+
 ```
+(repo root)
+├── compose.yaml             # canonical: ALL services; db/meili/zitadel(+db) unprofiled (dev backing),
+│                            # api/web/migrate/caddy/backup behind profiles: [prod]
+├── compose.override.yaml    # dev tuning of the backing services (loopback ports, no TLS, no limits)
 infra/
-├── docker-compose.prod.yml   # prod-like / self-hosted stack: db + migrate + api + web +
-│                             # zitadel(+db) + meilisearch + caddy, and an opt-in backup sidecar
+├── docker-compose.prod.yaml # THIN prod override: env-file path, internal-only net, zitadel_secrets vol
 ├── docker/
 │   ├── api.Dockerfile        # NestJS on Node, built with Bun (multi-stage)        — ADR-0025
 │   ├── web.Dockerfile        # Next.js standalone on Node, built with Bun          — ADR-0025
@@ -24,18 +32,25 @@ infra/
 
 | Level | How | Notes |
 | --- | --- | --- |
-| **Dev** | root `docker-compose.yml` (Postgres) + `bun run dev` | apps run natively. Not in this folder. |
-| **Local prod-like** | `docker-compose.prod.yml` | full stack in containers, HTTPS via Caddy's internal CA, high ports (8080/8443). |
-| **Self-hosted real** | same compose + real domain | Let's Encrypt, real secrets, backups. See runbooks. |
+| **Dev** | root `docker compose up` (db + meili + zitadel(+db)) + `bun run dev` | backing services in containers, apps run natively. Auto-merges `compose.override.yaml`. |
+| **Local prod-like** | root `compose.yaml` + thin override + `--profile prod` | full stack in containers, HTTPS via Caddy's internal CA, high ports (8080/8443). |
+| **Self-hosted real** | same command + real domain | Let's Encrypt, real secrets, backups. See runbooks. |
 
 ## Quick start (local prod-like)
 
 ```sh
 cp infra/env/.env.prod.example infra/env/.env.prod   # then edit: replace every CHANGE_ME
 chmod 600 infra/env/.env.prod
-docker compose -f infra/docker-compose.prod.yml up -d --build
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
+  --profile prod --env-file infra/env/.env.prod up -d --build
 # open https://localhost:8443  (Caddy's internal CA → accept/trust the local cert)
 ```
+
+> [!note] Backward-compat
+> The old `docker compose -f infra/docker-compose.prod.yml up -d --build` is superseded; it maps 1:1
+> to the base + thin override + `--profile prod` + `--env-file` command above. The prod project name
+> stays `lazyit-prod`, so existing volumes are reused. Plain `docker compose up` (no `-f`) is now the
+> **dev backing-services** stack, not the full prod stack.
 
 Full walkthrough: `docs/05-runbooks/docker-prod-like-first-boot.md`.
 Real deployment: `docs/05-runbooks/deploy-self-hosted.md`.

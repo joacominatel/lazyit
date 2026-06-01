@@ -1,12 +1,24 @@
-# lazyit — production-like / self-hosted stack. See ADR-0025/0026/0028/0037 and docs/05-runbooks/.
+# lazyit — canonical Compose definition (ALL services). See ADR-0025/0026/0028/0037 and
+# docs/05-runbooks/. Layout decided in docs/01-architecture/auth-zitadel-sot.md §9.
 #
-# Bring up (from the repo ROOT), after `cp infra/env/.env.prod.example infra/env/.env.prod`:
-#   docker compose -f infra/docker-compose.prod.yml --env-file infra/env/.env.prod up -d --build
+# This single file is the source of truth for every service. Profiles split the two audiences:
+#   - UNPROFILED backing services (db, meilisearch, zitadel, zitadel_db) come up by default and
+#     back native `bun run dev` (api/web run on the host). `compose.override.yaml` (auto-loaded)
+#     tunes THEM for dev: loopback-only ports, no TLS, no resource ceilings.
+#   - profiles: [prod] services (api, web, migrate, caddy, backup) only come up under --profile prod,
+#     i.e. the full containerized stack. Room is reserved for a future `zitadel-bootstrap` sidecar.
 #
-# --env-file is required: the `environment:` blocks use ${VAR} interpolation resolved by
+# DEV (from the repo ROOT) — backing services only, loopback ports, apps run via `bun run dev`:
+#   docker compose up -d            # auto-merges compose.override.yaml
+#
+# PROD (from the repo ROOT), after `cp infra/env/.env.prod.example infra/env/.env.prod`:
+#   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
+#     --profile prod --env-file infra/env/.env.prod up -d --build
+#
+# --env-file is required in prod: the `environment:` blocks use ${VAR} interpolation resolved by
 # Compose at parse time (from shell or --env-file), NOT from the service's env_file directive.
 #
-# Only Caddy publishes host ports (8080/8443 by default). db/api/web/zitadel stay on the
+# Only Caddy publishes host ports in prod (8080/8443 by default). db/api/web/zitadel stay on the
 # internal network — neither Postgres instance is ever exposed to the host (SEC-005 / ADR-0028).
 # Zitadel is served at auth.{LAZYIT_DOMAIN} via Caddy (ADR-0037 / ADR-0026).
 #
@@ -19,8 +31,9 @@
 # (json-file, 10m x 3) so container logs can't fill the disk over months, plus a modest
 # mem_limit/cpus ceiling so one runaway service can't OOM/CPU-starve the single host. Tune the
 # limits to your box; the sizing table lives in docs/05-runbooks/deploy-self-hosted.md.
+# (compose.override.yaml drops these for plain dev — they only bind under the prod merge.)
 
-name: lazyit-prod
+name: lazyit
 
 # Shared log-rotation policy — referenced by every long-running service via `logging: *default-logging`.
 # Caps each container's json-file log at 10 MB x 3 files (30 MB), preventing unbounded growth on a
@@ -32,7 +45,9 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
-  # --- PostgreSQL — internal network only, no published port ---------------
+  # --- PostgreSQL — internal network only, no published port (prod) ---------
+  # UNPROFILED: comes up on plain `docker compose up` for native dev. compose.override.yaml
+  # publishes 127.0.0.1:5432 and drops the resource ceiling for local work.
   db:
     # postgres:18-alpine — pinned by digest (rolling tag; re-pin on a deliberate bump).
     image: postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88
@@ -42,13 +57,17 @@ services:
     # Holds ALL app data — give it the most RAM headroom on the host.
     mem_limit: 1g
     cpus: 1.5
-    env_file: [env/.env.prod]
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-lazyit}
     volumes:
       # postgres:18 mounts the volume parent (PGDATA = /var/lib/postgresql/18/docker). Keep this
       # path tracking the major version on any upgrade — see docs/05-runbooks/backups.md.
       - db_data:/var/lib/postgresql
     healthcheck:
-      # $$ escapes compose interpolation so the check reads the container's env at runtime.
+      # $$ escapes compose interpolation so the check reads the container's env at runtime
+      # (works for both the dev POSTGRES_USER=postgres and the prod POSTGRES_USER=lazyit).
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-lazyit} -d $${POSTGRES_DB:-lazyit}"]
       interval: 10s
       timeout: 5s
@@ -56,33 +75,35 @@ services:
       start_period: 30s
     networks: [internal]
 
-  # --- One-shot migrate + seed: runs after db is healthy, before the API ----
+  # --- One-shot migrate + seed: runs after db is healthy, before the API (prod) ----
   migrate:
+    profiles: [prod]
     build:
-      context: ..
+      context: .
       dockerfile: infra/docker/migrate.Dockerfile
     image: lazyit-migrate:dev
     restart: "no"
     logging: *default-logging
     mem_limit: 512m
     cpus: 1.0
-    env_file: [env/.env.prod]
+    env_file: [infra/env/.env.prod]
     depends_on:
       db:
         condition: service_healthy
     networks: [internal]
 
-  # --- API (NestJS on Node) — internal only -------------------------------
+  # --- API (NestJS on Node) — internal only (prod) ------------------------
   api:
+    profiles: [prod]
     build:
-      context: ..
+      context: .
       dockerfile: infra/docker/api.Dockerfile
     image: lazyit-api:dev
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 512m
     cpus: 1.0
-    env_file: [env/.env.prod]
+    env_file: [infra/env/.env.prod]
     depends_on:
       db:
         condition: service_healthy
@@ -90,10 +111,11 @@ services:
         condition: service_completed_successfully
     networks: [internal]
 
-  # --- Web (Next.js standalone on Node) — internal only -------------------
+  # --- Web (Next.js standalone on Node) — internal only (prod) ------------
   web:
+    profiles: [prod]
     build:
-      context: ..
+      context: .
       dockerfile: infra/docker/web.Dockerfile
       args:
         # Baked at build time. Relative /api keeps the image domain-portable (ADR-0026).
@@ -124,6 +146,7 @@ services:
   # independent backups and a clean BYOI removal path (remove zitadel + zitadel_db,
   # change OIDC_ISSUER — no impact on the app DB).
   # Never published to the host — internal network only (ADR-0028).
+  # UNPROFILED: comes up on plain `docker compose up` (Zitadel is part of the dev backing stack).
   zitadel_db:
     # postgres:16-alpine — pinned by digest. NOTE: this is Postgres 16 (PGDATA layout differs
     # from the app's PG18 db). Re-pin on a deliberate bump; see docs/05-runbooks/backups.md.
@@ -133,10 +156,6 @@ services:
     logging: *default-logging
     mem_limit: 256m
     cpus: 0.5
-    env_file: [env/.env.prod]
-    # environment: overrides the POSTGRES_* vars that env_file inherits from the shared
-    # .env.prod (which sets POSTGRES_USER=lazyit for the app DB). Without this block,
-    # Postgres would initialize with the wrong credentials and Zitadel auth would fail.
     environment:
       POSTGRES_USER: ${ZITADEL_DB_USER:-zitadel}
       POSTGRES_PASSWORD: ${ZITADEL_DB_PASSWORD}
@@ -154,7 +173,7 @@ services:
       start_period: 20s
     networks: [internal]
 
-  # --- Zitadel IdP (prod) — internal only; Caddy terminates TLS at auth.{domain} --------
+  # --- Zitadel IdP — internal only; Caddy terminates TLS at auth.{domain} (prod) --------
   # Admin console: https://auth.yourdomain.com/ui/console
   # OIDC discovery: https://auth.yourdomain.com/.well-known/openid-configuration
   # --tlsMode external: Caddy terminates TLS and Zitadel serves HTTP internally, but Zitadel
@@ -162,6 +181,8 @@ services:
   # http:// URLs the browser blocks via CSP — see ADR-0037 and Zitadel TLS modes docs.
   # First start runs `start-from-init`: initialises the DB schema + creates the admin user.
   # See docs/05-runbooks/auth-bootstrap.md for the full bootstrap procedure.
+  # UNPROFILED: comes up on plain `docker compose up`. compose.override.yaml flips it to the dev
+  # form (loopback :8080, --tlsMode disabled, EXTERNALSECURE=false — no Caddy in front).
   zitadel:
     # ghcr.io/zitadel/zitadel:v2.68.0 — pinned by digest. Always back up zitadel_db AND keep the
     # matching ZITADEL_MASTERKEY before a deliberate bump (see docs/05-runbooks/backups.md).
@@ -171,7 +192,6 @@ services:
     logging: *default-logging
     mem_limit: 512m
     cpus: 1.0
-    env_file: [env/.env.prod]
     environment:
       ZITADEL_DATABASE_POSTGRES_HOST: zitadel_db
       ZITADEL_DATABASE_POSTGRES_PORT: "5432"
@@ -186,7 +206,7 @@ services:
       # Must match LAZYIT_HTTPS_PORT — Zitadel embeds this in console URLs and token issuer.
       # Default 443 (real domain); set to 8443 in .env.prod for local non-standard ports.
       ZITADEL_EXTERNALPORT: "${LAZYIT_HTTPS_PORT:-443}"
-      ZITADEL_EXTERNALDOMAIN: ${ZITADEL_EXTERNALDOMAIN}
+      ZITADEL_EXTERNALDOMAIN: ${ZITADEL_EXTERNALDOMAIN:-localhost}
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: ${ZITADEL_ADMIN_USERNAME:-admin}
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASSWORD}
     depends_on:
@@ -199,14 +219,16 @@ services:
       retries: 5
       start_period: 60s
     # No published ports — Caddy reaches Zitadel on the internal network (ADR-0028).
+    # compose.override.yaml publishes 127.0.0.1:8080 for native dev.
     networks: [internal]
 
-  # --- Meilisearch — internal network only, no published port ---------------
+  # --- Meilisearch — internal network only, no published port (prod) ---------------
   # ADR-0035: cross-entity search engine. Fail-soft: the API SearchService no-ops when Meili is
   # down, so no depends_on from api → meilisearch is needed.
   # First deploy: run the one-off reindex once after the stack is healthy to populate the indices
   # — see docs/05-runbooks/deploy-self-hosted.md §2a (the API runtime has no Bun; reindex runs in
   # the Bun-based migrate image).
+  # UNPROFILED: comes up on plain `docker compose up`. compose.override.yaml publishes 127.0.0.1:7700.
   meilisearch:
     # getmeili/meilisearch:v1.12.3 — pinned by digest. Meili data is rebuildable via reindex,
     # so the volume need not be backed up (see docs/05-runbooks/backups.md).
@@ -215,7 +237,10 @@ services:
     logging: *default-logging
     mem_limit: 512m
     cpus: 1.0
-    env_file: [env/.env.prod]
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: ${MEILI_ENV:-development}
+      MEILI_NO_ANALYTICS: "true"
     volumes:
       - meili_data:/meili_data
     healthcheck:
@@ -226,20 +251,21 @@ services:
       start_period: 30s
     networks: [internal]
 
-  # --- Caddy reverse proxy + automatic HTTPS — the only public surface -----
+  # --- Caddy reverse proxy + automatic HTTPS — the only public surface (prod) -----
   caddy:
+    profiles: [prod]
     # caddy:2-alpine — pinned by digest (rolling tag; re-pin on a deliberate bump).
     image: caddy:2-alpine@sha256:86deaf5e3d3408a6ccec08fbb79989783dd26e206ae10bcf78a801dc8c9ab794
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 128m
     cpus: 0.5
-    env_file: [env/.env.prod]
+    env_file: [infra/env/.env.prod]
     ports:
       - "${LAZYIT_HTTP_PORT:-8080}:80"
       - "${LAZYIT_HTTPS_PORT:-8443}:443"
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
@@ -251,16 +277,17 @@ services:
         condition: service_healthy
     networks: [internal]
 
-  # --- Backup sidecar (OPT-IN) — cron + pg_dump for BOTH databases ----------
-  # Disabled by default; enable with the `backup` profile:
-  #   docker compose -f infra/docker-compose.prod.yml --env-file infra/env/.env.prod \
-  #     --profile backup up -d backup
+  # --- Backup sidecar (OPT-IN) — cron + pg_dump for BOTH databases (prod) ----------
+  # In the `prod` AND a `backup` profile, so it only runs when BOTH are requested alongside the
+  # prod stack:
+  #   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
+  #     --profile prod --profile backup --env-file infra/env/.env.prod up -d backup
   # Dumps the app DB and the Zitadel DB on a schedule to the host-mounted ./backups dir, prunes
   # dumps older than the retention window, and (optional, OFF by default) runs an offsite hook.
   # Respects "no mandatory cloud" — local-disk only unless you wire BACKUP_OFFSITE_CMD.
   # Full DR procedure (what/order/restore): docs/05-runbooks/backups.md.
   backup:
-    profiles: [backup]
+    profiles: [prod, backup]
     # Same Postgres major as the app DB so pg_dump's client matches the server (avoids version
     # mismatch errors). Pinned by digest to match the `db` service.
     image: postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88
@@ -268,7 +295,7 @@ services:
     logging: *default-logging
     mem_limit: 256m
     cpus: 0.5
-    env_file: [env/.env.prod]
+    env_file: [infra/env/.env.prod]
     environment:
       # Cron schedule (crontab syntax). Default: daily at 02:30.
       BACKUP_CRON: ${BACKUP_CRON:-30 2 * * *}
@@ -285,9 +312,9 @@ services:
       # one-liner). Leave unset to keep backups local-disk only (no mandatory cloud).
       BACKUP_OFFSITE_CMD: ${BACKUP_OFFSITE_CMD:-}
     volumes:
-      # Dumps land on the host (repo-root ./backups; this path is relative to infra/) so they
-      # survive `down`/recreate and can be copied off-host. ./backups is gitignored.
-      - ../backups:/backups
+      # Dumps land on the host (repo-root ./backups) so they survive `down`/recreate and can be
+      # copied off-host. ./backups is gitignored.
+      - ./backups:/backups
     depends_on:
       db:
         condition: service_healthy

@@ -1,0 +1,68 @@
+# lazyit — PROD override (merged at deploy time on TOP of the root compose.yaml). See
+# docs/01-architecture/auth-zitadel-sot.md §9 and docs/05-runbooks/deploy-self-hosted.md.
+#
+# THIN by design: the heavy lifting (digest pins, the x-logging anchor, mem_limit/cpus,
+# healthchecks, depends_on, Caddy ports/volumes, the backup sidecar, the Zitadel FirstInstance +
+# --tlsMode external) all lives in the canonical compose.yaml under `profiles: [prod]`. This file
+# only carries the prod-specific DELTAS that the dev `compose.override.yaml` deliberately omits:
+#   - the prod env-file path (infra/env/.env.prod) for the backing services that read it via
+#     env_file — db/zitadel_db/zitadel/meilisearch (api/web/migrate/caddy/backup already declare it
+#     in compose.yaml). Compose still needs --env-file for the ${VAR} interpolation in
+#     `environment:` blocks (resolved at PARSE time, not from env_file). See the header of compose.yaml;
+#   - a reserved `zitadel_secrets` volume mounted read-only into api/web — the home of the future
+#     zitadel-bootstrap sidecar's oidc-client.json (dossier §4c / §9c; the sidecar itself is the NEXT
+#     PR). Reserving it now keeps this override stable when the sidecar lands;
+#   - it leaves the `internal` network (defined in compose.yaml) as the ONLY network — no host-published
+#     ports except Caddy's, which compose.yaml already scopes.
+#
+# Deploy (from the repo ROOT), after `cp infra/env/.env.prod.example infra/env/.env.prod`:
+#   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
+#     --profile prod --env-file infra/env/.env.prod up -d --build
+#
+# Backward-compat: the old `docker compose -f infra/docker-compose.prod.yml ... up` invocation maps
+# to this base + thin override + `--profile prod` (see docs/05-runbooks/deploy-self-hosted.md).
+
+# Prod project name. Overrides the base `name: lazyit` (which scopes the DEV stack) so prod keeps
+# its own `lazyit-prod_*` volume/network namespace — UNCHANGED from the old infra/docker-compose.prod.yml,
+# so existing prod volumes (lazyit-prod_db_data, lazyit-prod_zitadel_db_data, …) are reused, never
+# orphaned. Dev and prod therefore never share volumes. Referenced by the runbooks (backups, auth-bootstrap).
+name: lazyit-prod
+
+services:
+  # Backing services read the prod env-file here; the prod-profile services already declare
+  # `env_file: [infra/env/.env.prod]` in compose.yaml. Listing them keeps the env-file path a
+  # single prod-only concern, out of the dev override.
+  db:
+    env_file: [infra/env/.env.prod]
+
+  zitadel_db:
+    env_file: [infra/env/.env.prod]
+    # Re-assert Zitadel's own POSTGRES_* over what env_file inherits from the shared .env.prod
+    # (which sets POSTGRES_USER=lazyit for the APP db). Without this, the Zitadel DB would init
+    # with the app's credentials and Zitadel auth would fail.
+    environment:
+      POSTGRES_USER: ${ZITADEL_DB_USER:-zitadel}
+      POSTGRES_PASSWORD: ${ZITADEL_DB_PASSWORD}
+      POSTGRES_DB: ${ZITADEL_DB_NAME:-zitadel}
+
+  zitadel:
+    env_file: [infra/env/.env.prod]
+
+  meilisearch:
+    env_file: [infra/env/.env.prod]
+
+  # api/web read the OIDC/AUTH client secrets the future zitadel-bootstrap sidecar writes to the
+  # shared zitadel_secrets volume (dossier §4c). Mounted read-only; reserved now, consumed when
+  # the sidecar lands (NEXT PR). Harmless empty volume until then.
+  api:
+    volumes:
+      - zitadel_secrets:/zitadel-secrets:ro
+  web:
+    volumes:
+      - zitadel_secrets:/zitadel-secrets:ro
+
+volumes:
+  # Reserved for the future zitadel-bootstrap sidecar's exported OIDC client creds (dossier §9c/§9e).
+  # Persisted (named volume) so creds survive `down`; pair `down -v` with removing it for a clean
+  # re-bootstrap (dossier §4e). The sidecar that WRITES it arrives in the next PR.
+  zitadel_secrets:

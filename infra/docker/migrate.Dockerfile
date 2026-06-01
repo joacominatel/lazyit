@@ -26,7 +26,8 @@ COPY apps/api/prisma.config.ts apps/api/
 # src/search/search.documents (pure projectors) + the generated client; @prisma/adapter-pg and
 # meilisearch are already installed above. The Node API runtime image has no Bun, so reindex runs
 # in THIS Bun image via a one-off `docker compose run`:
-#   docker compose -f infra/docker-compose.prod.yml run --rm migrate bun run reindex:all
+#   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+#     --env-file infra/env/.env.prod run --rm migrate bun run reindex:all
 # (the default CMD is migrate+seed; `run` overrides it). See docs/05-runbooks/deploy-self-hosted.md §2a.
 # apps/api/package.json (with the `reindex:all` script) is already copied above.
 COPY apps/api/src/           apps/api/src/

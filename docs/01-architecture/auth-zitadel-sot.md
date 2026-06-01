@@ -37,7 +37,7 @@ adapter.
 
 ## 1. Zitadel platform capabilities
 
-**Pinned version:** Zitadel `v2.68.0` (digest-pinned in `infra/docker-compose.prod.yml`). The runtime
+**Pinned version:** Zitadel `v2.68.0` (digest-pinned in the canonical root `compose.yaml`). The runtime
 authN path speaks **generic OIDC** (no Zitadel SDK) — only the *write-back* + *bootstrap* paths use
 Zitadel-specific Management APIs. v2 (resource-based) APIs are used for all new integrations.
 
@@ -281,7 +281,7 @@ Goal: `docker compose up` brings the full OIDC stack live with **zero Zitadel co
 ### 4a. FirstInstance service account + PAT export
 
 ```yaml
-# infra/docker-compose.prod.yml — zitadel service (added env)
+# compose.yaml — zitadel service (added env; lands with the sidecar PR)
 zitadel:
   environment:
     ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: zitadel-bootstrap
@@ -586,16 +586,27 @@ organized once the `zitadel-bootstrap` sidecar lands?* It is recorded here as **
 is **no separate ADR**; it does not change a decision, it consolidates the existing split into the
 canonical Compose v2 layout.
 
+> **As built (this PR).** The consolidation landed: `compose.yaml` + `compose.override.yaml` at the
+> repo root and a thin `infra/docker-compose.prod.yaml`; the old `infra/docker-compose.prod.yml` was
+> removed (backward-compat command aliased in [[deploy-self-hosted]]). The **`zitadel-bootstrap`
+> sidecar itself is the next PR** (its slot is reserved: the `prod` profile + the `zitadel_secrets`
+> volume already exist). The deferred sub-questions (§9e) are settled below.
+
 ### 9a. Target layout
 
 - A single canonical **`compose.yaml` at the repo root** declaring **all** services (db, migrate, api,
-  web, zitadel, zitadel_db, caddy, backup, `zitadel-bootstrap`).
-- A committed **`compose.override.yaml`** (auto-loaded by `docker compose` for dev tuning):
-  localhost-only port bindings, **no Caddy**, no resource limits — the day-to-day developer experience.
-- A **`prod` profile** inside `compose.yaml` gating the prod-only services (**Caddy**, the **backup
-  sidecar**, and the **`zitadel-bootstrap` sidecar**) so they never come up in plain dev.
+  web, zitadel, zitadel_db, meilisearch, caddy, backup, and — once it lands — `zitadel-bootstrap`).
+- A committed **`compose.override.yaml`** (auto-loaded by `docker compose` for dev tuning of the
+  **unprofiled backing services only** — db, meilisearch, zitadel, zitadel_db): localhost-only port
+  bindings (Postgres 5432, Meili 7700, Zitadel 8080), Zitadel `--tlsMode disabled`, no resource
+  limits. The day-to-day developer experience: `docker compose up` brings up **just the backing
+  services** (api/web run natively via `bun run dev`); Caddy is absent because it is prod-profiled.
+- A **`prod` profile** inside `compose.yaml` gating the prod-only services (**api, web, migrate,
+  Caddy**, the **backup sidecar**, and the future **`zitadel-bootstrap` sidecar**) so they never come
+  up in plain dev.
 - A **thin `infra/docker-compose.prod.yaml` override** carrying only the prod-specific deltas:
-  env-file path, secrets volume mounts, internal-only networks.
+  env-file path (`infra/env/.env.prod`), the reserved `zitadel_secrets` volume mounts, internal-only
+  networks, and the `lazyit-prod` project name (so prod volumes are namespaced and reused unchanged).
 
 ### 9b. Commands
 
@@ -616,33 +627,37 @@ The one-shot `zitadel-bootstrap` sidecar (ADR-0043 §4 / dossier §4b) lives in 
 (dossier §4c). It is therefore absent from a plain `docker compose up` and only runs under
 `--profile prod`.
 
-### 9d. Migration path (backward-compatible)
+### 9d. Migration path (backward-compatible) — DONE
 
-1. **Rename** `docker-compose.yml` → `compose.yaml` (root).
-2. **Create** `compose.override.yaml` with the dev tuning (localhost ports, no Caddy, no limits).
-3. **Merge** the prod-only services into `compose.yaml` with `profiles: [prod]` (Caddy, backup,
-   `zitadel-bootstrap`).
-4. **Slim** `infra/docker-compose.prod.yml` → a **thin** `infra/docker-compose.prod.yaml` override
-   (env-file path, secrets volume, internal-only networks) — the bulk now lives in the canonical file.
-5. **Keep old runbook commands working** via an aliased note (the previous
-   `-f infra/docker-compose.prod.yml` invocation maps to the new base + thin override + `--profile
-   prod`), so existing [[deploy-self-hosted]] muscle memory still functions during the transition.
+1. **Renamed** `docker-compose.yml` → `compose.yaml` (root, via `git mv` to preserve history). ✅
+2. **Created** `compose.override.yaml` with the dev tuning (localhost ports, Zitadel no-TLS, no
+   limits) for the unprofiled backing services. ✅
+3. **Merged** the prod-only services into `compose.yaml` with `profiles: [prod]` (api, web, migrate,
+   Caddy, backup; slot reserved for `zitadel-bootstrap`); all prod hardening carried over verbatim
+   (digest pins, `x-logging` anchor, `mem_limit`/`cpus`, healthchecks, `depends_on`). ✅
+4. **Slimmed** `infra/docker-compose.prod.yml` → a **thin** `infra/docker-compose.prod.yaml` override
+   (env-file path, `zitadel_secrets` volume, internal-only networks, `lazyit-prod` project name) and
+   **removed** the old file — the bulk now lives in the canonical file. ✅
+5. **Old runbook commands aliased**: the previous `-f infra/docker-compose.prod.yml` invocation maps
+   to the new base + thin override + `--profile prod` + `--env-file`; documented in [[deploy-self-hosted]]
+   and `infra/README.md`. ✅
 
-This is fully **backward-compatible**: dev gains zero-config `docker compose up`, prod keeps an explicit
-single command, and no service definition is lost.
+Fully **backward-compatible**: dev gains zero-config `docker compose up` (backing services only), prod
+keeps a single explicit command, the `lazyit-prod` project name (hence prod volumes) is unchanged, and
+a rendered-config diff proves **no service or hardening option was dropped** (only the additive
+`profiles:` markers + the reserved `zitadel_secrets` volume appear).
 
-### 9e. Deferred implementation sub-questions (settle in the Phase-3 infra PR)
+### 9e. Deferred implementation sub-questions — settled
 
-1. **Secrets persistence** — is the `zitadel_secrets` volume a **persisted** volume (creds survive
-   `down`, faster restarts) or **regenerated** on each clean bootstrap (simpler, matches the dev-only
-   `down -v` clean-slate posture)?
-2. **`.env.prod` ownership** — does `infra/env/.env.prod` ship as a **placeholder** the operator fills,
-   or is it **bootstrap-owned output** (the sidecar writes the OIDC values, the operator only sets the
-   masterkey/domain)?
-3. **Convenience alias** — do we add a `Makefile`/`bun run` convenience alias for the long prod command,
-   or keep it explicit in the runbook?
-
-These are sequenced into the Phase-3 infra PR (see §8, PR 3.1) rather than decided here.
+1. **Secrets persistence** — the `zitadel_secrets` volume is a **persisted named volume** (creds
+   survive `down`, faster restarts). A clean re-bootstrap pairs `down -v` with removing it (dossier
+   §4e). It is declared in `infra/docker-compose.prod.yaml` now; the writer (the sidecar) is the next PR.
+2. **`.env.prod` ownership** — `infra/env/.env.prod` stays an **operator-filled placeholder**
+   (copied from `.env.prod.example`); the future sidecar writes the OIDC client values to the
+   `zitadel_secrets` volume, NOT into `.env.prod`. No change to the existing secrets posture (ADR-0028).
+3. **Convenience alias** — **kept explicit in the runbook** for now (no `Makefile`/`bun run` wrapper);
+   the long prod command is documented verbatim. `bun run db:up`/`db:down` already wrap the **dev**
+   `docker compose up -d` / `down` (now the backing-services stack).
 
 Related: [[0043-zitadel-source-of-truth]] · [[0037-idp-choice-zitadel-byoi]] ·
 [[0038-jit-user-provisioning]] · [[0039-authjs-v5-frontend-oidc]] · [[0040-rbac-roles]] ·
