@@ -1,5 +1,5 @@
 ---
-title: "ADR-0043: Dashboard recent-activity feed backed by a unified DB view"
+title: "ADR-0044: Dashboard recent-activity feed backed by a unified DB view"
 tags: [adr, api, dashboard, database]
 status: accepted
 created: 2026-06-01
@@ -7,7 +7,7 @@ updated: 2026-06-01
 deciders: [Joaquín Minatel]
 ---
 
-# ADR-0043: Dashboard recent-activity feed backed by a unified DB view
+# ADR-0044: Dashboard recent-activity feed backed by a unified DB view
 
 ## Status
 

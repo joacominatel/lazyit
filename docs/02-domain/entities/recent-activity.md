@@ -8,7 +8,7 @@ updated: 2026-06-01
 
 # RecentActivity
 
-> 🟢 implemented · Area: Dashboard (derived) · see [[0043-recent-activity-view]]
+> 🟢 implemented · Area: Dashboard (derived) · see [[0044-recent-activity-view]]
 
 ## Purpose
 
@@ -16,7 +16,7 @@ A **derived, read-only** unified activity feed for the dashboard — one chronol
 across the IT estate?" stream, newest first. Not a table: it is a **Postgres VIEW**
 (`recent_activity`) that `UNION ALL`s the four append-only activity sources. Nothing writes to it; it
 has no id, no timestamps of its own, no soft delete. Requested by the CEO directly ("podemos hacerlo
-con una view"). See [[0043-recent-activity-view]].
+con una view"). See [[0044-recent-activity-view]].
 
 ## Sources merged
 
@@ -65,6 +65,6 @@ dashboard's "Recent activity" panel via the data layer ([[0020-frontend-data-lay
 > superseded by this unified feed. It is kept on the summary contract for backward compatibility but
 > is no longer used by the web; removing it is a future cleanup.
 
-Related: [[0043-recent-activity-view]] · [[asset-history]] · [[asset-assignment]] · [[access-grant]] ·
+Related: [[0044-recent-activity-view]] · [[asset-history]] · [[asset-assignment]] · [[access-grant]] ·
 [[consumable-movement]] · [[0030-list-pagination-contract]] · [[0032-soft-delete-middleware]] ·
 [[0020-frontend-data-layer]].
