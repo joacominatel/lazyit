@@ -1,12 +1,11 @@
-// Public auth shell: a single centered column, no navigation or chrome.
+import { AuthShell } from "@/components/auth-shell";
+
+// Public auth shell: the shared AuthShell (wordmark + theme toggle + centered column), no app chrome.
+// The first-run /setup wizard renders the same shell so login ↔ wizard never jumps.
 export default function AuthLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <div className="flex min-h-svh items-center justify-center bg-muted/30 p-4">
-      {children}
-    </div>
-  );
+  return <AuthShell>{children}</AuthShell>;
 }

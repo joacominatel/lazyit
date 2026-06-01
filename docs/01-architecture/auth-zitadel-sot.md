@@ -476,14 +476,26 @@ Zitadel plumbing (project/app) is the sidecar's job.
 
 ### 5c. Wizard route + flow (Next.js 16 App Router)
 
-`apps/web/app/(app)/setup/page.tsx` — full-screen, no sidebar. On mount it reads `GET /config/status`;
-`isConfigured` → redirect `/dashboard`; else show the 4-step wizard:
+`apps/web/app/setup/page.tsx` — full-screen, no sidebar; lives OUTSIDE the `(app)` group so it is
+reachable before any login exists. It renders the shared `AuthShell` (wordmark + theme toggle +
+centered column, also used by the `(auth)` login surface). On mount the wizard reads
+`GET /config/status`; `isConfigured` → redirect `/login` (which forwards an already-signed-in
+operator to the dashboard); else show the adaptive wizard:
 
 1. **Welcome + integration choice** — radio: *bundled Zitadel* | *I have my own OIDC provider (BYOI)*.
-2. **Zitadel config** (only if bundled) — link to the console + optional client id/secret inputs;
-   **skippable** because the sidecar already provisioned them.
+2. **Configure** (BYOI ONLY) — re-shows the three OIDC env vars to confirm. The bundled-Zitadel path
+   **drops this step entirely** (the sidecar already provisioned everything), so its happy path is
+   Welcome → Administrator → Done. The step indicator adapts to the active path.
 3. **Create first ADMIN** — email + first/last name (role fixed to ADMIN here, by definition).
-4. **Confirm + redirect** — invalidate `GET /users/me` so the new ADMIN role is picked up.
+4. **Done** — invalidate `GET /users/me` so the new ADMIN role is picked up, then a "Go to sign in"
+   CTA to `/login` (closes the loop: the new ADMIN has no session yet and must authenticate first).
+
+**First-run gate** — a fresh operator had no way to *discover* `/setup` (every other entry point
+dead-ends before an ADMIN exists). `apps/web/proxy.ts` closes this: on a top-level navigation with no
+session it asks the API `GET /config/status` and, if `isConfigured=false` and the visitor is not
+already on `/setup`, redirects them to `/setup`. A session implies an ADMIN exists (skip the check);
+any API error FAILS OPEN so a transient blip never bricks navigation. The marketing landing and the
+`/login` page also surface a "Set up lazyit" CTA when unconfigured as belt-and-suspenders.
 
 Data layer per [[0020-frontend-data-layer]] (endpoints → hooks → components):
 `lib/api/endpoints/config.ts` (`getConfigStatus`, `setupConfig`) → `lib/api/hooks/use-config.ts`
@@ -541,18 +553,21 @@ points that bind *this* epic:
 
 ### 7a. First-run Setup Wizard (auth/onboarding UX)
 
-- **4-step full-screen flow** (§5c), no sidebar:
+- **Adaptive full-screen flow** (§5c), no sidebar, on the shared `AuthShell`:
   1. **IdP choice** — radio fork: *bundled Zitadel* vs. *bring-your-own OIDC (BYOI)*.
-  2. **Optional config** — only for BYOI (or to override the sidecar-provisioned bundled values); the
-     bundled-Zitadel path can skip this step because the `zitadel-bootstrap` sidecar already did the
-     plumbing.
+  2. **Configure** — BYOI ONLY (re-show the three OIDC env vars to confirm). The bundled-Zitadel path
+     **drops this step** because the `zitadel-bootstrap` sidecar already did the plumbing, so its
+     happy path is Welcome → Administrator → Done. The step indicator adapts.
   3. **Create first ADMIN** — email + first/last name; role is fixed to ADMIN here by definition.
   4. **Done** — confirmation; invalidates `GET /users/me` so the new ADMIN's controls light up
-     immediately, then redirects to the dashboard.
-- **First-run detection** — the wizard is driven by the public **`GET /setup/status`** endpoint
-  (the `/config/status` of §5a; `{ isConfigured, adminCount, integrationMode }`): an unconfigured
-  install (`isConfigured=false`, no ADMIN exists) routes to `/setup`; a configured install redirects
-  straight to `/dashboard`. Polled before any login exists, so it must stay `@Public()`.
+     immediately, then a "Go to sign in" CTA to **`/login`** (the new ADMIN must authenticate through
+     the IdP first — it has no session yet).
+- **First-run detection + gate** — driven by the public **`GET /config/status`** endpoint (§5a;
+  `{ isConfigured, adminCount, integrationMode, devMode, csrfToken }`): an unconfigured install
+  (`isConfigured=false`, no ADMIN exists) is ROUTED to `/setup` by the `proxy.ts` first-run gate (on
+  any top-level navigation without a session); a configured install proceeds normally. The wizard
+  itself self-locks (redirects to `/login`) if reached when already configured. Polled before any
+  login exists, so the endpoint must stay `@Public()`.
 - **Configured-vs-dev-mode topbar banner** — a persistent topbar banner reflects the integration
   posture: a *dev / unconfigured* state (e.g. shim or no real IdP) shows a clearly-labelled warning
   banner; a *configured* state (real OIDC bound) shows the IdP it is wired to. This makes "am I running
