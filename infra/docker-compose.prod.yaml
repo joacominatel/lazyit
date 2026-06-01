@@ -47,6 +47,16 @@ services:
 
   zitadel:
     env_file: [infra/env/.env.prod]
+    # Gate Zitadel on the one-shot zitadel-secrets-init (compose.yaml, profiles:[prod]) COMPLETING, so
+    # /zitadel-secrets is chmod 0777 BEFORE start-from-init writes bootstrap-key.json — else Zitadel's
+    # non-root uid hits "permission denied", the 03_default_instance migration fatals mid-way and the
+    # container restart-loops ("Errors.Instance.Domain.AlreadyExists") (dossier §4e). This edge lives
+    # ONLY in the prod overlay: `zitadel` is UNPROFILED (it backs dev too) and an unprofiled service
+    # cannot depend_on a profiles:[prod] one in the dev merge (invalid project). Compose merges this
+    # depends_on map with the base `zitadel_db` edge, so both gates apply in the prod merge.
+    depends_on:
+      zitadel-secrets-init:
+        condition: service_completed_successfully
 
   meilisearch:
     env_file: [infra/env/.env.prod]
