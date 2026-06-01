@@ -76,4 +76,29 @@ export class ApplicationsService {
     this.search.remove('applications', id);
     return application;
   }
+
+  /**
+   * Restore a soft-deleted application: clear `deletedAt` (ADR-0041). Found via the
+   * `includeSoftDeleted` escape hatch (the read filter would hide it). 404 if it never existed;
+   * idempotent if already live. Re-indexes for search on success.
+   */
+  async restore(id: string) {
+    const application = await this.prisma.application.findFirst({
+      where: { id },
+      includeSoftDeleted: true,
+    } as Prisma.ApplicationFindFirstArgs);
+    if (!application) {
+      throw new NotFoundException(`Application ${id} not found`);
+    }
+    if (application.deletedAt === null) {
+      return application; // already live — idempotent
+    }
+    const restored = await this.prisma.application.update({
+      where: { id },
+      data: { deletedAt: null },
+    });
+    // Re-index the restored application (ADR-0035).
+    this.search.upsert('applications', projectApplication(restored));
+    return restored;
+  }
 }
