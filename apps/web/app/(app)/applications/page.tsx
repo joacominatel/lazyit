@@ -1,7 +1,7 @@
 "use client";
 
 import { KeyIcon, MagnifyingGlassIcon, PlusIcon } from "@heroicons/react/24/outline";
-import type { User } from "@lazyit/shared";
+import { MAX_PAGE_LIMIT, type User } from "@lazyit/shared";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -84,7 +84,13 @@ export default function ApplicationsPage() {
   } = useApplications();
   const { data: categories } = useApplicationCategories();
   // All active grants across apps + all users — joined client-side for the counts/avatars (ADR-0020).
-  const { data: activeGrants } = useAccessGrants({ activeOnly: true });
+  // The counts must see every active grant, so we request the hard-max page (200) rather than the
+  // default 50; the Access list is per-application, so this dedicated count read stays unpaginated.
+  const { data: activeGrantsPage } = useAccessGrants({
+    activeOnly: true,
+    limit: MAX_PAGE_LIMIT,
+  });
+  const activeGrants = activeGrantsPage?.items;
   const { data: users } = useUsers();
   const deleteApplication = useDeleteApplication();
 
