@@ -17,15 +17,44 @@ import { createCrudEndpoints } from "../crud-endpoints";
  * Routes mirror apps/api/src/locations (see the Location entity note + ADR-0018).
  * Timestamps come back as ISO strings, not `Date` instances.
  */
+const BASE = "/locations";
 const locations = createCrudEndpoints<Location, CreateLocation, UpdateLocation>(
-  "/locations",
+  BASE,
 );
 
-// `GET /locations` is paginated (ADR-0030 amendment): unwrap the `Page<Location>`
-// envelope to its `items` for the current array-based screen. The list-chain wave
-// will consume the full envelope + server-side params.
-export const getLocations = (): Promise<Location[]> =>
-  apiFetch<Page<Location>>("/locations").then((page) => page.items);
+/**
+ * Server-side params for the location list (#104). `q` matches name/address/floor/description;
+ * `sort` is allowlisted to `name|type|createdAt|updatedAt` (unknown → 400). The location-type filter
+ * is NOT a server param — the screen applies it client-side over the page. `limit`/`offset` thread
+ * the pagination window (ADR-0030).
+ */
+export interface LocationListParams {
+  q?: string;
+  sort?: string;
+  dir?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * List non-deleted locations, paged. `GET /locations` returns a `Page<Location>` envelope; we return
+ * the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
+ * server-supported params are forwarded (extra client-only filter keys are ignored).
+ */
+export function getLocations(
+  params: LocationListParams = {},
+): Promise<Page<Location>> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.sort) {
+    qs.set("sort", params.sort);
+    if (params.dir) qs.set("dir", params.dir);
+  }
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  const search = qs.toString();
+  return apiFetch<Page<Location>>(search ? `${BASE}?${search}` : BASE);
+}
 export const getLocation = locations.get;
 export const createLocation = locations.create;
 export const updateLocation = locations.update;

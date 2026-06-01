@@ -1,10 +1,10 @@
 import type {
   Consumable,
+  ConsumableListPage,
   ConsumableMovement,
   ConsumableMovementQuery,
   CreateConsumable,
   CreateConsumableMovement,
-  Page,
   UpdateConsumable,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
@@ -27,26 +27,41 @@ export const createConsumable = crud.create;
 export const updateConsumable = crud.update;
 export const deleteConsumable = crud.remove;
 
-export interface ConsumableFilters {
-  /** Server-side: only items at or below their reorder threshold (`currentStock <= minStock`). */
+/**
+ * Server-side params for the consumable list (#104). `q` matches name/sku/description; `sort` is
+ * allowlisted to `name|sku|currentStock|createdAt|updatedAt` (unknown → 400); `lowStock=true` keeps
+ * only items at or below their reorder threshold (`currentStock <= minStock`). Category is NOT a
+ * server param — the screen filters it client-side over the page. `limit`/`offset` thread the
+ * pagination window (ADR-0030).
+ */
+export interface ConsumableListParams {
+  q?: string;
+  sort?: string;
+  dir?: "asc" | "desc";
   lowStock?: boolean;
+  limit?: number;
+  offset?: number;
 }
 
 /**
- * List non-deleted consumables, optionally only low-stock ones. `GET /consumables`
- * is paginated (ADR-0030 amendment): unwrap the `Page<Consumable>` envelope to its
- * `items` for the current array-based screen. The list-chain wave will consume the
- * full envelope + server-side params (sort/q/pagination).
+ * List non-deleted consumables, paged. `GET /consumables` returns a `Page<Consumable>` envelope; we
+ * return the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
+ * server-supported params are forwarded (extra client-only filter keys are ignored).
  */
 export function getConsumables(
-  filters: ConsumableFilters = {},
-): Promise<Consumable[]> {
-  const params = new URLSearchParams();
-  if (filters.lowStock) params.set("lowStock", "true");
-  const qs = params.toString();
-  return apiFetch<Page<Consumable>>(qs ? `${BASE}?${qs}` : BASE).then(
-    (page) => page.items,
-  );
+  params: ConsumableListParams = {},
+): Promise<ConsumableListPage> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.sort) {
+    qs.set("sort", params.sort);
+    if (params.dir) qs.set("dir", params.dir);
+  }
+  if (params.lowStock) qs.set("lowStock", "true");
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  const search = qs.toString();
+  return apiFetch<ConsumableListPage>(search ? `${BASE}?${search}` : BASE);
 }
 
 /** A consumable's stock movement ledger (newest first), optionally filtered by type / date range. */

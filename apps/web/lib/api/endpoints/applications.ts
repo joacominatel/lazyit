@@ -19,11 +19,40 @@ const BASE = "/applications";
 const crud = createCrudEndpoints<Application, CreateApplication, UpdateApplication>(
   BASE,
 );
-// `GET /applications` is paginated (ADR-0030 amendment): unwrap the
-// `Page<Application>` envelope to its `items` for the current array-based Access
-// screen. The list-chain wave will consume the full envelope + server-side params.
-export const getApplications = (): Promise<Application[]> =>
-  apiFetch<Page<Application>>(BASE).then((page) => page.items);
+
+/**
+ * Server-side params for the application list (#104). `q` matches name/vendor/url/description;
+ * `sort` is allowlisted to `name|vendor|isCritical|createdAt|updatedAt` (unknown → 400). Category and
+ * criticality are NOT server params — the Access screen applies them client-side over the page (it
+ * already joins category + grants client-side). `limit`/`offset` thread the pagination window.
+ */
+export interface ApplicationListParams {
+  q?: string;
+  sort?: string;
+  dir?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * List non-deleted applications, paged. `GET /applications` returns a `Page<Application>` envelope;
+ * we return the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
+ * server-supported params are forwarded (extra client-only filter keys are ignored).
+ */
+export function getApplications(
+  params: ApplicationListParams = {},
+): Promise<Page<Application>> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.sort) {
+    qs.set("sort", params.sort);
+    if (params.dir) qs.set("dir", params.dir);
+  }
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  const search = qs.toString();
+  return apiFetch<Page<Application>>(search ? `${BASE}?${search}` : BASE);
+}
 export const getApplication = crud.get;
 export const createApplication = crud.create;
 export const updateApplication = crud.update;

@@ -1,20 +1,26 @@
 "use client";
 
-import { CubeIcon, MagnifyingGlassIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { CubeIcon, PlusIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { PageHeader } from "@/components/page-header";
 import {
   EmptyState,
   ErrorState,
+  Pagination,
+  ResourceCard,
+  ResourceCardMeta,
   type ResourceColumn,
   ResourceTable,
   RowActions,
+  SortableHeader,
 } from "@/components/resource-table";
+import { SearchInput } from "@/components/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -25,112 +31,202 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { useConsumableCategories } from "@/lib/api/hooks/use-consumable-categories";
-import { useDeleteConsumable } from "@/lib/api/hooks/use-consumable-mutations";
 import { useConsumables } from "@/lib/api/hooks/use-consumables";
-import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
+import { useDeleteConsumable } from "@/lib/api/hooks/use-consumable-mutations";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useListParams } from "@/lib/hooks/use-list-params";
 import { formatDate } from "@/lib/utils/format";
 import { QuickAdjustButtons } from "./_components/quick-adjust-buttons";
 import { StockBadge } from "./_components/stock-badge";
 
-type StockFilter = "ALL" | "LOW";
-
-const COLUMNS: ResourceColumn[] = [
-  { key: "name", header: "Name", skeleton: <Skeleton className="h-4 w-32" /> },
-  {
-    key: "category",
-    header: "Category",
-    skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
-  },
-  {
-    key: "stock",
-    header: "Stock",
-    skeleton: <Skeleton className="h-5 w-12 rounded-md" />,
-  },
-  { key: "unit", header: "Unit", skeleton: <Skeleton className="h-4 w-14" /> },
-  { key: "sku", header: "SKU", skeleton: <Skeleton className="h-4 w-20" /> },
-  { key: "updated", header: "Updated", skeleton: <Skeleton className="h-4 w-20" /> },
-  {
-    key: "quick-adjust",
-    header: "Quick adjust",
-    srOnlyHeader: true,
-    headClassName: "w-24",
-    skeleton: <Skeleton className="ml-auto h-7 w-16" />,
-  },
-  {
-    key: "actions",
-    header: "Actions",
-    srOnlyHeader: true,
-    headClassName: "w-12 text-right",
-    skeleton: <Skeleton className="ml-auto size-7" />,
-  },
-];
+/**
+ * Filter param defaults. `lowStock` is a server filter ("true"); `category` is client-side over the
+ * page (the API has no category param).
+ */
+const FILTER_DEFAULTS = { lowStock: "", category: "ALL" } as const;
 
 export default function ConsumablesPage() {
   const router = useRouter();
-  const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("ALL");
-  const [stockFilter, setStockFilter] = useState<StockFilter>("ALL");
+  const canWrite = useCanWrite();
+  const {
+    q,
+    sort,
+    dir,
+    offset,
+    limit,
+    filters,
+    setQ,
+    toggleSort,
+    setFilter,
+    setOffset,
+    clearFilters,
+    filtersActive,
+  } = useListParams({
+    filters: FILTER_DEFAULTS,
+    defaultSort: "updatedAt",
+    defaultDir: "desc",
+  });
+
+  const categoryFilter = filters.category;
+  const lowStockOnly = filters.lowStock === "true";
+
+  // Forward only the server-supported params (`q`/`sort`/`dir`/`lowStock` + the window). `category`
+  // is filtered client-side over the page below.
+  const { data: page, isLoading, isFetching, isError, error, refetch } =
+    useConsumables({
+      q: q || undefined,
+      sort,
+      dir: sort ? dir : undefined,
+      lowStock: lowStockOnly,
+      limit,
+      offset,
+    });
+  const { data: categories } = useConsumableCategories();
+  const deleteConsumable = useDeleteConsumable();
+
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(
     null,
   );
 
-  const debouncedSearch = useDebouncedValue(search.trim().toLowerCase(), 300);
-
-  // `lowStock` is a server filter; search + category are applied client-side over the result.
-  const {
-    data: consumables,
-    isLoading,
-    isError,
-    error,
-    refetch,
-  } = useConsumables({ lowStock: stockFilter === "LOW" });
-  const { data: categories } = useConsumableCategories();
-  const deleteConsumable = useDeleteConsumable();
-
   const categoryNameById = useMemo(
-    () => new Map((categories ?? []).map((category) => [category.id, category.name])),
+    () =>
+      new Map((categories ?? []).map((category) => [category.id, category.name])),
     [categories],
   );
 
-  const filtered = useMemo(
-    () =>
-      (consumables ?? []).filter((consumable) => {
-        if (
-          debouncedSearch &&
-          !consumable.name.toLowerCase().includes(debouncedSearch) &&
-          !(consumable.sku ?? "").toLowerCase().includes(debouncedSearch)
-        )
-          return false;
-        if (categoryFilter !== "ALL" && consumable.categoryId !== categoryFilter)
-          return false;
-        return true;
-      }),
-    [consumables, debouncedSearch, categoryFilter],
+  const rows = useMemo(() => {
+    const items = page?.items ?? [];
+    return categoryFilter === "ALL"
+      ? items
+      : items.filter((consumable) => consumable.categoryId === categoryFilter);
+  }, [page?.items, categoryFilter]);
+
+  const columns = useMemo<ResourceColumn[]>(
+    () => [
+      {
+        key: "name",
+        header: (
+          <SortableHeader
+            label="Name"
+            active={sort === "name"}
+            direction={dir}
+            onToggle={() => toggleSort("name")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-32" />,
+      },
+      {
+        key: "category",
+        header: "Category",
+        skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
+      },
+      {
+        key: "stock",
+        header: (
+          <SortableHeader
+            label="Stock"
+            active={sort === "currentStock"}
+            direction={dir}
+            onToggle={() => toggleSort("currentStock")}
+          />
+        ),
+        skeleton: <Skeleton className="h-5 w-12 rounded-md" />,
+      },
+      { key: "unit", header: "Unit", skeleton: <Skeleton className="h-4 w-14" /> },
+      {
+        key: "sku",
+        header: (
+          <SortableHeader
+            label="SKU"
+            active={sort === "sku"}
+            direction={dir}
+            onToggle={() => toggleSort("sku")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-20" />,
+      },
+      {
+        key: "updated",
+        header: (
+          <SortableHeader
+            label="Updated"
+            active={sort === "updatedAt"}
+            direction={dir}
+            onToggle={() => toggleSort("updatedAt")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-20" />,
+      },
+      {
+        key: "quick-adjust",
+        header: "Quick adjust",
+        srOnlyHeader: true,
+        headClassName: "w-24",
+        skeleton: <Skeleton className="ml-auto h-7 w-16" />,
+      },
+      {
+        key: "actions",
+        header: "Actions",
+        srOnlyHeader: true,
+        headClassName: "w-12 text-right",
+        skeleton: <Skeleton className="ml-auto size-7" />,
+      },
+    ],
+    [sort, dir, toggleSort],
   );
 
-  const filtersActive =
-    debouncedSearch !== "" || categoryFilter !== "ALL" || stockFilter !== "ALL";
-  const isEmpty = (consumables?.length ?? 0) === 0;
+  const total = page?.total ?? 0;
+  const isEmpty = total === 0;
+
+  function categoryBadge(categoryId: string | null) {
+    return categoryId && categoryNameById.has(categoryId) ? (
+      <Badge variant="outline">{categoryNameById.get(categoryId)}</Badge>
+    ) : (
+      <span className="text-muted-foreground">—</span>
+    );
+  }
+
+  const chips = [
+    ...(q ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }] : []),
+    ...(categoryFilter !== "ALL"
+      ? [
+          {
+            key: "category",
+            label: `Category: ${categoryNameById.get(categoryFilter) ?? "—"}`,
+            onClear: () => setFilter("category", FILTER_DEFAULTS.category),
+          },
+        ]
+      : []),
+    ...(lowStockOnly
+      ? [
+          {
+            key: "lowStock",
+            label: "Low stock only",
+            onClear: () => setFilter("lowStock", FILTER_DEFAULTS.lowStock),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Consumables</h1>
-          <p className="text-sm text-muted-foreground">
-            Stock-counted supplies — cables, adapters, toner and the like.
-          </p>
-        </div>
-        <Button asChild>
-          <Link href="/consumables/new">
-            <PlusIcon />
-            New consumable
-          </Link>
-        </Button>
-      </div>
+      <PageHeader
+        title="Consumables"
+        subtitle="Stock-counted supplies — cables, adapters, toner and the like."
+        actions={
+          canWrite ? (
+            <Button asChild>
+              <Link href="/consumables/new">
+                <PlusIcon />
+                New consumable
+              </Link>
+            </Button>
+          ) : null
+        }
+      />
 
       {isLoading ? (
-        <ResourceTable columns={COLUMNS} isLoading />
+        <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
       ) : isError ? (
         <ErrorState
           title="Could not load consumables"
@@ -143,27 +239,32 @@ export default function ConsumablesPage() {
           title="No consumables yet"
           description="Add the supplies your team keeps in stock to start tracking quantities."
           action={
-            <Button asChild>
-              <Link href="/consumables/new">
-                <PlusIcon />
-                Create your first consumable
-              </Link>
-            </Button>
+            canWrite ? (
+              <Button asChild>
+                <Link href="/consumables/new">
+                  <PlusIcon />
+                  Create your first consumable
+                </Link>
+              </Button>
+            ) : undefined
           }
         />
       ) : (
         <>
           <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
-            <div className="relative lg:max-w-xs lg:flex-1">
-              <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search by name or SKU…"
-                className="pl-8"
-              />
-            </div>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SearchInput
+              value={q}
+              onChange={setQ}
+              debounceMs={300}
+              onDebouncedChange={setQ}
+              label="Search consumables"
+              placeholder="Search by name or SKU…"
+              className="lg:max-w-xs lg:flex-1"
+            />
+            <Select
+              value={categoryFilter}
+              onValueChange={(value) => setFilter("category", value)}
+            >
               <SelectTrigger className="lg:w-44">
                 <SelectValue />
               </SelectTrigger>
@@ -177,8 +278,10 @@ export default function ConsumablesPage() {
               </SelectContent>
             </Select>
             <Select
-              value={stockFilter}
-              onValueChange={(value) => setStockFilter(value as StockFilter)}
+              value={lowStockOnly ? "LOW" : "ALL"}
+              onValueChange={(value) =>
+                setFilter("lowStock", value === "LOW" ? "true" : "")
+              }
             >
               <SelectTrigger className="lg:w-44">
                 <SelectValue />
@@ -190,12 +293,68 @@ export default function ConsumablesPage() {
             </Select>
           </div>
 
+          <ActiveFilters chips={chips} onClearAll={clearFilters} />
+
           <ResourceTable
-            columns={COLUMNS}
-            isFilteredEmpty={filtered.length === 0}
+            columns={columns}
+            isFilteredEmpty={rows.length === 0}
             filteredEmptyMessage="No consumables match your filters."
+            filteredEmptyAction={<ClearFiltersLink onClick={clearFilters} />}
+            mobileChildren={rows.map((consumable) => (
+              <ResourceCard
+                key={consumable.id}
+                href={`/consumables/${consumable.id}`}
+                title={consumable.name}
+                badge={
+                  <StockBadge
+                    currentStock={consumable.currentStock}
+                    minStock={consumable.minStock}
+                  />
+                }
+                meta={
+                  <>
+                    <ResourceCardMeta label="Category">
+                      {categoryBadge(consumable.categoryId)}
+                    </ResourceCardMeta>
+                    <ResourceCardMeta label="Unit">
+                      {consumable.unit}
+                    </ResourceCardMeta>
+                    <ResourceCardMeta label="SKU">
+                      <span className="font-mono">{consumable.sku ?? "—"}</span>
+                    </ResourceCardMeta>
+                    <ResourceCardMeta label="Updated">
+                      {formatDate(consumable.updatedAt)}
+                    </ResourceCardMeta>
+                  </>
+                }
+                actions={
+                  canWrite ? (
+                    <>
+                      <QuickAdjustButtons
+                        consumableId={consumable.id}
+                        name={consumable.name}
+                        currentStock={consumable.currentStock}
+                        unit={consumable.unit}
+                        size="sm"
+                      />
+                      <RowActions
+                        onEdit={() =>
+                          router.push(`/consumables/${consumable.id}/edit`)
+                        }
+                        onDelete={() =>
+                          setDeleting({
+                            id: consumable.id,
+                            name: consumable.name,
+                          })
+                        }
+                      />
+                    </>
+                  ) : undefined
+                }
+              />
+            ))}
           >
-            {filtered.map((consumable) => (
+            {rows.map((consumable) => (
               <TableRow key={consumable.id}>
                 <TableCell className="font-medium">
                   <Link
@@ -205,16 +364,7 @@ export default function ConsumablesPage() {
                     {consumable.name}
                   </Link>
                 </TableCell>
-                <TableCell>
-                  {consumable.categoryId &&
-                  categoryNameById.has(consumable.categoryId) ? (
-                    <Badge variant="outline">
-                      {categoryNameById.get(consumable.categoryId)}
-                    </Badge>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </TableCell>
+                <TableCell>{categoryBadge(consumable.categoryId)}</TableCell>
                 <TableCell>
                   <StockBadge
                     currentStock={consumable.currentStock}
@@ -231,28 +381,41 @@ export default function ConsumablesPage() {
                   {formatDate(consumable.updatedAt)}
                 </TableCell>
                 <TableCell>
-                  <div className="flex justify-end">
-                    <QuickAdjustButtons
-                      consumableId={consumable.id}
-                      name={consumable.name}
-                      currentStock={consumable.currentStock}
-                      unit={consumable.unit}
-                    />
-                  </div>
+                  {canWrite ? (
+                    <div className="flex justify-end">
+                      <QuickAdjustButtons
+                        consumableId={consumable.id}
+                        name={consumable.name}
+                        currentStock={consumable.currentStock}
+                        unit={consumable.unit}
+                      />
+                    </div>
+                  ) : null}
                 </TableCell>
                 <TableCell className="text-right">
-                  <RowActions
-                    onEdit={() =>
-                      router.push(`/consumables/${consumable.id}/edit`)
-                    }
-                    onDelete={() =>
-                      setDeleting({ id: consumable.id, name: consumable.name })
-                    }
-                  />
+                  {canWrite ? (
+                    <RowActions
+                      onEdit={() =>
+                        router.push(`/consumables/${consumable.id}/edit`)
+                      }
+                      onDelete={() =>
+                        setDeleting({ id: consumable.id, name: consumable.name })
+                      }
+                    />
+                  ) : null}
                 </TableCell>
               </TableRow>
             ))}
           </ResourceTable>
+
+          <Pagination
+            total={total}
+            limit={page?.limit ?? limit}
+            offset={page?.offset ?? offset}
+            itemCount={page?.items.length ?? 0}
+            onOffsetChange={setOffset}
+            isFetching={isFetching}
+          />
         </>
       )}
 

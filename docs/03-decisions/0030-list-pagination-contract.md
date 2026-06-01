@@ -69,6 +69,8 @@ eleven lists plus the frontend data layer today.
   `sort` param) — the asset table sorts name / asset-tag / status / updated on the loaded rows only; a
   server-side ordered list is a future backend follow-up. Consumables and the small reference lists are
   not backend-paginated, so they gained no controls.
+  **(Superseded 2026-06-01 by amendment §6 below — sort is now server-side and authoritative, all six
+  lists paginate, and list view-state lives in the URL.)**
 
 ## Consequences
 
@@ -156,6 +158,55 @@ per-entity history is preserved exactly as the single-item path records it (`DEL
 `STATUS_CHANGED` with `{from,to}` for assets; `revokedAt`/`revokedById` per grant). An id that is a
 **no-op** (not found, already deleted/restored/revoked, or already at the target status) is
 **skipped** with a reason — never an error — so a partial multi-select still commits.
+
+### 6. Frontend list-chain — URL view-state, server sort UI, pagination + responsive (2026-06-01)
+
+The web consumes §§1–3 across **all six list pages** (assets, applications/Access, consumables,
+users, locations, kb). This supersedes the "Frontend pagination UI" bullet above:
+
+- **URL is the source of truth for list view-state.** Each list page replaced its local
+  `useState` cluster (search / filters / sort / offset) with one **`useListParams(...)`** call
+  (`lib/hooks/use-list-params.ts`): `q` / `sort` / `dir` / `limit` / `offset` / named `filters`
+  all live in the query string, so a filtered list is shareable, bookmarkable and Back-navigable,
+  and the **dashboard deep-links** into a pre-filtered list. `q`/filter changes reset paging to
+  the first page; sort/page changes do not.
+- **The four interim fetchers** (`getUsers` / `getLocations` / `getApplications` /
+  `getConsumables`) now take a params object and **return the whole `Page<T>` envelope** (no more
+  `.then(p => p.items)`). To avoid breaking the screens that join a resource client-side (asset
+  owners, access grantees, article authors, the asset form's location/category pickers), the bare
+  directory hooks (`useUsers` / `useLocations` / `useApplications`) keep their **`Entity[]`**
+  contract by requesting the hard-max page (200) and `select`-ing `items`; new **`useUserList` /
+  `useLocationList` / `useApplicationList`** hooks return the envelope for the list pages.
+  Consumables only powers its own list, so `useConsumables` returns the envelope directly.
+- **Server sort is wired to the UI.** Sortable column headers (`SortableHeader` →
+  `toggleSort(field)`) only expose the per-resource allowlist (§1); the order is recomputed by the
+  API over the **full** result set, not the page. Non-allowlisted columns (model/owners/category,
+  consumable unit, user "Updated", …) are intentionally **not** sortable.
+- **Server vs client filters.** Where the API has a real filter param it is threaded through `q`/the
+  list params (`assets` → `status`/`categoryId`/`locationId`; `consumables` → `lowStock`; `kb` →
+  `status`/`categoryId`). Filters the API does NOT support are applied **client-side over the current
+  page** and documented as such — `assets` ownership, `applications` category + criticality,
+  `consumables` category, `users` active/inactive, `locations` type. The URL param names (the
+  dashboard deep-links + bookmarks depend on these): `assets` `status`/`category`/`location`/`ownership`;
+  `applications` `category`/`criticality`; `consumables` `lowStock`(=`"true"`)/`category`; `users`
+  `status`; `locations` `type`; `kb` `status`/`categoryId`.
+- **Pagination + RBAC + recovery.** Every list renders the shared `Pagination` footer over `total`;
+  the "New X" button, per-row Edit/Delete and the consumables ±1 quick-adjust are gated on
+  `useCanWrite()` (ADR-0040) so a VIEWER never sees a control that would 403. Active filters show as
+  dismissible chips with a **"Clear all"** (`components/active-filters.tsx`), and the filtered-empty
+  row offers a **"Clear filters"** link.
+- **Responsive.** `components/resource-table.tsx` gained a `mobileChildren` slot + `ResourceCard` /
+  `ResourceCardMeta` primitives: below `md` each list stacks into touch-friendly cards (status /
+  owners / quick-adjust kept visible, ≥44px targets); the `<table>` shows at `md` and up.
+- **Departed owners** are dimmed on the asset list using the re-added
+  `activeAssignments[].user.deletedAt` (§3).
+- **Dashboard.** "Needs attention" now leads (above the count cards); every attention row + pillar
+  breakdown deep-links into the matching pre-filtered list (same URL params above); `generatedAt`
+  surfaces as "Updated <relative>" beside a **Refresh** button; ADMIN-gated quick actions (New asset
+  / Add stock / Grant access); the bespoke error card is replaced by the shared `ErrorState`; and the
+  activity feed's avatar-color copy is deduped onto `lib/avatar-color.ts`'s `avatarColorFor`.
+- **Deferred** (a follow-on wave, building on this): bulk multi-select / batch-action bar (§5) and
+  the "Show archived"/restore toggle.
 
 ## References
 

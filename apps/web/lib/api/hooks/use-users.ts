@@ -1,10 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { MAX_PAGE_LIMIT } from "@lazyit/shared";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   getCurrentUser,
   getUser,
   getUserAssignments,
   getUserGrants,
   getUsers,
+  type UserListParams,
 } from "../endpoints/users";
 import { createQueryKeys } from "../query-keys";
 
@@ -21,17 +23,40 @@ export const userKeys = {
   ...baseUserKeys,
   /** The authenticated caller (`GET /users/me`) — distinct from any `detail(id)`. */
   me: () => [...baseUserKeys.all, "me"] as const,
+  /** A parameterized (search/sort/paged) list page — distinct from the bare directory `lists()`. */
+  list: (params: UserListParams) => [...baseUserKeys.all, "list", params] as const,
   assignments: (id: string, activeOnly: boolean) =>
     [...baseUserKeys.detail(id), "assignments", activeOnly] as const,
   grants: (id: string, activeOnly: boolean) =>
     [...baseUserKeys.detail(id), "grants", activeOnly] as const,
 };
 
-/** List all (non-soft-deleted) users. */
+/**
+ * The full user directory as a flat `User[]` — for the screens that join users client-side (asset
+ * owners, access grantees, article authors, the assign/grant dialogs). The list is paginated
+ * server-side (ADR-0030), so this requests the hard-max page (200) to materialize the whole
+ * directory for those lookups; the dedicated **Users list page** uses {@link useUserList} for real
+ * paging. Returns just `items` so the existing `User[]` consumers are unchanged.
+ */
 export function useUsers() {
   return useQuery({
     queryKey: userKeys.lists(),
-    queryFn: getUsers,
+    queryFn: () => getUsers({ limit: MAX_PAGE_LIMIT }),
+    select: (page) => page.items,
+  });
+}
+
+/**
+ * The Users list page: a single page of users with server-side `q`/`sort` and paging (returns the
+ * `Page<User>` envelope so the page can render pagination + sortable headers). `keepPreviousData`
+ * holds the current page while the next query resolves, so searching/paging doesn't flash the
+ * skeleton.
+ */
+export function useUserList(params: UserListParams = {}) {
+  return useQuery({
+    queryKey: userKeys.list(params),
+    queryFn: () => getUsers(params),
+    placeholderData: keepPreviousData,
   });
 }
 
