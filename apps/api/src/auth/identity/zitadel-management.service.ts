@@ -13,7 +13,10 @@ import type { Role } from '../../../generated/prisma/client';
  *     (grant `urn:ietf:params:oauth:grant-type:jwt-bearer`, scope
  *     `urn:zitadel:iam:org:project:id:zitadel:aud`) for a Management-API access token. The token is
  *     CACHED and refreshed shortly before it expires so steady-state write-back does not re-auth.
- *  2. **v2 (resource-based) Management calls** — create / deactivate user, grant / revoke project role.
+ *  2. **Management calls** — create / deactivate user on the **v2** user service; manage the user's
+ *     project-role GRANT (authorization) on the **v1** Management API. Zitadel v2.68.0 has NO
+ *     `/v2/users/{id}/grants` endpoint (it 404s — the original bug); user-grant CRUD lives under
+ *     `/management/v1/users/...` (search/add/update/delete), reached at the same internal origin.
  *
  * SECURITY / boot posture (ADR-0043 §6): a missing or misconfigured Management credential MUST NEVER
  * block login. This service is constructed lazily by the IdP adapter and reads its config defensively;
@@ -97,7 +100,7 @@ export class ZitadelManagementService {
     );
   }
 
-  // ---------- v2 Management calls -------------------------------------------
+  // ---------- Management calls ----------------------------------------------
 
   /** Create a human user; returns the new Zitadel user id. POST /v2/users/human. */
   async createUser(input: {
@@ -135,9 +138,19 @@ export class ZitadelManagementService {
   }
 
   /**
-   * Mirror a role grant: ensure the user holds exactly the project-role for `role`. Revokes any
-   * pre-existing grant on the project first (a role CHANGE is a revoke-then-grant), then adds the new
-   * grant. POST /v2/users/{userId}/grants with { projectId, roleKeys }.
+   * Set the user's lazyit role to exactly `role` on the configured project (single-role semantics).
+   *
+   * Zitadel v2.68.0 exposes user-grant (authorization) CRUD on the **v1** Management API — there is NO
+   * `/v2/users/{id}/grants` (it 404s, the original bug). We therefore:
+   *  1. SEARCH the user's existing grant on the lazyit project — POST /management/v1/users/grants/_search
+   *     filtering by userId AND projectId (combined with AND).
+   *  2. If NONE exists (the common case — a freshly-JIT'd user) → ADD a grant:
+   *     POST /management/v1/users/{userId}/grants { projectId, roleKeys: [roleKey] }.
+   *  3. If one EXISTS → UPDATE its roles to exactly the new role:
+   *     PUT /management/v1/users/{userId}/grants/{grantId} { roleKeys: [roleKey] }.
+   *
+   * This set semantics avoids a delete+add race and handles the no-grant case gracefully (an empty
+   * search is NOT an error).
    */
   async grantRole(externalId: string, role: Role): Promise<void> {
     this.assertConfigured();
@@ -145,36 +158,61 @@ export class ZitadelManagementService {
     if (!roleKey) {
       throw this.fail('grantRole', `no Zitadel role key mapped for "${role}"`);
     }
-    // A user should carry a single lazyit role grant on the project; clear any existing one so a role
-    // change does not leave stale grants (idempotent: revokeRole is a no-op when none exist).
-    await this.revokeRole(externalId);
+    const existing = await this.findProjectGrant(externalId);
+    if (existing) {
+      await this.request(
+        'PUT',
+        `/management/v1/users/${encodeURIComponent(externalId)}/grants/${encodeURIComponent(existing)}`,
+        { roleKeys: [roleKey] },
+      );
+      return;
+    }
     await this.request(
       'POST',
-      `/v2/users/${encodeURIComponent(externalId)}/grants`,
+      `/management/v1/users/${encodeURIComponent(externalId)}/grants`,
       { projectId: this.projectId, roleKeys: [roleKey] },
     );
   }
 
   /**
-   * Revoke the user's grant(s) on the configured project. Lists the user's grants, finds the one for
-   * this project and DELETEs it. DELETE /v2/users/{userId}/grants/{grantId}. No-op when none exist.
+   * Revoke the user's grant on the configured project, if any. Searches for it (userId + projectId)
+   * and DELETEs it. DELETE /management/v1/users/{userId}/grants/{grantId}. No-op when none exists.
    */
   async revokeRole(externalId: string): Promise<void> {
     this.assertConfigured();
+    const existing = await this.findProjectGrant(externalId);
+    if (!existing) {
+      return;
+    }
+    await this.request(
+      'DELETE',
+      `/management/v1/users/${encodeURIComponent(externalId)}/grants/${encodeURIComponent(existing)}`,
+    );
+  }
+
+  /**
+   * Find the user's single grant id on the configured project, or `undefined` if they have none.
+   * POST /management/v1/users/grants/_search with a userIdQuery + projectIdQuery (combined with AND).
+   * An empty result is the COMMON case (a freshly-JIT'd user) and is NOT an error.
+   */
+  private async findProjectGrant(
+    externalId: string,
+  ): Promise<string | undefined> {
+    const projectId = this.projectId;
     const listed = await this.request(
-      'GET',
-      `/v2/users/${encodeURIComponent(externalId)}/grants`,
+      'POST',
+      '/management/v1/users/grants/_search',
+      {
+        queries: [
+          { userIdQuery: { userId: externalId } },
+          { projectIdQuery: { projectId } },
+        ],
+      },
     );
     const grants = this.extractGrants(listed);
-    const projectId = this.projectId;
-    for (const grant of grants) {
-      if (grant.projectId === projectId && grant.id) {
-        await this.request(
-          'DELETE',
-          `/v2/users/${encodeURIComponent(externalId)}/grants/${encodeURIComponent(grant.id)}`,
-        );
-      }
-    }
+    // The search already filters by projectId; double-check defensively before returning the id.
+    const match = grants.find((g) => g.projectId === projectId && g.id) ?? grants.find((g) => g.id);
+    return match?.id;
   }
 
   // ---------- token cache + HTTP --------------------------------------------
@@ -259,7 +297,7 @@ export class ZitadelManagementService {
    * re-throws as 503 — never a silent partial write (ADR-0043 §3/§6).
    */
   private async request(
-    method: 'GET' | 'POST' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     body?: unknown,
   ): Promise<unknown> {
@@ -304,7 +342,11 @@ export class ZitadelManagementService {
     }
   }
 
-  /** Pull the grant list out of a v2 grants response (`result` or `grants` array), defensively typed. */
+  /**
+   * Pull the grant list out of a v1 user-grant search response (`result` array), defensively typed.
+   * Each `UserGrant` carries its grant id as `id` (proto field 1); we also accept the legacy
+   * `userGrantId`/`grantId` aliases for resilience.
+   */
   private extractGrants(
     listed: unknown,
   ): { id?: string; projectId?: string }[] {

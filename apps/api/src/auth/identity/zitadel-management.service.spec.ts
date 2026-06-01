@@ -43,9 +43,13 @@ import { ZitadelManagementService } from './zitadel-management.service';
 
 /**
  * ZitadelManagementService unit tests (ADR-0043 Phase 2). The HTTP layer (`fetch`) is mocked — there
- * is NO live Zitadel. We assert: the service-account token is fetched once and reused (cache), each v2
- * call hits the right method/path/body, a non-2xx maps to a 503 ServiceUnavailableException (surfaced
- * upstream as 503), and an absent credential WARNs + throws "not configured" without ever blocking.
+ * is NO live Zitadel, so these prove the call SHAPE (method/path/body), not the live endpoint: the
+ * real Zitadel v2.68.0 endpoint correctness can only be confirmed by a `--profile prod` retest. We
+ * assert: the service-account token is fetched once and reused (cache), create/deactivate hit the v2
+ * user service, the user-grant set-role flow hits the v1 Management API (search → ADD when none / PUT
+ * when one exists; an empty search is NOT an error), a non-2xx maps to a 503
+ * ServiceUnavailableException, and an absent credential WARNs + throws "not configured" without ever
+ * blocking.
  */
 describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
   // A real RSA key so the JWT-profile assertion actually signs (PKCS#1 PEM, as Zitadel emits).
@@ -174,8 +178,8 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
     fetchMock
       .mockResolvedValueOnce(tokenResponse()) // token
       .mockResolvedValueOnce(jsonResponse({ userId: 'zitadel-user-7' })) // create
-      .mockResolvedValueOnce(jsonResponse({ result: [] })) // grantRole → list (revoke is no-op)
-      .mockResolvedValueOnce(jsonResponse({ userGrantId: 'g-1' })); // grantRole → add grant
+      .mockResolvedValueOnce(jsonResponse({ result: [] })) // grantRole → search (no existing grant)
+      .mockResolvedValueOnce(jsonResponse({ userGrantId: 'g-1' })); // grantRole → ADD grant
 
     const id = await svc.createUser({
       email: 'a@b.com',
@@ -200,11 +204,25 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
     });
     expect(createBody.email).toEqual({ email: 'a@b.com', isVerified: true });
 
-    // The role grant carries the project id + the mapped MEMBER role key.
+    // The grant search hits the v1 Management API filtering by userId AND projectId.
+    const searchCall = callAt(2);
+    expect(searchCall[0]).toBe(
+      'http://zitadel:8080/management/v1/users/grants/_search',
+    );
+    expect(searchCall[1].method).toBe('POST');
+    expect(JSON.parse(bodyOf(searchCall))).toEqual({
+      queries: [
+        { userIdQuery: { userId: 'zitadel-user-7' } },
+        { projectIdQuery: { projectId: 'project-1' } },
+      ],
+    });
+
+    // With no existing grant, the role is ADDed on the v1 Management API with the mapped MEMBER key.
     const grantCall = callAt(3);
     expect(grantCall[0]).toBe(
-      'http://zitadel:8080/v2/users/zitadel-user-7/grants',
+      'http://zitadel:8080/management/v1/users/zitadel-user-7/grants',
     );
+    expect(grantCall[1].method).toBe('POST');
     const grantBody = JSON.parse(bodyOf(grantCall)) as {
       projectId: string;
       roleKeys: string[];
@@ -227,57 +245,119 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
     expect(call[1].method).toBe('POST');
   });
 
-  it('grantRole revokes the existing grant then adds the new one (revoke-then-grant)', async () => {
+  it('grantRole ADDs a grant when the user has NO existing grant (no 404, no delete)', async () => {
     const svc = configure();
     fetchMock
       .mockResolvedValueOnce(tokenResponse()) // token
-      // grantRole → revokeRole lists grants: one existing grant on the project.
-      .mockResolvedValueOnce(
-        jsonResponse({
-          result: [{ id: 'old-grant', projectId: 'project-1' }],
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({})) // DELETE old grant
-      .mockResolvedValueOnce(jsonResponse({ userGrantId: 'new-grant' })); // POST new grant
+      .mockResolvedValueOnce(jsonResponse({ result: [] })) // search → empty (freshly-JIT'd user)
+      .mockResolvedValueOnce(jsonResponse({ userGrantId: 'new-grant' })); // ADD grant
 
     await svc.grantRole('zitadel-user-9', 'ADMIN');
 
-    const deleteCall = callAt(2);
-    expect(deleteCall[1].method).toBe('DELETE');
-    expect(deleteCall[0]).toBe(
-      'http://zitadel:8080/v2/users/zitadel-user-9/grants/old-grant',
+    // The search filters by userId AND projectId on the v1 Management API.
+    const searchCall = callAt(1);
+    expect(searchCall[1].method).toBe('POST');
+    expect(searchCall[0]).toBe(
+      'http://zitadel:8080/management/v1/users/grants/_search',
     );
-    const addCall = callAt(3);
+    expect(JSON.parse(bodyOf(searchCall))).toEqual({
+      queries: [
+        { userIdQuery: { userId: 'zitadel-user-9' } },
+        { projectIdQuery: { projectId: 'project-1' } },
+      ],
+    });
+
+    // No existing grant → POST (ADD), never a PUT or DELETE; this is the path that used to 404.
+    const addCall = callAt(2);
     expect(addCall[1].method).toBe('POST');
+    expect(addCall[0]).toBe(
+      'http://zitadel:8080/management/v1/users/zitadel-user-9/grants',
+    );
     expect(JSON.parse(bodyOf(addCall))).toEqual({
       projectId: 'project-1',
       roleKeys: ['ADMIN'],
     });
+    const methods = (fetchMock.mock.calls as FetchCall[]).map((c) => c[1].method);
+    expect(methods).not.toContain('DELETE');
+    expect(methods).not.toContain('PUT');
   });
 
-  it('revokeRole DELETEs only grants on the configured project', async () => {
+  it('grantRole UPDATEs (PUT) the existing grant when the user already holds one', async () => {
+    const svc = configure();
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse()) // token
+      .mockResolvedValueOnce(
+        jsonResponse({
+          result: [{ id: 'existing-grant', projectId: 'project-1' }],
+        }),
+      ) // search → one existing grant on the project
+      .mockResolvedValueOnce(jsonResponse({})); // PUT update roles
+
+    await svc.grantRole('zitadel-user-9', 'ADMIN');
+
+    const updateCall = callAt(2);
+    expect(updateCall[1].method).toBe('PUT');
+    expect(updateCall[0]).toBe(
+      'http://zitadel:8080/management/v1/users/zitadel-user-9/grants/existing-grant',
+    );
+    expect(JSON.parse(bodyOf(updateCall))).toEqual({ roleKeys: ['ADMIN'] });
+    // A set-role update never adds a second grant nor deletes the existing one. (The only POSTs are
+    // the token exchange and the search; there is no POST to the add-grant endpoint.)
+    const calls = fetchMock.mock.calls as FetchCall[];
+    expect(calls.map((c) => c[1].method)).not.toContain('DELETE');
+    const addGrantPosts = calls.filter(
+      (c) =>
+        c[1].method === 'POST' &&
+        c[0].endsWith('/management/v1/users/zitadel-user-9/grants'),
+    );
+    expect(addGrantPosts).toHaveLength(0);
+  });
+
+  it('revokeRole searches by userId+projectId then DELETEs the matched grant', async () => {
     const svc = configure();
     fetchMock
       .mockResolvedValueOnce(tokenResponse())
       .mockResolvedValueOnce(
         jsonResponse({
-          result: [
-            { id: 'g-other', projectId: 'other-project' },
-            { id: 'g-mine', projectId: 'project-1' },
-          ],
+          result: [{ id: 'g-mine', projectId: 'project-1' }],
         }),
-      )
+      ) // search (already scoped to the project)
       .mockResolvedValueOnce(jsonResponse({})); // DELETE g-mine
 
     await svc.revokeRole('zitadel-user-9');
+
+    const searchCall = callAt(1);
+    expect(searchCall[0]).toBe(
+      'http://zitadel:8080/management/v1/users/grants/_search',
+    );
+    expect(JSON.parse(bodyOf(searchCall))).toEqual({
+      queries: [
+        { userIdQuery: { userId: 'zitadel-user-9' } },
+        { projectIdQuery: { projectId: 'project-1' } },
+      ],
+    });
 
     const deleteCalls = (fetchMock.mock.calls as FetchCall[]).filter(
       (c) => c[1].method === 'DELETE',
     );
     expect(deleteCalls).toHaveLength(1);
     expect(deleteCalls[0][0]).toBe(
-      'http://zitadel:8080/v2/users/zitadel-user-9/grants/g-mine',
+      'http://zitadel:8080/management/v1/users/zitadel-user-9/grants/g-mine',
     );
+  });
+
+  it('revokeRole is a no-op (no DELETE) when the user has no grant on the project', async () => {
+    const svc = configure();
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(jsonResponse({ result: [] })); // search → empty
+
+    await svc.revokeRole('zitadel-user-9');
+
+    const deleteCalls = (fetchMock.mock.calls as FetchCall[]).filter(
+      (c) => c[1].method === 'DELETE',
+    );
+    expect(deleteCalls).toHaveLength(0);
   });
 
   it('a non-2xx Management response throws a 503 (no silent partial write)', async () => {
