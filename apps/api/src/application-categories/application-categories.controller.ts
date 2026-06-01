@@ -77,4 +77,15 @@ export class ApplicationCategoriesController {
   remove(@Param('id') id: string) {
     return this.categories.remove(id);
   }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Restore a soft-deleted application category — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: ApplicationCategoryDto })
+  restore(@Param('id') id: string) {
+    return this.categories.restore(id);
+  }
 }
