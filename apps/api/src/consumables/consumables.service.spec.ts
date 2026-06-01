@@ -19,6 +19,7 @@ type ConsumableModelMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
   // Field reference used by the lowStock filter (prisma.consumable.fields.minStock).
   fields: { minStock: unknown };
 };
@@ -71,6 +72,7 @@ describe('ConsumablesService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
       fields: { minStock: MIN_STOCK_FIELD },
     };
     consumableMovement = { findMany: jest.fn(), create: jest.fn() };
@@ -85,7 +87,11 @@ describe('ConsumablesService', () => {
     prisma = {
       consumable,
       consumableMovement,
-      $transaction: jest.fn((cb: (client: TxMock) => unknown) => cb(tx)),
+      // Handles BOTH forms: callback (createMovement) and array (findPage's [findMany, count]).
+      $transaction: jest.fn(
+        (arg: ((client: TxMock) => unknown) | Promise<unknown>[]) =>
+          Array.isArray(arg) ? Promise.all(arg) : arg(tx),
+      ),
     };
     // ActorService is mocked; guard validation detail lives in jwt-auth.guard.spec.ts. Default: no actor.
     // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
@@ -102,30 +108,82 @@ describe('ConsumablesService', () => {
     service = moduleRef.get(ConsumablesService);
   });
 
-  // --- findAll ------------------------------------------------------------
-  it('findAll lists by name asc with no filter by default', async () => {
-    consumable.findMany.mockResolvedValue([]);
+  // --- findPage -----------------------------------------------------------
+  it('findPage lists by name asc with no filter by default, returning the Page envelope', async () => {
+    consumable.findMany.mockResolvedValue([{ id: 'k1' }]);
+    consumable.count.mockResolvedValue(1);
 
-    await service.findAll();
+    const page = await service.findPage({}, { limit: 50, offset: 0 });
 
     expect(consumable.findMany).toHaveBeenCalledWith({
       where: {},
       orderBy: { name: 'asc' },
+      take: 50,
+      skip: 0,
+    });
+    expect(page).toEqual({
+      items: [{ id: 'k1' }],
+      total: 1,
+      limit: 50,
+      offset: 0,
     });
   });
 
-  it('findAll lowStock compares currentStock against the minStock field reference', async () => {
+  it('findPage lowStock compares currentStock against the minStock field reference', async () => {
     consumable.findMany.mockResolvedValue([]);
+    consumable.count.mockResolvedValue(0);
 
-    await service.findAll({ lowStock: true });
+    await service.findPage({ lowStock: true }, { limit: 50, offset: 0 });
 
-    expect(consumable.findMany).toHaveBeenCalledWith({
-      where: {
-        minStock: { not: null },
-        currentStock: { lte: MIN_STOCK_FIELD },
-      },
-      orderBy: { name: 'asc' },
+    const call = (
+      consumable.findMany.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.where).toEqual({
+      minStock: { not: null },
+      currentStock: { lte: MIN_STOCK_FIELD },
     });
+  });
+
+  it('findPage applies a case-insensitive q over name/sku/description', async () => {
+    consumable.findMany.mockResolvedValue([]);
+    consumable.count.mockResolvedValue(0);
+
+    await service.findPage({ q: 'hdmi' }, { limit: 50, offset: 0 });
+
+    const call = (
+      consumable.findMany.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.where).toEqual({
+      OR: [
+        { name: { contains: 'hdmi', mode: 'insensitive' } },
+        { sku: { contains: 'hdmi', mode: 'insensitive' } },
+        { description: { contains: 'hdmi', mode: 'insensitive' } },
+      ],
+    });
+  });
+
+  it('findPage honors an allowlisted sort and rejects an unknown one (400)', async () => {
+    consumable.findMany.mockResolvedValue([]);
+    consumable.count.mockResolvedValue(0);
+
+    await service.findPage(
+      {},
+      { limit: 50, offset: 0, sort: 'currentStock', dir: 'desc' },
+    );
+    const call = (
+      consumable.findMany.mock.calls as Array<
+        [{ orderBy: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.orderBy).toEqual({ currentStock: 'desc' });
+
+    await expect(
+      service.findPage({}, { limit: 50, offset: 0, sort: 'evil', dir: 'asc' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   // --- findOne / create / update / remove ---------------------------------
@@ -349,10 +407,16 @@ describe('ConsumablesService', () => {
   });
 
   it('propagates a thrown error from the actor resolver and never opens the transaction', async () => {
-    actor.resolve.mockImplementation(() => { throw new BadRequestException(); });
+    actor.resolve.mockImplementation(() => {
+      throw new BadRequestException();
+    });
 
     await expect(
-      service.createMovement('k1', { type: 'IN', quantity: 1 }, ACTOR_USER as never),
+      service.createMovement(
+        'k1',
+        { type: 'IN', quantity: 1 },
+        ACTOR_USER as never,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
