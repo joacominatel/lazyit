@@ -426,7 +426,9 @@ describe('JwtAuthGuard', () => {
       });
     });
 
-    it('uses email local-part as firstName when neither name nor given_name present', async () => {
+    it('uses the email local-part for BOTH names when neither name nor given_name present (hardened: lastName must not be empty)', async () => {
+      // Hardening (round-2): the User contract requires lastName .min(1), so the empty-lastName path
+      // is coerced to the email local-part instead of persisting a contract-violating row.
       (jose.jwtVerify as jest.Mock).mockResolvedValue({
         payload: {
           sub: 'oidc-sub-y',
@@ -451,12 +453,65 @@ describe('JwtAuthGuard', () => {
           externalId: 'oidc-sub-y',
           email: 'dana@example.com',
           firstName: 'dana',
-          lastName: '',
+          lastName: 'dana',
           isActive: true,
           role: 'MEMBER',
         },
         update: {},
       });
+    });
+
+    it('coerces a single-token name claim so lastName is non-empty (hardened)', async () => {
+      // `name: "Madonna"` → firstName "Madonna", lastName would be "" → coerced to the email
+      // local-part so the row satisfies the @lazyit/shared User schema (.min(1)).
+      (jose.jwtVerify as jest.Mock).mockResolvedValue({
+        payload: {
+          sub: 'oidc-sub-mono',
+          email: 'star@example.com',
+          name: 'Madonna',
+        },
+      });
+      prismaUser.findFirst.mockResolvedValue(null);
+      prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+      await guard.canActivate(
+        makeCtx({ headers: { authorization: 'Bearer t' } }),
+      );
+
+      const created = (
+        prismaUser.upsert.mock.calls[0][0] as {
+          create: { firstName: string; lastName: string };
+        }
+      ).create;
+      expect(created.firstName).toBe('Madonna');
+      expect(created.lastName).toBe('star');
+    });
+
+    it('coerces a whitespace-only given_name so firstName is non-empty (hardened)', async () => {
+      // given_name "   " + family_name "Lovelace": firstName would be whitespace → coerced to the
+      // email local-part; family_name is kept.
+      (jose.jwtVerify as jest.Mock).mockResolvedValue({
+        payload: {
+          sub: 'oidc-sub-ws',
+          email: 'ada@example.com',
+          given_name: '   ',
+          family_name: 'Lovelace',
+        },
+      });
+      prismaUser.findFirst.mockResolvedValue(null);
+      prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+      await guard.canActivate(
+        makeCtx({ headers: { authorization: 'Bearer t' } }),
+      );
+
+      const created = (
+        prismaUser.upsert.mock.calls[0][0] as {
+          create: { firstName: string; lastName: string };
+        }
+      ).create;
+      expect(created.firstName).toBe('ada');
+      expect(created.lastName).toBe('Lovelace');
     });
 
     it('JIT-provisions the FIRST user (User count 0) as ADMIN (ADR-0040 bootstrap)', async () => {
@@ -609,14 +664,16 @@ describe('JwtAuthGuard', () => {
         );
 
         expect(result).toBe(true);
-        // Placeholder fallback from the bare sub.
+        // Placeholder fallback from the bare sub. Hardened: BOTH names fall back to the email
+        // local-part (here the sub, since email is `${sub}@unknown`) so neither violates the
+        // @lazyit/shared User schema (.min(1)).
         expect(prismaUser.upsert).toHaveBeenCalledWith({
           where: { externalId: 'oidc-sub-fail' },
           create: {
             externalId: 'oidc-sub-fail',
             email: 'oidc-sub-fail@unknown',
             firstName: 'oidc-sub-fail',
-            lastName: '',
+            lastName: 'oidc-sub-fail',
             isActive: true,
             role: 'MEMBER',
           },
@@ -658,13 +715,14 @@ describe('JwtAuthGuard', () => {
         );
 
         expect(result).toBe(true);
+        // Hardened: both names fall back to the email local-part (the sub here), never empty.
         expect(prismaUser.upsert).toHaveBeenCalledWith({
           where: { externalId: 'oidc-sub-throw' },
           create: {
             externalId: 'oidc-sub-throw',
             email: 'oidc-sub-throw@unknown',
             firstName: 'oidc-sub-throw',
-            lastName: '',
+            lastName: 'oidc-sub-throw',
             isActive: true,
             role: 'MEMBER',
           },
