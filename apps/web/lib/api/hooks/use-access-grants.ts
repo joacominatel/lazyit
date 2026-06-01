@@ -15,9 +15,10 @@ export const accessGrantKeys = {
 };
 
 /**
- * List grants, filtered (e.g. all active grants for the Access list's
- * counts/avatars). `keepPreviousData` holds the current grants while a new
- * filter query resolves, avoiding a skeleton flash on filter changes.
+ * List grants, filtered and paged (e.g. all active grants for the Access list's
+ * counts/avatars, fetched with a large `limit`). Returns the `Page<AccessGrant>`
+ * envelope (`items` + `total`/`limit`/`offset`). `keepPreviousData` holds the
+ * current page while a new filter/page query resolves, avoiding a skeleton flash.
  */
 export function useAccessGrants(filters: AccessGrantFilters = {}) {
   return useQuery({
