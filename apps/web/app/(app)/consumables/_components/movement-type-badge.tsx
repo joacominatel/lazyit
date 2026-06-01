@@ -1,10 +1,11 @@
 import type { ConsumableMovementType } from "@lazyit/shared";
-import { cn } from "@/lib/utils";
+import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 
-const TONE: Record<ConsumableMovementType, string> = {
-  IN: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  OUT: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
-  ADJUSTMENT: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+/** Movement direction → shared status tone (IN adds → success, OUT subtracts → danger, set → info). */
+const TONE: Record<ConsumableMovementType, StatusTone> = {
+  IN: "success",
+  OUT: "danger",
+  ADJUSTMENT: "info",
 };
 
 const LABEL: Record<ConsumableMovementType, string> = {
@@ -15,14 +16,5 @@ const LABEL: Record<ConsumableMovementType, string> = {
 
 /** Colored chip for a stock movement direction (IN adds, OUT subtracts, ADJUSTMENT sets). */
 export function MovementTypeBadge({ type }: { type: ConsumableMovementType }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex rounded-md px-1.5 py-0.5 text-xs font-medium",
-        TONE[type],
-      )}
-    >
-      {LABEL[type]}
-    </span>
-  );
+  return <StatusBadge tone={TONE[type]}>{LABEL[type]}</StatusBadge>;
 }
