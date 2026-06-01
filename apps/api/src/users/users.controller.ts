@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  UnauthorizedException,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
@@ -50,6 +51,24 @@ export class UsersController {
   @ApiOkResponse({ type: [UserDto] })
   findAll() {
     return this.users.findAll();
+  }
+
+  @Get('me')
+  @ApiOperation({
+    summary: 'The current authenticated user (including their RBAC role)',
+    description:
+      'Returns the caller as resolved by the auth guard (@CurrentUser). The OIDC token does NOT ' +
+      'carry the lazyit role, so the frontend reads it here to decide which admin-only controls to ' +
+      'show. Any authenticated user may call it; it only ever returns the caller, never another user.',
+  })
+  @ApiOkResponse({ type: UserDto })
+  me(@CurrentUser() user?: User): User {
+    // The route is non-@Public, so the JwtAuthGuard guarantees a user in OIDC mode. In shim mode an
+    // anonymous caller would have no user — surface that as 401 rather than a confusing empty body.
+    if (!user) {
+      throw new UnauthorizedException('Not authenticated');
+    }
+    return user;
   }
 
   @Get(':id')
@@ -114,7 +133,9 @@ export class UsersController {
 
   @Post()
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Create a user — ADMIN only (can set the RBAC role)' })
+  @ApiOperation({
+    summary: 'Create a user — ADMIN only (can set the RBAC role)',
+  })
   @ApiCreatedResponse({ type: UserDto })
   create(@Body() dto: CreateUserDto) {
     return this.users.create(dto);
@@ -122,10 +143,18 @@ export class UsersController {
 
   @Patch(':id')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Update a user — ADMIN only (can change the RBAC role)' })
+  @ApiOperation({
+    summary: 'Update a user — ADMIN only (can change the RBAC role)',
+  })
   @ApiOkResponse({ type: UserDto })
-  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto) {
-    return this.users.update(id, dto);
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateUserDto,
+    @CurrentUser() actor?: User,
+  ) {
+    // Pass the actor so the service can enforce the RBAC self-role-change guard (no self-escalation/
+    // demotion → 403) and the last-admin guard (refuse to demote the final ADMIN → 409). ADR-0040.
+    return this.users.update(id, dto, this.actor.resolve(actor));
   }
 
   @Delete(':id')
@@ -156,7 +185,8 @@ export class UsersController {
   @Post(':id/offboard')
   @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Offboard a user (explicit alias of DELETE /users/:id) — ADMIN only',
+    summary:
+      'Offboard a user (explicit alias of DELETE /users/:id) — ADMIN only',
     description:
       'Same effect as DELETE /users/:id: soft-delete + revoke grants + release assignments, all in ' +
       'one transaction. Provided as an intention-revealing verb for the offboarding flow.',
