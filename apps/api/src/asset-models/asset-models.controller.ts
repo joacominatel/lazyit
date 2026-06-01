@@ -22,6 +22,7 @@ import {
   UpdateAssetModelSchema,
 } from '@lazyit/shared';
 import { AssetModelsService } from './asset-models.service';
+import { parseCuidQuery } from '../common/parse-cuid-query';
 import { Roles } from '../auth/roles.decorator';
 
 class AssetModelDto extends createZodDto(AssetModelSchema) {}
@@ -40,7 +41,7 @@ export class AssetModelsController {
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiOkResponse({ type: [AssetModelDto] })
   findAll(@Query('categoryId') categoryId?: string) {
-    return this.models.findAll(categoryId);
+    return this.models.findAll(parseCuidQuery(categoryId, 'categoryId'));
   }
 
   @Get(':id')
