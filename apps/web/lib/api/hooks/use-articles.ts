@@ -22,9 +22,11 @@ export const articleKeys = {
 };
 
 /**
- * List articles visible to the acting user, with optional server-side filters.
- * `keepPreviousData` keeps the current list on screen while a new filter query
- * resolves, so typing in the filter bar doesn't flash the skeleton.
+ * List articles visible to the acting user, with optional server-side filters and
+ * paging (`limit`/`offset`). Returns the `Page<ArticleListItem>` envelope (`items`
+ * + `total`/`limit`/`offset`) so the list can render pagination controls.
+ * `keepPreviousData` keeps the current page on screen while a new filter/page query
+ * resolves, so typing in the filter bar or paging doesn't flash the skeleton.
  */
 export function useArticles(filters: ArticleFilters = {}) {
   return useQuery({

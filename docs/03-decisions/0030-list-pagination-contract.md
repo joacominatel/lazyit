@@ -55,10 +55,20 @@ eleven lists plus the frontend data layer today.
 - When implemented, it spans backend **and** frontend (TanStack Query, [[0020-frontend-data-layer]])
   → split into separate front/back subagents per the workflow, not done piecemeal. **Frontend
   follow-up (2026-05-31):** the three list fetchers (`getAssets` / `getArticles` /
-  `getAccessGrants`) now request the `Page<T>` envelope and **unwrap `.items`**, typed with the lean
-  list-item types (`AssetListItem` / `ArticleListItem`), so the components keep their array contract.
-  Only the first page (default size 50) is shown until the UI gains real pagination — `total` is
-  available on the envelope for a future count/page control.
+  `getAccessGrants`) first requested the `Page<T>` envelope and **unwrapped `.items`**, showing only
+  the first page (default size 50) with `total` available for a future control.
+- **Frontend pagination UI (2026-06-01):** the three fetchers/hooks now thread `limit`/`offset` and
+  **return the whole `Page<T>` envelope** (`items` + `total`/`limit`/`offset`) rather than unwrapping
+  to an array. The list screens own an `offset` state (reset to 0 on any server-filter change, derived
+  during render rather than via an effect) and render a shared `Pagination` footer
+  (`components/resource-table.tsx`: visible range + total + prev/next, offset-based math) — wired into
+  the **assets** table and the **kb/articles** card list; `keepPreviousData` keeps the prior page on
+  screen so paging never flashes the skeleton. The **applications/Access** screen consumes
+  `getAccessGrants` only for per-app counts, so it requests the hard-max page (`limit = 200`) and stays
+  unpaginated. **Column sort is client-side over the current page** (the `Page<T>` contract carries no
+  `sort` param) — the asset table sorts name / asset-tag / status / updated on the loaded rows only; a
+  server-side ordered list is a future backend follow-up. Consumables and the small reference lists are
+  not backend-paginated, so they gained no controls.
 
 ## Consequences
 

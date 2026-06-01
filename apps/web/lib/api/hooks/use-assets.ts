@@ -22,9 +22,11 @@ export const assetKeys = {
 };
 
 /**
- * List assets, optionally filtered by category / location / status.
- * `keepPreviousData` holds the last result on screen while a new filter query
- * resolves, so changing a filter doesn't flash the table skeleton.
+ * List assets, optionally filtered by category / location / status and paged
+ * (`limit`/`offset`). Returns the `Page<AssetListItem>` envelope (`items` +
+ * `total`/`limit`/`offset`) so the list can render pagination controls.
+ * `keepPreviousData` holds the last page on screen while a new filter/page query
+ * resolves, so changing a filter or paging doesn't flash the table skeleton.
  */
 export function useAssets(filters: AssetFilters = {}) {
   return useQuery({

@@ -2,11 +2,16 @@
 
 import {
   ArrowPathIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpDownIcon,
   EllipsisVerticalIcon,
   PencilSquareIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/16/solid";
 import type { ComponentType, ReactNode } from "react";
+import { cn } from "@/lib/utils";
 import { RequestIdNote } from "@/components/request-id-note";
 import { Button } from "@/components/ui/button";
 import {
@@ -211,5 +216,131 @@ export function ErrorState({
         Retry
       </Button>
     </div>
+  );
+}
+
+/**
+ * Offset-based pagination footer for a `Page<T>` list (ADR-0030). Renders the visible range, the
+ * total count and prev/next controls; the prev/next math is offset-based to match the contract
+ * (`{ total, limit, offset }`). Pages keep `keepPreviousData` on the list query so paging doesn't
+ * flash the skeleton — `isFetching` dims the controls while the next page resolves. Renders nothing
+ * when everything fits on one page.
+ */
+export function Pagination({
+  total,
+  limit,
+  offset,
+  itemCount,
+  onOffsetChange,
+  isFetching = false,
+}: {
+  /** Total rows across all pages (from the envelope's `total`). */
+  total: number;
+  /** Current page size (the envelope's `limit`). */
+  limit: number;
+  /** Current zero-based window offset (the envelope's `offset`). */
+  offset: number;
+  /** Rows actually on this page (`items.length`) — used for the visible range's upper bound. */
+  itemCount: number;
+  /** Move to a new zero-based offset (the page clamps it into range). */
+  onOffsetChange: (offset: number) => void;
+  /** True while a page change is in flight — dims the controls. */
+  isFetching?: boolean;
+}) {
+  // A single page that fits everything needs no control.
+  if (total <= limit && offset === 0) return null;
+
+  const from = total === 0 ? 0 : offset + 1;
+  const to = offset + itemCount;
+  const hasPrev = offset > 0;
+  const hasNext = to < total;
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col items-center justify-between gap-3 sm:flex-row",
+        isFetching && "opacity-60",
+      )}
+    >
+      <p className="text-sm text-muted-foreground tabular-nums" aria-live="polite">
+        {total === 0 ? (
+          "No results"
+        ) : (
+          <>
+            Showing <span className="font-medium text-foreground">{from}</span>–
+            <span className="font-medium text-foreground">{to}</span> of{" "}
+            <span className="font-medium text-foreground">{total}</span>
+          </>
+        )}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!hasPrev}
+          onClick={() => onOffsetChange(Math.max(0, offset - limit))}
+        >
+          <ChevronLeftIcon />
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!hasNext}
+          onClick={() => onOffsetChange(offset + limit)}
+        >
+          Next
+          <ChevronRightIcon />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** A column's current sort state, or null when it isn't the active sort column. */
+export type SortDirection = "asc" | "desc";
+
+/**
+ * A sortable column header — a button that toggles asc/desc and shows the direction. Sorting here is
+ * **client-side over the current page** (the `Page<T>` contract carries no server sort param,
+ * ADR-0030), so it reorders only the rows on screen. Use inside a `ResourceColumn.header`.
+ */
+export function SortableHeader({
+  label,
+  active,
+  direction,
+  onToggle,
+  className,
+}: {
+  label: ReactNode;
+  /** True when this is the active sort column. */
+  active: boolean;
+  /** The active direction (only meaningful when `active`). */
+  direction: SortDirection;
+  onToggle: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={cn(
+        "-mx-2 inline-flex items-center gap-1 rounded px-2 py-1 font-medium outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+        active ? "text-foreground" : "text-muted-foreground",
+        className,
+      )}
+      aria-label={`Sort by ${typeof label === "string" ? label : "column"}`}
+    >
+      {label}
+      {active ? (
+        direction === "asc" ? (
+          <ChevronUpIcon className="size-3.5" />
+        ) : (
+          <ChevronDownIcon className="size-3.5" />
+        )
+      ) : (
+        <ChevronUpDownIcon className="size-3.5 opacity-50" />
+      )}
+    </button>
   );
 }
