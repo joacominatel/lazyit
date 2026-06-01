@@ -49,10 +49,19 @@ Zitadel-specific Management APIs. v2 (resource-based) APIs are used for all new 
 | Update user | `PATCH /v2/users/{userId}` | profile sync (future) |
 | Deactivate (offboard) | `POST /v2/users/{userId}:deactivate` | `idp.deactivateUser` (offboard) |
 | Reactivate | `POST /v2/users/{userId}:reactivate` | restore (future) |
-| Grant project role | `POST /v2/users/{userId}/grants` | `idp.grantRole` (role change) |
-| Revoke grant | `DELETE /v2/users/{userId}/grants/{grantId}` | `idp.revokeRole` |
-| List grants | `GET /v2/users/{userId}/grants` | reconciliation (future) |
+| Search user grants | `POST /management/v1/users/grants/_search` (queries: `userIdQuery` + `projectIdQuery`) | `idp.grantRole`/`revokeRole` (find the project grant) |
+| Add user grant | `POST /management/v1/users/{userId}/grants` `{ projectId, roleKeys }` | `idp.grantRole` (no existing grant) |
+| Update user grant | `PUT /management/v1/users/{userId}/grants/{grantId}` `{ roleKeys }` | `idp.grantRole` (set-role on an existing grant) |
+| Revoke user grant | `DELETE /management/v1/users/{userId}/grants/{grantId}` | `idp.revokeRole` |
 | List/create project roles | `GET`/`POST /v2/projects/{projectId}/roles` | bootstrap (define ADMIN/MEMBER/VIEWER) |
+
+> **User-grant (authorization) CRUD lives on the v1 Management API, NOT v2.** Zitadel v2.68.0 has no
+> `/v2/users/{userId}/grants` endpoint — it returns **404**. The grant operations above use
+> `/management/v1/users/...` (same host/internal origin, same Private-Key-JWT token). `grantRole` is
+> **set-role**: search the user's grant on the lazyit project → if none, ADD; if one exists, PUT its
+> `roleKeys` to exactly the new (single) role. An empty search is the common case (a freshly-JIT'd
+> user) and is **not** an error. No `x-zitadel-orgid` header is needed (the SA + project live in the
+> default org). Create/deactivate stay on the v2 user service.
 
 ### 1b. Service-account authentication
 
