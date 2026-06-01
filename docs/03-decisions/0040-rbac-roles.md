@@ -56,16 +56,18 @@ Concretely:
 
 1. **Schema** — `enum Role { ADMIN MEMBER VIEWER }` and `role Role @default(MEMBER)` on `User`
    (migration `rbac_user_role`). The default is MEMBER, so any unspecified path lands on the least
-   privileged *writeable* role (not ADMIN).
+   privileged *writeable* role (not ADMIN). **Default flipped to VIEWER by [[0043-zitadel-source-of-truth]]
+   Phase 1** — see the *Addendum — Round 4* below; an omitted role now lands read-only.
 2. **First user is ADMIN** — a fresh install must always have someone able to administer it:
    - the **seed** (`apps/api/prisma/seed.ts`) upserts an ADMIN user (email overridable via
      `SEED_ADMIN_EMAIL`, default `admin@lazyit.local`);
    - the **JIT** path (`jwt-auth.guard.ts`) makes the **first user ever provisioned** ADMIN: it
      counts existing users (including soft-deleted, so "ever") and, only when the count is 0, sets
      `role = ADMIN` in the `create` of the existing race-safe `upsert`-on-`externalId`. Every later
-     JIT user defaults to MEMBER. The check-then-create window is acceptable: it only matters on a
-     truly empty DB, and the worst case (two genuinely-concurrent first logins) makes both ADMIN —
-     strictly safer than locking everyone out, and an ADMIN can demote.
+     JIT user defaults to MEMBER (**flipped to VIEWER by ADR-0043 Phase 1** — see the addendum). The
+     check-then-create window is acceptable: it only matters on a truly empty DB, and the worst case
+     (two genuinely-concurrent first logins) makes both ADMIN — strictly safer than locking everyone
+     out, and an ADMIN can demote.
 3. **Primitives** — `@Roles(...Role[])` decorator (`auth/roles.decorator.ts`) records the allowed
    roles; `RolesGuard` (`auth/roles.guard.ts`) enforces them. Both are registered as `APP_GUARD` in
    `AuthModule` **in order**: `JwtAuthGuard` first (sets `request.user`), `RolesGuard` second (reads
@@ -176,5 +178,37 @@ already-ADMIN-gated Users API and adds the safety guards the original ADR deferr
   designate the first ADMIN directly against the DB. Documented in [[auth-bootstrap]] (with a raw-SQL
   fallback).
 
+## Addendum — Round 4: default role flipped MEMBER → VIEWER (ADR-0043 Phase 1)
+
+[[0043-zitadel-source-of-truth]] (the auth epic) flips the **default role from MEMBER to VIEWER**
+(CEO decision #3, quoted: *"app-created users AND non-first JIT users default to VIEWER; the first
+user ever provisioned on an empty DB is STILL ADMIN"*). The original MEMBER default was the least
+privileged *writeable* role; the epic makes the default least-privilege *period* (read-only), so a
+newly-provisioned identity can read but mutate nothing until an ADMIN promotes it. Concretely, in
+**Phase 1 (Foundation)**:
+
+- **Schema** — `role Role @default(VIEWER)` (migration `change_role_default_viewer`, a metadata-only
+  `ALTER COLUMN "role" SET DEFAULT 'VIEWER'`). It affects **only new inserts**; existing rows keep
+  their role (CEO decision #6 — no bulk-sync; dev resets via `docker compose down -v`).
+- **`users.service.create()`** — an omitted role is set explicitly to `VIEWER` (no longer relying on
+  the column default), so the service is the authoritative default for app-created users.
+- **JIT (`jwt-auth.guard.ts`)** — the **non-first** provisioned user defaults to `VIEWER` (was
+  MEMBER). The **first** user ever (empty DB / `count === 0`) **stays ADMIN** — the bootstrap is
+  unchanged, so an install is never left un-administrable. Email account-linking (preserve the
+  linked row's role) and the no-resurrect-of-soft-deleted behaviour are intact.
+- **Authorization stays DB-first** — the `RolesGuard` still reads `request.user.role` from the local
+  DB and **never** trusts a token role claim (ADR-0043 decision #1). The IdP is written-to as a
+  *mirror* (Phase 2), not read-from for authorization.
+- **IdentityProvider scaffold** — Phase 1 adds an `IdentityProvider` seam (`auth/identity/`) with a
+  Zitadel adapter (STUB; Phase 2 fills it) and a generic-OIDC adapter (management methods no-op with
+  a warn — BYOI degrades to read-only role management, decision #5), selected by a new
+  `IDENTITY_PROVIDER_TYPE` env var (default `zitadel`). No guard/service calls it yet — pure
+  scaffolding the Phase-2 write-back will use. The User response schema gains an optional, additive
+  `roleSource` (`local` | `idp`) field — informational only; it never gates authorization.
+
+The MEMBER role itself is unchanged (still the normal writeable tier); only the *default* moved. The
+[role → capability matrix](#role--capability-matrix) above still holds.
+
 Related: [[0038-jit-user-provisioning]] · [[0016-auth-strategy-deferred]] ·
-[[0022-draft-visibility-auth-shim]] · [[0023-access-management-design]] · [[user]]
+[[0022-draft-visibility-auth-shim]] · [[0023-access-management-design]] ·
+[[0043-zitadel-source-of-truth]] · [[user]]

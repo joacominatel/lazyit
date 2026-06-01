@@ -36,8 +36,9 @@ the reverse.
   `ADMIN` (full access, including Access-grant writes, Users administration and destructive deletes),
   `MEMBER` (normal inventory / KB / asset operations) and `VIEWER` (read-only everywhere). Enforced by
   the `RolesGuard`, which composes after the auth guard. The **first** user ever provisioned (seed or
-  first JIT login) is `ADMIN`; everyone else defaults to `MEMBER`. Only an `ADMIN` can change a role
-  (the Users controller is ADMIN-gated), so there is no self-escalation path.
+  first JIT login) is `ADMIN`; everyone else defaults to `VIEWER` (least-privilege; flipped from
+  `MEMBER` by [[0043-zitadel-source-of-truth]] Phase 1). Only an `ADMIN` can change a role (the Users
+  controller is ADMIN-gated), so there is no self-escalation path.
 
 ## Conventions
 
@@ -58,7 +59,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `firstName` | `string` | required. |
 | `lastName` | `string` | required. |
 | `isActive` | `boolean` | `@default(true)`. Activation flag — see note below. |
-| `role` | `Role` | `@default(MEMBER)`. RBAC role: `ADMIN` / `MEMBER` / `VIEWER` ([[0040-rbac-roles]]). First user ever provisioned = `ADMIN`. |
+| `role` | `Role` | `@default(VIEWER)` (flipped from `MEMBER` by [[0043-zitadel-source-of-truth]]). RBAC role: `ADMIN` / `MEMBER` / `VIEWER` ([[0040-rbac-roles]]). First user ever provisioned = `ADMIN`; all others default to `VIEWER`. |
 | `externalId` | `string?` | `@unique`, nullable. Holds the IdP `sub`; populated on first OIDC login ([[0038-jit-user-provisioning]]); `null` for unlinked users ([[0016-auth-strategy-deferred]]). |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |

@@ -12,6 +12,10 @@ import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
+  Prisma: {},
+  // UsersService imports Role as a VALUE (Role.VIEWER) for the ADR-0043 create default, so the mock
+  // must expose it or create() dereferences undefined.
+  Role: { ADMIN: 'ADMIN', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
 }));
 // UsersService transitively imports the ESM `meilisearch` package (via SearchService); jest can't
 // transform it. SearchService is replaced by a mock below; this stub stops the real module loading.
@@ -82,13 +86,17 @@ describe('UsersService', () => {
       id: 'uuid-1',
       ...dto,
       isActive: true,
+      role: 'VIEWER',
       externalId: null,
       deletedAt: null,
     };
     user.create.mockResolvedValue(created);
 
     await expect(service.create(dto)).resolves.toEqual(created);
-    expect(user.create).toHaveBeenCalledWith({ data: dto });
+    // ADR-0043: an omitted role defaults to VIEWER (least-privilege), set explicitly by the service.
+    expect(user.create).toHaveBeenCalledWith({
+      data: { ...dto, role: 'VIEWER' },
+    });
     // Fire-and-forget search sync (ADR-0035): the created user is upserted into the `users` index.
     expect(search.upsert).toHaveBeenCalledWith('users', {
       id: 'uuid-1',
@@ -97,6 +105,35 @@ describe('UsersService', () => {
       email: 'a@b.com',
     });
     expect(search.remove).not.toHaveBeenCalled();
+  });
+
+  it('defaults an omitted role to VIEWER (ADR-0043 — uniform least-privilege default)', async () => {
+    const dto = { email: 'v@b.com', firstName: 'Viv', lastName: 'Ian' };
+    user.create.mockResolvedValue({ id: 'uuid-v', ...dto, role: 'VIEWER' });
+
+    await service.create(dto);
+
+    const createCalls = user.create.mock.calls as Array<
+      [{ data: { role: string } }]
+    >;
+    expect(createCalls[0][0].data.role).toBe('VIEWER');
+  });
+
+  it('honours an explicit role on create (ADMIN-gated controller may pass any role)', async () => {
+    const dto = {
+      email: 'a@b.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'ADMIN' as const,
+    };
+    user.create.mockResolvedValue({ id: 'uuid-a', ...dto });
+
+    await service.create(dto);
+
+    // An explicitly-supplied role is preserved (not overridden by the VIEWER default).
+    expect(user.create).toHaveBeenCalledWith({
+      data: { ...dto, role: 'ADMIN' },
+    });
   });
 
   // SEC-006: externalId is no longer a client-settable create field (it is server-owned, ADR-0016).
