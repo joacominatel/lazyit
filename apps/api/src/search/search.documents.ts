@@ -23,6 +23,10 @@ export interface ArticleRow {
   title: string;
   excerpt: string | null;
   status: string;
+  // The full Markdown body. Indexed so runbook bodies become findable (ADR-0042). Only PUBLISHED
+  // articles are ever projected into the index (draft privacy — ADR-0022/0035), so indexing the
+  // content of an author-private DRAFT is structurally impossible.
+  content: string;
 }
 
 export interface UserRow {
@@ -68,6 +72,8 @@ export function projectArticle(row: ArticleRow): SearchDocument {
     title: row.title,
     excerpt: row.excerpt,
     status: row.status,
+    // Index the Markdown body so a full-text query over article content finds the runbook (ADR-0042).
+    content: row.content,
   };
 }
 

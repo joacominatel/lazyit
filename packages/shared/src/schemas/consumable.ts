@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { int4 } from "./primitives";
+import { int4, requireAtLeastOneKey } from "./primitives";
 
 /**
  * Consumable — a stock-counted supply item (cables, adapters, toner, …). Distinct from Asset, which
@@ -44,18 +44,23 @@ export const CreateConsumableSchema = z.strictObject({
   notes: z.string().trim().min(1).max(2000).optional(),
 });
 
-/** Partial update; any subset of the editable fields. `currentStock` is NOT updatable here. */
-export const UpdateConsumableSchema = z
-  .strictObject({
-    name: z.string().trim().min(1).max(200),
-    sku: z.string().trim().min(1).max(100),
-    categoryId: z.cuid(),
-    description: z.string().trim().min(1).max(1000),
-    minStock: int4({ min: 0, example: 5 }),
-    unit: z.string().trim().min(1).max(50),
-    notes: z.string().trim().min(1).max(2000),
-  })
-  .partial();
+/**
+ * Partial update; any subset of the editable fields (an empty body is rejected). `currentStock` is
+ * NOT updatable here.
+ */
+export const UpdateConsumableSchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      name: z.string().trim().min(1).max(200),
+      sku: z.string().trim().min(1).max(100),
+      categoryId: z.cuid(),
+      description: z.string().trim().min(1).max(1000),
+      minStock: int4({ min: 0, example: 5 }),
+      unit: z.string().trim().min(1).max(50),
+      notes: z.string().trim().min(1).max(2000),
+    })
+    .partial(),
+);
 
 export type Consumable = z.infer<typeof ConsumableSchema>;
 export type CreateConsumable = z.infer<typeof CreateConsumableSchema>;

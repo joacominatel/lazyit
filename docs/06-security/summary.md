@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-05-26
+updated: 2026-06-01
 ---
 
 # Security summary
@@ -59,13 +59,16 @@ Deferred (accepted ADR debt, not findings): **5** — see [[deferred]].
 
 ## Posture context (not a finding — see [[deferred]])
 
-lazyit is **unauthenticated by decision** ([[0016-auth-strategy-deferred]]) and **dev-only** ("must not
-be exposed publicly"). The forgeable `X-User-Id` shim ([[0022-draft-visibility-auth-shim]]), public
-Swagger ([[0018-api-documentation-swagger]]) and the Access pillar's open grant/revoke + "who-can-access-
-what" reads ([[0023-access-management-design]]) all sit on that accepted baseline. **Aggregate risk:** if
-this build is ever exposed publicly, the deferred items combine into a full read/write compromise — i.e.
-effectively Critical on exposure, and the Access data is the prime recon target. The single most
-important guardrail today is operational: **do not expose `:3001` (or `:5432`) beyond localhost/trusted dev**.
+lazyit now **authenticates** every request (global `JwtAuthGuard`, OIDC JWT or `X-User-Id` shim —
+[[0038-jit-user-provisioning]]) and **authorizes** it (RBAC `RolesGuard` — [[0040-rbac-roles]]):
+Access-grant writes, Users administration and destructive deletes are `ADMIN`-only, `VIEWER` is
+read-only. This closes the May review's #1 finding (the formerly open grant/revoke + user-delete
+surface). **Residual baseline:** reads (`GET`) — including the Access pillar's "who-can-access-what"
+([[0023-access-management-design]]) — are open to any authenticated user by design; public Swagger
+([[0018-api-documentation-swagger]]) and the forgeable, dev-only `X-User-Id` shim
+([[0022-draft-visibility-auth-shim]]) remain. **Aggregate risk:** much reduced now that mutations are
+gated, but the operational guardrail still holds: **do not expose `:3001` (or `:5432`) beyond
+localhost/trusted dev**, and never run production with `AUTH_MODE=shim`.
 
 ## Coverage & gaps (self-assessment)
 

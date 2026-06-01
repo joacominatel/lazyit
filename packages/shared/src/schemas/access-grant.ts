@@ -42,14 +42,28 @@ export const AccessGrantSchema = z.object({
  * to `now()` in the DB — pass it only to backdate an imported/historical record. `grantedById` is
  * NOT here: it comes from the `X-User-Id` header ([[0023]]).
  */
-export const CreateAccessGrantSchema = z.strictObject({
-  userId: z.uuid(),
-  applicationId: z.cuid(),
-  accessLevel: z.string().trim().min(1).max(100).optional(),
-  expiresAt: z.iso.datetime().optional(),
-  grantedAt: z.iso.datetime().optional(),
-  notes: z.string().trim().min(1).max(2000).optional(),
-});
+export const CreateAccessGrantSchema = z
+  .strictObject({
+    userId: z.uuid(),
+    applicationId: z.cuid(),
+    accessLevel: z.string().trim().min(1).max(100).optional(),
+    expiresAt: z.iso.datetime().optional(),
+    grantedAt: z.iso.datetime().optional(),
+    notes: z.string().trim().min(1).max(2000).optional(),
+  })
+  // Cross-field: a grant can't expire before it starts. Only checked when BOTH are supplied — an
+  // omitted grantedAt defaults to now() in the DB, so there's nothing to compare against here.
+  // ISO-8601 strings sort chronologically as strings, but parse to Date to be timezone-correct.
+  .refine(
+    (data) =>
+      data.expiresAt === undefined ||
+      data.grantedAt === undefined ||
+      new Date(data.expiresAt).getTime() >= new Date(data.grantedAt).getTime(),
+    {
+      error: "expiresAt must be on or after grantedAt",
+      path: ["expiresAt"],
+    },
+  );
 
 /**
  * Payload to revoke an active grant (`PATCH /access-grants/:id/revoke`). Sets `revokedAt = now()`.

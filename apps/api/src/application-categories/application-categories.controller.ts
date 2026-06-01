@@ -20,6 +20,7 @@ import {
   UpdateApplicationCategorySchema,
 } from '@lazyit/shared';
 import { ApplicationCategoriesService } from './application-categories.service';
+import { Roles } from '../auth/roles.decorator';
 
 class ApplicationCategoryDto extends createZodDto(ApplicationCategorySchema) {}
 class CreateApplicationCategoryDto extends createZodDto(
@@ -51,25 +52,40 @@ export class ApplicationCategoriesController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an application category' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create an application category (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: ApplicationCategoryDto })
   create(@Body() dto: CreateApplicationCategoryDto) {
     return this.categories.create(dto);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an application category' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Update an application category (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: ApplicationCategoryDto })
   update(@Param('id') id: string, @Body() dto: UpdateApplicationCategoryDto) {
     return this.categories.update(id, dto);
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Soft-delete an application category (detaches its applications)',
+    summary:
+      'Soft-delete an application category (detaches its applications) — ADMIN only',
   })
   @ApiOkResponse({ type: ApplicationCategoryDto })
   remove(@Param('id') id: string) {
     return this.categories.remove(id);
+  }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Restore a soft-deleted application category — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: ApplicationCategoryDto })
+  restore(@Param('id') id: string) {
+    return this.categories.restore(id);
   }
 }

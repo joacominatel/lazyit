@@ -1,58 +1,35 @@
 ---
 title: Status Review — May 2026
 tags: [moc, status, review]
-status: draft
+status: living
 created: 2026-05-30
-updated: 2026-05-30
+updated: 2026-06-01
 ---
 
 # Status Review — May 2026
 
 A point-in-time, multi-analyst review of the whole lazyit codebase (backend-weighted), run on
-**2026-05-30**. A fleet of 22 senior analysts each audited one lane and wrote a detailed report in
-its own folder; the CTO consolidated them into a prioritized plan.
+**2026-05-30** (22 senior analysts · 218 findings). **Round 1** then shipped the urgent / quick-win
+cluster as 8 PRs (#61–#72). This folder is now the **living record** of that arc.
 
-## Start here
+## Read this
 
-- **[[00-EXECUTIVE-SUMMARY|Executive Summary]]** (`00-EXECUTIVE-SUMMARY.md`) — the consolidated,
-  prioritized view: most urgent items, quick wins, the roadmap to a finished/large platform, and
-  the decisions needed from the CEO. **Read this first.**
+- **[[00-EXECUTIVE-SUMMARY|Round 1 closed, Round 2 backlog]]** (`00-EXECUTIVE-SUMMARY.md`) — what
+  Round 1 delivered, and the **prioritized Round 2 backlog** with the CEO decisions that gate it.
+  Verified against `dev` @ `d5b3b73` on 2026-06-01. **Start here.**
 
-## How this was produced
+## What changed since the original review
 
-- 22 analysts · 218 findings (1 Critical · 44 High · 94 Medium · 75 Low · 4 Info) · read-only pass.
-- Each `<folder>/analysis.md` holds one analyst's findings (category, severity, effort, confidence,
-  location, justification, recommendation) + quick wins.
+The 22 per-analyst digest folders (`backend-*`, `features-*`, `ux-*`, `infra-*`, `shared-*`,
+`docs-*`) were **removed** in the Round-1 cleanup: their *resolved* findings were noise, and their
+*pending* findings are consolidated into the Executive Summary's Round 2 backlog. The digests remain
+**recoverable in git history** — they were last present at commit `d5b3b73`:
 
-## Reports by team
+```sh
+git show d5b3b73:docs/status_may_2026/backend-completeness-gaps/analysis.md
+```
 
-### Backend (primary focus)
-- `backend-architecture-structure/` — module structure, CRUD duplication, file organization
-- `backend-bugs-correctness/` — concurrency, transactions, edge-case bugs
-- `backend-data-model-prisma/` — schema, indexes, constraints, soft-delete collisions
-- `backend-performance-optimization/` — query/runtime perf, unbounded lists, over-fetching
-- `backend-completeness-gaps/` — what's missing to "finish" (RBAC, offboarding, dashboard, workflows)
-- `backend-api-contracts/` — REST consistency, DTOs, OpenAPI, pagination contract
-- `backend-auth-authz/` — OIDC/JIT hardening + the missing authorization model
-- `backend-testing-quality/` — coverage gaps, integration/e2e gap
-- `backend-observability-ops/` — logging, health/readiness, fail-loud config
-- `backend-search-subsystem/` — Meilisearch sync correctness, data-exposure, reindex
+## How the original review was produced
 
-### Product / Features
-- `features-inventory-pillar/` · `features-access-pillar/` · `features-knowledge-and-crosscutting/`
-
-### Frontend / UX
-- `ux-design-language-ia/` · `ux-dashboard-and-dataviz/` · `ux-inventory-screens/` ·
-  `ux-access-kb-screens/` · `frontend-code-quality-perf/`
-
-### Infrastructure
-- `infra-devops-cicd/` · `infra-ops-reliability/`
-
-### Cross-cutting
-- `shared-contracts-package/` · `docs-dx-and-drift/`
-
-## Note on completeness
-
-Four reports carry full long-form write-ups (`backend-completeness-gaps`, `backend-observability-ops`,
-`backend-search-subsystem`, `infra-ops-reliability`); the remaining 18 carry the analyst's structured
-digest (top findings + quick wins). All findings feed the Executive Summary.
+22 analysts · ~2.23M tokens · 834 tool-uses · read-only pass · 218 findings
+(1 Critical · 44 High · 94 Medium · 75 Low · 4 Info).

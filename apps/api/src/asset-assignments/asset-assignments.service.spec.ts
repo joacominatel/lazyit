@@ -43,9 +43,13 @@ const ACTOR_USER: MinimalUser = { id: ACTOR_ID };
 describe('AssetAssignmentsService', () => {
   let service: AssetAssignmentsService;
   let assetAssignment: PrismaModelMock;
+  let asset: { findFirst: jest.Mock };
+  let user: { findFirst: jest.Mock };
   let tx: TxAssignmentMock;
   let prisma: {
     assetAssignment: PrismaModelMock;
+    asset: { findFirst: jest.Mock };
+    user: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
   let actor: { resolve: jest.Mock };
@@ -59,9 +63,16 @@ describe('AssetAssignmentsService', () => {
       create: jest.fn(),
       update: jest.fn(),
     };
+    // create() now asserts the asset and user are live (non-soft-deleted) rows before opening the
+    // transaction (mirrors AccessGrantsService). Default both to "found" so the existing create
+    // tests still reach the create path; the guard tests override to null.
+    asset = { findFirst: jest.fn().mockResolvedValue({ id: 'a1' }) };
+    user = { findFirst: jest.fn().mockResolvedValue({ id: 'u1' }) };
     tx = { create: jest.fn(), update: jest.fn() };
     prisma = {
       assetAssignment,
+      asset,
+      user,
       $transaction: jest.fn(
         (cb: (client: { assetAssignment: TxAssignmentMock }) => unknown) =>
           cb({ assetAssignment: tx }),
@@ -191,6 +202,30 @@ describe('AssetAssignmentsService', () => {
     expect(tx.create).not.toHaveBeenCalled();
   });
 
+  // --- create: live-row guards (mirror AccessGrantsService.assertUsable) ---
+  it('rejects assigning a soft-deleted (or missing) asset with 400, before the duplicate check', async () => {
+    // The soft-delete read filter hides deleted assets → findFirst returns null.
+    asset.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.create({ assetId: 'gone', userId: 'u1' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(assetAssignment.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects assigning to a soft-deleted (or missing) user with 400, before the duplicate check', async () => {
+    user.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.create({ assetId: 'a1', userId: 'gone' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(assetAssignment.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.create).not.toHaveBeenCalled();
+  });
+
   // --- findAll ------------------------------------------------------------
   it('findAll defaults to active-only, newest first', async () => {
     assetAssignment.findMany.mockResolvedValue([]);
@@ -278,11 +313,12 @@ describe('AssetAssignmentsService', () => {
     expect(calls[0][0].data.notes).toBe('returned');
   });
 
-  it("records a RELEASED history event for the assignment's asset", async () => {
+  it("records a RELEASED history event (with the released owner's userId payload) for the assignment's asset", async () => {
     actor.resolve.mockReturnValue(ACTOR_ID);
     assetAssignment.findUnique.mockResolvedValue({
       id: 'as1',
       assetId: 'a1',
+      userId: 'u1',
       releasedAt: null,
     });
     tx.update.mockResolvedValue({ id: 'as1', releasedAt: new Date() });
@@ -292,7 +328,12 @@ describe('AssetAssignmentsService', () => {
     expect(history.record).toHaveBeenCalledTimes(1);
     expect(history.record).toHaveBeenCalledWith(
       { assetAssignment: tx },
-      { assetId: 'a1', eventType: 'RELEASED', performedById: ACTOR_ID },
+      {
+        assetId: 'a1',
+        eventType: 'RELEASED',
+        payload: { userId: 'u1' },
+        performedById: ACTOR_ID,
+      },
     );
   });
 
@@ -432,16 +473,19 @@ describe('AssetAssignmentsService', () => {
       expect(calls[0][0].data.releasedAt).toBeInstanceOf(Date);
       expect(calls[0][0].data.releasedById).toBe(ACTOR_ID);
       expect(calls[1][0].where).toEqual({ id: 'as2' });
-      // One RELEASED history event per asset, on the SAME tx client.
+      // One RELEASED history event per asset, on the SAME tx client, each carrying the released
+      // owner's userId (the offboarded user 'u1') so the per-asset timeline is attributable.
       expect(history.record).toHaveBeenCalledTimes(2);
       expect(history.record).toHaveBeenNthCalledWith(1, bulkTx, {
         assetId: 'a1',
         eventType: 'RELEASED',
+        payload: { userId: 'u1' },
         performedById: ACTOR_ID,
       });
       expect(history.record).toHaveBeenNthCalledWith(2, bulkTx, {
         assetId: 'a2',
         eventType: 'RELEASED',
+        payload: { userId: 'u1' },
         performedById: ACTOR_ID,
       });
       expect(released).toEqual([

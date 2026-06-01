@@ -3,7 +3,7 @@ title: Application
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-01
 ---
 
 # Application
@@ -42,11 +42,12 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
 > user-managed [[application-category]] (consistent with assets/articles), and approver logic
 > belongs to the [[access-request]] workflow, which is **deferred**.
 
-> [!warning] Auth is a temporary shim — endpoints are insecure
-> There is **no authorization** on application or grant writes yet — anyone can create/edit/delete
-> applications and grant/revoke access. The actor on grants is just an `X-User-Id` header anyone can
-> set. Dev-only until an IdP lands ([[0016-auth-strategy-deferred]],
-> [[0022-draft-visibility-auth-shim]], [[0023-access-management-design]]).
+> [!note] Authorization (RBAC)
+> **Grant writes are ADMIN-only** ([[0040-rbac-roles]]). **Application** create/edit are ordinary
+> catalog work (`ADMIN` or `MEMBER`); **deleting** an application is ADMIN-only (a destructive delete).
+> Reads are open to any authenticated user. In production the actor comes from the verified OIDC token
+> ([[0038-jit-user-provisioning]]); the `X-User-Id` shim is dev-only and forgeable
+> ([[0022-draft-visibility-auth-shim]], [[0023-access-management-design]]).
 
 > [!warning] Known debt — unvalidated `metadata`
 > `metadata` (jsonb) accepts **any JSON object** (`z.record(z.string(), z.unknown())`), exactly like
@@ -92,6 +93,8 @@ Indexes: `@@index([categoryId])`.
 - `POST /applications` — create.
 - `PATCH /applications/:id` — partial update.
 - `DELETE /applications/:id` — soft delete.
+- `POST /applications/:id/restore` — ADMIN-only restore (clears `deletedAt`; re-indexes for search).
+  See [[0041-soft-delete-reuse-and-restore]].
 
 ## Not yet implemented (deferred)
 

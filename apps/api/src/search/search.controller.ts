@@ -1,5 +1,12 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
+import { createZodDto } from 'nestjs-zod';
+import { SearchResultsSchema } from '@lazyit/shared';
 import {
   SEARCH_INDEXES,
   SearchService,
@@ -10,6 +17,10 @@ import {
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 const MIN_LIMIT = 1;
+
+// OpenAPI response shape for GET /search: the shared SearchResults envelope ({ assets, articles,
+// users, locations, applications } — each entity key optional). Single source of truth (ADR-0018).
+class SearchResultsDto extends createZodDto(SearchResultsSchema) {}
 
 @ApiTags('search')
 @Controller('search')
@@ -38,6 +49,7 @@ export class SearchController {
     type: Number,
     description: `Per-index hit cap (${MIN_LIMIT}-${MAX_LIMIT}). Default ${DEFAULT_LIMIT}.`,
   })
+  @ApiOkResponse({ type: SearchResultsDto })
   async find(
     @Query('q') q?: string,
     @Query('entities') entities?: string,

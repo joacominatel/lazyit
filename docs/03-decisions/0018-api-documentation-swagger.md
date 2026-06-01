@@ -56,6 +56,18 @@ validation, types, OpenAPI and response shape.
 - **The OpenAPI document** is built in `main.ts` (`DocumentBuilder` + `SwaggerModule`), passed
   through nestjs-zod's `cleanupOpenApiDoc()` (required for correct zod output), and served at
   **`GET /api/docs`** (Swagger UI) and **`GET /api/docs-json`** (raw JSON).
+- **Bearer auth is global (round-2 polish):** `DocumentBuilder.addBearerAuth()` only *defines* the
+  scheme; `.addSecurityRequirements('bearer')` *applies* it to **every** operation. This replaced the
+  inconsistent per-controller `@ApiBearerAuth()` decorators — one source, applied everywhere. The few
+  `@Public()` routes inherit it as harmless doc-only noise.
+- **Standard error contract (round-2 polish):** a shared `ApiErrorSchema` (`@lazyit/shared`,
+  `{ statusCode, message, error? }` — the Nest HttpException body shape) is the single definition of
+  the error envelope. After `cleanupOpenApiDoc`, `addStandardErrorResponses`
+  (`apps/api/src/common/openapi-errors.ts`) registers it as the `ApiError` component and attaches
+  `400/401/403/404/409/500` responses to every operation — without clobbering responses a handler
+  already declares (e.g. an explicit `@ApiConflictResponse`).
+- **`GET /search`** now documents its response with the shared `SearchResultsSchema` via
+  `@ApiOkResponse` (it was previously undocumented).
 - **Controllers** carry `@ApiTags` / `@ApiOperation` / `@ApiResponse`; applied **retroactively to
   [[user]] and [[location]]** for consistency.
 - **Dates over the wire:** HTTP JSON has no `Date` type and `z.date()` cannot be represented in

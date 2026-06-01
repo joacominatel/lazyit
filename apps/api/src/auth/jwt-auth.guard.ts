@@ -10,7 +10,7 @@ import { Reflector } from '@nestjs/core';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
-import type { Prisma, User } from '../../generated/prisma/client';
+import { Prisma, Role, type User } from '../../generated/prisma/client';
 import { IS_PUBLIC_KEY } from './public.decorator';
 
 const UUID_REGEX =
@@ -206,6 +206,18 @@ export class JwtAuthGuard implements CanActivate {
       return existing;
     }
 
+    // RBAC bootstrap (ADR-0040): the FIRST user ever provisioned becomes ADMIN, so a fresh install
+    // is never left without anyone able to administer it; every later JIT user defaults to MEMBER.
+    // "Ever provisioned" counts soft-deleted rows too (includeSoftDeleted) — once any user has
+    // existed, a fresh row is no longer "the first", so an offboarded-then-reprovisioned install
+    // cannot silently hand ADMIN to the next signup. The check-then-create window is acceptable:
+    // it only matters on a truly empty DB, and the worst case (two genuinely-concurrent first
+    // logins) makes both ADMIN — strictly safer than locking everyone out, and an ADMIN can demote.
+    const userCount = await this.prisma.user.count({
+      includeSoftDeleted: true,
+    } as Prisma.UserCountArgs);
+    const role: Role = userCount === 0 ? Role.ADMIN : Role.MEMBER;
+
     // First login: the OIDC access token carries authorization, not identity, so fetch the real
     // profile from the userinfo endpoint and merge it OVER the token claims. Fail-soft — on any
     // failure `fetchUserinfo` returns null and we provision from the token claims alone.
@@ -214,7 +226,11 @@ export class JwtAuthGuard implements CanActivate {
 
     const emailClaim =
       typeof profile['email'] === 'string' ? profile['email'] : undefined;
-    const email = emailClaim ?? `${sub}@unknown`;
+    // Normalize (trim + lowercase) so the JIT-provisioned email matches the citext column and the
+    // @lazyit/shared EmailSchema (ADR-0041). Without this, an IdP that returns "Bob@x" would store a
+    // mixed-case row that the case-insensitive unique index still treats as "bob@x" — fine for
+    // uniqueness, but the stored value should be canonical and agree with API-created users.
+    const email = (emailClaim ?? `${sub}@unknown`).trim().toLowerCase();
 
     // Name resolution: given_name + family_name → split `name` → email local-part.
     let firstName: string;
@@ -244,6 +260,17 @@ export class JwtAuthGuard implements CanActivate {
       }
     }
 
+    // Harden the JIT row against the @lazyit/shared User contract (firstName/lastName are
+    // .min(1).max(100); ADR-0040/0038). The resolution above can still yield an empty field — a
+    // whitespace-only given_name, a single-token `name`, or the email-local-part path (no last
+    // name) — which would persist a row the API/zod schema would reject, leaving the user broken in
+    // the directory. Coerce both to a non-empty, trimmed, ≤100-char value, falling back to the
+    // email local-part (then the sub) so the JIT row always satisfies the same constraints as an
+    // API-created user. The IdP claims still take precedence whenever they are usable.
+    const fallback = (email.split('@')[0] || sub).slice(0, 100);
+    firstName = this.coerceName(firstName, fallback);
+    lastName = this.coerceName(lastName, fallback);
+
     // Upsert on the externalId unique key (race-proof): if a parallel first-login request already
     // created the row, the `update: {}` no-op returns it instead of throwing P2002. `where` targets
     // only `externalId`, so the soft-deleted case is already handled above (we 403 before reaching
@@ -256,9 +283,21 @@ export class JwtAuthGuard implements CanActivate {
         firstName,
         lastName,
         isActive: true,
+        role,
       },
       update: {},
     });
+  }
+
+  /**
+   * Coerce a JIT-resolved name field to a value that satisfies the @lazyit/shared User contract
+   * (trimmed, non-empty, ≤100 chars). Trims the candidate; if it is empty after trimming, uses the
+   * supplied non-empty fallback (the email local-part, then the sub). Both inputs are then capped at
+   * 100 to match the schema's `.max(100)`. Keeps the JIT row consistent with an API-created user.
+   */
+  private coerceName(candidate: string, fallback: string): string {
+    const trimmed = candidate.trim();
+    return (trimmed.length > 0 ? trimmed : fallback).slice(0, 100);
   }
 
   /**

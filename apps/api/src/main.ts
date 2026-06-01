@@ -4,6 +4,7 @@ import { cleanupOpenApiDoc } from 'nestjs-zod';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { validateBootConfig } from './auth/boot-config';
+import { addStandardErrorResponses } from './common/openapi-errors';
 
 async function bootstrap() {
   // Fail-loud config (ops-boot integrity): validate before NestFactory.create so a misconfigured
@@ -39,9 +40,18 @@ async function bootstrap() {
       'Self-hosted IT asset, access, ticket and knowledge-base API.',
     )
     .setVersion('0.1')
+    // addBearerAuth() only DEFINES the scheme; addSecurityRequirements applies it GLOBALLY so every
+    // operation documents the Authorization: Bearer requirement (ADR-0038). This replaces the
+    // inconsistent per-controller @ApiBearerAuth() decorators — one source, applied everywhere. The
+    // few @Public() routes (health probes) inherit it as harmless doc-only noise.
     .addBearerAuth()
+    .addSecurityRequirements('bearer')
     .build();
-  const document = cleanupOpenApiDoc(SwaggerModule.createDocument(app, config));
+  // cleanupOpenApiDoc renders the zod DTOs correctly; then add the standard error contract once,
+  // globally (ApiError schema + 400/401/403/404/409/500 per operation) — ADR-0018.
+  const document = addStandardErrorResponses(
+    cleanupOpenApiDoc(SwaggerModule.createDocument(app, config)),
+  );
   SwaggerModule.setup('api/docs', app, document);
 
   await app.listen(process.env.PORT ?? 3001);

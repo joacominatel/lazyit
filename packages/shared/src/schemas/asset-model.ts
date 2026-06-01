@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requireAtLeastOneKey } from "./primitives";
 
 /**
  * AssetModel — the generic make/model an Asset is an instance of (e.g. "Dell Latitude 5520").
@@ -37,17 +38,19 @@ export const CreateAssetModelSchema = z.strictObject({
   categoryId: z.cuid().optional(),
 });
 
-/** Partial update; any subset of the editable fields. */
-export const UpdateAssetModelSchema = z
-  .strictObject({
-    name: z.string().trim().min(1).max(200),
-    manufacturer: z.string().trim().min(1).max(200),
-    sku: z.string().trim().min(1).max(100),
-    description: z.string().trim().min(1).max(2000),
-    specs: ModelSpecsSchema,
-    categoryId: z.cuid(),
-  })
-  .partial();
+/** Partial update; any subset of the editable fields (an empty body is rejected). */
+export const UpdateAssetModelSchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      name: z.string().trim().min(1).max(200),
+      manufacturer: z.string().trim().min(1).max(200),
+      sku: z.string().trim().min(1).max(100),
+      description: z.string().trim().min(1).max(2000),
+      specs: ModelSpecsSchema,
+      categoryId: z.cuid(),
+    })
+    .partial(),
+);
 
 export type AssetModel = z.infer<typeof AssetModelSchema>;
 export type CreateAssetModel = z.infer<typeof CreateAssetModelSchema>;

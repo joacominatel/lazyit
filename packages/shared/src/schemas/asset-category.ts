@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requireAtLeastOneKey } from "./primitives";
 
 /**
  * AssetCategory — classification for AssetModels (Laptop, Server, Switch, …). User-managed:
@@ -28,14 +29,16 @@ export const CreateAssetCategorySchema = z.strictObject({
   icon: z.string().trim().min(1).max(100).optional(),
 });
 
-/** Partial update; any subset of the editable fields. */
-export const UpdateAssetCategorySchema = z
-  .strictObject({
-    name: z.string().trim().min(1).max(100),
-    description: z.string().trim().min(1).max(1000),
-    icon: z.string().trim().min(1).max(100),
-  })
-  .partial();
+/** Partial update; any subset of the editable fields (an empty body is rejected). */
+export const UpdateAssetCategorySchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      name: z.string().trim().min(1).max(100),
+      description: z.string().trim().min(1).max(1000),
+      icon: z.string().trim().min(1).max(100),
+    })
+    .partial(),
+);
 
 export type AssetCategory = z.infer<typeof AssetCategorySchema>;
 export type CreateAssetCategory = z.infer<typeof CreateAssetCategorySchema>;

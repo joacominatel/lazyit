@@ -43,11 +43,24 @@ export const CreateConsumableMovementSchema = z.strictObject({
  * Query params for `GET /consumables/:id/movements` — optional type filter and a `createdAt` range
  * (`from`/`to`, ISO datetimes). Newest first is enforced by the service, not here.
  */
-export const ConsumableMovementQuerySchema = z.object({
-  type: ConsumableMovementTypeSchema.optional(),
-  from: z.iso.datetime().optional(),
-  to: z.iso.datetime().optional(),
-});
+export const ConsumableMovementQuerySchema = z
+  .object({
+    type: ConsumableMovementTypeSchema.optional(),
+    from: z.iso.datetime().optional(),
+    to: z.iso.datetime().optional(),
+  })
+  // Reject an inverted range. Only checked when BOTH bounds are supplied; an open-ended range
+  // (only one bound) is valid. ISO-8601 strings parse to Date for a timezone-correct comparison.
+  .refine(
+    (data) =>
+      data.from === undefined ||
+      data.to === undefined ||
+      new Date(data.from).getTime() <= new Date(data.to).getTime(),
+    {
+      error: "from must be on or before to",
+      path: ["from"],
+    },
+  );
 
 export type ConsumableMovementType = z.infer<
   typeof ConsumableMovementTypeSchema

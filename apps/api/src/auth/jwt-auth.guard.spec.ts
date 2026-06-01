@@ -17,6 +17,9 @@ jest.mock('jose', () => ({
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {},
+  // The guard imports Role as a VALUE (Role.ADMIN / Role.MEMBER) for the RBAC bootstrap (ADR-0040),
+  // so the mock must expose it or jitProvision dereferences undefined.
+  Role: { ADMIN: 'ADMIN', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
 }));
 
 // Convenient import after the mock is set up.
@@ -29,6 +32,7 @@ const DB_USER = {
   firstName: 'Alice',
   lastName: 'Smith',
   isActive: true,
+  role: 'MEMBER',
   externalId: 'oidc-sub-001',
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -77,7 +81,7 @@ function echoUpsertedUser(args: { create: Record<string, unknown> }) {
 
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
-  let prismaUser: { findFirst: jest.Mock; upsert: jest.Mock };
+  let prismaUser: { findFirst: jest.Mock; upsert: jest.Mock; count: jest.Mock };
   let fetchMock: jest.Mock;
   const originalFetch = global.fetch;
 
@@ -86,7 +90,10 @@ describe('JwtAuthGuard', () => {
   });
 
   beforeEach(async () => {
-    prismaUser = { findFirst: jest.fn(), upsert: jest.fn() };
+    prismaUser = { findFirst: jest.fn(), upsert: jest.fn(), count: jest.fn() };
+    // Default: the DB already has users, so a JIT provision defaults to MEMBER. The first-user test
+    // overrides this to 0 to assert the ADMIN bootstrap (ADR-0040).
+    prismaUser.count.mockResolvedValue(1);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -379,6 +386,7 @@ describe('JwtAuthGuard', () => {
           firstName: 'Bob',
           lastName: 'Jones',
           isActive: true,
+          role: 'MEMBER',
         },
         update: {},
       });
@@ -412,12 +420,15 @@ describe('JwtAuthGuard', () => {
           firstName: 'Carol',
           lastName: 'Chen',
           isActive: true,
+          role: 'MEMBER',
         },
         update: {},
       });
     });
 
-    it('uses email local-part as firstName when neither name nor given_name present', async () => {
+    it('uses the email local-part for BOTH names when neither name nor given_name present (hardened: lastName must not be empty)', async () => {
+      // Hardening (round-2): the User contract requires lastName .min(1), so the empty-lastName path
+      // is coerced to the email local-part instead of persisting a contract-violating row.
       (jose.jwtVerify as jest.Mock).mockResolvedValue({
         payload: {
           sub: 'oidc-sub-y',
@@ -442,11 +453,101 @@ describe('JwtAuthGuard', () => {
           externalId: 'oidc-sub-y',
           email: 'dana@example.com',
           firstName: 'dana',
-          lastName: '',
+          lastName: 'dana',
           isActive: true,
+          role: 'MEMBER',
         },
         update: {},
       });
+    });
+
+    it('coerces a single-token name claim so lastName is non-empty (hardened)', async () => {
+      // `name: "Madonna"` → firstName "Madonna", lastName would be "" → coerced to the email
+      // local-part so the row satisfies the @lazyit/shared User schema (.min(1)).
+      (jose.jwtVerify as jest.Mock).mockResolvedValue({
+        payload: {
+          sub: 'oidc-sub-mono',
+          email: 'star@example.com',
+          name: 'Madonna',
+        },
+      });
+      prismaUser.findFirst.mockResolvedValue(null);
+      prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+      await guard.canActivate(
+        makeCtx({ headers: { authorization: 'Bearer t' } }),
+      );
+
+      const created = (
+        prismaUser.upsert.mock.calls[0][0] as {
+          create: { firstName: string; lastName: string };
+        }
+      ).create;
+      expect(created.firstName).toBe('Madonna');
+      expect(created.lastName).toBe('star');
+    });
+
+    it('coerces a whitespace-only given_name so firstName is non-empty (hardened)', async () => {
+      // given_name "   " + family_name "Lovelace": firstName would be whitespace → coerced to the
+      // email local-part; family_name is kept.
+      (jose.jwtVerify as jest.Mock).mockResolvedValue({
+        payload: {
+          sub: 'oidc-sub-ws',
+          email: 'ada@example.com',
+          given_name: '   ',
+          family_name: 'Lovelace',
+        },
+      });
+      prismaUser.findFirst.mockResolvedValue(null);
+      prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+      await guard.canActivate(
+        makeCtx({ headers: { authorization: 'Bearer t' } }),
+      );
+
+      const created = (
+        prismaUser.upsert.mock.calls[0][0] as {
+          create: { firstName: string; lastName: string };
+        }
+      ).create;
+      expect(created.firstName).toBe('ada');
+      expect(created.lastName).toBe('Lovelace');
+    });
+
+    it('JIT-provisions the FIRST user (User count 0) as ADMIN (ADR-0040 bootstrap)', async () => {
+      (jose.jwtVerify as jest.Mock).mockResolvedValue({
+        payload: {
+          sub: 'oidc-sub-first',
+          email: 'founder@example.com',
+          given_name: 'Founder',
+          family_name: 'Zero',
+        },
+      });
+      prismaUser.findFirst.mockResolvedValue(null);
+      // Empty database → this is the very first user, who must become ADMIN.
+      prismaUser.count.mockResolvedValue(0);
+      prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+      const req: Record<string, unknown> = {
+        headers: { authorization: 'Bearer valid.token.here' },
+      };
+
+      const result = await guard.canActivate(makeCtx(req));
+
+      expect(result).toBe(true);
+      expect(prismaUser.upsert).toHaveBeenCalledWith({
+        where: { externalId: 'oidc-sub-first' },
+        create: {
+          externalId: 'oidc-sub-first',
+          email: 'founder@example.com',
+          firstName: 'Founder',
+          lastName: 'Zero',
+          isActive: true,
+          role: 'ADMIN',
+        },
+        update: {},
+      });
+      expect((req.user as { role?: string }).role).toBe('ADMIN');
     });
 
     it('throws UnauthorizedException when OIDC_ISSUER is not configured', async () => {
@@ -519,6 +620,7 @@ describe('JwtAuthGuard', () => {
             firstName: 'Real',
             lastName: 'User',
             isActive: true,
+            role: 'MEMBER',
           },
           update: {},
         });
@@ -562,15 +664,18 @@ describe('JwtAuthGuard', () => {
         );
 
         expect(result).toBe(true);
-        // Placeholder fallback from the bare sub.
+        // Placeholder fallback from the bare sub. Hardened: BOTH names fall back to the email
+        // local-part (here the sub, since email is `${sub}@unknown`) so neither violates the
+        // @lazyit/shared User schema (.min(1)).
         expect(prismaUser.upsert).toHaveBeenCalledWith({
           where: { externalId: 'oidc-sub-fail' },
           create: {
             externalId: 'oidc-sub-fail',
             email: 'oidc-sub-fail@unknown',
             firstName: 'oidc-sub-fail',
-            lastName: '',
+            lastName: 'oidc-sub-fail',
             isActive: true,
+            role: 'MEMBER',
           },
           update: {},
         });
@@ -610,14 +715,16 @@ describe('JwtAuthGuard', () => {
         );
 
         expect(result).toBe(true);
+        // Hardened: both names fall back to the email local-part (the sub here), never empty.
         expect(prismaUser.upsert).toHaveBeenCalledWith({
           where: { externalId: 'oidc-sub-throw' },
           create: {
             externalId: 'oidc-sub-throw',
             email: 'oidc-sub-throw@unknown',
             firstName: 'oidc-sub-throw',
-            lastName: '',
+            lastName: 'oidc-sub-throw',
             isActive: true,
+            role: 'MEMBER',
           },
           update: {},
         });

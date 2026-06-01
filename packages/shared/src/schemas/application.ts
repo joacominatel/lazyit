@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requireAtLeastOneKey } from "./primitives";
 
 /**
  * Application — something a User can be granted access to: a SaaS product (Jira, GitHub, AWS), an
@@ -82,19 +83,21 @@ export const CreateApplicationSchema = z.strictObject({
   notes: z.string().trim().min(1).max(2000).optional(),
 });
 
-/** Partial update; any subset of the editable fields. */
-export const UpdateApplicationSchema = z
-  .strictObject({
-    name: z.string().trim().min(1).max(200),
-    description: z.string().trim().min(1).max(2000),
-    url: ApplicationUrlSchema,
-    vendor: z.string().trim().min(1).max(200),
-    categoryId: z.cuid(),
-    isCritical: z.boolean(),
-    metadata: ApplicationMetadataSchema,
-    notes: z.string().trim().min(1).max(2000),
-  })
-  .partial();
+/** Partial update; any subset of the editable fields (an empty body is rejected). */
+export const UpdateApplicationSchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      name: z.string().trim().min(1).max(200),
+      description: z.string().trim().min(1).max(2000),
+      url: ApplicationUrlSchema,
+      vendor: z.string().trim().min(1).max(200),
+      categoryId: z.cuid(),
+      isCritical: z.boolean(),
+      metadata: ApplicationMetadataSchema,
+      notes: z.string().trim().min(1).max(2000),
+    })
+    .partial(),
+);
 
 export type Application = z.infer<typeof ApplicationSchema>;
 export type CreateApplication = z.infer<typeof CreateApplicationSchema>;

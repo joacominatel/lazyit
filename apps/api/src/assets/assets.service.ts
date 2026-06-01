@@ -10,6 +10,7 @@ import { Prisma } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import { jsonDeepEqual } from '../common/deep-equal';
 import {
   AssetHistoryService,
   type RecordAssetEvent,
@@ -251,6 +252,46 @@ export class AssetsService {
     return deleted;
   }
 
+  /**
+   * Restore a soft-deleted asset: clear `deletedAt` and emit a `RESTORED` history event
+   * transactionally (ADR-0033 / ADR-0041) — the counterpart of `remove()`/`DELETED`. The row is found
+   * via the `includeSoftDeleted` escape hatch (the read filter hides soft-deleted assets). 404 if it
+   * never existed; idempotent (no event) if already live. The partial unique indexes free
+   * serial/assetTag on delete, so a restore can 409 if another live asset took one of them in the
+   * meantime (mapped by the global PrismaExceptionFilter). Re-indexes for search on success.
+   */
+  async restore(id: string, user?: User) {
+    const performedById = this.actor.resolve(user);
+    const existing = await this.prisma.asset.findFirst({
+      where: { id },
+      select: { id: true, deletedAt: true },
+      includeSoftDeleted: true,
+    } as Prisma.AssetFindFirstArgs);
+    if (!existing) {
+      throw new NotFoundException(`Asset ${id} not found`);
+    }
+    if (existing.deletedAt === null) {
+      // Already live — return the expanded view; no RESTORED event for a no-op.
+      return this.findOne(id);
+    }
+    const restored = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.asset.update({
+        where: { id },
+        data: { deletedAt: null },
+      });
+      await this.history.record(tx, {
+        assetId: id,
+        eventType: 'RESTORED',
+        performedById,
+      });
+      return row;
+    });
+    // Re-index the restored asset (ADR-0035).
+    this.search.upsert('assets', projectAsset(restored));
+    // Return the expanded relation graph (same shape as findOne), consistent with the no-op branch.
+    return this.findOne(id);
+  }
+
   /** Lightweight 404 guard for writes and the nested assignments endpoint (no relation loading). */
   async assertExists(id: string): Promise<void> {
     const asset = await this.prisma.asset.findFirst({
@@ -311,10 +352,9 @@ export class AssetsService {
     if (before.modelId !== updated.modelId) {
       change('MODEL_CHANGED', before.modelId, updated.modelId);
     }
-    if (
-      JSON.stringify(before.specs ?? null) !==
-      JSON.stringify(updated.specs ?? null)
-    ) {
+    if (!jsonDeepEqual(before.specs, updated.specs)) {
+      // Order-insensitive deep compare (not JSON.stringify): jsonb does not preserve object key
+      // order, so reordered specs keys must not emit a spurious SPECS_CHANGED (see deep-equal.ts).
       // specs can be large; record the change without echoing both blobs into the payload.
       events.push({
         assetId: updated.id,
