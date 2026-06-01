@@ -43,7 +43,10 @@ concrete instance of a generic [[asset-model]].
 > (`z.record(z.string(), z.unknown())`). The intent ([[0007-flexible-asset-specs-jsonb]]) is to
 > validate `specs` against a per-[[asset-category]] schema (e.g. a future
 > `AssetCategory.specsSchema`), which does not exist yet. Tracked as a `TODO(specs)` in the
-> shared zod schemas.
+> shared zod schemas. The web's custom-fields editor only authors **scalar string values**
+> (one `{ name, value }` row each), but pre-existing non-scalar entries (arrays/objects) are
+> **preserved untouched** on edit — they round-trip and render as compact JSON, they just
+> aren't editable inline.
 
 > [!note] Expanded read shape (reads only)
 > `GET /assets` and `GET /assets/:id` return an **`AssetWithRelations`**: the asset plus its `model`
@@ -79,7 +82,7 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `serial` | `string?` | Optional. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted serial is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
 | `assetTag` | `string?` | Optional internal company label. Same live-only PARTIAL unique index as `serial` ([[0041-soft-delete-reuse-and-restore]]). |
 | `status` | `AssetStatus` | required enum, **no default**. |
-| `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object for now (see debt note). |
+| `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object for now (see debt note). The web edits this via a **custom-fields editor** (a list of `{ name, value }` string rows) and renders it on the detail page as a label-cased key/value list, not raw JSON. |
 | `notes` | `string?` | optional. |
 | `purchaseDate` | `datetime?` | optional; ISO-8601 string over the wire ([[0018-api-documentation-swagger]]). |
 | `warrantyEnd` | `datetime?` | optional; ISO-8601 string over the wire. |
