@@ -3,7 +3,7 @@ title: Prod-like First Boot (Docker)
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-01
 ---
 
 # Runbook — bring up the prod-like stack locally
@@ -30,7 +30,10 @@ behind Caddy with local HTTPS — to validate a production-shaped deployment. Ba
 cp infra/env/.env.prod.example infra/env/.env.prod
 chmod 600 infra/env/.env.prod
 #    Minimum to change: POSTGRES_PASSWORD and the password inside DATABASE_URL (must match).
-#    For local prod-like, leave LAZYIT_SITE_ADDRESS=localhost and WEB_ORIGIN=https://localhost:8443.
+#    ZITADEL_MASTERKEY must be EXACTLY 32 bytes (a wrong length is a real first-boot failure):
+#        openssl rand -hex 16    # 16 bytes -> 32 hex chars (exactly 32)
+#    For local prod-like, set LAZYIT_DOMAIN=localhost (so the auth subdomain is auth.localhost),
+#    and leave LAZYIT_SITE_ADDRESS=localhost and WEB_ORIGIN=https://localhost:8443.
 
 # 2. Build images and start everything. Set a DC alias once for the long prod invocation.
 #    Boot order (by health): db -> migrate; zitadel-secrets-init -> zitadel -> zitadel-bootstrap
@@ -57,9 +60,23 @@ curl -sko /dev/null -w "docs:   %{http_code}\n"   https://localhost:8443/api/doc
 
 Expected: `web: 200`, `health: 200`, `docs: 200`, and `api: 401`. The **401 is correct**: the
 global OIDC guard is active (ADR-0038), so `/api/users` rejects unauthenticated calls — it is not a
-broken install. To see data you must bootstrap Zitadel and log in via the web UI
-([[auth-bootstrap]]); JIT provisioning creates your `User` row on first login. In a browser open
+broken install. With the bundled zero-touch Zitadel (ADR-0043) the OIDC integration is **already
+provisioned** by the `zitadel-bootstrap` sidecar — there is no console chore. To see data, log in via
+the web UI; the first login routes you to the in-app **`/setup` wizard** to create the first ADMIN
+([[auth-bootstrap]] §6b), and JIT provisioning creates your `User` row. In a browser open
 **https://localhost:8443** (accept / trust Caddy's local CA — see the troubleshooting runbook).
+
+> [!warning] Local prod-like: `auth.localhost` must resolve to 127.0.0.1
+> The browser-facing OIDC login redirects through **`auth.{LAZYIT_DOMAIN}`** (Caddy serves the Zitadel
+> console + token endpoints there — ADR-0037 §4). With `LAZYIT_DOMAIN=localhost` that host is
+> **`auth.localhost`**. Most resolvers map `*.localhost` to `127.0.0.1` automatically, but if your OS
+> does not (the browser fails to reach the IdP), add it to your hosts file:
+> ```sh
+> echo "127.0.0.1 auth.localhost" | sudo tee -a /etc/hosts
+> ```
+> Internal server-to-server calls (api/web → Zitadel for JWKS/token) do **not** need this — they reach
+> the `zitadel` container over Docker DNS at `http://zitadel:8080` (`OIDC_JWKS_URI`). Only the
+> *browser* leg needs `auth.localhost` to resolve.
 
 > [!info] Migrations & seed run automatically
 > The one-shot `migrate` service runs `prisma migrate deploy` then the idempotent seed

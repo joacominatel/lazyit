@@ -6,7 +6,8 @@ created: 2026-05-25
 updated: 2026-06-01
 ---
 
-<!-- updated 2026-06-01: registered ADR-0043 (Zitadel source-of-truth, proposed). -->
+<!-- updated 2026-06-01: ADR-0043 (Zitadel source-of-truth) accepted + validated live end-to-end
+     (epic delivered; Phase 4 hardening #92/#93/#94/#95 + INVARIANTS). -->
 
 # Decisions (ADRs) — Map of Content
 
