@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { CreateUserSchema, RoleSchema, UserSchema } from "./user";
+import {
+  CreateUserSchema,
+  RoleSchema,
+  UpdateUserSchema,
+  UserSchema,
+} from "./user";
 
 // SEC-006 — externalId is the IdP `sub` linkage (ADR-0016), server-owned. A client must not be able
 // to set it on create, or it could pre-link a local row to a future federated identity.
@@ -30,6 +35,40 @@ describe("CreateUserSchema (SEC-006)", () => {
   test("rejects an unknown role value", () => {
     expect(
       CreateUserSchema.safeParse({ ...valid, role: "SUPERADMIN" }).success,
+    ).toBe(false);
+  });
+});
+
+// ADR-0041 — email is case-insensitive (citext column). Write payloads normalize input (trim +
+// lowercase) so the stored value is canonical and "Bob@x" / "bob@x" can never become two users.
+describe("email normalization (ADR-0041)", () => {
+  test("CreateUserSchema lowercases and trims the email", () => {
+    const result = CreateUserSchema.safeParse({
+      email: "  Bob@Example.COM  ",
+      firstName: "Bob",
+      lastName: "Builder",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.email).toBe("bob@example.com");
+    }
+  });
+
+  test("UpdateUserSchema lowercases and trims the email", () => {
+    const result = UpdateUserSchema.safeParse({ email: "ALICE@X.IO" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.email).toBe("alice@x.io");
+    }
+  });
+
+  test("still rejects a non-email string", () => {
+    expect(
+      CreateUserSchema.safeParse({
+        email: "not-an-email",
+        firstName: "X",
+        lastName: "Y",
+      }).success,
     ).toBe(false);
   });
 });
