@@ -15,6 +15,14 @@ accepted — 2026-05-25. One of the three MVP modules ([[vision]]) alongside Inv
 and Access ([[application]]). Walks back the versioning that the [[article-version]] stub
 anticipated. Authorship/visibility rules are split into [[0022-draft-visibility-auth-shim]].
 
+> [!note] Partially superseded by [[0042-article-versioning-and-linking]] (2026-06-01)
+> The MVP shipped a simple wiki with **no versioning, no linking, and `LIKE`-only search excluding
+> `content`** — designed so each was an additive change later ("Append-improvable" below). [[0042]]
+> takes that path: it adds an **append-only [[article-version]]** (snapshot on every edit — restoring
+> auditability), **article↔asset/application linking** ([[article-link]]), and **indexes article
+> `content` in search**. Where this ADR says "no versioning" / "no FTS over content", read it as the
+> MVP baseline; [[0042]] is the current state. Tags remain deferred.
+
 ## Context
 
 The Knowledge Base is lazyit's internal-documentation pillar. Its users are **small IT teams
@@ -45,8 +53,11 @@ can be added later without a destructive migration**.
 - **`ArticleCategory`** is user-managed exactly like [[asset-category]]: `name` (unique), optional
   `description`, `icon` (a heroicon name, free string), and `order` (for sidebar sorting). Seeded
   with an initial, non-special set.
-- **No versioning, no tags, no advanced FTS.** Listing search is a basic case-insensitive `LIKE`
-  over `title` and `excerpt` only (not `content`).
+- **No versioning, no tags, no advanced FTS** *(MVP baseline; versioning + content search added in
+  [[0042-article-versioning-and-linking]])*. Listing search is a basic case-insensitive `LIKE` over
+  `title` and `excerpt` only (not `content`) — note Meilisearch full-text (incl. `content` since
+  [[0042]]) is the separate `/search` surface ([[0035-search-architecture]]); the `GET /articles?q=`
+  list filter is still `LIKE` over title/excerpt.
 - **`status` lifecycle:** `DRAFT` is author-private; `PUBLISHED` is team-visible. Transitions go
   through dedicated `POST /articles/:id/publish` and `/unpublish` endpoints (not `PATCH`, which
   never touches `status`). The visibility + authorship rules are in
@@ -62,9 +73,11 @@ can be added later without a destructive migration**.
 - **Positive:** the smallest thing that works; reads/writes are plain CRUD over one table plus a
   reference table.
 - **Append-improvable (the key property):** every deferred feature is a **non-destructive**
-  addition — versioning = a new `ArticleVersion` table with an FK from `Article` ([[article-version]]
-  stays ⚪ planned); tags = a join table; FTS = a Postgres `tsvector` column + GIN index. None
-  reshape `Article`.
+  addition — versioning = a new `ArticleVersion` table with an FK from `Article` (**done** in
+  [[0042-article-versioning-and-linking]]; [[article-version]] is now 🟢 implemented); linking = a
+  join table (**done** in [[0042]] — [[article-link]]); content search = projecting `content` into
+  Meilisearch (**done** in [[0042]]); tags = a join table (still ⚪ deferred). None reshaped
+  `Article`, exactly as designed.
 - **Trade-offs:** no edit history (an overwrite loses the previous body until versioning lands);
   search is substring-only and excludes `content`; `metadata` is unvalidated (same debt as `specs`).
 - **Deferred import formats:** `.pdf` (ugly text extraction), `.html` (→ `turndown`), `.odt`/`.rtf`
