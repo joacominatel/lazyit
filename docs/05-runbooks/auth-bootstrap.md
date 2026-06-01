@@ -201,6 +201,64 @@ record is auto-provisioned — no separate "add user to lazyit" step is needed b
 
 ---
 
+## 6b — Designate the first ADMIN (RBAC bootstrap)
+
+> [!warning] Why this step exists
+> RBAC ([[0040-rbac-roles]]) makes the **first user ever provisioned** an `ADMIN` and everyone else
+> a `MEMBER`. But the `rbac_user_role` migration backfilled every **pre-existing** user to `MEMBER`,
+> and the first-user-ADMIN rule **only fires on a truly empty database**. So on an instance that
+> already had users (the common upgrade case), the *only* `ADMIN` is the seeded `admin@lazyit.local`,
+> and an operator who signs in via OIDC lands as `MEMBER` with **no UI to promote themselves**.
+> You must grant the first real `ADMIN` out-of-band, once. After that, admins manage every role from
+> the Users section.
+
+**Preferred — the `set-role` script.** Run it on the API host (or `docker compose exec api`), from
+`apps/api`. It validates the role enum, matches the email case-insensitively, targets only LIVE
+(non-soft-deleted) users, and prints a loud before→after summary:
+
+```sh
+# From apps/api (Bun auto-loads .env for DATABASE_URL):
+bun run set-role operator@yourco.com ADMIN
+
+# Demote a stale admin once a real one exists:
+bun run set-role old.admin@yourco.com MEMBER
+```
+
+Inside the prod Docker stack the API runs as the `api` service:
+
+```sh
+docker compose -f infra/docker-compose.prod.yml exec api \
+  bun run set-role operator@yourco.com ADMIN
+```
+
+The user must already exist in the app DB — it is created automatically on their first OIDC login
+(JIT, [[0038-jit-user-provisioning]]), so have them sign in once first, then run the command.
+
+**Fallback — raw SQL.** If you cannot run the script (e.g. you only have `psql`), update the column
+directly. `role` is a Postgres enum and `email` is `citext`, so a case-insensitive match works:
+
+```sql
+UPDATE users
+SET role = 'ADMIN'
+WHERE email = 'operator@yourco.com'
+  AND "deletedAt" IS NULL;
+```
+
+Inside the prod stack (the `db` container already has `POSTGRES_USER` / `POSTGRES_DB` in its env, so
+let them expand **inside** the container via `sh -c`):
+
+```sh
+docker compose -f infra/docker-compose.prod.yml exec db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "UPDATE users SET role='\''ADMIN'\'' WHERE email='\''operator@yourco.com'\'' AND \"deletedAt\" IS NULL;"'
+```
+
+Valid roles are `ADMIN`, `MEMBER`, `VIEWER`. Once at least one real `ADMIN` exists, all further role
+management happens in the lazyit UI (**Users** section → the **Role** control). The API refuses to
+remove the last administrator (409) and never lets a user change their own role (403), so you cannot
+accidentally lock yourself out from the UI.
+
+---
+
 ## 7 — Bring-your-own-IdP (BYOI)
 
 Zitadel is the **default bundled IdP**, but the lazyit backend speaks **standard OIDC** — it
