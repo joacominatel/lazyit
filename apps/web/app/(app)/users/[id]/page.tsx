@@ -27,6 +27,7 @@ import {
 import { formatDate } from "@/lib/utils/format";
 import { ArticleStatusBadge } from "../../kb/_components/article-status-badge";
 import { UserFormDialog } from "../_components/user-form-dialog";
+import { UserRoleSelect } from "../_components/user-role-select";
 import { UserStatusBadge } from "../_components/user-status-badge";
 
 /**
@@ -157,6 +158,9 @@ export default function UserDetailPage() {
           <Detail label="Email">{user.email}</Detail>
           <Detail label="Status">
             <UserStatusBadge isActive={user.isActive} />
+          </Detail>
+          <Detail label="Role">
+            <UserRoleSelect user={user} />
           </Detail>
           <Detail label="Joined">{formatDate(user.createdAt)}</Detail>
           <Detail label="Last updated">{formatDate(user.updatedAt)}</Detail>
