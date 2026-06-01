@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { CreateUser, UpdateUser } from '@lazyit/shared';
-import { Prisma } from '../../generated/prisma/client';
+import { Prisma, Role } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectUser } from '../search/search.documents';
@@ -48,7 +48,13 @@ export class UsersService {
   }
 
   async create(data: CreateUser) {
-    const user = await this.prisma.user.create({ data });
+    // RBAC default (ADR-0040, flipped to VIEWER by ADR-0043): an omitted role lands the least-
+    // privileged read-only role. We set it explicitly here (rather than leaning on the Prisma column
+    // default) so the service is the authoritative default for app-created users and the behaviour is
+    // testable without a DB. The Users controller is ADMIN-gated, so an ADMIN may still pass any role.
+    const user = await this.prisma.user.create({
+      data: { ...data, role: data.role ?? Role.VIEWER },
+    });
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search.upsert('users', projectUser(user));
     return user;
