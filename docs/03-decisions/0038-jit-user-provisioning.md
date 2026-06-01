@@ -3,7 +3,7 @@ title: "ADR-0038: JIT user provisioning on first OIDC login"
 tags: [adr, auth, oidc]
 status: accepted
 created: 2026-05-27
-updated: 2026-05-27
+updated: 2026-06-01
 deciders: [Joaquín Minatel]
 ---
 
@@ -19,6 +19,13 @@ for all actor-tracked operations.
 > User's profile from the standard OIDC **userinfo endpoint**, because an OAuth *access token*
 > carries authorization, not identity (only `sub`/`aud`/`client_id`/`exp` — not `email`/`name`).
 > See the "userinfo enrichment" subsection under Decision below.
+
+> **Amendment 2026-06-01 — account linking by verified email.** When the `sub` lookup misses, the
+> JIT path now **links the new identity to an existing UNCLAIMED user that already holds the same
+> (normalized) email** instead of always creating a fresh row. This is what lets the seeded
+> `admin@lazyit.local` (created with `externalId = null`) be adopted by the operator's IdP identity
+> on first login — without it, the create collided with the seeded row's live-email unique index and
+> **every authenticated request 409'd**. See the "Account linking by verified email" subsection below.
 
 ## Context
 
@@ -105,6 +112,39 @@ calls the standard OIDC **userinfo endpoint** with the access token as Bearer, m
   Login is never blocked by a userinfo failure.
 - **Existing users skip it entirely.** A request whose `sub` already maps to a `User.externalId`
   returns the existing row without any discovery/userinfo round-trip.
+
+**Account linking by verified email (amended 2026-06-01):**
+
+When the `externalId = sub` lookup misses, the guard does **not** immediately create a fresh row.
+It first checks — using the **normal soft-delete-filtered Prisma client**, so only LIVE rows match —
+whether a user already holds the resolved (trim + lowercase, ADR-0041) email. The decision tree:
+
+| Existing live row with that email | Action |
+| --- | --- |
+| none | create a fresh User (unchanged behavior) |
+| `externalId IS NULL` (unclaimed) | **CLAIM it**: bind `externalId = sub` onto that row, **preserve its existing role**, and return it. Optionally refresh `firstName`/`lastName` from the claims *only* when the stored name is a seed placeholder (`Admin User`) and real claims are present — a real human name is never overwritten. |
+| `externalId === sub` | return it (defensive; the `sub` lookup normally caught this already) |
+| `externalId` is a **DIFFERENT** sub | **409 `ConflictException`** — refuse. Never re-bind an already-linked account. |
+
+This is the bootstrap path for the seeded ADMIN: the seed inserts `admin@lazyit.local` with
+`role = ADMIN, externalId = null` (ADR-0040). An operator creates a Zitadel user with that **same
+email**; their first login lands on the "unclaimed" branch, binds their `sub`, and **inherits the
+ADMIN role**. Before this amendment the guard tried to `upsert` a new row with the same email,
+hitting the live-email partial unique index (P2002 → 409) on **every** request.
+
+The claim is **race-safe**: it is an `updateMany` guarded by `{ id, externalId: null }` followed by a
+refetch. Two genuinely-concurrent first logins for the same email resolve to exactly one binding —
+the loser's `updateMany` matches 0 rows, it refetches the now-linked row, and the flow is idempotent
+(if the winner bound a *different* sub, the loser gets the 409 instead of silently overwriting).
+
+> [!warning] Security — why email linking is safe here, and only here
+> Linking by email is sound **only** under the trusted-IdP assumption (ADR-0037/0038): the admin
+> controls the IdP and the IdP owns/verifies the email. Two invariants keep it from becoming an
+> account-takeover primitive: **(1)** a row is claimed **only** when its `externalId IS NULL` (no
+> identity has bound it yet), and **(2)** a row already linked to a different `sub` is **never**
+> re-bound — the guard 409s. The email lookup runs through the soft-delete-filtered client, so a
+> soft-deleted / offboarded user with the same email is invisible and can never be linked or
+> resurrected (the no-resurrect posture of the `externalId` path is preserved end-to-end).
 
 **Library**: `jose` (standard OIDC / JWKS; no Passport, no NestJS-passport). userinfo + discovery
 use the runtime's `fetch` directly — no additional dependency.
