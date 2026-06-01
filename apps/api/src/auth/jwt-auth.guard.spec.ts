@@ -17,6 +17,9 @@ jest.mock('jose', () => ({
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {},
+  // The guard imports Role as a VALUE (Role.ADMIN / Role.MEMBER) for the RBAC bootstrap (ADR-0040),
+  // so the mock must expose it or jitProvision dereferences undefined.
+  Role: { ADMIN: 'ADMIN', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
 }));
 
 // Convenient import after the mock is set up.
@@ -29,6 +32,7 @@ const DB_USER = {
   firstName: 'Alice',
   lastName: 'Smith',
   isActive: true,
+  role: 'MEMBER',
   externalId: 'oidc-sub-001',
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -77,7 +81,7 @@ function echoUpsertedUser(args: { create: Record<string, unknown> }) {
 
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
-  let prismaUser: { findFirst: jest.Mock; upsert: jest.Mock };
+  let prismaUser: { findFirst: jest.Mock; upsert: jest.Mock; count: jest.Mock };
   let fetchMock: jest.Mock;
   const originalFetch = global.fetch;
 
@@ -86,7 +90,10 @@ describe('JwtAuthGuard', () => {
   });
 
   beforeEach(async () => {
-    prismaUser = { findFirst: jest.fn(), upsert: jest.fn() };
+    prismaUser = { findFirst: jest.fn(), upsert: jest.fn(), count: jest.fn() };
+    // Default: the DB already has users, so a JIT provision defaults to MEMBER. The first-user test
+    // overrides this to 0 to assert the ADMIN bootstrap (ADR-0040).
+    prismaUser.count.mockResolvedValue(1);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -379,6 +386,7 @@ describe('JwtAuthGuard', () => {
           firstName: 'Bob',
           lastName: 'Jones',
           isActive: true,
+          role: 'MEMBER',
         },
         update: {},
       });
@@ -412,6 +420,7 @@ describe('JwtAuthGuard', () => {
           firstName: 'Carol',
           lastName: 'Chen',
           isActive: true,
+          role: 'MEMBER',
         },
         update: {},
       });
@@ -444,9 +453,46 @@ describe('JwtAuthGuard', () => {
           firstName: 'dana',
           lastName: '',
           isActive: true,
+          role: 'MEMBER',
         },
         update: {},
       });
+    });
+
+    it('JIT-provisions the FIRST user (User count 0) as ADMIN (ADR-0040 bootstrap)', async () => {
+      (jose.jwtVerify as jest.Mock).mockResolvedValue({
+        payload: {
+          sub: 'oidc-sub-first',
+          email: 'founder@example.com',
+          given_name: 'Founder',
+          family_name: 'Zero',
+        },
+      });
+      prismaUser.findFirst.mockResolvedValue(null);
+      // Empty database → this is the very first user, who must become ADMIN.
+      prismaUser.count.mockResolvedValue(0);
+      prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+      const req: Record<string, unknown> = {
+        headers: { authorization: 'Bearer valid.token.here' },
+      };
+
+      const result = await guard.canActivate(makeCtx(req));
+
+      expect(result).toBe(true);
+      expect(prismaUser.upsert).toHaveBeenCalledWith({
+        where: { externalId: 'oidc-sub-first' },
+        create: {
+          externalId: 'oidc-sub-first',
+          email: 'founder@example.com',
+          firstName: 'Founder',
+          lastName: 'Zero',
+          isActive: true,
+          role: 'ADMIN',
+        },
+        update: {},
+      });
+      expect((req.user as { role?: string }).role).toBe('ADMIN');
     });
 
     it('throws UnauthorizedException when OIDC_ISSUER is not configured', async () => {
@@ -519,6 +565,7 @@ describe('JwtAuthGuard', () => {
             firstName: 'Real',
             lastName: 'User',
             isActive: true,
+            role: 'MEMBER',
           },
           update: {},
         });
@@ -571,6 +618,7 @@ describe('JwtAuthGuard', () => {
             firstName: 'oidc-sub-fail',
             lastName: '',
             isActive: true,
+            role: 'MEMBER',
           },
           update: {},
         });
@@ -618,6 +666,7 @@ describe('JwtAuthGuard', () => {
             firstName: 'oidc-sub-throw',
             lastName: '',
             isActive: true,
+            role: 'MEMBER',
           },
           update: {},
         });
