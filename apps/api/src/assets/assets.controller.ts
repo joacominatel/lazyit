@@ -221,4 +221,15 @@ export class AssetsController {
   remove(@Param('id') id: string, @CurrentUser() user?: User) {
     return this.assets.remove(id, user);
   }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Restore a soft-deleted asset (emits a RESTORED history event) — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: AssetWithRelationsDto })
+  restore(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.assets.restore(id, user);
+  }
 }
