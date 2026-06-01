@@ -1,4 +1,34 @@
-import { Logger, NotImplementedException } from '@nestjs/common';
+import { Logger, ServiceUnavailableException } from '@nestjs/common';
+
+// The ZitadelIdentityProvider transitively imports `jose` (ESM) via the management service; ts-jest
+// cannot parse it. These tests never reach the signing path (they exercise the absent-config branch),
+// so a minimal SignJWT stub is enough to let the module graph load.
+jest.mock('jose', () => {
+  class SignJWT {
+    setProtectedHeader() {
+      return this;
+    }
+    setIssuer() {
+      return this;
+    }
+    setSubject() {
+      return this;
+    }
+    setAudience() {
+      return this;
+    }
+    setIssuedAt() {
+      return this;
+    }
+    setExpirationTime() {
+      return this;
+    }
+    sign() {
+      return Promise.resolve('signed.jwt.assertion');
+    }
+  }
+  return { SignJWT };
+});
 
 // The providers import the generated Prisma client only for the `Role` TYPE (import type), which is
 // erased at compile time — but jest still resolves the module graph, so stub it to avoid loading the
@@ -109,20 +139,43 @@ describe('GenericOidcIdentityProvider (BYOI — ADR-0043 #5)', () => {
   });
 });
 
-describe('ZitadelIdentityProvider (STUB — ADR-0043 Phase 2)', () => {
+describe('ZitadelIdentityProvider (write-back — ADR-0043 Phase 2)', () => {
   let provider: ZitadelIdentityProvider;
+  // Snapshot the Management env so each test starts from a clean, deterministic config state.
+  const savedEnv = { ...process.env };
 
   beforeEach(() => {
+    delete process.env.ZITADEL_MGMT_SA_KEY;
+    delete process.env.ZITADEL_MGMT_SA_KEY_PATH;
+    delete process.env.ZITADEL_MGMT_PROJECT_ID;
+    delete process.env.ZITADEL_MGMT_API_URL;
+    delete process.env.OIDC_ISSUER;
+    delete process.env.OIDC_JWKS_URI;
     provider = new ZitadelIdentityProvider();
   });
 
-  it('resolves the external ref to { externalId: sub }', async () => {
+  afterEach(() => {
+    process.env = { ...savedEnv };
+  });
+
+  it('resolves the external ref to { externalId: sub } without a Management call', async () => {
     await expect(provider.resolveExternalRef('zitadel-sub')).resolves.toEqual({
       externalId: 'zitadel-sub',
     });
   });
 
-  it('throws NotImplementedException for the management methods (Phase 2)', async () => {
+  it('advertises management support', () => {
+    expect(provider.kind).toBe('zitadel');
+    expect(provider.supportsManagement).toBe(true);
+  });
+
+  it('absent config: management methods throw "not configured" 503 (never blocks login)', async () => {
+    // No ZITADEL_MGMT_* set. The provider was constructed without throwing (boot-safe); the
+    // management methods reject with a clear ServiceUnavailableException (mapped to 503 upstream).
+    const warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+
     await expect(
       provider.createUser({
         email: 'a@b.com',
@@ -130,15 +183,21 @@ describe('ZitadelIdentityProvider (STUB — ADR-0043 Phase 2)', () => {
         lastName: 'B',
         role: 'VIEWER',
       }),
-    ).rejects.toBeInstanceOf(NotImplementedException);
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
     await expect(provider.deactivateUser('ext-1')).rejects.toBeInstanceOf(
-      NotImplementedException,
+      ServiceUnavailableException,
     );
     await expect(provider.grantRole('ext-1', 'ADMIN')).rejects.toBeInstanceOf(
-      NotImplementedException,
+      ServiceUnavailableException,
     );
     await expect(provider.revokeRole('ext-1', 'ADMIN')).rejects.toBeInstanceOf(
-      NotImplementedException,
+      ServiceUnavailableException,
     );
+
+    // The absent credential is reported via a structured WARN, never blocking boot/login.
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Zitadel management'),
+    );
+    warnSpy.mockRestore();
   });
 });
