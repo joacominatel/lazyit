@@ -110,4 +110,14 @@ export class ApplicationsController {
   remove(@Param('id') id: string) {
     return this.applications.remove(id);
   }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore a soft-deleted application — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: ApplicationDto })
+  restore(@Param('id') id: string) {
+    return this.applications.restore(id);
+  }
 }
