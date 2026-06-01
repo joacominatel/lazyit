@@ -25,6 +25,7 @@ import {
   useUpdateGrantExpiry,
   useUpdateGrantNotes,
 } from "@/lib/api/hooks/use-access-grant-mutations";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 
 /** "YYYY-MM-DD" from a date input → ISO datetime (null when empty — clears the expiry). */
@@ -56,6 +57,7 @@ export function EditGrantDialog({
   onOpenChange,
   userName,
 }: EditGrantDialogProps) {
+  const canWrite = useCanWrite();
   const updateExpiry = useUpdateGrantExpiry();
   const updateNotes = useUpdateGrantNotes();
   const [expiresAt, setExpiresAt] = useState(""); // YYYY-MM-DD
@@ -105,6 +107,10 @@ export function EditGrantDialog({
       notifyError(error, "Couldn't update the grant");
     }
   }
+
+  // RBAC: editing a grant is an Access write (ADMIN-only — ADR-0040). Render nothing for non-writers
+  // so the affordance never appears; the API's RolesGuard is the real gate (fails closed).
+  if (!canWrite) return null;
 
   return (
     <Dialog open={grant != null} onOpenChange={onOpenChange}>
