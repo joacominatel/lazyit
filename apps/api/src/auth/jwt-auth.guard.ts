@@ -1,5 +1,6 @@
 import {
   CanActivate,
+  ConflictException,
   ExecutionContext,
   ForbiddenException,
   Injectable,
@@ -177,14 +178,18 @@ export class JwtAuthGuard implements CanActivate {
    *  - a live User with `externalId = sub` → returned as-is (no discovery / userinfo call);
    *  - a *soft-deleted* User with that sub → 403 (do NOT re-provision): re-creating a fresh row
    *    would silently resurrect an offboarded account and orphan its old User.id audit links;
-   *  - no row at all → first login: enrich the access token's claims with the OIDC userinfo profile
-   *    (the access token alone lacks email/name) and create the User. sub → externalId, email,
-   *    given_name + family_name → firstName/lastName (falls back to splitting `name`, then the
-   *    email local-part).
+   *  - no row by externalId → first login: enrich the access token's claims with the OIDC userinfo
+   *    profile (the access token alone lacks email/name), then ACCOUNT-LINK BY EMAIL before creating:
+   *    if a LIVE user already holds the (normalized) email and is UNCLAIMED (externalId IS NULL), bind
+   *    this sub onto that row and inherit its role (this is how the seeded ADMIN is adopted by the
+   *    operator's IdP identity). If that email is already linked to a DIFFERENT sub, 409 (never steal
+   *    an account). Otherwise create a fresh User: sub → externalId, email, given_name + family_name →
+   *    firstName/lastName (falls back to splitting `name`, then the email local-part).
    *
    * The create is a real upsert on the `externalId` unique key (was a check-then-act findFirst+create
    * race): parallel first-login requests for the same fresh token can no longer both create and
-   * collide on the unique constraint with an intermittent 500.
+   * collide on the unique constraint with an intermittent 500. The email-link claim is likewise
+   * race-safe (guarded updateMany + refetch).
    */
   private async jitProvision(
     sub: string,
@@ -268,8 +273,65 @@ export class JwtAuthGuard implements CanActivate {
     // email local-part (then the sub) so the JIT row always satisfies the same constraints as an
     // API-created user. The IdP claims still take precedence whenever they are usable.
     const fallback = (email.split('@')[0] || sub).slice(0, 100);
+    // Whether the names came from real OIDC claims (vs. the email-local-part last resort). Only
+    // claim-derived names are trustworthy enough to overwrite a seed placeholder on the claim step.
+    const namesFromClaims = Boolean(givenName || familyName || profile['name']);
     firstName = this.coerceName(firstName, fallback);
     lastName = this.coerceName(lastName, fallback);
+
+    // Account linking by verified email (ADR-0038 addendum, trusted-IdP model). The externalId
+    // lookup above missed, so this `sub` has never logged in. Before minting a fresh row, check
+    // whether a LIVE user already holds this email — the common case being the seeded ADMIN
+    // (admin@lazyit.local, externalId=null) that an operator now signs into via the IdP. This read
+    // uses the NORMAL soft-delete-filtered client (no includeSoftDeleted), so a soft-deleted /
+    // offboarded user with the same email is invisible here and is NEVER linked or resurrected.
+    //
+    // SECURITY: linking by email is sound ONLY because the IdP is trusted to own/verify the email
+    // (ADR-0037/0038). We therefore (a) CLAIM a row only when its externalId IS NULL (an account no
+    // identity has bound yet) and (b) NEVER re-bind a row already linked to a different `sub` —
+    // re-binding would be account takeover. The claim is a race-safe `updateMany` guarded by
+    // `{ id, externalId: null }`: a concurrent first-login wins the row exactly once; the loser's
+    // updateMany matches 0 rows and it refetches the now-linked row, so the flow stays idempotent.
+    const emailOwner = await this.prisma.user.findFirst({ where: { email } });
+    if (emailOwner) {
+      if (emailOwner.externalId === sub) {
+        // Defensive: normally the externalId lookup already caught this; return the live row.
+        return emailOwner;
+      }
+      if (emailOwner.externalId !== null) {
+        // Already bound to a DIFFERENT identity — refuse rather than steal it.
+        throw new ConflictException(
+          'This email is already linked to a different identity',
+        );
+      }
+      // externalId IS NULL → claim it for this sub. Preserve the existing role (this is how the
+      // seeded ADMIN's role is inherited by the operator's IdP identity). Optionally refresh the
+      // name only when the existing values look like a seed placeholder AND we have real claims.
+      const data: Prisma.UserUpdateManyMutationInput = { externalId: sub };
+      if (namesFromClaims && this.looksLikeSeedPlaceholder(emailOwner)) {
+        data.firstName = firstName;
+        data.lastName = lastName;
+      }
+      const claimed = await this.prisma.user.updateMany({
+        where: { id: emailOwner.id, externalId: null },
+        data,
+      });
+      // Refetch the canonical row: either we claimed it (count 1) or a concurrent login claimed it
+      // first (count 0) and we read the now-linked row. The normal client only returns LIVE rows.
+      const linked = await this.prisma.user.findFirst({
+        where: { id: emailOwner.id },
+      });
+      if (linked) {
+        if (claimed.count === 0 && linked.externalId !== sub) {
+          // A concurrent login bound this email to a DIFFERENT sub between our read and write.
+          throw new ConflictException(
+            'This email is already linked to a different identity',
+          );
+        }
+        return linked;
+      }
+      // Extremely unlikely (row soft-deleted between read and refetch) — fall through to create.
+    }
 
     // Upsert on the externalId unique key (race-proof): if a parallel first-login request already
     // created the row, the `update: {}` no-op returns it instead of throwing P2002. `where` targets
@@ -298,6 +360,20 @@ export class JwtAuthGuard implements CanActivate {
   private coerceName(candidate: string, fallback: string): string {
     const trimmed = candidate.trim();
     return (trimmed.length > 0 ? trimmed : fallback).slice(0, 100);
+  }
+
+  /**
+   * Heuristic for "this row's name is a seed/placeholder, not a real human-entered name", used only
+   * when linking an unclaimed email row (ADR-0038 addendum) to decide whether the first OIDC login
+   * may refresh the name from the IdP claims. Conservative on purpose: matches the seed's literal
+   * `Admin User` (case-insensitive) so a real operator name is never silently overwritten. The role
+   * is always preserved regardless — only the display name may be refreshed.
+   */
+  private looksLikeSeedPlaceholder(user: User): boolean {
+    return (
+      user.firstName.trim().toLowerCase() === 'admin' &&
+      user.lastName.trim().toLowerCase() === 'user'
+    );
   }
 
   /**

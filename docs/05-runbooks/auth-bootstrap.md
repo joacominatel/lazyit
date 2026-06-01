@@ -3,7 +3,7 @@ title: Zitadel Auth Bootstrap
 tags: [runbook, auth, zitadel, oidc]
 status: accepted
 created: 2026-05-26
-updated: 2026-05-26
+updated: 2026-06-01
 ---
 
 # Runbook — Zitadel IdP bootstrap (auth Phase 1)
@@ -211,6 +211,14 @@ record is auto-provisioned — no separate "add user to lazyit" step is needed b
 > and an operator who signs in via OIDC lands as `MEMBER` with **no UI to promote themselves**.
 > You must grant the first real `ADMIN` out-of-band, once. After that, admins manage every role from
 > the Users section.
+
+> [!tip] Easiest path — link the seeded admin by email (no script needed)
+> To become the first `ADMIN` without running anything, create a Zitadel user whose **email is the
+> SAME as the seeded admin** (default `admin@lazyit.local`, or your `SEED_ADMIN_EMAIL`). The first
+> login **links the two**: the JIT path ([[0038-jit-user-provisioning]]) binds your IdP `sub` onto
+> the unclaimed seeded row and you **inherit its `ADMIN` role**. From then on, manage every role in
+> the UI. (Linking only happens while the seeded row is still unclaimed — `externalId IS NULL` — and
+> never steals an email already linked to a different identity, which returns a 409.)
 
 **Preferred — the `set-role` script.** Run it on the API host (or `docker compose exec api`), from
 `apps/api`. It validates the role enum, matches the email case-insensitively, targets only LIVE

@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { Reflector } from '@nestjs/core';
 import {
+  ConflictException,
   ForbiddenException,
   Logger,
   UnauthorizedException,
@@ -79,9 +80,42 @@ function echoUpsertedUser(args: { create: Record<string, unknown> }) {
   return { ...DB_USER, ...args.create };
 }
 
+// jitProvision calls user.findFirst with three distinguishable shapes:
+//   { where: { externalId }, includeSoftDeleted: true } — the sub lookup (includes soft-deleted);
+//   { where: { email } }                                — the account-link-by-email lookup (LIVE);
+//   { where: { id } }                                   — the post-claim refetch (LIVE).
+// `routeFindFirst` builds a findFirst impl from per-shape handlers so the linking tests can return
+// different rows for the email lookup vs. the refetch without ordering assumptions.
+function routeFindFirst(handlers: {
+  byExternalId?: (sub: unknown) => unknown;
+  byEmail?: (email: unknown) => unknown;
+  byId?: (id: unknown) => unknown;
+}) {
+  return (args: { where?: Record<string, unknown> }) => {
+    const where = args.where ?? {};
+    if ('externalId' in where) {
+      return handlers.byExternalId
+        ? handlers.byExternalId(where.externalId)
+        : null;
+    }
+    if ('email' in where) {
+      return handlers.byEmail ? handlers.byEmail(where.email) : null;
+    }
+    if ('id' in where) {
+      return handlers.byId ? handlers.byId(where.id) : null;
+    }
+    return null;
+  };
+}
+
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
-  let prismaUser: { findFirst: jest.Mock; upsert: jest.Mock; count: jest.Mock };
+  let prismaUser: {
+    findFirst: jest.Mock;
+    upsert: jest.Mock;
+    count: jest.Mock;
+    updateMany: jest.Mock;
+  };
   let fetchMock: jest.Mock;
   const originalFetch = global.fetch;
 
@@ -90,7 +124,12 @@ describe('JwtAuthGuard', () => {
   });
 
   beforeEach(async () => {
-    prismaUser = { findFirst: jest.fn(), upsert: jest.fn(), count: jest.fn() };
+    prismaUser = {
+      findFirst: jest.fn(),
+      upsert: jest.fn(),
+      count: jest.fn(),
+      updateMany: jest.fn(),
+    };
     // Default: the DB already has users, so a JIT provision defaults to MEMBER. The first-user test
     // overrides this to 0 to assert the ADMIN bootstrap (ADR-0040).
     prismaUser.count.mockResolvedValue(1);
@@ -548,6 +587,259 @@ describe('JwtAuthGuard', () => {
         update: {},
       });
       expect((req.user as { role?: string }).role).toBe('ADMIN');
+    });
+
+    // -----------------------------------------------------------------------
+    // Account linking by verified email (ADR-0038 addendum) — the seed-admin bootstrap fix.
+    // -----------------------------------------------------------------------
+
+    describe('account linking by email (ADR-0038 addendum)', () => {
+      const SEED_ADMIN = {
+        ...DB_USER,
+        id: '99999999-9999-9999-9999-999999999999',
+        email: 'admin@lazyit.local',
+        firstName: 'Admin',
+        lastName: 'User',
+        role: 'ADMIN',
+        externalId: null,
+      };
+
+      it('links an unclaimed live user (the seeded ADMIN) on first OIDC login and PRESERVES its role', async () => {
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: {
+            sub: 'zitadel-sub-operator',
+            email: 'admin@lazyit.local',
+            given_name: 'Real',
+            family_name: 'Operator',
+          },
+        });
+        // externalId lookup misses; the email lookup finds the unclaimed seeded admin; the refetch
+        // returns the now-claimed row (externalId bound, role preserved).
+        const claimedRow = {
+          ...SEED_ADMIN,
+          externalId: 'zitadel-sub-operator',
+          firstName: 'Real',
+          lastName: 'Operator',
+        };
+        let claimed = false;
+        prismaUser.findFirst.mockImplementation(
+          routeFindFirst({
+            byExternalId: () => null,
+            byEmail: () => SEED_ADMIN,
+            byId: () => (claimed ? claimedRow : SEED_ADMIN),
+          }),
+        );
+        prismaUser.updateMany.mockImplementation(() => {
+          claimed = true;
+          return Promise.resolve({ count: 1 });
+        });
+
+        const req: Record<string, unknown> = {
+          headers: { authorization: 'Bearer valid.token.here' },
+        };
+
+        const result = await guard.canActivate(makeCtx(req));
+
+        expect(result).toBe(true);
+        // The claim binds externalId on the existing row (guarded by externalId: null) — no create.
+        expect(prismaUser.updateMany).toHaveBeenCalledWith({
+          where: {
+            id: SEED_ADMIN.id,
+            externalId: null,
+          },
+          data: {
+            externalId: 'zitadel-sub-operator',
+            // Seed placeholder "Admin User" + real claims → name refreshed.
+            firstName: 'Real',
+            lastName: 'Operator',
+          },
+        });
+        expect(prismaUser.upsert).not.toHaveBeenCalled();
+        // Role inherited from the seeded ADMIN, not reset to MEMBER.
+        expect((req.user as { role?: string }).role).toBe('ADMIN');
+        expect((req.user as { externalId?: string }).externalId).toBe(
+          'zitadel-sub-operator',
+        );
+      });
+
+      it('links an unclaimed live user WITHOUT overwriting a real (non-placeholder) name', async () => {
+        const liveMember = {
+          ...DB_USER,
+          id: '88888888-8888-8888-8888-888888888888',
+          email: 'jordan@corp.com',
+          firstName: 'Jordan',
+          lastName: 'Vega',
+          role: 'MEMBER',
+          externalId: null,
+        };
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: {
+            sub: 'zitadel-sub-jordan',
+            email: 'jordan@corp.com',
+            given_name: 'J',
+            family_name: 'V',
+          },
+        });
+        let claimed = false;
+        const claimedRow = {
+          ...liveMember,
+          externalId: 'zitadel-sub-jordan',
+        };
+        prismaUser.findFirst.mockImplementation(
+          routeFindFirst({
+            byExternalId: () => null,
+            byEmail: () => liveMember,
+            byId: () => (claimed ? claimedRow : liveMember),
+          }),
+        );
+        prismaUser.updateMany.mockImplementation(() => {
+          claimed = true;
+          return Promise.resolve({ count: 1 });
+        });
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer t' } }),
+        );
+
+        // The real name is not a seed placeholder → only externalId is written.
+        expect(prismaUser.updateMany).toHaveBeenCalledWith({
+          where: { id: liveMember.id, externalId: null },
+          data: { externalId: 'zitadel-sub-jordan' },
+        });
+        expect(prismaUser.upsert).not.toHaveBeenCalled();
+      });
+
+      it('throws ConflictException when the email is already linked to a DIFFERENT sub (no takeover)', async () => {
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: {
+            sub: 'attacker-sub',
+            email: 'admin@lazyit.local',
+            given_name: 'Mal',
+            family_name: 'Lory',
+          },
+        });
+        // externalId lookup misses; email lookup finds a row already bound to a different sub.
+        prismaUser.findFirst.mockImplementation(
+          routeFindFirst({
+            byExternalId: () => null,
+            byEmail: () => ({
+              ...SEED_ADMIN,
+              externalId: 'the-legit-owners-sub',
+            }),
+          }),
+        );
+
+        const req: Record<string, unknown> = {
+          headers: { authorization: 'Bearer valid.token.here' },
+        };
+
+        await expect(guard.canActivate(makeCtx(req))).rejects.toBeInstanceOf(
+          ConflictException,
+        );
+        // Must NOT re-bind or create.
+        expect(prismaUser.updateMany).not.toHaveBeenCalled();
+        expect(prismaUser.upsert).not.toHaveBeenCalled();
+      });
+
+      it('returns the row defensively when the email owner is already linked to THIS sub', async () => {
+        const alreadyLinked = {
+          ...SEED_ADMIN,
+          externalId: 'zitadel-sub-self',
+        };
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'zitadel-sub-self', email: 'admin@lazyit.local' },
+        });
+        prismaUser.findFirst.mockImplementation(
+          routeFindFirst({
+            byExternalId: () => null,
+            byEmail: () => alreadyLinked,
+          }),
+        );
+
+        const req: Record<string, unknown> = {
+          headers: { authorization: 'Bearer valid.token.here' },
+        };
+
+        const result = await guard.canActivate(makeCtx(req));
+
+        expect(result).toBe(true);
+        expect((req.user as { externalId?: string }).externalId).toBe(
+          'zitadel-sub-self',
+        );
+        expect(prismaUser.updateMany).not.toHaveBeenCalled();
+        expect(prismaUser.upsert).not.toHaveBeenCalled();
+      });
+
+      it('creates a fresh user as before when there is NO email collision', async () => {
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: {
+            sub: 'oidc-sub-fresh',
+            email: 'fresh@corp.com',
+            given_name: 'Fresh',
+            family_name: 'Hire',
+          },
+        });
+        // Both the externalId lookup AND the email lookup miss → fall through to the create/upsert.
+        prismaUser.findFirst.mockImplementation(
+          routeFindFirst({ byExternalId: () => null, byEmail: () => null }),
+        );
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer valid.token.here' } }),
+        );
+
+        expect(prismaUser.updateMany).not.toHaveBeenCalled();
+        expect(prismaUser.upsert).toHaveBeenCalledWith({
+          where: { externalId: 'oidc-sub-fresh' },
+          create: {
+            externalId: 'oidc-sub-fresh',
+            email: 'fresh@corp.com',
+            firstName: 'Fresh',
+            lastName: 'Hire',
+            isActive: true,
+            role: 'MEMBER',
+          },
+          update: {},
+        });
+      });
+
+      it('does NOT link (no resurrection) a SOFT-DELETED same-email user — the live email lookup misses', async () => {
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: {
+            sub: 'oidc-sub-rehire',
+            email: 'offboarded@corp.com',
+            given_name: 'Re',
+            family_name: 'Hire',
+          },
+        });
+        // The email lookup uses the soft-delete-FILTERED client, so a soft-deleted same-email user
+        // is invisible (returns null). The guard must create a fresh row, never claim/resurrect.
+        // (Modeled here by byEmail returning null — exactly what the filtered client yields.)
+        prismaUser.findFirst.mockImplementation(
+          routeFindFirst({ byExternalId: () => null, byEmail: () => null }),
+        );
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer t' } }),
+        );
+
+        // The email lookup must NOT pass includeSoftDeleted (it must only see LIVE rows).
+        const emailCall = (
+          prismaUser.findFirst.mock.calls as Array<[Record<string, unknown>]>
+        ).find((c) => 'email' in ((c[0]?.where as object) ?? {}));
+        expect(emailCall).toBeDefined();
+        expect(emailCall![0]).not.toHaveProperty('includeSoftDeleted');
+
+        expect(prismaUser.updateMany).not.toHaveBeenCalled();
+        // A brand-new row is created instead of reviving the offboarded one.
+        expect(prismaUser.upsert).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { externalId: 'oidc-sub-rehire' },
+          }),
+        );
+      });
     });
 
     it('throws UnauthorizedException when OIDC_ISSUER is not configured', async () => {
