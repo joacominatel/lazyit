@@ -1,24 +1,24 @@
 "use client";
 
-import {
-  ArrowLeftIcon,
-  PencilSquareIcon,
-  PlusIcon,
-  TrashIcon,
-} from "@heroicons/react/24/outline";
+import { PencilSquareIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
+import { PageHeader } from "@/components/page-header";
+import { Breadcrumb } from "@/components/breadcrumb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell, TableRow } from "@/components/ui/table";
 import {
+  ErrorState,
   type ResourceColumn,
   ResourceTable,
 } from "@/components/resource-table";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
 import { useAssets } from "@/lib/api/hooks/use-assets";
 import { useDeleteLocation } from "@/lib/api/hooks/use-location-mutations";
 import { useLocation } from "@/lib/api/hooks/use-locations";
@@ -37,8 +37,10 @@ export default function LocationDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
+  const canWrite = useCanWrite();
 
-  const { data: location, isLoading, isError } = useLocation(id);
+  const { data: location, isLoading, isError, error, refetch } =
+    useLocation(id);
   // Assets at this location (one page up to the max — a single physical site won't exceed it).
   const { data: assetsPage, isLoading: assetsLoading } = useAssets({
     locationId: id,
@@ -51,25 +53,21 @@ export default function LocationDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-4xl space-y-4">
-        <Skeleton className="h-4 w-20" />
-        <Skeleton className="h-8 w-1/2" />
-        <Skeleton className="h-40 w-full" />
+      <div className="mx-auto max-w-4xl">
+        <DetailSkeleton panels={2} />
       </div>
     );
   }
 
   if (isError || !location) {
     return (
-      <div className="mx-auto flex max-w-4xl flex-col items-center gap-3 rounded-lg border border-dashed py-16 text-center">
-        <p className="text-sm font-medium">Location not found</p>
-        <p className="text-sm text-muted-foreground">It may have been deleted.</p>
-        <Button variant="outline" asChild>
-          <Link href="/locations">
-            <ArrowLeftIcon />
-            Back to Locations
-          </Link>
-        </Button>
+      <div className="mx-auto max-w-4xl">
+        <ErrorState
+          title="Location not found"
+          description="It may have been deleted, or the API is unreachable."
+          onRetry={() => refetch()}
+          error={error}
+        />
       </div>
     );
   }
@@ -78,45 +76,47 @@ export default function LocationDetailPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <Button variant="ghost" size="sm" asChild className="-ml-2">
-            <Link href="/locations">
-              <ArrowLeftIcon />
-              Locations
-            </Link>
-          </Button>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight">
-              {location.name}
-            </h1>
-            <LocationTypeBadge type={location.type} />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-            <PencilSquareIcon />
-            Edit
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Delete location"
-            onClick={() => setDeleteOpen(true)}
-          >
-            <TrashIcon />
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        breadcrumb={
+          <Breadcrumb
+            items={[
+              { label: "Locations", href: "/locations" },
+              { label: location.name },
+            ]}
+          />
+        }
+        title={location.name}
+        badge={<LocationTypeBadge type={location.type} />}
+        actions={
+          canWrite ? (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+                <PencilSquareIcon />
+                Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Delete location"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <TrashIcon />
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
 
-      <Panel title="Details">
+      <DetailPanel title="Details">
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <Detail label="Type">
+          <DetailField label="Type">
             <LocationTypeBadge type={location.type} />
-          </Detail>
-          <Detail label="Floor">{location.floor ?? "—"}</Detail>
-          <Detail label="Address">{location.address ?? "—"}</Detail>
-          <Detail label="Last updated">{formatDate(location.updatedAt)}</Detail>
+          </DetailField>
+          <DetailField label="Floor">{location.floor ?? "—"}</DetailField>
+          <DetailField label="Address">{location.address ?? "—"}</DetailField>
+          <DetailField label="Last updated">
+            {formatDate(location.updatedAt)}
+          </DetailField>
         </dl>
         {location.notes && (
           <div className="mt-4 space-y-1">
@@ -124,17 +124,19 @@ export default function LocationDetailPage() {
             <dd className="text-sm whitespace-pre-wrap">{location.notes}</dd>
           </div>
         )}
-      </Panel>
+      </DetailPanel>
 
-      <Panel
+      <DetailPanel
         title={`Assets here${assets.length > 0 ? ` (${assets.length})` : ""}`}
-        action={
-          <Button size="sm" variant="outline" asChild>
-            <Link href="/assets/new">
-              <PlusIcon />
-              New asset
-            </Link>
-          </Button>
+        actions={
+          canWrite ? (
+            <Button size="sm" variant="outline" asChild>
+              <Link href="/assets/new">
+                <PlusIcon />
+                New asset
+              </Link>
+            </Button>
+          ) : undefined
         }
       >
         {assetsLoading ? (
@@ -175,7 +177,7 @@ export default function LocationDetailPage() {
             ))}
           </ResourceTable>
         )}
-      </Panel>
+      </DetailPanel>
 
       <LocationFormDialog
         open={editOpen}
@@ -217,34 +219,3 @@ const ASSET_COLUMNS: ResourceColumn[] = [
     skeleton: <Skeleton className="size-6 rounded-full" />,
   },
 ];
-
-/** A bordered section with a heading and optional header action. */
-function Panel({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-lg border p-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** A label/value pair in the details grid. */
-function Detail({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="text-sm">{children}</dd>
-    </div>
-  );
-}
