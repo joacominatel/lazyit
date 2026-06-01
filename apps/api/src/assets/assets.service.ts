@@ -251,6 +251,46 @@ export class AssetsService {
     return deleted;
   }
 
+  /**
+   * Restore a soft-deleted asset: clear `deletedAt` and emit a `RESTORED` history event
+   * transactionally (ADR-0033 / ADR-0041) — the counterpart of `remove()`/`DELETED`. The row is found
+   * via the `includeSoftDeleted` escape hatch (the read filter hides soft-deleted assets). 404 if it
+   * never existed; idempotent (no event) if already live. The partial unique indexes free
+   * serial/assetTag on delete, so a restore can 409 if another live asset took one of them in the
+   * meantime (mapped by the global PrismaExceptionFilter). Re-indexes for search on success.
+   */
+  async restore(id: string, user?: User) {
+    const performedById = this.actor.resolve(user);
+    const existing = await this.prisma.asset.findFirst({
+      where: { id },
+      select: { id: true, deletedAt: true },
+      includeSoftDeleted: true,
+    } as Prisma.AssetFindFirstArgs);
+    if (!existing) {
+      throw new NotFoundException(`Asset ${id} not found`);
+    }
+    if (existing.deletedAt === null) {
+      // Already live — return the expanded view; no RESTORED event for a no-op.
+      return this.findOne(id);
+    }
+    const restored = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.asset.update({
+        where: { id },
+        data: { deletedAt: null },
+      });
+      await this.history.record(tx, {
+        assetId: id,
+        eventType: 'RESTORED',
+        performedById,
+      });
+      return row;
+    });
+    // Re-index the restored asset (ADR-0035).
+    this.search.upsert('assets', projectAsset(restored));
+    // Return the expanded relation graph (same shape as findOne), consistent with the no-op branch.
+    return this.findOne(id);
+  }
+
   /** Lightweight 404 guard for writes and the nested assignments endpoint (no relation loading). */
   async assertExists(id: string): Promise<void> {
     const asset = await this.prisma.asset.findFirst({
