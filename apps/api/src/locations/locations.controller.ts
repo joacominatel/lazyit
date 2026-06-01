@@ -69,4 +69,14 @@ export class LocationsController {
   remove(@Param('id') id: string) {
     return this.locations.remove(id);
   }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore a soft-deleted location — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: LocationDto })
+  restore(@Param('id') id: string) {
+    return this.locations.restore(id);
+  }
 }
