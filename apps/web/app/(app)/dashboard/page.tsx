@@ -25,6 +25,7 @@ import { ApiError } from "@/lib/api/client";
 import { useDashboardSummary } from "@/lib/api/hooks/use-dashboard";
 import { cn } from "@/lib/utils";
 import { formatAssetStatus } from "../assets/_components/asset-status-badge";
+import { RecentActivityPanel } from "./_components/recent-activity-panel";
 
 /**
  * Dashboard landing — live metrics across lazyit's three pillars (Inventory / Access / Knowledge).
@@ -117,6 +118,8 @@ function DashboardContent({ summary }: { summary: DashboardSummary }) {
       </section>
 
       <NeedsAttention summary={summary} />
+
+      <RecentActivityPanel />
     </div>
   );
 }
