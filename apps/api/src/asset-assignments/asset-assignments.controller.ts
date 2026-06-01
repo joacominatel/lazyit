@@ -8,7 +8,6 @@ import {
   Query,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
@@ -17,8 +16,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { AssetAssignmentsService } from './asset-assignments.service';
-import { parseActiveOnly } from './active-only';
+import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseUuidQuery } from '../common/parse-uuid-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
 import {
   AssetAssignmentDto,
   CreateAssetAssignmentDto,
@@ -29,7 +29,6 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
 
-@ApiBearerAuth()
 @ApiTags('asset-assignments')
 @Controller('asset-assignments')
 export class AssetAssignmentsController {
@@ -55,9 +54,9 @@ export class AssetAssignmentsController {
     @Query('activeOnly') activeOnly?: string,
   ) {
     return this.assignments.findAll({
-      assetId,
+      assetId: parseCuidQuery(assetId, 'assetId'),
       userId: parseUuidQuery(userId, 'userId'),
-      activeOnly: parseActiveOnly(activeOnly),
+      activeOnly: parseBooleanQuery(activeOnly, true),
     });
   }
 
