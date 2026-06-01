@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -11,31 +10,27 @@ import {
 import {
   ApiConflictResponse,
   ApiCreatedResponse,
-  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { AccessGrantsService } from './access-grants.service';
-import { parseActiveOnly, parseIncludeExpired } from './query-params';
+import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseUuidQuery } from '../common/parse-uuid-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
+import { parsePageQuery } from '../common/parse-page-query';
 import {
   AccessGrantDto,
+  AccessGrantListPageDto,
   CreateAccessGrantDto,
   RevokeAccessGrantDto,
   UpdateAccessGrantExpiryDto,
   UpdateAccessGrantNotesDto,
 } from './access-grant.dto';
-
-// X-User-Id is the auth shim (ADR-0022). On grant writes it's OPTIONAL and becomes the actor
-// (grantedById / revokedById); absent → null actor (system/unknown), allowed by design (ADR-0023).
-const ACTOR_USER_HEADER = {
-  name: 'X-User-Id',
-  required: false,
-  description:
-    'Caller user id (auth shim). Optional; recorded as the grantor/revoker (null if absent).',
-} as const;
+import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
+import type { User } from '../../generated/prisma/client';
 
 @ApiTags('access-grants')
 @Controller('access-grants')
@@ -45,7 +40,7 @@ export class AccessGrantsController {
   @Get()
   @ApiOperation({
     summary:
-      'List grants; filter by userId / applicationId. Active-only by default.',
+      'List grants (paginated; newest first); filter by userId / applicationId. Active-only by default.',
   })
   @ApiQuery({ name: 'userId', required: false })
   @ApiQuery({ name: 'applicationId', required: false })
@@ -62,19 +57,43 @@ export class AccessGrantsController {
     description:
       'Default true. Pass false to hide active grants already past their expiresAt.',
   })
-  @ApiOkResponse({ type: [AccessGrantDto] })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: AccessGrantListPageDto })
   findAll(
     @Query('userId') userId?: string,
     @Query('applicationId') applicationId?: string,
     @Query('activeOnly') activeOnly?: string,
     @Query('includeExpired') includeExpired?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
   ) {
-    return this.grants.findAll({
-      userId: parseUuidQuery(userId, 'userId'),
-      applicationId,
-      activeOnly: parseActiveOnly(activeOnly),
-      includeExpired: parseIncludeExpired(includeExpired),
-    });
+    return this.grants.findPage(
+      {
+        userId: parseUuidQuery(userId, 'userId'),
+        applicationId: parseCuidQuery(applicationId, 'applicationId'),
+        activeOnly: parseBooleanQuery(activeOnly, true),
+        includeExpired: parseBooleanQuery(includeExpired, true),
+      },
+      parsePageQuery({ limit, offset, page }),
+    );
   }
 
   @Get(':id')
@@ -85,43 +104,48 @@ export class AccessGrantsController {
   }
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Open a grant (give a user access to an application)',
+    summary: 'Open a grant (give a user access to an application) — ADMIN only',
   })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiCreatedResponse({ type: AccessGrantDto })
   create(
     @Body() dto: CreateAccessGrantDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.grants.create(dto, actorId);
+    return this.grants.create(dto, user);
   }
 
   @Patch(':id/revoke')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Revoke an active grant (sets revokedAt; 409 if already revoked)',
+    summary:
+      'Revoke an active grant (sets revokedAt; 409 if already revoked) — ADMIN only',
   })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiOkResponse({ type: AccessGrantDto })
   @ApiConflictResponse({ description: 'The grant is already revoked' })
   revoke(
     @Param('id') id: string,
     @Body() dto: RevokeAccessGrantDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.grants.revoke(id, dto, actorId);
+    return this.grants.revoke(id, dto, user);
   }
 
   @Patch(':id/notes')
-  @ApiOperation({ summary: 'Update only the notes of a grant (null clears)' })
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Update only the notes of a grant (null clears) — ADMIN only',
+  })
   @ApiOkResponse({ type: AccessGrantDto })
   updateNotes(@Param('id') id: string, @Body() dto: UpdateAccessGrantNotesDto) {
     return this.grants.updateNotes(id, dto);
   }
 
   @Patch(':id/expiry')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Change the expiry of a grant (null makes it permanent)',
+    summary: 'Change the expiry of a grant (null makes it permanent) — ADMIN only',
   })
   @ApiOkResponse({ type: AccessGrantDto })
   updateExpiry(

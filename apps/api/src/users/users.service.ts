@@ -1,14 +1,44 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type { CreateUser, UpdateUser } from '@lazyit/shared';
+import { Prisma, Role } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectUser } from '../search/search.documents';
+import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
+import {
+  IDENTITY_PROVIDER,
+  type IdentityProvider,
+} from '../auth/identity/identity-provider.interface';
+
+/** What an offboarding reclaimed/revoked, for the response + the audit story. */
+export interface OffboardResult {
+  /** The soft-deleted user (deletedAt stamped). */
+  userId: string;
+  /** Asset assignments released (reclaimed assets), by id. */
+  releasedAssignments: { id: string; assetId: string }[];
+  /** Count of active access grants revoked. */
+  revokedGrants: number;
+}
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly search: SearchService,
+    private readonly assignments: AssetAssignmentsService,
+    // IdP write-back seam (ADR-0043). Zitadel mirrors lazyit's user/role decisions; generic-oidc
+    // (BYOI) no-ops every management call. Authorization stays DB-first regardless (decision #1).
+    @Inject(IDENTITY_PROVIDER)
+    private readonly idp: IdentityProvider,
+    @InjectPinoLogger(UsersService.name)
+    private readonly logger: PinoLogger,
   ) {}
 
   /** All users that have not been soft-deleted. */
@@ -29,29 +59,252 @@ export class UsersService {
     return user;
   }
 
-  async create(data: CreateUser) {
-    const user = await this.prisma.user.create({ data });
+  async create(data: CreateUser, actorId?: string) {
+    // RBAC default (ADR-0040, flipped to VIEWER by ADR-0043): an omitted role lands the least-
+    // privileged read-only role. We set it explicitly here (rather than leaning on the Prisma column
+    // default) so the service is the authoritative default for app-created users and the behaviour is
+    // testable without a DB. The Users controller is ADMIN-gated, so an ADMIN may still pass any role.
+    const role = data.role ?? Role.VIEWER;
+    // DB-first + mirror (ADR-0043 §3): create the LOCAL row first, then mirror into the IdP. If the
+    // mirror fails we must NOT leave a split-brain (local user exists, IdP missing) — so we compensate
+    // by removing the just-created local row and surface the Management failure as 503. This is the one
+    // place a hard delete is correct: the row was created microseconds ago in THIS request, is not yet
+    // referenced by anything, and was never visible to a reader — a soft delete would leave a ghost.
+    const user = await this.prisma.user.create({
+      data: { ...data, role },
+    });
+
+    try {
+      const ref = await this.idp.createUser({
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role,
+      });
+      this.auditWriteBack('createUser', actorId, user.id, {
+        email: user.email,
+        role,
+      });
+      // Zitadel returns the real user id; persist it as externalId so future grants/deactivate target
+      // the managed user. BYOI returns an empty ref (no IdP user) — leave externalId null in that case.
+      if (this.idp.supportsManagement && ref.externalId) {
+        const linked = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { externalId: ref.externalId },
+        });
+        this.search.upsert('users', projectUser(linked));
+        return linked;
+      }
+    } catch (err) {
+      // Compensate: roll the local create back so local and Zitadel never disagree (no split-brain).
+      await this.compensateLocalCreate(user.id);
+      this.logger.error(
+        { op: 'createUser', actor: actorId, subjectUserId: user.id },
+        `IdP write-back failed on create; rolled back local user (${err instanceof Error ? err.message : String(err)})`,
+      );
+      throw err;
+    }
+
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search.upsert('users', projectUser(user));
     return user;
   }
 
-  async update(id: string, data: UpdateUser) {
-    await this.findOne(id); // 404 if missing or already soft-deleted
+  /**
+   * Roll back a just-created local user when the IdP mirror failed (no-split-brain compensation). A
+   * HARD delete is correct here: the row was created in this same request, is unreferenced, and was
+   * never returned to a caller, so deleting it leaves no audit/FK orphan (unlike the soft-delete used
+   * for genuine offboarding). Best-effort: a delete failure is logged but the original 503 still wins.
+   */
+  private async compensateLocalCreate(userId: string): Promise<void> {
+    try {
+      await this.prisma.user.delete({ where: { id: userId } });
+    } catch (err) {
+      this.logger.error(
+        { op: 'compensateLocalCreate', subjectUserId: userId },
+        `failed to roll back local user after IdP write-back failure (${err instanceof Error ? err.message : String(err)})`,
+      );
+    }
+  }
+
+  /** Structured audit line for a successful IdP write-back (ADR-0043 §3 — no DB audit table yet). */
+  private auditWriteBack(
+    operation: string,
+    actorId: string | undefined,
+    subjectUserId: string,
+    fields: Record<string, unknown>,
+  ): void {
+    this.logger.info(
+      { op: operation, actor: actorId ?? 'system', subjectUserId, fields },
+      `IdP write-back: ${operation}`,
+    );
+  }
+
+  async update(id: string, data: UpdateUser, actorId?: string) {
+    const current = await this.findOne(id); // 404 if missing or already soft-deleted
+
+    // RBAC safety guards (ADR-0040) — only run when a role change is actually requested.
+    if (data.role !== undefined && data.role !== current.role) {
+      // No self-escalation/demotion: an ADMIN cannot change their OWN role (403). Privilege changes
+      // must be made BY one admin ON another, so a single admin can never quietly elevate or strip
+      // their own role and there is always a second pair of hands in the loop.
+      if (actorId !== undefined && actorId === id) {
+        throw new ForbiddenException('You cannot change your own role');
+      }
+      // Never strip the LAST remaining ADMIN of its role — that would leave the instance with no
+      // administrator and no way to recover from the UI (409). Demoting any other admin is fine.
+      if (current.role === 'ADMIN' && data.role !== 'ADMIN') {
+        await this.assertNotLastAdmin(id);
+      }
+    }
+
+    const roleChanged = data.role !== undefined && data.role !== current.role;
+
     const user = await this.prisma.user.update({ where: { id }, data });
+
+    // Mirror a role CHANGE to the IdP (ADR-0043 §3). Only on an actual role change, and only when the
+    // user is IdP-linked (externalId set) — a local-only row has nothing to mirror. If the mirror
+    // fails, compensate by reverting the local role to its previous value (no split-brain) and surface
+    // 503. A non-role update (name change) never touches the IdP. BYOI no-ops grantRole → no throw.
+    if (roleChanged && current.externalId) {
+      try {
+        await this.idp.grantRole(current.externalId, data.role!);
+        this.auditWriteBack('grantRole', actorId, id, {
+          from: current.role,
+          to: data.role,
+          externalId: current.externalId,
+        });
+      } catch (err) {
+        // Revert the local role so local and Zitadel agree (the previous role is the truth).
+        const reverted = await this.prisma.user.update({
+          where: { id },
+          data: { role: current.role },
+        });
+        this.search.upsert('users', projectUser(reverted));
+        this.logger.error(
+          { op: 'grantRole', actor: actorId, subjectUserId: id },
+          `IdP write-back failed on role change; reverted local role to ${current.role} (${err instanceof Error ? err.message : String(err)})`,
+        );
+        throw err;
+      }
+    }
+
     this.search.upsert('users', projectUser(user));
     return user;
   }
 
-  /** Soft delete: set deletedAt. Never hard-delete (auditability is a first principle). */
-  async remove(id: string) {
-    await this.findOne(id);
-    const user = await this.prisma.user.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+  /**
+   * Throws 409 Conflict if `userId` is the only remaining live ADMIN. Used before any action that
+   * would remove their administrator powers (role demotion, offboarding, delete), so a fresh install
+   * — or any instance — is never left without an administrator. Counts LIVE admins only (the read
+   * filter already excludes soft-deleted users), so an offboarded admin doesn't count toward the
+   * total. The check-then-act window is acceptable for a 5–20-person single-org tool: the worst case
+   * is two near-simultaneous demotions both passing, which is the same class of race ADR-0040 already
+   * accepts for first-user-ADMIN, and strictly safer than locking everyone out.
+   */
+  private async assertNotLastAdmin(userId: string) {
+    const otherAdmins = await this.prisma.user.count({
+      where: { role: 'ADMIN', id: { not: userId } },
     });
-    // Drop from the index so soft-deleted users never surface in search (ADR-0035).
+    if (otherAdmins === 0) {
+      throw new ConflictException(
+        'Cannot remove the last administrator. Promote another user to ADMIN first.',
+      );
+    }
+  }
+
+  /**
+   * Soft-delete (offboard) a user. Never hard-delete (auditability is a first principle), but a
+   * soft delete alone left the user's access live — the audit gap this closes. In ONE transaction
+   * we (1) revoke every active AccessGrant the user holds, (2) release every active AssetAssignment
+   * (reclaiming the assets) and append a RELEASED asset-history event for each, then (3) stamp
+   * `deletedAt`. All-or-nothing: a failure rolls the whole offboarding back, so a user is never left
+   * half-offboarded (deleted but still holding grants/assets, or vice-versa).
+   *
+   * `actorId` is the authenticated user performing the offboarding (from @CurrentUser via the
+   * controller). It is stamped as `revokedById` / `releasedById` so the action is attributable.
+   * Grant revocation is done INLINE here (prisma.accessGrant.updateMany) rather than via the
+   * access-grants service, to keep it inside this single transaction.
+   */
+  async remove(id: string, actorId?: string): Promise<OffboardResult> {
+    const target = await this.findOne(id); // 404 if missing or already soft-deleted
+
+    // Last-admin safety guard (ADR-0040): offboarding/deleting the only remaining ADMIN would leave
+    // the instance with no administrator (409). Offboarding a non-last admin, or any non-admin, is
+    // fine. Mirrors the role-demotion guard in update().
+    if (target.role === 'ADMIN') {
+      await this.assertNotLastAdmin(id);
+    }
+
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 0. Deactivate the user in the IdP FIRST, inside the transaction (ADR-0043 §2c). A Management
+      // failure throws here and rolls the ENTIRE offboarding back — so we never end up with a
+      // soft-deleted-local / still-active-in-Zitadel split-brain (the failure surfaces as 503). For an
+      // IdP-linked user only; a local-only row (externalId null) has nothing to deactivate. BYOI
+      // no-ops deactivateUser → no throw, offboarding proceeds locally exactly as before.
+      if (target.externalId) {
+        await this.idp.deactivateUser(target.externalId);
+        this.auditWriteBack('deactivateUser', actorId, id, {
+          externalId: target.externalId,
+        });
+      }
+
+      // 1. Revoke all the user's active (not-yet-revoked) access grants.
+      const { count: revokedGrants } = await tx.accessGrant.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: {
+          revokedAt: now,
+          ...(actorId !== undefined ? { revokedById: actorId } : {}),
+          notes: 'auto: offboarded',
+        },
+      });
+
+      // 2. Release all the user's active asset assignments (+ RELEASED history per asset).
+      const releasedAssignments = await this.assignments.releaseAllForUser(
+        tx,
+        id,
+        actorId,
+      );
+
+      // 3. Soft-delete the user.
+      await tx.user.update({ where: { id }, data: { deletedAt: now } });
+
+      return { userId: id, releasedAssignments, revokedGrants };
+    });
+
+    // Drop from the index so soft-deleted users never surface in search (ADR-0035). Outside the tx:
+    // fire-and-forget, must never roll back the DB offboarding.
     this.search.remove('users', id);
-    return user;
+    return result;
+  }
+
+  /**
+   * Restore (re-onboard) a soft-deleted user: clear `deletedAt` (ADR-0041). Deliberately does NOT
+   * re-grant the access or re-assign the assets that offboarding revoked/released — those are
+   * separate, intentional acts; restore only makes the account exist (and log in) again. Found via
+   * the `includeSoftDeleted` escape hatch (the read filter would hide it). 404 if it never existed;
+   * idempotent if already live. The partial unique index frees `email` on delete, so a restore can
+   * 409 if the (case-insensitive) email was reused by another live user in the meantime (mapped by
+   * the global PrismaExceptionFilter). Re-indexes for search on success.
+   */
+  async restore(id: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id },
+      includeSoftDeleted: true,
+    } as Prisma.UserFindFirstArgs);
+    if (!user) {
+      throw new NotFoundException(`User ${id} not found`);
+    }
+    if (user.deletedAt === null) {
+      return user; // already live — idempotent
+    }
+    const restored = await this.prisma.user.update({
+      where: { id },
+      data: { deletedAt: null },
+    });
+    // Re-index the restored user (ADR-0035).
+    this.search.upsert('users', projectUser(restored));
+    return restored;
   }
 }

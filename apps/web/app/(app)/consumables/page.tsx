@@ -29,6 +29,7 @@ import { useDeleteConsumable } from "@/lib/api/hooks/use-consumable-mutations";
 import { useConsumables } from "@/lib/api/hooks/use-consumables";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { formatDate } from "@/lib/utils/format";
+import { QuickAdjustButtons } from "./_components/quick-adjust-buttons";
 import { StockBadge } from "./_components/stock-badge";
 
 type StockFilter = "ALL" | "LOW";
@@ -48,6 +49,13 @@ const COLUMNS: ResourceColumn[] = [
   { key: "unit", header: "Unit", skeleton: <Skeleton className="h-4 w-14" /> },
   { key: "sku", header: "SKU", skeleton: <Skeleton className="h-4 w-20" /> },
   { key: "updated", header: "Updated", skeleton: <Skeleton className="h-4 w-20" /> },
+  {
+    key: "quick-adjust",
+    header: "Quick adjust",
+    srOnlyHeader: true,
+    headClassName: "w-24",
+    skeleton: <Skeleton className="ml-auto h-7 w-16" />,
+  },
   {
     key: "actions",
     header: "Actions",
@@ -221,6 +229,16 @@ export default function ConsumablesPage() {
                 </TableCell>
                 <TableCell className="text-muted-foreground tabular-nums">
                   {formatDate(consumable.updatedAt)}
+                </TableCell>
+                <TableCell>
+                  <div className="flex justify-end">
+                    <QuickAdjustButtons
+                      consumableId={consumable.id}
+                      name={consumable.name}
+                      currentStock={consumable.currentStock}
+                      unit={consumable.unit}
+                    />
+                  </div>
                 </TableCell>
                 <TableCell className="text-right">
                   <RowActions

@@ -100,6 +100,20 @@ CREATE UNIQUE INDEX "asset_assignments_assetId_userId_active_key"
   WHERE "releasedAt" IS NULL;
 ```
 
+The same pattern carries the soft-delete-reuse partial uniques ([[0041-soft-delete-reuse-and-restore]])
+and, for [[article-link]] ([[0042-article-versioning-and-linking]]), **both** a CHECK constraint
+(exactly-one-target) and two partial uniques (no duplicate link per target) — a CHECK has no PSL
+syntax either:
+
+```sql
+ALTER TABLE "article_links" ADD CONSTRAINT "article_links_exactly_one_target"
+  CHECK ((("assetId" IS NOT NULL)::int + ("applicationId" IS NOT NULL)::int) = 1);
+CREATE UNIQUE INDEX "article_links_article_asset_key"
+  ON "article_links" ("articleId", "assetId") WHERE "assetId" IS NOT NULL;
+CREATE UNIQUE INDEX "article_links_article_application_key"
+  ON "article_links" ("articleId", "applicationId") WHERE "applicationId" IS NOT NULL;
+```
+
 > [!note] Prisma does not manage what it can't represent
 > A partial index lives only in the migration SQL. Prisma can't model it, so it neither emits it
 > on `migrate diff` nor reports it as **drift** — the `--exit-code` check in §6 stays green. The

@@ -3,8 +3,11 @@ title: Decisions (ADRs) — MOC
 tags: [moc, adr]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-01
 ---
+
+<!-- updated 2026-06-01: ADR-0043 (Zitadel source-of-truth) accepted + validated live end-to-end
+     (epic delivered; Phase 4 hardening #92/#93/#94/#95 + INVARIANTS). -->
 
 # Decisions (ADRs) — Map of Content
 
@@ -37,15 +40,15 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0013-zod-validation-pipe]] | Zod validation via a custom ZodValidationPipe | superseded by [[0018-api-documentation-swagger]] |
 | [[0014-shared-package-build]] | Build @lazyit/shared to CommonJS + declarations | accepted |
 | [[0015-deployment-model]] | Deployment model — self-hosted for IT teams | accepted |
-| [[0016-auth-strategy-deferred]] | Authentication deferred; external IdP when needed | accepted |
+| [[0016-auth-strategy-deferred]] | Authentication deferred; external IdP when needed | superseded by [[0037-idp-choice-zitadel-byoi]] / [[0039-authjs-v5-frontend-oidc]] (auth implemented) |
 | [[0017-location-type-enum]] | Location type as a hardcoded enum (user-managed types deferred) | accepted |
 | [[0018-api-documentation-swagger]] | API documentation with Swagger/OpenAPI (nestjs-zod) | accepted |
 | [[0019-asset-assignment-integrity]] | AssetAssignment referential integrity & lifecycle | accepted (actor source superseded by [[0024-asset-assignment-actor-shim]]) |
 | [[0020-frontend-data-layer]] | Frontend data layer (endpoints → hooks → components) | accepted |
 | [[0021-knowledge-base-design]] | Knowledge Base design — simple wiki (Article + ArticleCategory) | accepted |
-| [[0022-draft-visibility-auth-shim]] | Draft visibility & the `X-User-Id` auth shim | accepted (temporary) |
-| [[0023-access-management-design]] | Access management design (Application + AccessGrant) | accepted |
-| [[0024-asset-assignment-actor-shim]] | Retrofit AssetAssignment actor to the `X-User-Id` shim | accepted |
+| [[0022-draft-visibility-auth-shim]] | Draft visibility & the `X-User-Id` auth shim | accepted (shim path preserved; actor source superseded in OIDC path by [[0038-jit-user-provisioning]]) |
+| [[0023-access-management-design]] | Access management design (Application + AccessGrant) | accepted (actor source superseded in OIDC path by [[0038-jit-user-provisioning]]) |
+| [[0024-asset-assignment-actor-shim]] | Retrofit AssetAssignment actor to the `X-User-Id` shim | accepted (actor source superseded in OIDC path by [[0038-jit-user-provisioning]]) |
 | [[0025-containerization-strategy]] | Containerization & image strategy (Bun build → Node runtime) | accepted |
 | [[0026-reverse-proxy-tls]] | Reverse proxy & TLS (Caddy), same-origin `/api` routing | accepted |
 | [[0027-ci-pipeline]] | CI on GitHub Actions; CD deferred | accepted |
@@ -58,11 +61,15 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0034-consumables-design]] | Consumables design (cached stock + append-only movements) | accepted |
 | [[0035-search-architecture]] | Cross-cutting search architecture (Meilisearch) | accepted |
 | [[0036-int4-bounded-integers]] | Integer fields bounded to the Postgres int4 range in shared schemas | accepted |
+| [[0037-idp-choice-zitadel-byoi]] | IdP choice — Zitadel, BYOI strategy, own Postgres | accepted (extended by [[0043-zitadel-source-of-truth]]) |
+| [[0038-jit-user-provisioning]] | JIT user provisioning on first OIDC login | accepted (extended by [[0043-zitadel-source-of-truth]]) |
+| [[0039-authjs-v5-frontend-oidc]] | Auth.js v5 for frontend OIDC login | accepted |
+| [[0040-rbac-roles]] | Minimal RBAC — ADMIN/MEMBER/VIEWER role on User | accepted (default-role + bootstrap extended by [[0043-zitadel-source-of-truth]]) |
+| [[0042-article-versioning-and-linking]] | KB depth — append-only ArticleVersion + article↔asset/application linking + content search | accepted |
+| [[0043-zitadel-source-of-truth]] | Zitadel as the identity & authorization source of truth (Option B) | accepted |
+| [[0044-recent-activity-view]] | Dashboard recent-activity feed backed by a unified `recent_activity` DB view | accepted |
 
 ## Pending ADRs (to write when decided)
-
-- **Auth IdP / provider** — Authentik vs Keycloak vs Zitadel vs equivalent. The strategy is
-  decided ([[0016-auth-strategy-deferred]]); only the provider choice remains.
 - **Async workers** — BullMQ + Redis (note the [[0009-bun-first-vs-app-stack]] tension:
   BullMQ pulls in `ioredis`, which `CLAUDE.md` discourages).
 - **CD / image publishing** — deferred in [[0027-ci-pipeline]]; define the registry (GHCR) +

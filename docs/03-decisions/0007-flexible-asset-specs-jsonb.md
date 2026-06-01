@@ -42,3 +42,9 @@ real columns over time.
 - **Trade-offs:** weaker DB-level typing/validation for `specs` — validate in the app layer
   (zod schema in `@lazyit/shared`, see [[monorepo]]).
 - **Follow-ups:** define per-category `specs` zod schemas when categories are implemented.
+- **Web (delivered):** the asset create/edit form authors `specs` through a **custom-fields
+  editor** — a dynamic list of `{ name, value }` string rows (keys validated non-empty + unique)
+  that serialize into the `specs` object; the asset detail renders `specs` as a label-cased
+  key/value list. The editor handles **scalar string** values only (per "se envie en json y
+  listo"); pre-existing non-scalar entries are preserved untouched. The shared schema stays the
+  open `z.record(z.string(), z.unknown())` — no narrowing — so legacy data keeps validating.

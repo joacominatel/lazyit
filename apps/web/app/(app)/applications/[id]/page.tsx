@@ -3,6 +3,7 @@
 import {
   ArrowLeftIcon,
   ArrowTopRightOnSquareIcon,
+  PencilIcon,
   PencilSquareIcon,
   TrashIcon,
   UserPlusIcon,
@@ -25,6 +26,7 @@ import {
 import { useRevokeGrant } from "@/lib/api/hooks/use-access-grant-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { formatDate } from "@/lib/utils/format";
+import { EditGrantDialog } from "../_components/edit-grant-dialog";
 import { GrantAccessDialog } from "../_components/grant-access-dialog";
 import { RevokeGrantDialog } from "../_components/revoke-grant-dialog";
 
@@ -50,6 +52,7 @@ export default function ApplicationDetailPage() {
   const [grantOpen, setGrantOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [revoking, setRevoking] = useState<AccessGrant | null>(null);
+  const [editing, setEditing] = useState<AccessGrant | null>(null);
   // Snapshot "now" once (not during render) so the expiry comparison stays pure and stable.
   const [now] = useState(() => Date.now());
 
@@ -216,9 +219,18 @@ export default function ApplicationDetailPage() {
                     ) : null}
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate font-medium">
-                          {userName(grant.userId)}
-                        </span>
+                        {user ? (
+                          <Link
+                            href={`/users/${user.id}`}
+                            className="truncate font-medium hover:underline"
+                          >
+                            {userName(grant.userId)}
+                          </Link>
+                        ) : (
+                          <span className="truncate font-medium">
+                            {userName(grant.userId)}
+                          </span>
+                        )}
                         {grant.accessLevel && (
                           <Badge variant="secondary">{grant.accessLevel}</Badge>
                         )}
@@ -244,16 +256,27 @@ export default function ApplicationDetailPage() {
                         {grant.expiresAt
                           ? ` · expires ${formatDate(grant.expiresAt)}`
                           : ""}
+                        {grant.notes ? ` · ${grant.notes}` : ""}
                       </p>
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setRevoking(grant)}
-                  >
-                    Revoke
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Edit grant"
+                      onClick={() => setEditing(grant)}
+                    >
+                      <PencilIcon />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setRevoking(grant)}
+                    >
+                      Revoke
+                    </Button>
+                  </div>
                 </li>
               );
             })}
@@ -292,6 +315,13 @@ export default function ApplicationDetailPage() {
         open={grantOpen}
         onOpenChange={setGrantOpen}
         applicationId={application.id}
+      />
+      <EditGrantDialog
+        grant={editing}
+        onOpenChange={(open) => {
+          if (!open) setEditing(null);
+        }}
+        userName={editing ? userName(editing.userId) : ""}
       />
       <RevokeGrantDialog
         open={revoking != null}

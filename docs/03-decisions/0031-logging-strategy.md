@@ -58,8 +58,12 @@ ordering ambiguity, no change to the Prisma mapping.
   request. CORS **exposes** that header (`exposedHeaders: ['X-Request-Id']` in `main.ts`) so the
   browser can read it cross-origin — the web client captures it onto `ApiError.requestId` and shows
   it in its error UX ([[0020-frontend-data-layer]]).
-- **Actor:** `customProps` surfaces the `X-User-Id` shim value as a clean `actor` field (null when
-  absent); the raw `x-user-id` header is **redacted** from the logged headers.
+- **Actor:** `customProps` surfaces the authenticated caller as a clean `actor` field. `customProps`
+  runs at response time — after `JwtAuthGuard` has resolved the caller — so the canonical source is
+  **`request.user.id`** (set by the guard in BOTH OIDC and shim modes), falling back to the
+  `X-User-Id` header and then `null`. Reading only the header (the original implementation) left
+  `actor: null` on **every OIDC log line**, since OIDC has no `x-user-id` header (regression fixed in
+  round-2). The raw `x-user-id` header is still **redacted** from the logged headers.
 - **Redaction:** `req.headers.authorization`, `req.headers.cookie`, `req.headers["x-user-id"]`.
 - **Levels:** `debug` outside production, `info` in production. `customLogLevel` maps responses to
   the vocabulary: status ≥ 500 or error → `error` (CRITICAL), ≥ 400 → `warn` (WARNING), else `info`.

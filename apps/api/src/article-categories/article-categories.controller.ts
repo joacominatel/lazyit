@@ -21,6 +21,7 @@ import {
   UpdateArticleCategorySchema,
 } from '@lazyit/shared';
 import { ArticleCategoriesService } from './article-categories.service';
+import { Roles } from '../auth/roles.decorator';
 
 class ArticleCategoryDto extends createZodDto(ArticleCategorySchema) {}
 class CreateArticleCategoryDto extends createZodDto(
@@ -52,26 +53,40 @@ export class ArticleCategoriesController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an article category' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create an article category (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: ArticleCategoryDto })
   create(@Body() dto: CreateArticleCategoryDto) {
     return this.categories.create(dto);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an article category' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Update an article category (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: ArticleCategoryDto })
   update(@Param('id') id: string, @Body() dto: UpdateArticleCategoryDto) {
     return this.categories.update(id, dto);
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Soft-delete an article category (409 if it still has articles)',
+    summary:
+      'Soft-delete an article category (409 if it still has articles) — ADMIN only',
   })
   @ApiOkResponse({ type: ArticleCategoryDto })
   @ApiConflictResponse({ description: 'The category still has live articles' })
   remove(@Param('id') id: string) {
     return this.categories.remove(id);
+  }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore a soft-deleted article category — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: ArticleCategoryDto })
+  restore(@Param('id') id: string) {
+    return this.categories.restore(id);
   }
 }

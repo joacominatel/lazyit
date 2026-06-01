@@ -6,10 +6,10 @@ import {
   MagnifyingGlassIcon,
   PlusIcon,
 } from "@heroicons/react/24/outline";
-import type { ArticleStatus } from "@lazyit/shared";
+import { type ArticleStatus, DEFAULT_PAGE_LIMIT } from "@lazyit/shared";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { EmptyState, ErrorState } from "@/components/resource-table";
+import { EmptyState, ErrorState, Pagination } from "@/components/resource-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,11 +35,12 @@ export default function KnowledgeBasePage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
+  const [offset, setOffset] = useState(0);
   const [importOpen, setImportOpen] = useState(false);
 
   const debouncedSearch = useDebouncedValue(search.trim(), 300);
 
-  const filters = useMemo(
+  const serverFilters = useMemo(
     () => ({
       q: debouncedSearch || undefined,
       status: statusFilter === "ALL" ? undefined : statusFilter,
@@ -48,10 +49,21 @@ export default function KnowledgeBasePage() {
     [debouncedSearch, statusFilter, categoryFilter],
   );
 
-  const { data: articles, isLoading, isError, error, refetch } =
-    useArticles(filters);
+  // Reset paging to the first page whenever the filters change (a different result set). Done during
+  // render rather than in an effect so the reset and the new fetch happen in one pass.
+  const filterKey = JSON.stringify(serverFilters);
+  const [lastFilterKey, setLastFilterKey] = useState(filterKey);
+  if (filterKey !== lastFilterKey) {
+    setLastFilterKey(filterKey);
+    setOffset(0);
+  }
+
+  const { data: page, isLoading, isFetching, isError, error, refetch } =
+    useArticles({ ...serverFilters, offset });
   const { data: categories } = useArticleCategories();
   const { data: users } = useUsers();
+
+  const articles = page?.items;
 
   const categoryName = (id: string) =>
     categories?.find((category) => category.id === id)?.name ?? "Uncategorized";
@@ -62,7 +74,7 @@ export default function KnowledgeBasePage() {
 
   const filtersActive =
     debouncedSearch !== "" || statusFilter !== "ALL" || categoryFilter !== "ALL";
-  const isEmpty = (articles?.length ?? 0) === 0;
+  const isEmpty = (page?.total ?? 0) === 0;
 
   return (
     <div className="space-y-6">
@@ -187,6 +199,17 @@ export default function KnowledgeBasePage() {
           ))}
         </ul>
       )}
+
+      {!isLoading && !isError && !isEmpty ? (
+        <Pagination
+          total={page?.total ?? 0}
+          limit={page?.limit ?? DEFAULT_PAGE_LIMIT}
+          offset={page?.offset ?? 0}
+          itemCount={articles?.length ?? 0}
+          onOffsetChange={setOffset}
+          isFetching={isFetching}
+        />
+      ) : null}
 
       <ImportArticleDialog open={importOpen} onOpenChange={setImportOpen} />
     </div>

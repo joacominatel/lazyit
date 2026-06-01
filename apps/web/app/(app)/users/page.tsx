@@ -6,6 +6,7 @@ import {
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
 import type { User } from "@lazyit/shared";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import {
@@ -30,7 +31,9 @@ import { UserAvatar } from "@/components/user-avatar";
 import { useDeleteUser } from "@/lib/api/hooks/use-user-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { formatDate } from "@/lib/utils/format";
+import { ByoiBanner } from "./_components/byoi-banner";
 import { UserFormDialog } from "./_components/user-form-dialog";
+import { UserRoleSelect } from "./_components/user-role-select";
 import { UserStatusBadge } from "./_components/user-status-badge";
 
 type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
@@ -45,6 +48,11 @@ const COLUMNS: ResourceColumn[] = [
   },
   { key: "name", header: "Name", skeleton: <Skeleton className="h-4 w-32" /> },
   { key: "email", header: "Email", skeleton: <Skeleton className="h-4 w-48" /> },
+  {
+    key: "role",
+    header: "Role",
+    skeleton: <Skeleton className="h-8 w-[7.5rem] rounded-lg" />,
+  },
   {
     key: "status",
     header: "Status",
@@ -114,6 +122,8 @@ export default function UsersPage() {
         </Button>
       </div>
 
+      <ByoiBanner />
+
       {isLoading ? (
         <ResourceTable columns={COLUMNS} isLoading />
       ) : isError ? (
@@ -176,10 +186,18 @@ export default function UsersPage() {
                   />
                 </TableCell>
                 <TableCell className="font-medium">
-                  {user.firstName} {user.lastName}
+                  <Link
+                    href={`/users/${user.id}`}
+                    className="hover:underline"
+                  >
+                    {user.firstName} {user.lastName}
+                  </Link>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {user.email}
+                </TableCell>
+                <TableCell>
+                  <UserRoleSelect user={user} size="sm" />
                 </TableCell>
                 <TableCell>
                   <UserStatusBadge isActive={user.isActive} />

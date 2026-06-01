@@ -1,10 +1,12 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { UserFormDialog } from "@/app/(app)/users/_components/user-form-dialog";
+import { AccessLevelCombobox } from "@/components/access-level-combobox";
 import { CreatableField } from "@/components/creatable-field";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,6 +32,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useGrantAccess } from "@/lib/api/hooks/use-access-grant-mutations";
+import { useApplicationGrants } from "@/lib/api/hooks/use-applications";
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { notifyError } from "@/lib/api/notify-error";
 
@@ -46,9 +49,11 @@ interface GrantAccessDialogProps {
 
 /**
  * Grant a user access to an application (opens an AccessGrant). Multi-grant is allowed, so users are
- * not filtered out by existing grants. `accessLevel` is free-form (each app owns its vocabulary);
- * `expiresAt` is informative only (no auto-revoke — ADR-0023). The grantor (`grantedById`) comes
- * from the `X-User-Id` shim and may be null (anonymous) by design.
+ * not filtered out by existing grants — instead, when the chosen user already holds active grants on
+ * this app, the dialog shows that context (their current access levels) so the grantor doesn't
+ * duplicate by accident. `accessLevel` is free-form (each app owns its vocabulary) but surfaced via a
+ * combobox of the common values; `expiresAt` is informative only (no auto-revoke — ADR-0023). The
+ * grantor (`grantedById`) comes from the authenticated user's identity (Bearer token, ADR-0038/0039).
  */
 export function GrantAccessDialog({
   open,
@@ -56,11 +61,21 @@ export function GrantAccessDialog({
   applicationId,
 }: GrantAccessDialogProps) {
   const { data: users } = useUsers();
+  // The app's current active grants — to show the grantee's existing context (no duplicate by mistake).
+  const { data: activeGrants } = useApplicationGrants(applicationId, {
+    activeOnly: true,
+  });
   const grant = useGrantAccess();
   const [userId, setUserId] = useState("");
   const [accessLevel, setAccessLevel] = useState("");
   const [expiresAt, setExpiresAt] = useState(""); // YYYY-MM-DD
   const [notes, setNotes] = useState("");
+
+  // The selected grantee's existing active grants on this application (the "current context").
+  const existingForUser = useMemo(
+    () => (activeGrants ?? []).filter((g) => g.userId === userId),
+    [activeGrants, userId],
+  );
 
   function handleOpenChange(next: boolean) {
     if (!next) {
@@ -141,18 +156,28 @@ export function GrantAccessDialog({
                 </SelectContent>
               </Select>
             </CreatableField>
+            {userId && existingForUser.length > 0 && (
+              <FieldDescription className="flex flex-wrap items-center gap-1.5">
+                <span>Already has access:</span>
+                {existingForUser.map((g) => (
+                  <Badge key={g.id} variant="secondary">
+                    {g.accessLevel ?? "access"}
+                  </Badge>
+                ))}
+              </FieldDescription>
+            )}
           </Field>
 
           <Field>
             <FieldLabel htmlFor="grant-level">Access level</FieldLabel>
-            <Input
+            <AccessLevelCombobox
               id="grant-level"
               value={accessLevel}
-              onChange={(event) => setAccessLevel(event.target.value)}
-              placeholder="admin, developer, viewer…"
+              onChange={setAccessLevel}
             />
             <FieldDescription>
-              Optional, free-form — whatever this application calls its roles.
+              Optional, free-form — pick a common value or type whatever this
+              application calls its roles.
             </FieldDescription>
           </Field>
 

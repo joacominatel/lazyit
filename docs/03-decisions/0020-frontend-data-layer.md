@@ -122,6 +122,38 @@ clarity > deduplication**: abstract the endpoint/key boilerplate (pure, fully ty
 hooks hand-written. Revisit only if a later entity makes the hooks genuinely identical *and*
 numerous.
 
+### Detail pages and the per-entity related-reads (2026-06-01)
+
+The list mold has a **detail-page** counterpart: a `(<entity>)/[id]/page.tsx` that reads the one
+record and its **related** sub-resources, then cross-links them. The pattern, as implemented:
+
+- **Nested reads** ride the entity's own endpoint file + query-key factory, with the nested key
+  composed under `detail(id)` so invalidating the entity (or `all`) refetches the panels. New here:
+  `getUserAssignments` / `getUserGrants` (`GET /users/:id/{assignments,access-grants}`) and the
+  `userKeys.{assignments,grants}(id, activeOnly)` keys; the access-grant **edit** writes
+  (`updateAccessGrantNotes` / `updateAccessGrantExpiry` → `PATCH /access-grants/:id/{notes,expiry}`)
+  whose mutation hooks invalidate the grant **and** the application **and** the user caches.
+- **Asset-centric per-person view.** `users/[id]` is the User counterpart to `assets/[id]`: it shows
+  the person's held assets ([[asset-assignment]]), their application access ([[access-grant]] — the
+  per-user "who can access what" angle), and the [[article]]s they authored. The nested grant/
+  assignment reads are **lean** (FK ids only — the controller doesn't `includeUser`/inline the
+  asset), so labels are resolved client-side from the catalog reads (`useAssets`/`useApplications`),
+  and every reference is a link both ways (user ⇄ application, user ⇄ asset).
+- **`locations/[id]`** shows the place plus the assets physically there, via the existing
+  `useAssets({ locationId })` server filter — no new endpoint.
+- **Access-edit UX.** A grant's **`expiresAt`** and **`notes`** are editable from the application
+  detail (an `EditGrantDialog` per active row, firing only the changed field); `accessLevel` uses a
+  shared **combobox** (`components/access-level-combobox.tsx`, an input + native `<datalist>` of the
+  common values) — it stays **free-form** (the schema is, deliberately — [[0023-access-management-design]]),
+  so the suggestion list lives in `web`, not `@lazyit/shared`. The grant dialog shows the grantee's
+  existing active grants on the app as context.
+- **Deactivated grantees/owners flagged in lists.** Soft-deleted people render dimmed + a
+  "deactivated" hint in the avatar stacks. Caveat (same root as the [[0030-list-pagination-contract]]
+  lean projection): `GET /users` and `GET /assets` exclude/omit soft-deleted user data, so on the
+  **lists** a departed grantee has no identity to draw — the Access list surfaces them as a single
+  dimmed placeholder chip (`⊘N`) so the avatar count still matches the grant count. Full
+  per-person dimming only happens where the read carries `deletedAt` (the asset/application detail).
+
 ## Consequences
 
 - **Positive:** a consistent, testable, copy-pasteable mold; contracts centralized in

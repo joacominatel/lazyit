@@ -20,6 +20,7 @@ import {
   UpdateLocationSchema,
 } from '@lazyit/shared';
 import { LocationsService } from './locations.service';
+import { Roles } from '../auth/roles.decorator';
 
 // DTOs from the shared zod schemas (validation + TS type + OpenAPI). See ADR-0018.
 class LocationDto extends createZodDto(LocationSchema) {}
@@ -46,23 +47,36 @@ export class LocationsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a location' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create a location (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: LocationDto })
   create(@Body() dto: CreateLocationDto) {
     return this.locations.create(dto);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a location' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Update a location (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: LocationDto })
   update(@Param('id') id: string, @Body() dto: UpdateLocationDto) {
     return this.locations.update(id, dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete a location' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Soft-delete a location — ADMIN only' })
   @ApiOkResponse({ type: LocationDto })
   remove(@Param('id') id: string) {
     return this.locations.remove(id);
+  }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore a soft-deleted location — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: LocationDto })
+  restore(@Param('id') id: string) {
+    return this.locations.restore(id);
   }
 }

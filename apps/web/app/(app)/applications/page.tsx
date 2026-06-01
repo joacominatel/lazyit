@@ -1,7 +1,7 @@
 "use client";
 
 import { KeyIcon, MagnifyingGlassIcon, PlusIcon } from "@heroicons/react/24/outline";
-import type { User } from "@lazyit/shared";
+import { MAX_PAGE_LIMIT, type User } from "@lazyit/shared";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -84,7 +84,13 @@ export default function ApplicationsPage() {
   } = useApplications();
   const { data: categories } = useApplicationCategories();
   // All active grants across apps + all users — joined client-side for the counts/avatars (ADR-0020).
-  const { data: activeGrants } = useAccessGrants({ activeOnly: true });
+  // The counts must see every active grant, so we request the hard-max page (200) rather than the
+  // default 50; the Access list is per-application, so this dedicated count read stays unpaginated.
+  const { data: activeGrantsPage } = useAccessGrants({
+    activeOnly: true,
+    limit: MAX_PAGE_LIMIT,
+  });
+  const activeGrants = activeGrantsPage?.items;
   const { data: users } = useUsers();
   const deleteApplication = useDeleteApplication();
 
@@ -226,6 +232,11 @@ export default function ApplicationsPage() {
                     .map((id) => userById.get(id))
                     .filter((user): user is User => user != null)
                 : [];
+              // Distinct grantees with an active grant whose user row is soft-deleted (hence absent
+              // from the active-users read) — flagged as a dimmed placeholder chip, not dropped.
+              const deactivatedGrantees = access
+                ? [...access.userIds].filter((id) => !userById.has(id)).length
+                : 0;
               const count = access?.count ?? 0;
               return (
                 <TableRow key={application.id}>
@@ -262,7 +273,10 @@ export default function ApplicationsPage() {
                       <span className="text-sm text-muted-foreground">—</span>
                     ) : (
                       <div className="flex items-center gap-2">
-                        <StackedUserAvatars users={granteeUsers} />
+                        <StackedUserAvatars
+                          users={granteeUsers}
+                          deactivatedCount={deactivatedGrantees}
+                        />
                         <span className="text-sm text-muted-foreground tabular-nums">
                           {count}
                         </span>

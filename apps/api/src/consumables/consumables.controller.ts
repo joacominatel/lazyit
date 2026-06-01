@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -12,7 +11,6 @@ import {
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
-  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -29,15 +27,10 @@ import {
   UpdateConsumableSchema,
 } from '@lazyit/shared';
 import { ConsumablesService } from './consumables.service';
-
-// X-User-Id is the auth shim (ADR-0022). On a movement it's OPTIONAL and recorded as the actor who
-// performed it (ConsumableMovement.performedById); absent → null actor (ADR-0034).
-const ACTOR_USER_HEADER = {
-  name: 'X-User-Id',
-  required: false,
-  description:
-    'Caller user id (auth shim). Optional; recorded as the actor who performed the movement.',
-} as const;
+import { parseBooleanQuery } from '../common/parse-boolean-query';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
+import type { User } from '../../generated/prisma/client';
 
 class ConsumableDto extends createZodDto(ConsumableSchema) {}
 class CreateConsumableDto extends createZodDto(CreateConsumableSchema) {}
@@ -62,7 +55,7 @@ export class ConsumablesController {
   })
   @ApiOkResponse({ type: [ConsumableDto] })
   findAll(@Query('lowStock') lowStock?: string) {
-    return this.consumables.findAll({ lowStock: lowStock === 'true' });
+    return this.consumables.findAll({ lowStock: parseBooleanQuery(lowStock) });
   }
 
   @Get(':id')
@@ -108,15 +101,17 @@ export class ConsumablesController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a consumable (stock starts at 0)' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create a consumable (stock starts at 0) (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: ConsumableDto })
   create(@Body() dto: CreateConsumableDto) {
     return this.consumables.create(dto);
   }
 
   @Patch(':id')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
-    summary: 'Update a consumable (currentStock is not editable)',
+    summary: 'Update a consumable (currentStock is not editable) (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ConsumableDto })
   update(@Param('id') id: string, @Body() dto: UpdateConsumableDto) {
@@ -124,24 +119,35 @@ export class ConsumablesController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete a consumable' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Soft-delete a consumable — ADMIN only' })
   @ApiOkResponse({ type: ConsumableDto })
   remove(@Param('id') id: string) {
     return this.consumables.remove(id);
   }
 
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore a soft-deleted consumable — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: ConsumableDto })
+  restore(@Param('id') id: string) {
+    return this.consumables.restore(id);
+  }
+
   @Post(':id/movements')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
     summary:
-      'Record a stock movement (IN adds, OUT subtracts, ADJUSTMENT sets)',
+      'Record a stock movement (IN adds, OUT subtracts, ADJUSTMENT sets) (ADMIN or MEMBER)',
   })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiCreatedResponse({ type: ConsumableMovementDto })
   createMovement(
     @Param('id') id: string,
     @Body() dto: CreateConsumableMovementDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.consumables.createMovement(id, dto, actorId);
+    return this.consumables.createMovement(id, dto, user);
   }
 }

@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -12,7 +11,6 @@ import {
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
-  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -20,9 +18,11 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ArticleListItemSchema,
   AssetAssignmentWithUserSchema,
   AssetHistoryQuerySchema,
   AssetHistorySchema,
+  AssetListPageSchema,
   AssetSchema,
   AssetStatusSchema,
   AssetWithRelationsSchema,
@@ -31,28 +31,29 @@ import {
   type AssetStatus,
 } from '@lazyit/shared';
 import { AssetsService } from './assets.service';
+import { ArticlesService } from '../articles/articles.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
-import { parseActiveOnly } from '../asset-assignments/active-only';
+import { parseBooleanQuery } from '../common/parse-boolean-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
+import { parsePageQuery } from '../common/parse-page-query';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
+import type { User } from '../../generated/prisma/client';
 
-// X-User-Id is the auth shim (ADR-0022). On asset writes it's OPTIONAL and recorded as the actor
-// of the resulting history event (AssetHistory.performedById); absent → null actor (ADR-0033).
-const ACTOR_USER_HEADER = {
-  name: 'X-User-Id',
-  required: false,
-  description:
-    'Caller user id (auth shim). Optional; recorded as the actor of the asset history event.',
-} as const;
-
-// Writes keep the lean Asset shape; reads return the expanded AssetWithRelations.
+// Writes keep the lean Asset shape; the detail read returns the expanded AssetWithRelations, while
+// the (paginated) list returns the trimmed AssetListItem envelope.
 class AssetDto extends createZodDto(AssetSchema) {}
 class CreateAssetDto extends createZodDto(CreateAssetSchema) {}
 class UpdateAssetDto extends createZodDto(UpdateAssetSchema) {}
 class AssetWithRelationsDto extends createZodDto(AssetWithRelationsSchema) {}
+class AssetListPageDto extends createZodDto(AssetListPageSchema) {}
 class AssetAssignmentWithUserDto extends createZodDto(
   AssetAssignmentWithUserSchema,
 ) {}
 class AssetHistoryDto extends createZodDto(AssetHistorySchema) {}
+// Reverse KB lookup (ADR-0042): the lean article-list shape for GET /assets/:id/articles.
+class ArticleListItemDto extends createZodDto(ArticleListItemSchema) {}
 
 @ApiTags('assets')
 @Controller('assets')
@@ -61,12 +62,13 @@ export class AssetsController {
     private readonly assets: AssetsService,
     private readonly assignments: AssetAssignmentsService,
     private readonly history: AssetHistoryService,
+    private readonly articles: ArticlesService,
   ) {}
 
   @Get()
   @ApiOperation({
     summary:
-      'List assets (expanded with model/category, location, activeAssignments). Excludes soft-deleted.',
+      'List assets (paginated; lean: model/category, location, activeAssignments — no specs). Excludes soft-deleted.',
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'locationId', required: false })
@@ -81,12 +83,33 @@ export class AssetsController {
     description:
       'Case-insensitive substring match on name, serial and assetTag',
   })
-  @ApiOkResponse({ type: [AssetWithRelationsDto] })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: AssetListPageDto })
   findAll(
     @Query('categoryId') categoryId?: string,
     @Query('locationId') locationId?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
   ) {
     let parsedStatus: AssetStatus | undefined;
     if (status !== undefined) {
@@ -98,12 +121,15 @@ export class AssetsController {
       }
       parsedStatus = result.data;
     }
-    return this.assets.findAll({
-      categoryId,
-      locationId,
-      status: parsedStatus,
-      q,
-    });
+    return this.assets.findPage(
+      {
+        categoryId: parseCuidQuery(categoryId, 'categoryId'),
+        locationId: parseCuidQuery(locationId, 'locationId'),
+        status: parsedStatus,
+        q,
+      },
+      parsePageQuery({ limit, offset, page }),
+    );
   }
 
   @Get(':id')
@@ -134,7 +160,7 @@ export class AssetsController {
     await this.assets.assertExists(id); // 404 if the asset is missing or soft-deleted
     return this.assignments.findAll({
       assetId: id,
-      activeOnly: parseActiveOnly(activeOnly),
+      activeOnly: parseBooleanQuery(activeOnly, true),
       includeUser: true,
     });
   }
@@ -172,31 +198,53 @@ export class AssetsController {
     return this.history.list(id, parsed.data);
   }
 
+  @Get(':id/articles')
+  @ApiOperation({
+    summary:
+      "List the PUBLISHED knowledge-base articles linked to this asset ('the runbook for THIS server'). (ADR-0042)",
+  })
+  @ApiOkResponse({ type: [ArticleListItemDto] })
+  async findArticles(@Param('id') id: string) {
+    await this.assets.assertExists(id); // 404 if the asset is missing or soft-deleted
+    return this.articles.findArticlesForAsset(id);
+  }
+
   @Post()
-  @ApiOperation({ summary: 'Create an asset' })
-  @ApiHeader(ACTOR_USER_HEADER)
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create an asset (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: AssetDto })
-  create(@Body() dto: CreateAssetDto, @Headers('x-user-id') actorId?: string) {
-    return this.assets.create(dto, actorId);
+  create(@Body() dto: CreateAssetDto, @CurrentUser() user?: User) {
+    return this.assets.create(dto, user);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an asset' })
-  @ApiHeader(ACTOR_USER_HEADER)
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Update an asset (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: AssetDto })
   update(
     @Param('id') id: string,
     @Body() dto: UpdateAssetDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.assets.update(id, dto, actorId);
+    return this.assets.update(id, dto, user);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete an asset' })
-  @ApiHeader(ACTOR_USER_HEADER)
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Soft-delete an asset — ADMIN only' })
   @ApiOkResponse({ type: AssetDto })
-  remove(@Param('id') id: string, @Headers('x-user-id') actorId?: string) {
-    return this.assets.remove(id, actorId);
+  remove(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.assets.remove(id, user);
+  }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Restore a soft-deleted asset (emits a RESTORED history event) — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: AssetWithRelationsDto })
+  restore(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.assets.restore(id, user);
   }
 }

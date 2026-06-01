@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   type AccessGrantFilters,
   getAccessGrants,
@@ -14,10 +14,16 @@ export const accessGrantKeys = {
     [...accessGrantKeys.all, "list", filters] as const,
 };
 
-/** List grants, filtered (e.g. all active grants for the Access list's counts/avatars). */
+/**
+ * List grants, filtered and paged (e.g. all active grants for the Access list's
+ * counts/avatars, fetched with a large `limit`). Returns the `Page<AccessGrant>`
+ * envelope (`items` + `total`/`limit`/`offset`). `keepPreviousData` holds the
+ * current page while a new filter/page query resolves, avoiding a skeleton flash.
+ */
 export function useAccessGrants(filters: AccessGrantFilters = {}) {
   return useQuery({
     queryKey: accessGrantKeys.list(filters),
     queryFn: () => getAccessGrants(filters),
+    placeholderData: keepPreviousData,
   });
 }

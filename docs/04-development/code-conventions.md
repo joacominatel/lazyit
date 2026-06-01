@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-30
 ---
 
 # Code Conventions
@@ -35,6 +35,14 @@ Conventions for application code. Data-model conventions live in [[conventions]]
   reads on soft-deletable models to `deletedAt: null` — don't re-add manual `where: { deletedAt: null }`
   guards. Use `findFirst` (not `findUnique`) for soft-delete-aware lookups by id; pass
   `{ includeSoftDeleted: true }` to bypass (restore / audit).
+- **Soft-delete reuse + restore** ([[0041-soft-delete-reuse-and-restore]]): natural-key uniques on
+  soft-deletable models (`email`, `name`, `slug`, `sku`, `serial`, `assetTag`) are NOT `@unique` —
+  they're PARTIAL unique indexes `WHERE "deletedAt" IS NULL` (raw SQL in the migration, like
+  AssetAssignment), so a soft-deleted value is reusable. Each soft-deletable entity has an ADMIN-gated
+  `POST /<resource>/:id/restore` that finds the row via `includeSoftDeleted`, clears `deletedAt`, and
+  (for Asset) emits a `RESTORED` history event. `User.email` is `citext` — normalize emails
+  (`trim().toLowerCase()`) on write. A new natural-key unique on a soft-deletable model should follow
+  this partial-index pattern, not a plain `@unique`.
 
 ## Observability — logging
 
@@ -54,8 +62,17 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
 ## Frontend (Next.js)
 
 - App Router, TypeScript, Tailwind v4 ([[0010-nextjs-frontend]], [[0011-tailwind-styling]]).
-  shadcn/ui is the planned component layer (not yet installed); document component
-  conventions here when UI work starts.
+- **shadcn/ui is installed** ([[0011-tailwind-styling]]). Its generated primitives live in
+  `apps/web/components/ui/*` (copy-in, not a dependency) and are composed by app components in
+  `apps/web/components/` and the route trees. Treat `components/ui/*` as vendored: regenerate via
+  the shadcn CLI rather than hand-editing, and build features by composing those primitives.
+- **Icons: heroicons only in app code; lucide stays inside `components/ui/*`.** Use
+  `@heroicons/react` (`/24/outline`, `/24/solid`) for every icon you place in pages, layouts and
+  app components — it is the project's single icon vocabulary. `lucide-react` is a transitive
+  dependency of shadcn/ui primitives (e.g. the chevrons baked into `command`, `select`,
+  `dropdown-menu`); leave those as generated. **Do not import `lucide-react` outside
+  `components/ui/*`, and do not introduce a third icon set** — mixing icon families is the most
+  common visual-inconsistency drift on the [[0020-frontend-data-layer]] screens.
 
 ## The Bun-first boundary
 

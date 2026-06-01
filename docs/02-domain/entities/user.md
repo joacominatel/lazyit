@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-01
 ---
 
 # User
@@ -29,9 +29,16 @@ the reverse.
 - Offboarding a user must not erase history: assignments and grants are *released*, not
   deleted (soft delete + lifecycle timestamps).
 - **Identity / auth:** the local User is the source of truth for the domain. Authentication is
-  **deferred** ([[0016-auth-strategy-deferred]]); when it lands we integrate with an external IdP
-  (OIDC) and map its `sub` to `externalId` — we do **not** implement our own auth. Current
-  endpoints are **unauthenticated (dev-only)**.
+  handled by an external IdP (OIDC) whose `sub` maps to `externalId`; the global guard JIT-provisions
+  a User on first login ([[0038-jit-user-provisioning]]) — we do **not** implement our own auth.
+  `AUTH_MODE=shim` keeps the `X-User-Id` header path for dev/test.
+- **Authorization (RBAC):** a single `role` ([[0040-rbac-roles]]) governs what a user may do —
+  `ADMIN` (full access, including Access-grant writes, Users administration and destructive deletes),
+  `MEMBER` (normal inventory / KB / asset operations) and `VIEWER` (read-only everywhere). Enforced by
+  the `RolesGuard`, which composes after the auth guard. The **first** user ever provisioned (seed or
+  first JIT login) is `ADMIN`; everyone else defaults to `VIEWER` (least-privilege; flipped from
+  `MEMBER` by [[0043-zitadel-source-of-truth]] Phase 1). Only an `ADMIN` can change a role (the Users
+  controller is ADMIN-gated), so there is no self-escalation path.
 
 ## Conventions
 
@@ -48,11 +55,12 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `uuid` | `@default(uuid())`, `@db.Uuid` — sensitive/exposed ([[0005-id-strategy]]). |
-| `email` | `string` | `@unique`, required. |
+| `email` | `string` | Required, **case-insensitive** (`@db.Citext`, [[0041-soft-delete-reuse-and-restore]]). Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL in the migration; no `@unique`), so a soft-deleted email is freed for reuse / restore. Write payloads normalize it (trim + lowercase). |
 | `firstName` | `string` | required. |
 | `lastName` | `string` | required. |
 | `isActive` | `boolean` | `@default(true)`. Activation flag — see note below. |
-| `externalId` | `string?` | `@unique`, nullable. Holds the IdP `sub` once auth is integrated; `null` until then ([[0016-auth-strategy-deferred]]). |
+| `role` | `Role` | `@default(VIEWER)` (flipped from `MEMBER` by [[0043-zitadel-source-of-truth]]). RBAC role: `ADMIN` / `MEMBER` / `VIEWER` ([[0040-rbac-roles]]). First user ever provisioned = `ADMIN`; all others default to `VIEWER`. |
+| `externalId` | `string?` | `@unique`, nullable. Holds the IdP `sub`; populated on first OIDC login ([[0038-jit-user-provisioning]]); `null` for unlinked users ([[0016-auth-strategy-deferred]]). |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | Soft delete — `null` while live; reads filter `deletedAt: null` ([[0006-soft-delete-and-auditing]]). |
@@ -65,11 +73,31 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 
 ## Endpoints
 
-`apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted), `GET /users/:id`,
-`POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete). Bodies validated against the
+`apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted), `GET /users/me`
+(the current authenticated caller, **including their role** — declared before `:id` so the literal
+`me` isn't parsed as a uuid; the OIDC token doesn't carry the lazyit role, so the web reads it here),
+`GET /users/:id`, `POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete),
+`POST /users/:id/offboard`, `POST /users/:id/restore` (re-onboard: clears `deletedAt`; does NOT
+re-grant access or re-assign assets — [[0041-soft-delete-reuse-and-restore]]).
+All **write** endpoints (create / update / delete / offboard / restore) are **ADMIN-only**
+(`@Roles('ADMIN')`, [[0040-rbac-roles]]); the reads (incl. `me`) are open to any authenticated user. Bodies validated against the
 shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). Also
-`GET /users/:id/assignments?activeOnly=` lists the assets assigned to the user ([[asset-assignment]]).
+`GET /users/:id/assignments?activeOnly=` lists the assets assigned to the user ([[asset-assignment]])
+and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their application access
+([[access-grant]]).
+
+> [!note] RBAC safety guards (ADR-0040, Round 3)
+> Changing a `role` is governed by two service-level guards. The API **refuses to remove the last
+> remaining `ADMIN`** — demoting away from `ADMIN`, offboarding or deleting the final administrator
+> returns **409 Conflict** — and **no user can change their own role** (**403 Forbidden**). Role
+> management is otherwise done by an `ADMIN` from the **Users** section (a per-user role Select);
+> the very first `ADMIN` on a pre-existing DB is set out-of-band via `bun run set-role` ([[auth-bootstrap]]).
+
+**Web:** `users/[id]` is the asset-centric **per-person** detail page (the counterpart to the asset
+detail) — it composes the two nested reads above plus the user's authored [[article]]s, answering
+"who can access what" for one person and cross-linking user ⇄ asset / application. See
+[[0020-frontend-data-layer]].
 
 Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] · [[ticket]] ·
 [[asset-centric]] · [[shared-package]] · [[0013-zod-validation-pipe]] ·
-[[0016-auth-strategy-deferred]]
+[[0016-auth-strategy-deferred]] · [[0038-jit-user-provisioning]] · [[0040-rbac-roles]]

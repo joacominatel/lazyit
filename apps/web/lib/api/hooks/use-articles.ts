@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   type ArticleFilters,
   getArticle,
@@ -21,11 +21,18 @@ export const articleKeys = {
   bySlug: (slug: string) => [...articleKeys.all, "by-slug", slug] as const,
 };
 
-/** List articles visible to the acting user, with optional server-side filters. */
+/**
+ * List articles visible to the acting user, with optional server-side filters and
+ * paging (`limit`/`offset`). Returns the `Page<ArticleListItem>` envelope (`items`
+ * + `total`/`limit`/`offset`) so the list can render pagination controls.
+ * `keepPreviousData` keeps the current page on screen while a new filter/page query
+ * resolves, so typing in the filter bar or paging doesn't flash the skeleton.
+ */
 export function useArticles(filters: ArticleFilters = {}) {
   return useQuery({
     queryKey: articleKeys.list(filters),
     queryFn: () => getArticles(filters),
+    placeholderData: keepPreviousData,
   });
 }
 

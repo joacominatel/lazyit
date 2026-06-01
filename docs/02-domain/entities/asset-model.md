@@ -29,7 +29,8 @@ The generic make/model definition an [[asset]] is an instance of — e.g. "Dell 
 - **Soft delete only** — we never hard-delete, so existing [[asset]]s keep referencing a
   soft-deleted model. The FK's `onDelete: SetNull` is only a safety net for a (non-occurring)
   hard delete: it would detach assets rather than delete them (audit > strict integrity).
-- `sku` is unique when present (a duplicate returns `409`).
+- `sku` is unique among **live** rows when present (a live duplicate returns `409`); a soft-deleted
+  sku is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]).
 
 ## Conventions
 
@@ -47,7 +48,7 @@ Prisma model `AssetModel` → table `asset_models`. Validation schemas (`AssetMo
 | `id` | `cuid` | `@default(cuid())`. |
 | `name` | `string` | required (e.g. "Dell Latitude 5520"). |
 | `manufacturer` | `string` | required (e.g. "Dell"). |
-| `sku` | `string?` | `@unique`, optional — unique when present. |
+| `sku` | `string?` | Optional. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted sku is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
 | `description` | `string?` | optional. |
 | `specs` | `jsonb?` | model-level default specs (e.g. "ships with 16GB"). **Distinct from `Asset.specs`** (type-level vs per-unit). Any JSON object for now ([[0007-flexible-asset-specs-jsonb]]). |
 | `categoryId` | `cuid?` | optional FK → [[asset-category]], `onDelete: SetNull`. |
@@ -59,6 +60,8 @@ Prisma model `AssetModel` → table `asset_models`. Validation schemas (`AssetMo
 
 `apps/api/src/asset-models/` (`AssetModelsModule`): `GET /asset-models` (excludes soft-deleted,
 optional `?categoryId=` filter), `GET /asset-models/:id`, `POST`, `PATCH /:id`, `DELETE /:id`
-(soft delete). An invalid `categoryId` on write returns `400` (FK → [[0018-api-documentation-swagger]]).
+(soft delete), `POST /:id/restore` (ADMIN-only — clears `deletedAt`,
+[[0041-soft-delete-reuse-and-restore]]). An invalid `categoryId` on write returns `400`
+(FK → [[0018-api-documentation-swagger]]).
 
 Related: [[asset]] · [[asset-category]] · [[conventions]] · [[0018-api-documentation-swagger]]

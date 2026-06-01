@@ -1,0 +1,234 @@
+import { Injectable } from '@nestjs/common';
+import type {
+  DashboardActivityItem,
+  DashboardSummary,
+  PageQuery,
+  Page,
+  RecentActivityItem,
+} from '@lazyit/shared';
+import { offsetOf, pageOf } from '@lazyit/shared';
+import { PrismaService } from '../prisma/prisma.service';
+
+/** AssetStatus enum values, in schema order — used to zero-fill the `byStatus` buckets. */
+const ASSET_STATUSES = [
+  'OPERATIONAL',
+  'IN_MAINTENANCE',
+  'IN_STORAGE',
+  'RETIRED',
+  'LOST',
+  'UNKNOWN',
+] as const;
+
+/** Default look-ahead window (days) for "grants expiring soon". */
+const DEFAULT_EXPIRING_WITHIN_DAYS = 30;
+
+/** How many recent AssetHistory rows the activity slice returns. */
+const RECENT_ACTIVITY_LIMIT = 10;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Read-only dashboard aggregation (CTO Round 1). Composes cheap counts/groupBys across the three
+ * pillars into a single typed {@link DashboardSummary}. No persisted "dashboard" entity, no schema
+ * change — every figure is derived from existing tables.
+ *
+ * Soft delete (ADR-0032): reads on soft-deletable models (Asset, Application, Consumable, Article)
+ * are auto-scoped to `deletedAt: null` by the Prisma extension, so `count`/`groupBy` here already
+ * exclude soft-deleted rows. The lifecycle joins (AssetAssignment, AccessGrant) are NOT
+ * soft-deletable, so their close markers (`releasedAt` / `revokedAt`) are filtered explicitly.
+ *
+ * The queries are independent, so they run concurrently in one `Promise.all` round-trip-ish batch.
+ */
+@Injectable()
+export class DashboardService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  /** Compute the dashboard snapshot. `expiringWithinDays` tunes the "expiring soon" window. */
+  async getSummary(
+    expiringWithinDays = DEFAULT_EXPIRING_WITHIN_DAYS,
+  ): Promise<DashboardSummary> {
+    const now = new Date();
+    const expiryCutoff = new Date(now.getTime() + expiringWithinDays * MS_PER_DAY);
+
+    const [
+      assetTotal,
+      assetsByStatusGroups,
+      assignedAssets,
+      activeGrants,
+      expiringSoon,
+      onCriticalApps,
+      consumableTotal,
+      lowStock,
+      articleTotal,
+      publishedArticles,
+      recentHistory,
+    ] = await Promise.all([
+      // --- Inventory ---------------------------------------------------------
+      this.prisma.asset.count(),
+      this.prisma.asset.groupBy({ by: ['status'], _count: { _all: true } }),
+      // Distinct assets holding >=1 active assignment. groupBy collapses multi-owner assets to one
+      // row each, so its length is the distinct-asset count.
+      this.prisma.assetAssignment
+        .groupBy({ by: ['assetId'], where: { releasedAt: null } })
+        .then((rows) => rows.length),
+
+      // --- Access ------------------------------------------------------------
+      this.prisma.accessGrant.count({ where: { revokedAt: null } }),
+      this.prisma.accessGrant.count({
+        where: {
+          revokedAt: null,
+          expiresAt: { gt: now, lte: expiryCutoff },
+        },
+      }),
+      // Active grants on critical apps. `application` is a relation filter; the related Application
+      // is auto-soft-delete-filtered, so grants whose app is soft-deleted are excluded.
+      this.prisma.accessGrant.count({
+        where: { revokedAt: null, application: { is: { isCritical: true } } },
+      }),
+
+      // --- Consumables -------------------------------------------------------
+      this.prisma.consumable.count(),
+      // currentStock <= minStock, only for consumables that declare a minStock. Prisma can't compare
+      // two columns, so we filter `minStock != null` and post-filter the rows; the set is small
+      // (a low-stock alert list) so selecting the two ints and comparing in-process is cheap.
+      this.prisma.consumable
+        .findMany({
+          where: { minStock: { not: null } },
+          select: { currentStock: true, minStock: true },
+        })
+        .then(
+          (rows) =>
+            rows.filter((c) => c.minStock !== null && c.currentStock <= c.minStock)
+              .length,
+        ),
+
+      // --- Knowledge ---------------------------------------------------------
+      this.prisma.article.count(),
+      this.prisma.article.count({ where: { status: 'PUBLISHED' } }),
+
+      // --- Recent activity ---------------------------------------------------
+      this.prisma.assetHistory.findMany({
+        orderBy: { id: 'desc' },
+        take: RECENT_ACTIVITY_LIMIT,
+        select: {
+          id: true,
+          assetId: true,
+          eventType: true,
+          payload: true,
+          performedById: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    const byStatus = ASSET_STATUSES.reduce<Record<string, number>>(
+      (acc, status) => {
+        acc[status] = 0;
+        return acc;
+      },
+      {},
+    );
+    for (const group of assetsByStatusGroups) {
+      byStatus[group.status] = group._count._all;
+    }
+
+    const recentActivity: DashboardActivityItem[] = recentHistory.map((row) => ({
+      id: row.id,
+      assetId: row.assetId,
+      eventType: row.eventType,
+      payload: (row.payload as Record<string, unknown> | null) ?? null,
+      performedById: row.performedById,
+      createdAt: row.createdAt.toISOString(),
+    }));
+
+    return {
+      assets: {
+        total: assetTotal,
+        byStatus: byStatus as DashboardSummary['assets']['byStatus'],
+        assigned: assignedAssets,
+      },
+      access: {
+        activeGrants,
+        expiringSoon,
+        expiringWithinDays,
+        onCriticalApps,
+      },
+      consumables: {
+        total: consumableTotal,
+        lowStock,
+      },
+      articles: {
+        total: articleTotal,
+        published: publishedArticles,
+        draft: articleTotal - publishedArticles,
+      },
+      recentActivity,
+      generatedAt: now.toISOString(),
+    };
+  }
+
+  /**
+   * Recent activity feed (CEO Round 2, ADR-0043) — the unified, cross-pillar stream the dashboard
+   * shows, newest first and offset-paginated (ADR-0030). Reads the `recent_activity` Postgres VIEW
+   * (a `UNION ALL` over AssetHistory, AssetAssignment, AccessGrant and ConsumableMovement; Prisma
+   * cannot express a UNION view, so it lives as raw SQL in a migration and is read here with a typed
+   * `$queryRaw`). The view already drops rows whose parent entity is soft-deleted.
+   *
+   * The actor display name is resolved with a LEFT JOIN to `users` (lightly — just first/last name);
+   * `actorId`/`actorName` are null for system/unknown actors or a deleted actor whose audit FK was
+   * set null. The page slice and the `count` over the same view run inside one `$transaction`, so the
+   * `total` cannot drift from the page under concurrent writes to any source.
+   */
+  async getActivity(page: PageQuery): Promise<Page<RecentActivityItem>> {
+    const { take, skip } = offsetOf(page);
+
+    const [rows, totalRows] = await this.prisma.$transaction([
+      this.prisma.$queryRaw<RecentActivityRow[]>`
+        SELECT
+          ra."occurredAt",
+          ra."actorId",
+          CASE WHEN u."id" IS NULL THEN NULL
+               ELSE u."firstName" || ' ' || u."lastName" END AS "actorName",
+          ra."entityType",
+          ra."entityId",
+          ra."action",
+          ra."summary"
+        FROM "recent_activity" ra
+        LEFT JOIN "users" u ON u."id" = ra."actorId"
+        ORDER BY ra."occurredAt" DESC
+        LIMIT ${take} OFFSET ${skip}
+      `,
+      this.prisma.$queryRaw<[{ count: bigint }]>`
+        SELECT COUNT(*)::bigint AS count FROM "recent_activity"
+      `,
+    ]);
+
+    const total = Number(totalRows[0]?.count ?? 0);
+    const items: RecentActivityItem[] = rows.map((row) => ({
+      occurredAt: row.occurredAt.toISOString(),
+      actorId: row.actorId,
+      actorName: row.actorName,
+      entityType: row.entityType,
+      entityId: row.entityId,
+      action: row.action,
+      summary: row.summary,
+    }));
+
+    return pageOf(items, total, page);
+  }
+}
+
+/**
+ * Raw row shape returned by the `recent_activity` view read (the pg driver maps `timestamptz` to a JS
+ * `Date`; `actorId`/`actorName` are nullable). Narrowed to the {@link RecentActivityItem} wire shape
+ * (ISO timestamp) in {@link DashboardService.getActivity}.
+ */
+interface RecentActivityRow {
+  occurredAt: Date;
+  actorId: string | null;
+  actorName: string | null;
+  entityType: RecentActivityItem['entityType'];
+  entityId: string;
+  action: string;
+  summary: string;
+}

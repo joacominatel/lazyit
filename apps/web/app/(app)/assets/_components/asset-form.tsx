@@ -19,7 +19,6 @@ import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Field,
-  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -38,6 +37,13 @@ import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutati
 import { useLocations } from "@/lib/api/hooks/use-locations";
 import { notifyError } from "@/lib/api/notify-error";
 import { formatAssetStatus } from "./asset-status-badge";
+import {
+  type CustomFieldRow,
+  CustomFieldsEditor,
+  rowsToSpecs,
+  specsToRows,
+  validateRows,
+} from "./custom-fields-editor";
 
 const FORM_ID = "asset-form";
 /** Radix Select forbids an empty-string item value; use a sentinel for "none". */
@@ -84,10 +90,11 @@ function toFormValues(asset?: Asset): AssetFormValues {
 
 /**
  * Create/edit form for an Asset. Per-mode validation (CreateAssetSchema vs the
- * partial UpdateAssetSchema — ADR-0020). `specs` is free-form jsonb: it lives in
- * local state as raw text and is parsed/validated on submit (the simple JSON
- * editor of the task; per-category schemas are deferred — ADR-0007). Dates are
- * edited as date inputs and stored as ISO datetimes (the wire shape).
+ * partial UpdateAssetSchema — ADR-0020). `specs` is free-form jsonb edited through
+ * the {@link CustomFieldsEditor}: a dynamic list of `{ name, value }` rows that
+ * serialize into the `specs` object on submit (per-category schemas are deferred —
+ * ADR-0007). Non-scalar legacy entries (arrays/objects) are preserved untouched.
+ * Dates are edited as date inputs and stored as ISO datetimes (the wire shape).
  */
 export function AssetForm({ asset }: { asset?: Asset }) {
   const isEdit = asset != null;
@@ -98,10 +105,14 @@ export function AssetForm({ asset }: { asset?: Asset }) {
   const updateAsset = useUpdateAsset();
   const isPending = createAsset.isPending || updateAsset.isPending;
 
-  const [specsText, setSpecsText] = useState(
-    asset?.specs ? JSON.stringify(asset.specs, null, 2) : "",
+  // Split existing specs into editable scalar rows + preserved non-scalar entries.
+  const [{ rows: initialRows, preserved }] = useState(() =>
+    specsToRows(asset?.specs),
   );
-  const [specsError, setSpecsError] = useState<string | null>(null);
+  const [specRows, setSpecRows] = useState<CustomFieldRow[]>(initialRows);
+  const [specErrors, setSpecErrors] = useState<Record<string, string>>({});
+  // Did the asset arrive with any specs? Used to clear them on edit (see onSubmit).
+  const hadSpecs = asset?.specs != null && Object.keys(asset.specs).length > 0;
 
   const form = useForm<AssetFormValues>({
     resolver: zodResolver(
@@ -111,24 +122,16 @@ export function AssetForm({ asset }: { asset?: Asset }) {
   });
 
   const onSubmit = form.handleSubmit((values) => {
-    // Parse the free-form specs JSON; an object or nothing, never invalid.
-    let specs: Record<string, unknown> | undefined;
-    const trimmed = specsText.trim();
-    if (trimmed) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(trimmed);
-      } catch {
-        setSpecsError("Invalid JSON.");
-        return;
-      }
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        setSpecsError('Specs must be a JSON object, e.g. {"ram":"16GB"}.');
-        return;
-      }
-      specs = parsed as Record<string, unknown>;
-    }
-    setSpecsError(null);
+    // Validate the custom-field rows (non-empty + unique names); abort on any error.
+    const { errors, ok } = validateRows(specRows);
+    setSpecErrors(errors);
+    if (!ok) return;
+
+    // Serialize rows into the specs object, merging preserved non-scalar entries.
+    let specs = rowsToSpecs(specRows, preserved);
+    // On edit, if the user cleared every field but the asset previously had specs,
+    // send `{}` to actually clear them (an omitted key is a no-op in a PATCH).
+    if (isEdit && specs === undefined && hadSpecs) specs = {};
 
     const payload = {
       name: values.name,
@@ -408,29 +411,14 @@ export function AssetForm({ asset }: { asset?: Asset }) {
           )}
         />
 
-        <Field data-invalid={specsError ? true : undefined}>
-          <FieldLabel htmlFor="specs">Specs (JSON)</FieldLabel>
-          <Textarea
-            id="specs"
-            value={specsText}
-            onChange={(event) => {
-              setSpecsText(event.target.value);
-              if (specsError) setSpecsError(null);
-            }}
-            placeholder={'{\n  "cpu": "Apple M3",\n  "ram": "16GB"\n}'}
-            className="min-h-[140px] font-mono text-sm"
-            aria-invalid={specsError ? true : undefined}
-          />
-          <FieldDescription>
-            Free-form JSON object; validated on save. Per-category schemas are a
-            future improvement (ADR-0007).
-          </FieldDescription>
-          {specsError && (
-            <p role="alert" className="text-sm text-destructive">
-              {specsError}
-            </p>
-          )}
-        </Field>
+        <CustomFieldsEditor
+          rows={specRows}
+          errors={specErrors}
+          onChange={(rows) => {
+            setSpecRows(rows);
+            if (Object.keys(specErrors).length > 0) setSpecErrors({});
+          }}
+        />
       </FieldGroup>
 
       <div className="flex justify-end gap-2">

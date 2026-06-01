@@ -22,6 +22,8 @@ import {
   UpdateAssetModelSchema,
 } from '@lazyit/shared';
 import { AssetModelsService } from './asset-models.service';
+import { parseCuidQuery } from '../common/parse-cuid-query';
+import { Roles } from '../auth/roles.decorator';
 
 class AssetModelDto extends createZodDto(AssetModelSchema) {}
 class CreateAssetModelDto extends createZodDto(CreateAssetModelSchema) {}
@@ -39,7 +41,7 @@ export class AssetModelsController {
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiOkResponse({ type: [AssetModelDto] })
   findAll(@Query('categoryId') categoryId?: string) {
-    return this.models.findAll(categoryId);
+    return this.models.findAll(parseCuidQuery(categoryId, 'categoryId'));
   }
 
   @Get(':id')
@@ -50,23 +52,36 @@ export class AssetModelsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an asset model' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create an asset model (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: AssetModelDto })
   create(@Body() dto: CreateAssetModelDto) {
     return this.models.create(dto);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an asset model' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Update an asset model (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: AssetModelDto })
   update(@Param('id') id: string, @Body() dto: UpdateAssetModelDto) {
     return this.models.update(id, dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete an asset model' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Soft-delete an asset model — ADMIN only' })
   @ApiOkResponse({ type: AssetModelDto })
   remove(@Param('id') id: string) {
     return this.models.remove(id);
+  }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore a soft-deleted asset model — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: AssetModelDto })
+  restore(@Param('id') id: string) {
+    return this.models.restore(id);
   }
 }

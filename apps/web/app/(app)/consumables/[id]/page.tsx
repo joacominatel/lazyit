@@ -34,6 +34,7 @@ import {
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { formatDate } from "@/lib/utils/format";
 import { MovementTypeBadge } from "../_components/movement-type-badge";
+import { QuickAdjustButtons } from "../_components/quick-adjust-buttons";
 import { stockTone } from "../_components/stock-badge";
 import { StockMovementDialog } from "../_components/stock-movement-dialog";
 
@@ -146,24 +147,13 @@ export default function ConsumableDetailPage() {
       <Panel
         title="Stock"
         action={
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => setMovementType("IN")}>
-              <ArrowDownTrayIcon />
-              Add
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setMovementType("OUT")}>
-              <ArrowUpTrayIcon />
-              Remove
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setMovementType("ADJUSTMENT")}
-            >
-              <ScaleIcon />
-              Adjust
-            </Button>
-          </div>
+          <QuickAdjustButtons
+            consumableId={consumable.id}
+            name={consumable.name}
+            currentStock={consumable.currentStock}
+            unit={consumable.unit}
+            size="sm"
+          />
         }
       >
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -180,6 +170,26 @@ export default function ConsumableDetailPage() {
             ? `Reorder threshold: ${consumable.minStock} ${consumable.unit}`
             : "No reorder threshold set."}
         </p>
+        {/* Quick adjust (±1) above covers the common case; these open the detailed form
+            for a specific quantity / reason, or an absolute recount. */}
+        <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
+          <Button size="sm" variant="outline" onClick={() => setMovementType("IN")}>
+            <ArrowDownTrayIcon />
+            Add…
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setMovementType("OUT")}>
+            <ArrowUpTrayIcon />
+            Remove…
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setMovementType("ADJUSTMENT")}
+          >
+            <ScaleIcon />
+            Adjust…
+          </Button>
+        </div>
       </Panel>
 
       <Panel title="Details">

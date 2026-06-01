@@ -3,7 +3,7 @@ title: AccessGrant
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-01
 ---
 
 # AccessGrant
@@ -37,7 +37,9 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
   verbatim and never interprets it; each [[application]] owns its vocabulary.
 - **`expiresAt` is informative only** — no scheduler auto-revokes at expiry. An expired-but-not-
   revoked grant is still *active*; the list endpoints can **hide** it with `includeExpired=false`,
-  but nothing in the database changes ([[0023-access-management-design]]).
+  but nothing in the database changes ([[0023-access-management-design]]). On **create**, when both
+  are supplied, `expiresAt` must be **on or after** `grantedAt` (a grant can't expire before it
+  starts) — a `@lazyit/shared` cross-field refine returns `400` otherwise (round-2 correctness).
 - **Immutable identity:** `userId`, `applicationId` and `grantedAt` are set once. Only `notes`,
   `revokedAt` and `expiresAt` are mutable.
 - **Create-time integrity:** `userId` and `applicationId` must reference **live** (non-soft-deleted)
@@ -60,9 +62,12 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
 > the create-time live-check reduces, but doesn't eliminate, dangling references. Same nuance as
 > [[asset-assignment]] ([[0019-asset-assignment-integrity]], [[0023-access-management-design]]).
 
-> [!warning] Endpoints are insecure until auth lands
-> The `X-User-Id` header is spoofable; there is no authorization on reads or writes yet — anyone can
-> grant or revoke access ([[0016-auth-strategy-deferred]], [[0022-draft-visibility-auth-shim]]).
+> [!note] Access-grant writes are ADMIN-only (RBAC)
+> All grant writes — `POST /access-grants` (open), `PATCH /access-grants/:id/revoke`,
+> `…/notes`, `…/expiry` — require the `ADMIN` role ([[0040-rbac-roles]]); a `MEMBER`/`VIEWER` gets
+> **403**. Reads stay open to any authenticated user, exposing the access map team-wide by design.
+> In production the actor comes from the verified OIDC token ([[0038-jit-user-provisioning]]); the
+> `X-User-Id` shim is dev-only and still forgeable ([[0022-draft-visibility-auth-shim]]).
 
 ## Conventions
 

@@ -30,7 +30,8 @@ concrete instance of a generic [[asset-model]].
   ([[0007-flexible-asset-specs-jsonb]]).
 - `status` is a **required** enum (`AssetStatus`), **no default** — every asset is classified
   (consistent with [[location]]`.type`).
-- `serial` and `assetTag` are each unique when present (a duplicate returns `409`).
+- `serial` and `assetTag` are each unique **among live rows** when present (a live duplicate returns
+  `409`); a soft-deleted value is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]).
 - FKs (`modelId`, `locationId`) are `onDelete: SetNull`: deleting a model/location **detaches**
   assets, never deletes them (auditability > strict referential integrity). Combined with soft
   delete everywhere, references are preserved in practice.
@@ -42,7 +43,10 @@ concrete instance of a generic [[asset-model]].
 > (`z.record(z.string(), z.unknown())`). The intent ([[0007-flexible-asset-specs-jsonb]]) is to
 > validate `specs` against a per-[[asset-category]] schema (e.g. a future
 > `AssetCategory.specsSchema`), which does not exist yet. Tracked as a `TODO(specs)` in the
-> shared zod schemas.
+> shared zod schemas. The web's custom-fields editor only authors **scalar string values**
+> (one `{ name, value }` row each), but pre-existing non-scalar entries (arrays/objects) are
+> **preserved untouched** on edit — they round-trip and render as compact JSON, they just
+> aren't editable inline.
 
 > [!note] Expanded read shape (reads only)
 > `GET /assets` and `GET /assets/:id` return an **`AssetWithRelations`**: the asset plus its `model`
@@ -75,10 +79,10 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | --- | --- | --- |
 | `id` | `cuid` | `@default(cuid())`. |
 | `name` | `string` | required (e.g. "SW-CORE-01"); naming convention is the user's, not enforced. |
-| `serial` | `string?` | `@unique`, optional — unique when present. |
-| `assetTag` | `string?` | `@unique`, optional — internal company label, unique when present. |
+| `serial` | `string?` | Optional. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted serial is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
+| `assetTag` | `string?` | Optional internal company label. Same live-only PARTIAL unique index as `serial` ([[0041-soft-delete-reuse-and-restore]]). |
 | `status` | `AssetStatus` | required enum, **no default**. |
-| `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object for now (see debt note). |
+| `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object for now (see debt note). The web edits this via a **custom-fields editor** (a list of `{ name, value }` string rows) and renders it on the detail page as a label-cased key/value list, not raw JSON. |
 | `notes` | `string?` | optional. |
 | `purchaseDate` | `datetime?` | optional; ISO-8601 string over the wire ([[0018-api-documentation-swagger]]). |
 | `warrantyEnd` | `datetime?` | optional; ISO-8601 string over the wire. |
@@ -109,6 +113,10 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
   `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]). Each write
   takes an **optional `X-User-Id`** header (the actor) and emits an [[asset-history]] event
   (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally ([[0033-asset-history-event-model]]).
+- `POST /assets/:id/restore` — **ADMIN-only** ([[0040-rbac-roles]]). Clears `deletedAt` and emits a
+  `RESTORED` [[asset-history]] event transactionally; returns the expanded asset. Idempotent on a live
+  asset; can `409` if a live asset took the freed serial/assetTag meanwhile
+  ([[0041-soft-delete-reuse-and-restore]]).
 
 ## Not yet implemented (deferred)
 

@@ -48,3 +48,9 @@ Split by mutability.
 - **Follow-ups:** append-only tables get `createdAt` only (done as the models landed). The default
   `deletedAt IS NULL` scope on mutable entities is now enforced centrally by a Prisma client
   extension — see [[0032-soft-delete-middleware]] (no more per-query guards).
+- **Reuse & restore ([[0041-soft-delete-reuse-and-restore]]):** because a soft delete keeps the row,
+  a full `@unique` on a soft-deletable column would burn the value forever (the ghost row keeps
+  colliding). ADR-0041 replaces every such `@unique` with a **partial unique index**
+  `WHERE "deletedAt" IS NULL` (uniqueness among live rows only), adds ADMIN-gated `POST
+  /<resource>/:id/restore` endpoints that clear `deletedAt`, and makes `User.email` case-insensitive
+  (citext). Soft delete is therefore reversible and freed values are immediately reusable.

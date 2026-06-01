@@ -86,11 +86,13 @@ note) · `f548ffc` (prod compose: Postgres on the internal network, no host port
 Addresses all three of the finding's recommendations across both the dev and the new
 production-shaped stack ([[0028-secrets-and-config]]):
 
-- **Dev DB no longer binds all interfaces.** `docker-compose.yml` now publishes
-  `"127.0.0.1:5432:5432"` (loopback only) — the dev database is unreachable from the LAN, while
-  `localhost` connections are unchanged (zero developer impact). The running dev container keeps its
-  old mapping until its next recreate; the change applies on the next `up`.
-- **Production never exposes Postgres at all.** `infra/docker-compose.prod.yml` puts `db` (and
+- **Dev DB no longer binds all interfaces.** The root compose (then `docker-compose.yml`, since
+  consolidated into `compose.yaml` + `compose.override.yaml`) publishes `"127.0.0.1:5432:5432"`
+  (loopback only) — the dev database is unreachable from the LAN, while `localhost` connections are
+  unchanged (zero developer impact). The running dev container keeps its old mapping until its next
+  recreate; the change applies on the next `up`.
+- **Production never exposes Postgres at all.** The prod stack (then `infra/docker-compose.prod.yml`,
+  now `compose.yaml` + `infra/docker-compose.prod.yaml` under `--profile prod`) puts `db` (and
   `api`/`web`) on an internal compose network with **no `ports:`** — only Caddy publishes host
   ports. Verified live: `lazyit-prod-db-1` reports `5432/tcp` with the host mapping `null`.
 - **No trivial secrets in examples.** `infra/env/.env.prod.example` uses explicit `CHANGE_ME`
@@ -107,6 +109,7 @@ production-shaped stack ([[0028-secrets-and-config]]):
 
 ### Re-verification
 
-Brought up the full prod-like stack (`infra/docker-compose.prod.yml`): `db` healthy with no host
-port mapping; the only host-published ports belong to Caddy (`8080`/`8443`). Dev `docker-compose.yml`
+Brought up the full prod-like stack (at the time `infra/docker-compose.prod.yml`; the equivalent
+command today is `compose.yaml` + `infra/docker-compose.prod.yaml --profile prod`): `db` healthy with
+no host port mapping; the only host-published ports belong to Caddy (`8080`/`8443`). The dev compose
 still validates and the dev container is undisturbed.

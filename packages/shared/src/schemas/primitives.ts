@@ -28,3 +28,19 @@ export function int4(opts: { min?: number; max?: number; example?: number } = {}
   const schema = z.number().int().min(min).max(max);
   return opts.example === undefined ? schema : schema.meta({ example: opts.example });
 }
+
+/**
+ * Reject an empty PATCH body. Wraps a partial Update*Schema so that `{}` (no fields to change) is a
+ * 400 instead of a silent no-op update. A PATCH with nothing to change is almost always a client
+ * bug (a misspelled / dropped field name on a strictObject would be stripped to {} and "succeed"
+ * without changing anything); requiring at least one key surfaces it. Keys explicitly set to `null`
+ * count as a change (clearing a field), so `{ notes: null }` is allowed.
+ *
+ * Applied to the `.partial()` Update*Schema family. (The notes/expiry update schemas have a single
+ * REQUIRED nullable key, so `{}` already fails their base shape — they don't need this.)
+ */
+export function requireAtLeastOneKey<T extends z.ZodType>(schema: T) {
+  return schema.refine((value) => Object.keys(value as object).length > 0, {
+    error: "At least one field must be provided to update",
+  });
+}

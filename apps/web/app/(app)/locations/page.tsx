@@ -10,6 +10,7 @@ import {
   type LocationType,
   LocationTypeSchema,
 } from "@lazyit/shared";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import {
@@ -173,7 +174,14 @@ export default function LocationsPage() {
           >
             {filtered.map((location) => (
               <TableRow key={location.id}>
-                <TableCell className="font-medium">{location.name}</TableCell>
+                <TableCell className="font-medium">
+                  <Link
+                    href={`/locations/${location.id}`}
+                    className="hover:underline"
+                  >
+                    {location.name}
+                  </Link>
+                </TableCell>
                 <TableCell>
                   <LocationTypeBadge type={location.type} />
                 </TableCell>

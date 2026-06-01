@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -17,7 +16,6 @@ import {
   ApiBody,
   ApiConsumes,
   ApiCreatedResponse,
-  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -25,8 +23,13 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ArticleLinkSchema,
+  ArticleListPageSchema,
   ArticleSchema,
   ArticleStatusSchema,
+  ArticleVersionPageSchema,
+  ArticleVersionSchema,
+  CreateArticleLinkSchema,
   CreateArticleSchema,
   ImportArticleSchema,
   UpdateArticleSchema,
@@ -35,25 +38,24 @@ import {
 import { ArticlesService } from './articles.service';
 import { maxImportBytes } from './article-import';
 import { parseUuidQuery } from '../common/parse-uuid-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
+import { parsePageQuery } from '../common/parse-page-query';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
+import type { User } from '../../generated/prisma/client';
 
+// The detail reads return the full Article (with `content`); the paginated list returns the lean
+// ArticleListItem envelope (content omitted, excerpt kept).
 class ArticleDto extends createZodDto(ArticleSchema) {}
 class CreateArticleDto extends createZodDto(CreateArticleSchema) {}
 class UpdateArticleDto extends createZodDto(UpdateArticleSchema) {}
 class ImportArticleDto extends createZodDto(ImportArticleSchema) {}
-
-// X-User-Id is the auth shim (ADR-0022): on reads it reveals the caller's own drafts; on writes it
-// is required and becomes the author/editor. Declared per-endpoint with the right `required` flag.
-const READ_USER_HEADER = {
-  name: 'X-User-Id',
-  required: false,
-  description: "Caller user id (auth shim). Reveals the caller's own drafts.",
-} as const;
-const WRITE_USER_HEADER = {
-  name: 'X-User-Id',
-  required: true,
-  description:
-    'Caller user id (auth shim). Required; becomes the author/editor.',
-} as const;
+class ArticleListPageDto extends createZodDto(ArticleListPageSchema) {}
+// Versioning + linking (ADR-0042).
+class ArticleVersionDto extends createZodDto(ArticleVersionSchema) {}
+class ArticleVersionPageDto extends createZodDto(ArticleVersionPageSchema) {}
+class ArticleLinkDto extends createZodDto(ArticleLinkSchema) {}
+class CreateArticleLinkDto extends createZodDto(CreateArticleLinkSchema) {}
 
 @ApiTags('articles')
 @Controller('articles')
@@ -63,9 +65,8 @@ export class ArticlesController {
   @Get()
   @ApiOperation({
     summary:
-      'List articles (excludes soft-deleted). Drafts are visible only to their author.',
+      'List articles (paginated; lean — no markdown content, excerpt kept). Excludes soft-deleted; drafts are visible only to their author.',
   })
-  @ApiHeader(READ_USER_HEADER)
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'authorId', required: false })
   @ApiQuery({
@@ -78,13 +79,34 @@ export class ArticlesController {
     required: false,
     description: 'Case-insensitive substring match on title and excerpt',
   })
-  @ApiOkResponse({ type: [ArticleDto] })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: ArticleListPageDto })
   findAll(
-    @Headers('x-user-id') userId?: string,
+    @CurrentUser() user: User | undefined,
     @Query('categoryId') categoryId?: string,
     @Query('authorId') authorId?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
   ) {
     let parsedStatus: ArticleStatus | undefined;
     if (status !== undefined) {
@@ -96,47 +118,106 @@ export class ArticlesController {
       }
       parsedStatus = result.data;
     }
-    return this.articles.findAll(
+    return this.articles.findPage(
       {
-        categoryId,
+        categoryId: parseCuidQuery(categoryId, 'categoryId'),
         authorId: parseUuidQuery(authorId, 'authorId'),
         status: parsedStatus,
         q,
       },
-      userId,
+      parsePageQuery({ limit, offset, page }),
+      user,
     );
   }
 
   @Get('by-slug/:slug')
   @ApiOperation({ summary: 'Get an article by slug' })
-  @ApiHeader(READ_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
   findBySlug(
     @Param('slug') slug: string,
-    @Headers('x-user-id') userId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.articles.findBySlug(slug, userId);
+    return this.articles.findBySlug(slug, user);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get an article by id' })
-  @ApiHeader(READ_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
-  findOne(@Param('id') id: string, @Headers('x-user-id') userId?: string) {
-    return this.articles.findOne(id, userId);
+  findOne(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.findOne(id, user);
+  }
+
+  @Get(':id/versions')
+  @ApiOperation({
+    summary:
+      "List an article's version history (append-only; newest first; paginated). Drafts visible only to their author. (ADR-0042)",
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiOkResponse({ type: ArticleVersionPageDto })
+  findVersions(
+    @Param('id') id: string,
+    @CurrentUser() user?: User,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.articles.listVersions(
+      id,
+      parsePageQuery({ limit, offset, page }),
+      user,
+    );
+  }
+
+  @Get(':id/versions/:version')
+  @ApiOperation({
+    summary: 'Get a single version of an article by its version number (ADR-0042)',
+  })
+  @ApiOkResponse({ type: ArticleVersionDto })
+  findVersion(
+    @Param('id') id: string,
+    @Param('version') version: string,
+    @CurrentUser() user?: User,
+  ) {
+    const parsed = Number(version);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      throw new BadRequestException('version must be a positive integer');
+    }
+    return this.articles.findVersion(id, parsed, user);
+  }
+
+  @Get(':id/links')
+  @ApiOperation({
+    summary:
+      "List an article's links to assets/applications (readable by any reader of the article). (ADR-0042)",
+  })
+  @ApiOkResponse({ type: [ArticleLinkDto] })
+  findLinks(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.findLinks(id, user);
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an article (author = X-User-Id)' })
-  @ApiHeader(WRITE_USER_HEADER)
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({
+    summary: 'Create an article (author = current user) (ADMIN or MEMBER)',
+  })
   @ApiCreatedResponse({ type: ArticleDto })
-  create(@Body() dto: CreateArticleDto, @Headers('x-user-id') userId?: string) {
-    return this.articles.create(dto, userId);
+  create(@Body() dto: CreateArticleDto, @CurrentUser() user?: User) {
+    return this.articles.create(dto, user);
   }
 
   @Post('import')
-  @ApiOperation({ summary: 'Import an article from a .md, .txt or .docx file' })
-  @ApiHeader(WRITE_USER_HEADER)
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({
+    summary:
+      'Import an article from a .md, .txt or .docx file (ADMIN or MEMBER)',
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -163,52 +244,95 @@ export class ArticlesController {
   importArticle(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: ImportArticleDto,
-    @Headers('x-user-id') userId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.articles.importArticle(file, dto, userId);
+    return this.articles.importArticle(file, dto, user);
   }
 
   @Patch(':id')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
-    summary: 'Update an article (author only; never changes status)',
+    summary:
+      'Update an article (author only; never changes status) (ADMIN or MEMBER)',
   })
-  @ApiHeader(WRITE_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
   update(
     @Param('id') id: string,
     @Body() dto: UpdateArticleDto,
-    @Headers('x-user-id') userId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.articles.update(id, dto, userId);
+    return this.articles.update(id, dto, user);
+  }
+
+  @Post(':id/links')
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({
+    summary:
+      'Link an article to an Asset XOR an Application (author only; exactly one target). (ADMIN or MEMBER) (ADR-0042)',
+  })
+  @ApiCreatedResponse({ type: ArticleLinkDto })
+  addLink(
+    @Param('id') id: string,
+    @Body() dto: CreateArticleLinkDto,
+    @CurrentUser() user?: User,
+  ) {
+    return this.articles.addLink(id, dto, user);
+  }
+
+  @Delete(':id/links/:linkId')
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({
+    summary: 'Remove a link from an article (author only). (ADMIN or MEMBER) (ADR-0042)',
+  })
+  @ApiOkResponse({ type: ArticleLinkDto })
+  removeLink(
+    @Param('id') id: string,
+    @Param('linkId') linkId: string,
+    @CurrentUser() user?: User,
+  ) {
+    return this.articles.removeLink(id, linkId, user);
   }
 
   @Post(':id/publish')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
     summary:
-      'Publish an article (author only). Sets publishedAt on first publish.',
+      'Publish an article (author only). Sets publishedAt on first publish. (ADMIN or MEMBER)',
   })
-  @ApiHeader(WRITE_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
-  publish(@Param('id') id: string, @Headers('x-user-id') userId?: string) {
-    return this.articles.publish(id, userId);
+  publish(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.publish(id, user);
   }
 
   @Post(':id/unpublish')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
     summary:
-      'Unpublish an article back to DRAFT (author only). Keeps publishedAt.',
+      'Unpublish an article back to DRAFT (author only). Keeps publishedAt. (ADMIN or MEMBER)',
   })
-  @ApiHeader(WRITE_USER_HEADER)
   @ApiOkResponse({ type: ArticleDto })
-  unpublish(@Param('id') id: string, @Headers('x-user-id') userId?: string) {
-    return this.articles.unpublish(id, userId);
+  unpublish(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.unpublish(id, user);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete an article (author only)' })
-  @ApiHeader(WRITE_USER_HEADER)
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Soft-delete an article (destructive) — ADMIN only',
+  })
   @ApiOkResponse({ type: ArticleDto })
-  remove(@Param('id') id: string, @Headers('x-user-id') userId?: string) {
-    return this.articles.remove(id, userId);
+  remove(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.remove(id, user);
+  }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Restore a soft-deleted article (author only) — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: ArticleDto })
+  restore(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.restore(id, user);
   }
 }

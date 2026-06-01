@@ -21,6 +21,7 @@ type PrismaAssetMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
 };
 
 // The transaction client the service writes through. $transaction is mocked to invoke the callback
@@ -35,8 +36,11 @@ type AssetData = Record<string, unknown>;
 type CreateCall = [{ data: AssetData }];
 type UpdateCall = [{ where: { id: string }; data: AssetData }];
 
-// A well-formed UUID used as the X-User-Id actor where a resolved actor matters.
+// A well-formed UUID used as the actor where a resolved actor matters.
 const ACTOR_ID = '11111111-1111-1111-1111-111111111111';
+// Minimal User shape for tests — the full Prisma User type, but only id matters here.
+type MinimalUser = { id: string };
+const ACTOR_USER: MinimalUser = { id: ACTOR_ID };
 
 // The nested relations the expanded reads request. Mirrors ASSET_RELATIONS in the service: model
 // (+category), location, and the active owners (releasedAt null) each with their user.
@@ -49,6 +53,73 @@ const EXPECTED_INCLUDE = {
     include: { user: true },
   },
 };
+
+// The lean projection the paginated LIST (findPage) requests. Mirrors ASSET_LIST_SELECT in the
+// service: every column EXCEPT the `specs` jsonb, plus trimmed joins (model+category, location,
+// active owners). This is what asserts the lean select (no specs, trimmed relations).
+const EXPECTED_LIST_SELECT = {
+  id: true,
+  name: true,
+  serial: true,
+  assetTag: true,
+  status: true,
+  notes: true,
+  purchaseDate: true,
+  warrantyEnd: true,
+  modelId: true,
+  locationId: true,
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+  model: {
+    select: {
+      id: true,
+      name: true,
+      manufacturer: true,
+      category: { select: { id: true, name: true } },
+    },
+  },
+  location: { select: { id: true, name: true, type: true } },
+  assignments: {
+    where: { releasedAt: null },
+    orderBy: { assignedAt: 'desc' },
+    select: {
+      id: true,
+      userId: true,
+      user: {
+        select: { id: true, firstName: true, lastName: true, email: true },
+      },
+    },
+  },
+};
+
+// A lean row as the LIST query returns it (no `specs`; trimmed joins) before the service renames
+// `assignments` -> `activeAssignments`. Overridable per test.
+const leanRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 'a1',
+  name: 'SRV-01',
+  serial: null,
+  assetTag: null,
+  status: 'OPERATIONAL',
+  notes: null,
+  purchaseDate: null,
+  warrantyEnd: null,
+  modelId: 'm1',
+  locationId: 'l1',
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  deletedAt: null,
+  model: { id: 'm1', name: 'Latitude', manufacturer: 'Dell', category: null },
+  location: { id: 'l1', name: 'HQ', type: 'OFFICE' },
+  assignments: [
+    {
+      id: 'as1',
+      userId: 'u1',
+      user: { id: 'u1', firstName: 'A', lastName: 'B', email: 'a@b.co' },
+    },
+  ],
+  ...overrides,
+});
 
 // A raw Prisma row as returned by findMany/findFirst with the include (before the service maps
 // `assignments` -> `activeAssignments`). Overridable per test.
@@ -109,18 +180,27 @@ describe('AssetsService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
     };
     // The transaction client the writes go through; $transaction runs the callback with it.
     tx = { create: jest.fn(), update: jest.fn() };
     prisma = {
       asset,
-      $transaction: jest.fn((cb: (client: { asset: TxAssetMock }) => unknown) =>
-        cb({ asset: tx }),
+      // create/update/remove pass a CALLBACK (interactive tx); findPage passes an ARRAY of two
+      // promises (findMany + count). Support both forms.
+      $transaction: jest.fn(
+        (
+          arg:
+            | ((client: { asset: TxAssetMock }) => unknown)
+            | Array<Promise<unknown>>,
+        ) =>
+          Array.isArray(arg) ? Promise.all(arg) : arg({ asset: tx }),
       ),
     };
-    // ActorService is mocked; the shim-validation details live in actor.service.spec.ts. Here we
+    // ActorService is mocked; the guard validation detail lives in jwt-auth.guard.spec.ts. Here we
     // just steer resolve() and assert the service delegates to it. Default: no actor (undefined).
-    actor = { resolve: jest.fn().mockResolvedValue(undefined) };
+    // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
+    actor = { resolve: jest.fn().mockReturnValue(undefined) };
     history = { record: jest.fn(), list: jest.fn() };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
@@ -187,24 +267,24 @@ describe('AssetsService', () => {
   });
 
   it('resolves the actor via ActorService and stamps it onto the CREATED event', async () => {
-    actor.resolve.mockResolvedValue(ACTOR_ID);
+    actor.resolve.mockReturnValue(ACTOR_ID);
     const dto = { name: 'SRV-01', status: 'OPERATIONAL' as const };
     tx.create.mockResolvedValue({ id: 'a1', ...dto });
 
-    await service.create(dto, ACTOR_ID);
+    await service.create(dto, ACTOR_USER as never);
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_ID);
+    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     expect(history.record).toHaveBeenCalledWith(
       { asset: tx },
       { assetId: 'a1', eventType: 'CREATED', performedById: ACTOR_ID },
     );
   });
 
-  it('propagates a BadRequest from the actor shim and never opens the transaction', async () => {
-    actor.resolve.mockRejectedValue(new BadRequestException());
+  it('propagates a thrown error from the actor resolver and never opens the transaction', async () => {
+    actor.resolve.mockImplementation(() => { throw new BadRequestException(); });
 
     await expect(
-      service.create({ name: 'SRV-01', status: 'OPERATIONAL' }, 'bad'),
+      service.create({ name: 'SRV-01', status: 'OPERATIONAL' }, ACTOR_USER as never),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(tx.create).not.toHaveBeenCalled();
@@ -275,74 +355,103 @@ describe('AssetsService', () => {
     );
   });
 
-  // --- findAll (expanded) -------------------------------------------------
-  it('findAll without filters: excludes soft-deleted, newest first, with relations', async () => {
+  // --- findPage (paginated, lean) -----------------------------------------
+  it('findPage uses the LEAN select (no specs; trimmed joins), newest first, with take/skip', async () => {
     asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
 
-    await service.findAll();
+    await service.findPage({}, { limit: 50, offset: 0 });
 
     expect(asset.findMany).toHaveBeenCalledWith({
       where: {},
       orderBy: { createdAt: 'desc' },
-      include: EXPECTED_INCLUDE,
+      take: 50,
+      skip: 0,
+      select: EXPECTED_LIST_SELECT,
     });
+    // The lean select must NOT request the specs jsonb (the whole point of the projection).
+    const selectArg = (
+      asset.findMany.mock.calls as Array<
+        [{ select: Record<string, unknown> }]
+      >
+    )[0][0].select;
+    expect(selectArg).not.toHaveProperty('specs');
   });
 
-  it('findAll maps each row assignments -> activeAssignments', async () => {
+  it('findPage runs findMany + count over the SAME where inside one $transaction', async () => {
+    asset.findMany.mockResolvedValue([leanRow()]);
+    asset.count.mockResolvedValue(7);
+
+    const result = await service.findPage(
+      { status: 'RETIRED', locationId: 'l1' },
+      { limit: 10, offset: 20 },
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: unknown; take: number; skip: number }]>
+    )[0][0];
+    const countArgs = (
+      asset.count.mock.calls as Array<[{ where: unknown }]>
+    )[0][0];
+    // Identical where feeds both queries; take/skip come from the window.
+    expect(findManyArgs.where).toEqual({ locationId: 'l1', status: 'RETIRED' });
+    expect(findManyArgs.take).toBe(10);
+    expect(findManyArgs.skip).toBe(20);
+    expect(countArgs.where).toEqual({ locationId: 'l1', status: 'RETIRED' });
+    // The envelope echoes the window and carries the total.
+    expect(result.total).toBe(7);
+    expect(result.limit).toBe(10);
+    expect(result.offset).toBe(20);
+  });
+
+  it('findPage maps each lean row assignments -> activeAssignments (no `assignments` key leaks)', async () => {
     asset.findMany.mockResolvedValue([
-      rawRow({
+      leanRow({
         assignments: [
-          { id: 'as1', releasedAt: null, user: { id: 'u1' } },
-          { id: 'as2', releasedAt: null, user: { id: 'u2' } },
+          { id: 'as1', userId: 'u1', user: { id: 'u1' } },
+          { id: 'as2', userId: 'u2', user: { id: 'u2' } },
         ],
       }),
     ]);
+    asset.count.mockResolvedValue(1);
 
-    const result = await service.findAll();
+    const result = await service.findPage({}, { limit: 50, offset: 0 });
 
-    expect(result[0]).not.toHaveProperty('assignments');
-    expect(result[0].activeAssignments).toHaveLength(2);
+    expect(result.items[0]).not.toHaveProperty('assignments');
+    expect(result.items[0]).not.toHaveProperty('specs');
+    expect(result.items[0].activeAssignments).toHaveLength(2);
   });
 
-  it('the assignments include filters to active (releasedAt null) so released owners are excluded', async () => {
+  it('the lean assignments select filters to active (releasedAt null) so released owners are excluded', async () => {
     asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
 
-    await service.findAll();
+    await service.findPage({}, { limit: 50, offset: 0 });
 
     const calls = asset.findMany.mock.calls as Array<
-      [{ include: { assignments: { where: unknown } } }]
+      [{ select: { assignments: { where: unknown } } }]
     >;
-    expect(calls[0][0].include.assignments.where).toEqual({ releasedAt: null });
+    expect(calls[0][0].select.assignments.where).toEqual({ releasedAt: null });
   });
 
-  it('findAll filters by status and locationId', async () => {
+  it('findPage filters by categoryId through the related model', async () => {
     asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
 
-    await service.findAll({ status: 'RETIRED', locationId: 'l1' });
+    await service.findPage({ categoryId: 'c1' }, { limit: 50, offset: 0 });
 
-    expect(asset.findMany).toHaveBeenCalledWith({
-      where: { locationId: 'l1', status: 'RETIRED' },
-      orderBy: { createdAt: 'desc' },
-      include: EXPECTED_INCLUDE,
-    });
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({ model: { categoryId: 'c1' } });
   });
 
-  it('findAll filters by categoryId through the related model', async () => {
+  it('findPage filters by q (case-insensitive OR over name/serial/assetTag)', async () => {
     asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
 
-    await service.findAll({ categoryId: 'c1' });
-
-    expect(asset.findMany).toHaveBeenCalledWith({
-      where: { model: { categoryId: 'c1' } },
-      orderBy: { createdAt: 'desc' },
-      include: EXPECTED_INCLUDE,
-    });
-  });
-
-  it('findAll filters by q (case-insensitive OR over name/serial/assetTag)', async () => {
-    asset.findMany.mockResolvedValue([]);
-
-    await service.findAll({ q: 'srv' });
+    await service.findPage({ q: 'srv' }, { limit: 50, offset: 0 });
 
     const calls = asset.findMany.mock.calls as Array<
       [{ where: Record<string, unknown> }]
@@ -396,13 +505,13 @@ describe('AssetsService', () => {
   });
 
   it('update resolves the actor via ActorService before opening the transaction', async () => {
-    actor.resolve.mockResolvedValue(ACTOR_ID);
+    actor.resolve.mockReturnValue(ACTOR_ID);
     asset.findFirst.mockResolvedValue(beforeRow());
     tx.update.mockResolvedValue(beforeRow({ status: 'RETIRED' }));
 
-    await service.update('a1', { status: 'RETIRED' }, ACTOR_ID);
+    await service.update('a1', { status: 'RETIRED' }, ACTOR_USER as never);
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_ID);
+    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     const calls = history.record.mock.calls as Array<
       [unknown, { performedById?: string }]
     >;
@@ -514,12 +623,23 @@ describe('AssetsService', () => {
     expect(history.record).not.toHaveBeenCalled();
   });
 
-  it('does not emit SPECS_CHANGED when specs are deep-equal (compared by JSON)', async () => {
+  it('does not emit SPECS_CHANGED when the specs are structurally equal', async () => {
     const specs = { ram: '64GB' };
     asset.findFirst.mockResolvedValue(beforeRow({ specs }));
     tx.update.mockResolvedValue(beforeRow({ specs: { ram: '64GB' } }));
 
     await service.update('a1', { specs: { ram: '64GB' } });
+
+    expect(history.record).not.toHaveBeenCalled();
+  });
+
+  it('does not emit a spurious SPECS_CHANGED when only the jsonb key ORDER differs', async () => {
+    // jsonb does not preserve key order, so a re-save can come back with keys reordered. The deep
+    // compare must treat this as no change (the false-positive this fix removes — see deep-equal.ts).
+    asset.findFirst.mockResolvedValue(beforeRow({ specs: { cpu: 'i7', ram: '64GB' } }));
+    tx.update.mockResolvedValue(beforeRow({ specs: { ram: '64GB', cpu: 'i7' } }));
+
+    await service.update('a1', { specs: { ram: '64GB', cpu: 'i7' } });
 
     expect(history.record).not.toHaveBeenCalled();
   });
@@ -542,11 +662,11 @@ describe('AssetsService', () => {
   });
 
   it('records a DELETED history event on soft delete', async () => {
-    actor.resolve.mockResolvedValue(ACTOR_ID);
+    actor.resolve.mockReturnValue(ACTOR_ID);
     asset.findFirst.mockResolvedValue({ id: 'a1' });
     tx.update.mockResolvedValue({ id: 'a1', deletedAt: new Date() });
 
-    await service.remove('a1', ACTOR_ID);
+    await service.remove('a1', ACTOR_USER as never);
 
     expect(history.record).toHaveBeenCalledTimes(1);
     expect(history.record).toHaveBeenCalledWith(
@@ -565,5 +685,75 @@ describe('AssetsService', () => {
     expect(tx.update).not.toHaveBeenCalled();
     expect(history.record).not.toHaveBeenCalled();
     expect(search.remove).not.toHaveBeenCalled();
+  });
+
+  // --- restore (ADR-0041) --------------------------------------------------
+  it('restore clears deletedAt and emits a RESTORED history event in the transaction', async () => {
+    actor.resolve.mockReturnValue(ACTOR_ID);
+    // 1st findFirst: the soft-deleted lookup (includeSoftDeleted). 2nd: findOne after restore.
+    asset.findFirst
+      .mockResolvedValueOnce({ id: 'a1', deletedAt: new Date() })
+      .mockResolvedValueOnce({
+        id: 'a1',
+        deletedAt: null,
+        assignments: [],
+        model: null,
+        location: null,
+      });
+    tx.update.mockResolvedValue({ id: 'a1', deletedAt: null });
+
+    await service.restore('a1', ACTOR_USER as never);
+
+    // The first lookup uses the includeSoftDeleted escape hatch (so a soft-deleted asset is visible).
+    const firstLookup = asset.findFirst.mock.calls[0][0] as {
+      includeSoftDeleted?: boolean;
+    };
+    expect(firstLookup.includeSoftDeleted).toBe(true);
+    // deletedAt is cleared inside a transaction (never a plain update).
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    const calls = tx.update.mock.calls as UpdateCall[];
+    expect(calls[0][0].where).toEqual({ id: 'a1' });
+    expect(calls[0][0].data.deletedAt).toBeNull();
+    // RESTORED is emitted atomically (ADR-0033/0041), attributed to the actor.
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      { assetId: 'a1', eventType: 'RESTORED', performedById: ACTOR_ID },
+    );
+    // Re-indexed after restore (ADR-0035).
+    expect(search.upsert).toHaveBeenCalledWith(
+      'assets',
+      expect.objectContaining({ id: 'a1' }),
+    );
+  });
+
+  it('restore is idempotent on an already-live asset: no transaction, no RESTORED event', async () => {
+    asset.findFirst
+      // The includeSoftDeleted lookup returns a live row (deletedAt null)...
+      .mockResolvedValueOnce({ id: 'a1', deletedAt: null })
+      // ...then findOne returns the expanded live row.
+      .mockResolvedValueOnce({
+        id: 'a1',
+        deletedAt: null,
+        assignments: [],
+        model: null,
+        location: null,
+      });
+
+    await service.restore('a1');
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(history.record).not.toHaveBeenCalled();
+    expect(tx.update).not.toHaveBeenCalled();
+  });
+
+  it('restore 404s (no transaction) when the asset never existed', async () => {
+    asset.findFirst.mockResolvedValue(null);
+
+    await expect(service.restore('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(history.record).not.toHaveBeenCalled();
   });
 });

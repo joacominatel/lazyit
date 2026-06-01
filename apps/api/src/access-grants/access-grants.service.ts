@@ -6,11 +6,14 @@ import {
 } from '@nestjs/common';
 import type {
   CreateAccessGrant,
+  PageQuery,
   RevokeAccessGrant,
   UpdateAccessGrantExpiry,
   UpdateAccessGrantNotes,
 } from '@lazyit/shared';
+import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
+import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 
@@ -24,9 +27,8 @@ export interface FindAccessGrantsFilters {
 
 /**
  * AccessGrant — the User↔Application access join (append-only, revoked via `revokedAt`; ADR-0023).
- * The actor (`grantedById` on create, `revokedById` on revoke) comes from the optional `X-User-Id`
- * shim via the shared {@link ActorService} — never the request body (ADR-0022/0024). When real auth
- * lands, the actor comes from the JWT and these methods are unchanged.
+ * The actor (`grantedById` on create, `revokedById` on revoke) comes from the authenticated User
+ * resolved by JwtAuthGuard (@CurrentUser()) — never the request body (ADR-0022/0024/0038).
  */
 @Injectable()
 export class AccessGrantsService {
@@ -39,14 +41,48 @@ export class AccessGrantsService {
    * Grants, newest first. Filters: user, application, `activeOnly` (only `revokedAt = null`,
    * default true) and `includeExpired` (default true; when false, hides grants already past their
    * `expiresAt`). `expiresAt` never changes activeness — it's informative (ADR-0023).
+   *
+   * Unpaginated — still used by the inherently-scoped nested lists (`/users/:id/access-grants`,
+   * `/applications/:id/access-grants`). The top-level `GET /access-grants` uses {@link findPage}.
    */
-  findAll({
+  findAll(filters: FindAccessGrantsFilters) {
+    return this.prisma.accessGrant.findMany({
+      where: this.buildWhere(filters),
+      orderBy: { grantedAt: 'desc' },
+    });
+  }
+
+  /**
+   * A single page of grants (newest first) for the top-level `GET /access-grants` — the most
+   * sensitive unbounded list (ADR-0030/SEC-007). Runs the page `findMany(take/skip)` and the `count`
+   * over the **same** `where` inside one `$transaction`, so the `total` can't drift from the page
+   * under concurrent inserts/revokes. Same filters as {@link findAll}.
+   */
+  async findPage(filters: FindAccessGrantsFilters, page: PageQuery) {
+    const where = this.buildWhere(filters);
+    const { take, skip } = offsetOf(page);
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.accessGrant.findMany({
+        where,
+        orderBy: { grantedAt: 'desc' },
+        take,
+        skip,
+      }),
+      this.prisma.accessGrant.count({ where }),
+    ]);
+    // The Prisma rows carry `Date`s; the API serializes them to the ISO-string wire shape at the
+    // HTTP boundary (same as findAll/findOne) — the AccessGrantListPage DTO documents that shape.
+    return pageOf(items, total, page);
+  }
+
+  /** The shared `where` for the grant lists — used identically by findAll, findPage and its count. */
+  private buildWhere({
     userId,
     applicationId,
     activeOnly = true,
     includeExpired = true,
-  }: FindAccessGrantsFilters) {
-    const where: Prisma.AccessGrantWhereInput = {
+  }: FindAccessGrantsFilters): Prisma.AccessGrantWhereInput {
+    return {
       ...(userId ? { userId } : {}),
       ...(applicationId ? { applicationId } : {}),
       ...(activeOnly ? { revokedAt: null } : {}),
@@ -54,10 +90,6 @@ export class AccessGrantsService {
         ? {}
         : { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }),
     };
-    return this.prisma.accessGrant.findMany({
-      where,
-      orderBy: { grantedAt: 'desc' },
-    });
   }
 
   /** A single grant by id; throws 404 if missing. (No soft delete — none to filter.) */
@@ -73,10 +105,10 @@ export class AccessGrantsService {
    * Open a grant (give a user access to an application). `userId` and `applicationId` must reference
    * **live** (non-soft-deleted) rows → 400 otherwise (don't grant access to a decommissioned app or
    * a departed user). Multi-grant is allowed: no uniqueness check. `grantedById` is set from the
-   * `X-User-Id` shim when present (null = system/unknown).
+   * authenticated User when present (null = system/unknown).
    */
-  async create(data: CreateAccessGrant, actorId?: string) {
-    const grantedById = await this.actor.resolve(actorId);
+  async create(data: CreateAccessGrant, user?: User) {
+    const grantedById = this.actor.resolve(user);
     await this.assertUserUsable(data.userId);
     await this.assertApplicationUsable(data.applicationId);
     return this.prisma.accessGrant.create({
@@ -99,16 +131,16 @@ export class AccessGrantsService {
   }
 
   /**
-   * Revoke an active grant: set `revokedAt = now()` (+ `revokedById` from the shim, optional `notes`).
-   * 404 if missing; 409 if already revoked (revoke is not repeatable). Revoking one grant does not
-   * affect any other grant the same user holds on the same application.
+   * Revoke an active grant: set `revokedAt = now()` (+ `revokedById` from the authenticated User,
+   * optional `notes`). 404 if missing; 409 if already revoked (revoke is not repeatable). Revoking
+   * one grant does not affect any other grant the same user holds on the same application.
    */
-  async revoke(id: string, data: RevokeAccessGrant, actorId?: string) {
+  async revoke(id: string, data: RevokeAccessGrant, user?: User) {
     const grant = await this.findOne(id);
     if (grant.revokedAt !== null) {
       throw new ConflictException(`AccessGrant ${id} is already revoked`);
     }
-    const revokedById = await this.actor.resolve(actorId);
+    const revokedById = this.actor.resolve(user);
     return this.prisma.accessGrant.update({
       where: { id },
       data: {

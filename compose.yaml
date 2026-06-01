@@ -1,0 +1,508 @@
+# lazyit — canonical Compose definition (ALL services). See ADR-0025/0026/0028/0037 and
+# docs/05-runbooks/. Layout decided in docs/01-architecture/auth-zitadel-sot.md §9.
+#
+# This single file is the source of truth for every service. Profiles split the two audiences:
+#   - UNPROFILED backing services (db, meilisearch, zitadel, zitadel_db) come up by default and
+#     back native `bun run dev` (api/web run on the host). `compose.override.yaml` (auto-loaded)
+#     tunes THEM for dev: loopback-only ports, no TLS, no resource ceilings.
+#   - profiles: [prod] services (api, web, migrate, caddy, backup) only come up under --profile prod,
+#     i.e. the full containerized stack. Room is reserved for a future `zitadel-bootstrap` sidecar.
+#
+# DEV (from the repo ROOT) — backing services only, loopback ports, apps run via `bun run dev`:
+#   docker compose up -d            # auto-merges compose.override.yaml
+#
+# PROD (from the repo ROOT), after `cp infra/env/.env.prod.example infra/env/.env.prod`:
+#   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
+#     --profile prod --env-file infra/env/.env.prod up -d --build
+#
+# --env-file is required in prod: the `environment:` blocks use ${VAR} interpolation resolved by
+# Compose at parse time (from shell or --env-file), NOT from the service's env_file directive.
+#
+# Only Caddy publishes host ports in prod (8080/8443 by default). db/api/web/zitadel stay on the
+# internal network — neither Postgres instance is ever exposed to the host (SEC-005 / ADR-0028).
+# Zitadel is served at auth.{LAZYIT_DOMAIN} via Caddy (ADR-0037 / ADR-0026).
+#
+# Image digest-pinning (ADR-0025 follow-up): every base image is pinned by @sha256 so a deploy is
+# byte-reproducible and a re-pulled rolling tag (node:26-alpine, caddy:2-alpine) can't silently
+# change underneath the operator. The human-readable tag is kept in a comment beside each digest;
+# re-pin after a deliberate upgrade with the command noted at the bottom of this file.
+#
+# Log rotation + resource limits: every long-running service gets the shared `logging` anchor
+# (json-file, 10m x 3) so container logs can't fill the disk over months, plus a modest
+# mem_limit/cpus ceiling so one runaway service can't OOM/CPU-starve the single host. Tune the
+# limits to your box; the sizing table lives in docs/05-runbooks/deploy-self-hosted.md.
+# (compose.override.yaml drops these for plain dev — they only bind under the prod merge.)
+
+name: lazyit
+
+# Shared log-rotation policy — referenced by every long-running service via `logging: *default-logging`.
+# Caps each container's json-file log at 10 MB x 3 files (30 MB), preventing unbounded growth on a
+# long-lived single host (would otherwise fill /var/lib/docker and crash the Docker daemon).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # --- PostgreSQL — internal network only, no published port (prod) ---------
+  # UNPROFILED: comes up on plain `docker compose up` for native dev. compose.override.yaml
+  # publishes 127.0.0.1:5432 and drops the resource ceiling for local work.
+  db:
+    # postgres:18-alpine — pinned by digest (rolling tag; re-pin on a deliberate bump).
+    image: postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88
+    restart: unless-stopped
+    shm_size: 256mb
+    logging: *default-logging
+    # Holds ALL app data — give it the most RAM headroom on the host.
+    mem_limit: 1g
+    cpus: 1.5
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-lazyit}
+    volumes:
+      # postgres:18 mounts the volume parent (PGDATA = /var/lib/postgresql/18/docker). Keep this
+      # path tracking the major version on any upgrade — see docs/05-runbooks/backups.md.
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      # $$ escapes compose interpolation so the check reads the container's env at runtime
+      # (works for both the dev POSTGRES_USER=postgres and the prod POSTGRES_USER=lazyit).
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-lazyit} -d $${POSTGRES_DB:-lazyit}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [internal]
+
+  # --- One-shot migrate + seed: runs after db is healthy, before the API (prod) ----
+  migrate:
+    profiles: [prod]
+    build:
+      context: .
+      dockerfile: infra/docker/migrate.Dockerfile
+    image: lazyit-migrate:dev
+    restart: "no"
+    logging: *default-logging
+    mem_limit: 512m
+    cpus: 1.0
+    env_file: [infra/env/.env.prod]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+
+  # --- API (NestJS on Node) — internal only (prod) ------------------------
+  api:
+    profiles: [prod]
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    image: lazyit-api:dev
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 512m
+    cpus: 1.0
+    env_file: [infra/env/.env.prod]
+    # Zero-touch OIDC (ADR-0043 Phase 3, §4c): the zitadel-bootstrap sidecar GENERATES the OIDC client
+    # (id/secret), issuer, JWKS URI and the lazyit PROJECT ID at first boot and writes them to
+    # oidc-client.json in the shared zitadel_secrets volume (mounted read-only in
+    # infra/docker-compose.prod.yaml). The api reads that file at startup (path = OIDC_CLIENT_FILE) and
+    # back-fills any of OIDC_ISSUER / OIDC_CLIENT_ID / OIDC_CLIENT_SECRET / OIDC_JWKS_URI /
+    # ZITADEL_MGMT_PROJECT_ID it does not already get from env_file (.env.prod). Explicit env ALWAYS
+    # wins (BYOI). => the operator no longer hand-copies the client id/secret OR the project id.
+    # The Phase-2 ZitadelManagementService reads the runtime SA key from ZITADEL_MGMT_SA_KEY_PATH
+    # (sa-key.json, also written by the sidecar) and grants the project's ADMIN/MEMBER/VIEWER roles on
+    # the resolved project id.
+    environment:
+      ZITADEL_MGMT_SA_KEY_PATH: ${ZITADEL_MGMT_SA_KEY_PATH:-/zitadel-secrets/sa-key.json}
+      # Where the api reads the sidecar's OIDC client/project file. Defaults to the mounted path.
+      OIDC_CLIENT_FILE: ${OIDC_CLIENT_FILE:-/zitadel-secrets/oidc-client.json}
+      # OPTIONAL override: pin the project id to fail clear if it ever drifts. Normally LEFT UNSET —
+      # it comes from oidc-client.json (bundled flow). Set only for BYOI without the sidecar.
+      ZITADEL_MGMT_PROJECT_ID: ${ZITADEL_MGMT_PROJECT_ID:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      # Gate the api on the bootstrap COMPLETING successfully — so OIDC_CLIENT_* / sa-key.json exist
+      # before the api validates its OIDC config at boot (ADR-0043 §4c/§4d).
+      zitadel-bootstrap:
+        condition: service_completed_successfully
+    networks: [internal]
+
+  # --- Web (Next.js standalone on Node) — internal only (prod) ------------
+  web:
+    profiles: [prod]
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+      args:
+        # Baked at build time. Relative /api keeps the image domain-portable (ADR-0026).
+        NEXT_PUBLIC_API_URL: /api
+    image: lazyit-web:dev
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 256m
+    cpus: 0.5
+    # Auth.js runs server-side and reads these at RUNTIME (ADR-0039). Scoped explicitly rather
+    # than env_file so the web container never sees the DB / Zitadel / Meili secrets it has no
+    # use for (ADR-0028 least-privilege). Requires --env-file for the ${...} interpolation.
+    # Zero-touch OIDC (ADR-0043 Phase 3, §4c): when AUTH_ISSUER / AUTH_CLIENT_ID / AUTH_CLIENT_SECRET
+    # are left unset (the bundled-Zitadel flow), the web reads the sidecar's oidc-client.json at
+    # startup (path = OIDC_CLIENT_FILE, mounted read-only) and maps its OIDC_* values onto these
+    # AUTH_* vars (+ derives AUTH_INTERNAL_ISSUER from the file's internal JWKS origin). Explicit
+    # AUTH_* env ALWAYS wins (BYOI). => no hand-copied client id/secret on the web side either.
+    environment:
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_TRUST_HOST: "true"            # trust Caddy's X-Forwarded-Host (behind reverse proxy)
+      # Canonical public origin. Pins the OIDC redirect_uri to the external URL
+      # (https://host/api/auth/callback/oidc); without it Auth.js infers the container's own
+      # 0.0.0.0:3000 and the redirect_uri won't match what's registered in the IdP.
+      AUTH_URL: ${WEB_ORIGIN}
+      # OPTIONAL in the bundled flow — leave these unset and the sidecar's oidc-client.json supplies
+      # them at startup. Set them only for BYOI (your own IdP, no bundled Zitadel).
+      AUTH_ISSUER: ${AUTH_ISSUER:-}
+      AUTH_CLIENT_ID: ${AUTH_CLIENT_ID:-}
+      AUTH_CLIENT_SECRET: ${AUTH_CLIENT_SECRET:-}
+      AUTH_INTERNAL_ISSUER: ${AUTH_INTERNAL_ISSUER:-}
+      # Where the web reads the sidecar's OIDC client file. Defaults to the mounted path.
+      OIDC_CLIENT_FILE: ${OIDC_CLIENT_FILE:-/zitadel-secrets/oidc-client.json}
+    depends_on:
+      # Wait for the zero-touch bootstrap to finish so the OIDC client (id/secret) exists before the
+      # web server boots Auth.js (ADR-0043 §4c/§4d). The web reads AUTH_CLIENT_* from .env.prod when
+      # set; otherwise from oidc-client.json on the shared (read-only) volume the sidecar writes.
+      zitadel-bootstrap:
+        condition: service_completed_successfully
+    networks: [internal]
+
+  # --- Zitadel's own PostgreSQL — separate from the app DB (ADR-0037) -----
+  # Hard requirement: Zitadel does aggressive schema migrations. Separate DB means
+  # independent backups and a clean BYOI removal path (remove zitadel + zitadel_db,
+  # change OIDC_ISSUER — no impact on the app DB).
+  # Never published to the host — internal network only (ADR-0028).
+  # UNPROFILED: comes up on plain `docker compose up` (Zitadel is part of the dev backing stack).
+  zitadel_db:
+    # postgres:16-alpine — pinned by digest. NOTE: this is Postgres 16 (PGDATA layout differs
+    # from the app's PG18 db). Re-pin on a deliberate bump; see docs/05-runbooks/backups.md.
+    image: postgres:16-alpine@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
+    restart: unless-stopped
+    shm_size: 64mb
+    logging: *default-logging
+    mem_limit: 256m
+    cpus: 0.5
+    environment:
+      POSTGRES_USER: ${ZITADEL_DB_USER:-zitadel}
+      POSTGRES_PASSWORD: ${ZITADEL_DB_PASSWORD}
+      POSTGRES_DB: ${ZITADEL_DB_NAME:-zitadel}
+    volumes:
+      # postgres:16 default PGDATA = /var/lib/postgresql/data; the data/ subdir lands inside this
+      # mounted parent so it persists, but the path must track the major version on any upgrade.
+      - zitadel_db_data:/var/lib/postgresql
+    healthcheck:
+      # $$ escapes compose interpolation so the check reads the container's env at runtime.
+      test: ["CMD-SHELL", "pg_isready -U $${ZITADEL_DB_USER:-zitadel} -d $${ZITADEL_DB_NAME:-zitadel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [internal]
+
+  # --- Zitadel secrets-volume permission fixer — ONE-SHOT, root (prod) ----------------
+  # ADR-0043 Phase 3 (dossier §4e). A freshly-created named volume is owned root:root (mode 0755), but the
+  # `zitadel` container runs as a NON-ROOT user (uid ~1000). Without this, Zitadel's start-from-init
+  # cannot write its FirstInstance machine key (`open /zitadel-secrets/bootstrap-key.json: permission
+  # denied`): the 03_default_instance migration fatals after partially creating the instance and the
+  # container restart-loops ("Errors.Instance.Domain.AlreadyExists"). This tiny init service runs as
+  # root and chmods the dir 0777 BEFORE Zitadel starts, so ANY container uid (Zitadel ~1000, the
+  # bootstrap sidecar as root, …) can create files in it. The dir-level 0777 is an acceptable tradeoff
+  # here: zitadel_secrets is an INTERNAL-only named volume on a single host (ADR-0028), and the
+  # per-file mode still governs read access (the sidecar writes 0644 outputs; 0600 stays on the
+  # machine key). restart:"no" → runs once. NO other dependency — it only prepares the volume.
+  zitadel-secrets-init:
+    profiles: [prod]
+    # alpine:3.21 — pinned by digest (matches infra/docker/zitadel-bootstrap.Dockerfile).
+    image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    user: "0:0"
+    restart: "no"
+    logging: *default-logging
+    command: ["sh", "-c", "chmod 0777 /zitadel-secrets"]
+    volumes:
+      - zitadel_secrets:/zitadel-secrets
+    networks: [internal]
+
+  # --- Zitadel IdP — internal only; Caddy terminates TLS at auth.{domain} (prod) --------
+  # Admin console: https://auth.yourdomain.com/ui/console
+  # OIDC discovery: https://auth.yourdomain.com/.well-known/openid-configuration
+  # --tlsMode external: Caddy terminates TLS and Zitadel serves HTTP internally, but Zitadel
+  # generates https:// URLs for clients (and sets ExternalSecure=true). `disabled` would emit
+  # http:// URLs the browser blocks via CSP — see ADR-0037 and Zitadel TLS modes docs.
+  # First start runs `start-from-init`: initialises the DB schema + creates the admin user.
+  # See docs/05-runbooks/auth-bootstrap.md for the full bootstrap procedure.
+  # UNPROFILED: comes up on plain `docker compose up`. compose.override.yaml flips it to the dev
+  # form (loopback :8080, --tlsMode disabled, EXTERNALSECURE=false — no Caddy in front).
+  zitadel:
+    # ghcr.io/zitadel/zitadel:v2.68.0 — pinned by digest. Always back up zitadel_db AND keep the
+    # matching ZITADEL_MASTERKEY before a deliberate bump (see docs/05-runbooks/backups.md).
+    image: ghcr.io/zitadel/zitadel:v2.68.0@sha256:9e0e672e4467fd5b1ad07acf206d61e096886e44ca1347c2deef8b65f8ace2b5
+    command: start-from-init --masterkey "${ZITADEL_MASTERKEY}" --tlsMode external
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 512m
+    cpus: 1.0
+    environment:
+      ZITADEL_DATABASE_POSTGRES_HOST: zitadel_db
+      ZITADEL_DATABASE_POSTGRES_PORT: "5432"
+      ZITADEL_DATABASE_POSTGRES_DATABASE: ${ZITADEL_DB_NAME:-zitadel}
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: ${ZITADEL_DB_USER:-zitadel}
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: ${ZITADEL_DB_PASSWORD}
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: ${ZITADEL_DB_USER:-zitadel}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${ZITADEL_DB_PASSWORD}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+      ZITADEL_EXTERNALSECURE: "true"    # prod: behind Caddy HTTPS (ADR-0037)
+      # Must match LAZYIT_HTTPS_PORT — Zitadel embeds this in console URLs and token issuer.
+      # Default 443 (real domain); set to 8443 in .env.prod for local non-standard ports.
+      ZITADEL_EXTERNALPORT: "${LAZYIT_HTTPS_PORT:-443}"
+      ZITADEL_EXTERNALDOMAIN: ${ZITADEL_EXTERNALDOMAIN:-localhost}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: ${ZITADEL_ADMIN_USERNAME:-admin}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASSWORD}
+      # Zero-touch bootstrap (ADR-0043 §4a): start-from-init ALSO creates a MACHINE user (granted
+      # IAM_OWNER) and writes its private key (JSON, MACHINEKEY_TYPE=1) to MACHINEKEYPATH inside the
+      # shared zitadel_secrets volume. The `zitadel-bootstrap` sidecar reads that key to authenticate
+      # to the Management API (Private-Key JWT) and provision the project/app/roles/SA with NO console
+      # access. Idempotent on subsequent boots (start-from-init skips an existing first-instance).
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: ${ZITADEL_BOOTSTRAP_USERNAME:-zitadel-bootstrap}
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: "lazyit Bootstrap Service Account"
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_TYPE: "1"   # 1 = JSON (the only supported value)
+      ZITADEL_FIRSTINSTANCE_MACHINEKEYPATH: /zitadel-secrets/bootstrap-key.json
+    depends_on:
+      zitadel_db:
+        condition: service_healthy
+      # NOTE: the gate on zitadel-secrets-init lives in infra/docker-compose.prod.yaml, NOT here.
+      # `zitadel` is UNPROFILED (it backs dev too), but zitadel-secrets-init is profiles:[prod]; an
+      # unprofiled service may not depend_on a profiled one (the dev merge would be "invalid compose
+      # project: depends on undefined service"). The prod overlay adds the edge only in the prod merge.
+    # No container healthcheck on purpose: the zitadel image is shell-less/distroless — no /bin/sh
+    # and no curl — so a CMD-SHELL `curl ... /debug/healthz` check can NEVER run and would leave the
+    # container permanently (unhealthy) even though Zitadel boots fine and serves on :8080. Readiness
+    # is gated instead by the zitadel-bootstrap sidecar's own poll (see infra/scripts/zitadel-bootstrap.sh,
+    # which curls /debug/healthz from its alpine image — which DOES have curl — until HTTP 200), and
+    # api/web gate on the sidecar completing (depends_on: service_completed_successfully).
+    # No published ports — Caddy reaches Zitadel on the internal network (ADR-0028).
+    # compose.override.yaml publishes 127.0.0.1:8080 for native dev.
+    volumes:
+      # Zitadel WRITES the FirstInstance machine key here on first boot; the sidecar READS it.
+      # In plain dev (`docker compose up`, no --profile prod) the volume just holds the key file —
+      # harmless, and lets a future dev-side bootstrap reuse the same path.
+      - zitadel_secrets:/zitadel-secrets
+    networks: [internal]
+
+  # --- Zitadel zero-touch bootstrap sidecar — ONE-SHOT, fail-loud (prod) --------------
+  # ADR-0043 Phase 3 (§4). Turns a freshly start-from-init'd Zitadel into a fully-wired OIDC IdP with
+  # NO console clicking: authenticates with the FirstInstance machine key (Private-Key JWT), then
+  # idempotently provisions the `lazyit` project, the OIDC web app (redirect = the Auth.js callback,
+  # JWT access token, roles asserted), the project roles ADMIN/MEMBER/VIEWER (Phase-2 grantRole
+  # prerequisite) and a runtime SA + key; finally writes oidc-client.json + sa-key.json into the
+  # shared zitadel_secrets volume for api/web. See infra/scripts/zitadel-bootstrap.sh and
+  # docs/05-runbooks/auth-bootstrap.md.
+  #   restart:"no"  → a misconfig stays VISIBLE (the run fails loudly; api/web won't start on failure).
+  #   idempotent    → `down && up` is safe; if the secret files already exist it short-circuits.
+  zitadel-bootstrap:
+    profiles: [prod]
+    build:
+      context: .
+      dockerfile: infra/docker/zitadel-bootstrap.Dockerfile
+    image: lazyit-zitadel-bootstrap:dev
+    restart: "no"
+    logging: *default-logging
+    mem_limit: 128m
+    cpus: 0.5
+    # OIDC_ISSUER / WEB_ORIGIN / ZITADEL_* are resolved by Compose at parse time from --env-file.
+    # The script only needs the external issuer, the web origin (for the redirect) and the internal
+    # Zitadel URL — everything else (project/app names) has a sane default.
+    environment:
+      OIDC_ISSUER: ${OIDC_ISSUER}
+      WEB_ORIGIN: ${WEB_ORIGIN}
+      ZITADEL_INTERNAL_URL: ${AUTH_INTERNAL_ISSUER:-http://zitadel:8080}
+      ZITADEL_PROJECT_NAME: ${ZITADEL_PROJECT_NAME:-lazyit}
+      ZITADEL_APP_NAME: ${ZITADEL_APP_NAME:-lazyit-web}
+      ZITADEL_API_SA_USERNAME: ${ZITADEL_API_SA_USERNAME:-lazyit-api}
+    volumes:
+      # Read the FirstInstance machine key + WRITE oidc-client.json / sa-key.json (read-write).
+      - zitadel_secrets:/zitadel-secrets
+    depends_on:
+      # service_started (NOT service_healthy): the zitadel image has no shell/curl so it carries no
+      # container healthcheck (see the zitadel service above). The sidecar does its OWN readiness poll
+      # — it curls ${ZITADEL_INTERNAL_URL}/debug/healthz until 200 before provisioning (and fails loud
+      # if Zitadel never comes up), so gating on the container merely STARTING is correct here.
+      zitadel:
+        condition: service_started
+    networks: [internal]
+
+  # --- Meilisearch — internal network only, no published port (prod) ---------------
+  # ADR-0035: cross-entity search engine. Fail-soft: the API SearchService no-ops when Meili is
+  # down, so no depends_on from api → meilisearch is needed.
+  # First deploy: run the one-off reindex once after the stack is healthy to populate the indices
+  # — see docs/05-runbooks/deploy-self-hosted.md §2a (the API runtime has no Bun; reindex runs in
+  # the Bun-based migrate image).
+  # UNPROFILED: comes up on plain `docker compose up`. compose.override.yaml publishes 127.0.0.1:7700.
+  meilisearch:
+    # getmeili/meilisearch:v1.12.3 — pinned by digest. Meili data is rebuildable via reindex,
+    # so the volume need not be backed up (see docs/05-runbooks/backups.md).
+    image: getmeili/meilisearch:v1.12.3@sha256:4acfcbbb9e089aa1aac838cfda3fba7f07aaaef044c23da8acbe0ab741400dac
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 512m
+    cpus: 1.0
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: ${MEILI_ENV:-development}
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meili_data:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:7700/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [internal]
+
+  # --- Caddy reverse proxy + automatic HTTPS — the only public surface (prod) -----
+  caddy:
+    profiles: [prod]
+    # caddy:2-alpine — pinned by digest (rolling tag; re-pin on a deliberate bump).
+    image: caddy:2-alpine@sha256:86deaf5e3d3408a6ccec08fbb79989783dd26e206ae10bcf78a801dc8c9ab794
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 128m
+    cpus: 0.5
+    env_file: [infra/env/.env.prod]
+    ports:
+      - "${LAZYIT_HTTP_PORT:-8080}:80"
+      - "${LAZYIT_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      # Gate on real readiness (service_healthy), not mere process start, so Caddy doesn't
+      # publish 502s while the API/web are still booting. Both expose a Dockerfile HEALTHCHECK.
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    networks: [internal]
+
+  # --- Backup sidecar (OPT-IN) — cron + pg_dump for BOTH databases (prod) ----------
+  # In the `prod` AND a `backup` profile, so it only runs when BOTH are requested alongside the
+  # prod stack:
+  #   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
+  #     --profile prod --profile backup --env-file infra/env/.env.prod up -d backup
+  # Dumps the app DB and the Zitadel DB on a schedule to the host-mounted ./backups dir, prunes
+  # dumps older than the retention window, and (optional, OFF by default) runs an offsite hook.
+  # Respects "no mandatory cloud" — local-disk only unless you wire BACKUP_OFFSITE_CMD.
+  # Full DR procedure (what/order/restore): docs/05-runbooks/backups.md.
+  backup:
+    profiles: [prod, backup]
+    # Same Postgres major as the app DB so pg_dump's client matches the server (avoids version
+    # mismatch errors). Pinned by digest to match the `db` service.
+    image: postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 256m
+    cpus: 0.5
+    env_file: [infra/env/.env.prod]
+    environment:
+      # Cron schedule (crontab syntax). Default: daily at 02:30.
+      BACKUP_CRON: ${BACKUP_CRON:-30 2 * * *}
+      # Keep dumps newer than this many days; older ones are pruned after each run.
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      # App DB connection (reuses the shared POSTGRES_* + the `db` service name).
+      PGHOST: db
+      # Zitadel DB connection (the `zitadel_db` service uses its own credentials).
+      ZITADEL_DB_HOST: zitadel_db
+      ZITADEL_DB_USER: ${ZITADEL_DB_USER:-zitadel}
+      ZITADEL_DB_PASSWORD: ${ZITADEL_DB_PASSWORD}
+      ZITADEL_DB_NAME: ${ZITADEL_DB_NAME:-zitadel}
+      # OPTIONAL offsite copy — OFF unless set. Receives the dump path as $1 (e.g. an rclone/scp
+      # one-liner). Leave unset to keep backups local-disk only (no mandatory cloud).
+      BACKUP_OFFSITE_CMD: ${BACKUP_OFFSITE_CMD:-}
+    volumes:
+      # Dumps land on the host (repo-root ./backups) so they survive `down`/recreate and can be
+      # copied off-host. ./backups is gitignored.
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+      zitadel_db:
+        condition: service_healthy
+    # Generate a crontab, then run cron in the foreground. Every shell `$` is written as `$$` so
+    # Compose's parse-time ${...} interpolation leaves them intact for the container shell at
+    # RUNTIME. PGPASSWORD/POSTGRES_* come from env_file; ZITADEL_* are passed explicitly above. The
+    # job writes timestamped custom-format (-Fc) dumps and prunes by mtime. `crond -f -d 8` keeps
+    # the container alive and logs to stdout (captured by the json-file driver + rotation).
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /backups
+        cat > /usr/local/bin/lazyit-backup <<'SCRIPT'
+        #!/bin/sh
+        set -eu
+        TS="$$(date +%Y%m%d-%H%M%S)"
+        echo "[lazyit-backup] starting run $$TS"
+        # App DB — POSTGRES_USER/PASSWORD/DB come from the shared .env.prod (env_file).
+        PGPASSWORD="$$POSTGRES_PASSWORD" pg_dump -h "$$PGHOST" -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc \
+          > "/backups/app-$${TS}.dump"
+        echo "[lazyit-backup] app DB -> /backups/app-$${TS}.dump"
+        # Zitadel DB — its own credentials.
+        PGPASSWORD="$$ZITADEL_DB_PASSWORD" pg_dump -h "$$ZITADEL_DB_HOST" -U "$$ZITADEL_DB_USER" -d "$$ZITADEL_DB_NAME" -Fc \
+          > "/backups/zitadel-$${TS}.dump"
+        echo "[lazyit-backup] zitadel DB -> /backups/zitadel-$${TS}.dump"
+        # Retention sweep — delete dumps older than BACKUP_RETENTION_DAYS.
+        find /backups -name '*.dump' -type f -mtime "+$${BACKUP_RETENTION_DAYS}" -print -delete || true
+        # Optional offsite hook (OFF unless BACKUP_OFFSITE_CMD is set). Receives each dump path as $$1.
+        if [ -n "$${BACKUP_OFFSITE_CMD:-}" ]; then
+          for f in "/backups/app-$${TS}.dump" "/backups/zitadel-$${TS}.dump"; do
+            sh -c "$$BACKUP_OFFSITE_CMD \"\$$1\"" _ "$$f" || echo "[lazyit-backup] offsite hook failed for $$f"
+          done
+        fi
+        echo "[lazyit-backup] run $$TS complete"
+        SCRIPT
+        chmod +x /usr/local/bin/lazyit-backup
+        # Export the runtime env into the cron job's environment (cron runs with a bare env).
+        printenv | sed 's/^/export /' > /etc/lazyit-backup.env
+        echo "$$BACKUP_CRON . /etc/lazyit-backup.env; /usr/local/bin/lazyit-backup >> /proc/1/fd/1 2>&1" > /etc/crontabs/root
+        echo "[lazyit-backup] scheduled: $$BACKUP_CRON (retention $${BACKUP_RETENTION_DAYS}d) -> /backups"
+        exec crond -f -d 8
+    networks: [internal]
+
+volumes:
+  db_data:
+  zitadel_db_data:
+  meili_data:
+  caddy_data:
+  caddy_config:
+  # Shared secrets volume for the zero-touch Zitadel bootstrap (ADR-0043 §4 / §9e). Zitadel writes
+  # the FirstInstance machine key here; the zitadel-bootstrap sidecar reads it and writes back
+  # oidc-client.json + sa-key.json for api/web. Persisted (a named volume) so creds survive `down`;
+  # pair `down -v` with removing it for a clean re-bootstrap. Declared here (not only in the prod
+  # override) because the unprofiled `zitadel` service mounts it for the key export.
+  zitadel_secrets:
+
+networks:
+  internal:
+    driver: bridge
+
+# -----------------------------------------------------------------------------
+# Re-pinning an image digest after a deliberate upgrade (ADR-0025 follow-up):
+#   docker pull <image>:<tag>
+#   docker buildx imagetools inspect <image>:<tag> --format '{{.Manifest.Digest}}'
+# (or, with `skopeo inspect docker://<image>:<tag> | jq -r .Digest`). Replace the @sha256:...
+# beside the matching tag comment. Always re-pin via a deliberate bump — never let a rolling tag
+# (node:26-alpine, caddy:2-alpine) drift silently.
+# -----------------------------------------------------------------------------

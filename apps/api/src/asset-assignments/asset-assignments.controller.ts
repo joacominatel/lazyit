@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -11,30 +10,24 @@ import {
 import {
   ApiConflictResponse,
   ApiCreatedResponse,
-  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { AssetAssignmentsService } from './asset-assignments.service';
-import { parseActiveOnly } from './active-only';
+import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseUuidQuery } from '../common/parse-uuid-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
 import {
   AssetAssignmentDto,
   CreateAssetAssignmentDto,
   ReleaseAssetAssignmentDto,
   UpdateAssetAssignmentNotesDto,
 } from './asset-assignment.dto';
-
-// X-User-Id is the auth shim (ADR-0022). On assignment writes it's OPTIONAL and becomes the actor
-// (assignedById / releasedById); absent → null actor (system/unknown), allowed by design (ADR-0024).
-const ACTOR_USER_HEADER = {
-  name: 'X-User-Id',
-  required: false,
-  description:
-    'Caller user id (auth shim). Optional; recorded as the assigner/releaser (null if absent).',
-} as const;
+import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
+import type { User } from '../../generated/prisma/client';
 
 @ApiTags('asset-assignments')
 @Controller('asset-assignments')
@@ -61,9 +54,9 @@ export class AssetAssignmentsController {
     @Query('activeOnly') activeOnly?: string,
   ) {
     return this.assignments.findAll({
-      assetId,
+      assetId: parseCuidQuery(assetId, 'assetId'),
       userId: parseUuidQuery(userId, 'userId'),
-      activeOnly: parseActiveOnly(activeOnly),
+      activeOnly: parseBooleanQuery(activeOnly, true),
     });
   }
 
@@ -75,34 +68,39 @@ export class AssetAssignmentsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Open an assignment (assign a user to an asset)' })
-  @ApiHeader(ACTOR_USER_HEADER)
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({
+    summary: 'Open an assignment (assign a user to an asset) (ADMIN or MEMBER)',
+  })
   @ApiCreatedResponse({ type: AssetAssignmentDto })
   create(
     @Body() dto: CreateAssetAssignmentDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.assignments.create(dto, actorId);
+    return this.assignments.create(dto, user);
   }
 
   @Patch(':id/release')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
     summary:
-      'Release an active assignment (sets releasedAt; 409 if already released)',
+      'Release an active assignment (sets releasedAt; 409 if already released) (ADMIN or MEMBER)',
   })
-  @ApiHeader(ACTOR_USER_HEADER)
   @ApiOkResponse({ type: AssetAssignmentDto })
   @ApiConflictResponse({ description: 'The assignment is already released' })
   release(
     @Param('id') id: string,
     @Body() dto: ReleaseAssetAssignmentDto,
-    @Headers('x-user-id') actorId?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.assignments.release(id, dto, actorId);
+    return this.assignments.release(id, dto, user);
   }
 
   @Patch(':id/notes')
-  @ApiOperation({ summary: 'Update only the notes of an assignment' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({
+    summary: 'Update only the notes of an assignment (ADMIN or MEMBER)',
+  })
   @ApiOkResponse({ type: AssetAssignmentDto })
   updateNotes(
     @Param('id') id: string,

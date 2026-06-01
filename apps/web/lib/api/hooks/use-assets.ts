@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   type AssetFilters,
   getAsset,
@@ -21,11 +21,18 @@ export const assetKeys = {
     [...assetKeys.all, "detail", assetId, "assignments", activeOnly] as const,
 };
 
-/** List assets, optionally filtered by category / location / status. */
+/**
+ * List assets, optionally filtered by category / location / status and paged
+ * (`limit`/`offset`). Returns the `Page<AssetListItem>` envelope (`items` +
+ * `total`/`limit`/`offset`) so the list can render pagination controls.
+ * `keepPreviousData` holds the last page on screen while a new filter/page query
+ * resolves, so changing a filter or paging doesn't flash the table skeleton.
+ */
 export function useAssets(filters: AssetFilters = {}) {
   return useQuery({
     queryKey: assetKeys.list(filters),
     queryFn: () => getAssets(filters),
+    placeholderData: keepPreviousData,
   });
 }
 
