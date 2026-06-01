@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 import type {
   DashboardActivityItem,
   DashboardSummary,
+  PageQuery,
+  Page,
+  RecentActivityItem,
 } from '@lazyit/shared';
+import { offsetOf, pageOf } from '@lazyit/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** AssetStatus enum values, in schema order — used to zero-fill the `byStatus` buckets. */
@@ -162,4 +166,69 @@ export class DashboardService {
       generatedAt: now.toISOString(),
     };
   }
+
+  /**
+   * Recent activity feed (CEO Round 2, ADR-0043) — the unified, cross-pillar stream the dashboard
+   * shows, newest first and offset-paginated (ADR-0030). Reads the `recent_activity` Postgres VIEW
+   * (a `UNION ALL` over AssetHistory, AssetAssignment, AccessGrant and ConsumableMovement; Prisma
+   * cannot express a UNION view, so it lives as raw SQL in a migration and is read here with a typed
+   * `$queryRaw`). The view already drops rows whose parent entity is soft-deleted.
+   *
+   * The actor display name is resolved with a LEFT JOIN to `users` (lightly — just first/last name);
+   * `actorId`/`actorName` are null for system/unknown actors or a deleted actor whose audit FK was
+   * set null. The page slice and the `count` over the same view run inside one `$transaction`, so the
+   * `total` cannot drift from the page under concurrent writes to any source.
+   */
+  async getActivity(page: PageQuery): Promise<Page<RecentActivityItem>> {
+    const { take, skip } = offsetOf(page);
+
+    const [rows, totalRows] = await this.prisma.$transaction([
+      this.prisma.$queryRaw<RecentActivityRow[]>`
+        SELECT
+          ra."occurredAt",
+          ra."actorId",
+          CASE WHEN u."id" IS NULL THEN NULL
+               ELSE u."firstName" || ' ' || u."lastName" END AS "actorName",
+          ra."entityType",
+          ra."entityId",
+          ra."action",
+          ra."summary"
+        FROM "recent_activity" ra
+        LEFT JOIN "users" u ON u."id" = ra."actorId"
+        ORDER BY ra."occurredAt" DESC
+        LIMIT ${take} OFFSET ${skip}
+      `,
+      this.prisma.$queryRaw<[{ count: bigint }]>`
+        SELECT COUNT(*)::bigint AS count FROM "recent_activity"
+      `,
+    ]);
+
+    const total = Number(totalRows[0]?.count ?? 0);
+    const items: RecentActivityItem[] = rows.map((row) => ({
+      occurredAt: row.occurredAt.toISOString(),
+      actorId: row.actorId,
+      actorName: row.actorName,
+      entityType: row.entityType,
+      entityId: row.entityId,
+      action: row.action,
+      summary: row.summary,
+    }));
+
+    return pageOf(items, total, page);
+  }
+}
+
+/**
+ * Raw row shape returned by the `recent_activity` view read (the pg driver maps `timestamptz` to a JS
+ * `Date`; `actorId`/`actorName` are nullable). Narrowed to the {@link RecentActivityItem} wire shape
+ * (ISO timestamp) in {@link DashboardService.getActivity}.
+ */
+interface RecentActivityRow {
+  occurredAt: Date;
+  actorId: string | null;
+  actorName: string | null;
+  entityType: RecentActivityItem['entityType'];
+  entityId: string;
+  action: string;
+  summary: string;
 }
