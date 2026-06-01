@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SLUG_MAX_LENGTH, SLUG_REGEX } from "../utils/slug";
+import { requireAtLeastOneKey } from "./primitives";
 
 /**
  * Article — a knowledge-base document (markdown). Simple wiki: no versioning/tags/FTS
@@ -63,19 +64,22 @@ export const CreateArticleSchema = z.strictObject({
 });
 
 /**
- * Partial update. Excludes `status` (use publish/unpublish) and `authorId` (immutable). The editor
- * is recorded from the caller (X-User-Id → `lastEditedById`), not the body.
+ * Partial update (an empty body is rejected). Excludes `status` (use publish/unpublish) and
+ * `authorId` (immutable). The editor is recorded from the caller (X-User-Id → `lastEditedById`),
+ * not the body.
  */
-export const UpdateArticleSchema = z
-  .strictObject({
-    title: z.string().trim().min(1).max(200),
-    slug: SlugSchema,
-    content: z.string().min(1),
-    excerpt: z.string().trim().min(1).max(280),
-    categoryId: z.cuid(),
-    metadata: ArticleMetadataSchema,
-  })
-  .partial();
+export const UpdateArticleSchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      title: z.string().trim().min(1).max(200),
+      slug: SlugSchema,
+      content: z.string().min(1),
+      excerpt: z.string().trim().min(1).max(280),
+      categoryId: z.cuid(),
+      metadata: ArticleMetadataSchema,
+    })
+    .partial(),
+);
 
 /**
  * Non-file fields of the multipart import (`POST /articles/import`). The file itself is handled
