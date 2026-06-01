@@ -601,3 +601,18 @@ enum ConsumableMovementType {
   OUT
   ADJUSTMENT
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// VIEW: recent_activity (ADR-0043) — NOT a Prisma model.
+//
+// A read-only Postgres VIEW that UNION ALLs the four append-only activity sources (AssetHistory,
+// AssetAssignment assigned/released, AccessGrant granted/revoked, ConsumableMovement stock in/out/
+// adjustment) into one normalized, newest-first stream for the dashboard's recent-activity feed.
+// Columns: { occurredAt timestamptz, actorId uuid?, entityType text, entityId text, action text,
+// summary text }. Prisma cannot express a UNION view in PSL, so it lives ONLY as raw SQL in
+// prisma/migrations/20260601163936_recent_activity_view/migration.sql (the same "SQL Prisma can't
+// represent" pattern as the partial unique indexes — see docs/05-runbooks/prisma-migrations.md §3).
+// Prisma neither emits nor flags it as drift; it is read with a typed $queryRaw in DashboardService.
+// The contract lives in @lazyit/shared (schemas/recent-activity.ts). Documented here so the view is
+// discoverable from the schema. See docs/02-domain/entities/recent-activity.md.
+// ─────────────────────────────────────────────────────────────────────────────────────────────

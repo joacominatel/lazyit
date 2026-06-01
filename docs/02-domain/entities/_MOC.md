@@ -56,4 +56,8 @@ updated: 2026-05-25
 - 🟢 [[article-category]] — user-managed grouping of articles.
 - ⚪ [[article-version]] — historical version of an article; deferred by [[0021-knowledge-base-design]].
 
+## Dashboard (derived)
+
+- 🟢 [[recent-activity]] — read-only DB **view** unifying asset/access/stock activity into one feed.
+
 Model overview & order: [[02-domain/_MOC|Domain]]. Conventions: [[conventions]].
