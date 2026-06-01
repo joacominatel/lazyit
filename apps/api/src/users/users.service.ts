@@ -1,15 +1,21 @@
 import {
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type { CreateUser, UpdateUser } from '@lazyit/shared';
 import { Prisma, Role } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectUser } from '../search/search.documents';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
+import {
+  IDENTITY_PROVIDER,
+  type IdentityProvider,
+} from '../auth/identity/identity-provider.interface';
 
 /** What an offboarding reclaimed/revoked, for the response + the audit story. */
 export interface OffboardResult {
@@ -27,6 +33,12 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly search: SearchService,
     private readonly assignments: AssetAssignmentsService,
+    // IdP write-back seam (ADR-0043). Zitadel mirrors lazyit's user/role decisions; generic-oidc
+    // (BYOI) no-ops every management call. Authorization stays DB-first regardless (decision #1).
+    @Inject(IDENTITY_PROVIDER)
+    private readonly idp: IdentityProvider,
+    @InjectPinoLogger(UsersService.name)
+    private readonly logger: PinoLogger,
   ) {}
 
   /** All users that have not been soft-deleted. */
@@ -47,17 +59,85 @@ export class UsersService {
     return user;
   }
 
-  async create(data: CreateUser) {
+  async create(data: CreateUser, actorId?: string) {
     // RBAC default (ADR-0040, flipped to VIEWER by ADR-0043): an omitted role lands the least-
     // privileged read-only role. We set it explicitly here (rather than leaning on the Prisma column
     // default) so the service is the authoritative default for app-created users and the behaviour is
     // testable without a DB. The Users controller is ADMIN-gated, so an ADMIN may still pass any role.
+    const role = data.role ?? Role.VIEWER;
+    // DB-first + mirror (ADR-0043 §3): create the LOCAL row first, then mirror into the IdP. If the
+    // mirror fails we must NOT leave a split-brain (local user exists, IdP missing) — so we compensate
+    // by removing the just-created local row and surface the Management failure as 503. This is the one
+    // place a hard delete is correct: the row was created microseconds ago in THIS request, is not yet
+    // referenced by anything, and was never visible to a reader — a soft delete would leave a ghost.
     const user = await this.prisma.user.create({
-      data: { ...data, role: data.role ?? Role.VIEWER },
+      data: { ...data, role },
     });
+
+    try {
+      const ref = await this.idp.createUser({
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role,
+      });
+      this.auditWriteBack('createUser', actorId, user.id, {
+        email: user.email,
+        role,
+      });
+      // Zitadel returns the real user id; persist it as externalId so future grants/deactivate target
+      // the managed user. BYOI returns an empty ref (no IdP user) — leave externalId null in that case.
+      if (this.idp.supportsManagement && ref.externalId) {
+        const linked = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { externalId: ref.externalId },
+        });
+        this.search.upsert('users', projectUser(linked));
+        return linked;
+      }
+    } catch (err) {
+      // Compensate: roll the local create back so local and Zitadel never disagree (no split-brain).
+      await this.compensateLocalCreate(user.id);
+      this.logger.error(
+        { op: 'createUser', actor: actorId, subjectUserId: user.id },
+        `IdP write-back failed on create; rolled back local user (${err instanceof Error ? err.message : String(err)})`,
+      );
+      throw err;
+    }
+
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search.upsert('users', projectUser(user));
     return user;
+  }
+
+  /**
+   * Roll back a just-created local user when the IdP mirror failed (no-split-brain compensation). A
+   * HARD delete is correct here: the row was created in this same request, is unreferenced, and was
+   * never returned to a caller, so deleting it leaves no audit/FK orphan (unlike the soft-delete used
+   * for genuine offboarding). Best-effort: a delete failure is logged but the original 503 still wins.
+   */
+  private async compensateLocalCreate(userId: string): Promise<void> {
+    try {
+      await this.prisma.user.delete({ where: { id: userId } });
+    } catch (err) {
+      this.logger.error(
+        { op: 'compensateLocalCreate', subjectUserId: userId },
+        `failed to roll back local user after IdP write-back failure (${err instanceof Error ? err.message : String(err)})`,
+      );
+    }
+  }
+
+  /** Structured audit line for a successful IdP write-back (ADR-0043 §3 — no DB audit table yet). */
+  private auditWriteBack(
+    operation: string,
+    actorId: string | undefined,
+    subjectUserId: string,
+    fields: Record<string, unknown>,
+  ): void {
+    this.logger.info(
+      { op: operation, actor: actorId ?? 'system', subjectUserId, fields },
+      `IdP write-back: ${operation}`,
+    );
   }
 
   async update(id: string, data: UpdateUser, actorId?: string) {
@@ -78,7 +158,37 @@ export class UsersService {
       }
     }
 
+    const roleChanged = data.role !== undefined && data.role !== current.role;
+
     const user = await this.prisma.user.update({ where: { id }, data });
+
+    // Mirror a role CHANGE to the IdP (ADR-0043 §3). Only on an actual role change, and only when the
+    // user is IdP-linked (externalId set) — a local-only row has nothing to mirror. If the mirror
+    // fails, compensate by reverting the local role to its previous value (no split-brain) and surface
+    // 503. A non-role update (name change) never touches the IdP. BYOI no-ops grantRole → no throw.
+    if (roleChanged && current.externalId) {
+      try {
+        await this.idp.grantRole(current.externalId, data.role!);
+        this.auditWriteBack('grantRole', actorId, id, {
+          from: current.role,
+          to: data.role,
+          externalId: current.externalId,
+        });
+      } catch (err) {
+        // Revert the local role so local and Zitadel agree (the previous role is the truth).
+        const reverted = await this.prisma.user.update({
+          where: { id },
+          data: { role: current.role },
+        });
+        this.search.upsert('users', projectUser(reverted));
+        this.logger.error(
+          { op: 'grantRole', actor: actorId, subjectUserId: id },
+          `IdP write-back failed on role change; reverted local role to ${current.role} (${err instanceof Error ? err.message : String(err)})`,
+        );
+        throw err;
+      }
+    }
+
     this.search.upsert('users', projectUser(user));
     return user;
   }
@@ -128,6 +238,18 @@ export class UsersService {
 
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
+      // 0. Deactivate the user in the IdP FIRST, inside the transaction (ADR-0043 §2c). A Management
+      // failure throws here and rolls the ENTIRE offboarding back — so we never end up with a
+      // soft-deleted-local / still-active-in-Zitadel split-brain (the failure surfaces as 503). For an
+      // IdP-linked user only; a local-only row (externalId null) has nothing to deactivate. BYOI
+      // no-ops deactivateUser → no throw, offboarding proceeds locally exactly as before.
+      if (target.externalId) {
+        await this.idp.deactivateUser(target.externalId);
+        this.auditWriteBack('deactivateUser', actorId, id, {
+          externalId: target.externalId,
+        });
+      }
+
       // 1. Revoke all the user's active (not-yet-revoked) access grants.
       const { count: revokedGrants } = await tx.accessGrant.updateMany({
         where: { userId: id, revokedAt: null },
