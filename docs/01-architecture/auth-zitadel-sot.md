@@ -184,6 +184,34 @@ All credential paths are **mounted secret files**, never inline env values (§6.
 *warns* (does not fail) if the Management credential is absent — login must never be blocked by a
 missing write-back capability.
 
+> **Phase 2 — as built (binding env surface).** Phase 2 settled the runtime auth on the **Private-Key
+> JWT** path only (decision #4; the PAT is the bootstrap sidecar's concern in Phase 3), so the
+> `ZITADEL_MGMT_AUTH` / `…_PAT_PATH` draft vars above are *not* used at runtime. The implemented
+> surface (see `apps/api/.env.example`):
+>
+> ```
+> IDENTITY_PROVIDER_TYPE=zitadel            # | generic-oidc (default zitadel)
+> ZITADEL_MGMT_PROJECT_ID=<projectId>       # the project whose ADMIN/MEMBER/VIEWER roles lazyit grants
+> ZITADEL_MGMT_API_URL=http://zitadel:8080  # internal Management origin (defaults to OIDC_JWKS_URI / OIDC_ISSUER origin)
+> ZITADEL_MGMT_SA_KEY=<inline JSON>         # the SA machine-key JSON, OR:
+> ZITADEL_MGMT_SA_KEY_PATH=/zitadel-secrets/api-key.json   # a mounted secret file (Phase-3 sidecar; manual for now)
+> ```
+>
+> The adapter + Management client live at **`apps/api/src/auth/identity/`** (the Phase-1 scaffold's
+> home — `zitadel.identity-provider.ts` + `zitadel-management.service.ts`), not the draft `src/idp/`.
+> The client reaches Zitadel at the internal origin with `X-Forwarded-Host`/`-Proto` derived from
+> `OIDC_ISSUER` and signs the JWT-profile assertion with `aud = OIDC_ISSUER`, **mirroring
+> `jwt-auth.guard.ts`**. The cached Management token is refreshed ~60s before expiry. The deactivate
+> call is `POST /v2/users/{userId}/deactivate` (current v2; the older `:deactivate` colon form in §1a
+> is equivalent). A missing/misconfigured credential **WARNs at boot-time resolution and throws a
+> clear "Zitadel management not configured" 503 from the management methods only** — never on the
+> login path. Write-back into `UsersService` is no-split-brain: create rolls back the local row if the
+> mirror fails, a role change reverts the local role, and offboard runs `deactivateUser` **inside the
+> offboard transaction** so a failure rolls the whole offboarding back — each surfacing **503**, and
+> each audited via a structured Pino line (`op`, `actor`, `subjectUserId`, `fields`); no audit DB
+> table this phase. Under `generic-oidc` every management call is a no-op, so a BYOI deployment writes
+> the local user with **no Management call and no 503**.
+
 ---
 
 ## 3. Data model evolution
