@@ -2,6 +2,7 @@
 
 import {
   BookOpenIcon,
+  Cog6ToothIcon,
   CubeIcon,
   KeyIcon,
   MapPinIcon,
@@ -11,12 +12,15 @@ import {
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { usePermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
   label: string;
   href: string;
   icon: typeof Squares2X2Icon;
+  /** Render only for ADMINs (the API still gates the routes server-side). */
+  adminOnly?: boolean;
 };
 
 type NavSection = {
@@ -37,10 +41,11 @@ type NavSection = {
  *                                      the *thing* is an Application, the *pillar*
  *                                      is Access)
  *   Knowledge → Knowledge Base
- *   Manage    → Users, Locations      (supporting registries)
+ *   Manage    → Users, Locations, Settings (supporting registries + admin)
  *
- * Every target is an implemented route; dead links (Tickets, Settings) stay out
- * per ADR-0016 (no ticketing).
+ * Every target is an implemented route; dead links (Tickets) stay out per ADR-0016
+ * (no ticketing). "Settings" is the ADMIN-only home for instance config, taxonomy
+ * management and the role overview — hidden for non-admins (the API also gates it).
  */
 const NAV: NavSection[] = [
   {
@@ -67,23 +72,29 @@ const NAV: NavSection[] = [
     items: [
       { label: "Users", href: "/users", icon: UsersIcon },
       { label: "Locations", href: "/locations", icon: MapPinIcon },
+      { label: "Settings", href: "/settings", icon: Cog6ToothIcon, adminOnly: true },
     ],
   },
 ];
 
 export function SidebarNav() {
   const pathname = usePathname();
+  const { isAdmin } = usePermissions();
 
   return (
     <nav className="flex-1 space-y-4 p-2">
-      {NAV.map((section, index) => (
+      {NAV.map((section, index) => {
+        // Hide admin-only items for non-admins; drop a section that ends up empty.
+        const items = section.items.filter((item) => !item.adminOnly || isAdmin);
+        if (items.length === 0) return null;
+        return (
         <div key={section.heading ?? `section-${index}`} className="space-y-0.5">
           {section.heading ? (
             <p className="px-3 pt-1 pb-1 text-xs font-medium tracking-wide text-muted-foreground/70 uppercase">
               {section.heading}
             </p>
           ) : null}
-          {section.items.map(({ label, href, icon: Icon }) => {
+          {items.map(({ label, href, icon: Icon }) => {
             // Active for the exact route and any nested route (e.g. /assets/:id).
             const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
@@ -106,7 +117,8 @@ export function SidebarNav() {
             );
           })}
         </div>
-      ))}
+        );
+      })}
     </nav>
   );
 }
