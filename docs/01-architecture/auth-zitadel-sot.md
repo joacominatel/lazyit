@@ -8,7 +8,8 @@ updated: 2026-06-01
 
 # Auth — Zitadel as the identity & authorization source of truth (design dossier)
 
-> **Decision of record:** [[0043-zitadel-source-of-truth]] (status: proposed). This dossier is the
+> **Decision of record:** [[0043-zitadel-source-of-truth]] (status: accepted — CEO approved all 7
+> forks 2026-06-01). This dossier is the
 > *how* behind that ADR — it consolidates six design lanes (Zitadel platform capabilities, backend
 > auth, data model, devops/infra, frontend setup wizard, security) plus the UX direction, with
 > concrete contracts, DDL, compose snippets, and a sequenced, migration-safe implementation roadmap.
@@ -30,6 +31,7 @@ adapter.
 6. [Security — threat model & guardrails](#6-security--threat-model--guardrails)
 7. [UI direction (from the UX lanes)](#7-ui-direction-from-the-ux-lanes)
 8. [Implementation roadmap (sequenced, migration-safe)](#8-implementation-roadmap)
+9. [Compose structure (decided)](#9-compose-structure-decided)
 
 ---
 
@@ -411,23 +413,52 @@ canonical non-negotiables; it rides the security lane, not this PR.
 The wizard and user-management surfaces ride lazyit's broader UX northstar (functional → product). The
 points that bind *this* epic:
 
-- **Setup wizard UX** — full-screen 4-step flow (§5c), no sidebar; clear *bundled vs. BYOI* fork at
-  step 1; the Zitadel step is skippable (sidecar already did the plumbing); confirmation invalidates
-  `GET /users/me` so the new ADMIN's controls light up immediately.
-- **Role visibility & gating** — the UI reads the caller's role from `GET /users/me` (never the OIDC
-  token), mirroring the backend's DB-first rule (§6.1). The role selector defaults to **VIEWER** on
-  create.
-- **Unified `StatusBadge` vocabulary** — extend the planned shared badge system with a *role* badge
-  (ADMIN/MEMBER/VIEWER) and an *IdP-sync provenance* indicator (`token` vs `fallback`/local), using the
-  locked semantic palette (emerald/amber/sky/rose/gray/indigo) so the same hue means the same thing
-  across entities.
+### 7a. First-run Setup Wizard (auth/onboarding UX)
+
+- **4-step full-screen flow** (§5c), no sidebar:
+  1. **IdP choice** — radio fork: *bundled Zitadel* vs. *bring-your-own OIDC (BYOI)*.
+  2. **Optional config** — only for BYOI (or to override the sidecar-provisioned bundled values); the
+     bundled-Zitadel path can skip this step because the `zitadel-bootstrap` sidecar already did the
+     plumbing.
+  3. **Create first ADMIN** — email + first/last name; role is fixed to ADMIN here by definition.
+  4. **Done** — confirmation; invalidates `GET /users/me` so the new ADMIN's controls light up
+     immediately, then redirects to the dashboard.
+- **First-run detection** — the wizard is driven by the public **`GET /setup/status`** endpoint
+  (the `/config/status` of §5a; `{ isConfigured, adminCount, integrationMode }`): an unconfigured
+  install (`isConfigured=false`, no ADMIN exists) routes to `/setup`; a configured install redirects
+  straight to `/dashboard`. Polled before any login exists, so it must stay `@Public()`.
+- **Configured-vs-dev-mode topbar banner** — a persistent topbar banner reflects the integration
+  posture: a *dev / unconfigured* state (e.g. shim or no real IdP) shows a clearly-labelled warning
+  banner; a *configured* state (real OIDC bound) shows the IdP it is wired to. This makes "am I running
+  a real auth stack?" obvious at a glance and prevents shipping a dev posture by accident.
+
+### 7b. Role-management UX
+
+- **Role read from the DB, never the token** — the UI reads the caller's role from `GET /users/me`
+  (never the OIDC token), mirroring the backend's DB-first rule (§6.1). The create-user role selector
+  defaults to **VIEWER**.
+- **Role-source badge** — a per-user *IdP-sync provenance* indicator (`token` / synced-with-IdP vs.
+  `fallback` / local-only), part of the unified `StatusBadge` vocabulary alongside the *role* badge
+  (ADMIN/MEMBER/VIEWER), using the locked semantic palette
+  (emerald/amber/sky/rose/gray/indigo) so the same hue means the same thing across entities.
+- **Last-admin guard surfaced** — the backend's last-admin-guard **409** (you cannot demote/offboard
+  the final ADMIN) is surfaced as an **explained toast** (the guard message verbatim), not a raw error.
+- **Self-role-change disabled** — an ADMIN cannot change their *own* role; the control is **disabled
+  with an explanatory tooltip** rather than silently rejected, matching the backend no-self-role guard.
 - **BYOI graceful-degradation banner** — on the Users page, when the IdP emits no role claim and
-  write-back is disabled, show a non-blocking banner explaining that roles are managed locally and not
-  synced; surface 409/403 guard messages verbatim as toasts (already the Round-3 pattern).
+  write-back is disabled, a non-blocking banner explains that roles are managed locally and not synced;
+  409/403 guard messages surface verbatim as toasts (already the Round-3 pattern).
+
+### 7c. Phasing & north-star follow-up
+
 - **Phasing** — the broader UX northstar (spacing/type/badge system, filter persistence, breadcrumbs,
   cross-links, keyboard/bulk power-user features) is a *separate* roadmap; only the wizard + role
   surfaces above are in scope for this epic. They are designed to *not* block the northstar's Phase 1
   (the StatusBadge contract is shared).
+- **North-star follow-up (flagged).** The broader platform UI north-star here draws on the **Round-3
+  UX audit**; the dedicated north-star analysis lane **did not return** for this dossier. Treat a
+  consolidated platform UI north-star (built on the Round-3 audit) as a **small follow-up** to schedule
+  separately — it does not gate this epic.
 
 ---
 
@@ -477,6 +508,11 @@ M2  (optional) add_config_settings   CREATE TABLE config_settings        ← Pha
   + `zitadel-bootstrap` service + `zitadel_secrets` volume + `depends_on` rewires + FirstInstance
   machine-user env + `.env.prod.example` updates + secret-file mounting. **Depends on:** 2.x (so api can
   consume Management creds), but the sidecar itself is independent of app code.
+  - **Bundled sub-item — Compose consolidation (§9):** in the same PR, migrate to the canonical
+    Compose v2 layout (`compose.yaml` + `compose.override.yaml` + a `prod` profile + a thin
+    `infra/docker-compose.prod.yaml`), placing the `zitadel-bootstrap` sidecar in the `prod` profile.
+    Backward-compatible (§9d). The three deferred sub-questions (§9e: secrets-volume persistence,
+    `.env.prod` ownership, convenience alias) are settled here. **Owner: devops-infra.**
 - **PR 3.2 (backend):** `ConfigModule` — `GET /config/status` (`@Public()`) + `POST /config/setup`
   (`@Roles('ADMIN')`, idempotency gate, CSRF, rate-limit, audit) + (optional) `config_settings` table
   (M2). **Depends on:** 1.x.
@@ -511,6 +547,74 @@ M0 (#86 view) ──────────────────────
 | **frontend** | PR 3.3 (wizard + Users surfaces) |
 | **security (sentinel)** | PR 4.1 (INVARIANTS + wizard/role tests) |
 | **(independent)** | PR #86 recent-activity view — own track, M0 first |
+
+---
+
+## 9. Compose structure (decided)
+
+This resolves a CEO question raised alongside the auth epic: *how should the Compose files be
+organized once the `zitadel-bootstrap` sidecar lands?* It is recorded here as **infra hygiene under
+[[0025-containerization-strategy]] / [[0026-reverse-proxy-tls]] / [[0028-secrets-and-config]]** — there
+is **no separate ADR**; it does not change a decision, it consolidates the existing split into the
+canonical Compose v2 layout.
+
+### 9a. Target layout
+
+- A single canonical **`compose.yaml` at the repo root** declaring **all** services (db, migrate, api,
+  web, zitadel, zitadel_db, caddy, backup, `zitadel-bootstrap`).
+- A committed **`compose.override.yaml`** (auto-loaded by `docker compose` for dev tuning):
+  localhost-only port bindings, **no Caddy**, no resource limits — the day-to-day developer experience.
+- A **`prod` profile** inside `compose.yaml` gating the prod-only services (**Caddy**, the **backup
+  sidecar**, and the **`zitadel-bootstrap` sidecar**) so they never come up in plain dev.
+- A **thin `infra/docker-compose.prod.yaml` override** carrying only the prod-specific deltas:
+  env-file path, secrets volume mounts, internal-only networks.
+
+### 9b. Commands
+
+```sh
+# dev — auto-merges compose.override.yaml; no Caddy, localhost ports, no prod sidecars
+docker compose up
+
+# prod — explicit base + thin override + the prod profile + the prod env file
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
+  --profile prod --env-file infra/env/.env.prod up -d --build
+```
+
+### 9c. The `zitadel-bootstrap` sidecar in this layout
+
+The one-shot `zitadel-bootstrap` sidecar (ADR-0043 §4 / dossier §4b) lives in the **`prod` profile**,
+`depends_on: zitadel (condition: service_healthy)`, and writes the OIDC/AUTH secrets
+(`oidc-client.json`) to a mounted **`zitadel_secrets` volume** that `api`/`web` read at startup
+(dossier §4c). It is therefore absent from a plain `docker compose up` and only runs under
+`--profile prod`.
+
+### 9d. Migration path (backward-compatible)
+
+1. **Rename** `docker-compose.yml` → `compose.yaml` (root).
+2. **Create** `compose.override.yaml` with the dev tuning (localhost ports, no Caddy, no limits).
+3. **Merge** the prod-only services into `compose.yaml` with `profiles: [prod]` (Caddy, backup,
+   `zitadel-bootstrap`).
+4. **Slim** `infra/docker-compose.prod.yml` → a **thin** `infra/docker-compose.prod.yaml` override
+   (env-file path, secrets volume, internal-only networks) — the bulk now lives in the canonical file.
+5. **Keep old runbook commands working** via an aliased note (the previous
+   `-f infra/docker-compose.prod.yml` invocation maps to the new base + thin override + `--profile
+   prod`), so existing [[deploy-self-hosted]] muscle memory still functions during the transition.
+
+This is fully **backward-compatible**: dev gains zero-config `docker compose up`, prod keeps an explicit
+single command, and no service definition is lost.
+
+### 9e. Deferred implementation sub-questions (settle in the Phase-3 infra PR)
+
+1. **Secrets persistence** — is the `zitadel_secrets` volume a **persisted** volume (creds survive
+   `down`, faster restarts) or **regenerated** on each clean bootstrap (simpler, matches the dev-only
+   `down -v` clean-slate posture)?
+2. **`.env.prod` ownership** — does `infra/env/.env.prod` ship as a **placeholder** the operator fills,
+   or is it **bootstrap-owned output** (the sidecar writes the OIDC values, the operator only sets the
+   masterkey/domain)?
+3. **Convenience alias** — do we add a `Makefile`/`bun run` convenience alias for the long prod command,
+   or keep it explicit in the runbook?
+
+These are sequenced into the Phase-3 infra PR (see §8, PR 3.1) rather than decided here.
 
 Related: [[0043-zitadel-source-of-truth]] · [[0037-idp-choice-zitadel-byoi]] ·
 [[0038-jit-user-provisioning]] · [[0039-authjs-v5-frontend-oidc]] · [[0040-rbac-roles]] ·

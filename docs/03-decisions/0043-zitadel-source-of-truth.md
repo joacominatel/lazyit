@@ -1,7 +1,7 @@
 ---
 title: "ADR-0043: Zitadel as the identity & authorization source of truth (Option B)"
 tags: [adr, auth, authz, oidc, rbac, idp, zitadel, security]
-status: proposed
+status: accepted
 created: 2026-06-01
 updated: 2026-06-01
 deciders: [Joaquín Minatel]
@@ -11,7 +11,7 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — 2026-06-01 (CEO decision: "vamos con el B por completo"). This ADR **extends**
+**accepted** — 2026-06-01 (CEO approved all 7 forks with the recommended resolutions). This ADR **extends**
 [[0037-idp-choice-zitadel-byoi]] (Zitadel is the bundled IdP + BYOI contract),
 [[0038-jit-user-provisioning]] (JIT provisioning + account-linking) and
 [[0040-rbac-roles]] (the local `Role` enum + `RolesGuard`). It does **not** discard them: the
@@ -29,60 +29,47 @@ It supersedes the *defaults and follow-ups* of the prior auth ADRs as noted in
 
 ---
 
-## Decisions needed from the CEO (residual forks)
+## Decisions (resolved 2026-06-01, CEO-approved)
 
-The design lanes converged on most of the design but surfaced **seven open forks** that need a CEO
-call before (or during) implementation. They are listed up top because they gate the roadmap.
+The design lanes surfaced **seven forks** that gated the roadmap. On 2026-06-01 the CEO **approved all
+seven with the recommended resolutions**. They are recorded here as the binding decisions; the design
+dossier ([[auth-zitadel-sot]]) carries the implementation detail.
 
-1. **Role authority: read-through token vs. local cache.** Do we (A) keep `User.role` as the
-   authoritative fast-path the `RolesGuard` reads (Zitadel write-back is a *one-way mirror* for the
-   IdP console), or (B) make the Zitadel role claim authoritative and resolve `request.user.role`
-   from the token on every request (local column becomes a cache/fallback)?
-   **Lane split:** *backend-auth* leans (B) read-through; *data-model* + *security* lean (A)
-   DB-first (least surprise, BYOI-safe, no per-request token re-parse). **Recommendation: (A)** —
-   keep DB-first authorization; write roles *back* to Zitadel as a mirror so the IdP console reflects
-   reality, but never trust a token claim for a privilege decision. This is also the security lane's
-   hard invariant.
+1. **Role authority = DB-first.** `RolesGuard` reads `User.role` from the **database**; a token role
+   claim is **never an authorization source** (informational/diagnostic only). Roles are written *back*
+   to Zitadel as a one-way mirror so the IdP console reflects reality, but a privilege decision never
+   trusts a token claim. (Least surprise, BYOI-safe, no per-request token re-parse — and the security
+   lane's hard invariant.)
 
-2. **What the setup wizard provisions.** Does the wizard (A) only create the first ADMIN +
-   mark setup complete in the app DB (Zitadel OIDC client created out-of-band by the
-   `zitadel-bootstrap` sidecar), or (B) also drive Zitadel Management API to create the project /
-   OIDC app / roles? **Recommendation: split** — the *infra sidecar* does the zero-touch Zitadel
-   plumbing (project + OIDC app + PAT export), the *wizard* is the in-app phase that confirms
-   integration mode and creates the first ADMIN. Keeps the wizard BYOI-safe.
+2. **Setup wizard = split.** The infra `zitadel-bootstrap` sidecar does the zero-touch Zitadel plumbing
+   (project + OIDC app + PAT export); the in-app wizard is the phase that **confirms the integration
+   mode and creates the first ADMIN**. This keeps the wizard BYOI-safe (a BYOI operator skips the
+   Zitadel step and still creates the first ADMIN).
 
-3. **Default role for app-created users vs. JIT users.** ADR-0040 sets JIT users to MEMBER (first
-   ever = ADMIN). The CEO directive says *app-created* users default to **VIEWER**. Are these two
-   different flows? **Recommendation: yes, and reconcile downward** — first JIT user = ADMIN
-   (unchanged), but **all other new users default to VIEWER** (both JIT *and* app-created), so the
-   safe least-privilege default is uniform. This flips the JIT non-first default MEMBER→VIEWER. *(If
-   the CEO prefers to keep JIT=MEMBER and only app-create=VIEWER, the roadmap's Phase-1 flip narrows
-   to the `CreateUser` path only.)*
+3. **Default role = VIEWER, uniform.** App-created **and** non-first JIT users default to **VIEWER**
+   (least privilege, uniform across both flows — this flips the JIT non-first default MEMBER→VIEWER).
+   **The first user ever on an empty DB stays ADMIN** (an install must never be left un-administrable).
 
-4. **Management-API auth: Private-Key JWT vs. PAT.** The service account that lets lazyit write
-   users/roles back to Zitadel can authenticate with a rotatable Private-Key JWT (production-grade)
-   or a long-lived PAT (simpler, what the zero-touch sidecar already exports).
-   **Recommendation: PAT for the bootstrap sidecar (already designed), Private-Key JWT for the
-   runtime API → Management traffic** once write-back lands; rotate the PAT every 30 days and scope
-   it as narrowly as Zitadel allows.
+4. **Management-API auth = PAT + Private-Key JWT.** The bootstrap sidecar authenticates with a **PAT**
+   (what `start-from-init` already exports); the runtime API → Management traffic uses a rotatable
+   **Private-Key JWT** (production-grade). **Rotate the PAT every 30 days** and scope the service
+   account as narrowly as Zitadel allows.
 
-5. **BYOI role management.** With a generic OIDC IdP there is no Management API to write back to.
-   Do we (A) accept "BYOI = read-only role management, manage users in your IdP" for v1, or (B)
-   commit now to a generic write-back interface (webhook / SCIM)? **Recommendation: (A)** — graceful
-   degradation: BYOI keeps full authN + JIT + *local* RBAC, but user/role *write-back* no-ops with a
-   logged warning and a UI banner. A generic provisioning interface is a deliberate future ADR.
+5. **BYOI = read-only role management.** With a generic OIDC IdP there is no Management API to write
+   back to, so user/role *write-back* methods **no-op with a `warn` log + a UI banner**; BYOI keeps
+   full authN + JIT + *local* RBAC. A generic write-back interface (SCIM / webhook) is a **deferred
+   future ADR**.
 
-6. **Migration timing for existing installs.** On upgrade, existing users keep their current role
-   (`MEMBER`/`ADMIN`); only *new* inserts get the VIEWER default. Do we ship an optional one-off
-   "bulk sync local roles → Zitadel" script, or accept that pre-existing users have no Zitadel role
-   claim until next touched? **Recommendation: accept it for v1** (DB-first authorization means the
-   missing claim is harmless), provide the `set-role` script (already exists, ADR-0040 addendum) as
-   the manual lever.
+6. **Existing-user migration = not a concern for now.** lazyit currently runs only on `dev`; the
+   operator uses `docker compose down -v` for a clean slate, so **no bulk-sync ("local roles → Zitadel")
+   script is built**. Existing rows keep their current role; only **new inserts** get the VIEWER default
+   (DB-first authorization means a missing Zitadel role claim is harmless). **Revisit before any
+   production deployment.**
 
-7. **Wizard network exposure & one-time guard.** The setup endpoint is public (pre-login) so an
-   operator can reach it remotely. Confirm we (A) idempotency-gate it on "any ADMIN exists" + CSRF +
-   rate-limit (security lane), and (B) expose it on the reverse proxy (vs. localhost-only).
-   **Recommendation: (A) all three guards, (B) exposed but logged + rate-limited.**
+7. **Setup-endpoint guards = idempotent gate + CSRF + rate-limit.** `POST /config/setup` is
+   **idempotency-gated on "any ADMIN exists"** (returns 409 once one exists), requires a **CSRF token**,
+   and is **rate-limited** and audited. It is **exposed on the reverse proxy** (so an operator can reach
+   first-run remotely) but **logged + rate-limited**, not localhost-only.
 
 ---
 
@@ -154,7 +141,7 @@ ADR-0037 §3 is untouched). Management-API coupling is *opt-in* and lives only i
 ### 2. Roles: DB-first authorization, Zitadel as the write-back mirror
 
 `RolesGuard` continues to read `request.user.role` resolved **from the local `User` row** (ADR-0040).
-This is the **recommended resolution of Open Fork #1 (A)** and the security lane's non-negotiable
+This is the **CEO-approved resolution of Fork #1 (DB-first)** and the security lane's non-negotiable
 invariant:
 
 > **Token claims are NOT an authorization source.** A role claim, if present, is informational/
@@ -167,8 +154,8 @@ Zitadel project-role grant (write-back), so the IdP console reflects reality. Th
 *"Assert Roles on Authentication"* + the app's *"User Roles Inside ID Token"* toggles) can be surfaced
 in the UI as provenance, but never gates access.
 
-*(If the CEO instead picks Fork #1 (B), the guard resolves the role from the token with the DB row as
-a fallback; the dossier documents both wirings. The default in this ADR is (A).)*
+*(Fork #1 was resolved DB-first; the token-authoritative variant was rejected. The dossier still
+documents both wirings for reference, but this ADR mandates DB-first.)*
 
 ### 3. Management-API write-back for user & role lifecycle
 
@@ -217,8 +204,8 @@ The bootstrap default flips from MEMBER to **VIEWER** for app-created users (CEO
   see the roadmap's serial lane). **Only affects new inserts**; existing rows keep their role.
 - **First-user-ADMIN is unchanged**: on a truly empty DB the first JIT login / seed is still ADMIN
   (an install must never be left un-administrable).
-- Per Open Fork #3, the **recommendation** is to also flip the *non-first JIT* default MEMBER→VIEWER so
-  the least-privilege default is uniform across JIT and app-create; pending CEO confirmation.
+- Per Fork #3 (CEO-approved), the *non-first JIT* default is also flipped MEMBER→VIEWER so the
+  least-privilege default is **uniform across JIT and app-create**.
 
 ### 6. Security guardrails (encoded, non-negotiable)
 
@@ -291,12 +278,16 @@ This ADR **extends** rather than replaces ADR-0037/0038/0040. Specifically it su
 - **Negative / trade-offs:**
   - New coupling surface (Management API) and a privileged service-account credential to secure and
     rotate; mitigated by §6 guardrails + audit.
-  - BYOI loses *write-back* user/role management (read-only roles, manage in your IdP) — accepted for
-    v1 (Fork #5).
-  - The setup wizard adds a privileged pre-login surface; mitigated by the one-time gate + CSRF +
-    rate-limit (Fork #7).
+  - BYOI loses *write-back* user/role management (read-only roles, manage in your IdP) — CEO-approved
+    for v1 (Fork #5); a generic write-back interface is a deferred future ADR.
+  - The setup wizard adds a privileged pre-login surface; mitigated by the idempotent one-time gate +
+    CSRF + rate-limit (Fork #7).
   - `ZITADEL_MASTERKEY` remains the recovery linchpin (lost key = lost encrypted Zitadel data); the
     backup posture in [[backups]] / [[auth-bootstrap]] becomes more load-bearing.
+  - **No existing-user migration is built** (Fork #6): lazyit runs only on `dev`, so the operator gets
+    a clean slate with `docker compose down -v` — existing rows keep their role, only new inserts get
+    the VIEWER default, and **no bulk role-sync script is shipped**. This is revisited before any
+    production deployment.
 
 - **Follow-ups (out of scope here, deferred to a future ADR):**
   - A generic write-back interface for BYOI (webhook / SCIM) — Fork #5 (B).
