@@ -89,7 +89,9 @@ set before first boot and **cannot change** afterward (lost key = lost encrypted
 - Docker split-DNS: the API reaches the IdP at an internal URL; the guard already rewrites JWKS +
   userinfo to the internal origin and injects `X-Forwarded-Host`/`-Proto` (ADR-0038). The bootstrap
   sidecar must do the same for Management-API calls.
-- Zitadel needs ~30–90s to first-init; healthcheck `start_period: 60s`.
+- Zitadel needs ~30–90s to first-init. The image is shell-less (no `/bin/sh`/`curl`) so it carries
+  **no container healthcheck**; the `zitadel-bootstrap` sidecar polls `/debug/healthz` itself
+  (default up to ~180s) before provisioning (see §4b).
 
 ---
 
@@ -316,9 +318,17 @@ zitadel-bootstrap:
   restart: "no"                            # one-shot; operator sees failures
   env_file: [env/.env.prod]
   volumes: [ zitadel_secrets:/zitadel-secrets ]   # read PAT, write oidc-client.json
-  depends_on: { zitadel: { condition: service_healthy } }
+  depends_on: { zitadel: { condition: service_started } }   # see note below
   networks: [internal]
 ```
+
+> **Gate on `service_started`, not `service_healthy`.** The `zitadel` image is shell-less /
+> distroless — no `/bin/sh`, no `curl` — so it carries **no container healthcheck** (a `CMD-SHELL`
+> curl check can never run and would mark it permanently `(unhealthy)` even though Zitadel boots
+> fine on `:8080`). Readiness is therefore gated by the sidecar's OWN poll, not by a container
+> healthcheck. The sidecar's alpine image has `curl`, so it polls `/debug/healthz` itself before
+> provisioning (and fails loud if Zitadel never comes up). api/web still gate on the sidecar
+> COMPLETING (`service_completed_successfully`), which is the correct readiness signal.
 
 The sidecar waits for `/debug/healthz`, authenticates (as built: Private-Key JWT, not a PAT),
 **upserts** the `lazyit` project + OIDC web app (redirect `…/api/auth/callback/oidc`, JWT token type,
@@ -662,9 +672,10 @@ canonical Compose v2 layout.
 > repo root and a thin `infra/docker-compose.prod.yaml`; the old `infra/docker-compose.prod.yml` was
 > removed (backward-compat command aliased in [[deploy-self-hosted]]). The **`zitadel-bootstrap`
 > sidecar then landed in PR 3.1** (Private-Key JWT, see the §4 as-built note): it lives in the `prod`
-> profile, `depends_on: zitadel (service_healthy)`, mounts the `zitadel_secrets` volume read-write,
-> and `api`/`web` gate on it via `service_completed_successfully`. The deferred sub-questions (§9e)
-> are settled below.
+> profile, `depends_on: zitadel (service_started)` (the shell-less zitadel image carries no
+> healthcheck — the sidecar polls `/debug/healthz` itself; see the §4b note), mounts the
+> `zitadel_secrets` volume read-write, and `api`/`web` gate on it via
+> `service_completed_successfully`. The deferred sub-questions (§9e) are settled below.
 
 ### 9a. Target layout
 
@@ -696,10 +707,11 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
 ### 9c. The `zitadel-bootstrap` sidecar in this layout
 
 The one-shot `zitadel-bootstrap` sidecar (ADR-0043 §4 / dossier §4b) lives in the **`prod` profile**,
-`depends_on: zitadel (condition: service_healthy)`, and writes the OIDC/AUTH secrets
-(`oidc-client.json`) to a mounted **`zitadel_secrets` volume** that `api`/`web` read at startup
-(dossier §4c). It is therefore absent from a plain `docker compose up` and only runs under
-`--profile prod`.
+`depends_on: zitadel (condition: service_started)` — the shell-less `zitadel` image has no
+healthcheck, so the sidecar polls `/debug/healthz` itself before provisioning (§4b note) — and writes
+the OIDC/AUTH secrets (`oidc-client.json`) to a mounted **`zitadel_secrets` volume** that `api`/`web`
+read at startup (dossier §4c). It is therefore absent from a plain `docker compose up` and only runs
+under `--profile prod`.
 
 ### 9d. Migration path (backward-compatible) — DONE
 
