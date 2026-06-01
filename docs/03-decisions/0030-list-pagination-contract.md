@@ -3,7 +3,7 @@ title: "ADR-0030: List endpoint pagination contract (offset; implementation defe
 tags: [adr, security, api]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-30
+updated: 2026-06-01
 deciders: [Joaquín Minatel]
 ---
 
@@ -85,6 +85,77 @@ eleven lists plus the frontend data layer today.
   longer dim a departed (soft-deleted) owner's avatar — re-add that field to `AssetListAssignment`
   (backend) if list-level dimming is wanted; the detail read (`GET /assets/:id`) still carries it.
 - The hard max (200) caps the worst-case response size for any endpoint that adopts the contract.
+
+## Amendment (2026-06-01) — sort contract, full list migration, lean-owner `deletedAt`, batch actions
+
+A UX/UI audit found correctness bugs in the list/data layer. This amendment fixes them — all
+**additive**, **no migration** (query params, projection changes and new endpoints on existing models).
+
+### 1. Sort is now part of the `Page<T>` contract
+
+`PageQuery` gained two optional params — **`sort`** (a field name) and **`dir`** (`asc` | `desc`,
+defaulting to `asc` only when `sort` is present; with no `sort` the service keeps its own default
+order). The shape only validates that they are well-formed strings; **the set of sortable fields is
+per-resource**, validated against an **ALLOWLIST** by each list endpoint. An unknown `sort` is
+**rejected with 400** (`resolveSort` → `UnknownSortFieldError` → `BadRequestException` via
+`common/resolve-sort.ts`), **never silently ignored** — so a sort always means what it says. The
+allowlist maps each PUBLIC `?sort=` key to the Prisma column (the wire key may differ from the
+column, and the surface is bounded so a client can never order by an arbitrary/secret field).
+
+The asset list's previous client-side, page-local sort (a trust bug — it presented as a global sort
+but only re-ordered the loaded page) is replaced by a **real server-side `orderBy` over the full
+result set**.
+
+Per-resource sortable-field allowlists:
+
+| Endpoint | `sort` keys | default order |
+| --- | --- | --- |
+| `GET /assets` | `name`, `assetTag`, `serial`, `status`, `createdAt`, `updatedAt` | `createdAt desc` |
+| `GET /applications` | `name`, `vendor`, `isCritical`, `createdAt`, `updatedAt` | `name asc` |
+| `GET /consumables` | `name`, `sku`, `currentStock`, `createdAt`, `updatedAt` | `name asc` |
+| `GET /users` | `firstName`, `lastName`, `email`, `role`, `createdAt` | `createdAt desc` |
+| `GET /locations` | `name`, `type`, `createdAt`, `updatedAt` | `createdAt desc` |
+
+### 2. Four more lists migrated onto `Page<T>` + server-side `q` + sort
+
+`GET /applications`, `GET /consumables`, `GET /users` and `GET /locations` previously returned **raw
+arrays** that the frontend filtered client-side — so search silently missed anything past the
+backend window (false "no results"). They now use a service `findPage(...)` (`findMany` + `count`
+over one `where` in a `$transaction`), with a **server-side case-insensitive `q`** over the sensible
+text fields and the allowlisted sort. The lists stay lean (no heavy joins/blobs). Search is now
+authoritative; silent truncation is gone. New envelope schemas live in `@lazyit/shared`
+(`application-list.ts`, `consumable-list.ts`, `user-list.ts`, `location-list.ts`). `q` columns:
+applications → name/vendor/url/description · consumables → name/sku/description (the `lowStock`
+filter is preserved) · users → firstName/lastName/email · locations → name/address/floor/description.
+
+### 3. Lean asset-owner `deletedAt` re-added
+
+The Round-1 residual is closed: `AssetListAssignment.user` (and the `ASSET_LIST_SELECT` projection)
+again carries **`deletedAt`**, so the **asset list** can dim a departed (soft-deleted) owner's
+avatar — matching the detail read. (The soft-delete extension only filters the top-level query, so a
+nested join's `user` row is still returned with its `deletedAt`; the field is populated.)
+
+### 4. KB `ArticleLink` reverse lookup for applications (ADR-0042)
+
+`GET /applications/:id/articles` now returns the PUBLISHED articles linked to an application
+("the runbook for THIS app"), mirroring the existing `GET /assets/:id/articles`. The forward
+link endpoints already existed (`GET/POST/DELETE /articles/:id/links`, ADMIN/MEMBER author-gated).
+Reverse lists return the lean `ArticleListItem` shape (no markdown content) and exclude DRAFTs.
+
+### 5. Batch (bulk) mutation endpoints — ADMIN only
+
+Multi-select actions: `POST /assets/batch/delete`, `POST /assets/batch/restore`,
+`POST /assets/batch/status` and `POST /access-grants/batch/revoke`. Payload is a non-empty,
+de-duplicated, **bounded (≤ 200)** id list (`@lazyit/shared/batch.ts`); the response is a
+`BatchResult` (`{ requested, succeeded[], skipped[{id, reason}] }`).
+
+**Auditability semantics (decided):** a batch runs in **ONE transaction** but keeps **per-entity
+auditability — one `AssetHistory` event (or per-grant revoke) per item, never one entry for the
+whole batch.** A batch is a convenience over N single-item actions, not a different audit event, so
+per-entity history is preserved exactly as the single-item path records it (`DELETED` / `RESTORED` /
+`STATUS_CHANGED` with `{from,to}` for assets; `revokedAt`/`revokedById` per grant). An id that is a
+**no-op** (not found, already deleted/restored/revoked, or already at the target status) is
+**skipped** with a reason — never an error — so a partial multi-select still commits.
 
 ## References
 
