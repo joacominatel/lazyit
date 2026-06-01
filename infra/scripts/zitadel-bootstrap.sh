@@ -315,12 +315,19 @@ _key_create="$(api POST "/users/${SA_USER_ID}/keys" \
 _key_details="$(printf '%s' "$_key_create" | jq -r '.keyDetails')"
 [ -n "$_key_details" ] && [ "$_key_details" != "null" ] || fail "key create response had no keyDetails"
 
-# ---------- 3e. write the two secret files (atomic) --------------------------
-umask 077
+# ---------- 3e. write the two secret files (atomic, WORLD-READABLE) ----------
+# api/web consume these (oidc-client.json + sa-key.json) but run as a DIFFERENT uid than this sidecar
+# and mount zitadel_secrets READ-ONLY (infra/docker-compose.prod.yaml), so the files MUST be readable
+# by other uids: we explicitly chmod 0644 each output. `mktemp` creates 0600 and `mv` preserves that
+# mode, so the chmod (not just an umask) is what actually opens read access. 0644 here is an accepted
+# tradeoff: zitadel_secrets is an INTERNAL-only named volume on a single host (ADR-0028) — ADR-0043 §6
+# "secrets as files, not plaintext-in-image" is still honored (the secrets live on disk, not baked in).
+umask 022
 _sa_tmp="$(mktemp -p "$SECRETS_DIR")"
 printf '%s' "$_key_details" | base64 -d > "$_sa_tmp" 2>/dev/null || printf '%s' "$_key_details" | base64 --decode > "$_sa_tmp"
 jq -e '.keyId and .userId and .key' "$_sa_tmp" >/dev/null 2>&1 || fail "decoded SA key is not a valid Zitadel machine-key JSON"
 mv -f "$_sa_tmp" "$SA_KEY_OUT"
+chmod 0644 "$SA_KEY_OUT"
 log "wrote ${SA_KEY_OUT} (runtime SA private key for ZITADEL_MGMT_SA_KEY_PATH)."
 
 _oc_tmp="$(mktemp -p "$SECRETS_DIR")"
@@ -333,6 +340,7 @@ jq -nc \
   '{OIDC_ISSUER:$issuer, OIDC_CLIENT_ID:$cid, OIDC_CLIENT_SECRET:$csec, OIDC_JWKS_URI:$jwks, ZITADEL_MGMT_PROJECT_ID:$proj}' \
   > "$_oc_tmp"
 mv -f "$_oc_tmp" "$OIDC_CLIENT_OUT"
+chmod 0644 "$OIDC_CLIENT_OUT"
 log "wrote ${OIDC_CLIENT_OUT} (issuer/client_id/client_secret/jwks/project for api+web)."
 
 log "DONE — Zitadel is provisioned. project=${PROJECT_ID} app=${CLIENT_ID} sa=${SA_USER_ID}"

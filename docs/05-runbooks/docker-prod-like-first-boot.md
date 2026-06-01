@@ -33,7 +33,9 @@ chmod 600 infra/env/.env.prod
 #    For local prod-like, leave LAZYIT_SITE_ADDRESS=localhost and WEB_ORIGIN=https://localhost:8443.
 
 # 2. Build images and start everything. Set a DC alias once for the long prod invocation.
-#    Boot order (by health): db -> migrate -> zitadel -> zitadel-bootstrap -> api -> web -> caddy.
+#    Boot order (by health): db -> migrate; zitadel-secrets-init -> zitadel -> zitadel-bootstrap
+#    -> api -> web -> caddy. (zitadel-secrets-init chmods the secrets volume world-writable so
+#    Zitadel's non-root uid can export its FirstInstance machine key — ADR-0043 dossier §4e.)
 DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod --env-file infra/env/.env.prod"
 $DC up -d --build
 

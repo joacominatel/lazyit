@@ -101,10 +101,14 @@ secret files already exist it short-circuits with *"already provisioned … noth
 > Stale creds in `zitadel_secrets` against a fresh `zitadel_db` will block re-provision (the script
 > can't re-read an existing app's secret — it fails loud and tells you to remove the volume).
 
-> [!tip] Secrets-volume ownership
-> The volume must be writable by Zitadel's uid for the FirstInstance key export to land. If
-> `bootstrap-key.json` never appears, the sidecar exits non-zero with a clear *"machine key not
-> found"* message — check the volume permissions (dossier §4e).
+> [!tip] Secrets-volume ownership (handled automatically)
+> The `zitadel_secrets` volume must be writable by Zitadel's non-root uid for the FirstInstance key
+> export to land. A one-shot **`zitadel-secrets-init`** service `chmod 0777`s the volume BEFORE Zitadel
+> starts (`zitadel.depends_on: zitadel-secrets-init: service_completed_successfully`), so no manual
+> `chown`/`chmod` is needed. If `bootstrap-key.json` still never appears, the sidecar exits non-zero
+> with a clear *"machine key not found"* message — inspect `docker compose logs zitadel-secrets-init`
+> and the volume permissions (dossier §4e). The sidecar writes its `oidc-client.json`/`sa-key.json`
+> outputs `0644` so `api`/`web` (a different uid, read-only mount) can read them.
 
 After this, jump to [[#6 — Add users to Zitadel]] (and [[#6b — Designate the first ADMIN (RBAC
 bootstrap)]] on an upgraded instance). Sections 1–5 below document the **manual** alternative.

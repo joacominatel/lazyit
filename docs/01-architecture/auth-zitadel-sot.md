@@ -375,8 +375,18 @@ zitadel_db (healthy) → zitadel (healthy) → zitadel-bootstrap (completed) →
 
 ### 4e. Operator gotchas (carried from the devops lane)
 
-- **Secrets volume must be writable by the zitadel uid** or the PAT silently fails to export → api 401
-  at runtime.
+- **Secrets volume must be writable by the zitadel uid.** A freshly-created named volume is owned
+  `root:root` (mode `0755`), but the `zitadel` container runs as a NON-ROOT user (uid ~1000), so
+  `start-from-init` cannot write `bootstrap-key.json` (`permission denied`) → the `03_default_instance`
+  migration fatals mid-way and the container restart-loops (`Errors.Instance.Domain.AlreadyExists`).
+  **Resolved automatically:** a one-shot **`zitadel-secrets-init`** service (root, `restart:"no"`,
+  `profiles:[prod]`) `chmod 0777`s `/zitadel-secrets` BEFORE Zitadel starts (`zitadel.depends_on`
+  gates on it `service_completed_successfully`). No manual `chown`/`chmod` step.
+- **Output files must be world-READABLE.** The sidecar (root) writes `oidc-client.json` + `sa-key.json`;
+  `api`/`web` run as a DIFFERENT uid and mount `zitadel_secrets` READ-ONLY, so the sidecar `chmod 0644`s
+  both outputs (a plain `umask` won't help — `mktemp` creates `0600` and `mv` preserves it). `0644` on an
+  INTERNAL-only single-host volume is an accepted tradeoff; §6 "secrets as files" is still honored. The
+  machine key stays `0600` (only root reads it).
 - **`down -v` wipes `zitadel_db_data` but NOT host secret dirs.** For a clean re-bootstrap the operator
   must also remove the `zitadel_secrets` volume (or the host `./zitadel-secrets/`), else stale creds
   block re-provision. **Document this explicitly.**

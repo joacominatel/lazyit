@@ -209,6 +209,29 @@ services:
       start_period: 20s
     networks: [internal]
 
+  # --- Zitadel secrets-volume permission fixer — ONE-SHOT, root (prod) ----------------
+  # ADR-0043 Phase 3 (dossier §4e). A freshly-created named volume is owned root:root (mode 0755), but the
+  # `zitadel` container runs as a NON-ROOT user (uid ~1000). Without this, Zitadel's start-from-init
+  # cannot write its FirstInstance machine key (`open /zitadel-secrets/bootstrap-key.json: permission
+  # denied`): the 03_default_instance migration fatals after partially creating the instance and the
+  # container restart-loops ("Errors.Instance.Domain.AlreadyExists"). This tiny init service runs as
+  # root and chmods the dir 0777 BEFORE Zitadel starts, so ANY container uid (Zitadel ~1000, the
+  # bootstrap sidecar as root, …) can create files in it. The dir-level 0777 is an acceptable tradeoff
+  # here: zitadel_secrets is an INTERNAL-only named volume on a single host (ADR-0028), and the
+  # per-file mode still governs read access (the sidecar writes 0644 outputs; 0600 stays on the
+  # machine key). restart:"no" → runs once. NO other dependency — it only prepares the volume.
+  zitadel-secrets-init:
+    profiles: [prod]
+    # alpine:3.21 — pinned by digest (matches infra/docker/zitadel-bootstrap.Dockerfile).
+    image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    user: "0:0"
+    restart: "no"
+    logging: *default-logging
+    command: ["sh", "-c", "chmod 0777 /zitadel-secrets"]
+    volumes:
+      - zitadel_secrets:/zitadel-secrets
+    networks: [internal]
+
   # --- Zitadel IdP — internal only; Caddy terminates TLS at auth.{domain} (prod) --------
   # Admin console: https://auth.yourdomain.com/ui/console
   # OIDC discovery: https://auth.yourdomain.com/.well-known/openid-configuration
@@ -257,6 +280,10 @@ services:
     depends_on:
       zitadel_db:
         condition: service_healthy
+      # NOTE: the gate on zitadel-secrets-init lives in infra/docker-compose.prod.yaml, NOT here.
+      # `zitadel` is UNPROFILED (it backs dev too), but zitadel-secrets-init is profiles:[prod]; an
+      # unprofiled service may not depend_on a profiled one (the dev merge would be "invalid compose
+      # project: depends on undefined service"). The prod overlay adds the edge only in the prod merge.
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/debug/healthz || exit 1"]
       interval: 10s
