@@ -6,6 +6,8 @@ created: 2026-05-25
 updated: 2026-06-01
 ---
 
+<!-- updated 2026-06-01: registered ADR-0043 (Zitadel source-of-truth, proposed). -->
+
 # Decisions (ADRs) — Map of Content
 
 Architecture Decision Records in **MADR-lite** format: *Context → Considered options →
@@ -58,11 +60,12 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0034-consumables-design]] | Consumables design (cached stock + append-only movements) | accepted |
 | [[0035-search-architecture]] | Cross-cutting search architecture (Meilisearch) | accepted |
 | [[0036-int4-bounded-integers]] | Integer fields bounded to the Postgres int4 range in shared schemas | accepted |
-| [[0037-idp-choice-zitadel-byoi]] | IdP choice — Zitadel, BYOI strategy, own Postgres | accepted |
-| [[0038-jit-user-provisioning]] | JIT user provisioning on first OIDC login | accepted |
+| [[0037-idp-choice-zitadel-byoi]] | IdP choice — Zitadel, BYOI strategy, own Postgres | accepted (extended by [[0043-zitadel-source-of-truth]]) |
+| [[0038-jit-user-provisioning]] | JIT user provisioning on first OIDC login | accepted (extended by [[0043-zitadel-source-of-truth]]) |
 | [[0039-authjs-v5-frontend-oidc]] | Auth.js v5 for frontend OIDC login | accepted |
-| [[0040-rbac-roles]] | Minimal RBAC — ADMIN/MEMBER/VIEWER role on User | accepted |
+| [[0040-rbac-roles]] | Minimal RBAC — ADMIN/MEMBER/VIEWER role on User | accepted (default-role + bootstrap extended by [[0043-zitadel-source-of-truth]]) |
 | [[0042-article-versioning-and-linking]] | KB depth — append-only ArticleVersion + article↔asset/application linking + content search | accepted |
+| [[0043-zitadel-source-of-truth]] | Zitadel as the identity & authorization source of truth (Option B) | proposed |
 
 ## Pending ADRs (to write when decided)
 - **Async workers** — BullMQ + Redis (note the [[0009-bun-first-vs-app-stack]] tension:
