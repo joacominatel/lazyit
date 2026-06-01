@@ -14,8 +14,9 @@ import { apiFetch } from "../client";
  *
  * The top-level list is **paginated** (ADR-0030): `GET /access-grants` returns a
  * `Page<AccessGrant>` envelope (the row is already lean — no relations inlined) and
- * `getAccessGrants` unwraps `.items`. The nested per-user / per-application grant
- * lists (in endpoints/applications.ts and endpoints/users.ts) stay bare arrays.
+ * `getAccessGrants` returns the whole envelope (`items` + `total`/`limit`/`offset`).
+ * The nested per-user / per-application grant lists (in endpoints/applications.ts and
+ * endpoints/users.ts) stay bare arrays.
  */
 
 const BASE = "/access-grants";
@@ -27,17 +28,22 @@ export interface AccessGrantFilters {
   activeOnly?: boolean;
   /** Default true — include active grants past their expiresAt. */
   includeExpired?: boolean;
+  /** Page size (ADR-0030; 1-200). Omit for the server default (50). */
+  limit?: number;
+  /** Zero-based window offset (ADR-0030). Omit for the first page. */
+  offset?: number;
 }
 
 /**
- * List grants (newest first), filtered. `GET /access-grants` returns a paginated
- * `Page<AccessGrant>` envelope (ADR-0030); we unwrap `.items` so callers keep an
- * array. The default page size (50) applies — the Access list's counts/avatars
- * are built from the first page only until the UI paginates.
+ * List grants (newest first), filtered and paged. `GET /access-grants` returns a
+ * paginated `Page<AccessGrant>` envelope (ADR-0030); we return the whole envelope
+ * so callers can read both `items` and the `total`/`limit`/`offset` metadata. A
+ * count-only consumer (e.g. the Access list's per-app avatars) requests a large
+ * `limit` to gather all active grants in one page.
  */
-export async function getAccessGrants(
+export function getAccessGrants(
   filters: AccessGrantFilters = {},
-): Promise<AccessGrant[]> {
+): Promise<AccessGrantListPage> {
   const params = new URLSearchParams();
   if (filters.userId) params.set("userId", filters.userId);
   if (filters.applicationId) params.set("applicationId", filters.applicationId);
@@ -45,9 +51,11 @@ export async function getAccessGrants(
     params.set("activeOnly", String(filters.activeOnly));
   if (filters.includeExpired !== undefined)
     params.set("includeExpired", String(filters.includeExpired));
+  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  if (filters.offset !== undefined)
+    params.set("offset", String(filters.offset));
   const qs = params.toString();
-  const page = await apiFetch<AccessGrantListPage>(qs ? `${BASE}?${qs}` : BASE);
-  return page.items;
+  return apiFetch<AccessGrantListPage>(qs ? `${BASE}?${qs}` : BASE);
 }
 
 /** Open a grant (give a user access to an application). 400 if the user/app isn't live. */
