@@ -21,7 +21,7 @@ import { useAsset, useAssetAssignments } from "@/lib/api/hooks/use-assets";
 import { useDeleteAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { notifyError } from "@/lib/api/notify-error";
-import { formatDate } from "@/lib/utils/format";
+import { formatDate, formatFieldLabel, formatSpecValue } from "@/lib/utils/format";
 import { AssetHistoryTimeline } from "../_components/asset-history-timeline";
 import { AssetStatusBadge } from "../_components/asset-status-badge";
 import { AssignUserDialog } from "../_components/assign-user-dialog";
@@ -169,17 +169,19 @@ export default function AssetDetailPage() {
         )}
       </Panel>
 
-      <Panel title="Specs">
+      <Panel title="Custom fields">
         {specsEntries.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No specs recorded.</p>
+          <p className="text-sm text-muted-foreground">
+            No custom fields recorded.
+          </p>
         ) : (
-          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
             {specsEntries.map(([key, value]) => (
-              <div key={key} className="flex gap-2 text-sm">
-                <dt className="font-medium text-muted-foreground">{key}</dt>
-                <dd className="font-mono break-all">
-                  {typeof value === "string" ? value : JSON.stringify(value)}
-                </dd>
+              <div key={key} className="space-y-1">
+                <dt className="text-xs font-medium text-muted-foreground">
+                  {formatFieldLabel(key) || key}
+                </dt>
+                <dd className="text-sm break-words">{formatSpecValue(value)}</dd>
               </div>
             ))}
           </dl>
