@@ -51,9 +51,10 @@ services:
   meilisearch:
     env_file: [infra/env/.env.prod]
 
-  # api/web read the OIDC/AUTH client secrets the future zitadel-bootstrap sidecar writes to the
-  # shared zitadel_secrets volume (dossier §4c). Mounted read-only; reserved now, consumed when
-  # the sidecar lands (NEXT PR). Harmless empty volume until then.
+  # api/web read the OIDC/AUTH client secrets the zitadel-bootstrap sidecar writes to the shared
+  # zitadel_secrets volume (dossier §4c): the api reads sa-key.json (ZITADEL_MGMT_SA_KEY_PATH) +
+  # oidc-client.json; the web reads the same OIDC client values. Mounted READ-ONLY here (the sidecar
+  # is the only writer). The api's depends_on (in compose.yaml) gates it on the sidecar completing.
   api:
     volumes:
       - zitadel_secrets:/zitadel-secrets:ro
@@ -62,7 +63,9 @@ services:
       - zitadel_secrets:/zitadel-secrets:ro
 
 volumes:
-  # Reserved for the future zitadel-bootstrap sidecar's exported OIDC client creds (dossier §9c/§9e).
+  # The zitadel-bootstrap sidecar's exported OIDC client creds + runtime SA key (dossier §9c/§9e).
+  # NOW declared in the canonical compose.yaml too (the unprofiled `zitadel` service mounts it for the
+  # FirstInstance machine-key export); re-listed here is a harmless no-op under the compose merge.
   # Persisted (named volume) so creds survive `down`; pair `down -v` with removing it for a clean
-  # re-bootstrap (dossier §4e). The sidecar that WRITES it arrives in the next PR.
+  # re-bootstrap (dossier §4e).
   zitadel_secrets:
