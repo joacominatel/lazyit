@@ -2,6 +2,7 @@ import type {
   AccessGrant,
   Application,
   CreateApplication,
+  Page,
   UpdateApplication,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
@@ -18,7 +19,11 @@ const BASE = "/applications";
 const crud = createCrudEndpoints<Application, CreateApplication, UpdateApplication>(
   BASE,
 );
-export const getApplications = crud.list;
+// `GET /applications` is paginated (ADR-0030 amendment): unwrap the
+// `Page<Application>` envelope to its `items` for the current array-based Access
+// screen. The list-chain wave will consume the full envelope + server-side params.
+export const getApplications = (): Promise<Application[]> =>
+  apiFetch<Page<Application>>(BASE).then((page) => page.items);
 export const getApplication = crud.get;
 export const createApplication = crud.create;
 export const updateApplication = crud.update;

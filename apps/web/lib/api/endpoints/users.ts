@@ -2,6 +2,7 @@ import type {
   AccessGrant,
   AssetAssignment,
   CreateUser,
+  Page,
   UpdateUser,
   User,
 } from "@lazyit/shared";
@@ -21,7 +22,11 @@ import { createCrudEndpoints } from "../crud-endpoints";
 const BASE = "/users";
 const users = createCrudEndpoints<User, CreateUser, UpdateUser>(BASE);
 
-export const getUsers = users.list;
+// The `GET /users` list is paginated (ADR-0030 amendment): the API returns a
+// `Page<User>` envelope. Interim unwrap to `items` keeps the current array-based
+// screen working; the list-chain wave replaces this with full envelope + params.
+export const getUsers = (): Promise<User[]> =>
+  apiFetch<Page<User>>(BASE).then((page) => page.items);
 export const getUser = users.get;
 export const createUser = users.create;
 export const updateUser = users.update;

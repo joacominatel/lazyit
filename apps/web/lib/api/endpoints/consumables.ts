@@ -4,6 +4,7 @@ import type {
   ConsumableMovementQuery,
   CreateConsumable,
   CreateConsumableMovement,
+  Page,
   UpdateConsumable,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
@@ -31,14 +32,21 @@ export interface ConsumableFilters {
   lowStock?: boolean;
 }
 
-/** List non-deleted consumables, optionally only low-stock ones. */
+/**
+ * List non-deleted consumables, optionally only low-stock ones. `GET /consumables`
+ * is paginated (ADR-0030 amendment): unwrap the `Page<Consumable>` envelope to its
+ * `items` for the current array-based screen. The list-chain wave will consume the
+ * full envelope + server-side params (sort/q/pagination).
+ */
 export function getConsumables(
   filters: ConsumableFilters = {},
 ): Promise<Consumable[]> {
   const params = new URLSearchParams();
   if (filters.lowStock) params.set("lowStock", "true");
   const qs = params.toString();
-  return apiFetch<Consumable[]>(qs ? `${BASE}?${qs}` : BASE);
+  return apiFetch<Page<Consumable>>(qs ? `${BASE}?${qs}` : BASE).then(
+    (page) => page.items,
+  );
 }
 
 /** A consumable's stock movement ledger (newest first), optionally filtered by type / date range. */
