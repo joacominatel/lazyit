@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CreateUserSchema,
   RoleSchema,
+  RoleSourceSchema,
   UpdateUserSchema,
   UserSchema,
 } from "./user";
@@ -93,5 +94,45 @@ describe("UserSchema role (ADR-0040)", () => {
     };
     expect(UserSchema.safeParse(base).success).toBe(false);
     expect(UserSchema.safeParse({ ...base, role: "VIEWER" }).success).toBe(true);
+  });
+});
+
+// ADR-0043 — `roleSource` is an OPTIONAL, additive field on the User response (informational only; the
+// API still authorizes from the DB role). It must not break existing responses that omit it.
+describe("UserSchema roleSource (ADR-0043)", () => {
+  const base = {
+    id: "00000000-0000-0000-0000-000000000000",
+    email: "a@b.com",
+    firstName: "Ada",
+    lastName: "Lovelace",
+    isActive: true,
+    role: "VIEWER" as const,
+    externalId: null,
+    createdAt: "2026-06-01T00:00:00.000Z",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+    deletedAt: null,
+  };
+
+  test("RoleSourceSchema accepts exactly local / idp", () => {
+    expect(RoleSourceSchema.options).toEqual(["local", "idp"]);
+  });
+
+  test("roleSource is optional (omitted is still valid — additive, no break)", () => {
+    expect(UserSchema.safeParse(base).success).toBe(true);
+  });
+
+  test("accepts a present roleSource of local or idp", () => {
+    expect(
+      UserSchema.safeParse({ ...base, roleSource: "local" }).success,
+    ).toBe(true);
+    expect(UserSchema.safeParse({ ...base, roleSource: "idp" }).success).toBe(
+      true,
+    );
+  });
+
+  test("rejects an unknown roleSource value", () => {
+    expect(
+      UserSchema.safeParse({ ...base, roleSource: "token" }).success,
+    ).toBe(false);
   });
 });
