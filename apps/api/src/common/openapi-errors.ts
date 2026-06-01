@@ -17,10 +17,7 @@ const API_ERROR_SCHEMA = {
   properties: {
     statusCode: { type: 'integer', example: 400 },
     message: {
-      oneOf: [
-        { type: 'string' },
-        { type: 'array', items: { type: 'string' } },
-      ],
+      oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
     },
     error: { type: 'string' },
   },
