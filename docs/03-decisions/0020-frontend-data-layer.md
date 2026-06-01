@@ -148,11 +148,38 @@ record and its **related** sub-resources, then cross-links them. The pattern, as
   so the suggestion list lives in `web`, not `@lazyit/shared`. The grant dialog shows the grantee's
   existing active grants on the app as context.
 - **Deactivated grantees/owners flagged in lists.** Soft-deleted people render dimmed + a
-  "deactivated" hint in the avatar stacks. Caveat (same root as the [[0030-list-pagination-contract]]
-  lean projection): `GET /users` and `GET /assets` exclude/omit soft-deleted user data, so on the
-  **lists** a departed grantee has no identity to draw — the Access list surfaces them as a single
-  dimmed placeholder chip (`⊘N`) so the avatar count still matches the grant count. Full
-  per-person dimming only happens where the read carries `deletedAt` (the asset/application detail).
+  "deactivated" hint in the avatar stacks. The **asset list** now dims departed owners directly:
+  `GET /assets` re-added `activeAssignments[].user.deletedAt` ([[0030-list-pagination-contract]]
+  amendment §3), so a soft-deleted owner is drawn grayscale exactly like the detail read. The
+  **Access list** still can't draw a departed grantee's identity — its count read (`GET /users`)
+  excludes soft-deleted rows — so it surfaces them as a single dimmed placeholder chip (`⊘N`) to keep
+  the avatar count matching the grant count.
+
+### List-page chrome & URL view-state (2026-06-01)
+
+The list mold gained a shared chrome layer so all six list pages (assets, applications/Access,
+consumables, users, locations, kb) stay identical in structure and behaviour — see
+[[0030-list-pagination-contract]] amendment §6 for the full rollout:
+
+- **`useListParams(...)`** (`lib/hooks/use-list-params.ts`) makes the **URL the source of truth** for
+  list view-state (`q` / `sort` / `dir` / `limit` / `offset` / named `filters`) — replacing each
+  page's local `useState` cluster, so lists are shareable, bookmarkable, Back-navigable and
+  deep-linkable from the dashboard.
+- **Chrome primitives:** `<PageHeader>` (one fixed title scale + actions/subtitle), `<SearchInput>`
+  (accessible, clearable, self-debouncing), `<ActiveFilters>` + `ClearFiltersLink`
+  (`components/active-filters.tsx`, the dismissible filter chips + "Clear all" / in-row recovery).
+- **`<ResourceTable>` is now responsive:** a `mobileChildren` slot plus `<ResourceCard>` /
+  `<ResourceCardMeta>` render each row as a touch-friendly stacked card below `md`, with the
+  `<table>` at `md`+. The page builds its rows once and hands the table a desktop and a mobile
+  projection. `<SortableHeader>` is wired to `toggleSort` for **server-side** sort (only the
+  per-resource allowlist columns are sortable).
+- **The four interim list fetchers** (`getUsers`/`getLocations`/`getApplications`/`getConsumables`)
+  now take a params object and return the **whole `Page<T>` envelope**. The bare directory hooks
+  (`useUsers`/`useLocations`/`useApplications`) keep their `Entity[]` contract for client-side joins
+  by requesting the max page (200) and `select`-ing `items`; dedicated `useUserList`/`useLocationList`/
+  `useApplicationList` hooks return the envelope for the list pages.
+- **RBAC:** write affordances (New X, per-row Edit/Delete, consumable ±1 quick-adjust) are gated on
+  `useCanWrite()` (the API is still the real gate).
 
 ## Consequences
 
