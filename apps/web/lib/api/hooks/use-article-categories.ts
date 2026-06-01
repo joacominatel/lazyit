@@ -1,16 +1,56 @@
-import { useQuery } from "@tanstack/react-query";
-import { getArticleCategories } from "../endpoints/article-categories";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type {
+  CreateArticleCategory,
+  UpdateArticleCategory,
+} from "@lazyit/shared";
+import {
+  createArticleCategory,
+  deleteArticleCategory,
+  getArticleCategories,
+  updateArticleCategory,
+} from "../endpoints/article-categories";
 
-/** Query keys for Article categories (read-only in the current scope). */
+/** Query keys for Article categories. */
 export const articleCategoryKeys = {
   all: ["article-categories"] as const,
   lists: () => [...articleCategoryKeys.all, "list"] as const,
 };
 
-/** List all article categories (for KB filters and the article form select). */
+/** List all article categories (KB filters + form select + Settings → Taxonomies table). */
 export function useArticleCategories() {
   return useQuery({
     queryKey: articleCategoryKeys.lists(),
     queryFn: getArticleCategories,
+  });
+}
+
+/** Create an article category; invalidates the list. */
+export function useCreateArticleCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateArticleCategory) => createArticleCategory(data),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: articleCategoryKeys.all }),
+  });
+}
+
+/** Update an article category; invalidates the list. */
+export function useUpdateArticleCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateArticleCategory }) =>
+      updateArticleCategory(id, data),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: articleCategoryKeys.all }),
+  });
+}
+
+/** Soft-delete an article category; invalidates the list (API returns 409 if it still has articles). */
+export function useDeleteArticleCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteArticleCategory(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: articleCategoryKeys.all }),
   });
 }
