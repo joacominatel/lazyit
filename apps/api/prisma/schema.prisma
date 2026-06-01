@@ -27,10 +27,12 @@ model User {
   firstName  String
   lastName   String
   isActive   Boolean   @default(true)
-  // RBAC role (ADR-0040). Default MEMBER; the first JIT user / seed becomes ADMIN. The RolesGuard
-  // gates Access-grant writes, Users administration and destructive deletes to ADMIN; VIEWER is
-  // read-only. Only an ADMIN (via the ADMIN-gated Users controller) can change a role.
-  role       Role      @default(MEMBER)
+  // RBAC role (ADR-0040, default flipped by ADR-0043). Default VIEWER (least-privilege): app-created
+  // users AND non-first JIT users land read-only until an ADMIN promotes them. The first JIT user /
+  // seed still becomes ADMIN so a fresh install is never un-administrable. The RolesGuard gates
+  // Access-grant writes, Users administration and destructive deletes to ADMIN; VIEWER is read-only.
+  // Only an ADMIN (via the ADMIN-gated Users controller) can change a role.
+  role       Role      @default(VIEWER)
   // Maps to the IdP `sub` once auth is integrated; null until then (no auth yet).
   // Nullable + unique: many users may be unlinked, but a linked sub is 1:1. See ADR-0016.
   externalId String?   @unique
