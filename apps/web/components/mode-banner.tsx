@@ -13,8 +13,12 @@ import { Button } from "@/components/ui/button";
 /**
  * Topbar mode banner (ADR-0043 §7a). Reflects the instance's auth posture so "am I running a real
  * auth stack?" is obvious at a glance and a dev posture is never shipped by accident:
- *   - devMode (AUTH_MODE=shim or NODE_ENV!=production) → an amber "Dev Mode" banner.
- *   - otherwise → a blue "Production" banner.
+ *   - devMode (AUTH_MODE=shim or NODE_ENV!=production) → a "Dev Mode" banner in the `warning` tone.
+ *   - otherwise → a "Production" banner in the `info` tone.
+ *
+ * Colors use the semantic `--warning`/`--info` design tokens (text-warning / bg-warning/10, etc.)
+ * rather than raw amber/blue palette classes, so the posture tones stay consistent with the rest of
+ * the design system and adapt to light/dark via the tokens themselves.
  *
  * Dismissible per browser session (sessionStorage) so it reappears on a fresh session but does not
  * nag within one. Responsive: the label collapses to icon-only on narrow screens. Renders nothing
@@ -69,8 +73,8 @@ export function ModeBanner() {
       className={cn(
         "flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium",
         dev
-          ? "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300"
-          : "border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-300",
+          ? "border-warning/30 bg-warning/10 text-warning"
+          : "border-info/30 bg-info/10 text-info",
       )}
     >
       <Icon className="size-3.5 shrink-0" />
@@ -85,9 +89,7 @@ export function ModeBanner() {
         aria-label="Dismiss mode banner"
         className={cn(
           "-mr-1 ml-0.5 size-4",
-          dev
-            ? "hover:bg-amber-100 dark:hover:bg-amber-500/20"
-            : "hover:bg-blue-100 dark:hover:bg-blue-500/20",
+          dev ? "hover:bg-warning/20" : "hover:bg-info/20",
         )}
       >
         <XMarkIcon className="size-3" />
