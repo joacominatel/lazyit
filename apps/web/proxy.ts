@@ -1,53 +1,107 @@
 /**
- * Auth.js v5 route-protection proxy — ADR-0039.
+ * Auth.js v5 route-protection proxy + first-run gate — ADR-0039 / ADR-0043 Phase 3.
  *
  * Named `proxy.ts` per the Next.js 16 file convention (renamed from `middleware.ts`
  * — see https://nextjs.org/docs/messages/middleware-to-proxy).
  *
- * Protects all routes under the (app) group. Unauthenticated visitors are
- * redirected to /login. The (auth) group routes (/login, /api/auth/**) remain
- * public so the sign-in flow can complete.
+ * Two responsibilities:
  *
- * The `authorized` callback is called for every matched request. Returning
- * false redirects to the configured `pages.signIn` (set to "/login" in auth.ts).
+ * 1. Route protection. Routes under the (app) group require a session; unauthenticated visitors are
+ *    redirected to /login (with a `callbackUrl`). The public surfaces — /login, /setup, /api/auth/**
+ *    and the marketing root — stay reachable so the sign-in and first-run flows can complete.
  *
- * Matcher: The Next.js config `matcher` below excludes static assets, the
- * Auth.js endpoints, the login page, and Next.js internals from the proxy
- * entirely, keeping overhead minimal.
+ * 2. First-run gate (ADR-0043). A fresh, UNCONFIGURED instance (no ADMIN exists yet) has no way for an
+ *    operator to discover the /setup wizard — every other entry point dead-ends before an admin
+ *    exists. So on a top-level navigation, when there is no session, we ask the API
+ *    `GET /config/status`; if the instance is unconfigured and the visitor is not already on /setup,
+ *    we send them to /setup. A configured instance (or any signed-in user — a session implies an
+ *    ADMIN already exists) skips the check entirely, and any error talking to the API FAILS OPEN
+ *    (normal flow proceeds) so a transient API blip never bricks navigation.
+ *
+ * The `authorized` callback is called for every matched request.
  */
+import type { ConfigStatus } from "@lazyit/shared";
+
 import { auth } from "@/auth";
 
-export default auth((req) => {
+/**
+ * API base URL for the gate's server-side `GET /config/status`. Prefers an internal URL
+ * (`INTERNAL_API_URL`, e.g. the in-cluster service name) when set, falling back to the public
+ * `NEXT_PUBLIC_API_URL` used by the browser client. Mirrors lib/api/client.ts's default.
+ */
+const API_URL =
+  process.env.INTERNAL_API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:3001";
+
+/** Public paths the gate must never trap (the sign-in/first-run/OIDC surfaces themselves). */
+function isPublicPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/api/auth") ||
+    pathname === "/login" ||
+    pathname === "/setup" ||
+    pathname === "/"
+  );
+}
+
+/**
+ * Ask the API whether the instance has been configured (any ADMIN exists). Returns `false` (treat as
+ * configured → no redirect) on ANY failure so a transient API problem never blocks navigation. A
+ * short abort keeps the proxy from hanging on a slow/unreachable API.
+ */
+async function isUnconfigured(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_URL}/config/status`, {
+      // Always hit the API — first-run state can flip at any moment and must never be cached stale.
+      cache: "no-store",
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!res.ok) return false;
+    const status = (await res.json()) as ConfigStatus;
+    return status.isConfigured === false;
+  } catch {
+    return false;
+  }
+}
+
+export default auth(async (req) => {
   const { nextUrl, auth: session } = req;
+  const { pathname } = nextUrl;
 
-  // /api/auth/**, /login and /setup are always public — handled by matcher exclusion below, but we
-  // add an explicit guard here as belt-and-suspenders. /setup is the first-run wizard (ADR-0043
-  // Phase 3): it MUST be reachable before any login exists (no ADMIN yet → no session), so it cannot
-  // sit behind the (app) auth guard. It self-locks server-side once an ADMIN exists.
-  const isPublic =
-    nextUrl.pathname.startsWith("/api/auth") ||
-    nextUrl.pathname === "/login" ||
-    nextUrl.pathname === "/setup" ||
-    nextUrl.pathname === "/";
+  // A signed-in user implies an ADMIN already exists → the instance is configured. Skip the gate and
+  // only run route protection. (Route protection itself is a no-op here since there IS a session.)
+  if (!session) {
+    // First-run gate. Only on top-level document navigations (not RSC/prefetch/data fetches) to avoid
+    // a `GET /config/status` per sub-request — `Sec-Fetch-Mode: navigate` marks a real navigation.
+    const isNavigation =
+      req.headers.get("sec-fetch-mode") === "navigate" ||
+      req.headers.get("accept")?.includes("text/html");
 
-  if (!isPublic && !session) {
-    const loginUrl = new URL("/login", nextUrl.origin);
-    // Preserve the destination so Auth.js can redirect back after sign-in.
-    loginUrl.searchParams.set("callbackUrl", nextUrl.pathname);
-    return Response.redirect(loginUrl);
+    if (isNavigation && pathname !== "/setup" && (await isUnconfigured())) {
+      return Response.redirect(new URL("/setup", nextUrl.origin));
+    }
+
+    // Route protection: send unauthenticated visitors of protected routes to /login, preserving the
+    // intended destination so Auth.js can return them there after sign-in.
+    if (!isPublicPath(pathname)) {
+      const loginUrl = new URL("/login", nextUrl.origin);
+      loginUrl.searchParams.set("callbackUrl", pathname);
+      return Response.redirect(loginUrl);
+    }
   }
 });
 
 export const config = {
   /**
-   * Run middleware on all routes except:
+   * Run the proxy on all routes except:
    * - Next.js internals (_next/*)
    * - Static files (favicon, images, fonts, etc.)
    * - Auth.js OIDC endpoints (/api/auth/*)
-   * - The login page itself (/login)
    * - The first-run setup wizard (/setup) — public, pre-login (ADR-0043 Phase 3)
+   *
+   * NB: unlike before, the marketing root (`$`) and /login ARE matched so the first-run gate can
+   * redirect a fresh operator landing on them to /setup. The `isPublicPath` guard above keeps those
+   * surfaces from being trapped by route protection.
    */
-  matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/auth|login|setup|$).*)",
-  ],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth|setup).*)"],
 };
