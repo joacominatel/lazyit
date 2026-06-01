@@ -155,11 +155,10 @@ describe('ConfigService', () => {
   // ---------- setup ---------------------------------------------------------
 
   describe('setup', () => {
-    it('creates the first ADMIN (role locked to ADMIN) and mirrors it to the IdP', async () => {
+    it('creates the first ADMIN (role locked to ADMIN) and PERSISTS the externalId link from the IdP mirror', async () => {
       user.count.mockResolvedValue(0); // no ADMIN yet
-      user.update.mockResolvedValue(
-        makeAdminRow({ externalId: 'zitadel-user-99' }),
-      );
+      const linkedRow = makeAdminRow({ externalId: 'zitadel-user-99' });
+      user.update.mockResolvedValue(linkedRow);
 
       const outcome = await service.setup(SETUP_INPUT, '203.0.113.7');
 
@@ -174,13 +173,24 @@ describe('ConfigService', () => {
       expect(idp.createUser).toHaveBeenCalledWith(
         expect.objectContaining({ role: 'ADMIN', email: 'admin@example.com' }),
       );
-      // Mirror landed → externalId persisted and reported.
+      // The mirror landed → the local ADMIN row is UPDATED to LINK the IdP-returned externalId.
+      // This is the load-bearing assertion: setup must write the externalId back onto the first
+      // ADMIN, not merely call createUser (ADR-0043 §5b — the bootstrapped ADMIN is a linked mirror,
+      // not an orphan local row). Asserting the exact update payload proves the link is persisted.
+      expect(user.update).toHaveBeenCalledTimes(1);
       expect(user.update).toHaveBeenCalledWith({
         where: { id: makeAdminRow().id },
         data: { externalId: 'zitadel-user-99' },
       });
+      // The mirror-success path syncs the search index from the LINKED row and reports mirrored=true
+      // with the linked row's id — confirming setup carries the linked (externalId-bearing) row
+      // forward rather than dropping the link after createUser.
+      expect(search.upsert).toHaveBeenCalledWith(
+        'users',
+        expect.objectContaining({ id: linkedRow.id }),
+      );
       expect(outcome.mirrored).toBe(true);
-      expect(outcome.adminId).toBe(makeAdminRow().id);
+      expect(outcome.adminId).toBe(linkedRow.id);
     });
 
     it('409s when an ADMIN already exists (idempotent one-time gate) and never creates a row', async () => {
