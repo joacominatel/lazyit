@@ -31,21 +31,25 @@ export const updateAsset = crud.update;
 export const deleteAsset = crud.remove;
 
 /**
- * Server-side filters for the asset list. `q` matches name / serial / assetTag.
- * `limit`/`offset` thread the pagination window (ADR-0030); omit for the defaults
- * (page size 50, offset 0).
+ * Server-side filters for the asset list. `q` matches name / serial / assetTag;
+ * `status`/`categoryId`/`locationId` scope the result set. `sort` is allowlisted to
+ * `name|assetTag|serial|status|createdAt|updatedAt` (unknown → 400). The ownership filter is NOT a
+ * server param — the screen applies it client-side over the page. `limit`/`offset` thread the
+ * pagination window (ADR-0030); omit for the defaults (page size 50, offset 0).
  */
 export interface AssetFilters {
   q?: string;
   categoryId?: string;
   locationId?: string;
   status?: AssetStatus;
+  sort?: string;
+  dir?: "asc" | "desc";
   limit?: number;
   offset?: number;
 }
 
 /**
- * List non-deleted assets (lean), optionally filtered and paged. `GET /assets`
+ * List non-deleted assets (lean), optionally filtered, sorted and paged. `GET /assets`
  * returns a paginated `Page<AssetListItem>` envelope (ADR-0030); we return the
  * whole envelope (`items` + `total`/`limit`/`offset`) so the list can render
  * pagination controls. `limit`/`offset` are echoed by the server.
@@ -56,6 +60,10 @@ export function getAssets(filters: AssetFilters = {}): Promise<AssetListPage> {
   if (filters.categoryId) params.set("categoryId", filters.categoryId);
   if (filters.locationId) params.set("locationId", filters.locationId);
   if (filters.status) params.set("status", filters.status);
+  if (filters.sort) {
+    params.set("sort", filters.sort);
+    if (filters.dir) params.set("dir", filters.dir);
+  }
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));
