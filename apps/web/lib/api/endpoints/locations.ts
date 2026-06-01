@@ -1,4 +1,10 @@
-import type { CreateLocation, Location, UpdateLocation } from "@lazyit/shared";
+import type {
+  CreateLocation,
+  Location,
+  Page,
+  UpdateLocation,
+} from "@lazyit/shared";
+import { apiFetch } from "../client";
 import { createCrudEndpoints } from "../crud-endpoints";
 
 /**
@@ -15,7 +21,11 @@ const locations = createCrudEndpoints<Location, CreateLocation, UpdateLocation>(
   "/locations",
 );
 
-export const getLocations = locations.list;
+// `GET /locations` is paginated (ADR-0030 amendment): unwrap the `Page<Location>`
+// envelope to its `items` for the current array-based screen. The list-chain wave
+// will consume the full envelope + server-side params.
+export const getLocations = (): Promise<Location[]> =>
+  apiFetch<Page<Location>>("/locations").then((page) => page.items);
 export const getLocation = locations.get;
 export const createLocation = locations.create;
 export const updateLocation = locations.update;
