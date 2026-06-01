@@ -6,24 +6,29 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
   CreateLocationSchema,
+  LocationListPageSchema,
   LocationSchema,
   UpdateLocationSchema,
 } from '@lazyit/shared';
-import { LocationsService } from './locations.service';
+import { LocationsService, LOCATION_SORT_ALLOWLIST } from './locations.service';
+import { parsePageQuery } from '../common/parse-page-query';
 import { Roles } from '../auth/roles.decorator';
 
 // DTOs from the shared zod schemas (validation + TS type + OpenAPI). See ADR-0018.
 class LocationDto extends createZodDto(LocationSchema) {}
+class LocationListPageDto extends createZodDto(LocationListPageSchema) {}
 class CreateLocationDto extends createZodDto(CreateLocationSchema) {}
 class UpdateLocationDto extends createZodDto(UpdateLocationSchema) {}
 
@@ -33,10 +38,60 @@ export class LocationsController {
   constructor(private readonly locations: LocationsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List all locations (excludes soft-deleted)' })
-  @ApiOkResponse({ type: [LocationDto] })
-  findAll() {
-    return this.locations.findAll();
+  @ApiOperation({
+    summary:
+      'List locations (paginated; excludes soft-deleted). Server-side q search + sort.',
+  })
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description:
+      'Case-insensitive substring match on name, address, floor and description',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: Object.keys(LOCATION_SORT_ALLOWLIST),
+    description:
+      'Server-side sort field. Unknown field → 400. Default: createdAt desc.',
+  })
+  @ApiQuery({
+    name: 'dir',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default asc when sort is set).',
+  })
+  @ApiOkResponse({ type: LocationListPageDto })
+  findAll(
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
+  ) {
+    return this.locations.findPage(
+      { q },
+      parsePageQuery({ limit, offset, page, sort, dir }),
+    );
   }
 
   @Get(':id')
