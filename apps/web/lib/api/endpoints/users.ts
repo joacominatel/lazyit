@@ -28,6 +28,15 @@ export const updateUser = users.update;
 export const deleteUser = users.remove;
 
 /**
+ * The current authenticated user (`GET /users/me`). The OIDC token does NOT carry the lazyit RBAC
+ * role (ADR-0040), so the frontend reads the caller's role here to decide which admin-only controls
+ * to show (e.g. the role Select). Returns the caller only — never another user.
+ */
+export function getCurrentUser(): Promise<User> {
+  return apiFetch<User>(`${BASE}/me`);
+}
+
+/**
  * A user's asset assignments (`GET /users/:id/assignments`). Active-only by default; pass
  * `activeOnly: false` for the full ownership history. The rows are **bare** (`assetId` only — no
  * `asset`/`user` inline), so the user detail resolves the asset label client-side.

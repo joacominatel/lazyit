@@ -72,16 +72,25 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 
 ## Endpoints
 
-`apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted), `GET /users/:id`,
-`POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete), `POST /users/:id/offboard`,
-`POST /users/:id/restore` (re-onboard: clears `deletedAt`; does NOT re-grant access or re-assign
-assets — [[0041-soft-delete-reuse-and-restore]]).
+`apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted), `GET /users/me`
+(the current authenticated caller, **including their role** — declared before `:id` so the literal
+`me` isn't parsed as a uuid; the OIDC token doesn't carry the lazyit role, so the web reads it here),
+`GET /users/:id`, `POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete),
+`POST /users/:id/offboard`, `POST /users/:id/restore` (re-onboard: clears `deletedAt`; does NOT
+re-grant access or re-assign assets — [[0041-soft-delete-reuse-and-restore]]).
 All **write** endpoints (create / update / delete / offboard / restore) are **ADMIN-only**
-(`@Roles('ADMIN')`, [[0040-rbac-roles]]); the reads are open to any authenticated user. Bodies validated against the
+(`@Roles('ADMIN')`, [[0040-rbac-roles]]); the reads (incl. `me`) are open to any authenticated user. Bodies validated against the
 shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). Also
 `GET /users/:id/assignments?activeOnly=` lists the assets assigned to the user ([[asset-assignment]])
 and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their application access
 ([[access-grant]]).
+
+> [!note] RBAC safety guards (ADR-0040, Round 3)
+> Changing a `role` is governed by two service-level guards. The API **refuses to remove the last
+> remaining `ADMIN`** — demoting away from `ADMIN`, offboarding or deleting the final administrator
+> returns **409 Conflict** — and **no user can change their own role** (**403 Forbidden**). Role
+> management is otherwise done by an `ADMIN` from the **Users** section (a per-user role Select);
+> the very first `ADMIN` on a pre-existing DB is set out-of-band via `bun run set-role` ([[auth-bootstrap]]).
 
 **Web:** `users/[id]` is the asset-centric **per-person** detail page (the counterpart to the asset
 detail) — it composes the two nested reads above plus the user's authored [[article]]s, answering

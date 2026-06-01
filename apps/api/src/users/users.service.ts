@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { CreateUser, UpdateUser } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -49,11 +54,47 @@ export class UsersService {
     return user;
   }
 
-  async update(id: string, data: UpdateUser) {
-    await this.findOne(id); // 404 if missing or already soft-deleted
+  async update(id: string, data: UpdateUser, actorId?: string) {
+    const current = await this.findOne(id); // 404 if missing or already soft-deleted
+
+    // RBAC safety guards (ADR-0040) — only run when a role change is actually requested.
+    if (data.role !== undefined && data.role !== current.role) {
+      // No self-escalation/demotion: an ADMIN cannot change their OWN role (403). Privilege changes
+      // must be made BY one admin ON another, so a single admin can never quietly elevate or strip
+      // their own role and there is always a second pair of hands in the loop.
+      if (actorId !== undefined && actorId === id) {
+        throw new ForbiddenException('You cannot change your own role');
+      }
+      // Never strip the LAST remaining ADMIN of its role — that would leave the instance with no
+      // administrator and no way to recover from the UI (409). Demoting any other admin is fine.
+      if (current.role === 'ADMIN' && data.role !== 'ADMIN') {
+        await this.assertNotLastAdmin(id);
+      }
+    }
+
     const user = await this.prisma.user.update({ where: { id }, data });
     this.search.upsert('users', projectUser(user));
     return user;
+  }
+
+  /**
+   * Throws 409 Conflict if `userId` is the only remaining live ADMIN. Used before any action that
+   * would remove their administrator powers (role demotion, offboarding, delete), so a fresh install
+   * — or any instance — is never left without an administrator. Counts LIVE admins only (the read
+   * filter already excludes soft-deleted users), so an offboarded admin doesn't count toward the
+   * total. The check-then-act window is acceptable for a 5–20-person single-org tool: the worst case
+   * is two near-simultaneous demotions both passing, which is the same class of race ADR-0040 already
+   * accepts for first-user-ADMIN, and strictly safer than locking everyone out.
+   */
+  private async assertNotLastAdmin(userId: string) {
+    const otherAdmins = await this.prisma.user.count({
+      where: { role: 'ADMIN', id: { not: userId } },
+    });
+    if (otherAdmins === 0) {
+      throw new ConflictException(
+        'Cannot remove the last administrator. Promote another user to ADMIN first.',
+      );
+    }
   }
 
   /**
@@ -70,7 +111,14 @@ export class UsersService {
    * access-grants service, to keep it inside this single transaction.
    */
   async remove(id: string, actorId?: string): Promise<OffboardResult> {
-    await this.findOne(id); // 404 if missing or already soft-deleted
+    const target = await this.findOne(id); // 404 if missing or already soft-deleted
+
+    // Last-admin safety guard (ADR-0040): offboarding/deleting the only remaining ADMIN would leave
+    // the instance with no administrator (409). Offboarding a non-last admin, or any non-admin, is
+    // fine. Mirrors the role-demotion guard in update().
+    if (target.role === 'ADMIN') {
+      await this.assertNotLastAdmin(id);
+    }
 
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {

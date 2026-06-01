@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  getCurrentUser,
   getUser,
   getUserAssignments,
   getUserGrants,
@@ -18,6 +19,8 @@ import { createQueryKeys } from "../query-keys";
 const baseUserKeys = createQueryKeys("users");
 export const userKeys = {
   ...baseUserKeys,
+  /** The authenticated caller (`GET /users/me`) — distinct from any `detail(id)`. */
+  me: () => [...baseUserKeys.all, "me"] as const,
   assignments: (id: string, activeOnly: boolean) =>
     [...baseUserKeys.detail(id), "assignments", activeOnly] as const,
   grants: (id: string, activeOnly: boolean) =>
@@ -29,6 +32,20 @@ export function useUsers() {
   return useQuery({
     queryKey: userKeys.lists(),
     queryFn: getUsers,
+  });
+}
+
+/**
+ * The current authenticated user (`GET /users/me`), used mainly to read the caller's RBAC role
+ * (ADR-0040) — the OIDC token does not carry it. The role drives whether admin-only controls (like
+ * the role Select) render. Cached longer than list data: the caller's own role rarely changes within
+ * a session, and a stale read only briefly under- or over-shows a control that the API still gates.
+ */
+export function useCurrentUser() {
+  return useQuery({
+    queryKey: userKeys.me(),
+    queryFn: getCurrentUser,
+    staleTime: 5 * 60 * 1000,
   });
 }
 

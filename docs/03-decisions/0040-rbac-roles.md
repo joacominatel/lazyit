@@ -136,11 +136,45 @@ mutation); all `GET`s are unannotated (any authenticated user, including VIEWER)
 
 - **Follow-ups (out of scope here):**
   - Frontend role-aware UI (hide admin actions for non-admins) — a separate web PR; the API is the
-    enforcement boundary regardless.
+    enforcement boundary regardless. **Done (Round 3):** the Users list + detail render each role and
+    let an ADMIN change it via a Select (see the addendum below).
   - **Soft-delete restore** endpoints will be ADMIN-gated by the same `@Roles('ADMIN')` mechanism in
     the next stacked PR (Round-2 #2).
   - A "last ADMIN" guard (refuse to demote/offboard the final ADMIN) is a sensible future safeguard;
-    not implemented now.
+    not implemented now. **Done (Round 3):** implemented as a service-level guard (see the addendum).
+
+## Addendum — Round 3: role management UI + safety guards + bootstrap
+
+The CEO asked to "manage roles (the admins) from the Users section". This round wires the UI to the
+already-ADMIN-gated Users API and adds the safety guards the original ADR deferred.
+
+- **`GET /users/me`** (any authenticated user) — returns the `@CurrentUser()` the auth guard
+  resolved, **including the role**. The OIDC access token does not carry the lazyit role, so the
+  frontend reads it here to decide which admin-only controls to render. The route is declared
+  **before** `GET /users/:id` so the literal `me` is not swallowed by the uuid `ParseUUIDPipe`. It
+  returns the caller only, never another user; in shim mode an anonymous caller gets 401.
+- **Last-admin guard** (`users.service.ts`) — any action that would strip the final live ADMIN of
+  its administrator powers is refused with **409 Conflict** ("Cannot remove the last administrator…"):
+  demoting the only ADMIN (role change away from ADMIN), or offboarding/deleting it. Counts LIVE
+  admins only (soft-deleted admins don't count). The check-then-act window is the same bounded race
+  the first-user-ADMIN rule already accepts; worst case over-protects (two near-simultaneous
+  demotions both pass), never under-protects.
+- **No self-role-change** (`users.service.ts`) — an ADMIN cannot change their OWN role (**403
+  Forbidden**, "You cannot change your own role"). Privilege changes must be made by one admin on
+  another, so a single admin can never quietly elevate/strip their own role. The controller passes
+  the resolved actor id into `update(id, dto, actorId)` to enforce this; non-role edits (name,
+  email, isActive) by yourself are unaffected.
+- **Frontend** — `UserRoleSelect` (Users list cell + detail Profile panel) reads the caller via
+  `GET /users/me`: a non-admin sees a read-only badge; an admin editing themselves sees a disabled
+  badge; an admin editing someone else gets an ADMIN/MEMBER/VIEWER Select with a confirmation step.
+  The 409/403 messages are surfaced verbatim as toasts (`notifyError`). The API remains the real
+  enforcement boundary; the UI only hides/guards what the API already forbids.
+- **Bootstrap fix** — the `rbac_user_role` migration backfilled all PRE-EXISTING users to MEMBER, and
+  first-user-ADMIN only fires on an empty DB, so on a real (non-empty) DB an operator who logs in via
+  OIDC is stuck as MEMBER with no UI to self-promote. A standalone script
+  `apps/api/scripts/set-role.ts` (`bun run set-role <email> <ADMIN|MEMBER|VIEWER>`) lets the operator
+  designate the first ADMIN directly against the DB. Documented in [[auth-bootstrap]] (with a raw-SQL
+  fallback).
 
 Related: [[0038-jit-user-provisioning]] · [[0016-auth-strategy-deferred]] ·
 [[0022-draft-visibility-auth-shim]] · [[0023-access-management-design]] · [[user]]

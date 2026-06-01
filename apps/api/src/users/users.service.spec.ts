@@ -1,5 +1,9 @@
 import { Test } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
@@ -18,6 +22,7 @@ type PrismaUserMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
 };
 
 // The transaction client the offboarding writes go through; $transaction runs the callback with it.
@@ -41,6 +46,9 @@ describe('UsersService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      // Default: there is at least one OTHER admin, so the last-admin guard is a no-op unless a test
+      // overrides this to 0 to simulate the final administrator.
+      count: jest.fn().mockResolvedValue(1),
     };
     tx = {
       user: { update: jest.fn() },
@@ -194,6 +202,141 @@ describe('UsersService', () => {
       firstName: 'Ada',
       lastName: 'Byron',
       email: 'a@b.com',
+    });
+  });
+
+  // ADR-0040 RBAC safety guards — last-admin protection + no self-role-change.
+  describe('role-change guards (ADR-0040)', () => {
+    it('forbids a user from changing their OWN role (403)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        role: 'ADMIN',
+        deletedAt: null,
+      });
+
+      // actorId === target id → self-change is rejected before any DB write.
+      await expect(
+        service.update('uuid-1', { role: 'MEMBER' }, 'uuid-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to demote the LAST remaining ADMIN (409)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'admin-1',
+        role: 'ADMIN',
+        deletedAt: null,
+      });
+      // No OTHER admin exists → this is the final administrator.
+      user.count.mockResolvedValue(0);
+
+      await expect(
+        service.update('admin-1', { role: 'MEMBER' }, 'actor-99'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(user.count).toHaveBeenCalledWith({
+        where: { role: 'ADMIN', id: { not: 'admin-1' } },
+      });
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('allows demoting an admin when another admin remains', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'admin-1',
+        role: 'ADMIN',
+        deletedAt: null,
+      });
+      user.count.mockResolvedValue(2); // other admins exist
+      user.update.mockResolvedValue({
+        id: 'admin-1',
+        firstName: 'A',
+        lastName: 'B',
+        email: 'a@b.com',
+        role: 'MEMBER',
+      });
+
+      await expect(
+        service.update('admin-1', { role: 'MEMBER' }, 'actor-99'),
+      ).resolves.toMatchObject({ role: 'MEMBER' });
+      expect(user.update).toHaveBeenCalledWith({
+        where: { id: 'admin-1' },
+        data: { role: 'MEMBER' },
+      });
+    });
+
+    it('allows promoting a member to admin without touching the last-admin guard', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        role: 'MEMBER',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'A',
+        lastName: 'B',
+        email: 'a@b.com',
+        role: 'ADMIN',
+      });
+
+      await service.update('member-1', { role: 'ADMIN' }, 'actor-99');
+      // Promotion is not a demotion-away-from-ADMIN, so the count guard never runs.
+      expect(user.count).not.toHaveBeenCalled();
+      expect(user.update).toHaveBeenCalled();
+    });
+
+    it('skips the guards for a non-role update (e.g. name change)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'admin-1',
+        role: 'ADMIN',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({
+        id: 'admin-1',
+        firstName: 'New',
+        lastName: 'Name',
+        email: 'a@b.com',
+        role: 'ADMIN',
+      });
+
+      // Same actor as the target, but no role field → self-guard must NOT trip.
+      await service.update('admin-1', { firstName: 'New' }, 'admin-1');
+      expect(user.count).not.toHaveBeenCalled();
+      expect(user.update).toHaveBeenCalled();
+    });
+
+    it('refuses to offboard the LAST remaining ADMIN (409)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'admin-1',
+        role: 'ADMIN',
+        deletedAt: null,
+      });
+      user.count.mockResolvedValue(0); // the only admin
+
+      await expect(
+        service.remove('admin-1', 'actor-99'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      // The transaction never runs — nothing is soft-deleted or revoked.
+      expect(tx.user.update).not.toHaveBeenCalled();
+      expect(tx.accessGrant.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('offboards an admin when another admin remains', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'admin-1',
+        role: 'ADMIN',
+        deletedAt: null,
+      });
+      user.count.mockResolvedValue(1); // a second admin remains
+      tx.user.update.mockResolvedValue({
+        id: 'admin-1',
+        deletedAt: new Date(),
+      });
+
+      await expect(
+        service.remove('admin-1', 'actor-99'),
+      ).resolves.toMatchObject({
+        userId: 'admin-1',
+      });
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
     });
   });
 

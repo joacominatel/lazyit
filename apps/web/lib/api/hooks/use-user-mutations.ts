@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { CreateUser, UpdateUser } from "@lazyit/shared";
+import type { CreateUser, Role, UpdateUser } from "@lazyit/shared";
 import { createUser, deleteUser, updateUser } from "../endpoints/users";
 import { userKeys } from "./use-users";
 
@@ -26,6 +26,26 @@ export function useUpdateUser() {
     onSuccess: (_user, { id }) => {
       queryClient.invalidateQueries({ queryKey: userKeys.all });
       queryClient.invalidateQueries({ queryKey: userKeys.detail(id) });
+    },
+  });
+}
+
+/**
+ * Change a user's RBAC role (ADR-0040) via `PATCH /users/:id`. A focused mutation so the role Select
+ * stays simple. Toasts/confirmation are owned by the calling component; this only keeps the cache
+ * coherent — invalidating the list, the user's detail, AND `me` (the caller may have changed their
+ * own role in some flow, and `me` carries the role the UI gates on). The API still enforces the
+ * last-admin (409) and self-role-change (403) guards, surfaced as the mutation's error.
+ */
+export function useUpdateUserRole() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, role }: { id: string; role: Role }) =>
+      updateUser(id, { role }),
+    onSuccess: (_user, { id }) => {
+      queryClient.invalidateQueries({ queryKey: userKeys.all });
+      queryClient.invalidateQueries({ queryKey: userKeys.detail(id) });
+      queryClient.invalidateQueries({ queryKey: userKeys.me() });
     },
   });
 }
