@@ -1,72 +1,64 @@
-import { Injectable, NotImplementedException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { Role } from '../../../generated/prisma/client';
 import type {
   CreateIdentityUserInput,
   ExternalRef,
   IdentityProvider,
 } from './identity-provider.interface';
+import { ZitadelManagementService } from './zitadel-management.service';
 
 /**
- * ZitadelIdentityProvider — STUB (ADR-0043, Phase 1).
+ * ZitadelIdentityProvider — the real write-back adapter (ADR-0043 Phase 2).
  *
  * Zitadel is lazyit's recommended self-hosted IdP, and the only one we can MANAGE (provision users,
- * disable them, mirror role grants) via its Management API. Phase 2 fills these methods with real
- * Management-API calls (PAT for bootstrap, Private-Key JWT for runtime — ADR-0043 decision #4).
+ * disable them, mirror role grants) via its Management API. This adapter delegates the plumbing
+ * (service-account Private-Key JWT auth + token cache + the v2 resource calls) to
+ * {@link ZitadelManagementService}; it just maps the {@link IdentityProvider} contract onto it.
  *
- * Phase 1 is scaffolding only: the management methods are not wired into any guard/service yet, so
- * they throw {@link NotImplementedException} with a TODO(Phase 2) note (a loud failure if something
- * calls them prematurely, vs. the generic provider's intentional silent no-op). `resolveExternalRef`
- * is already functional and returns `{ externalId: sub }` — the `sub` is the external reference lazyit
- * persists; Phase 2 may enrich it if the managed Zitadel user id differs from the token sub.
+ * Authorization stays DB-first regardless (ADR-0043 decision #1): these write-backs MIRROR lazyit's
+ * decisions into Zitadel — the RolesGuard never reads a role from the token.
  *
- * Authorization stays DB-first regardless (ADR-0043 decision #1): even once these write-backs exist,
- * they MIRROR lazyit's decisions into Zitadel — the RolesGuard never reads a role from the token.
+ * Boot / login safety (ADR-0043 §6): the management service reads its config lazily and NEVER throws
+ * at construction, so an absent/misconfigured Management credential cannot fail boot. When the
+ * credential is missing the management methods throw a clear "Zitadel management not configured"
+ * error (surfaced upstream as 503) — the runtime authN path never touches this adapter.
  */
 @Injectable()
 export class ZitadelIdentityProvider implements IdentityProvider {
   readonly kind = 'zitadel';
   readonly supportsManagement = true;
 
+  // Constructed once. Lazy config resolution lives inside the service, so this is safe at boot even
+  // when ZITADEL_MGMT_* are unset (the no-op factory still builds the provider).
+  private readonly management = new ZitadelManagementService();
+
   resolveExternalRef(sub: string): Promise<ExternalRef> {
-    // Phase 1: the OIDC `sub` IS the external reference. Phase 2 may resolve a distinct Zitadel user id.
+    // The OIDC `sub` IS the Zitadel user id lazyit stores as externalId; no Management call needed.
     return Promise.resolve({ externalId: sub });
   }
 
-  // The management methods are unimplemented in Phase 1. They return a REJECTED promise (consistent
-  // with the Promise-returning contract — a Phase-2 caller can `await`/`.catch()` it uniformly) rather
-  // than throwing synchronously. The TODO markers below are where Phase 2 plugs in the real
-  // Management-API calls (PAT for bootstrap, Private-Key JWT for runtime — ADR-0043 decision #4).
-
-  // TODO(Phase 2): call the Zitadel Management API to create/import the user and return its id.
-  createUser(input: CreateIdentityUserInput): Promise<ExternalRef> {
-    return this.notImplemented('createUser', input.email);
+  async createUser(input: CreateIdentityUserInput): Promise<ExternalRef> {
+    const externalId = await this.management.createUser({
+      email: input.email,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      role: input.role,
+    });
+    return { externalId };
   }
 
-  // TODO(Phase 2): call the Zitadel Management API to deactivate the user.
-  deactivateUser(externalId: string): Promise<never> {
-    return this.notImplemented('deactivateUser', externalId);
+  deactivateUser(externalId: string): Promise<void> {
+    return this.management.deactivateUser(externalId);
   }
 
-  // TODO(Phase 2): mirror the role grant via the Zitadel Management API (project role assignment).
-  grantRole(externalId: string, role: Role): Promise<never> {
-    return this.notImplemented('grantRole', `${externalId}:${role}`);
+  grantRole(externalId: string, role: Role): Promise<void> {
+    return this.management.grantRole(externalId, role);
   }
 
-  // TODO(Phase 2): mirror the role revocation via the Zitadel Management API.
-  revokeRole(externalId: string, role: Role): Promise<never> {
-    return this.notImplemented('revokeRole', `${externalId}:${role}`);
-  }
-
-  /**
-   * Build the Phase-1 not-yet-implemented rejection shared by all management methods. `context` is
-   * folded into the message purely so the (otherwise-unused) Phase-1 params are referenced — Phase 2
-   * replaces each call site with a real Management-API request.
-   */
-  private notImplemented(operation: string, context: string): Promise<never> {
-    return Promise.reject(
-      new NotImplementedException(
-        `ZitadelIdentityProvider.${operation} is not implemented yet (ADR-0043 Phase 2) [${context}]`,
-      ),
-    );
+  revokeRole(externalId: string, _role: Role): Promise<void> {
+    // The interface carries the role for symmetry/logging, but a revoke clears the user's project
+    // grant regardless of which role it held (a role CHANGE is grantRole's revoke-then-grant).
+    void _role;
+    return this.management.revokeRole(externalId);
   }
 }
