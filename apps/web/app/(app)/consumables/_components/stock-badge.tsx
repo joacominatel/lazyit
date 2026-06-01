@@ -1,3 +1,4 @@
+import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { cn } from "@/lib/utils";
 
 export type StockTone = "ok" | "low" | "out";
@@ -9,10 +10,11 @@ export function stockTone(currentStock: number, minStock: number | null): StockT
   return "ok";
 }
 
-const TONE_CLASS: Record<StockTone, string> = {
-  ok: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  low: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  out: "bg-destructive/10 text-destructive",
+/** Stock status → the shared status tone (single source of truth for status color). */
+const STATUS_TONE: Record<StockTone, StatusTone> = {
+  ok: "success",
+  low: "warning",
+  out: "danger",
 };
 
 /** The on-hand quantity rendered with a status color (green / amber / red). */
@@ -29,15 +31,12 @@ export function StockBadge({
 }) {
   const tone = stockTone(currentStock, minStock);
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-md px-2 py-0.5 text-sm font-medium tabular-nums",
-        TONE_CLASS[tone],
-        className,
-      )}
+    <StatusBadge
+      tone={STATUS_TONE[tone]}
+      className={cn("h-auto rounded-md px-2 text-sm tabular-nums", className)}
     >
       {currentStock}
       {unit ? ` ${unit}` : ""}
-    </span>
+    </StatusBadge>
   );
 }

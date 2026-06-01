@@ -105,6 +105,31 @@ black anchors. Two CEO-driven amendments have since refined this **at the token 
    The **brand accent and the semantic colors from amendment 1 are unchanged** — only the
    neutral ramp was softened.
 
+3. **Status color as a single source of truth** (2026-06). Audit finding: the semantic
+   `--success` / `--warning` / `--info` tokens from amendment 1 were defined but consumed
+   **zero times** — every status surface hardcoded raw Tailwind palette (emerald/amber/sky/
+   rose) with hand-written `dark:` variants, so the same state drifted in hue across screens
+   and dark-mode parity was re-guessed per component. This amendment **activates** the tokens
+   and makes them the only place a status color is decided:
+   - **Tokens re-tuned for AA as solid fills.** `--success oklch(0.53 0.14 150)`,
+     `--warning oklch(0.82 0.15 85)`, `--info oklch(0.54 0.14 240)` in light;
+     `0.72/0.16/150`, `0.84/0.15/85`, `0.7/0.13/240` in dark — hue-aligned with the chart
+     ramp. Each `*-foreground` clears WCAG AA on its token **as a solid fill** (light
+     4.69–8.58:1, dark 7.16–10.99:1). Status pills fill **solid**, not tinted, because a
+     tinted amber-text-on-amber-tint pill cannot reach AA on the bone canvas (~1.6:1).
+   - **`StatusBadge` primitive** (`components/ui/status-badge.tsx`): `tone` of
+     `success | warning | info | danger | neutral` (danger → `--destructive`,
+     neutral → `--secondary`), optional `dot`, plus a standalone `StatusDot`. `Badge` also
+     gains `success` / `warning` / `info` variants. The dedicated status badges
+     (stock / movement-type / asset-status / article-status / user-status / user-role) now
+     map their states to a tone instead of carrying a private palette.
+   - **Categorical / avatar palette.** The previously-dead `--chart-1..5` hues are the
+     canonical categorical identities, realized as `--avatar-1..5` (+ `--avatar-foreground`)
+     at a lightness that clears white-text AA on both themes. One shared helper
+     (`lib/avatar-color.ts`, `avatarColorFor(seed)`) replaces the duplicated avatar color
+     functions, so a person reads the same color on every screen. (The third copy in the
+     dashboard activity panel adopts it in a later wave.)
+
 ## Consequences
 
 - **Positive:** fast, consistent UI; neutral design tokens centralize the look; Radix
