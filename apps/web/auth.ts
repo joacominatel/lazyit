@@ -24,6 +24,14 @@
 
 import NextAuth, { customFetch } from "next-auth";
 
+import { loadWebBootstrapOidcFile } from "@/lib/auth/bootstrap-file";
+
+// Zero-touch bootstrap (ADR-0043 Phase 3): before any AUTH_* read below, back-fill them from the
+// sidecar's oidc-client.json (mounted read-only) for any var the operator did not set, so the
+// bundled-Zitadel flow needs NO hand-copied client id/secret. Explicit AUTH_* env always wins; a
+// Node-runtime-only, fail-soft no-op on Edge / when the file is absent (BYOI + `next build`).
+loadWebBootstrapOidcFile();
+
 declare module "next-auth" {
   interface Session {
     /** IdP access token, forwarded as `Authorization: Bearer` on API calls. */
