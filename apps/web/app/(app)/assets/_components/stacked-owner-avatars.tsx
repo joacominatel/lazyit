@@ -6,11 +6,11 @@ const MAX_SHOWN = 4;
 
 /**
  * The trimmed owner-assignment shape carried by the lean asset list
- * (`AssetListItem`), widened with an **optional** `user.deletedAt` so this same
- * component also accepts the full detail shape if reused. NOTE (ADR-0030 lean
- * projection): `GET /assets` does NOT include `user.deletedAt`, so on the list a
- * departed owner can't be dimmed — `deletedAt` would need re-adding to the lean
- * schema for that. The detail read still carries it.
+ * (`AssetListItem`). The lean projection now carries `user.deletedAt` (re-added in
+ * the ADR-0030 amendment, 2026-06-01) — `null` for a live owner, an ISO timestamp
+ * for a departed (soft-deleted) one — so the list dims a departed owner exactly
+ * like the detail read. The intersection just keeps the field optional so this
+ * component also accepts any caller passing the full detail shape.
  */
 type OwnerAssignment = AssetListItem["activeAssignments"][number] & {
   user: { deletedAt?: string | null };
@@ -19,8 +19,7 @@ type OwnerAssignment = AssetListItem["activeAssignments"][number] & {
 /**
  * Overlapping avatars of an asset's active owners, with a "+N" overflow chip.
  * Soft-deleted owners (a person who left but whose assignment isn't released yet)
- * render dimmed/grayscale with a "deactivated" hint — they linger until released
- * (only when `deletedAt` is present; see {@link OwnerAssignment}).
+ * render dimmed/grayscale with a "deactivated" hint — they linger until released.
  */
 export function StackedOwnerAvatars({
   assignments,
