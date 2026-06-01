@@ -19,6 +19,17 @@ export const RoleSchema = z.enum(["ADMIN", "MEMBER", "VIEWER"]);
 export type Role = z.infer<typeof RoleSchema>;
 
 /**
+ * Where a user's role currently lives, for the auth epic (ADR-0043). Informational only — the API's
+ * RolesGuard ALWAYS authorizes from the local DB role (ADR-0043 decision #1); this never gates
+ * anything. OPTIONAL and additive so it can be omitted by every current response without breaking
+ * existing consumers:
+ *   - "local" — the role is managed in lazyit's own DB (current behaviour; the only value emitted today).
+ *   - "idp"   — the role is mirrored to / sourced from the IdP (a Phase-2+ concept).
+ */
+export const RoleSourceSchema = z.enum(["local", "idp"]);
+export type RoleSource = z.infer<typeof RoleSourceSchema>;
+
+/**
  * A normalized email for WRITE payloads (ADR-0041). Email is case-insensitive end-to-end: the DB
  * column is `citext` and the live-row unique index is case-insensitive, so input is canonicalized
  * (trim + lowercase) before it is stored. This makes "Bob@x" and "bob@x" the same address on input,
@@ -38,8 +49,11 @@ export const UserSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   isActive: z.boolean(),
-  // RBAC role (ADR-0040). Always present on the wire; defaults to MEMBER server-side.
+  // RBAC role (ADR-0040). Always present on the wire; defaults to VIEWER server-side (ADR-0043).
   role: RoleSchema,
+  // Where the role is managed (ADR-0043). OPTIONAL + additive: omitted today (implicitly "local"),
+  // informational only — the API still authorizes from the DB role, never from this field or a token.
+  roleSource: RoleSourceSchema.optional(),
   // IdP `sub` mapping; null until auth is integrated (no auth yet). See ADR-0016.
   externalId: z.string().nullable(),
   createdAt: z.iso.datetime(),
@@ -58,9 +72,10 @@ export const CreateUserSchema = z.strictObject({
   email: EmailSchema,
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
-  // RBAC role (ADR-0040). Optional; omitted → server default MEMBER. Accepting it here is SAFE only
-  // because the Users controller is ADMIN-gated by the RolesGuard: a non-admin never reaches this
-  // endpoint, so they cannot set or escalate a role. Privilege management is an ADMIN-only operation.
+  // RBAC role (ADR-0040; default flipped to VIEWER by ADR-0043). Optional; omitted → server default
+  // VIEWER (least-privilege read-only). Accepting it here is SAFE only because the Users controller is
+  // ADMIN-gated by the RolesGuard: a non-admin never reaches this endpoint, so they cannot set or
+  // escalate a role. Privilege management is an ADMIN-only operation.
   role: RoleSchema.optional(),
 });
 
