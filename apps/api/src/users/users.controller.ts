@@ -180,4 +180,17 @@ export class UsersController {
   ): ReturnType<UsersService['remove']> {
     return this.users.remove(id, this.actor.resolve(actor));
   }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore (re-onboard) a soft-deleted user — ADMIN only (ADR-0041)',
+    description:
+      'Clears deletedAt so the account exists and can log in again. Does NOT re-grant the access or ' +
+      're-assign the assets that offboarding revoked/released — those are separate, intentional acts.',
+  })
+  @ApiOkResponse({ type: UserDto })
+  restore(@Param('id', ParseUUIDPipe) id: string) {
+    return this.users.restore(id);
+  }
 }
