@@ -55,7 +55,7 @@ describe('search document projectors', () => {
     });
   });
 
-  it('projectArticle keeps id/slug/title/excerpt/status', () => {
+  it('projectArticle keeps id/slug/title/excerpt/status/content (content searchable — ADR-0042)', () => {
     expect(
       projectArticle({
         id: 'art1',
@@ -63,6 +63,7 @@ describe('search document projectors', () => {
         title: 'VPN Guide',
         excerpt: 'how to vpn',
         status: 'PUBLISHED',
+        content: '## Step 1\nOpen the VPN client and connect to the gateway.',
       }),
     ).toEqual({
       id: 'art1',
@@ -70,6 +71,7 @@ describe('search document projectors', () => {
       title: 'VPN Guide',
       excerpt: 'how to vpn',
       status: 'PUBLISHED',
+      content: '## Step 1\nOpen the VPN client and connect to the gateway.',
     });
   });
 

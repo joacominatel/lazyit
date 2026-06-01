@@ -43,7 +43,9 @@ logged (CRITICAL) and swallowed. If Meili is down, writes still succeed and sear
   (this lane does not touch `infra/`). Config via `MEILI_HOST` / `MEILI_MASTER_KEY`
   ([[0028-secrets-and-config]]). If `MEILI_HOST` is unset the search wiring no-ops (search disabled).
 - **Indexed entities**: `assets`, `articles`, `users`, `locations`, `applications` (one Meili index
-  each; primary key `id`).
+  each; primary key `id`). The `articles` document includes the markdown **`content`** since
+  [[0042-article-versioning-and-linking]] (runbook bodies are findable); only PUBLISHED articles are
+  ever indexed, so a DRAFT's content can't leak. Re-run `reindex:all` after deploy to backfill it.
 - **Sync**: `SearchService.upsert(index, doc)` / `delete(index, id)`, called **fire-and-forget** from
   each service's create / update / soft-delete. Soft-deleting removes the document, so soft-deleted
   rows never appear in results. A failed sync is logged, never thrown.

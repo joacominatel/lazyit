@@ -3,7 +3,7 @@ title: Article
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-01
 ---
 
 # Article
@@ -13,16 +13,22 @@ updated: 2026-05-25
 ## Purpose
 
 A knowledge-base document (markdown): a procedure, troubleshooting note or runbook. The internal
-documentation pillar of lazyit ([[vision]]). Deliberately a **simple wiki** for small teams — no
-versioning, tags or full-text search ([[0021-knowledge-base-design]]).
+documentation pillar of lazyit ([[vision]]). Started as a deliberately **simple wiki** for small
+teams ([[0021-knowledge-base-design]]); [[0042-article-versioning-and-linking]] added the first
+depth — **append-only versioning** ([[article-version]]), **asset/application linking**
+([[article-link]]), and **content indexed in search** ([[0035-search-architecture]]). Tags remain
+deferred.
 
 ## Relationships
 
 - **grouped by** one [[article-category]] (`categoryId`, **required** FK, `onDelete: Restrict`).
 - **authored by** one [[user]] (`authorId`, **required** FK, `onDelete: Restrict`) — the creator.
 - **last edited by** an optional [[user]] (`lastEditedById`, `onDelete: SetNull`).
-- **versioned by** [[article-version]] — ⚪ **deferred** ([[0021-knowledge-base-design]]); the KB
-  ships without edit history. Adding it later is non-destructive (a new table + FK).
+- **versioned by** [[article-version]] — 🟢 **implemented** ([[0042-article-versioning-and-linking]]):
+  an append-only snapshot is written on every create/edit that changes a versioned field, in the same
+  transaction as the article write. An article with version history can't be hard-deleted (Restrict).
+- **linked to** [[asset]] / [[application]] via [[article-link]] — 🟢 **implemented** ([[0042]]):
+  each link targets an asset XOR an application ("the runbook for THIS server/app").
 
 ## Business rules
 
@@ -39,6 +45,13 @@ versioning, tags or full-text search ([[0021-knowledge-base-design]]).
   on create, `authorId` is taken from the caller, **never** the body.
 - **Import** (`POST /articles/import`) accepts `.md`, `.txt`, `.docx`, extracts **markdown only**,
   and does **not** store the original file. `.pdf`/`.html`/`.odt` are deferred.
+- **Versioning** ([[0042-article-versioning-and-linking]]): create/import write [[article-version]]
+  **v1**; an edit that changes `title`/`content`/`excerpt` and a `publish`/`unpublish` (status
+  change) append the next version — all **in the same transaction** as the article write, so the
+  prior body is never lost. A metadata-only or no-op `PATCH` writes no version.
+- **Search** ([[0035-search-architecture]] / [[0042]]): a PUBLISHED article is indexed in
+  Meilisearch including its **`content`** (runbook bodies are findable). A DRAFT is never indexed
+  (author-private), so its content can't leak via search.
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
 
 > [!warning] Auth is a temporary shim — endpoints are insecure
@@ -107,16 +120,27 @@ listings), `@@index([status, publishedAt])` (latest published).
 - `POST /articles/:id/restore` — restore (clears `deletedAt`; author only). ADMIN-gated route; can
   `409` if a live article took the freed slug meanwhile ([[0041-soft-delete-reuse-and-restore]]).
 
+Versioning + linking ([[0042-article-versioning-and-linking]]):
+
+- `GET /articles/:id/versions` — paginated version history ([[0030-list-pagination-contract]]),
+  newest first; `GET /articles/:id/versions/:version` — one version. Drafts visible only to author.
+- `POST /articles/:id/links` — link to an asset XOR application (author only, `ADMIN`/`MEMBER`);
+  `DELETE /articles/:id/links/:linkId` — unlink; `GET /articles/:id/links` — list links.
+- `GET /assets/:id/articles` — reverse: PUBLISHED articles linked to an asset (lean list shape).
+
 For a non-author write on a **published** article the API returns `403`; on a **draft**, `404`.
 
 ## Not yet implemented (deferred)
 
-- [[article-version]] (edit history), **tags**, **full-text search**, **export** (md/pdf) —
-  all non-destructive future additions ([[0021-knowledge-base-design]]).
+- **Tags**; **export** (md/pdf) — still deferred ([[0021-knowledge-base-design]]). *(Edit history
+  and full-text-over-content shipped in [[0042-article-versioning-and-linking]].)*
+- **Rollback** — replay a past [[article-version]] onto the live article ([[0042]]).
 - **Slug auto-suffixing** on collision; **per-category `metadata`** validation.
 - Deferred import formats: `.pdf`, `.html` (→ turndown), `.odt`/`.rtf`.
+- Article↔article and article↔location links (only asset/application links exist — [[0042]]).
 
-Related: [[article-category]] · [[article-version]] · [[user]] · [[shared-package]] ·
-[[0021-knowledge-base-design]] · [[0022-draft-visibility-auth-shim]] ·
-[[0016-auth-strategy-deferred]] · [[0007-flexible-asset-specs-jsonb]] ·
-[[0006-soft-delete-and-auditing]] · [[0018-api-documentation-swagger]]
+Related: [[article-category]] · [[article-version]] · [[article-link]] · [[user]] ·
+[[shared-package]] · [[0042-article-versioning-and-linking]] · [[0021-knowledge-base-design]] ·
+[[0022-draft-visibility-auth-shim]] · [[0016-auth-strategy-deferred]] ·
+[[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]] ·
+[[0035-search-architecture]] · [[0018-api-documentation-swagger]]
