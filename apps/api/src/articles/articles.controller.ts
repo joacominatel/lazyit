@@ -24,9 +24,13 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ArticleLinkSchema,
   ArticleListPageSchema,
   ArticleSchema,
   ArticleStatusSchema,
+  ArticleVersionPageSchema,
+  ArticleVersionSchema,
+  CreateArticleLinkSchema,
   CreateArticleSchema,
   ImportArticleSchema,
   UpdateArticleSchema,
@@ -47,6 +51,11 @@ class CreateArticleDto extends createZodDto(CreateArticleSchema) {}
 class UpdateArticleDto extends createZodDto(UpdateArticleSchema) {}
 class ImportArticleDto extends createZodDto(ImportArticleSchema) {}
 class ArticleListPageDto extends createZodDto(ArticleListPageSchema) {}
+// Versioning + linking (ADR-0042).
+class ArticleVersionDto extends createZodDto(ArticleVersionSchema) {}
+class ArticleVersionPageDto extends createZodDto(ArticleVersionPageSchema) {}
+class ArticleLinkDto extends createZodDto(ArticleLinkSchema) {}
+class CreateArticleLinkDto extends createZodDto(CreateArticleLinkSchema) {}
 
 @ApiBearerAuth()
 @ApiTags('articles')
@@ -139,6 +148,61 @@ export class ArticlesController {
     return this.articles.findOne(id, user);
   }
 
+  @Get(':id/versions')
+  @ApiOperation({
+    summary:
+      "List an article's version history (append-only; newest first; paginated). Drafts visible only to their author. (ADR-0042)",
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiOkResponse({ type: ArticleVersionPageDto })
+  findVersions(
+    @Param('id') id: string,
+    @CurrentUser() user?: User,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.articles.listVersions(
+      id,
+      parsePageQuery({ limit, offset, page }),
+      user,
+    );
+  }
+
+  @Get(':id/versions/:version')
+  @ApiOperation({
+    summary: 'Get a single version of an article by its version number (ADR-0042)',
+  })
+  @ApiOkResponse({ type: ArticleVersionDto })
+  findVersion(
+    @Param('id') id: string,
+    @Param('version') version: string,
+    @CurrentUser() user?: User,
+  ) {
+    const parsed = Number(version);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      throw new BadRequestException('version must be a positive integer');
+    }
+    return this.articles.findVersion(id, parsed, user);
+  }
+
+  @Get(':id/links')
+  @ApiOperation({
+    summary:
+      "List an article's links to assets/applications (readable by any reader of the article). (ADR-0042)",
+  })
+  @ApiOkResponse({ type: [ArticleLinkDto] })
+  findLinks(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.findLinks(id, user);
+  }
+
   @Post()
   @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
@@ -199,6 +263,35 @@ export class ArticlesController {
     @CurrentUser() user?: User,
   ) {
     return this.articles.update(id, dto, user);
+  }
+
+  @Post(':id/links')
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({
+    summary:
+      'Link an article to an Asset XOR an Application (author only; exactly one target). (ADMIN or MEMBER) (ADR-0042)',
+  })
+  @ApiCreatedResponse({ type: ArticleLinkDto })
+  addLink(
+    @Param('id') id: string,
+    @Body() dto: CreateArticleLinkDto,
+    @CurrentUser() user?: User,
+  ) {
+    return this.articles.addLink(id, dto, user);
+  }
+
+  @Delete(':id/links/:linkId')
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({
+    summary: 'Remove a link from an article (author only). (ADMIN or MEMBER) (ADR-0042)',
+  })
+  @ApiOkResponse({ type: ArticleLinkDto })
+  removeLink(
+    @Param('id') id: string,
+    @Param('linkId') linkId: string,
+    @CurrentUser() user?: User,
+  ) {
+    return this.articles.removeLink(id, linkId, user);
   }
 
   @Post(':id/publish')
