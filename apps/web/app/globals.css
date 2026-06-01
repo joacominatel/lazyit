@@ -61,20 +61,24 @@
      canvas. Wired to --primary / --ring / --sidebar-primary so the single accent
      drives buttons, focus rings and the active nav item. CTO default; ADR-0011. */
   --brand: oklch(0.55 0.18 275);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
+  /* Softened neutral ramp (CEO direction, ADR-0011): no pure white / pure black.
+     Light canvas is a warm "bone" (low chroma at hue ~95), text a very dark warm
+     gray (~hue 75) — calmer than #000/#fff while keeping AA contrast (fg-on-bg
+     ~16.9:1). Card/popover sit just above the bone so surfaces stay distinguishable. */
+  --background: oklch(0.985 0.004 95);
+  --foreground: oklch(0.21 0.006 75);
+  --card: oklch(0.995 0.003 95);
+  --card-foreground: oklch(0.21 0.006 75);
+  --popover: oklch(0.995 0.003 95);
+  --popover-foreground: oklch(0.21 0.006 75);
   --primary: var(--brand);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.955 0.005 95);
+  --secondary-foreground: oklch(0.27 0.006 75);
+  --muted: oklch(0.955 0.005 95);
+  --muted-foreground: oklch(0.52 0.008 75);
+  --accent: oklch(0.955 0.005 95);
+  --accent-foreground: oklch(0.27 0.006 75);
   --destructive: oklch(0.577 0.245 27.325);
   /* Semantic status tokens — success / warning / info, paired with a readable
      foreground. Kept distinct from --destructive (already defined). */
@@ -84,8 +88,8 @@
   --warning-foreground: oklch(0.205 0 0);
   --info: oklch(0.6 0.13 240);
   --info-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --border: oklch(0.9 0.005 95);
+  --input: oklch(0.9 0.005 95);
   --ring: var(--brand);
   /* Chart ramp anchored on the brand indigo, fanning out through teal/amber/rose
      for categorical series (replaces the old grayscale ramp). */
@@ -95,13 +99,15 @@
   --chart-4: oklch(0.74 0.16 75);
   --chart-5: oklch(0.62 0.2 15);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
+  /* Sidebar tracks the bone canvas: a hair deeper than --background so the rail
+     reads as a distinct surface without going gray. */
+  --sidebar: oklch(0.97 0.005 95);
+  --sidebar-foreground: oklch(0.21 0.006 75);
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-accent: oklch(0.94 0.006 95);
+  --sidebar-accent-foreground: oklch(0.27 0.006 75);
+  --sidebar-border: oklch(0.9 0.005 95);
   --sidebar-ring: var(--brand);
 }
 
@@ -109,20 +115,24 @@
   /* Lighter indigo so the accent keeps contrast on the near-black canvas. This
      is the SAME single brand hue as light mode — there is no second orphan blue. */
   --brand: oklch(0.62 0.17 275);
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
+  /* Softened neutral ramp (CEO direction, ADR-0011): the canvas is a very dark
+     warm gray (hue ~75), not pure black; text is the same warm "bone" as light
+     mode's background. fg-on-bg ~16:1, well past AA. Card/popover step up in
+     lightness so surfaces are layered, not flat. */
+  --background: oklch(0.205 0.006 75);
+  --foreground: oklch(0.96 0.004 95);
+  --card: oklch(0.255 0.007 75);
+  --card-foreground: oklch(0.96 0.004 95);
+  --popover: oklch(0.255 0.007 75);
+  --popover-foreground: oklch(0.96 0.004 95);
   --primary: var(--brand);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.3 0.007 75);
+  --secondary-foreground: oklch(0.96 0.004 95);
+  --muted: oklch(0.3 0.007 75);
+  --muted-foreground: oklch(0.715 0.006 90);
+  --accent: oklch(0.3 0.007 75);
+  --accent-foreground: oklch(0.96 0.004 95);
   --destructive: oklch(0.704 0.191 22.216);
   --success: oklch(0.7 0.15 150);
   --success-foreground: oklch(0.145 0 0);
@@ -130,21 +140,24 @@
   --warning-foreground: oklch(0.205 0 0);
   --info: oklch(0.68 0.13 240);
   --info-foreground: oklch(0.145 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  /* Warm-tinted hairlines: a touch of the bone hue in the translucent white so
+     borders read warm against the dark warm-gray canvas. */
+  --border: oklch(0.97 0.004 95 / 10%);
+  --input: oklch(0.97 0.004 95 / 15%);
   --ring: var(--brand);
   --chart-1: oklch(0.62 0.17 275);
   --chart-2: oklch(0.68 0.13 200);
   --chart-3: oklch(0.7 0.14 150);
   --chart-4: oklch(0.8 0.15 80);
   --chart-5: oklch(0.68 0.18 15);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
+  /* Sidebar a hair darker than the dark canvas so the rail recedes slightly. */
+  --sidebar: oklch(0.175 0.006 75);
+  --sidebar-foreground: oklch(0.96 0.004 95);
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-accent: oklch(0.3 0.007 75);
+  --sidebar-accent-foreground: oklch(0.96 0.004 95);
+  --sidebar-border: oklch(0.97 0.004 95 / 10%);
   --sidebar-ring: var(--brand);
 }
 
