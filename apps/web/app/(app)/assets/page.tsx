@@ -5,7 +5,12 @@ import {
   PlusIcon,
   ServerStackIcon,
 } from "@heroicons/react/24/outline";
-import { type AssetStatus, AssetStatusSchema } from "@lazyit/shared";
+import {
+  type AssetListItem,
+  type AssetStatus,
+  AssetStatusSchema,
+  DEFAULT_PAGE_LIMIT,
+} from "@lazyit/shared";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -13,9 +18,12 @@ import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import {
   EmptyState,
   ErrorState,
+  Pagination,
   type ResourceColumn,
   ResourceTable,
   RowActions,
+  type SortDirection,
+  SortableHeader,
 } from "@/components/resource-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,47 +49,90 @@ import { StackedOwnerAvatars } from "./_components/stacked-owner-avatars";
 type StatusFilter = "ALL" | AssetStatus;
 type OwnershipFilter = "ALL" | "HAS" | "NONE";
 
-const COLUMNS: ResourceColumn[] = [
-  { key: "name", header: "Name", skeleton: <Skeleton className="h-4 w-32" /> },
-  {
-    key: "assetTag",
-    header: "Asset tag",
-    skeleton: <Skeleton className="h-4 w-20" />,
-  },
-  { key: "model", header: "Model", skeleton: <Skeleton className="h-4 w-28" /> },
-  {
-    key: "category",
-    header: "Category",
-    skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
-  },
-  {
-    key: "location",
-    header: "Location",
-    skeleton: <Skeleton className="h-4 w-24" />,
-  },
-  {
-    key: "status",
-    header: "Status",
-    skeleton: <Skeleton className="h-5 w-20 rounded-full" />,
-  },
-  {
-    key: "owners",
-    header: "Owners",
-    skeleton: <Skeleton className="size-6 rounded-full" />,
-  },
-  {
-    key: "updated",
-    header: "Updated",
-    skeleton: <Skeleton className="h-4 w-20" />,
-  },
-  {
-    key: "actions",
-    header: "Actions",
-    srOnlyHeader: true,
-    headClassName: "w-12 text-right",
-    skeleton: <Skeleton className="ml-auto size-7" />,
-  },
-];
+/** The columns that can be sorted client-side over the current page (ADR-0030: no server sort). */
+type SortKey = "name" | "assetTag" | "status" | "updatedAt";
+
+interface SortState {
+  key: SortKey;
+  direction: SortDirection;
+}
+
+/**
+ * Build the column set, wiring the sortable headers to the current sort state. Sorting is
+ * client-side over the loaded page only (the `Page<T>` contract has no sort param, ADR-0030).
+ */
+function buildColumns(
+  sort: SortState,
+  onSort: (key: SortKey) => void,
+): ResourceColumn[] {
+  const sortable = (key: SortKey, label: string) => (
+    <SortableHeader
+      label={label}
+      active={sort.key === key}
+      direction={sort.direction}
+      onToggle={() => onSort(key)}
+    />
+  );
+  return [
+    {
+      key: "name",
+      header: sortable("name", "Name"),
+      skeleton: <Skeleton className="h-4 w-32" />,
+    },
+    {
+      key: "assetTag",
+      header: sortable("assetTag", "Asset tag"),
+      skeleton: <Skeleton className="h-4 w-20" />,
+    },
+    { key: "model", header: "Model", skeleton: <Skeleton className="h-4 w-28" /> },
+    {
+      key: "category",
+      header: "Category",
+      skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
+    },
+    {
+      key: "location",
+      header: "Location",
+      skeleton: <Skeleton className="h-4 w-24" />,
+    },
+    {
+      key: "status",
+      header: sortable("status", "Status"),
+      skeleton: <Skeleton className="h-5 w-20 rounded-full" />,
+    },
+    {
+      key: "owners",
+      header: "Owners",
+      skeleton: <Skeleton className="size-6 rounded-full" />,
+    },
+    {
+      key: "updated",
+      header: sortable("updatedAt", "Updated"),
+      skeleton: <Skeleton className="h-4 w-20" />,
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      srOnlyHeader: true,
+      headClassName: "w-12 text-right",
+      skeleton: <Skeleton className="ml-auto size-7" />,
+    },
+  ];
+}
+
+/** Compare two assets on `key`; returns a sign for `Array.sort` (asc). */
+function compareAssets(a: AssetListItem, b: AssetListItem, key: SortKey): number {
+  switch (key) {
+    case "name":
+      return a.name.localeCompare(b.name);
+    case "assetTag":
+      return (a.assetTag ?? "").localeCompare(b.assetTag ?? "");
+    case "status":
+      return a.status.localeCompare(b.status);
+    case "updatedAt":
+      return a.updatedAt.localeCompare(b.updatedAt);
+  }
+}
 
 export default function AssetsPage() {
   const router = useRouter();
@@ -90,13 +141,19 @@ export default function AssetsPage() {
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [locationFilter, setLocationFilter] = useState("ALL");
   const [ownershipFilter, setOwnershipFilter] = useState<OwnershipFilter>("ALL");
+  const [offset, setOffset] = useState(0);
+  const [sort, setSort] = useState<SortState>({
+    key: "updatedAt",
+    direction: "desc",
+  });
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(
     null,
   );
 
   const debouncedSearch = useDebouncedValue(search.trim(), 300);
 
-  const filters = useMemo(
+  // Server-side filters that scope the result set; offset is threaded for paging (ADR-0030).
+  const serverFilters = useMemo(
     () => ({
       q: debouncedSearch || undefined,
       status: statusFilter === "ALL" ? undefined : statusFilter,
@@ -106,23 +163,48 @@ export default function AssetsPage() {
     [debouncedSearch, statusFilter, categoryFilter, locationFilter],
   );
 
-  const { data: assets, isLoading, isError, error, refetch } =
-    useAssets(filters);
+  // Any server-filter change is a different result set, so paging resets to the first page. We do
+  // this during render (the "derive state from props" pattern) rather than in an effect, so the
+  // reset and the new fetch happen in one pass — no extra render at a stale offset.
+  const filterKey = JSON.stringify(serverFilters);
+  const [lastFilterKey, setLastFilterKey] = useState(filterKey);
+  if (filterKey !== lastFilterKey) {
+    setLastFilterKey(filterKey);
+    setOffset(0);
+  }
+
+  const { data: page, isLoading, isFetching, isError, error, refetch } =
+    useAssets({ ...serverFilters, offset });
   const { data: categories } = useAssetCategories();
   const { data: locations } = useLocations();
   const deleteAsset = useDeleteAsset();
 
-  // Ownership ("has / no active owners") is filtered client-side over the result.
-  const filtered = useMemo(
-    () =>
-      (assets ?? []).filter((asset) => {
-        if (ownershipFilter === "HAS") return asset.activeAssignments.length > 0;
-        if (ownershipFilter === "NONE")
-          return asset.activeAssignments.length === 0;
-        return true;
-      }),
-    [assets, ownershipFilter],
+  const assets = page?.items;
+
+  const toggleSort = (key: SortKey) =>
+    setSort((current) =>
+      current.key === key
+        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: "asc" },
+    );
+
+  const columns = useMemo(
+    () => buildColumns(sort, toggleSort),
+    [sort],
   );
+
+  // Ownership ("has / no active owners") is filtered, then the page is sorted — both client-side
+  // over the current page only (the contract carries no sort param, ADR-0030).
+  const filtered = useMemo(() => {
+    const rows = (assets ?? []).filter((asset) => {
+      if (ownershipFilter === "HAS") return asset.activeAssignments.length > 0;
+      if (ownershipFilter === "NONE")
+        return asset.activeAssignments.length === 0;
+      return true;
+    });
+    const sorted = [...rows].sort((a, b) => compareAssets(a, b, sort.key));
+    return sort.direction === "asc" ? sorted : sorted.reverse();
+  }, [assets, ownershipFilter, sort]);
 
   const filtersActive =
     debouncedSearch !== "" ||
@@ -130,7 +212,7 @@ export default function AssetsPage() {
     categoryFilter !== "ALL" ||
     locationFilter !== "ALL" ||
     ownershipFilter !== "ALL";
-  const isEmpty = (assets?.length ?? 0) === 0;
+  const isEmpty = (page?.total ?? 0) === 0;
 
   return (
     <div className="space-y-6">
@@ -150,7 +232,7 @@ export default function AssetsPage() {
       </div>
 
       {isLoading ? (
-        <ResourceTable columns={COLUMNS} isLoading />
+        <ResourceTable columns={columns} isLoading />
       ) : isError ? (
         <ErrorState
           title="Could not load assets"
@@ -243,7 +325,7 @@ export default function AssetsPage() {
           </div>
 
           <ResourceTable
-            columns={COLUMNS}
+            columns={columns}
             isFilteredEmpty={filtered.length === 0}
             filteredEmptyMessage="No assets match your filters."
           >
@@ -293,6 +375,15 @@ export default function AssetsPage() {
               </TableRow>
             ))}
           </ResourceTable>
+
+          <Pagination
+            total={page?.total ?? 0}
+            limit={page?.limit ?? DEFAULT_PAGE_LIMIT}
+            offset={page?.offset ?? 0}
+            itemCount={assets?.length ?? 0}
+            onOffsetChange={setOffset}
+            isFetching={isFetching}
+          />
         </>
       )}
 
