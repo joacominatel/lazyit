@@ -104,15 +104,23 @@ services:
     mem_limit: 512m
     cpus: 1.0
     env_file: [infra/env/.env.prod]
-    # The Phase-2 ZitadelManagementService reads the runtime SA key from this path and grants the
-    # project's ADMIN/MEMBER/VIEWER roles on this project id. Both are produced by the
-    # zitadel-bootstrap sidecar into the shared zitadel_secrets volume (mounted read-only in
-    # infra/docker-compose.prod.yaml). ZITADEL_MGMT_PROJECT_ID also appears in oidc-client.json, but
-    # the env value pins it explicitly so the api fails clear if the project id ever drifts.
-    # OIDC_ISSUER / OIDC_JWKS_URI come from .env.prod (env_file); the bootstrap writes matching values
-    # to oidc-client.json for OIDC_CLIENT_ID/SECRET (the api reads the file when env is unset — §4c).
+    # Zero-touch OIDC (ADR-0043 Phase 3, §4c): the zitadel-bootstrap sidecar GENERATES the OIDC client
+    # (id/secret), issuer, JWKS URI and the lazyit PROJECT ID at first boot and writes them to
+    # oidc-client.json in the shared zitadel_secrets volume (mounted read-only in
+    # infra/docker-compose.prod.yaml). The api reads that file at startup (path = OIDC_CLIENT_FILE) and
+    # back-fills any of OIDC_ISSUER / OIDC_CLIENT_ID / OIDC_CLIENT_SECRET / OIDC_JWKS_URI /
+    # ZITADEL_MGMT_PROJECT_ID it does not already get from env_file (.env.prod). Explicit env ALWAYS
+    # wins (BYOI). => the operator no longer hand-copies the client id/secret OR the project id.
+    # The Phase-2 ZitadelManagementService reads the runtime SA key from ZITADEL_MGMT_SA_KEY_PATH
+    # (sa-key.json, also written by the sidecar) and grants the project's ADMIN/MEMBER/VIEWER roles on
+    # the resolved project id.
     environment:
       ZITADEL_MGMT_SA_KEY_PATH: ${ZITADEL_MGMT_SA_KEY_PATH:-/zitadel-secrets/sa-key.json}
+      # Where the api reads the sidecar's OIDC client/project file. Defaults to the mounted path.
+      OIDC_CLIENT_FILE: ${OIDC_CLIENT_FILE:-/zitadel-secrets/oidc-client.json}
+      # OPTIONAL override: pin the project id to fail clear if it ever drifts. Normally LEFT UNSET —
+      # it comes from oidc-client.json (bundled flow). Set only for BYOI without the sidecar.
+      ZITADEL_MGMT_PROJECT_ID: ${ZITADEL_MGMT_PROJECT_ID:-}
     depends_on:
       db:
         condition: service_healthy
@@ -141,6 +149,11 @@ services:
     # Auth.js runs server-side and reads these at RUNTIME (ADR-0039). Scoped explicitly rather
     # than env_file so the web container never sees the DB / Zitadel / Meili secrets it has no
     # use for (ADR-0028 least-privilege). Requires --env-file for the ${...} interpolation.
+    # Zero-touch OIDC (ADR-0043 Phase 3, §4c): when AUTH_ISSUER / AUTH_CLIENT_ID / AUTH_CLIENT_SECRET
+    # are left unset (the bundled-Zitadel flow), the web reads the sidecar's oidc-client.json at
+    # startup (path = OIDC_CLIENT_FILE, mounted read-only) and maps its OIDC_* values onto these
+    # AUTH_* vars (+ derives AUTH_INTERNAL_ISSUER from the file's internal JWKS origin). Explicit
+    # AUTH_* env ALWAYS wins (BYOI). => no hand-copied client id/secret on the web side either.
     environment:
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_TRUST_HOST: "true"            # trust Caddy's X-Forwarded-Host (behind reverse proxy)
@@ -148,14 +161,18 @@ services:
       # (https://host/api/auth/callback/oidc); without it Auth.js infers the container's own
       # 0.0.0.0:3000 and the redirect_uri won't match what's registered in the IdP.
       AUTH_URL: ${WEB_ORIGIN}
-      AUTH_ISSUER: ${AUTH_ISSUER}
-      AUTH_CLIENT_ID: ${AUTH_CLIENT_ID}
-      AUTH_CLIENT_SECRET: ${AUTH_CLIENT_SECRET}
-      AUTH_INTERNAL_ISSUER: ${AUTH_INTERNAL_ISSUER}
+      # OPTIONAL in the bundled flow — leave these unset and the sidecar's oidc-client.json supplies
+      # them at startup. Set them only for BYOI (your own IdP, no bundled Zitadel).
+      AUTH_ISSUER: ${AUTH_ISSUER:-}
+      AUTH_CLIENT_ID: ${AUTH_CLIENT_ID:-}
+      AUTH_CLIENT_SECRET: ${AUTH_CLIENT_SECRET:-}
+      AUTH_INTERNAL_ISSUER: ${AUTH_INTERNAL_ISSUER:-}
+      # Where the web reads the sidecar's OIDC client file. Defaults to the mounted path.
+      OIDC_CLIENT_FILE: ${OIDC_CLIENT_FILE:-/zitadel-secrets/oidc-client.json}
     depends_on:
       # Wait for the zero-touch bootstrap to finish so the OIDC client (id/secret) exists before the
-      # web server boots Auth.js (ADR-0043 §4c/§4d). The web reads its AUTH_CLIENT_* from .env.prod;
-      # the sidecar also mirrors them into oidc-client.json on the shared (read-only) volume.
+      # web server boots Auth.js (ADR-0043 §4c/§4d). The web reads AUTH_CLIENT_* from .env.prod when
+      # set; otherwise from oidc-client.json on the shared (read-only) volume the sidecar writes.
       zitadel-bootstrap:
         condition: service_completed_successfully
     networks: [internal]
