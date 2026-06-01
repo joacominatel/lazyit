@@ -211,17 +211,19 @@ export class JwtAuthGuard implements CanActivate {
       return existing;
     }
 
-    // RBAC bootstrap (ADR-0040): the FIRST user ever provisioned becomes ADMIN, so a fresh install
-    // is never left without anyone able to administer it; every later JIT user defaults to MEMBER.
-    // "Ever provisioned" counts soft-deleted rows too (includeSoftDeleted) — once any user has
-    // existed, a fresh row is no longer "the first", so an offboarded-then-reprovisioned install
-    // cannot silently hand ADMIN to the next signup. The check-then-create window is acceptable:
-    // it only matters on a truly empty DB, and the worst case (two genuinely-concurrent first
-    // logins) makes both ADMIN — strictly safer than locking everyone out, and an ADMIN can demote.
+    // RBAC bootstrap (ADR-0040; default flipped to VIEWER by ADR-0043): the FIRST user ever
+    // provisioned becomes ADMIN, so a fresh install is never left without anyone able to administer
+    // it; every later JIT user defaults to VIEWER (least-privilege read-only, uniform with app-created
+    // users) until an ADMIN promotes them. "Ever provisioned" counts soft-deleted rows too
+    // (includeSoftDeleted) — once any user has existed, a fresh row is no longer "the first", so an
+    // offboarded-then-reprovisioned install cannot silently hand ADMIN to the next signup. The
+    // check-then-create window is acceptable: it only matters on a truly empty DB, and the worst case
+    // (two genuinely-concurrent first logins) makes both ADMIN — strictly safer than locking everyone
+    // out, and an ADMIN can demote.
     const userCount = await this.prisma.user.count({
       includeSoftDeleted: true,
     } as Prisma.UserCountArgs);
-    const role: Role = userCount === 0 ? Role.ADMIN : Role.MEMBER;
+    const role: Role = userCount === 0 ? Role.ADMIN : Role.VIEWER;
 
     // First login: the OIDC access token carries authorization, not identity, so fetch the real
     // profile from the userinfo endpoint and merge it OVER the token claims. Fail-soft — on any
