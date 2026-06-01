@@ -3,9 +3,11 @@ import { Button } from "@/components/ui/button";
 import { CardContent, CardFooter } from "@/components/ui/card";
 
 /**
- * Step 4 — done (ADR-0043 §7a step 4). Confirms the first administrator was created and sends the
- * operator to the dashboard. The finish handler invalidated `GET /users/me` already (in the setup
- * mutation), so the new ADMIN's controls light up immediately on first sign-in.
+ * Final step — done (ADR-0043 §7a). Confirms the first administrator was created and closes the loop
+ * by sending the operator to /login to sign in as that ADMIN (the new account does not have a session
+ * yet — it must authenticate through the IdP first). The finish handler already invalidated
+ * `GET /users/me` (in the setup mutation), so the ADMIN's controls light up immediately on first
+ * sign-in.
  */
 export function StepDone({
   email,
@@ -38,7 +40,7 @@ export function StepDone({
         </div>
       </CardContent>
       <CardFooter className="justify-end">
-        <Button onClick={onFinish}>Go to dashboard</Button>
+        <Button onClick={onFinish}>Go to sign in</Button>
       </CardFooter>
     </>
   );
