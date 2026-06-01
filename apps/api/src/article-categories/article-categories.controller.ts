@@ -79,4 +79,14 @@ export class ArticleCategoriesController {
   remove(@Param('id') id: string) {
     return this.categories.remove(id);
   }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore a soft-deleted article category — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: ArticleCategoryDto })
+  restore(@Param('id') id: string) {
+    return this.categories.restore(id);
+  }
 }
