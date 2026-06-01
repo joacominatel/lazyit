@@ -66,10 +66,24 @@ Edit `infra/env/.env.prod`:
 
 ## 2. Bring it up
 
+The stack is one canonical `compose.yaml` at the repo root plus a thin prod override; the full
+containerized stack lives behind the `prod` profile ([[auth-zitadel-sot#9-compose-structure-decided|dossier §9]]).
+Run from the **repo root**:
+
 ```sh
-docker compose -f infra/docker-compose.prod.yml up -d --build
-docker compose -f infra/docker-compose.prod.yml ps          # all healthy; migrate exited 0
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
+  --profile prod --env-file infra/env/.env.prod up -d --build
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
+  --profile prod --env-file infra/env/.env.prod ps          # all healthy; migrate exited 0
 ```
+
+> [!note] Backward-compat — the old command is aliased
+> The previous form `docker compose -f infra/docker-compose.prod.yml up -d --build` is **superseded**.
+> It maps 1:1 to the new **base + thin override + `--profile prod` + `--env-file`** invocation above.
+> The prod **project name is unchanged** (`lazyit-prod`), so existing volumes
+> (`lazyit-prod_db_data`, `lazyit-prod_zitadel_db_data`, …) are reused — no data migration. Plain
+> `docker compose up` (no `-f`) is now the **dev** backing-services stack (Postgres + Meilisearch +
+> Zitadel for native `bun run dev`), not the full prod stack — see [[setup]].
 
 Caddy obtains a certificate automatically (Let's Encrypt for a public FQDN on :443, or its internal
 CA otherwise). The one-shot `migrate` service applies migrations and seeds before the API starts.
@@ -80,7 +94,8 @@ After the stack is healthy (all services up, `migrate` exited 0), run the full r
 populate Meilisearch with existing data ([[0035-search-architecture]]):
 
 ```sh
-docker compose -f infra/docker-compose.prod.yml run --rm migrate bun run reindex:all
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+  --env-file infra/env/.env.prod run --rm migrate bun run reindex:all
 ```
 
 > [!important] Run reindex via the `migrate` job, not the API container
@@ -118,7 +133,8 @@ Full procedure: **[[auth-bootstrap]]**. JIT provisioning creates the `User` row 
 
 ```sh
 git pull                                                       # or ship a new build/image
-docker compose -f infra/docker-compose.prod.yml up -d --build  # rebuilds; migrate re-runs (deploy)
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
+  --profile prod --env-file infra/env/.env.prod up -d --build  # rebuilds; migrate re-runs (deploy)
 ```
 
 New migrations are applied automatically by the `migrate` job on the next `up` (it runs
