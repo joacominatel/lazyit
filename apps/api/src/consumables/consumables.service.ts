@@ -6,12 +6,15 @@ import {
 import type {
   CreateConsumable,
   CreateConsumableMovement,
+  PageQuery,
   UpdateConsumable,
 } from '@lazyit/shared';
+import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import { resolveSortOrBadRequest } from '../common/resolve-sort';
 
 /**
  * PostgreSQL `int4` upper bound — the max value a Prisma `Int` column (here `currentStock`) can
@@ -24,7 +27,21 @@ const INT4_MAX = 2_147_483_647;
 export interface ConsumableFilters {
   /** When true, return only items at or below their reorder threshold (minStock set). */
   lowStock?: boolean;
+  /** Case-insensitive substring over name / sku / description (OR). */
+  q?: string;
 }
+
+/**
+ * Server-side sort allowlist for `GET /consumables` (ADR-0030 amendment). Maps each PUBLIC `?sort=`
+ * key to the Prisma column. Unknown key → 400. With no `sort`, the list keeps its default `name asc`.
+ */
+export const CONSUMABLE_SORT_ALLOWLIST = {
+  name: 'name',
+  sku: 'sku',
+  currentStock: 'currentStock',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+} as const;
 
 /** Optional filters for a consumable's movement ledger. */
 export interface MovementFilters {
@@ -43,20 +60,51 @@ export class ConsumablesService {
   ) {}
 
   /**
-   * Non-deleted consumables, ordered by name. With `lowStock`, restricts to items that declare a
-   * `minStock` and whose `currentStock` is at or below it — a column-to-column comparison via a
-   * Prisma field reference (`prisma.consumable.fields.minStock`).
+   * A single page of non-deleted consumables (default `name asc`). Server-side `q` search (over
+   * name/sku/description) and an allowlisted sort make the list authoritative — migrated off the
+   * raw-array contract that filtered client-side and silently truncated past the window (ADR-0030).
+   * The `lowStock` filter is preserved (items at or below their reorder threshold — a column-to-column
+   * comparison via the Prisma field reference). Runs `findMany(take/skip)` + `count` over the same
+   * `where` in one `$transaction`.
    */
-  findAll(filters: ConsumableFilters = {}) {
-    return this.prisma.consumable.findMany({
-      where: filters.lowStock
+  async findPage(filters: ConsumableFilters, page: PageQuery) {
+    const where = this.buildWhere(filters);
+    const { take, skip } = offsetOf(page);
+    const orderBy =
+      resolveSortOrBadRequest<Prisma.ConsumableOrderByWithRelationInput>(
+        page,
+        CONSUMABLE_SORT_ALLOWLIST,
+      ) ??
+      ({ name: 'asc' } satisfies Prisma.ConsumableOrderByWithRelationInput);
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.consumable.findMany({ where, orderBy, take, skip }),
+      this.prisma.consumable.count({ where }),
+    ]);
+    return pageOf(items, total, page);
+  }
+
+  /** The shared `where` for the consumable list — used identically by findPage and its count. */
+  private buildWhere({
+    lowStock,
+    q,
+  }: ConsumableFilters): Prisma.ConsumableWhereInput {
+    return {
+      ...(lowStock
         ? {
             minStock: { not: null },
             currentStock: { lte: this.prisma.consumable.fields.minStock },
           }
-        : {},
-      orderBy: { name: 'asc' },
-    });
+        : {}),
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { sku: { contains: q, mode: 'insensitive' } },
+              { description: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
   }
 
   /** A single non-deleted consumable by id; throws 404 if missing or deleted. */
@@ -164,7 +212,11 @@ export class ConsumablesService {
         // Guarded decrement: only succeeds while the live row still has enough stock. This is the
         // atomic check-and-act that closes the lost-update race — no row matched ⇒ 409 + rollback.
         const result = await tx.consumable.updateMany({
-          where: { id: consumableId, deletedAt: null, currentStock: { gte: quantity } },
+          where: {
+            id: consumableId,
+            deletedAt: null,
+            currentStock: { gte: quantity },
+          },
           data: { currentStock: { decrement: quantity } },
         });
         if (result.count === 0) {
