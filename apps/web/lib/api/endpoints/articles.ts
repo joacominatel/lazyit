@@ -1,6 +1,5 @@
 import type {
   Article,
-  ArticleListItem,
   ArticleListPage,
   ArticleStatus,
   CreateArticle,
@@ -18,8 +17,9 @@ import { createCrudEndpoints } from "../crud-endpoints";
  *
  * The list read is **lean and paginated** (ADR-0030): `GET /articles` returns a
  * `Page<ArticleListItem>` envelope (the markdown `content` is omitted; `excerpt`
- * is kept) and `getArticles` unwraps `.items`. The detail reads (`getArticle`,
- * `getArticleBySlug`) still return the full `Article` with `content`.
+ * is kept) and `getArticles` returns the whole envelope so the list can render
+ * pagination controls. The detail reads (`getArticle`, `getArticleBySlug`) still
+ * return the full `Article` with `content`.
  *
  * Authorship/visibility is enforced by the API via the Bearer token (ADR-0038/0039).
  * These functions don't deal with auth directly — the token flows from the session.
@@ -33,32 +33,38 @@ export const createArticle = crud.create;
 export const updateArticle = crud.update;
 export const deleteArticle = crud.remove;
 
-/** Server-side filters for the list endpoint (ADR-0021: `q` is title+excerpt). */
+/**
+ * Server-side filters for the list endpoint (ADR-0021: `q` is title+excerpt).
+ * `limit`/`offset` thread the pagination window (ADR-0030); omit for the defaults.
+ */
 export interface ArticleFilters {
   categoryId?: string;
   authorId?: string;
   status?: ArticleStatus;
   q?: string;
+  limit?: number;
+  offset?: number;
 }
 
 /**
- * List articles the caller may see (lean), with optional server-side filters.
- * `GET /articles` returns a paginated `Page<ArticleListItem>` envelope (ADR-0030;
- * `content` omitted); we unwrap `.items` so the list keeps consuming an array.
- * The default page size (50) applies — the UI does not yet page, so for now only
- * the first page is shown.
+ * List articles the caller may see (lean), with optional server-side filters and
+ * paging. `GET /articles` returns a paginated `Page<ArticleListItem>` envelope
+ * (ADR-0030; `content` omitted); we return the whole envelope (`items` +
+ * `total`/`limit`/`offset`) so the list can render pagination controls.
  */
-export async function getArticles(
+export function getArticles(
   filters: ArticleFilters = {},
-): Promise<ArticleListItem[]> {
+): Promise<ArticleListPage> {
   const params = new URLSearchParams();
   if (filters.categoryId) params.set("categoryId", filters.categoryId);
   if (filters.authorId) params.set("authorId", filters.authorId);
   if (filters.status) params.set("status", filters.status);
   if (filters.q) params.set("q", filters.q);
+  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  if (filters.offset !== undefined)
+    params.set("offset", String(filters.offset));
   const qs = params.toString();
-  const page = await apiFetch<ArticleListPage>(qs ? `${BASE}?${qs}` : BASE);
-  return page.items;
+  return apiFetch<ArticleListPage>(qs ? `${BASE}?${qs}` : BASE);
 }
 
 /** Fetch a single article by its slug (the public/detail lookup). */
