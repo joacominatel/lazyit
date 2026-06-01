@@ -39,7 +39,8 @@ cp infra/env/.env.prod.example infra/env/.env.prod
 chmod 600 infra/env/.env.prod
 ```
 
-Set every `CHANGE_ME` (passwords, `ZITADEL_MASTERKEY` ≥ 32 chars, `AUTH_SECRET`, your domain). For
+Set every `CHANGE_ME` (passwords, `ZITADEL_MASTERKEY` **exactly 32 bytes** — `openssl rand -hex 16`,
+`AUTH_SECRET`, your domain). For
 the bundled flow you **leave `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `AUTH_CLIENT_ID` /
 `AUTH_CLIENT_SECRET` as `CHANGE_ME`** — the sidecar provisions them. You only need to set the
 *external auth URL*: `OIDC_ISSUER` / `AUTH_ISSUER` (e.g. `https://auth.yourdomain.com`),
@@ -131,9 +132,10 @@ Before starting:
    ```
    Set every `CHANGE_ME` value. Critical Zitadel vars:
    - `ZITADEL_DB_PASSWORD` — strong, unique, random.
-   - `ZITADEL_MASTERKEY` — **minimum 32 characters**, random. Generate one:
+   - `ZITADEL_MASTERKEY` — **exactly 32 bytes** (Zitadel rejects anything shorter *or* longer — a
+     wrong length is a real first-boot failure). Generate one that is exactly 32 chars:
      ```sh
-     openssl rand -base64 32
+     openssl rand -hex 16   # 16 random bytes -> 32 hex chars (exactly 32)
      ```
      This key encrypts Zitadel's sensitive data at rest. **Back it up.** Losing it means
      losing access to Zitadel's encrypted data.
@@ -315,7 +317,15 @@ record is auto-provisioned — no separate "add user to lazyit" step is needed b
 
 ## 6b — Designate the first ADMIN (RBAC bootstrap)
 
-> [!warning] Why this step exists
+> [!tip] Primary path is the in-app `/setup` wizard (ADR-0043)
+> On a **fresh** zero-touch install you do **not** run anything out-of-band: the first ADMIN is created
+> in-app by the **`/setup` wizard** (`POST /config/setup` — idempotent one-time gate + CSRF +
+> rate-limit; [[auth-zitadel-sot]] §5). Open the app, the unconfigured state routes you to `/setup`,
+> create the first ADMIN, done. The script/SQL below is the **fallback** for the *upgrade* case (an
+> instance that already had `MEMBER` users before RBAC, where the wizard self-locks because an
+> ADMIN — the seed — already exists) or for BYOI operators who prefer the CLI.
+
+> [!warning] Why this fallback step exists
 > RBAC ([[0040-rbac-roles]]) makes the **first user ever provisioned** an `ADMIN` and everyone else
 > a `MEMBER`. But the `rbac_user_role` migration backfilled every **pre-existing** user to `MEMBER`,
 > and the first-user-ADMIN rule **only fires on a truly empty database**. So on an instance that
@@ -423,9 +433,10 @@ The app database (`db_data`) is completely unaffected.
 
 ## Troubleshooting
 
-**Zitadel fails to start — "masterkey must be at least 32 bytes"**
-The `ZITADEL_MASTERKEY` is too short. Generate a new one with `openssl rand -base64 32`
-and update `.env.prod`.
+**Zitadel fails to start — "masterkey must be 32 bytes"**
+The `ZITADEL_MASTERKEY` is the wrong length. Zitadel needs **exactly 32 bytes** — shorter *or* longer
+both fail (`openssl rand -base64 32` is wrong here: it yields ~44 chars). Generate one that is exactly
+32 chars with `openssl rand -hex 16` and update `.env.prod`.
 
 **Zitadel fails to start — DB connection refused**
 Check that `zitadel_db` is healthy before `zitadel` starts:

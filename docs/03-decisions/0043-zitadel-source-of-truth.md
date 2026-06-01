@@ -27,6 +27,25 @@ It supersedes the *defaults and follow-ups* of the prior auth ADRs as noted in
 > The companion design dossier (contracts, DDL, compose, wizard UX, threat model, roadmap) lives at
 > [[auth-zitadel-sot]]. This ADR records the *decision and its guardrails*; the dossier records *how*.
 
+> [!success] Validated live — 2026-06-01 (epic delivered)
+> The full epic was **validated end-to-end live** on 2026-06-01: a zero-touch first boot
+> (`docker compose … --profile prod up -d --build` from an `.env.prod` with no hand-copied OIDC
+> client) brings up the bundled Zitadel, provisions project/app/roles/SA via the sidecar, and the
+> in-app `/setup` wizard creates the first ADMIN, who is mirrored (write-back) into Zitadel. Phase 4
+> hardening landed the four as-built fixes the live debugging surfaced:
+> - **#92** — the `zitadel-bootstrap` **sidecar** (Private-Key JWT) provisions project + OIDC app +
+>   ADMIN/MEMBER/VIEWER roles + runtime SA, writing `oidc-client.json` / `sa-key.json` to the volume.
+> - **#93** — the **`zitadel-secrets-init`** one-shot fixes the secrets-volume permissions (`chmod`
+>   before Zitadel boots) so the non-root Zitadel uid can export its FirstInstance machine key.
+> - **#94** — the **healthcheck gate**: the shell-less Zitadel image carries no container healthcheck,
+>   so the sidecar gates on `service_started` and polls `/debug/healthz` itself before provisioning.
+> - **#95** — the **v1 user-grant endpoints**: user-grant CRUD lives on `/management/v1/users/...`
+>   (the v2 `/v2/users/{id}/grants` form 404s on Zitadel v2.68.0); `grantRole` is set-role.
+>
+> Also fixed: the `ZITADEL_MASTERKEY` must be **exactly 32 bytes** (not "min 32"); `openssl rand -hex
+> 16` yields a correct value (see `infra/env/.env.prod.example` + [[auth-bootstrap]]). The §6
+> guardrails are recorded as the canonical security non-negotiables in [[INVARIANTS]].
+
 ---
 
 ## Decisions (resolved 2026-06-01, CEO-approved)

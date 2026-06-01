@@ -1,4 +1,6 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, type INestApplication } from '@nestjs/common';
+import { Test, type TestingModule } from '@nestjs/testing';
+import request from 'supertest';
 import type { Request } from 'express';
 
 // The controller imports ConfigService at runtime, which loads the generated Prisma client and the
@@ -13,8 +15,9 @@ jest.mock('../../generated/prisma/client', () => ({
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 import { ConfigController } from './config.controller';
-import type { ConfigService, SetupOutcome } from './config.service';
-import type { SetupCsrfService } from './setup-csrf.service';
+import { ConfigService, type SetupOutcome } from './config.service';
+import { SetupCsrfService } from './setup-csrf.service';
+import { SetupRateLimitGuard } from './setup-rate-limit.guard';
 
 /** Minimal Express request stub carrying an IP for the audit line. */
 function reqWithIp(ip: string): Request {
@@ -98,5 +101,72 @@ describe('ConfigController', () => {
       mirrored: true,
       setupCompletedAt: '2026-06-01T00:00:00.000Z',
     });
+  });
+});
+
+/**
+ * Rate-limit propagation through the real HTTP pipeline (ADR-0043 §6 #3 / Fork #7). The unit tests
+ * above instantiate the controller directly, which BYPASSES `@UseGuards(SetupRateLimitGuard)` — so
+ * they can never prove the 429 actually reaches a client. This block boots a minimal Nest app with the
+ * REAL guard wired on `POST /config/setup` and asserts that, once the per-IP cap is exceeded, the
+ * endpoint responds **429 Too Many Requests** and the service is NOT invoked (the guard short-circuits
+ * before the handler). `MAX_ATTEMPTS = 5` (setup-rate-limit.guard.ts), so the 6th call from one IP trips.
+ */
+describe('POST /config/setup — rate-limit guard 429 propagation (e2e pipeline)', () => {
+  let app: INestApplication;
+
+  const OUTCOME: SetupOutcome = {
+    adminId: '11111111-1111-1111-1111-111111111111',
+    email: 'admin@example.com',
+    mirrored: true,
+    setupCompletedAt: new Date('2026-06-01T00:00:00.000Z'),
+  };
+
+  const setup = jest.fn().mockResolvedValue(OUTCOME);
+  // A real CSRF service so a freshly-issued token passes the controller's CSRF gate, leaving the
+  // rate-limit guard as the only thing that can reject the request.
+  const csrfService = new SetupCsrfService();
+
+  beforeAll(async () => {
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      controllers: [ConfigController],
+      providers: [
+        SetupRateLimitGuard,
+        { provide: SetupCsrfService, useValue: csrfService },
+        // ConfigController injects ConfigService by class; only `setup` is exercised here.
+        { provide: ConfigService, useValue: { setup } },
+      ],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('returns 429 once the per-IP cap is exceeded and never calls the service for the blocked attempt', async () => {
+    const token = csrfService.issue();
+    const server = app.getHttpServer();
+    // 5 attempts are allowed within the window (each 201). A fixed IP keys the bucket.
+    for (let i = 0; i < 5; i++) {
+      const ok = await request(server)
+        .post('/config/setup')
+        .set('X-CSRF-Token', token)
+        .set('X-Forwarded-For', '198.51.100.9')
+        .send(SETUP_DTO);
+      expect(ok.status).toBe(201);
+    }
+    expect(setup).toHaveBeenCalledTimes(5);
+
+    // The 6th from the same IP is rejected by the guard with 429 — before the handler runs.
+    const blocked = await request(server)
+      .post('/config/setup')
+      .set('X-CSRF-Token', token)
+      .set('X-Forwarded-For', '198.51.100.9')
+      .send(SETUP_DTO);
+    expect(blocked.status).toBe(429);
+    // The guard short-circuited: the service was not called a 6th time.
+    expect(setup).toHaveBeenCalledTimes(5);
   });
 });

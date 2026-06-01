@@ -22,6 +22,7 @@ dependency auditing are later phases.
 
 | Path | What it holds |
 | --- | --- |
+| [[INVARIANTS]] | The auth/authZ **non-negotiables** (ADR-0043 §6): the baseline a finding is measured against. |
 | [[summary]] | Dashboard: counts by severity + the top findings. Updated each sweep. |
 | `issues/` | One file per **open** finding, `SEC-NNN-slug.md`. |
 | `closed/` | Findings that were fixed (and re-verified) or dismissed; moved here from `issues/`. |
@@ -69,5 +70,5 @@ API is not run during review (engagement rule). Verify before acting on a fix.
 - **Deferred** — a real risk that an ADR already accepts as conscious debt; tracked in [[deferred]],
   not as an open issue.
 
-Related: `.claude/skills/lazyit-sentinel/SKILL.md` · [[03-decisions/_MOC|Decisions (ADRs)]] ·
-[[claude-workflow]]
+Related: [[INVARIANTS]] · `.claude/skills/lazyit-sentinel/SKILL.md` ·
+[[03-decisions/_MOC|Decisions (ADRs)]] · [[claude-workflow]]

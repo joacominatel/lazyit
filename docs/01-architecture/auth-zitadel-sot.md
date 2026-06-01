@@ -1,7 +1,7 @@
 ---
 title: "Auth — Zitadel as source of truth (Option B): design dossier"
 tags: [architecture, auth, authz, oidc, rbac, idp, zitadel, security, devops, frontend]
-status: proposed
+status: accepted
 created: 2026-06-01
 updated: 2026-06-01
 ---
@@ -13,6 +13,15 @@ updated: 2026-06-01
 > *how* behind that ADR — it consolidates six design lanes (Zitadel platform capabilities, backend
 > auth, data model, devops/infra, frontend setup wizard, security) plus the UX direction, with
 > concrete contracts, DDL, compose snippets, and a sequenced, migration-safe implementation roadmap.
+
+> [!success] Delivered & validated live — 2026-06-01
+> All four phases shipped and the epic was **validated end-to-end live** (zero-touch first boot +
+> in-app `/setup` + write-back). Phase 4 hardening landed the as-built fixes the live run exposed:
+> **#92** sidecar (Private-Key JWT provisioning), **#93** `zitadel-secrets-init` volume-perms fix,
+> **#94** healthcheck gate (shell-less Zitadel → sidecar polls `/debug/healthz`), **#95** v1
+> user-grant endpoints (`/management/v1/users/...`; v2 `/grants` 404s on v2.68.0), plus the
+> `ZITADEL_MASTERKEY` "exactly 32 bytes" doc fix. The §6 guardrails are now the canonical
+> [[INVARIANTS]] reference. See the ADR's "Validated live" note for the full closeout.
 
 The CEO chose **Option B**: Zitadel is the source of truth for identity + roles + tokens; lazyit can
 manage users/roles by **writing back** to Zitadel; first-run is an **in-app setup wizard** (one build,
@@ -519,8 +528,9 @@ encoded in [[0043-zitadel-source-of-truth]] §6. Summary:
 | 6.5 | **Account linking by email** | Unchanged from ADR-0038: claim only `externalId IS NULL` *live* rows; never re-bind a different `sub` (409); soft-deleted rows invisible. Confirmed safe under the trusted-IdP assumption. |
 | 6.6 | **Secrets in compose** | `ZITADEL_MASTERKEY` / `OIDC_CLIENT_SECRET` / Management PAT-key mounted as files (`/run/secrets/…` or `zitadel_secrets`), `.env.prod` `chmod 600` + gitignored; `down -v` paired with removing the secrets volume. |
 
-A new security-invariants note (`docs/06-security/INVARIANTS.md`) is recommended to make 6.1/6.5 the
-canonical non-negotiables; it rides the security lane, not this PR.
+The security-invariants note [[INVARIANTS]] (`docs/06-security/INVARIANTS.md`) makes these the
+canonical non-negotiables (each with a one-line WHY + where it is enforced in code). **Delivered in
+Phase 4 (2026-06-01).**
 
 ---
 
@@ -638,13 +648,20 @@ M2  (optional) add_config_settings   CREATE TABLE config_settings        ← Pha
   wizard + `config` endpoints/hooks (ADR-0020) + the dev-mode topbar banner + the Users-page BYOI
   graceful-degradation banner. **Depends on:** 3.2.
 
-### Phase 4 — Hardening & docs *(owner: security + devops + each lane)*
+### Phase 4 — Hardening & docs *(owner: security + devops + each lane)* — ✅ DONE (2026-06-01)
 
-- **PR 4.1 (security):** `docs/06-security/INVARIANTS.md` (the §6 non-negotiables) + setup-wizard
-  CSRF/rate-limit/audit tests + role-claim mismatch logging test.
-- **PR 4.2 (docs):** flip [[auth-bootstrap]] to lead with the zero-touch path (manual path retained as
-  BYOI/fallback); update [[deploy-self-hosted]] + [[backups]] (secrets volume + masterkey) + the ADR
-  MOC status (0043 proposed → accepted on CEO sign-off).
+- **PR 4.1 (security) — ✅ DONE:** [[INVARIANTS]] (`docs/06-security/INVARIANTS.md`, the §6
+  non-negotiables, each with a WHY + where-enforced) + the setup-wizard CSRF/rate-limit/audit tests
+  (the rate-limit **429 now asserted through the real HTTP pipeline** in `config.controller.spec.ts`,
+  and `config.service.spec.ts` asserts the first ADMIN is **persisted with the externalId linked**).
+  The "role-claim mismatch logging" test was **SKIPPED** — there is no such code path (authZ is
+  DB-first; no role claim is ever read into `request.user.role`), so per the workflow it was not
+  invented. If a role-claim provenance hint is later surfaced (§2), add the warn + its test then.
+- **PR 4.2 (docs) — ✅ DONE:** [[auth-bootstrap]] leads with the zero-touch path (manual console kept
+  as the BYOI/fallback; the `/setup` wizard is the primary first-ADMIN path); the local prod-like
+  runbook ([[docker-prod-like-first-boot]]) documents the as-built flow + the `auth.localhost`
+  hosts-file note; the `ZITADEL_MASTERKEY` "exactly 32 bytes" fix landed across
+  `infra/env/.env.prod.example` + the runbooks; the ADR MOC status is `accepted` (validated live).
 
 ### Dependency graph (at a glance)
 
