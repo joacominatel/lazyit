@@ -37,7 +37,9 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
   verbatim and never interprets it; each [[application]] owns its vocabulary.
 - **`expiresAt` is informative only** — no scheduler auto-revokes at expiry. An expired-but-not-
   revoked grant is still *active*; the list endpoints can **hide** it with `includeExpired=false`,
-  but nothing in the database changes ([[0023-access-management-design]]).
+  but nothing in the database changes ([[0023-access-management-design]]). On **create**, when both
+  are supplied, `expiresAt` must be **on or after** `grantedAt` (a grant can't expire before it
+  starts) — a `@lazyit/shared` cross-field refine returns `400` otherwise (round-2 correctness).
 - **Immutable identity:** `userId`, `applicationId` and `grantedAt` are set once. Only `notes`,
   `revokedAt` and `expiresAt` are mutable.
 - **Create-time integrity:** `userId` and `applicationId` must reference **live** (non-soft-deleted)

@@ -40,6 +40,11 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
   can't express a partial index, so it's raw SQL in the migration ([[0019-asset-assignment-integrity]],
   [[prisma-migrations]] §3). A friendly `409` pre-check backs it up; the index is the race-proof
   guarantee.
+- **Live-row guard on assign (round-2 correctness):** `create()` rejects (`400`) an `assetId` or
+  `userId` that does not reference a **live (non-soft-deleted)** row — you can't assign a
+  decommissioned asset or a departed user. Mirrors the same guard on [[access-grant]]
+  (`assertUsable`); the soft-delete read filter ([[0032-soft-delete-middleware]]) makes the lookup
+  return null for deleted rows, so the check is a single `findFirst`.
 - **Immutable identity:** `assetId`, `userId` and `assignedAt` are set once and never change. Only
   `notes` and `releasedAt` are mutable. Reassigning a single owner = release that assignment +
   create a new one.

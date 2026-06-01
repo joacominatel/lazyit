@@ -58,7 +58,13 @@ On the first authenticated request bearing a valid OIDC Bearer JWT with an unkno
    - `externalId = sub` (the IdP's stable identifier)
    - `email = email` claim
    - `firstName` / `lastName` from `given_name` + `family_name` claims; fall back to splitting the
-     `name` claim on whitespace; last resort: `email` local-part as `firstName`, empty `lastName`.
+     `name` claim on whitespace; last resort: the `email` local-part. **Both names are then
+     hardened** (`coerceName`): trimmed, capped at 100 chars, and any field still empty (a
+     whitespace-only `given_name`, a single-token `name`, or the email-local-part path that left no
+     last name) falls back to the email local-part (then `sub`). This guarantees the JIT row
+     satisfies the same `@lazyit/shared` `User` contract (`firstName`/`lastName` `.min(1).max(100)`)
+     as an API-created user, so a sparse IdP profile can never persist a row the schema would reject
+     (round-2 correctness).
    - `isActive = true`
 2. The new User is set on `request.user` and the request proceeds normally.
 
@@ -71,8 +77,8 @@ and skip creation.
 | --- | --- | --- |
 | `sub` | `externalId` | — (required) |
 | `email` | `email` | `sub@unknown` (guard never fails on missing email) |
-| `given_name` | `firstName` | split `name`; email local-part |
-| `family_name` | `lastName` | remainder after first word of `name`; `""` |
+| `given_name` | `firstName` | split `name`; email local-part (never empty after `coerceName`) |
+| `family_name` | `lastName` | remainder after first word of `name`; email local-part (never empty after `coerceName`) |
 
 **userinfo enrichment (amended 2026-05-27, issue #59):**
 

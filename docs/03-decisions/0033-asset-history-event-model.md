@@ -51,8 +51,11 @@ event, **transactionally** (`$transaction`) so the log row commits atomically wi
   Index `(assetId, id)` serves the timeline query.
 - **Emission** is explicit and transactional: the **[[asset]] service** emits `CREATED`, the per-field
   `STATUS_CHANGED` / `LOCATION_CHANGED` / `MODEL_CHANGED` / `SPECS_CHANGED` (diffing the row before vs
-  after the update; `SPECS_CHANGED` carries no payload as specs can be large), and `DELETED`; the
-  **[[asset-assignment]] service** emits `ASSIGNED` and `RELEASED`. `RESTORED` is emitted by the asset
+  after the update; `SPECS_CHANGED` carries no payload as specs can be large, and the specs diff uses
+  an **order-insensitive deep compare** — `apps/api/src/common/deep-equal.ts` — not `JSON.stringify`,
+  because `jsonb` does not preserve object key order, so reordered keys must not emit a spurious
+  `SPECS_CHANGED`), and `DELETED`; the **[[asset-assignment]] service** emits `ASSIGNED` and `RELEASED`
+  (both carrying `{ userId }` so a multi-owner asset's timeline is attributable per owner). `RESTORED` is emitted by the asset
   restore endpoint (`POST /assets/:id/restore`, [[0041-soft-delete-reuse-and-restore]]) — the
   counterpart of `DELETED`. (It was reserved-without-emitter until ADR-0041.)
 - **`AssetHistoryService`** owns `record(client, event)` (called with the transaction client) and
