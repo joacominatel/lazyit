@@ -18,14 +18,20 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { CreateUserSchema, UpdateUserSchema, UserSchema } from '@lazyit/shared';
+import {
+  CreateUserSchema,
+  UpdateUserSchema,
+  UserListPageSchema,
+  UserSchema,
+} from '@lazyit/shared';
 import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { ActorService } from '../common/actor.service';
-import { UsersService } from './users.service';
+import { UsersService, USER_SORT_ALLOWLIST } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
+import { parsePageQuery } from '../common/parse-page-query';
 import { AssetAssignmentDto } from '../asset-assignments/asset-assignment.dto';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
@@ -33,6 +39,7 @@ import { AccessGrantDto } from '../access-grants/access-grant.dto';
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe), TS types and the
 // OpenAPI schema, all from one definition. See docs/03-decisions/0018-api-documentation-swagger.md.
 class UserDto extends createZodDto(UserSchema) {}
+class UserListPageDto extends createZodDto(UserListPageSchema) {}
 class CreateUserDto extends createZodDto(CreateUserSchema) {}
 class UpdateUserDto extends createZodDto(UpdateUserSchema) {}
 
@@ -47,10 +54,60 @@ export class UsersController {
   ) {}
 
   @Get()
-  @ApiOperation({ summary: 'List all users (excludes soft-deleted)' })
-  @ApiOkResponse({ type: [UserDto] })
-  findAll() {
-    return this.users.findAll();
+  @ApiOperation({
+    summary:
+      'List users (paginated; excludes soft-deleted). Server-side q search + sort.',
+  })
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description:
+      'Case-insensitive substring match on firstName, lastName and email',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: Object.keys(USER_SORT_ALLOWLIST),
+    description:
+      'Server-side sort field. Unknown field → 400. Default: createdAt desc.',
+  })
+  @ApiQuery({
+    name: 'dir',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default asc when sort is set).',
+  })
+  @ApiOkResponse({ type: UserListPageDto })
+  findAll(
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
+  ) {
+    return this.users.findPage(
+      { q },
+      parsePageQuery({ limit, offset, page, sort, dir }),
+    );
   }
 
   @Get('me')
