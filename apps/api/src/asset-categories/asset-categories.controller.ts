@@ -20,6 +20,7 @@ import {
   UpdateAssetCategorySchema,
 } from '@lazyit/shared';
 import { AssetCategoriesService } from './asset-categories.service';
+import { Roles } from '../auth/roles.decorator';
 
 class AssetCategoryDto extends createZodDto(AssetCategorySchema) {}
 class CreateAssetCategoryDto extends createZodDto(CreateAssetCategorySchema) {}
@@ -45,21 +46,24 @@ export class AssetCategoriesController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an asset category' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create an asset category (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: AssetCategoryDto })
   create(@Body() dto: CreateAssetCategoryDto) {
     return this.categories.create(dto);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an asset category' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Update an asset category (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: AssetCategoryDto })
   update(@Param('id') id: string, @Body() dto: UpdateAssetCategoryDto) {
     return this.categories.update(id, dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete an asset category' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Soft-delete an asset category — ADMIN only' })
   @ApiOkResponse({ type: AssetCategoryDto })
   remove(@Param('id') id: string) {
     return this.categories.remove(id);
