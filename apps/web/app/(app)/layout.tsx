@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/auth";
+import { Breadcrumb } from "@/components/breadcrumb";
 import { GlobalSearch } from "@/components/global-search";
 import { MobileNav } from "@/components/mobile-nav";
 import { ModeBanner } from "@/components/mode-banner";
@@ -55,7 +56,12 @@ export default async function AppLayout({
         </header>
         {/* Syncs Auth.js access token into the client-side store so apiFetch sends Bearer automatically. */}
         <SessionTokenSync />
-        <main id="main-content" className="flex-1 p-6">
+        {/* Layout-level breadcrumb bar: route-driven, renders nothing on top-level
+            pages (e.g. /dashboard). Retires the per-page "Back to X" buttons. */}
+        <div className="border-b border-border px-4 py-2 empty:hidden md:px-6">
+          <Breadcrumb />
+        </div>
+        <main id="main-content" className="flex-1 p-4 md:p-6">
           {children}
         </main>
       </div>
