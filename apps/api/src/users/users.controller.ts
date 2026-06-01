@@ -24,13 +24,9 @@ import { Roles } from '../auth/roles.decorator';
 import { ActorService } from '../common/actor.service';
 import { UsersService } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
-import { parseActiveOnly } from '../asset-assignments/active-only';
+import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { AssetAssignmentDto } from '../asset-assignments/asset-assignment.dto';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
-import {
-  parseActiveOnly as parseGrantActiveOnly,
-  parseIncludeExpired,
-} from '../access-grants/query-params';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
 
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe), TS types and the
@@ -81,7 +77,7 @@ export class UsersController {
     await this.users.findOne(id); // 404 if the user is missing or soft-deleted
     return this.assignments.findAll({
       userId: id,
-      activeOnly: parseActiveOnly(activeOnly),
+      activeOnly: parseBooleanQuery(activeOnly, true),
     });
   }
 
@@ -111,8 +107,8 @@ export class UsersController {
     await this.users.findOne(id); // 404 if the user is missing or soft-deleted
     return this.grants.findAll({
       userId: id,
-      activeOnly: parseGrantActiveOnly(activeOnly),
-      includeExpired: parseIncludeExpired(includeExpired),
+      activeOnly: parseBooleanQuery(activeOnly, true),
+      includeExpired: parseBooleanQuery(includeExpired, true),
     });
   }
 
