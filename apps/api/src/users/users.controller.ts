@@ -137,8 +137,9 @@ export class UsersController {
     summary: 'Create a user — ADMIN only (can set the RBAC role)',
   })
   @ApiCreatedResponse({ type: UserDto })
-  create(@Body() dto: CreateUserDto) {
-    return this.users.create(dto);
+  create(@Body() dto: CreateUserDto, @CurrentUser() actor?: User) {
+    // Pass the actor so the service can attribute the IdP write-back audit line (ADR-0043 §3).
+    return this.users.create(dto, this.actor.resolve(actor));
   }
 
   @Patch(':id')

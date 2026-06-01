@@ -3,11 +3,15 @@ import {
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { getLoggerToken, PinoLogger } from 'nestjs-pino';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
+import { IDENTITY_PROVIDER } from '../auth/identity/identity-provider.interface';
+import type { IdentityProvider } from '../auth/identity/identity-provider.interface';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -26,7 +30,20 @@ type PrismaUserMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  delete: jest.Mock;
   count: jest.Mock;
+};
+
+// A mock IdentityProvider (ADR-0043 write-back). Defaults to a supports-management provider whose
+// calls resolve; individual tests override a method to reject to exercise the no-split-brain paths.
+type IdpMock = {
+  kind: string;
+  supportsManagement: boolean;
+  resolveExternalRef: jest.Mock;
+  createUser: jest.Mock;
+  deactivateUser: jest.Mock;
+  grantRole: jest.Mock;
+  revokeRole: jest.Mock;
 };
 
 // The transaction client the offboarding writes go through; $transaction runs the callback with it.
@@ -43,6 +60,7 @@ describe('UsersService', () => {
   let search: SearchMock;
   let tx: TxMock;
   let assignments: { releaseAllForUser: jest.Mock };
+  let idp: IdpMock;
 
   beforeEach(async () => {
     user = {
@@ -50,6 +68,7 @@ describe('UsersService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      delete: jest.fn(),
       // Default: there is at least one OTHER admin, so the last-admin guard is a no-op unless a test
       // overrides this to 0 to simulate the final administrator.
       count: jest.fn().mockResolvedValue(1),
@@ -67,6 +86,26 @@ describe('UsersService', () => {
     // AssetAssignmentsService is mocked; its own logic is covered in its spec. Default: no active
     // assignments to release.
     assignments = { releaseAllForUser: jest.fn().mockResolvedValue([]) };
+    // Default IdP: a supports-management provider whose write-backs succeed. createUser echoes a
+    // distinct externalId so the create path's externalId-link branch is exercised. Tests that probe
+    // the no-split-brain compensation override a method to reject.
+    idp = {
+      kind: 'zitadel',
+      supportsManagement: true,
+      resolveExternalRef: jest.fn((sub: string) =>
+        Promise.resolve({ externalId: sub }),
+      ),
+      createUser: jest.fn().mockResolvedValue({ externalId: 'zitadel-user-1' }),
+      deactivateUser: jest.fn().mockResolvedValue(undefined),
+      grantRole: jest.fn().mockResolvedValue(undefined),
+      revokeRole: jest.fn().mockResolvedValue(undefined),
+    };
+    // A no-op PinoLogger stand-in (the service uses it for structured write-back audit lines).
+    const logger = {
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+    } as unknown as PinoLogger;
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -74,13 +113,15 @@ describe('UsersService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: SearchService, useValue: search },
         { provide: AssetAssignmentsService, useValue: assignments },
+        { provide: IDENTITY_PROVIDER, useValue: idp as IdentityProvider },
+        { provide: getLoggerToken(UsersService.name), useValue: logger },
       ],
     }).compile();
 
     service = moduleRef.get(UsersService);
   });
 
-  it('creates a user without externalId (current case — no auth yet)', async () => {
+  it('creates the local mirror then links the Zitadel externalId (ADR-0043 §3 DB-first + mirror)', async () => {
     const dto = { email: 'a@b.com', firstName: 'Ada', lastName: 'Lovelace' };
     const created = {
       id: 'uuid-1',
@@ -90,14 +131,29 @@ describe('UsersService', () => {
       externalId: null,
       deletedAt: null,
     };
+    const linked = { ...created, externalId: 'zitadel-user-1' };
     user.create.mockResolvedValue(created);
+    user.update.mockResolvedValue(linked);
 
-    await expect(service.create(dto)).resolves.toEqual(created);
+    // The default idp supportsManagement and returns externalId 'zitadel-user-1'.
+    await expect(service.create(dto)).resolves.toEqual(linked);
     // ADR-0043: an omitted role defaults to VIEWER (least-privilege), set explicitly by the service.
     expect(user.create).toHaveBeenCalledWith({
       data: { ...dto, role: 'VIEWER' },
     });
-    // Fire-and-forget search sync (ADR-0035): the created user is upserted into the `users` index.
+    // The IdP mirror is invoked with the new user's profile + resolved role.
+    expect(idp.createUser).toHaveBeenCalledWith({
+      email: 'a@b.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'VIEWER',
+    });
+    // The Zitadel user id is persisted back onto the local row as externalId.
+    expect(user.update).toHaveBeenCalledWith({
+      where: { id: 'uuid-1' },
+      data: { externalId: 'zitadel-user-1' },
+    });
+    // Fire-and-forget search sync (ADR-0035): the linked user is upserted into the `users` index.
     expect(search.upsert).toHaveBeenCalledWith('users', {
       id: 'uuid-1',
       firstName: 'Ada',
@@ -110,6 +166,12 @@ describe('UsersService', () => {
   it('defaults an omitted role to VIEWER (ADR-0043 — uniform least-privilege default)', async () => {
     const dto = { email: 'v@b.com', firstName: 'Viv', lastName: 'Ian' };
     user.create.mockResolvedValue({ id: 'uuid-v', ...dto, role: 'VIEWER' });
+    user.update.mockResolvedValue({
+      id: 'uuid-v',
+      ...dto,
+      role: 'VIEWER',
+      externalId: 'zitadel-user-1',
+    });
 
     await service.create(dto);
 
@@ -117,6 +179,10 @@ describe('UsersService', () => {
       [{ data: { role: string } }]
     >;
     expect(createCalls[0][0].data.role).toBe('VIEWER');
+    // The mirror also receives the VIEWER role.
+    expect(idp.createUser).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'VIEWER' }),
+    );
   });
 
   it('honours an explicit role on create (ADMIN-gated controller may pass any role)', async () => {
@@ -127,6 +193,11 @@ describe('UsersService', () => {
       role: 'ADMIN' as const,
     };
     user.create.mockResolvedValue({ id: 'uuid-a', ...dto });
+    user.update.mockResolvedValue({
+      id: 'uuid-a',
+      ...dto,
+      externalId: 'zitadel-user-1',
+    });
 
     await service.create(dto);
 
@@ -134,6 +205,58 @@ describe('UsersService', () => {
     expect(user.create).toHaveBeenCalledWith({
       data: { ...dto, role: 'ADMIN' },
     });
+    expect(idp.createUser).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'ADMIN' }),
+    );
+  });
+
+  it('BYOI (generic-oidc): creates the LOCAL user, no externalId link, no 503', async () => {
+    // BYOI provider: supportsManagement=false, createUser no-ops returning an empty ref.
+    idp.supportsManagement = false;
+    idp.createUser.mockResolvedValue({ externalId: '' });
+    const dto = { email: 'b@b.com', firstName: 'By', lastName: 'Oi' };
+    const created = {
+      id: 'uuid-b',
+      ...dto,
+      role: 'VIEWER',
+      externalId: null,
+      deletedAt: null,
+    };
+    user.create.mockResolvedValue(created);
+
+    // The local create succeeds and is returned as-is; no externalId-link update; no throw.
+    await expect(service.create(dto)).resolves.toEqual(created);
+    expect(user.update).not.toHaveBeenCalled();
+    expect(user.delete).not.toHaveBeenCalled();
+    expect(search.upsert).toHaveBeenCalledWith('users', {
+      id: 'uuid-b',
+      firstName: 'By',
+      lastName: 'Oi',
+      email: 'b@b.com',
+    });
+  });
+
+  it('no-split-brain: an IdP createUser failure rolls back the local user and surfaces 503', async () => {
+    const dto = { email: 'c@b.com', firstName: 'Caro', lastName: 'Line' };
+    user.create.mockResolvedValue({
+      id: 'uuid-c',
+      ...dto,
+      role: 'VIEWER',
+      externalId: null,
+    });
+    // The Management mirror fails — the upstream contract surfaces this as 503.
+    idp.createUser.mockRejectedValue(
+      new ServiceUnavailableException('Zitadel management call failed'),
+    );
+
+    await expect(service.create(dto)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+    // Compensation: the just-created local row is HARD-deleted so local + Zitadel never disagree.
+    expect(user.delete).toHaveBeenCalledWith({ where: { id: 'uuid-c' } });
+    // No externalId link, and the user is not left indexed for search.
+    expect(user.update).not.toHaveBeenCalled();
+    expect(search.upsert).not.toHaveBeenCalled();
   });
 
   // SEC-006: externalId is no longer a client-settable create field (it is server-owned, ADR-0016).
@@ -384,6 +507,175 @@ describe('UsersService', () => {
 
     expect(user.findMany).toHaveBeenCalledWith({
       orderBy: { createdAt: 'desc' },
+    });
+  });
+
+  // ADR-0043 §3 — IdP write-back (DB-first + mirror), no-split-brain, 503 on Management failure.
+  describe('IdP write-back (ADR-0043 §3)', () => {
+    it('role change on a linked user mirrors grantRole to the IdP', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'A',
+        lastName: 'B',
+        email: 'a@b.com',
+        role: 'ADMIN',
+        externalId: 'zitadel-user-9',
+      });
+
+      await service.update('member-1', { role: 'ADMIN' }, 'actor-99');
+
+      expect(idp.grantRole).toHaveBeenCalledWith('zitadel-user-9', 'ADMIN');
+    });
+
+    it('a non-role update never touches the IdP (no grant call)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'New',
+        lastName: 'B',
+        email: 'a@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+      });
+
+      await service.update('member-1', { firstName: 'New' }, 'actor-99');
+
+      expect(idp.grantRole).not.toHaveBeenCalled();
+    });
+
+    it('a local-only user (no externalId) skips the grant mirror on role change', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'local-1',
+        role: 'MEMBER',
+        externalId: null,
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({
+        id: 'local-1',
+        firstName: 'A',
+        lastName: 'B',
+        email: 'a@b.com',
+        role: 'ADMIN',
+        externalId: null,
+      });
+
+      await service.update('local-1', { role: 'ADMIN' }, 'actor-99');
+
+      expect(idp.grantRole).not.toHaveBeenCalled();
+    });
+
+    it('no-split-brain: a grantRole failure reverts the local role and surfaces 503', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      // First update applies the new role; the revert update restores the previous role.
+      user.update
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'A',
+          lastName: 'B',
+          email: 'a@b.com',
+          role: 'ADMIN',
+          externalId: 'zitadel-user-9',
+        })
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'A',
+          lastName: 'B',
+          email: 'a@b.com',
+          role: 'MEMBER',
+          externalId: 'zitadel-user-9',
+        });
+      idp.grantRole.mockRejectedValue(
+        new ServiceUnavailableException('Zitadel management call failed'),
+      );
+
+      await expect(
+        service.update('member-1', { role: 'ADMIN' }, 'actor-99'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      // The local role is reverted to MEMBER (the truth) so local + Zitadel agree.
+      const updateCalls = user.update.mock.calls as Array<
+        [{ where: { id: string }; data: { role?: string } }]
+      >;
+      expect(updateCalls[1][0]).toEqual({
+        where: { id: 'member-1' },
+        data: { role: 'MEMBER' },
+      });
+    });
+
+    it('offboarding a linked user deactivates it in the IdP inside the transaction', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
+      tx.accessGrant.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.remove('uuid-1', 'actor-99');
+
+      expect(idp.deactivateUser).toHaveBeenCalledWith('zitadel-user-9');
+      // The soft-delete still happened (the deactivate succeeded, so the txn committed).
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('no-split-brain: a deactivateUser failure rolls back the WHOLE offboard and surfaces 503', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      // The Management deactivate fails INSIDE the transaction → the txn callback throws → rollback.
+      idp.deactivateUser.mockRejectedValue(
+        new ServiceUnavailableException('Zitadel management call failed'),
+      );
+
+      await expect(service.remove('uuid-1', 'actor-99')).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+
+      // Because the deactivate ran FIRST in the txn and threw, nothing else was committed: no
+      // soft-delete, no grant revocation, no assignment release (the rollback is the no-split-brain).
+      expect(tx.user.update).not.toHaveBeenCalled();
+      expect(tx.accessGrant.updateMany).not.toHaveBeenCalled();
+      expect(assignments.releaseAllForUser).not.toHaveBeenCalled();
+    });
+
+    it('BYOI (generic-oidc): offboard a local-only user makes no IdP call and no 503', async () => {
+      idp.supportsManagement = false;
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        role: 'MEMBER',
+        externalId: null,
+        deletedAt: null,
+      });
+      tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
+      tx.accessGrant.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.remove('uuid-1', 'actor-99')).resolves.toMatchObject(
+        { userId: 'uuid-1' },
+      );
+
+      // A local-only row (externalId null) has nothing to deactivate.
+      expect(idp.deactivateUser).not.toHaveBeenCalled();
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
     });
   });
 });
