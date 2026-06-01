@@ -31,7 +31,8 @@ the "what changed, when, by whom?" trail that auditing requires ([[problem-space
 ## Events (`AssetHistoryEventType`)
 
 `CREATED` · `STATUS_CHANGED` · `ASSIGNED` · `RELEASED` · `LOCATION_CHANGED` · `MODEL_CHANGED` ·
-`SPECS_CHANGED` · `DELETED` · `RESTORED` (reserved — no restore endpoint emits it yet).
+`SPECS_CHANGED` · `DELETED` · `RESTORED` (emitted by `POST /assets/:id/restore`, the counterpart of
+`DELETED` — [[0041-soft-delete-reuse-and-restore]]).
 
 ## Emission
 

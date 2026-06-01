@@ -30,7 +30,8 @@ concrete instance of a generic [[asset-model]].
   ([[0007-flexible-asset-specs-jsonb]]).
 - `status` is a **required** enum (`AssetStatus`), **no default** — every asset is classified
   (consistent with [[location]]`.type`).
-- `serial` and `assetTag` are each unique when present (a duplicate returns `409`).
+- `serial` and `assetTag` are each unique **among live rows** when present (a live duplicate returns
+  `409`); a soft-deleted value is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]).
 - FKs (`modelId`, `locationId`) are `onDelete: SetNull`: deleting a model/location **detaches**
   assets, never deletes them (auditability > strict referential integrity). Combined with soft
   delete everywhere, references are preserved in practice.
@@ -75,8 +76,8 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | --- | --- | --- |
 | `id` | `cuid` | `@default(cuid())`. |
 | `name` | `string` | required (e.g. "SW-CORE-01"); naming convention is the user's, not enforced. |
-| `serial` | `string?` | `@unique`, optional — unique when present. |
-| `assetTag` | `string?` | `@unique`, optional — internal company label, unique when present. |
+| `serial` | `string?` | Optional. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted serial is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
+| `assetTag` | `string?` | Optional internal company label. Same live-only PARTIAL unique index as `serial` ([[0041-soft-delete-reuse-and-restore]]). |
 | `status` | `AssetStatus` | required enum, **no default**. |
 | `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object for now (see debt note). |
 | `notes` | `string?` | optional. |
@@ -109,6 +110,10 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
   `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]). Each write
   takes an **optional `X-User-Id`** header (the actor) and emits an [[asset-history]] event
   (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally ([[0033-asset-history-event-model]]).
+- `POST /assets/:id/restore` — **ADMIN-only** ([[0040-rbac-roles]]). Clears `deletedAt` and emits a
+  `RESTORED` [[asset-history]] event transactionally; returns the expanded asset. Idempotent on a live
+  asset; can `409` if a live asset took the freed serial/assetTag meanwhile
+  ([[0041-soft-delete-reuse-and-restore]]).
 
 ## Not yet implemented (deferred)
 

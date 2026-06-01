@@ -17,8 +17,13 @@ datasource db {
 /// A person in the organization. Central to access, peripheral to assets:
 /// users come and go while assets persist. See docs/02-domain/entities/user.md
 model User {
-  id         String    @id @default(uuid()) @db.Uuid
-  email      String    @unique
+  id String @id @default(uuid()) @db.Uuid
+  // Case-insensitive (citext, ADR-0041): "Bob@x" and "bob@x" are the same address, so OIDC/JIT can
+  // never mint two users from one mailbox. UNIQUENESS is a PARTIAL unique index WHERE "deletedAt" IS
+  // NULL (raw SQL in the migration — Prisma can't express partial uniques), so a soft-deleted user
+  // frees its email for reuse and Restore can reclaim it. No `@unique` here: that would emit a FULL
+  // unique index, re-introducing the ghost-row collision. Follows the AssetAssignment precedent.
+  email      String    @db.Citext
   firstName  String
   lastName   String
   isActive   Boolean   @default(true)
@@ -105,8 +110,11 @@ enum LocationType {
 /// edited and soft-deleted from the app — the seed set is just an initial, non-special list.
 /// See docs/02-domain/entities/asset-category.md
 model AssetCategory {
-  id          String    @id @default(cuid())
-  name        String    @unique
+  id String @id @default(cuid())
+  // Unique among LIVE rows only: a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
+  // migration — Prisma can't express it), so a soft-deleted category frees its name for reuse and
+  // Restore can reclaim it. No `@unique` (that re-introduces the ghost-row collision). See ADR-0041.
+  name        String
   description String?
   // Free string: a heroicon name for the web UI (e.g. "ServerStackIcon"). Not validated.
   icon        String?
@@ -125,8 +133,10 @@ model AssetModel {
   id           String         @id @default(cuid())
   name         String
   manufacturer String
-  // Unique when present (Postgres treats NULLs as distinct), optional.
-  sku          String?        @unique
+  // Unique among LIVE rows when present (NULLs are distinct in Postgres): a PARTIAL unique index
+  // WHERE "deletedAt" IS NULL (raw SQL in the migration). A soft-deleted model frees its sku for
+  // reuse; Restore reclaims it. No `@unique` (that re-introduces the ghost collision). See ADR-0041.
+  sku          String?
   description  String?
   // Model-level default specs (e.g. "Latitude 5520 ships with 16GB"). Distinct from Asset.specs.
   specs        Json?
@@ -148,9 +158,11 @@ model AssetModel {
 model Asset {
   id           String      @id @default(cuid())
   name         String
-  // serial / assetTag: unique when present (NULLs distinct in Postgres).
-  serial       String?     @unique
-  assetTag     String?     @unique
+  // serial / assetTag: unique among LIVE rows when present (NULLs distinct in Postgres). Each gets a
+  // PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the migration), so a soft-deleted asset
+  // frees its serial/assetTag for reuse and Restore reclaims them. No `@unique` (ghost collision). ADR-0041.
+  serial       String?
+  assetTag     String?
   status       AssetStatus
   // Per-unit type-specific attributes (jsonb). Validated in the app (zod), not the DB.
   // See docs/03-decisions/0007-flexible-asset-specs-jsonb.md
@@ -245,8 +257,8 @@ model AssetHistory {
   @@map("asset_history")
 }
 
-/// The discrete asset events recorded in AssetHistory (ADR-0033). RESTORED is reserved for a future
-/// restore action (no endpoint emits it yet).
+/// The discrete asset events recorded in AssetHistory (ADR-0033). RESTORED is emitted by the asset
+/// restore endpoint (POST /assets/:id/restore — ADR-0041), the counterpart of DELETED.
 enum AssetHistoryEventType {
   CREATED
   STATUS_CHANGED
@@ -263,8 +275,11 @@ enum AssetHistoryEventType {
 /// AssetCategory: created/edited/soft-deleted from the app; the seed set is an initial, non-special
 /// list. See docs/02-domain/entities/article-category.md
 model ArticleCategory {
-  id          String    @id @default(cuid())
-  name        String    @unique
+  id String @id @default(cuid())
+  // Unique among LIVE rows only: a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
+  // migration). A soft-deleted category frees its name for reuse; Restore reclaims it. No `@unique`
+  // (that re-introduces the ghost-row collision). See ADR-0041.
+  name        String
   description String?
   // Free string: a heroicon name for the web UI (e.g. "ServerStackIcon"). Not validated.
   icon        String?
@@ -283,9 +298,12 @@ model ArticleCategory {
 /// DRAFT is author-private, PUBLISHED is team-visible; authorship/visibility rules live in the
 /// service (ADR-0022). See docs/02-domain/entities/article.md
 model Article {
-  id             String          @id @default(cuid())
-  // Short, memorable, unique. Format/length validated in @lazyit/shared (lowercase, [a-z0-9-], <=60).
-  slug           String          @unique
+  id String @id @default(cuid())
+  // Short, memorable, unique among LIVE rows. Format/length validated in @lazyit/shared (lowercase,
+  // [a-z0-9-], <=60). UNIQUENESS is a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
+  // migration), so a soft-deleted article frees its slug for reuse and Restore reclaims it. No
+  // `@unique` (that re-introduces the ghost-row collision). See ADR-0041.
+  slug           String
   title          String
   // Markdown body (Postgres text). Validated/sanitized in the app, not the DB.
   content        String
@@ -328,8 +346,11 @@ enum ArticleStatus {
 /// ArticleCategory: created, edited and soft-deleted from the app; the seed set is an initial,
 /// non-special list. See docs/02-domain/entities/application-category.md
 model ApplicationCategory {
-  id          String    @id @default(cuid())
-  name        String    @unique
+  id String @id @default(cuid())
+  // Unique among LIVE rows only: a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
+  // migration). A soft-deleted category frees its name for reuse; Restore reclaims it. No `@unique`
+  // (that re-introduces the ghost-row collision). See ADR-0041.
+  name        String
   description String?
   // Free string: a heroicon name for the web UI (e.g. "CloudIcon"). Not validated.
   icon        String?
@@ -418,8 +439,11 @@ model AccessGrant {
 /// ApplicationCategory: created, edited and soft-deleted from the app; the seed set is an initial,
 /// non-special list. See docs/02-domain/entities/consumable-category.md
 model ConsumableCategory {
-  id          String    @id @default(cuid())
-  name        String    @unique
+  id String @id @default(cuid())
+  // Unique among LIVE rows only: a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
+  // migration). A soft-deleted category frees its name for reuse; Restore reclaims it. No `@unique`
+  // (that re-introduces the ghost-row collision). See ADR-0041.
+  name        String
   description String?
   // Free string: a heroicon name for the web UI (e.g. "CpuChipIcon"). Not validated.
   icon        String?
@@ -440,8 +464,10 @@ model ConsumableCategory {
 model Consumable {
   id           String              @id @default(cuid())
   name         String
-  // Unique when present (Postgres treats NULLs as distinct), optional.
-  sku          String?             @unique
+  // Unique among LIVE rows when present (NULLs are distinct in Postgres): a PARTIAL unique index
+  // WHERE "deletedAt" IS NULL (raw SQL in the migration). A soft-deleted consumable frees its sku for
+  // reuse; Restore reclaims it. No `@unique` (that re-introduces the ghost collision). See ADR-0041.
+  sku          String?
   // Optional category; SetNull on delete so consumables survive (deleting a category detaches them).
   categoryId   String?
   category     ConsumableCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)

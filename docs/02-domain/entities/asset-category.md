@@ -26,7 +26,8 @@ is expected to have.
   set is **seeded** (`prisma/seed.ts`: Server, Switch, Router, Firewall, Laptop, Desktop,
   Mobile, Printer, Storage, UPS, Peripheral, Other) but the seeded rows are **not special** —
   they can be edited or removed like any other.
-- `name` is unique (a duplicate create returns `409`).
+- `name` is unique among **live** rows (a live duplicate create returns `409`); a soft-deleted name
+  is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]).
 - May later define a recommended `specs` schema/template for its models — deferred (see the
   Known-debt note on [[asset]] and [[0007-flexible-asset-specs-jsonb]]).
 
@@ -49,7 +50,7 @@ Prisma model `AssetCategory` → table `asset_categories`. Validation schemas
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `cuid` | `@default(cuid())`. |
-| `name` | `string` | `@unique`, required. |
+| `name` | `string` | Required. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted name is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
 | `description` | `string?` | optional. |
 | `icon` | `string?` | optional, **free string** — a heroicon name for the web UI (e.g. `"ServerStackIcon"`), not validated. |
 | `createdAt` | `datetime` | `@default(now())`. |
@@ -59,7 +60,8 @@ Prisma model `AssetCategory` → table `asset_categories`. Validation schemas
 ## Endpoints
 
 `apps/api/src/asset-categories/` (`AssetCategoriesModule`): `GET /asset-categories` (excludes
-soft-deleted), `GET /asset-categories/:id`, `POST`, `PATCH /:id`, `DELETE /:id` (soft delete).
+soft-deleted), `GET /asset-categories/:id`, `POST`, `PATCH /:id`, `DELETE /:id` (soft delete),
+`POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]).
 Documented via Swagger ([[0018-api-documentation-swagger]]).
 
 Related: [[asset-model]] · [[asset]] · [[conventions]] · [[0018-api-documentation-swagger]]

@@ -54,7 +54,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `uuid` | `@default(uuid())`, `@db.Uuid` — sensitive/exposed ([[0005-id-strategy]]). |
-| `email` | `string` | `@unique`, required. |
+| `email` | `string` | Required, **case-insensitive** (`@db.Citext`, [[0041-soft-delete-reuse-and-restore]]). Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL in the migration; no `@unique`), so a soft-deleted email is freed for reuse / restore. Write payloads normalize it (trim + lowercase). |
 | `firstName` | `string` | required. |
 | `lastName` | `string` | required. |
 | `isActive` | `boolean` | `@default(true)`. Activation flag — see note below. |
@@ -73,9 +73,11 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 ## Endpoints
 
 `apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted), `GET /users/:id`,
-`POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete), `POST /users/:id/offboard`.
-All **write** endpoints (create / update / delete / offboard) are **ADMIN-only** (`@Roles('ADMIN')`,
-[[0040-rbac-roles]]); the reads are open to any authenticated user. Bodies validated against the
+`POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete), `POST /users/:id/offboard`,
+`POST /users/:id/restore` (re-onboard: clears `deletedAt`; does NOT re-grant access or re-assign
+assets — [[0041-soft-delete-reuse-and-restore]]).
+All **write** endpoints (create / update / delete / offboard / restore) are **ADMIN-only**
+(`@Roles('ADMIN')`, [[0040-rbac-roles]]); the reads are open to any authenticated user. Bodies validated against the
 shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). Also
 `GET /users/:id/assignments?activeOnly=` lists the assets assigned to the user ([[asset-assignment]]).
 

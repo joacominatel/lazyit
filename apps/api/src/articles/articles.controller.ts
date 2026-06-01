@@ -232,4 +232,15 @@ export class ArticlesController {
   remove(@Param('id') id: string, @CurrentUser() user?: User) {
     return this.articles.remove(id, user);
   }
+
+  @Post(':id/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Restore a soft-deleted article (author only) — ADMIN only (ADR-0041)',
+  })
+  @ApiOkResponse({ type: ArticleDto })
+  restore(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.restore(id, user);
+  }
 }

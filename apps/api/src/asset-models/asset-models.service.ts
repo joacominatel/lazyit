@@ -60,4 +60,27 @@ export class AssetModelsService {
       data: { deletedAt: new Date() },
     });
   }
+
+  /**
+   * Restore a soft-deleted model: clear `deletedAt` (ADR-0041). Found via the `includeSoftDeleted`
+   * escape hatch (the read filter would hide it). 404 if it never existed; idempotent if already
+   * live. The partial unique index frees `sku` on delete, so a restore can 409 if another live model
+   * took the sku in the meantime (mapped by the global PrismaExceptionFilter).
+   */
+  async restore(id: string) {
+    const model = await this.prisma.assetModel.findFirst({
+      where: { id },
+      includeSoftDeleted: true,
+    } as Prisma.AssetModelFindFirstArgs);
+    if (!model) {
+      throw new NotFoundException(`AssetModel ${id} not found`);
+    }
+    if (model.deletedAt === null) {
+      return model; // already live — idempotent
+    }
+    return this.prisma.assetModel.update({
+      where: { id },
+      data: { deletedAt: null },
+    });
+  }
 }

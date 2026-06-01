@@ -675,4 +675,74 @@ describe('AssetsService', () => {
     expect(history.record).not.toHaveBeenCalled();
     expect(search.remove).not.toHaveBeenCalled();
   });
+
+  // --- restore (ADR-0041) --------------------------------------------------
+  it('restore clears deletedAt and emits a RESTORED history event in the transaction', async () => {
+    actor.resolve.mockReturnValue(ACTOR_ID);
+    // 1st findFirst: the soft-deleted lookup (includeSoftDeleted). 2nd: findOne after restore.
+    asset.findFirst
+      .mockResolvedValueOnce({ id: 'a1', deletedAt: new Date() })
+      .mockResolvedValueOnce({
+        id: 'a1',
+        deletedAt: null,
+        assignments: [],
+        model: null,
+        location: null,
+      });
+    tx.update.mockResolvedValue({ id: 'a1', deletedAt: null });
+
+    await service.restore('a1', ACTOR_USER as never);
+
+    // The first lookup uses the includeSoftDeleted escape hatch (so a soft-deleted asset is visible).
+    const firstLookup = asset.findFirst.mock.calls[0][0] as {
+      includeSoftDeleted?: boolean;
+    };
+    expect(firstLookup.includeSoftDeleted).toBe(true);
+    // deletedAt is cleared inside a transaction (never a plain update).
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    const calls = tx.update.mock.calls as UpdateCall[];
+    expect(calls[0][0].where).toEqual({ id: 'a1' });
+    expect(calls[0][0].data.deletedAt).toBeNull();
+    // RESTORED is emitted atomically (ADR-0033/0041), attributed to the actor.
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      { assetId: 'a1', eventType: 'RESTORED', performedById: ACTOR_ID },
+    );
+    // Re-indexed after restore (ADR-0035).
+    expect(search.upsert).toHaveBeenCalledWith(
+      'assets',
+      expect.objectContaining({ id: 'a1' }),
+    );
+  });
+
+  it('restore is idempotent on an already-live asset: no transaction, no RESTORED event', async () => {
+    asset.findFirst
+      // The includeSoftDeleted lookup returns a live row (deletedAt null)...
+      .mockResolvedValueOnce({ id: 'a1', deletedAt: null })
+      // ...then findOne returns the expanded live row.
+      .mockResolvedValueOnce({
+        id: 'a1',
+        deletedAt: null,
+        assignments: [],
+        model: null,
+        location: null,
+      });
+
+    await service.restore('a1');
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(history.record).not.toHaveBeenCalled();
+    expect(tx.update).not.toHaveBeenCalled();
+  });
+
+  it('restore 404s (no transaction) when the asset never existed', async () => {
+    asset.findFirst.mockResolvedValue(null);
+
+    await expect(service.restore('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(history.record).not.toHaveBeenCalled();
+  });
 });

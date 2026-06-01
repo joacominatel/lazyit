@@ -1,10 +1,15 @@
 /**
  * Seeds an initial ADMIN user and the initial AssetCategory, ArticleCategory, ApplicationCategory and
- * ConsumableCategory sets. Idempotent (upsert by unique `name` / `email`): safe to re-run.
- * `update: {}` on the categories never clobbers user edits — all category sets are user-managed, the
- * seed lists are just an initial, non-special starting point (see docs/02-domain/entities/
- * asset-category.md, article-category.md and application-category.md). The seeded user is ADMIN
- * (ADR-0040): a freshly-seeded database must always have at least one administrator.
+ * ConsumableCategory sets. Idempotent: safe to re-run.
+ *
+ * Since ADR-0041, the natural keys (`User.email`, `*.name`) are NO LONGER full `@unique` columns —
+ * uniqueness is a PARTIAL unique index scoped to live rows (`WHERE "deletedAt" IS NULL`), which
+ * Prisma can't use as a `where` unique key. So the seed can't `upsert({ where: { name } })` anymore;
+ * it does an explicit find-among-LIVE-rows then create. This raw PrismaClient is NOT wrapped by the
+ * soft-delete extension, so the find filters `deletedAt: null` explicitly. Idempotent and it never
+ * clobbers user edits — all category sets are user-managed, the seed lists are just an initial,
+ * non-special starting point (see docs/02-domain/entities/asset-category.md etc.). The seeded user is
+ * ADMIN (ADR-0040): a freshly-seeded database must always have at least one administrator.
  *
  * Run from apps/api: `bunx prisma db seed`.
  */
@@ -78,54 +83,80 @@ const INITIAL_CONSUMABLE_CATEGORIES = [
 
 async function main() {
   // The seeded administrator (ADR-0040). ADMIN so a fresh database is never left without anyone able
-  // to administer it. Upsert on the unique email keeps it idempotent and re-asserts the role.
-  await prisma.user.upsert({
-    where: { email: SEED_ADMIN_EMAIL },
-    update: { role: Role.ADMIN },
-    create: {
-      email: SEED_ADMIN_EMAIL,
-      firstName: 'Admin',
-      lastName: 'User',
-      role: Role.ADMIN,
-    },
+  // to administer it. Email is normalized (citext + ADR-0041) to its canonical lowercase form so the
+  // find matches the case-insensitive column. Re-asserts the ADMIN role on re-run (corrects a manual
+  // dev demotion); creates the row only when no LIVE admin with that email exists.
+  const adminEmail = SEED_ADMIN_EMAIL.trim().toLowerCase();
+  const existingAdmin = await prisma.user.findFirst({
+    where: { email: adminEmail, deletedAt: null },
+    select: { id: true },
   });
-  console.log(`Seeded ADMIN user ${SEED_ADMIN_EMAIL}.`);
+  if (existingAdmin) {
+    await prisma.user.update({
+      where: { id: existingAdmin.id },
+      data: { role: Role.ADMIN },
+    });
+  } else {
+    await prisma.user.create({
+      data: {
+        email: adminEmail,
+        firstName: 'Admin',
+        lastName: 'User',
+        role: Role.ADMIN,
+      },
+    });
+  }
+  console.log(`Seeded ADMIN user ${adminEmail}.`);
 
   for (const name of INITIAL_ASSET_CATEGORIES) {
-    await prisma.assetCategory.upsert({
-      where: { name },
-      update: {}, // don't overwrite user edits on re-run
-      create: { name },
+    const existing = await prisma.assetCategory.findFirst({
+      where: { name, deletedAt: null },
+      select: { id: true },
     });
+    if (!existing) {
+      await prisma.assetCategory.create({ data: { name } });
+    }
   }
   console.log(`Seeded ${INITIAL_ASSET_CATEGORIES.length} asset categories.`);
 
   for (const [index, { name, icon }] of INITIAL_ARTICLE_CATEGORIES.entries()) {
-    await prisma.articleCategory.upsert({
-      where: { name },
-      update: {}, // don't overwrite user edits on re-run
-      create: { name, icon, order: index + 1 },
+    const existing = await prisma.articleCategory.findFirst({
+      where: { name, deletedAt: null },
+      select: { id: true },
     });
+    if (!existing) {
+      await prisma.articleCategory.create({
+        data: { name, icon, order: index + 1 },
+      });
+    }
   }
   console.log(`Seeded ${INITIAL_ARTICLE_CATEGORIES.length} article categories.`);
 
   for (const [index, { name, icon }] of INITIAL_APPLICATION_CATEGORIES.entries()) {
-    await prisma.applicationCategory.upsert({
-      where: { name },
-      update: {}, // don't overwrite user edits on re-run
-      create: { name, icon, order: index + 1 },
+    const existing = await prisma.applicationCategory.findFirst({
+      where: { name, deletedAt: null },
+      select: { id: true },
     });
+    if (!existing) {
+      await prisma.applicationCategory.create({
+        data: { name, icon, order: index + 1 },
+      });
+    }
   }
   console.log(
     `Seeded ${INITIAL_APPLICATION_CATEGORIES.length} application categories.`,
   );
 
   for (const [index, name] of INITIAL_CONSUMABLE_CATEGORIES.entries()) {
-    await prisma.consumableCategory.upsert({
-      where: { name },
-      update: {}, // don't overwrite user edits on re-run
-      create: { name, order: index + 1 },
+    const existing = await prisma.consumableCategory.findFirst({
+      where: { name, deletedAt: null },
+      select: { id: true },
     });
+    if (!existing) {
+      await prisma.consumableCategory.create({
+        data: { name, order: index + 1 },
+      });
+    }
   }
   console.log(
     `Seeded ${INITIAL_CONSUMABLE_CATEGORIES.length} consumable categories.`,

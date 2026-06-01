@@ -226,7 +226,11 @@ export class JwtAuthGuard implements CanActivate {
 
     const emailClaim =
       typeof profile['email'] === 'string' ? profile['email'] : undefined;
-    const email = emailClaim ?? `${sub}@unknown`;
+    // Normalize (trim + lowercase) so the JIT-provisioned email matches the citext column and the
+    // @lazyit/shared EmailSchema (ADR-0041). Without this, an IdP that returns "Bob@x" would store a
+    // mixed-case row that the case-insensitive unique index still treats as "bob@x" — fine for
+    // uniqueness, but the stored value should be canonical and agree with API-created users.
+    const email = (emailClaim ?? `${sub}@unknown`).trim().toLowerCase();
 
     // Name resolution: given_name + family_name → split `name` → email local-part.
     let firstName: string;

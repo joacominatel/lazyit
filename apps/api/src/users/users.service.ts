@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { CreateUser, UpdateUser } from '@lazyit/shared';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectUser } from '../search/search.documents';
@@ -100,5 +101,34 @@ export class UsersService {
     // fire-and-forget, must never roll back the DB offboarding.
     this.search.remove('users', id);
     return result;
+  }
+
+  /**
+   * Restore (re-onboard) a soft-deleted user: clear `deletedAt` (ADR-0041). Deliberately does NOT
+   * re-grant the access or re-assign the assets that offboarding revoked/released — those are
+   * separate, intentional acts; restore only makes the account exist (and log in) again. Found via
+   * the `includeSoftDeleted` escape hatch (the read filter would hide it). 404 if it never existed;
+   * idempotent if already live. The partial unique index frees `email` on delete, so a restore can
+   * 409 if the (case-insensitive) email was reused by another live user in the meantime (mapped by
+   * the global PrismaExceptionFilter). Re-indexes for search on success.
+   */
+  async restore(id: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id },
+      includeSoftDeleted: true,
+    } as Prisma.UserFindFirstArgs);
+    if (!user) {
+      throw new NotFoundException(`User ${id} not found`);
+    }
+    if (user.deletedAt === null) {
+      return user; // already live — idempotent
+    }
+    const restored = await this.prisma.user.update({
+      where: { id },
+      data: { deletedAt: null },
+    });
+    // Re-index the restored user (ADR-0035).
+    this.search.upsert('users', projectUser(restored));
+    return restored;
   }
 }

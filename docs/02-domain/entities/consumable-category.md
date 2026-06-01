@@ -18,13 +18,16 @@ seed set is an initial, non-special list.
 
 ## Fields
 
-- `id` — `cuid()`; `name` (unique); `description?`; `icon?` (heroicon name, free string); `order?`
-  (sort key, nulls last); soft delete + timestamps ([[0006-soft-delete-and-auditing]]).
+- `id` — `cuid()`; `name` (unique among **live** rows only — a PARTIAL unique index
+  `WHERE "deletedAt" IS NULL`, freed for reuse / restore on soft delete,
+  [[0041-soft-delete-reuse-and-restore]]); `description?`; `icon?` (heroicon name, free string);
+  `order?` (sort key, nulls last); soft delete + timestamps ([[0006-soft-delete-and-auditing]]).
 
 ## Endpoints
 
 `apps/api/src/consumable-categories/` — CRUD (`GET` / `GET /:id` / `POST` / `PATCH /:id` /
-`DELETE /:id` soft delete), ordered by `order` (nulls last) then `name`.
+`DELETE /:id` soft delete / `POST /:id/restore` ADMIN-only clears `deletedAt`,
+[[0041-soft-delete-reuse-and-restore]]), ordered by `order` (nulls last) then `name`.
 
 ## Business rules
 
