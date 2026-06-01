@@ -19,6 +19,7 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ArticleListItemSchema,
   AssetAssignmentWithUserSchema,
   AssetHistoryQuerySchema,
   AssetHistorySchema,
@@ -31,6 +32,7 @@ import {
   type AssetStatus,
 } from '@lazyit/shared';
 import { AssetsService } from './assets.service';
+import { ArticlesService } from '../articles/articles.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { parseActiveOnly } from '../asset-assignments/active-only';
@@ -50,6 +52,8 @@ class AssetAssignmentWithUserDto extends createZodDto(
   AssetAssignmentWithUserSchema,
 ) {}
 class AssetHistoryDto extends createZodDto(AssetHistorySchema) {}
+// Reverse KB lookup (ADR-0042): the lean article-list shape for GET /assets/:id/articles.
+class ArticleListItemDto extends createZodDto(ArticleListItemSchema) {}
 
 @ApiBearerAuth()
 @ApiTags('assets')
@@ -59,6 +63,7 @@ export class AssetsController {
     private readonly assets: AssetsService,
     private readonly assignments: AssetAssignmentsService,
     private readonly history: AssetHistoryService,
+    private readonly articles: ArticlesService,
   ) {}
 
   @Get()
@@ -192,6 +197,17 @@ export class AssetsController {
       );
     }
     return this.history.list(id, parsed.data);
+  }
+
+  @Get(':id/articles')
+  @ApiOperation({
+    summary:
+      "List the PUBLISHED knowledge-base articles linked to this asset ('the runbook for THIS server'). (ADR-0042)",
+  })
+  @ApiOkResponse({ type: [ArticleListItemDto] })
+  async findArticles(@Param('id') id: string) {
+    await this.assets.assertExists(id); // 404 if the asset is missing or soft-deleted
+    return this.articles.findArticlesForAsset(id);
   }
 
   @Post()
