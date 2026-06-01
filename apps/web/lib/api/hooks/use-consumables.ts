@@ -1,7 +1,7 @@
 import type { ConsumableMovementQuery } from "@lazyit/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
-  type ConsumableFilters,
+  type ConsumableListParams,
   getConsumable,
   getConsumableMovements,
   getConsumables,
@@ -14,22 +14,23 @@ import {
 export const consumableKeys = {
   all: ["consumables"] as const,
   lists: () => [...consumableKeys.all, "list"] as const,
-  list: (filters: ConsumableFilters) =>
-    [...consumableKeys.all, "list", filters] as const,
+  list: (params: ConsumableListParams) =>
+    [...consumableKeys.all, "list", params] as const,
   detail: (id: string) => [...consumableKeys.all, "detail", id] as const,
   movements: (id: string, query: ConsumableMovementQuery) =>
     [...consumableKeys.all, "detail", id, "movements", query] as const,
 };
 
 /**
- * List consumables (raw; category joined client-side), optionally only low-stock
- * items. `keepPreviousData` holds the current list while a new filter query
- * resolves, avoiding a skeleton flash on each filter change.
+ * The Consumables list page: a single page with server-side `q`/`sort`/`lowStock` and paging (returns
+ * the `Page<Consumable>` envelope so the page can paginate + sort). Category is filtered client-side
+ * over the page (no server param). `keepPreviousData` holds the current page while the next query
+ * resolves, avoiding a skeleton flash on each search/filter/page change.
  */
-export function useConsumables(filters: ConsumableFilters = {}) {
+export function useConsumables(params: ConsumableListParams = {}) {
   return useQuery({
-    queryKey: consumableKeys.list(filters),
-    queryFn: () => getConsumables(filters),
+    queryKey: consumableKeys.list(params),
+    queryFn: () => getConsumables(params),
     placeholderData: keepPreviousData,
   });
 }
