@@ -14,14 +14,17 @@ dev tuning. This folder keeps only the **thin prod override**. See
 ```
 (repo root)
 ├── compose.yaml             # canonical: ALL services; db/meili/zitadel(+db) unprofiled (dev backing),
-│                            # api/web/migrate/caddy/backup behind profiles: [prod]
+│                            # api/web/migrate/caddy/backup/zitadel-bootstrap behind profiles: [prod]
 ├── compose.override.yaml    # dev tuning of the backing services (loopback ports, no TLS, no limits)
 infra/
 ├── docker-compose.prod.yaml # THIN prod override: env-file path, internal-only net, zitadel_secrets vol
 ├── docker/
-│   ├── api.Dockerfile        # NestJS on Node, built with Bun (multi-stage)        — ADR-0025
-│   ├── web.Dockerfile        # Next.js standalone on Node, built with Bun          — ADR-0025
-│   └── migrate.Dockerfile    # one-shot Bun job: `prisma migrate deploy` + seed    — ADR-0025
+│   ├── api.Dockerfile               # NestJS on Node, built with Bun (multi-stage)        — ADR-0025
+│   ├── web.Dockerfile               # Next.js standalone on Node, built with Bun          — ADR-0025
+│   ├── migrate.Dockerfile           # one-shot Bun job: `prisma migrate deploy` + seed    — ADR-0025
+│   └── zitadel-bootstrap.Dockerfile # tiny alpine (curl+jq+openssl): zero-touch IdP setup — ADR-0043
+├── scripts/
+│   └── zitadel-bootstrap.sh  # one-shot, fail-loud, idempotent Zitadel provisioner        — ADR-0043
 ├── caddy/
 │   └── Caddyfile             # reverse proxy + automatic HTTPS, same-origin /api    — ADR-0026
 └── env/
@@ -73,10 +76,15 @@ Backups: `docs/05-runbooks/backups.md`.
   `AUTH_SECRET`, and the OIDC secret.
 - **Auth is wired** (ADR-0037/0038/0039): a bundled Zitadel IdP (its own `zitadel_db`) served at
   `auth.{LAZYIT_DOMAIN}` via Caddy; the API validates OIDC tokens, the web app uses Auth.js.
-  Bootstrap: `docs/05-runbooks/auth-bootstrap.md`. BYOI by changing the `OIDC_*` vars.
+- **Zero-touch IdP bootstrap** (ADR-0043 Phase 3): the one-shot `zitadel-bootstrap` sidecar (prod
+  profile) provisions the project, OIDC app, the `ADMIN`/`MEMBER`/`VIEWER` project roles and a
+  runtime service-account from the FirstInstance machine key — **no console clicking** — and writes
+  `oidc-client.json` + `sa-key.json` into the shared `zitadel_secrets` volume that api/web read.
+  Fail-loud (`restart: "no"`) + idempotent. Bootstrap: `docs/05-runbooks/auth-bootstrap.md` §0.
+  BYOI by changing the `OIDC_*` vars and dropping the zitadel services.
 - **Image digest-pinning** (ADR-0025 follow-up): every base image is pinned by `@sha256` with the
   human tag in a comment, so deploys are reproducible and rolling tags can't drift silently. Re-pin
-  after a deliberate bump (command at the bottom of `docker-compose.prod.yml`).
+  after a deliberate bump (command at the bottom of `compose.yaml`).
 - **Disk/OOM safety**: every long-running compose service has a `logging:` rotation block
   (json-file, 10m x 3) and a modest `mem_limit`/`cpus` so logs can't fill the disk and one runaway
   service can't OOM the single host.

@@ -13,9 +13,10 @@ behind Caddy with local HTTPS — to validate a production-shaped deployment. Ba
 [[deployment]], [[0025-containerization-strategy]], [[0026-reverse-proxy-tls]], [[0028-secrets-and-config]].
 
 > [!note] This is *not* the dev workflow
-> Day-to-day development uses the root `docker-compose.yml` (Postgres only) + `bun run dev`
-> ([[setup]]). This runbook is the **containerized, prod-shaped** stack in `infra/`. It uses high
-> ports (Caddy `8080`/`8443`) so it never clashes with dev (`3000`/`3001`/`5432`).
+> Day-to-day development uses the root `compose.yaml` + auto-loaded `compose.override.yaml` (backing
+> services: db + meili + zitadel) + `bun run dev` ([[setup]]). This runbook is the **containerized,
+> prod-shaped** stack (`compose.yaml` + `infra/docker-compose.prod.yaml` + `--profile prod`). It uses
+> high ports (Caddy `8080`/`8443`) so it never clashes with dev (`3000`/`3001`/`5432`).
 
 ## Prerequisites
 
@@ -31,12 +32,15 @@ chmod 600 infra/env/.env.prod
 #    Minimum to change: POSTGRES_PASSWORD and the password inside DATABASE_URL (must match).
 #    For local prod-like, leave LAZYIT_SITE_ADDRESS=localhost and WEB_ORIGIN=https://localhost:8443.
 
-# 2. Build images and start everything (db -> migrate -> api -> web -> caddy, ordered by health).
-docker compose -f infra/docker-compose.prod.yml up -d --build
+# 2. Build images and start everything. Set a DC alias once for the long prod invocation.
+#    Boot order (by health): db -> migrate -> zitadel -> zitadel-bootstrap -> api -> web -> caddy.
+DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod --env-file infra/env/.env.prod"
+$DC up -d --build
 
-# 3. Watch it converge. migrate runs once and exits 0; api/web/db become healthy.
-docker compose -f infra/docker-compose.prod.yml ps
-docker compose -f infra/docker-compose.prod.yml logs -f migrate   # Ctrl-C after it exits
+# 3. Watch it converge. migrate + zitadel-bootstrap each run once and exit 0; api/web/db become healthy.
+$DC ps
+$DC logs -f migrate            # Ctrl-C after it exits
+$DC logs -f zitadel-bootstrap  # the zero-touch Zitadel provisioner (ADR-0043 §4); ends "DONE …", exit 0
 ```
 
 ## Verify
@@ -63,11 +67,13 @@ broken install. To see data you must bootstrap Zitadel and log in via the web UI
 ## Routine operations
 
 ```sh
-docker compose -f infra/docker-compose.prod.yml logs -f api          # follow API logs
-docker compose -f infra/docker-compose.prod.yml restart api          # restart one service
-docker compose -f infra/docker-compose.prod.yml up -d --build        # rebuild after a code change
-docker compose -f infra/docker-compose.prod.yml down                 # stop (keeps ALL volumes)
-docker compose -f infra/docker-compose.prod.yml down -v              # stop AND delete ALL 5 volumes
+# (reuse the DC alias from above)
+$DC logs -f api          # follow API logs
+$DC restart api          # restart one service
+$DC up -d --build        # rebuild after a code change
+$DC down                 # stop (keeps ALL volumes)
+$DC down -v              # stop AND delete ALL volumes (incl. zitadel_db_data; see auth-bootstrap §0b
+                         # for a clean re-bootstrap, which ALSO removes the zitadel_secrets volume)
 ```
 
 ## Teardown

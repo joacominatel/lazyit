@@ -104,10 +104,31 @@ services:
     mem_limit: 512m
     cpus: 1.0
     env_file: [infra/env/.env.prod]
+    # Zero-touch OIDC (ADR-0043 Phase 3, §4c): the zitadel-bootstrap sidecar GENERATES the OIDC client
+    # (id/secret), issuer, JWKS URI and the lazyit PROJECT ID at first boot and writes them to
+    # oidc-client.json in the shared zitadel_secrets volume (mounted read-only in
+    # infra/docker-compose.prod.yaml). The api reads that file at startup (path = OIDC_CLIENT_FILE) and
+    # back-fills any of OIDC_ISSUER / OIDC_CLIENT_ID / OIDC_CLIENT_SECRET / OIDC_JWKS_URI /
+    # ZITADEL_MGMT_PROJECT_ID it does not already get from env_file (.env.prod). Explicit env ALWAYS
+    # wins (BYOI). => the operator no longer hand-copies the client id/secret OR the project id.
+    # The Phase-2 ZitadelManagementService reads the runtime SA key from ZITADEL_MGMT_SA_KEY_PATH
+    # (sa-key.json, also written by the sidecar) and grants the project's ADMIN/MEMBER/VIEWER roles on
+    # the resolved project id.
+    environment:
+      ZITADEL_MGMT_SA_KEY_PATH: ${ZITADEL_MGMT_SA_KEY_PATH:-/zitadel-secrets/sa-key.json}
+      # Where the api reads the sidecar's OIDC client/project file. Defaults to the mounted path.
+      OIDC_CLIENT_FILE: ${OIDC_CLIENT_FILE:-/zitadel-secrets/oidc-client.json}
+      # OPTIONAL override: pin the project id to fail clear if it ever drifts. Normally LEFT UNSET —
+      # it comes from oidc-client.json (bundled flow). Set only for BYOI without the sidecar.
+      ZITADEL_MGMT_PROJECT_ID: ${ZITADEL_MGMT_PROJECT_ID:-}
     depends_on:
       db:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      # Gate the api on the bootstrap COMPLETING successfully — so OIDC_CLIENT_* / sa-key.json exist
+      # before the api validates its OIDC config at boot (ADR-0043 §4c/§4d).
+      zitadel-bootstrap:
         condition: service_completed_successfully
     networks: [internal]
 
@@ -128,6 +149,11 @@ services:
     # Auth.js runs server-side and reads these at RUNTIME (ADR-0039). Scoped explicitly rather
     # than env_file so the web container never sees the DB / Zitadel / Meili secrets it has no
     # use for (ADR-0028 least-privilege). Requires --env-file for the ${...} interpolation.
+    # Zero-touch OIDC (ADR-0043 Phase 3, §4c): when AUTH_ISSUER / AUTH_CLIENT_ID / AUTH_CLIENT_SECRET
+    # are left unset (the bundled-Zitadel flow), the web reads the sidecar's oidc-client.json at
+    # startup (path = OIDC_CLIENT_FILE, mounted read-only) and maps its OIDC_* values onto these
+    # AUTH_* vars (+ derives AUTH_INTERNAL_ISSUER from the file's internal JWKS origin). Explicit
+    # AUTH_* env ALWAYS wins (BYOI). => no hand-copied client id/secret on the web side either.
     environment:
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_TRUST_HOST: "true"            # trust Caddy's X-Forwarded-Host (behind reverse proxy)
@@ -135,10 +161,20 @@ services:
       # (https://host/api/auth/callback/oidc); without it Auth.js infers the container's own
       # 0.0.0.0:3000 and the redirect_uri won't match what's registered in the IdP.
       AUTH_URL: ${WEB_ORIGIN}
-      AUTH_ISSUER: ${AUTH_ISSUER}
-      AUTH_CLIENT_ID: ${AUTH_CLIENT_ID}
-      AUTH_CLIENT_SECRET: ${AUTH_CLIENT_SECRET}
-      AUTH_INTERNAL_ISSUER: ${AUTH_INTERNAL_ISSUER}
+      # OPTIONAL in the bundled flow — leave these unset and the sidecar's oidc-client.json supplies
+      # them at startup. Set them only for BYOI (your own IdP, no bundled Zitadel).
+      AUTH_ISSUER: ${AUTH_ISSUER:-}
+      AUTH_CLIENT_ID: ${AUTH_CLIENT_ID:-}
+      AUTH_CLIENT_SECRET: ${AUTH_CLIENT_SECRET:-}
+      AUTH_INTERNAL_ISSUER: ${AUTH_INTERNAL_ISSUER:-}
+      # Where the web reads the sidecar's OIDC client file. Defaults to the mounted path.
+      OIDC_CLIENT_FILE: ${OIDC_CLIENT_FILE:-/zitadel-secrets/oidc-client.json}
+    depends_on:
+      # Wait for the zero-touch bootstrap to finish so the OIDC client (id/secret) exists before the
+      # web server boots Auth.js (ADR-0043 §4c/§4d). The web reads AUTH_CLIENT_* from .env.prod when
+      # set; otherwise from oidc-client.json on the shared (read-only) volume the sidecar writes.
+      zitadel-bootstrap:
+        condition: service_completed_successfully
     networks: [internal]
 
   # --- Zitadel's own PostgreSQL — separate from the app DB (ADR-0037) -----
@@ -209,6 +245,15 @@ services:
       ZITADEL_EXTERNALDOMAIN: ${ZITADEL_EXTERNALDOMAIN:-localhost}
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: ${ZITADEL_ADMIN_USERNAME:-admin}
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASSWORD}
+      # Zero-touch bootstrap (ADR-0043 §4a): start-from-init ALSO creates a MACHINE user (granted
+      # IAM_OWNER) and writes its private key (JSON, MACHINEKEY_TYPE=1) to MACHINEKEYPATH inside the
+      # shared zitadel_secrets volume. The `zitadel-bootstrap` sidecar reads that key to authenticate
+      # to the Management API (Private-Key JWT) and provision the project/app/roles/SA with NO console
+      # access. Idempotent on subsequent boots (start-from-init skips an existing first-instance).
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: ${ZITADEL_BOOTSTRAP_USERNAME:-zitadel-bootstrap}
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: "lazyit Bootstrap Service Account"
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_TYPE: "1"   # 1 = JSON (the only supported value)
+      ZITADEL_FIRSTINSTANCE_MACHINEKEYPATH: /zitadel-secrets/bootstrap-key.json
     depends_on:
       zitadel_db:
         condition: service_healthy
@@ -220,6 +265,49 @@ services:
       start_period: 60s
     # No published ports — Caddy reaches Zitadel on the internal network (ADR-0028).
     # compose.override.yaml publishes 127.0.0.1:8080 for native dev.
+    volumes:
+      # Zitadel WRITES the FirstInstance machine key here on first boot; the sidecar READS it.
+      # In plain dev (`docker compose up`, no --profile prod) the volume just holds the key file —
+      # harmless, and lets a future dev-side bootstrap reuse the same path.
+      - zitadel_secrets:/zitadel-secrets
+    networks: [internal]
+
+  # --- Zitadel zero-touch bootstrap sidecar — ONE-SHOT, fail-loud (prod) --------------
+  # ADR-0043 Phase 3 (§4). Turns a freshly start-from-init'd Zitadel into a fully-wired OIDC IdP with
+  # NO console clicking: authenticates with the FirstInstance machine key (Private-Key JWT), then
+  # idempotently provisions the `lazyit` project, the OIDC web app (redirect = the Auth.js callback,
+  # JWT access token, roles asserted), the project roles ADMIN/MEMBER/VIEWER (Phase-2 grantRole
+  # prerequisite) and a runtime SA + key; finally writes oidc-client.json + sa-key.json into the
+  # shared zitadel_secrets volume for api/web. See infra/scripts/zitadel-bootstrap.sh and
+  # docs/05-runbooks/auth-bootstrap.md.
+  #   restart:"no"  → a misconfig stays VISIBLE (the run fails loudly; api/web won't start on failure).
+  #   idempotent    → `down && up` is safe; if the secret files already exist it short-circuits.
+  zitadel-bootstrap:
+    profiles: [prod]
+    build:
+      context: .
+      dockerfile: infra/docker/zitadel-bootstrap.Dockerfile
+    image: lazyit-zitadel-bootstrap:dev
+    restart: "no"
+    logging: *default-logging
+    mem_limit: 128m
+    cpus: 0.5
+    # OIDC_ISSUER / WEB_ORIGIN / ZITADEL_* are resolved by Compose at parse time from --env-file.
+    # The script only needs the external issuer, the web origin (for the redirect) and the internal
+    # Zitadel URL — everything else (project/app names) has a sane default.
+    environment:
+      OIDC_ISSUER: ${OIDC_ISSUER}
+      WEB_ORIGIN: ${WEB_ORIGIN}
+      ZITADEL_INTERNAL_URL: ${AUTH_INTERNAL_ISSUER:-http://zitadel:8080}
+      ZITADEL_PROJECT_NAME: ${ZITADEL_PROJECT_NAME:-lazyit}
+      ZITADEL_APP_NAME: ${ZITADEL_APP_NAME:-lazyit-web}
+      ZITADEL_API_SA_USERNAME: ${ZITADEL_API_SA_USERNAME:-lazyit-api}
+    volumes:
+      # Read the FirstInstance machine key + WRITE oidc-client.json / sa-key.json (read-write).
+      - zitadel_secrets:/zitadel-secrets
+    depends_on:
+      zitadel:
+        condition: service_healthy
     networks: [internal]
 
   # --- Meilisearch — internal network only, no published port (prod) ---------------
@@ -368,6 +456,12 @@ volumes:
   meili_data:
   caddy_data:
   caddy_config:
+  # Shared secrets volume for the zero-touch Zitadel bootstrap (ADR-0043 §4 / §9e). Zitadel writes
+  # the FirstInstance machine key here; the zitadel-bootstrap sidecar reads it and writes back
+  # oidc-client.json + sa-key.json for api/web. Persisted (a named volume) so creds survive `down`;
+  # pair `down -v` with removing it for a clean re-bootstrap. Declared here (not only in the prod
+  # override) because the unprofiled `zitadel` service mounts it for the key export.
+  zitadel_secrets:
 
 networks:
   internal:

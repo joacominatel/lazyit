@@ -278,7 +278,23 @@ re-specified here. The only coupling is migration ordering (§8): PR #86's view 
 
 Goal: `docker compose up` brings the full OIDC stack live with **zero Zitadel console access**.
 
-### 4a. FirstInstance service account + PAT export
+> **Phase 3 — as built (binding).** PR 3.1 shipped the sidecar on the **Private-Key JWT** path (the
+> §1b *preferred* mechanism), NOT the PAT draft in §4a/§4b below. The FirstInstance machine user
+> exports a **JSON private key** (not a PAT) via the top-level `ZITADEL_FIRSTINSTANCE_MACHINEKEYPATH`
+> (+ `…ORG_MACHINE_MACHINEKEY_TYPE: "1"`); the machine user is granted **IAM_OWNER**. The sidecar
+> (`infra/scripts/zitadel-bootstrap.sh`, `alpine` + curl/jq/openssl) signs an RFC-7523 assertion with
+> that key, exchanges it at `/oauth/v2/token`, and calls the **v1 Management API** (the `/management/v1`
+> REST gateway — `POST /projects`, `/projects/{id}/apps/oidc`, `/projects/{id}/roles`, `/users/machine`,
+> `/users/{id}/keys`) to idempotently create the project, the OIDC web app (Authorization Code,
+> client-secret-basic, **JWT** access token, id-token userinfo + role assertion), the project roles
+> **ADMIN/MEMBER/VIEWER** (Phase-2 `grantRole` prerequisite) and a runtime **service-account + key**.
+> It writes **two** files: `oidc-client.json` (issuer/client_id/client_secret/jwks/project id) AND
+> `sa-key.json` (the runtime SA private key for `ZITADEL_MGMT_SA_KEY_PATH`). Idempotency is
+> search-first (`/projects/_search`, `/projects/{id}/apps/_search`, `/users/_search`) plus a
+> short-circuit when both secret files already exist (the app secret can't be re-read). Fail-loud:
+> `set -eu` + `restart: "no"`. Pinned to Zitadel **v2.68.0**.
+
+### 4a. FirstInstance service account + PAT export (draft — superseded by the as-built note above)
 
 ```yaml
 # compose.yaml — zitadel service (added env; lands with the sidecar PR)
@@ -304,14 +320,16 @@ zitadel-bootstrap:
   networks: [internal]
 ```
 
-The sidecar waits for `/debug/healthz`, reads the PAT, **upserts** the `lazyit` project + OIDC web app
-(redirect `…/api/auth/callback/oidc`, JWT token type, userinfo-in-ID-token, roles assertion), and
-writes `/zitadel-secrets/oidc-client.json`:
+The sidecar waits for `/debug/healthz`, authenticates (as built: Private-Key JWT, not a PAT),
+**upserts** the `lazyit` project + OIDC web app (redirect `…/api/auth/callback/oidc`, JWT token type,
+userinfo-in-ID-token, roles assertion) + the ADMIN/MEMBER/VIEWER roles + a runtime SA, and writes
+`/zitadel-secrets/oidc-client.json` (consumed by api + web) plus `/zitadel-secrets/sa-key.json` (the
+runtime SA key for `ZITADEL_MGMT_SA_KEY_PATH`):
 
 ```json
 { "OIDC_CLIENT_ID": "…@lazyit", "OIDC_CLIENT_SECRET": "…",
   "OIDC_JWKS_URI": "http://zitadel:8080/oauth/v2/keys",
-  "OIDC_ISSUER": "https://auth.<domain>" }
+  "OIDC_ISSUER": "https://auth.<domain>", "ZITADEL_MGMT_PROJECT_ID": "…" }
 ```
 
 ### 4c. api / web read credentials at startup
@@ -329,8 +347,25 @@ web:
   volumes: [ zitadel_secrets:/zitadel-secrets:ro ]
 ```
 
-The api reads `oidc-client.json` if `OIDC_CLIENT_*` are not already set in env. Boot-config validation
-still enforces `OIDC_*` presence in OIDC mode, so a missing file is caught early.
+Both api and web **consume** `oidc-client.json` at startup (path = `OIDC_CLIENT_FILE`, default
+`/zitadel-secrets/oidc-client.json`), filling whatever the operator left unset — explicit env **always
+overrides** the file:
+
+- **api** (`apps/api/src/auth/bootstrap-file.ts`, run from `main.ts` BEFORE boot-config validation):
+  back-fills `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_JWKS_URI` /
+  `ZITADEL_MGMT_PROJECT_ID` into `process.env`, so every downstream reader (`JwtAuthGuard`,
+  `ZitadelManagementService`) is unchanged. Boot-config validation then sees the merged env, so
+  OIDC-mode `OIDC_ISSUER`/`OIDC_JWKS_URI` presence is satisfied by the file in the bundled flow.
+- **web** (`apps/web/lib/auth/bootstrap-file.ts`, run from `auth.ts`): maps the file's `OIDC_ISSUER` →
+  `AUTH_ISSUER`, `OIDC_CLIENT_ID` → `AUTH_CLIENT_ID`, `OIDC_CLIENT_SECRET` → `AUTH_CLIENT_SECRET`, and
+  the `OIDC_JWKS_URI` origin → `AUTH_INTERNAL_ISSUER`. Node-runtime-only (a no-op on the Edge
+  middleware bundle and during `next build`, where the file is absent).
+
+This is what makes the sidecar **zero-touch**: the project id + OIDC client id/secret are GENERATED at
+first boot, so the operator cannot put them in env — they flow through the file. A missing file is the
+normal BYOI / env-only path (silent no-op); the loaders never crash and never log secret values.
+`ZITADEL_MGMT_PROJECT_ID` is no longer a required static env (it comes from the file); keep it set only
+as a BYOI pin.
 
 ### 4d. Dependency / health ordering
 
@@ -613,11 +648,13 @@ organized once the `zitadel-bootstrap` sidecar lands?* It is recorded here as **
 is **no separate ADR**; it does not change a decision, it consolidates the existing split into the
 canonical Compose v2 layout.
 
-> **As built (this PR).** The consolidation landed: `compose.yaml` + `compose.override.yaml` at the
+> **As built.** The consolidation landed first: `compose.yaml` + `compose.override.yaml` at the
 > repo root and a thin `infra/docker-compose.prod.yaml`; the old `infra/docker-compose.prod.yml` was
 > removed (backward-compat command aliased in [[deploy-self-hosted]]). The **`zitadel-bootstrap`
-> sidecar itself is the next PR** (its slot is reserved: the `prod` profile + the `zitadel_secrets`
-> volume already exist). The deferred sub-questions (§9e) are settled below.
+> sidecar then landed in PR 3.1** (Private-Key JWT, see the §4 as-built note): it lives in the `prod`
+> profile, `depends_on: zitadel (service_healthy)`, mounts the `zitadel_secrets` volume read-write,
+> and `api`/`web` gate on it via `service_completed_successfully`. The deferred sub-questions (§9e)
+> are settled below.
 
 ### 9a. Target layout
 

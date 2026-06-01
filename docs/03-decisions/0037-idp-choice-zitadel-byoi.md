@@ -50,8 +50,9 @@ clusters) is a deal-breaker at this scale.
 ### 1. Zitadel is the bundled default IdP
 
 Zitadel (`ghcr.io/zitadel/zitadel:v2.68.0`, pinned) is the IdP shipped with the default
-self-hosted setup. It is added as a service in both `docker-compose.yml` (dev) and
-`infra/docker-compose.prod.yml` (prod).
+self-hosted setup. It is a service in the canonical root `compose.yaml` (an unprofiled backing
+service for dev; tuned for prod under `--profile prod` + `infra/docker-compose.prod.yaml`). The
+old `infra/docker-compose.prod.yml` was consolidated into this layout (see [[auth-zitadel-sot]] §9).
 
 Image version is pinned for reproducibility. Upgrades are intentional (update the tag, test,
 commit).

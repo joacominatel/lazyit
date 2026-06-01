@@ -36,9 +36,9 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
 
 ## Planned runbooks (write when real)
 
-- **Scheduled/offsite backup automation** — shipped: the opt-in `backup` profile sidecar in
-  `infra/docker-compose.prod.yml` (cron + `pg_dump` for both DBs + retention + optional offsite
-  hook), documented in [[backups]]. Promote to a standalone runbook only if it grows beyond that.
+- **Scheduled/offsite backup automation** — shipped: the opt-in `backup` profile sidecar in the
+  canonical `compose.yaml` (cron + `pg_dump` for both DBs + retention + optional offsite hook),
+  documented in [[backups]]. Promote to a standalone runbook only if it grows beyond that.
 - **Secrets rotation** — per-secret steps (DB password needs `ALTER USER`, not just an env edit;
   `AUTH_SECRET` logs everyone out; `ZITADEL_MASTERKEY` is unrotatable-in-place). Sketched in
   [[deploy-self-hosted]]; write the full runbook when rotation cadence is set.

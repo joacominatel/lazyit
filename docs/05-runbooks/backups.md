@@ -36,19 +36,20 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > `.env.prod` covers it, but never let that file be your *only* copy of the masterkey.
 
 > [!info] Automation: the opt-in backup sidecar (see below)
-> Items #2 and #3 can be automated by the `backup` profile service in
-> `infra/docker-compose.prod.yml` (cron + `pg_dump` for both DBs to a host-mounted `./backups`,
-> with retention). Item #1 is **your responsibility** — `.env.prod` must be copied off-host
-> manually and access-controlled.
+> Items #2 and #3 can be automated by the `backup` profile service in the canonical `compose.yaml`
+> (cron + `pg_dump` for both DBs to a host-mounted `./backups`, with retention). Item #1 is **your
+> responsibility** — `.env.prod` must be copied off-host manually and access-controlled.
 
-All commands run from the repo root, against the prod-like / self-hosted stack
-(`infra/docker-compose.prod.yml`). Postgres is not published to the host
-([[0028-secrets-and-config]]), so backups run *inside* the compose network via
+All commands run from the repo root, against the prod-like / self-hosted stack (the consolidated
+`compose.yaml` + `infra/docker-compose.prod.yaml` + `--profile prod`; the old
+`-f infra/docker-compose.prod.yml` form is superseded — [[deploy-self-hosted]]). Postgres is not
+published to the host ([[0028-secrets-and-config]]), so backups run *inside* the compose network via
 `docker compose exec`. Shorthands:
 
 ```sh
-PG="docker compose -f infra/docker-compose.prod.yml exec -T db"          # app DB
-ZPG="docker compose -f infra/docker-compose.prod.yml exec -T zitadel_db" # Zitadel DB
+DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod"
+PG="$DC exec -T db"          # app DB
+ZPG="$DC exec -T zitadel_db" # Zitadel DB
 ```
 
 ## Manual backup — both databases
@@ -81,9 +82,10 @@ A `backup` profile service (off by default) runs cron + `pg_dump` for **both** D
 writes timestamped dumps to the host-mounted `./backups` directory, and prunes old ones. Enable it:
 
 ```sh
-# Bring up just the sidecar (the rest of the stack should already be up):
-docker compose -f infra/docker-compose.prod.yml --env-file infra/env/.env.prod \
-  --profile backup up -d backup
+# Bring up just the sidecar (the rest of the stack should already be up). The backup service needs
+# BOTH the prod and backup profiles:
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --env-file infra/env/.env.prod \
+  --profile prod --profile backup up -d backup
 ```
 
 Tune via `.env.prod` (all optional — sane defaults shown):
@@ -102,7 +104,7 @@ NOT back up `.env.prod`** — copy that off-host yourself. Offsite is OFF by def
 want it. Check it ran:
 
 ```sh
-docker compose -f infra/docker-compose.prod.yml logs backup   # "[lazyit-backup] run ... complete"
+$DC logs backup   # "[lazyit-backup] run ... complete"
 ls -lh backups/
 ```
 
@@ -118,8 +120,8 @@ ls -lh backups/
    **same `ZITADEL_MASTERKEY`** as when the Zitadel DB was dumped). `chmod 600 infra/env/.env.prod`.
 2. **Zitadel DB** — restore `zitadel-*.dump` (subsection below).
 3. **App DB** — restore `app-*.dump` (subsection below).
-4. **Bring the stack up** — `docker compose -f infra/docker-compose.prod.yml up -d`.
-5. **Reindex Meilisearch** — `docker compose -f infra/docker-compose.prod.yml run --rm migrate bun run reindex:all`
+4. **Bring the stack up** — `$DC --env-file infra/env/.env.prod up -d`.
+5. **Reindex Meilisearch** — `$DC --env-file infra/env/.env.prod run --rm migrate bun run reindex:all`
    (the index is rebuildable; see [[deploy-self-hosted]] §2a).
 
 ### Restore the app DB
@@ -129,22 +131,22 @@ ls -lh backups/
 cat app-20260530-120000.dump | $PG sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists'
 
 # Cleanest: reset ONLY the app DB volume, then restore into a fresh db.
-docker compose -f infra/docker-compose.prod.yml down            # stop the stack (keeps volumes)
+$DC down                                                        # stop the stack (keeps volumes)
 docker volume rm lazyit-prod_db_data                            # remove ONLY the app DB volume
-docker compose -f infra/docker-compose.prod.yml up -d db        # fresh, empty app db (auto-created)
+$DC --env-file infra/env/.env.prod up -d db                    # fresh, empty app db (auto-created)
 # wait until healthy, then load the dump:
 cat app-20260530-120000.dump | $PG sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner'
 # then bring up the rest (migrate is a no-op if the dump already matches the schema):
-docker compose -f infra/docker-compose.prod.yml up -d
+$DC --env-file infra/env/.env.prod up -d
 ```
 
 > [!danger] NEVER use `down -v` to reset just the app DB
-> `down -v` removes **ALL five** named volumes in the project — including `zitadel_db_data`
-> (the entire IdP: users, OIDC client, masterkey-encrypted store), `meili_data`, `caddy_data`,
-> and `caddy_config`. Resetting the app DB with `down -v` silently **wipes your Zitadel IdP** and
-> turns a routine restore into a compound outage. Use the targeted
-> `docker volume rm lazyit-prod_db_data` shown above (the `lazyit-prod_` prefix is the compose
-> project `name:`).
+> `down -v` removes **ALL** named volumes in the project — including `zitadel_db_data` (the entire
+> IdP: users, OIDC client, masterkey-encrypted store), `zitadel_secrets` (the bootstrap key + the
+> exported OIDC client id/secret + the runtime SA key), `meili_data`, `caddy_data`, and
+> `caddy_config`. Resetting the app DB with `down -v` silently **wipes your Zitadel IdP** and turns a
+> routine restore into a compound outage. Use the targeted `docker volume rm lazyit-prod_db_data`
+> shown above (the `lazyit-prod_` prefix is the compose project `name:`).
 
 ### Restore Zitadel
 
@@ -157,28 +159,26 @@ is undecryptable.
 cat zitadel-20260530-120000.dump | $ZPG sh -c 'pg_restore -U "$ZITADEL_DB_USER" -d "$ZITADEL_DB_NAME" --clean --if-exists'
 
 # Cleanest: reset ONLY the Zitadel DB volume, then restore.
-docker compose -f infra/docker-compose.prod.yml down
+$DC down
 docker volume rm lazyit-prod_zitadel_db_data                       # remove ONLY the Zitadel DB volume
-docker compose -f infra/docker-compose.prod.yml up -d zitadel_db   # fresh, empty zitadel db
+$DC --env-file infra/env/.env.prod up -d zitadel_db               # fresh, empty zitadel db
 # wait until healthy, then load the dump:
 cat zitadel-20260530-120000.dump | $ZPG sh -c 'pg_restore -U "$ZITADEL_DB_USER" -d "$ZITADEL_DB_NAME" --no-owner'
-docker compose -f infra/docker-compose.prod.yml up -d              # bring up the rest
+$DC --env-file infra/env/.env.prod up -d                          # bring up the rest
 ```
 
-If you are restoring onto a **brand-new** Zitadel (no prior dump), do not restore — instead
-re-run the bootstrap in [[auth-bootstrap]]; you will get a new instance and must re-register the
-OIDC client.
+If you are restoring onto a **brand-new** Zitadel (no prior dump), do not restore — instead re-run
+the zero-touch bootstrap in [[auth-bootstrap]] §0 (also remove the `zitadel_secrets` volume for a
+clean re-provision); you will get a new instance and the sidecar re-registers the OIDC client.
 
 ## Verify a restore
 
 ```sh
 # App DB: row count.
-docker compose -f infra/docker-compose.prod.yml exec -T db \
-  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select count(*) from users;"
+$PG psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select count(*) from users;"
 
 # Zitadel DB: the schema came back.
-docker compose -f infra/docker-compose.prod.yml exec -T zitadel_db \
-  psql -U "$ZITADEL_DB_USER" -d "$ZITADEL_DB_NAME" -c "\dn"
+$ZPG psql -U "$ZITADEL_DB_USER" -d "$ZITADEL_DB_NAME" -c "\dn"
 
 # End to end: log in via the web UI (this is the real proof both DBs + the masterkey line up).
 ```

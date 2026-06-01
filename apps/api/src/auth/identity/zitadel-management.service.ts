@@ -68,7 +68,12 @@ export class ZitadelManagementService {
   /** The cached Management-API access token (null until first fetch / after a failure). */
   private cachedToken: CachedToken | null = null;
 
-  /** Visible for testing: the configured project id (the role grants target this project). */
+  /**
+   * Visible for testing: the configured project id (the role grants target this project). Sourced
+   * from `process.env.ZITADEL_MGMT_PROJECT_ID`, which the zero-touch boot loader back-fills from the
+   * sidecar's oidc-client.json when the operator does not pin it (ADR-0043 Phase 3 — see
+   * auth/bootstrap-file.ts). Env-set values are honoured unchanged (BYOI).
+   */
   get projectId(): string | undefined {
     return process.env.ZITADEL_MGMT_PROJECT_ID?.trim() || undefined;
   }
@@ -77,10 +82,19 @@ export class ZitadelManagementService {
    * Whether the Management config is present enough to attempt write-back. Read by the IdP adapter so
    * it can decide (in a future reconciliation path) without forcing a throw; the management methods
    * here still `assertConfigured()` so a half-configured deployment fails loudly rather than silently.
+   *
+   * Requires all three pieces write-back needs: the SA key (ZITADEL_MGMT_SA_KEY[_PATH]), the project
+   * id (ZITADEL_MGMT_PROJECT_ID) and the external issuer (OIDC_ISSUER — the JWT `aud` + the
+   * X-Forwarded-Host source). All three are resolvable either from explicit env or, in the bundled
+   * zero-touch flow, from the sidecar files (sa-key.json + oidc-client.json) — see ADR-0043 Phase 3.
    */
   isConfigured(): boolean {
     this.resolveConfig();
-    return this.serviceAccountKey !== null && this.projectId !== undefined;
+    return (
+      this.serviceAccountKey !== null &&
+      this.projectId !== undefined &&
+      !!process.env.OIDC_ISSUER?.trim()
+    );
   }
 
   // ---------- v2 Management calls -------------------------------------------

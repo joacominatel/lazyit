@@ -6,20 +6,112 @@ created: 2026-05-26
 updated: 2026-06-01
 ---
 
-# Runbook — Zitadel IdP bootstrap (auth Phase 1)
+# Runbook — Zitadel IdP bootstrap
 
-Step-by-step procedure for an IT generalist to start Zitadel, create the first admin,
-and register lazyit as an OIDC client. Written for the self-hosted prod setup.
-See [[0037-idp-choice-zitadel-byoi]] for the rationale behind Zitadel and BYOI design.
+How to bring up the bundled Zitadel IdP for the self-hosted prod stack. lazyit ships a
+**zero-touch bootstrap** (ADR-0043 Phase 3): `docker compose … --profile prod up` provisions the
+whole OIDC integration — project, OIDC app, project roles, runtime service-account — with **NO
+Zitadel console access**. The old manual console procedure is kept below as a fallback/teaching aid.
+See [[0037-idp-choice-zitadel-byoi]] and [[auth-zitadel-sot]] §4 for the rationale.
+
+> [!tip] Start here — the zero-touch path
+> For the **bundled Zitadel** flow, follow [[#0 — Zero-touch bootstrap (recommended)]]. You only set
+> a handful of env vars; the `zitadel-bootstrap` sidecar does all the console work and writes the
+> OIDC client id/secret into a shared volume the app reads automatically — **you never copy them by
+> hand**.
 
 > [!info] BYOI — Bring Your Own IdP
-> This runbook covers the **bundled Zitadel** setup. If you already have an OIDC-compatible
-> IdP (Azure AD, Okta, Keycloak, Authentik …), skip directly to
-> [[#7 — Bring-your-own-IdP (BYOI)]]. No code changes are needed — you just set 3 env vars.
+> If you already have an OIDC-compatible IdP (Azure AD, Okta, Keycloak, Authentik …), skip to
+> [[#7 — Bring-your-own-IdP (BYOI)]]. No code changes — you set 3 env vars and drop the Zitadel
+> services. The manual console sections [[#3 — Access the Zitadel console]]–[[#5 — Bring up the full
+> stack]] are retained for operators who prefer to provision Zitadel by hand.
 
 ---
 
-## 1 — Prerequisites
+## 0 — Zero-touch bootstrap (recommended)
+
+This is the default path for the bundled Zitadel. One command brings up a fully-configured IdP.
+
+### 0a. Fill in the env file
+
+```sh
+cp infra/env/.env.prod.example infra/env/.env.prod
+chmod 600 infra/env/.env.prod
+```
+
+Set every `CHANGE_ME` (passwords, `ZITADEL_MASTERKEY` ≥ 32 chars, `AUTH_SECRET`, your domain). For
+the bundled flow you **leave `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `AUTH_CLIENT_ID` /
+`AUTH_CLIENT_SECRET` as `CHANGE_ME`** — the sidecar provisions them. You only need to set the
+*external auth URL*: `OIDC_ISSUER` / `AUTH_ISSUER` (e.g. `https://auth.yourdomain.com`),
+`ZITADEL_EXTERNALDOMAIN`, `LAZYIT_DOMAIN` and `WEB_ORIGIN`.
+
+### 0b. Bring up the full stack — one command
+
+```sh
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
+  --profile prod --env-file infra/env/.env.prod up -d --build
+```
+
+The boot order is enforced by `depends_on`:
+
+```
+zitadel_db (healthy) → zitadel (healthy) → zitadel-bootstrap (completed) → api + web (healthy) → caddy
+```
+
+On first boot Zitadel `start-from-init` creates the admin **and** a FirstInstance *machine user*,
+exporting its private key to `bootstrap-key.json` in the `zitadel_secrets` volume. The one-shot
+`zitadel-bootstrap` sidecar then authenticates with that key (Private-Key JWT) and **idempotently**:
+
+1. creates/finds the `lazyit` **project** (with role assertion on),
+2. creates the project **roles** `ADMIN` / `MEMBER` / `VIEWER` (the Phase-2 write-back grants these),
+3. creates/finds the OIDC **web app** (redirect = `…/api/auth/callback/oidc`, JWT access token,
+   userinfo + roles asserted into the ID token) and captures its **client id + secret**,
+4. creates/finds a runtime **service-account** + private key for the API write-back,
+5. writes two files into the `zitadel_secrets` volume — `oidc-client.json` (issuer/client_id/
+   client_secret/jwks/project id, read by api **and** web) and `sa-key.json` (the runtime SA key,
+   read by the API via `ZITADEL_MGMT_SA_KEY_PATH`).
+
+The api and web then **consume** `oidc-client.json` at startup (path = `OIDC_CLIENT_FILE`, default
+`/zitadel-secrets/oidc-client.json`): the api back-fills `OIDC_*` + `ZITADEL_MGMT_PROJECT_ID`, the web
+maps them onto its `AUTH_*` vars (+ derives `AUTH_INTERNAL_ISSUER` from the file's internal JWKS
+origin). Explicit env **always wins**, so in the bundled flow you leave `OIDC_CLIENT_ID/SECRET`,
+`AUTH_CLIENT_ID/SECRET` and `ZITADEL_MGMT_PROJECT_ID` **unset** — the sidecar provides them and you
+never hand-copy a client id/secret from the console. Set them in `.env.prod` only for BYOI.
+
+### 0c. Watch it provision
+
+```sh
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+  --env-file infra/env/.env.prod logs -f zitadel-bootstrap
+```
+
+A successful run ends with `DONE — Zitadel is provisioned. project=… app=… sa=…` and **exit 0**.
+The sidecar is `restart: "no"` and **fails loud**: any error exits non-zero, `api`/`web` won't start
+(their `depends_on` requires `service_completed_successfully`), and the run is visible in
+`docker compose ps` as `Exit 1`. Re-running `up` re-runs the sidecar; it is idempotent — if the
+secret files already exist it short-circuits with *"already provisioned … nothing to do"*.
+
+> [!warning] Clean re-bootstrap
+> `down -v` wipes `zitadel_db_data` (and the admin/instance) but the named `zitadel_secrets` volume
+> **also** holds the keys. For a clean re-provision remove **both**:
+> ```sh
+> docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod down -v
+> docker volume rm lazyit-prod_zitadel_secrets   # drops bootstrap-key.json / oidc-client.json / sa-key.json
+> ```
+> Stale creds in `zitadel_secrets` against a fresh `zitadel_db` will block re-provision (the script
+> can't re-read an existing app's secret — it fails loud and tells you to remove the volume).
+
+> [!tip] Secrets-volume ownership
+> The volume must be writable by Zitadel's uid for the FirstInstance key export to land. If
+> `bootstrap-key.json` never appears, the sidecar exits non-zero with a clear *"machine key not
+> found"* message — check the volume permissions (dossier §4e).
+
+After this, jump to [[#6 — Add users to Zitadel]] (and [[#6b — Designate the first ADMIN (RBAC
+bootstrap)]] on an upgraded instance). Sections 1–5 below document the **manual** alternative.
+
+---
+
+## 1 — Prerequisites (manual path)
 
 Before starting:
 
@@ -55,18 +147,27 @@ Before starting:
 
 ## 2 — First start
 
+> [!note] Manual path only
+> Sections 2–5 are the **manual console** alternative to the zero-touch path in §0. Use them only if
+> you are provisioning Zitadel by hand (or learning how it works); the bundled flow needs none of it.
+> All commands use the consolidated Compose layout (`compose.yaml` + `infra/docker-compose.prod.yaml`
+> + `--profile prod`). The old `-f infra/docker-compose.prod.yml` form is superseded
+> ([[deploy-self-hosted]]).
+
 Start only Zitadel and its database first (the full stack can come up after bootstrap):
 
 ```sh
 # From the repo root:
-docker compose -f infra/docker-compose.prod.yml up -d zitadel_db zitadel caddy
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+  --env-file infra/env/.env.prod up -d zitadel_db zitadel caddy
 ```
 
 Watch the logs — the first start takes **30–90 seconds** because Zitadel initialises its
 database schema and creates the first admin user:
 
 ```sh
-docker compose -f infra/docker-compose.prod.yml logs -f zitadel
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+  --env-file infra/env/.env.prod logs -f zitadel
 ```
 
 Wait until you see a line similar to:
@@ -105,6 +206,11 @@ securely.
 ---
 
 ## 4 — Register the lazyit OIDC client
+
+> [!note] Manual path only — the zero-touch sidecar already does ALL of section 4
+> The `zitadel-bootstrap` sidecar (§0) creates the project, the OIDC app, the `ADMIN`/`MEMBER`/
+> `VIEWER` roles and the runtime service-account, and writes the client id/secret into the shared
+> volume — you do **not** copy them by hand. Follow this section only when provisioning manually.
 
 Zitadel organises clients as **Applications** inside a **Project**. Do this once after bootstrap.
 
@@ -167,11 +273,13 @@ Verify it matches your `ZITADEL_EXTERNALDOMAIN`.
 
 ## 5 — Bring up the full stack
 
-With the OIDC credentials now in `.env.prod`, start the remaining services:
+With the OIDC credentials now in `.env.prod`, start the remaining services. (The examples below use a
+`DC` alias for the long invocation — set it once in your shell.)
 
 ```sh
-docker compose -f infra/docker-compose.prod.yml up -d --build
-docker compose -f infra/docker-compose.prod.yml ps   # verify all services are healthy
+DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod --env-file infra/env/.env.prod"
+$DC up -d --build
+$DC ps   # verify all services are healthy
 ```
 
 The API will read `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` on start.
@@ -235,7 +343,7 @@ bun run set-role old.admin@yourco.com MEMBER
 Inside the prod Docker stack the API runs as the `api` service:
 
 ```sh
-docker compose -f infra/docker-compose.prod.yml exec api \
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod exec api \
   bun run set-role operator@yourco.com ADMIN
 ```
 
@@ -256,7 +364,7 @@ Inside the prod stack (the `db` container already has `POSTGRES_USER` / `POSTGRE
 let them expand **inside** the container via `sh -c`):
 
 ```sh
-docker compose -f infra/docker-compose.prod.yml exec db sh -c \
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod exec db sh -c \
   'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "UPDATE users SET role='\''ADMIN'\'' WHERE email='\''operator@yourco.com'\'' AND \"deletedAt\" IS NULL;"'
 ```
 
@@ -279,10 +387,13 @@ OIDC_CLIENT_ID=<client id from your IdP>
 OIDC_CLIENT_SECRET=<client secret from your IdP>
 ```
 
-Then restart the affected services:
+For BYOI you also **remove the `zitadel` / `zitadel_db` / `zitadel-bootstrap` services** (below) so the
+sidecar does not run, and set `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` (and the `AUTH_*` mirrors)
+explicitly. Then restart the affected services:
 
 ```sh
-docker compose -f infra/docker-compose.prod.yml up -d api
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+  --env-file infra/env/.env.prod up -d api
 ```
 
 No code changes needed. Configure the redirect URI in your IdP to:
@@ -293,12 +404,13 @@ https://yourdomain.com/api/auth/callback/<provider-name>
 To remove the bundled Zitadel entirely (clean removal path):
 
 ```sh
-# Stop and remove Zitadel containers
-docker compose -f infra/docker-compose.prod.yml stop zitadel zitadel_db
-docker compose -f infra/docker-compose.prod.yml rm -f zitadel zitadel_db
+DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod"
+# Stop and remove the Zitadel containers (incl. the bootstrap sidecar)
+$DC stop zitadel zitadel_db zitadel-bootstrap
+$DC rm -f zitadel zitadel_db zitadel-bootstrap
 
-# Remove the Zitadel DB volume (destructive — all Zitadel data gone)
-docker volume rm lazyit-prod_zitadel_db_data
+# Remove the Zitadel DB + secrets volumes (destructive — all Zitadel data gone)
+docker volume rm lazyit-prod_zitadel_db_data lazyit-prod_zitadel_secrets
 ```
 
 The app database (`db_data`) is completely unaffected.
@@ -314,10 +426,19 @@ and update `.env.prod`.
 **Zitadel fails to start — DB connection refused**
 Check that `zitadel_db` is healthy before `zitadel` starts:
 ```sh
-docker compose -f infra/docker-compose.prod.yml ps zitadel_db
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod ps zitadel_db
 ```
-The `depends_on: condition: service_healthy` should handle this, but if the healthcheck
-timing is tight, restart Zitadel: `docker compose -f infra/docker-compose.prod.yml restart zitadel`
+The `depends_on: condition: service_healthy` should handle this, but if the healthcheck timing is
+tight, restart Zitadel:
+`docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod restart zitadel`
+
+**`zitadel-bootstrap` exits non-zero**
+The sidecar is `restart: "no"` and fails loud. Read its log:
+`docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod logs zitadel-bootstrap`.
+Common causes: `OIDC_ISSUER` does not match `ZITADEL_EXTERNALDOMAIN` (token `aud` mismatch / 404
+"Instance not found"); `bootstrap-key.json` missing (the `zitadel_secrets` volume is not writable by
+Zitadel's uid); or stale creds against a fresh `zitadel_db` (remove the `zitadel_secrets` volume —
+see §0b clean re-bootstrap).
 
 **"invalid_client" on OIDC callback**
 Double-check `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` match the values in the Zitadel
@@ -327,7 +448,7 @@ console. The client secret is shown only once at creation time.
 Verify the DNS A record for `auth.yourdomain.com` is correct and reachable on port 80
 (for Let's Encrypt). Check Caddy logs:
 ```sh
-docker compose -f infra/docker-compose.prod.yml logs caddy
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod logs caddy
 ```
 
 **Admin password rejected on first login**
@@ -338,5 +459,6 @@ instance.
 
 ---
 
-Related: [[0037-idp-choice-zitadel-byoi]] · [[deploy-self-hosted]] · [[0028-secrets-and-config]] ·
-[[0016-auth-strategy-deferred]] · [[0026-reverse-proxy-tls]]
+Related: [[0043-zitadel-source-of-truth]] · [[auth-zitadel-sot]] · [[0037-idp-choice-zitadel-byoi]] ·
+[[deploy-self-hosted]] · [[0028-secrets-and-config]] · [[0016-auth-strategy-deferred]] ·
+[[0026-reverse-proxy-tls]]

@@ -20,8 +20,12 @@ apps/api/generated
 **/.env
 **/.env.*
 
-# Infra itself is not COPYed into app images
+# Infra itself is not COPYed into app images...
 infra
+# ...EXCEPT the zitadel-bootstrap script, which infra/docker/zitadel-bootstrap.Dockerfile COPYs into
+# its own tiny image (ADR-0043 Phase 3). The Dockerfiles themselves are read by the daemon, not COPYed.
+!infra/scripts
+!infra/scripts/zitadel-bootstrap.sh
 
 # Logs & OS cruft
 **/*.log
