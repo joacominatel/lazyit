@@ -20,6 +20,7 @@ import { createZodDto } from 'nestjs-zod';
 import { CreateUserSchema, UpdateUserSchema, UserSchema } from '@lazyit/shared';
 import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
 import { ActorService } from '../common/actor.service';
 import { UsersService } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
@@ -116,22 +117,25 @@ export class UsersController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a user' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Create a user — ADMIN only (can set the RBAC role)' })
   @ApiCreatedResponse({ type: UserDto })
   create(@Body() dto: CreateUserDto) {
     return this.users.create(dto);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a user' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Update a user — ADMIN only (can change the RBAC role)' })
   @ApiOkResponse({ type: UserDto })
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto) {
     return this.users.update(id, dto);
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Offboard (soft-delete) a user',
+    summary: 'Offboard (soft-delete) a user — ADMIN only',
     description:
       'Soft-deletes the user and, in one transaction, revokes all their active access grants and ' +
       'releases all their active asset assignments (with RELEASED history). Returns the offboarding ' +
@@ -154,8 +158,9 @@ export class UsersController {
   }
 
   @Post(':id/offboard')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Offboard a user (explicit alias of DELETE /users/:id)',
+    summary: 'Offboard a user (explicit alias of DELETE /users/:id) — ADMIN only',
     description:
       'Same effect as DELETE /users/:id: soft-delete + revoke grants + release assignments, all in ' +
       'one transaction. Provided as an intention-revealing verb for the offboarding flow.',

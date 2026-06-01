@@ -10,7 +10,7 @@ import { Reflector } from '@nestjs/core';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
-import type { Prisma, User } from '../../generated/prisma/client';
+import { Prisma, Role, type User } from '../../generated/prisma/client';
 import { IS_PUBLIC_KEY } from './public.decorator';
 
 const UUID_REGEX =
@@ -206,6 +206,18 @@ export class JwtAuthGuard implements CanActivate {
       return existing;
     }
 
+    // RBAC bootstrap (ADR-0040): the FIRST user ever provisioned becomes ADMIN, so a fresh install
+    // is never left without anyone able to administer it; every later JIT user defaults to MEMBER.
+    // "Ever provisioned" counts soft-deleted rows too (includeSoftDeleted) — once any user has
+    // existed, a fresh row is no longer "the first", so an offboarded-then-reprovisioned install
+    // cannot silently hand ADMIN to the next signup. The check-then-create window is acceptable:
+    // it only matters on a truly empty DB, and the worst case (two genuinely-concurrent first
+    // logins) makes both ADMIN — strictly safer than locking everyone out, and an ADMIN can demote.
+    const userCount = await this.prisma.user.count({
+      includeSoftDeleted: true,
+    } as Prisma.UserCountArgs);
+    const role: Role = userCount === 0 ? Role.ADMIN : Role.MEMBER;
+
     // First login: the OIDC access token carries authorization, not identity, so fetch the real
     // profile from the userinfo endpoint and merge it OVER the token claims. Fail-soft — on any
     // failure `fetchUserinfo` returns null and we provision from the token claims alone.
@@ -256,6 +268,7 @@ export class JwtAuthGuard implements CanActivate {
         firstName,
         lastName,
         isActive: true,
+        role,
       },
       update: {},
     });

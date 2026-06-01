@@ -37,6 +37,7 @@ import { maxImportBytes } from './article-import';
 import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
 
 // The detail reads return the full Article (with `content`); the paginated list returns the lean
@@ -139,14 +140,21 @@ export class ArticlesController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an article (author = current user)' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({
+    summary: 'Create an article (author = current user) (ADMIN or MEMBER)',
+  })
   @ApiCreatedResponse({ type: ArticleDto })
   create(@Body() dto: CreateArticleDto, @CurrentUser() user?: User) {
     return this.articles.create(dto, user);
   }
 
   @Post('import')
-  @ApiOperation({ summary: 'Import an article from a .md, .txt or .docx file' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({
+    summary:
+      'Import an article from a .md, .txt or .docx file (ADMIN or MEMBER)',
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -179,8 +187,10 @@ export class ArticlesController {
   }
 
   @Patch(':id')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
-    summary: 'Update an article (author only; never changes status)',
+    summary:
+      'Update an article (author only; never changes status) (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ArticleDto })
   update(
@@ -192,9 +202,10 @@ export class ArticlesController {
   }
 
   @Post(':id/publish')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
     summary:
-      'Publish an article (author only). Sets publishedAt on first publish.',
+      'Publish an article (author only). Sets publishedAt on first publish. (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ArticleDto })
   publish(@Param('id') id: string, @CurrentUser() user?: User) {
@@ -202,9 +213,10 @@ export class ArticlesController {
   }
 
   @Post(':id/unpublish')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
     summary:
-      'Unpublish an article back to DRAFT (author only). Keeps publishedAt.',
+      'Unpublish an article back to DRAFT (author only). Keeps publishedAt. (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ArticleDto })
   unpublish(@Param('id') id: string, @CurrentUser() user?: User) {
@@ -212,7 +224,10 @@ export class ArticlesController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete an article (author only)' })
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Soft-delete an article (destructive) — ADMIN only',
+  })
   @ApiOkResponse({ type: ArticleDto })
   remove(@Param('id') id: string, @CurrentUser() user?: User) {
     return this.articles.remove(id, user);

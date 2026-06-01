@@ -29,6 +29,7 @@ import {
 } from '@lazyit/shared';
 import { ConsumablesService } from './consumables.service';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
 
 class ConsumableDto extends createZodDto(ConsumableSchema) {}
@@ -101,15 +102,17 @@ export class ConsumablesController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a consumable (stock starts at 0)' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create a consumable (stock starts at 0) (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: ConsumableDto })
   create(@Body() dto: CreateConsumableDto) {
     return this.consumables.create(dto);
   }
 
   @Patch(':id')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
-    summary: 'Update a consumable (currentStock is not editable)',
+    summary: 'Update a consumable (currentStock is not editable) (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ConsumableDto })
   update(@Param('id') id: string, @Body() dto: UpdateConsumableDto) {
@@ -117,16 +120,18 @@ export class ConsumablesController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete a consumable' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Soft-delete a consumable — ADMIN only' })
   @ApiOkResponse({ type: ConsumableDto })
   remove(@Param('id') id: string) {
     return this.consumables.remove(id);
   }
 
   @Post(':id/movements')
+  @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
     summary:
-      'Record a stock movement (IN adds, OUT subtracts, ADJUSTMENT sets)',
+      'Record a stock movement (IN adds, OUT subtracts, ADJUSTMENT sets) (ADMIN or MEMBER)',
   })
   @ApiCreatedResponse({ type: ConsumableMovementDto })
   createMovement(

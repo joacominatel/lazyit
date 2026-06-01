@@ -22,6 +22,10 @@ model User {
   firstName  String
   lastName   String
   isActive   Boolean   @default(true)
+  // RBAC role (ADR-0040). Default MEMBER; the first JIT user / seed becomes ADMIN. The RolesGuard
+  // gates Access-grant writes, Users administration and destructive deletes to ADMIN; VIEWER is
+  // read-only. Only an ADMIN (via the ADMIN-gated Users controller) can change a role.
+  role       Role      @default(MEMBER)
   // Maps to the IdP `sub` once auth is integrated; null until then (no auth yet).
   // Nullable + unique: many users may be unlinked, but a linked sub is 1:1. See ADR-0016.
   externalId String?   @unique
@@ -50,6 +54,18 @@ model User {
   consumableMovements ConsumableMovement[] @relation("ConsumableMovementActor")
 
   @@map("users")
+}
+
+/// RBAC role for a User (ADR-0040). A single coarse-grained role, NOT a per-resource ACL matrix
+/// (explicitly rejected for the 5–20-person target). Enforced by the RolesGuard composing after the
+/// auth guard:
+///   - ADMIN  — full access, including Access-grant writes, Users administration and destructive deletes.
+///   - MEMBER — normal inventory / KB / asset operations; NOT Access-grant writes, Users admin or deletes.
+///   - VIEWER — read-only everywhere; cannot mutate anything.
+enum Role {
+  ADMIN
+  MEMBER
+  VIEWER
 }
 
 /// Where an asset physically lives — office, datacenter, rack, warehouse or

@@ -1,13 +1,15 @@
 /**
- * Seeds the initial AssetCategory, ArticleCategory and ApplicationCategory sets. Idempotent (upsert
- * by unique `name`): safe to re-run, and `update: {}` means it never clobbers user edits — all three
- * category sets are user-managed, the seed lists are just an initial, non-special starting point (see
- * docs/02-domain/entities/asset-category.md, article-category.md and application-category.md).
+ * Seeds an initial ADMIN user and the initial AssetCategory, ArticleCategory, ApplicationCategory and
+ * ConsumableCategory sets. Idempotent (upsert by unique `name` / `email`): safe to re-run.
+ * `update: {}` on the categories never clobbers user edits — all category sets are user-managed, the
+ * seed lists are just an initial, non-special starting point (see docs/02-domain/entities/
+ * asset-category.md, article-category.md and application-category.md). The seeded user is ADMIN
+ * (ADR-0040): a freshly-seeded database must always have at least one administrator.
  *
  * Run from apps/api: `bunx prisma db seed`.
  */
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../generated/prisma/client';
+import { PrismaClient, Role } from '../generated/prisma/client';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -15,6 +17,11 @@ if (!connectionString) {
 }
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+
+// The seeded administrator (ADR-0040). Email is overridable via SEED_ADMIN_EMAIL (Bun auto-loads
+// .env); defaults to a clearly-internal address. Idempotent: re-running keeps the row and (re)asserts
+// the ADMIN role so a manual demotion in dev is corrected on the next seed.
+const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? 'admin@lazyit.local';
 
 // Initial asset categories. Users can add / edit / soft-delete categories afterwards; none of
 // these is special. Icons (heroicon names) are left unset for the frontend to assign.
@@ -70,6 +77,20 @@ const INITIAL_CONSUMABLE_CATEGORIES = [
 ];
 
 async function main() {
+  // The seeded administrator (ADR-0040). ADMIN so a fresh database is never left without anyone able
+  // to administer it. Upsert on the unique email keeps it idempotent and re-asserts the role.
+  await prisma.user.upsert({
+    where: { email: SEED_ADMIN_EMAIL },
+    update: { role: Role.ADMIN },
+    create: {
+      email: SEED_ADMIN_EMAIL,
+      firstName: 'Admin',
+      lastName: 'User',
+      role: Role.ADMIN,
+    },
+  });
+  console.log(`Seeded ADMIN user ${SEED_ADMIN_EMAIL}.`);
+
   for (const name of INITIAL_ASSET_CATEGORIES) {
     await prisma.assetCategory.upsert({
       where: { name },

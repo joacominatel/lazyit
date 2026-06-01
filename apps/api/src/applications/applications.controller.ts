@@ -28,6 +28,7 @@ import {
   parseIncludeExpired,
 } from '../access-grants/query-params';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
+import { Roles } from '../auth/roles.decorator';
 
 class ApplicationDto extends createZodDto(ApplicationSchema) {}
 class CreateApplicationDto extends createZodDto(CreateApplicationSchema) {}
@@ -87,21 +88,24 @@ export class ApplicationsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an application' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create an application (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: ApplicationDto })
   create(@Body() dto: CreateApplicationDto) {
     return this.applications.create(dto);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an application' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Update an application (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: ApplicationDto })
   update(@Param('id') id: string, @Body() dto: UpdateApplicationDto) {
     return this.applications.update(id, dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete an application' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Soft-delete an application — ADMIN only' })
   @ApiOkResponse({ type: ApplicationDto })
   remove(@Param('id') id: string) {
     return this.applications.remove(id);
