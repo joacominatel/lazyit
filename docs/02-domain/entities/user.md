@@ -79,7 +79,14 @@ assets — [[0041-soft-delete-reuse-and-restore]]).
 All **write** endpoints (create / update / delete / offboard / restore) are **ADMIN-only**
 (`@Roles('ADMIN')`, [[0040-rbac-roles]]); the reads are open to any authenticated user. Bodies validated against the
 shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). Also
-`GET /users/:id/assignments?activeOnly=` lists the assets assigned to the user ([[asset-assignment]]).
+`GET /users/:id/assignments?activeOnly=` lists the assets assigned to the user ([[asset-assignment]])
+and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their application access
+([[access-grant]]).
+
+**Web:** `users/[id]` is the asset-centric **per-person** detail page (the counterpart to the asset
+detail) — it composes the two nested reads above plus the user's authored [[article]]s, answering
+"who can access what" for one person and cross-linking user ⇄ asset / application. See
+[[0020-frontend-data-layer]].
 
 Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] · [[ticket]] ·
 [[asset-centric]] · [[shared-package]] · [[0013-zod-validation-pipe]] ·

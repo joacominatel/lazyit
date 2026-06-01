@@ -6,6 +6,7 @@ import {
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
 import type { User } from "@lazyit/shared";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import {
@@ -176,7 +177,12 @@ export default function UsersPage() {
                   />
                 </TableCell>
                 <TableCell className="font-medium">
-                  {user.firstName} {user.lastName}
+                  <Link
+                    href={`/users/${user.id}`}
+                    className="hover:underline"
+                  >
+                    {user.firstName} {user.lastName}
+                  </Link>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {user.email}

@@ -71,5 +71,9 @@ for both api and web ([[shared-package]], [[0013-zod-validation-pipe]]).
 [[0041-soft-delete-reuse-and-restore]]). Bodies validated against the shared schemas and documented
 via Swagger ([[0018-api-documentation-swagger]]).
 
+**Web:** `locations/[id]` is the location detail page — the place's facts plus the "assets here"
+view (the inventory physically located there), via the existing `GET /assets?locationId=` filter
+(no dedicated endpoint). See [[0020-frontend-data-layer]].
+
 Related: [[asset]] · [[conventions]] · [[shared-package]] · [[0013-zod-validation-pipe]] ·
 [[0017-location-type-enum]]

@@ -232,6 +232,11 @@ export default function ApplicationsPage() {
                     .map((id) => userById.get(id))
                     .filter((user): user is User => user != null)
                 : [];
+              // Distinct grantees with an active grant whose user row is soft-deleted (hence absent
+              // from the active-users read) — flagged as a dimmed placeholder chip, not dropped.
+              const deactivatedGrantees = access
+                ? [...access.userIds].filter((id) => !userById.has(id)).length
+                : 0;
               const count = access?.count ?? 0;
               return (
                 <TableRow key={application.id}>
@@ -268,7 +273,10 @@ export default function ApplicationsPage() {
                       <span className="text-sm text-muted-foreground">—</span>
                     ) : (
                       <div className="flex items-center gap-2">
-                        <StackedUserAvatars users={granteeUsers} />
+                        <StackedUserAvatars
+                          users={granteeUsers}
+                          deactivatedCount={deactivatedGrantees}
+                        />
                         <span className="text-sm text-muted-foreground tabular-nums">
                           {count}
                         </span>
