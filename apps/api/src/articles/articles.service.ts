@@ -217,6 +217,39 @@ export class ArticlesService {
     return article;
   }
 
+  /**
+   * Restore a soft-deleted article: clear `deletedAt` (ADR-0041). The route is ADMIN-gated, but
+   * authorship still governs WHICH article an actor may restore (mirroring remove): only the original
+   * author may restore their own article. Found via the `includeSoftDeleted` escape hatch (the read
+   * filter would hide it). 404 if it never existed; 403 if owned by someone else; idempotent if
+   * already live. The partial unique index frees `slug` on delete, so a restore can 409 if another
+   * live article took the slug (mapped by the global PrismaExceptionFilter). On success the article is
+   * re-indexed only if PUBLISHED (draft privacy — ADR-0022 / ADR-0035).
+   */
+  async restore(id: string, currentUser?: User) {
+    const cu = this.requireCurrentUser(currentUser);
+    const article = await this.prisma.article.findFirst({
+      where: { id },
+      includeSoftDeleted: true,
+    } as Prisma.ArticleFindFirstArgs);
+    if (!article) {
+      throw new NotFoundException(`Article ${id} not found`);
+    }
+    if (article.authorId !== cu) {
+      throw new ForbiddenException('Only the author can restore this article');
+    }
+    if (article.deletedAt === null) {
+      return article; // already live — idempotent
+    }
+    const restored = await this.prisma.article.update({
+      where: { id },
+      data: { deletedAt: null, lastEditedById: cu },
+    });
+    // Re-index honoring draft privacy: PUBLISHED is indexed, a DRAFT stays out (ADR-0022 / ADR-0035).
+    this.syncSearch(restored);
+    return restored;
+  }
+
   /** Publish (author only). Sets publishedAt on the first publish; idempotent if already published. */
   async publish(id: string, currentUser?: User) {
     const cu = this.requireCurrentUser(currentUser);
