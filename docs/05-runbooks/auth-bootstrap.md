@@ -71,6 +71,13 @@ exporting its private key to `bootstrap-key.json` in the `zitadel_secrets` volum
    client_secret/jwks/project id, read by api **and** web) and `sa-key.json` (the runtime SA key,
    read by the API via `ZITADEL_MGMT_SA_KEY_PATH`).
 
+The api and web then **consume** `oidc-client.json` at startup (path = `OIDC_CLIENT_FILE`, default
+`/zitadel-secrets/oidc-client.json`): the api back-fills `OIDC_*` + `ZITADEL_MGMT_PROJECT_ID`, the web
+maps them onto its `AUTH_*` vars (+ derives `AUTH_INTERNAL_ISSUER` from the file's internal JWKS
+origin). Explicit env **always wins**, so in the bundled flow you leave `OIDC_CLIENT_ID/SECRET`,
+`AUTH_CLIENT_ID/SECRET` and `ZITADEL_MGMT_PROJECT_ID` **unset** — the sidecar provides them and you
+never hand-copy a client id/secret from the console. Set them in `.env.prod` only for BYOI.
+
 ### 0c. Watch it provision
 
 ```sh

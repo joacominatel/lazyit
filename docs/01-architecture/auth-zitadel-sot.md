@@ -347,8 +347,25 @@ web:
   volumes: [ zitadel_secrets:/zitadel-secrets:ro ]
 ```
 
-The api reads `oidc-client.json` if `OIDC_CLIENT_*` are not already set in env. Boot-config validation
-still enforces `OIDC_*` presence in OIDC mode, so a missing file is caught early.
+Both api and web **consume** `oidc-client.json` at startup (path = `OIDC_CLIENT_FILE`, default
+`/zitadel-secrets/oidc-client.json`), filling whatever the operator left unset — explicit env **always
+overrides** the file:
+
+- **api** (`apps/api/src/auth/bootstrap-file.ts`, run from `main.ts` BEFORE boot-config validation):
+  back-fills `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_JWKS_URI` /
+  `ZITADEL_MGMT_PROJECT_ID` into `process.env`, so every downstream reader (`JwtAuthGuard`,
+  `ZitadelManagementService`) is unchanged. Boot-config validation then sees the merged env, so
+  OIDC-mode `OIDC_ISSUER`/`OIDC_JWKS_URI` presence is satisfied by the file in the bundled flow.
+- **web** (`apps/web/lib/auth/bootstrap-file.ts`, run from `auth.ts`): maps the file's `OIDC_ISSUER` →
+  `AUTH_ISSUER`, `OIDC_CLIENT_ID` → `AUTH_CLIENT_ID`, `OIDC_CLIENT_SECRET` → `AUTH_CLIENT_SECRET`, and
+  the `OIDC_JWKS_URI` origin → `AUTH_INTERNAL_ISSUER`. Node-runtime-only (a no-op on the Edge
+  middleware bundle and during `next build`, where the file is absent).
+
+This is what makes the sidecar **zero-touch**: the project id + OIDC client id/secret are GENERATED at
+first boot, so the operator cannot put them in env — they flow through the file. A missing file is the
+normal BYOI / env-only path (silent no-op); the loaders never crash and never log secret values.
+`ZITADEL_MGMT_PROJECT_ID` is no longer a required static env (it comes from the file); keep it set only
+as a BYOI pin.
 
 ### 4d. Dependency / health ordering
 
