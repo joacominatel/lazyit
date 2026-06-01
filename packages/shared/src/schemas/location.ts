@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requireAtLeastOneKey } from "./primitives";
 
 /**
  * Location — where an asset physically lives.
@@ -48,17 +49,19 @@ export const CreateLocationSchema = z.strictObject({
   notes: z.string().trim().min(1).max(2000).optional(),
 });
 
-/** Partial update; any subset of the editable fields. */
-export const UpdateLocationSchema = z
-  .strictObject({
-    name: z.string().trim().min(1).max(200),
-    type: LocationTypeSchema,
-    description: z.string().trim().min(1).max(2000),
-    address: z.string().trim().min(1).max(500),
-    floor: z.string().trim().min(1).max(50),
-    notes: z.string().trim().min(1).max(2000),
-  })
-  .partial();
+/** Partial update; any subset of the editable fields (an empty body is rejected). */
+export const UpdateLocationSchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      name: z.string().trim().min(1).max(200),
+      type: LocationTypeSchema,
+      description: z.string().trim().min(1).max(2000),
+      address: z.string().trim().min(1).max(500),
+      floor: z.string().trim().min(1).max(50),
+      notes: z.string().trim().min(1).max(2000),
+    })
+    .partial(),
+);
 
 export type LocationType = z.infer<typeof LocationTypeSchema>;
 export type Location = z.infer<typeof LocationSchema>;
