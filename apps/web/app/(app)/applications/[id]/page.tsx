@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowLeftIcon,
   ArrowTopRightOnSquareIcon,
   PencilIcon,
   PencilSquareIcon,
@@ -11,12 +10,18 @@ import {
 import { type AccessGrant, isSafeApplicationUrl, type User } from "@lazyit/shared";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { type ReactNode, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
+import { PageHeader } from "@/components/page-header";
+import { Breadcrumb } from "@/components/breadcrumb";
+import { RelatedArticlesPanel } from "@/components/related-articles-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { UserAvatar } from "@/components/user-avatar";
+import { ErrorState } from "@/components/resource-table";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
 import { useApplicationCategories } from "@/lib/api/hooks/use-application-categories";
 import { useDeleteApplication } from "@/lib/api/hooks/use-application-mutations";
 import {
@@ -40,8 +45,10 @@ export default function ApplicationDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
+  const canWrite = useCanWrite();
 
-  const { data: application, isLoading, isError } = useApplication(id);
+  const { data: application, isLoading, isError, error, refetch } =
+    useApplication(id);
   // All grants (active + revoked), each raw (userId only) — resolved to users below.
   const { data: grants } = useApplicationGrants(id, { activeOnly: false });
   const { data: categories } = useApplicationCategories();
@@ -63,25 +70,21 @@ export default function ApplicationDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-4xl space-y-4">
-        <Skeleton className="h-4 w-20" />
-        <Skeleton className="h-8 w-1/2" />
-        <Skeleton className="h-40 w-full" />
+      <div className="mx-auto max-w-4xl">
+        <DetailSkeleton panels={2} />
       </div>
     );
   }
 
   if (isError || !application) {
     return (
-      <div className="mx-auto flex max-w-4xl flex-col items-center gap-3 rounded-lg border border-dashed py-16 text-center">
-        <p className="text-sm font-medium">Application not found</p>
-        <p className="text-sm text-muted-foreground">It may have been deleted.</p>
-        <Button variant="outline" asChild>
-          <Link href="/applications">
-            <ArrowLeftIcon />
-            Back to Access
-          </Link>
-        </Button>
+      <div className="mx-auto max-w-4xl">
+        <ErrorState
+          title="Application not found"
+          description="It may have been deleted, or the API is unreachable."
+          onRetry={() => refetch()}
+          error={error}
+        />
       </div>
     );
   }
@@ -97,53 +100,64 @@ export default function ApplicationDetailPage() {
     return user ? `${user.firstName} ${user.lastName}` : "Unknown user";
   }
 
+  /** Render a user's name as a link to their detail when the user is known, else plain text. */
+  function userLink(userId: string) {
+    const user = userById.get(userId);
+    if (!user) return <span>{userName(userId)}</span>;
+    return (
+      <Link href={`/users/${user.id}`} className="hover:underline">
+        {userName(userId)}
+      </Link>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <Button variant="ghost" size="sm" asChild className="-ml-2">
-            <Link href="/applications">
-              <ArrowLeftIcon />
-              Access
-            </Link>
-          </Button>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight">
-              {application.name}
-            </h1>
-            {application.isCritical && (
-              <Badge variant="destructive">Critical</Badge>
-            )}
-          </div>
-          {application.vendor && (
-            <p className="text-sm text-muted-foreground">{application.vendor}</p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/applications/${application.id}/edit`}>
-              <PencilSquareIcon />
-              Edit
-            </Link>
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Delete application"
-            onClick={() => setDeleteOpen(true)}
-          >
-            <TrashIcon />
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        breadcrumb={
+          <Breadcrumb
+            items={[
+              { label: "Access", href: "/applications" },
+              { label: application.name },
+            ]}
+          />
+        }
+        title={application.name}
+        subtitle={application.vendor ?? undefined}
+        badge={
+          application.isCritical ? (
+            <Badge variant="destructive">Critical</Badge>
+          ) : undefined
+        }
+        actions={
+          canWrite ? (
+            <>
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/applications/${application.id}/edit`}>
+                  <PencilSquareIcon />
+                  Edit
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Delete application"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <TrashIcon />
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
 
-      <Panel title="Details">
+      <DetailPanel title="Details">
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <Detail label="Vendor">{application.vendor ?? "—"}</Detail>
-          <Detail label="Category">
+          <DetailField label="Vendor">{application.vendor ?? "—"}</DetailField>
+          <DetailField label="Category">
             {categoryName ? <Badge variant="outline">{categoryName}</Badge> : "—"}
-          </Detail>
-          <Detail label="URL">
+          </DetailField>
+          <DetailField label="URL">
             {application.url ? (
               isSafeApplicationUrl(application.url) ? (
                 <a
@@ -161,7 +175,7 @@ export default function ApplicationDetailPage() {
             ) : (
               "—"
             )}
-          </Detail>
+          </DetailField>
         </dl>
         {application.description && (
           <div className="mt-4 space-y-1">
@@ -179,15 +193,21 @@ export default function ApplicationDetailPage() {
             <dd className="text-sm whitespace-pre-wrap">{application.notes}</dd>
           </div>
         )}
-      </Panel>
+      </DetailPanel>
 
-      <Panel
+      <DetailPanel
         title="Active access"
-        action={
-          <Button size="sm" variant="outline" onClick={() => setGrantOpen(true)}>
-            <UserPlusIcon />
-            Grant access
-          </Button>
+        actions={
+          canWrite ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setGrantOpen(true)}
+            >
+              <UserPlusIcon />
+              Grant access
+            </Button>
+          ) : undefined
         }
       >
         {active.length === 0 ? (
@@ -242,11 +262,7 @@ export default function ApplicationDetailPage() {
                             Deactivated
                           </Badge>
                         )}
-                        {expired && (
-                          <Badge className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                            Expired
-                          </Badge>
-                        )}
+                        {expired && <StatusBadge tone="warning">Expired</StatusBadge>}
                       </div>
                       <p className="truncate text-sm text-muted-foreground">
                         Granted {formatDate(grant.grantedAt)}
@@ -260,32 +276,36 @@ export default function ApplicationDetailPage() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Edit grant"
-                      onClick={() => setEditing(grant)}
-                    >
-                      <PencilIcon />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setRevoking(grant)}
-                    >
-                      Revoke
-                    </Button>
-                  </div>
+                  {canWrite && (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Edit grant"
+                        onClick={() => setEditing(grant)}
+                      >
+                        <PencilIcon />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setRevoking(grant)}
+                      >
+                        Revoke
+                      </Button>
+                    </div>
+                  )}
                 </li>
               );
             })}
           </ul>
         )}
-      </Panel>
+      </DetailPanel>
+
+      <RelatedArticlesPanel applicationId={application.id} />
 
       {history.length > 0 && (
-        <Panel title="History">
+        <DetailPanel title="History">
           <ul className="divide-y text-sm">
             {history.map((grant) => (
               <li
@@ -293,7 +313,7 @@ export default function ApplicationDetailPage() {
                 className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0"
               >
                 <span className="flex items-center gap-2 font-medium">
-                  {userName(grant.userId)}
+                  {userLink(grant.userId)}
                   {grant.accessLevel && (
                     <Badge variant="outline">{grant.accessLevel}</Badge>
                   )}
@@ -308,7 +328,7 @@ export default function ApplicationDetailPage() {
               </li>
             ))}
           </ul>
-        </Panel>
+        </DetailPanel>
       )}
 
       <GrantAccessDialog
@@ -342,37 +362,6 @@ export default function ApplicationDetailPage() {
         onConfirm={() => deleteApplication.mutateAsync(application.id)}
         onDeleted={() => router.push("/applications")}
       />
-    </div>
-  );
-}
-
-/** A bordered section with a heading and optional header action. */
-function Panel({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-lg border p-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** A label/value pair in the details grid. */
-function Detail({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="text-sm">{children}</dd>
     </div>
   );
 }
