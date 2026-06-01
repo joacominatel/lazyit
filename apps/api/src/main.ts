@@ -4,9 +4,15 @@ import { cleanupOpenApiDoc } from 'nestjs-zod';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { validateBootConfig } from './auth/boot-config';
+import { loadBootstrapOidcFile } from './auth/bootstrap-file';
 import { addStandardErrorResponses } from './common/openapi-errors';
 
 async function bootstrap() {
+  // Zero-touch bootstrap (ADR-0043 Phase 3): back-fill OIDC_* / ZITADEL_MGMT_PROJECT_ID from the
+  // sidecar's oidc-client.json (mounted read-only) for any var the operator did not set, BEFORE
+  // validation — so OIDC-mode boot sees the merged env and the bundled-Zitadel flow needs no
+  // hand-copied creds. Explicit env always wins; an absent file leaves the env-only path unchanged.
+  loadBootstrapOidcFile();
   // Fail-loud config (ops-boot integrity): validate before NestFactory.create so a misconfigured
   // server refuses to start with a CRITICAL log, instead of booting half-wired. See boot-config.ts.
   validateBootConfig();
