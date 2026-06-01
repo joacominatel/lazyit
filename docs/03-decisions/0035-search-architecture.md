@@ -38,9 +38,10 @@ logged (CRITICAL) and swallowed. If Meili is down, writes still succeed and sear
 
 ## Decision
 
-- **Meilisearch** as an external service: added to the dev `docker-compose.yml` (loopback `:7700`,
-  `MEILI_MASTER_KEY`); **production is a DevOps hand-off** — add it to `infra/docker-compose.prod.yml`
-  (this lane does not touch `infra/`). Config via `MEILI_HOST` / `MEILI_MASTER_KEY`
+- **Meilisearch** as an external service: a service in the canonical root `compose.yaml` (unprofiled
+  backing service; `compose.override.yaml` publishes loopback `:7700` for dev, `--profile prod` keeps
+  it internal-only). _Originally hand-off to DevOps for `infra/docker-compose.prod.yml`; that file was
+  since consolidated into `compose.yaml` — see [[auth-zitadel-sot]] §9._ Config via `MEILI_HOST` / `MEILI_MASTER_KEY`
   ([[0028-secrets-and-config]]). If `MEILI_HOST` is unset the search wiring no-ops (search disabled).
 - **Indexed entities**: `assets`, `articles`, `users`, `locations`, `applications` (one Meili index
   each; primary key `id`). The `articles` document includes the markdown **`content`** since
@@ -73,8 +74,9 @@ logged (CRITICAL) and swallowed. If Meili is down, writes still succeed and sear
 
 ## Hand-offs
 
-- **DevOps:** add `meilisearch` to `infra/docker-compose.prod.yml` (+ `MEILI_MASTER_KEY` secret,
-  `MEILI_ENV=production`, never publish the port) and run `reindex:all` once on first deploy.
+- **DevOps:** _delivered_ — `meilisearch` is in the canonical `compose.yaml` (+ `MEILI_MASTER_KEY`
+  secret, `MEILI_ENV=production`, port never published under `--profile prod`); run `reindex:all`
+  once on first deploy. (The old `infra/docker-compose.prod.yml` target was consolidated — §9 above.)
 - **Frontend:** _delivered_ (#21) — a ⌘K command palette in the topbar consuming `GET /search`
   (`apps/web/components/global-search.tsx`); the response is typed in `@lazyit/shared` (`search`
   schema). Results group by entity and degrade gracefully where no detail page exists yet.

@@ -56,8 +56,8 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
 
 | Level | What runs | Runbook |
 | --- | --- | --- |
-| **Dev** | root `docker-compose.yml` (Postgres) + `bun run dev` | [[setup]] |
-| **Local prod-like** | `infra/docker-compose.prod.yml`, local HTTPS, high ports 8080/8443 | [[docker-prod-like-first-boot]] |
+| **Dev** | root `compose.yaml` + auto-loaded `compose.override.yaml` (backing services) + `bun run dev` | [[setup]] |
+| **Local prod-like** | `compose.yaml` + `infra/docker-compose.prod.yaml` + `--profile prod`, local HTTPS, high ports 8080/8443 | [[docker-prod-like-first-boot]] |
 | **Self-hosted real** | same compose, real domain + Let's Encrypt, real secrets, backups | [[deploy-self-hosted]] |
 
 ## CI/CD
