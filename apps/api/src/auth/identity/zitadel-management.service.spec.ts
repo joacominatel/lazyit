@@ -320,7 +320,7 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
     expect(svc.isConfigured()).toBe(false);
   });
 
-  it('isConfigured() is true only when both the SA key and project id are present', () => {
+  it('isConfigured() is true only when the SA key, project id AND issuer are all present', () => {
     process.env.ZITADEL_MGMT_SA_KEY = saKeyJson;
     process.env.OIDC_ISSUER = 'https://auth.example.com';
     // Missing ZITADEL_MGMT_PROJECT_ID.
@@ -329,5 +329,23 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
 
     process.env.ZITADEL_MGMT_PROJECT_ID = 'project-1';
     expect(new ZitadelManagementService().isConfigured()).toBe(true);
+
+    // Drop the issuer: write-back cannot sign its assertion without it, so isConfigured() is false.
+    delete process.env.OIDC_ISSUER;
+    expect(new ZitadelManagementService().isConfigured()).toBe(false);
+  });
+
+  it('isConfigured() is true with the project id + SA key supplied by the bootstrap files (zero-touch)', () => {
+    // After the boot loader (auth/bootstrap-file.ts) merges oidc-client.json into process.env, the
+    // project id + issuer simply appear in env exactly as if pinned. The SA key comes from
+    // ZITADEL_MGMT_SA_KEY_PATH (the sidecar's sa-key.json) — here inline-JSON stands in for that read.
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    process.env.ZITADEL_MGMT_SA_KEY = saKeyJson; // stands in for sa-key.json @ ZITADEL_MGMT_SA_KEY_PATH
+    process.env.ZITADEL_MGMT_PROJECT_ID = 'file-project-1'; // from oidc-client.json
+    process.env.OIDC_ISSUER = 'https://auth.example.com'; // from oidc-client.json
+
+    const svc = new ZitadelManagementService();
+    expect(svc.isConfigured()).toBe(true);
+    expect(svc.projectId).toBe('file-project-1');
   });
 });
