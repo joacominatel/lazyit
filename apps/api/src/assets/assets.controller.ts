@@ -36,6 +36,7 @@ import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { parseActiveOnly } from '../asset-assignments/active-only';
 import { parsePageQuery } from '../common/parse-page-query';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
 
 // Writes keep the lean Asset shape; the detail read returns the expanded AssetWithRelations, while
@@ -194,14 +195,16 @@ export class AssetsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an asset' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Create an asset (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: AssetDto })
   create(@Body() dto: CreateAssetDto, @CurrentUser() user?: User) {
     return this.assets.create(dto, user);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an asset' })
+  @Roles('ADMIN', 'MEMBER')
+  @ApiOperation({ summary: 'Update an asset (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: AssetDto })
   update(
     @Param('id') id: string,
@@ -212,7 +215,8 @@ export class AssetsController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete an asset' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Soft-delete an asset — ADMIN only' })
   @ApiOkResponse({ type: AssetDto })
   remove(@Param('id') id: string, @CurrentUser() user?: User) {
     return this.assets.remove(id, user);
