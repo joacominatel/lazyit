@@ -23,6 +23,7 @@ import { AssetHistoryModule } from './asset-history/asset-history.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { HealthModule } from './health/health.module';
 import { CommonModule } from './common/common.module';
+import { ConfigModule } from './config/config.module';
 import { SearchModule } from './search/search.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
@@ -43,6 +44,9 @@ import { buildLoggerParams } from './logging/logging.config';
     SearchModule,
     // Operational health probes (@Public() /health/live + /health/ready). Hand-rolled, no terminus.
     HealthModule,
+    // In-app first-run setup (ADR-0043 Phase 3): @Public() GET /config/status + the idempotent,
+    // CSRF + rate-limited POST /config/setup that bootstraps the first ADMIN. No migration.
+    ConfigModule,
     AssetHistoryModule,
     UsersModule,
     LocationsModule,

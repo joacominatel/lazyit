@@ -3,6 +3,7 @@ import Link from "next/link";
 import { auth } from "@/auth";
 import { GlobalSearch } from "@/components/global-search";
 import { MobileNav } from "@/components/mobile-nav";
+import { ModeBanner } from "@/components/mode-banner";
 import { SessionTokenSync } from "@/components/session-token-sync";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -47,6 +48,7 @@ export default async function AppLayout({
           <MobileNav />
           <GlobalSearch />
           <div className="ml-auto flex items-center gap-2">
+            <ModeBanner />
             <ThemeToggle />
             <UserMenu />
           </div>
