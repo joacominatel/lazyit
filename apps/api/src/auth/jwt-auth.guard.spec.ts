@@ -130,8 +130,8 @@ describe('JwtAuthGuard', () => {
       count: jest.fn(),
       updateMany: jest.fn(),
     };
-    // Default: the DB already has users, so a JIT provision defaults to MEMBER. The first-user test
-    // overrides this to 0 to assert the ADMIN bootstrap (ADR-0040).
+    // Default: the DB already has users, so a JIT provision defaults to VIEWER (ADR-0043). The
+    // first-user test overrides this to 0 to assert the ADMIN bootstrap (ADR-0040).
     prismaUser.count.mockResolvedValue(1);
 
     const moduleRef = await Test.createTestingModule({
@@ -425,7 +425,7 @@ describe('JwtAuthGuard', () => {
           firstName: 'Bob',
           lastName: 'Jones',
           isActive: true,
-          role: 'MEMBER',
+          role: 'VIEWER',
         },
         update: {},
       });
@@ -459,7 +459,7 @@ describe('JwtAuthGuard', () => {
           firstName: 'Carol',
           lastName: 'Chen',
           isActive: true,
-          role: 'MEMBER',
+          role: 'VIEWER',
         },
         update: {},
       });
@@ -494,7 +494,7 @@ describe('JwtAuthGuard', () => {
           firstName: 'dana',
           lastName: 'dana',
           isActive: true,
-          role: 'MEMBER',
+          role: 'VIEWER',
         },
         update: {},
       });
@@ -587,6 +587,35 @@ describe('JwtAuthGuard', () => {
         update: {},
       });
       expect((req.user as { role?: string }).role).toBe('ADMIN');
+    });
+
+    it('JIT-provisions a NON-first user (User count > 0) as VIEWER (ADR-0043 default flip)', async () => {
+      (jose.jwtVerify as jest.Mock).mockResolvedValue({
+        payload: {
+          sub: 'oidc-sub-second',
+          email: 'second@example.com',
+          given_name: 'Second',
+          family_name: 'Comer',
+        },
+      });
+      prismaUser.findFirst.mockResolvedValue(null);
+      // The DB already has at least one user → this signup is NOT the first, so it defaults to VIEWER
+      // (least-privilege, uniform with app-created users) rather than MEMBER (the pre-ADR-0043 default).
+      prismaUser.count.mockResolvedValue(3);
+      prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+      const req: Record<string, unknown> = {
+        headers: { authorization: 'Bearer valid.token.here' },
+      };
+
+      const result = await guard.canActivate(makeCtx(req));
+
+      expect(result).toBe(true);
+      const upsertCalls = prismaUser.upsert.mock.calls as Array<
+        [{ create: { role: string } }]
+      >;
+      expect(upsertCalls[0][0].create.role).toBe('VIEWER');
+      expect((req.user as { role?: string }).role).toBe('VIEWER');
     });
 
     // -----------------------------------------------------------------------
@@ -798,7 +827,7 @@ describe('JwtAuthGuard', () => {
             firstName: 'Fresh',
             lastName: 'Hire',
             isActive: true,
-            role: 'MEMBER',
+            role: 'VIEWER',
           },
           update: {},
         });
@@ -912,7 +941,7 @@ describe('JwtAuthGuard', () => {
             firstName: 'Real',
             lastName: 'User',
             isActive: true,
-            role: 'MEMBER',
+            role: 'VIEWER',
           },
           update: {},
         });
@@ -967,7 +996,7 @@ describe('JwtAuthGuard', () => {
             firstName: 'oidc-sub-fail',
             lastName: 'oidc-sub-fail',
             isActive: true,
-            role: 'MEMBER',
+            role: 'VIEWER',
           },
           update: {},
         });
@@ -1016,7 +1045,7 @@ describe('JwtAuthGuard', () => {
             firstName: 'oidc-sub-throw',
             lastName: 'oidc-sub-throw',
             isActive: true,
-            role: 'MEMBER',
+            role: 'VIEWER',
           },
           update: {},
         });
