@@ -442,7 +442,10 @@ The sidecar is `restart: "no"` and fails loud. Read its log:
 Common causes: `OIDC_ISSUER` does not match `ZITADEL_EXTERNALDOMAIN` (token `aud` mismatch / 404
 "Instance not found"); `bootstrap-key.json` missing (the `zitadel_secrets` volume is not writable by
 Zitadel's uid); or stale creds against a fresh `zitadel_db` (remove the `zitadel_secrets` volume —
-see §0b clean re-bootstrap).
+see §0b clean re-bootstrap). The sidecar gates on `zitadel` only with `condition: service_started`
+(the shell-less zitadel image has no container healthcheck), then **polls `/debug/healthz` itself**
+(default up to ~180s) before provisioning — so a `"Zitadel did not become healthy in time"` error in
+its log means Zitadel never came up: check the `zitadel` service log first.
 
 **"invalid_client" on OIDC callback**
 Double-check `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` match the values in the Zitadel
