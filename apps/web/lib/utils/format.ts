@@ -34,3 +34,38 @@ export function formatRelativeTime(iso: string, now: number): string {
   if (months < 12) return `${months}mo ago`;
   return `${Math.round(months / 12)}y ago`;
 }
+
+/**
+ * Raw spec/object key → a human label. Splits camelCase, snake_case and kebab-case,
+ * then Title-Cases each word ("cpuModel" / "cpu_model" / "cpu-model" → "Cpu Model").
+ * Used to render free-form `Asset.specs` keys readably on the detail page. A key
+ * with no recognizable boundary falls back to a single capitalized word; an
+ * empty/whitespace-only key returns "".
+ */
+export function formatFieldLabel(key: string): string {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2") // camelCase boundary
+    .replace(/[_-]+/g, " ") // snake_case / kebab-case
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return "";
+  return words
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/**
+ * Render a free-form spec value (string | number | boolean | null | object) as a
+ * display string. Scalars are shown verbatim; booleans as "Yes"/"No"; null/undefined
+ * as "—"; anything non-scalar (arrays/objects, which the custom-fields editor never
+ * produces but legacy specs might) falls back to compact JSON.
+ */
+export function formatSpecValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
