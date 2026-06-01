@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowLeftIcon,
   ArrowDownTrayIcon,
   ArrowUpTrayIcon,
   PencilSquareIcon,
@@ -11,11 +10,14 @@ import {
 import type { ConsumableMovementType, User } from "@lazyit/shared";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { type ReactNode, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
+import { PageHeader } from "@/components/page-header";
+import { Breadcrumb } from "@/components/breadcrumb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/resource-table";
 import {
   Table,
   TableBody,
@@ -25,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
 import { useConsumableCategories } from "@/lib/api/hooks/use-consumable-categories";
 import { useDeleteConsumable } from "@/lib/api/hooks/use-consumable-mutations";
 import {
@@ -61,8 +64,10 @@ export default function ConsumableDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
+  const canWrite = useCanWrite();
 
-  const { data: consumable, isLoading, isError } = useConsumable(id);
+  const { data: consumable, isLoading, isError, error, refetch } =
+    useConsumable(id);
   const { data: movements } = useConsumableMovements(id);
   const { data: categories } = useConsumableCategories();
   const { data: users } = useUsers();
@@ -79,25 +84,21 @@ export default function ConsumableDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-4xl space-y-4">
-        <Skeleton className="h-4 w-20" />
-        <Skeleton className="h-8 w-1/2" />
-        <Skeleton className="h-40 w-full" />
+      <div className="mx-auto max-w-4xl">
+        <DetailSkeleton panels={3} />
       </div>
     );
   }
 
   if (isError || !consumable) {
     return (
-      <div className="mx-auto flex max-w-4xl flex-col items-center gap-3 rounded-lg border border-dashed py-16 text-center">
-        <p className="text-sm font-medium">Consumable not found</p>
-        <p className="text-sm text-muted-foreground">It may have been deleted.</p>
-        <Button variant="outline" asChild>
-          <Link href="/consumables">
-            <ArrowLeftIcon />
-            Back to Consumables
-          </Link>
-        </Button>
+      <div className="mx-auto max-w-4xl">
+        <ErrorState
+          title="Consumable not found"
+          description="It may have been deleted, or the API is unreachable."
+          onRetry={() => refetch()}
+          error={error}
+        />
       </div>
     );
   }
@@ -109,51 +110,55 @@ export default function ConsumableDetailPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <Button variant="ghost" size="sm" asChild className="-ml-2">
-            <Link href="/consumables">
-              <ArrowLeftIcon />
-              Consumables
-            </Link>
-          </Button>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            {consumable.name}
-          </h1>
-          {consumable.sku && (
-            <p className="font-mono text-sm text-muted-foreground">
-              {consumable.sku}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/consumables/${consumable.id}/edit`}>
-              <PencilSquareIcon />
-              Edit
-            </Link>
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Delete consumable"
-            onClick={() => setDeleteOpen(true)}
-          >
-            <TrashIcon />
-          </Button>
-        </div>
-      </div>
-
-      <Panel
-        title="Stock"
-        action={
-          <QuickAdjustButtons
-            consumableId={consumable.id}
-            name={consumable.name}
-            currentStock={consumable.currentStock}
-            unit={consumable.unit}
-            size="sm"
+      <PageHeader
+        breadcrumb={
+          <Breadcrumb
+            items={[
+              { label: "Consumables", href: "/consumables" },
+              { label: consumable.name },
+            ]}
           />
+        }
+        title={consumable.name}
+        subtitle={
+          consumable.sku ? (
+            <span className="font-mono">{consumable.sku}</span>
+          ) : undefined
+        }
+        actions={
+          canWrite ? (
+            <>
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/consumables/${consumable.id}/edit`}>
+                  <PencilSquareIcon />
+                  Edit
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Delete consumable"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <TrashIcon />
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
+
+      <DetailPanel
+        title="Stock"
+        actions={
+          canWrite ? (
+            <QuickAdjustButtons
+              consumableId={consumable.id}
+              name={consumable.name}
+              currentStock={consumable.currentStock}
+              unit={consumable.unit}
+              size="sm"
+            />
+          ) : undefined
         }
       >
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -172,35 +177,45 @@ export default function ConsumableDetailPage() {
         </p>
         {/* Quick adjust (±1) above covers the common case; these open the detailed form
             for a specific quantity / reason, or an absolute recount. */}
-        <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
-          <Button size="sm" variant="outline" onClick={() => setMovementType("IN")}>
-            <ArrowDownTrayIcon />
-            Add…
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setMovementType("OUT")}>
-            <ArrowUpTrayIcon />
-            Remove…
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setMovementType("ADJUSTMENT")}
-          >
-            <ScaleIcon />
-            Adjust…
-          </Button>
-        </div>
-      </Panel>
+        {canWrite && (
+          <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setMovementType("IN")}
+            >
+              <ArrowDownTrayIcon />
+              Add…
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setMovementType("OUT")}
+            >
+              <ArrowUpTrayIcon />
+              Remove…
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setMovementType("ADJUSTMENT")}
+            >
+              <ScaleIcon />
+              Adjust…
+            </Button>
+          </div>
+        )}
+      </DetailPanel>
 
-      <Panel title="Details">
+      <DetailPanel title="Details">
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <Detail label="SKU">
+          <DetailField label="SKU">
             <span className="font-mono">{consumable.sku ?? "—"}</span>
-          </Detail>
-          <Detail label="Category">
+          </DetailField>
+          <DetailField label="Category">
             {categoryName ? <Badge variant="outline">{categoryName}</Badge> : "—"}
-          </Detail>
-          <Detail label="Unit">{consumable.unit}</Detail>
+          </DetailField>
+          <DetailField label="Unit">{consumable.unit}</DetailField>
         </dl>
         {consumable.description && (
           <div className="mt-4 space-y-1">
@@ -218,9 +233,9 @@ export default function ConsumableDetailPage() {
             <dd className="text-sm whitespace-pre-wrap">{consumable.notes}</dd>
           </div>
         )}
-      </Panel>
+      </DetailPanel>
 
-      <Panel title="Movements">
+      <DetailPanel title="Movements">
         {(movements?.length ?? 0) === 0 ? (
           <p className="text-sm text-muted-foreground">
             No movements yet. Add, remove or adjust stock to start the ledger.
@@ -255,7 +270,10 @@ export default function ConsumableDetailPage() {
                       </TableCell>
                       <TableCell>
                         {actor ? (
-                          <span className="flex items-center gap-2">
+                          <Link
+                            href={`/users/${actor.id}`}
+                            className="flex items-center gap-2 hover:underline"
+                          >
                             <UserAvatar
                               size="sm"
                               firstName={actor.firstName}
@@ -265,7 +283,7 @@ export default function ConsumableDetailPage() {
                             <span className="truncate">
                               {actor.firstName} {actor.lastName}
                             </span>
-                          </span>
+                          </Link>
                         ) : (
                           <span className="text-muted-foreground">System</span>
                         )}
@@ -280,7 +298,7 @@ export default function ConsumableDetailPage() {
             </Table>
           </div>
         )}
-      </Panel>
+      </DetailPanel>
 
       <StockMovementDialog
         open={movementType != null}
@@ -300,37 +318,6 @@ export default function ConsumableDetailPage() {
         onConfirm={() => deleteConsumable.mutateAsync(consumable.id)}
         onDeleted={() => router.push("/consumables")}
       />
-    </div>
-  );
-}
-
-/** A bordered section with a heading and optional header action. */
-function Panel({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-lg border p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** A label/value pair in the details grid. */
-function Detail({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="text-sm">{children}</dd>
     </div>
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowLeftIcon,
   ArrowTopRightOnSquareIcon,
   PencilSquareIcon,
   TrashIcon,
@@ -9,12 +8,17 @@ import {
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { type ReactNode, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
+import { PageHeader } from "@/components/page-header";
+import { Breadcrumb } from "@/components/breadcrumb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { ErrorState } from "@/components/resource-table";
 import { UserAvatar } from "@/components/user-avatar";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useArticles } from "@/lib/api/hooks/use-articles";
 import { useAssets } from "@/lib/api/hooks/use-assets";
@@ -41,8 +45,9 @@ export default function UserDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
+  const canWrite = useCanWrite();
 
-  const { data: user, isLoading, isError } = useUser(id);
+  const { data: user, isLoading, isError, error, refetch } = useUser(id);
   // Active + released assignments and active + revoked grants for the full per-person picture.
   const { data: assignments } = useUserAssignments(id, false);
   const { data: grants } = useUserGrants(id, false);
@@ -72,27 +77,21 @@ export default function UserDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-4xl space-y-4">
-        <Skeleton className="h-4 w-20" />
-        <Skeleton className="h-8 w-1/2" />
-        <Skeleton className="h-40 w-full" />
+      <div className="mx-auto max-w-4xl">
+        <DetailSkeleton panels={3} />
       </div>
     );
   }
 
   if (isError || !user) {
     return (
-      <div className="mx-auto flex max-w-4xl flex-col items-center gap-3 rounded-lg border border-dashed py-16 text-center">
-        <p className="text-sm font-medium">User not found</p>
-        <p className="text-sm text-muted-foreground">
-          They may have been offboarded.
-        </p>
-        <Button variant="outline" asChild>
-          <Link href="/users">
-            <ArrowLeftIcon />
-            Back to Users
-          </Link>
-        </Button>
+      <div className="mx-auto max-w-4xl">
+        <ErrorState
+          title="User not found"
+          description="They may have been offboarded, or the API is unreachable."
+          onRetry={() => refetch()}
+          error={error}
+        />
       </div>
     );
   }
@@ -109,65 +108,65 @@ export default function UserDetailPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <Button variant="ghost" size="sm" asChild className="-ml-2">
-            <Link href="/users">
-              <ArrowLeftIcon />
-              Users
-            </Link>
-          </Button>
-          <div className="flex flex-wrap items-center gap-3">
+      <PageHeader
+        breadcrumb={
+          <Breadcrumb
+            items={[
+              { label: "Users", href: "/users" },
+              { label: `${user.firstName} ${user.lastName}` },
+            ]}
+          />
+        }
+        title={
+          <span className="flex items-center gap-3">
             <UserAvatar
               size="lg"
               firstName={user.firstName}
               lastName={user.lastName}
               email={user.email}
             />
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight">
-                {user.firstName} {user.lastName}
-              </h1>
-              <p className="text-sm text-muted-foreground">{user.email}</p>
-            </div>
-            <UserStatusBadge isActive={user.isActive} />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setEditOpen(true)}
-          >
-            <PencilSquareIcon />
-            Edit
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Offboard user"
-            onClick={() => setDeleteOpen(true)}
-          >
-            <TrashIcon />
-          </Button>
-        </div>
-      </div>
+            {user.firstName} {user.lastName}
+          </span>
+        }
+        subtitle={user.email}
+        badge={<UserStatusBadge isActive={user.isActive} />}
+        actions={
+          canWrite ? (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+                <PencilSquareIcon />
+                Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Offboard user"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <TrashIcon />
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
 
-      <Panel title="Profile">
+      <DetailPanel title="Profile">
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <Detail label="Email">{user.email}</Detail>
-          <Detail label="Status">
+          <DetailField label="Email">{user.email}</DetailField>
+          <DetailField label="Status">
             <UserStatusBadge isActive={user.isActive} />
-          </Detail>
-          <Detail label="Role">
+          </DetailField>
+          <DetailField label="Role">
             <UserRoleSelect user={user} />
-          </Detail>
-          <Detail label="Joined">{formatDate(user.createdAt)}</Detail>
-          <Detail label="Last updated">{formatDate(user.updatedAt)}</Detail>
+          </DetailField>
+          <DetailField label="Joined">{formatDate(user.createdAt)}</DetailField>
+          <DetailField label="Last updated">
+            {formatDate(user.updatedAt)}
+          </DetailField>
         </dl>
-      </Panel>
+      </DetailPanel>
 
-      <Panel title="Assets held">
+      <DetailPanel title="Assets held">
         {activeAssignments.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             Holds no assets right now.
@@ -202,9 +201,9 @@ export default function UserDetailPage() {
             ))}
           </ul>
         )}
-      </Panel>
+      </DetailPanel>
 
-      <Panel title="Application access">
+      <DetailPanel title="Application access">
         {activeGrants.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No active application access.
@@ -231,11 +230,7 @@ export default function UserDetailPage() {
                       {grant.accessLevel && (
                         <Badge variant="secondary">{grant.accessLevel}</Badge>
                       )}
-                      {expired && (
-                        <Badge className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                          Expired
-                        </Badge>
-                      )}
+                      {expired && <StatusBadge tone="warning">Expired</StatusBadge>}
                     </div>
                     <p className="truncate text-sm text-muted-foreground">
                       Granted {formatDate(grant.grantedAt)}
@@ -256,9 +251,9 @@ export default function UserDetailPage() {
             })}
           </ul>
         )}
-      </Panel>
+      </DetailPanel>
 
-      <Panel title="Authored articles">
+      <DetailPanel title="Authored articles">
         {articles.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             Has not authored any knowledge base articles.
@@ -288,10 +283,10 @@ export default function UserDetailPage() {
             ))}
           </ul>
         )}
-      </Panel>
+      </DetailPanel>
 
       {assignmentHistory.length > 0 && (
-        <Panel title="Ownership history">
+        <DetailPanel title="Ownership history">
           <ul className="divide-y text-sm">
             {assignmentHistory.map((assignment) => (
               <li
@@ -313,11 +308,11 @@ export default function UserDetailPage() {
               </li>
             ))}
           </ul>
-        </Panel>
+        </DetailPanel>
       )}
 
       {grantHistory.length > 0 && (
-        <Panel title="Access history">
+        <DetailPanel title="Access history">
           <ul className="divide-y text-sm">
             {grantHistory.map((grant) => (
               <li
@@ -342,7 +337,7 @@ export default function UserDetailPage() {
               </li>
             ))}
           </ul>
-        </Panel>
+        </DetailPanel>
       )}
 
       <UserFormDialog
@@ -362,37 +357,6 @@ export default function UserDetailPage() {
         Offboarding revokes their access grants and releases their assets. To
         keep them on record but disabled, set them inactive instead.
       </DeleteConfirmDialog>
-    </div>
-  );
-}
-
-/** A bordered section with a heading and optional header action. */
-function Panel({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-lg border p-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** A label/value pair in the profile grid. */
-function Detail({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="text-sm">{children}</dd>
     </div>
   );
 }
