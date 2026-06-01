@@ -3,7 +3,7 @@ title: Deferred / accepted risks
 tags: [security, deferred]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-01
 ---
 
 # Deferred / accepted risks
@@ -17,19 +17,21 @@ the accepted baseline.
 > risk, that is a finding — open a `SEC-NNN` in `issues/` and link the ADR. The shim implementation was
 > checked against ADR-0022 (see DEF-002) and currently **matches** it.
 
-## DEF-001 — The whole API is unauthenticated (no guards)
+## DEF-001 — Authn/authz on the API ✅ RESOLVED (2026-06-01)
 
-- **ADR:** [[0016-auth-strategy-deferred]] (accepted). **Risk owner:** auth work (future IdP/OIDC).
-- Every endpoint is open: anyone who can reach `:3001` can read/create/update/(soft-)delete every
-  entity. Accepted as **dev-only** — "Current endpoints are for local development only… do not expose
-  this build publicly."
-- **Why not a finding:** explicitly decided and bounded to dev. **Trigger to revisit:** the first
-  endpoint that needs real identity, or any plan to expose the build. If exposed publicly this is, in
-  effect, Critical — that conditional severity is reflected in [[summary]], not re-filed here.
-- **Highest-sensitivity instance:** the Access pillar (ADR-0023). `GET /access-grants` exposes "who can
-  access what" — including `accessLevel: admin` on `isCritical` applications — to any caller. Under the
-  no-auth posture this is the same accepted root, but it is the most valuable recon target if exposed,
-  so it should be among the first endpoints placed behind auth.
+- **History:** originally "the whole API is unauthenticated (no guards)" — every endpoint open, accepted
+  as **dev-only** under [[0016-auth-strategy-deferred]].
+- **Now resolved in two steps:**
+  - **Authentication** ([[0038-jit-user-provisioning]]): a global `JwtAuthGuard` validates the OIDC
+    Bearer JWT (or the `X-User-Id` shim when `AUTH_MODE=shim`) on every non-`@Public()` route and sets
+    `request.user`.
+  - **Authorization (RBAC)** ([[0040-rbac-roles]]): a `RolesGuard` composes after the auth guard and
+    enforces `@Roles()`. Access-grant writes, Users administration and all destructive deletes are
+    `ADMIN`-only; `MEMBER` does ordinary inventory/KB/asset writes; `VIEWER` is read-only.
+- **Residual / to verify:** reads (`GET`) are still open to any authenticated user — including
+  `GET /access-grants`, which exposes "who can access what". That is by design (any authenticated team
+  member can see the access map) but is the most sensitive read; a future tightening to ADMIN-only is a
+  judgement call, not a regression. The `X-User-Id` shim remains forgeable (see DEF-002) and is dev-only.
 
 ## DEF-002 — `X-User-Id` is a forgeable identity shim
 

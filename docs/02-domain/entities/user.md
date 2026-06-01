@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-01
 ---
 
 # User
@@ -29,9 +29,15 @@ the reverse.
 - Offboarding a user must not erase history: assignments and grants are *released*, not
   deleted (soft delete + lifecycle timestamps).
 - **Identity / auth:** the local User is the source of truth for the domain. Authentication is
-  **deferred** ([[0016-auth-strategy-deferred]]); when it lands we integrate with an external IdP
-  (OIDC) and map its `sub` to `externalId` — we do **not** implement our own auth. Current
-  endpoints are **unauthenticated (dev-only)**.
+  handled by an external IdP (OIDC) whose `sub` maps to `externalId`; the global guard JIT-provisions
+  a User on first login ([[0038-jit-user-provisioning]]) — we do **not** implement our own auth.
+  `AUTH_MODE=shim` keeps the `X-User-Id` header path for dev/test.
+- **Authorization (RBAC):** a single `role` ([[0040-rbac-roles]]) governs what a user may do —
+  `ADMIN` (full access, including Access-grant writes, Users administration and destructive deletes),
+  `MEMBER` (normal inventory / KB / asset operations) and `VIEWER` (read-only everywhere). Enforced by
+  the `RolesGuard`, which composes after the auth guard. The **first** user ever provisioned (seed or
+  first JIT login) is `ADMIN`; everyone else defaults to `MEMBER`. Only an `ADMIN` can change a role
+  (the Users controller is ADMIN-gated), so there is no self-escalation path.
 
 ## Conventions
 
@@ -52,7 +58,8 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `firstName` | `string` | required. |
 | `lastName` | `string` | required. |
 | `isActive` | `boolean` | `@default(true)`. Activation flag — see note below. |
-| `externalId` | `string?` | `@unique`, nullable. Holds the IdP `sub` once auth is integrated; `null` until then ([[0016-auth-strategy-deferred]]). |
+| `role` | `Role` | `@default(MEMBER)`. RBAC role: `ADMIN` / `MEMBER` / `VIEWER` ([[0040-rbac-roles]]). First user ever provisioned = `ADMIN`. |
+| `externalId` | `string?` | `@unique`, nullable. Holds the IdP `sub`; populated on first OIDC login ([[0038-jit-user-provisioning]]); `null` for unlinked users ([[0016-auth-strategy-deferred]]). |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | Soft delete — `null` while live; reads filter `deletedAt: null` ([[0006-soft-delete-and-auditing]]). |
@@ -66,10 +73,12 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 ## Endpoints
 
 `apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted), `GET /users/:id`,
-`POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete). Bodies validated against the
+`POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete), `POST /users/:id/offboard`.
+All **write** endpoints (create / update / delete / offboard) are **ADMIN-only** (`@Roles('ADMIN')`,
+[[0040-rbac-roles]]); the reads are open to any authenticated user. Bodies validated against the
 shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). Also
 `GET /users/:id/assignments?activeOnly=` lists the assets assigned to the user ([[asset-assignment]]).
 
 Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] · [[ticket]] ·
 [[asset-centric]] · [[shared-package]] · [[0013-zod-validation-pipe]] ·
-[[0016-auth-strategy-deferred]]
+[[0016-auth-strategy-deferred]] · [[0038-jit-user-provisioning]] · [[0040-rbac-roles]]
