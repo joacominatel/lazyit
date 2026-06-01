@@ -1,5 +1,8 @@
 import { Test } from '@nestjs/testing';
-import { DashboardSummarySchema } from '@lazyit/shared';
+import {
+  DashboardSummarySchema,
+  RecentActivityItemSchema,
+} from '@lazyit/shared';
 import { DashboardService } from './dashboard.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -25,6 +28,8 @@ type PrismaMock = {
   consumable: { count: jest.Mock; findMany: jest.Mock };
   article: { count: jest.Mock };
   assetHistory: { findMany: jest.Mock };
+  $queryRaw: jest.Mock;
+  $transaction: jest.Mock;
 };
 
 function buildPrismaMock(): PrismaMock {
@@ -35,6 +40,10 @@ function buildPrismaMock(): PrismaMock {
     consumable: { count: jest.fn(), findMany: jest.fn() },
     article: { count: jest.fn() },
     assetHistory: { findMany: jest.fn() },
+    // $queryRaw returns a sentinel "query handle"; $transaction resolves the array of handles to
+    // canned results — mirroring how getActivity batches the page read + the count.
+    $queryRaw: jest.fn(),
+    $transaction: jest.fn(),
   };
 }
 
@@ -207,5 +216,96 @@ describe('DashboardService', () => {
   it('stamps generatedAt as an ISO-8601 string', async () => {
     const summary = await service.getSummary();
     expect(Number.isNaN(Date.parse(summary.generatedAt))).toBe(false);
+  });
+
+  describe('getActivity (recent_activity view read + shaping)', () => {
+    // One row per source, exactly as the recent_activity view + actor LEFT JOIN return them: the pg
+    // driver maps occurredAt (timestamptz) to a JS Date, and actorId/actorName are nullable.
+    const viewRows = [
+      {
+        occurredAt: new Date('2026-05-31T12:00:00.000Z'),
+        actorId: '11111111-1111-4111-8111-111111111111',
+        actorName: 'Admin User',
+        entityType: 'consumable',
+        entityId: 'cconsum000000000000000001',
+        action: 'stock_in',
+        summary: 'Stock added: +10',
+      },
+      {
+        occurredAt: new Date('2026-05-31T11:00:00.000Z'),
+        actorId: '11111111-1111-4111-8111-111111111111',
+        actorName: 'Admin User',
+        entityType: 'application',
+        entityId: 'capp00000000000000000001',
+        action: 'granted',
+        summary: 'Access granted to a user',
+      },
+      {
+        occurredAt: new Date('2026-05-31T10:00:00.000Z'),
+        actorId: null,
+        actorName: null,
+        entityType: 'asset',
+        entityId: 'casset0000000000000000001',
+        action: 'created',
+        summary: 'Asset created',
+      },
+    ];
+
+    beforeEach(() => {
+      // $queryRaw is called twice (page slice, then count); $transaction resolves the [page, count]
+      // array of handles to the canned results.
+      prisma.$queryRaw
+        .mockReturnValueOnce('PAGE_QUERY')
+        .mockReturnValueOnce('COUNT_QUERY');
+      prisma.$transaction.mockResolvedValue([viewRows, [{ count: 3n }]]);
+    });
+
+    it('returns a Page<RecentActivityItem> with ISO timestamps and the echoed window', async () => {
+      const page = await service.getActivity({ limit: 20, offset: 0 });
+      expect(page.total).toBe(3);
+      expect(page.limit).toBe(20);
+      expect(page.offset).toBe(0);
+      expect(page.items).toHaveLength(3);
+      expect(page.items[0]).toEqual({
+        occurredAt: '2026-05-31T12:00:00.000Z',
+        actorId: '11111111-1111-4111-8111-111111111111',
+        actorName: 'Admin User',
+        entityType: 'consumable',
+        entityId: 'cconsum000000000000000001',
+        action: 'stock_in',
+        summary: 'Stock added: +10',
+      });
+    });
+
+    it('keeps a null actor (system / unknown / deleted actor) as null id + name', async () => {
+      const page = await service.getActivity({ limit: 20, offset: 0 });
+      const assetRow = page.items.find((i) => i.entityType === 'asset');
+      expect(assetRow?.actorId).toBeNull();
+      expect(assetRow?.actorName).toBeNull();
+    });
+
+    it('every returned row validates against the shared RecentActivityItemSchema', async () => {
+      const page = await service.getActivity({ limit: 20, offset: 0 });
+      for (const item of page.items) {
+        expect(() => RecentActivityItemSchema.parse(item)).not.toThrow();
+      }
+    });
+
+    it('batches the page read and the count in a single $transaction', async () => {
+      await service.getActivity({ limit: 20, offset: 0 });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledWith([
+        'PAGE_QUERY',
+        'COUNT_QUERY',
+      ]);
+    });
+
+    it('coerces a bigint count from COUNT(*)::bigint to a JS number', async () => {
+      prisma.$transaction.mockResolvedValue([viewRows, [{ count: 42n }]]);
+      const page = await service.getActivity({ limit: 20, offset: 10 });
+      expect(page.total).toBe(42);
+      expect(typeof page.total).toBe('number');
+      expect(page.offset).toBe(10);
+    });
   });
 });
