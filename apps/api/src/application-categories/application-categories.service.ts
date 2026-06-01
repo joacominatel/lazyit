@@ -3,6 +3,7 @@ import type {
   CreateApplicationCategory,
   UpdateApplicationCategory,
 } from '@lazyit/shared';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -46,6 +47,29 @@ export class ApplicationCategoriesService {
     return this.prisma.applicationCategory.update({
       where: { id },
       data: { deletedAt: new Date() },
+    });
+  }
+
+  /**
+   * Restore a soft-deleted category: clear `deletedAt` (ADR-0041). Found via the `includeSoftDeleted`
+   * escape hatch (the read filter would hide it). 404 if it never existed; idempotent if already
+   * live. The partial unique index frees `name` on delete, so a restore can 409 if another live
+   * category took the name in the meantime (mapped by the global PrismaExceptionFilter).
+   */
+  async restore(id: string) {
+    const category = await this.prisma.applicationCategory.findFirst({
+      where: { id },
+      includeSoftDeleted: true,
+    } as Prisma.ApplicationCategoryFindFirstArgs);
+    if (!category) {
+      throw new NotFoundException(`ApplicationCategory ${id} not found`);
+    }
+    if (category.deletedAt === null) {
+      return category; // already live — idempotent
+    }
+    return this.prisma.applicationCategory.update({
+      where: { id },
+      data: { deletedAt: null },
     });
   }
 }
