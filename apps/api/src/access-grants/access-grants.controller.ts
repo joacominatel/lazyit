@@ -29,6 +29,7 @@ import {
   UpdateAccessGrantNotesDto,
 } from './access-grant.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
 
 @ApiBearerAuth()
@@ -104,8 +105,9 @@ export class AccessGrantsController {
   }
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Open a grant (give a user access to an application)',
+    summary: 'Open a grant (give a user access to an application) — ADMIN only',
   })
   @ApiCreatedResponse({ type: AccessGrantDto })
   create(
@@ -116,8 +118,10 @@ export class AccessGrantsController {
   }
 
   @Patch(':id/revoke')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Revoke an active grant (sets revokedAt; 409 if already revoked)',
+    summary:
+      'Revoke an active grant (sets revokedAt; 409 if already revoked) — ADMIN only',
   })
   @ApiOkResponse({ type: AccessGrantDto })
   @ApiConflictResponse({ description: 'The grant is already revoked' })
@@ -130,15 +134,19 @@ export class AccessGrantsController {
   }
 
   @Patch(':id/notes')
-  @ApiOperation({ summary: 'Update only the notes of a grant (null clears)' })
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Update only the notes of a grant (null clears) — ADMIN only',
+  })
   @ApiOkResponse({ type: AccessGrantDto })
   updateNotes(@Param('id') id: string, @Body() dto: UpdateAccessGrantNotesDto) {
     return this.grants.updateNotes(id, dto);
   }
 
   @Patch(':id/expiry')
+  @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Change the expiry of a grant (null makes it permanent)',
+    summary: 'Change the expiry of a grant (null makes it permanent) — ADMIN only',
   })
   @ApiOkResponse({ type: AccessGrantDto })
   updateExpiry(
