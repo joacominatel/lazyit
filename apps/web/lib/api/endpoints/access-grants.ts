@@ -3,6 +3,8 @@ import type {
   AccessGrantListPage,
   CreateAccessGrant,
   RevokeAccessGrant,
+  UpdateAccessGrantExpiry,
+  UpdateAccessGrantNotes,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
 
@@ -71,6 +73,35 @@ export function revokeAccessGrant(
   data: RevokeAccessGrant = {},
 ): Promise<AccessGrant> {
   return apiFetch<AccessGrant>(`${BASE}/${id}/revoke`, {
+    method: "PATCH",
+    body: data,
+  });
+}
+
+/**
+ * Edit only a grant's notes (`PATCH /access-grants/:id/notes`). `notes: null` clears them. Identity
+ * (user, application, grantedAt) is immutable — this is a metadata edit, no actor.
+ */
+export function updateAccessGrantNotes(
+  id: string,
+  data: UpdateAccessGrantNotes,
+): Promise<AccessGrant> {
+  return apiFetch<AccessGrant>(`${BASE}/${id}/notes`, {
+    method: "PATCH",
+    body: data,
+  });
+}
+
+/**
+ * Change a grant's expiry (`PATCH /access-grants/:id/expiry`) — extend, shorten, or clear it.
+ * `expiresAt: null` removes the expiry (makes the grant permanent). Informative only: changing it
+ * never revokes or reactivates the grant (ADR-0023).
+ */
+export function updateAccessGrantExpiry(
+  id: string,
+  data: UpdateAccessGrantExpiry,
+): Promise<AccessGrant> {
+  return apiFetch<AccessGrant>(`${BASE}/${id}/expiry`, {
     method: "PATCH",
     body: data,
   });
