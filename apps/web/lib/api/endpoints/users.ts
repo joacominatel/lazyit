@@ -22,11 +22,37 @@ import { createCrudEndpoints } from "../crud-endpoints";
 const BASE = "/users";
 const users = createCrudEndpoints<User, CreateUser, UpdateUser>(BASE);
 
-// The `GET /users` list is paginated (ADR-0030 amendment): the API returns a
-// `Page<User>` envelope. Interim unwrap to `items` keeps the current array-based
-// screen working; the list-chain wave replaces this with full envelope + params.
-export const getUsers = (): Promise<User[]> =>
-  apiFetch<Page<User>>(BASE).then((page) => page.items);
+/**
+ * Server-side params for the user list (#104). `q` matches firstName/lastName/email;
+ * `sort` is allowlisted to `firstName|lastName|email|role|createdAt` (unknown → 400). The
+ * active/inactive status filter is NOT a server param — the screen applies it client-side over the
+ * page. `limit`/`offset` thread the pagination window (ADR-0030).
+ */
+export interface UserListParams {
+  q?: string;
+  sort?: string;
+  dir?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * List non-deleted users, paged. `GET /users` returns a `Page<User>` envelope; we return the whole
+ * envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only the server-supported
+ * params are forwarded (extra client-only filter keys are ignored).
+ */
+export function getUsers(params: UserListParams = {}): Promise<Page<User>> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.sort) {
+    qs.set("sort", params.sort);
+    if (params.dir) qs.set("dir", params.dir);
+  }
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  const search = qs.toString();
+  return apiFetch<Page<User>>(search ? `${BASE}?${search}` : BASE);
+}
 export const getUser = users.get;
 export const createUser = users.create;
 export const updateUser = users.update;
