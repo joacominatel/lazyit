@@ -207,7 +207,8 @@ Two cooperating pieces replace the console chore:
   `/setup` route detects the unconfigured state, lets the operator pick **bundled Zitadel** or
   **BYOI**, and creates the **first ADMIN** via an idempotent `POST /config/setup` (gated by an
   "any-ADMIN-exists" flag, a CSRF token and a rate limit). Once an ADMIN exists the wizard
-  self-locks and redirects to the dashboard.
+  self-locks and redirects to `/login` (the new ADMIN authenticates through the IdP first). A
+  first-run gate in `apps/web/proxy.ts` routes a fresh, sessionless operator to `/setup`.
 
 The wizard is **BYOI-safe**: a BYOI operator skips the Zitadel step (their `OIDC_*` env vars are
 already set) and still creates the first ADMIN; the backend makes **zero** Management-API calls when
