@@ -1,6 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CreateUser, Role, UpdateUser } from "@lazyit/shared";
-import { createUser, deleteUser, updateUser } from "../endpoints/users";
+import {
+  createUser,
+  deleteUser,
+  restoreUser,
+  updateUser,
+} from "../endpoints/users";
 import { userKeys } from "./use-users";
 
 /**
@@ -54,6 +59,18 @@ export function useDeleteUser() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => deleteUser(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: userKeys.all }),
+  });
+}
+
+/**
+ * Restore (re-onboard) a soft-deleted user (ADMIN, ADR-0041). Invalidates the users cache so the
+ * archived list updates; the API does NOT re-grant the user's prior access/assignments.
+ */
+export function useRestoreUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => restoreUser(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: userKeys.all }),
   });
 }
