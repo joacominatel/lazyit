@@ -31,8 +31,11 @@ import { ArticlesService } from '../articles/articles.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parsePageQuery } from '../common/parse-page-query';
+import { assertCanListDeleted } from '../common/deleted-filter';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
+import type { User } from '../../generated/prisma/client';
 
 class ApplicationDto extends createZodDto(ApplicationSchema) {}
 class ApplicationListPageDto extends createZodDto(ApplicationListPageSchema) {}
@@ -53,7 +56,7 @@ export class ApplicationsController {
   @Get()
   @ApiOperation({
     summary:
-      'List applications (paginated; excludes soft-deleted). Server-side q search + sort.',
+      'List applications (paginated; active by default). Server-side q search + sort. deleted=only lists archived rows (ADMIN).',
   })
   @ApiQuery({
     name: 'q',
@@ -92,6 +95,13 @@ export class ApplicationsController {
     enum: ['asc', 'desc'],
     description: 'Sort direction (default asc when sort is set).',
   })
+  @ApiQuery({
+    name: 'deleted',
+    required: false,
+    enum: ['active', 'only'],
+    description:
+      'Soft-delete slice. active (default) = live rows; only = archived (soft-deleted) rows — ADMIN only (403 otherwise). (ADR-0041)',
+  })
   @ApiOkResponse({ type: ApplicationListPageDto })
   findAll(
     @Query('q') q?: string,
@@ -100,11 +110,21 @@ export class ApplicationsController {
     @Query('page') page?: string,
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.applications.findPage(
-      { q },
-      parsePageQuery({ limit, offset, page, sort, dir }),
-    );
+    const pageQuery = parsePageQuery({
+      limit,
+      offset,
+      page,
+      sort,
+      dir,
+      deleted,
+    });
+    // The list route carries no @Roles (any authenticated user may list ACTIVE rows), so gate the
+    // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
+    assertCanListDeleted(pageQuery.deleted, user);
+    return this.applications.findPage({ q }, pageQuery);
   }
 
   @Get(':id')
