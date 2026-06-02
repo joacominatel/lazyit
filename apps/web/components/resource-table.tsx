@@ -2,6 +2,7 @@
 
 import {
   ArrowPathIcon,
+  ArrowUturnLeftIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ChevronUpDownIcon,
@@ -10,11 +11,13 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/16/solid";
+import { XMarkIcon } from "@heroicons/react/16/solid";
 import Link from "next/link";
 import type { ComponentType, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { RequestIdNote } from "@/components/request-id-note";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,6 +56,26 @@ const SKELETON_ROW_KEYS = ["a", "b", "c", "d", "e", "f", "g", "h"] as const;
 /** Number of mobile skeleton cards to mirror the loading state below `md`. */
 const SKELETON_CARD_KEYS = ["a", "b", "c"] as const;
 
+/**
+ * The select-all header state a list feeds {@link ResourceTable} to enable multi-row selection (the
+ * bulk / batch-action wave). When present, the table renders a leading checkbox column whose header
+ * toggles the whole visible page; rows render their own {@link SelectCell}. Wire this straight from
+ * `useRowSelection(...)`. ADMIN-gate the whole thing at the call site (`useCanWrite()`) — omit
+ * `selection` entirely for non-admins so the column never appears.
+ */
+export interface ResourceTableSelection {
+  /** Whether the leading checkbox column renders at all (and a header select-all is shown). */
+  enabled: boolean;
+  /** True when every visible row is selected. */
+  allSelected: boolean;
+  /** True when some but not all visible rows are selected (header shows an indeterminate dash). */
+  someSelected: boolean;
+  /** Select (true) or clear (false) every visible row. */
+  onToggleAll: (selected: boolean) => void;
+  /** Accessible label for the header checkbox (e.g. "Select all assets"). */
+  selectAllLabel?: string;
+}
+
 interface ResourceTableProps {
   columns: ResourceColumn[];
   /** Show skeleton rows instead of content (initial load). */
@@ -78,6 +101,13 @@ interface ResourceTableProps {
    * horizontally as before. Loading and filtered-empty states are mirrored automatically.
    */
   mobileChildren?: ReactNode;
+  /**
+   * Enables multi-row selection: when set (and `enabled`), the table renders a leading checkbox
+   * column with a header select-all. Rows opt in by rendering a leading {@link SelectCell}; mobile
+   * cards pass `selectable`/`selected`/`onSelectedChange` to {@link ResourceCard}. See
+   * {@link ResourceTableSelection}.
+   */
+  selection?: ResourceTableSelection;
 }
 
 /**
@@ -100,14 +130,35 @@ export function ResourceTable({
   filteredEmptyAction,
   children,
   mobileChildren,
+  selection,
 }: ResourceTableProps) {
   const hasMobile = mobileChildren !== undefined;
+  const selectable = selection?.enabled ?? false;
+  // The leading checkbox column adds one cell — fold it into skeleton rows and the empty colSpan.
+  const colSpan = columns.length + (selectable ? 1 : 0);
   return (
     <>
       <div className={cn("rounded-lg border", hasMobile && "hidden md:block")}>
         <Table>
           <TableHeader>
             <TableRow>
+              {selectable ? (
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={
+                      selection?.allSelected
+                        ? true
+                        : selection?.someSelected
+                          ? "indeterminate"
+                          : false
+                    }
+                    onCheckedChange={(value) =>
+                      selection?.onToggleAll(value === true)
+                    }
+                    aria-label={selection?.selectAllLabel ?? "Select all rows"}
+                  />
+                </TableHead>
+              ) : null}
               {columns.map((column) => (
                 <TableHead key={column.key} className={column.headClassName}>
                   {column.srOnlyHeader ? (
@@ -123,6 +174,11 @@ export function ResourceTable({
             {isLoading ? (
               SKELETON_ROW_KEYS.slice(0, skeletonRows).map((rowKey) => (
                 <TableRow key={rowKey}>
+                  {selectable ? (
+                    <TableCell>
+                      <Skeleton className="size-4 rounded-[4px]" />
+                    </TableCell>
+                  ) : null}
                   {columns.map((column) => (
                     <TableCell key={column.key}>
                       {column.skeleton ?? <Skeleton className="h-4 w-24" />}
@@ -133,7 +189,7 @@ export function ResourceTable({
             ) : isFilteredEmpty ? (
               <TableRow>
                 <TableCell
-                  colSpan={columns.length}
+                  colSpan={colSpan}
                   className="h-24 text-center text-muted-foreground"
                   aria-live="polite"
                 >
@@ -181,6 +237,37 @@ export function ResourceTable({
   );
 }
 
+/**
+ * The leading selection cell for a desktop table row — a checkbox bound to one row's selected state.
+ * Render it as the FIRST `<TableCell>` of each row when the table's `selection` is enabled, and set
+ * `data-state={selected ? "selected" : undefined}` on the row so the shared `data-[state=selected]`
+ * row styling highlights it. The `onClick` stop-propagation keeps a click on the box from also
+ * triggering a row-level navigation handler.
+ */
+export function SelectCell({
+  checked,
+  onCheckedChange,
+  label,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  /** Accessible label (e.g. `Select ${asset.name}`). */
+  label: string;
+}) {
+  return (
+    <TableCell
+      className="w-10"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <Checkbox
+        checked={checked}
+        onCheckedChange={(value) => onCheckedChange(value === true)}
+        aria-label={label}
+      />
+    </TableCell>
+  );
+}
+
 /** The filtered-empty message + an optional inline "Clear filters" recovery action. */
 function FilteredEmpty({
   message,
@@ -211,6 +298,10 @@ export function ResourceCard({
   badge,
   meta,
   actions,
+  selectable = false,
+  selected = false,
+  onSelectedChange,
+  selectLabel = "Select row",
 }: {
   /** Detail route the card body links to. Omit for a non-navigable card. */
   href?: string;
@@ -222,6 +313,17 @@ export function ResourceCard({
   meta?: ReactNode;
   /** Row of controls (quick-adjust, RowActions) pinned to the card footer. */
   actions?: ReactNode;
+  /**
+   * Enables a leading selection checkbox on the card (the mobile twin of {@link SelectCell}). Pair
+   * with `selected`/`onSelectedChange` from `useRowSelection(...)`; ADMIN-gate at the call site.
+   */
+  selectable?: boolean;
+  /** Whether this card is selected (controlled). */
+  selected?: boolean;
+  /** Toggle this card's selected state. */
+  onSelectedChange?: (selected: boolean) => void;
+  /** Accessible label for the card's checkbox (e.g. `Select ${asset.name}`). */
+  selectLabel?: string;
 }) {
   const header = (
     <div className="flex items-start justify-between gap-2">
@@ -230,17 +332,35 @@ export function ResourceCard({
     </div>
   );
   return (
-    <div className="rounded-lg border p-4">
-      {href ? (
-        <Link
-          href={href}
-          className="block rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {header}
-        </Link>
-      ) : (
-        header
+    <div
+      className={cn(
+        "rounded-lg border p-4 transition-colors",
+        selectable && selected && "border-primary/40 bg-muted",
       )}
+      data-state={selectable && selected ? "selected" : undefined}
+    >
+      <div className="flex items-start gap-3">
+        {selectable ? (
+          <Checkbox
+            checked={selected}
+            onCheckedChange={(value) => onSelectedChange?.(value === true)}
+            aria-label={selectLabel}
+            className="mt-0.5 shrink-0"
+          />
+        ) : null}
+        <div className="min-w-0 flex-1">
+          {href ? (
+            <Link
+              href={href}
+              className="block rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {header}
+            </Link>
+          ) : (
+            header
+          )}
+        </div>
+      </div>
       {meta ? (
         <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
           {meta}
@@ -306,6 +426,83 @@ export function RowActions({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/**
+ * A single per-row "Restore" button for the archived (`deleted=only`) view, replacing the Edit/Delete
+ * dropdown — a soft-deleted row can only be brought back, not edited or re-deleted. Wire `onRestore`
+ * to the per-entity `POST /<resource>/:id/restore` mutation; the page owns the toast + invalidation.
+ */
+export function RestoreRowAction({
+  onRestore,
+  disabled = false,
+  label = "Restore",
+}: {
+  onRestore: () => void;
+  disabled?: boolean;
+  label?: string;
+}) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onRestore}
+      disabled={disabled}
+    >
+      <ArrowUturnLeftIcon />
+      {label}
+    </Button>
+  );
+}
+
+/**
+ * The contextual batch-action bar surfaced when one or more rows are selected (the bulk wave). It is
+ * sticky at the bottom of the viewport so it stays reachable while scrolling a long list, shows the
+ * selected count + a "Clear" affordance, and renders the page-supplied `actions` (bulk delete /
+ * restore / status-change / revoke buttons). Renders nothing when `count` is 0, so a page can mount
+ * it unconditionally. ADMIN-gate at the call site — the selection column shouldn't even appear for a
+ * non-admin.
+ */
+export function BatchActionBar({
+  count,
+  onClear,
+  children,
+  noun = "item",
+}: {
+  /** How many rows are selected (the bar hides at 0). */
+  count: number;
+  /** Clear the whole selection. */
+  onClear: () => void;
+  /** The bulk action buttons for this list. */
+  children: ReactNode;
+  /** Singular noun for the count label (e.g. "asset"); pluralized with a trailing "s". */
+  noun?: string;
+}) {
+  if (count === 0) return null;
+  return (
+    <div
+      className="sticky bottom-4 z-20 mx-auto flex w-full max-w-2xl flex-col gap-3 rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:flex-row sm:items-center sm:justify-between"
+      role="region"
+      aria-label="Bulk actions"
+    >
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium tabular-nums" aria-live="polite">
+          {count} {noun}
+          {count === 1 ? "" : "s"} selected
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onClear}
+          aria-label="Clear selection"
+        >
+          <XMarkIcon className="size-4" />
+          Clear
+        </Button>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
+    </div>
   );
 }
 
