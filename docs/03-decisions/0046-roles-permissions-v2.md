@@ -1,0 +1,188 @@
+---
+title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissions (catalog-as-code)"
+tags: [adr, auth, authz, rbac, permissions, security]
+status: accepted
+created: 2026-06-02
+updated: 2026-06-02
+deciders: [Joaquín Minatel]
+---
+
+# ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissions (catalog-as-code)
+
+## Status
+
+**accepted** — 2026-06-02 (CEO decision). This ADR **supersedes the authorization MECHANISM of**
+[[0040-rbac-roles]] — the coarse `@Roles()` role-gate — with a fine-grained permission model, while
+**keeping** ADR-0040's per-domain philosophy (authorization is per-domain, NEVER per-record / per-row
+ACLs — Option B's per-resource matrix stays rejected). It **extends** [[0043-zitadel-source-of-truth]]
+(DB-first authorization, IdP write-back, BYOI): permissions are a new DB-first authorization source
+that, like roles, is never read from a token claim and never synced to the IdP.
+
+> This record covers **phases P0 + P1 only** — the *foundation*: the catalog, the `RolePermission`
+> table + seed, and this decision. It is **purely additive and behavior-preserving**: nothing consumes
+> `RolePermission` yet. The enforcement layer (`@RequirePermission` guard, annotating GETs, migrating
+> the existing `@Roles` sites, the config endpoints) is later, separately-shipped waves (see
+> [§Phased delivery](#phased-delivery)).
+
+## Context
+
+[[0040-rbac-roles]] closed the May-2026 "authN but no authZ" finding with a deliberately minimal
+model: a single `Role` enum on `User` (`ADMIN`/`MEMBER`/`VIEWER`), a `@Roles()` decorator and a
+`RolesGuard`. It explicitly **rejected** any per-resource permission matrix as over-engineering for a
+5–20-person team. That was the right call to *close the hole fast*, but it left two limitations the CEO
+now wants addressed:
+
+- **The role→capability mapping is hard-coded in decorators.** "What a MEMBER may do" is spread across
+  ~70 `@Roles(...)` annotations on controllers. There is no way to adjust a role's powers without
+  editing and redeploying code, and no single place that states the full matrix.
+- **Reads are wide open.** Every `GET` is unannotated, so any authenticated user — including VIEWER —
+  can read **everything**, including the user directory and who-has-access-to-what. ADR-0040 accepted
+  this ("read everything = all roles"); the CEO wants to start tightening the most sensitive reads.
+
+The CEO's framing (quoted, do not re-litigate):
+
+- **"3 roles fijos + permisos configurables."** Keep `enum Role { ADMIN MEMBER VIEWER }` exactly
+  as-is; make the per-role PERMISSIONS configurable. This is **not** dynamic custom roles (deferred to
+  a future ADR).
+- **"Pre-tightening de los 2 reads sensibles."** Every `<domain>:read` is seeded to all three roles to
+  preserve today's behavior — **except** `accessGrant:read` and `user:read`, seeded to ADMIN + MEMBER
+  only (VIEWER loses them). This closes the worst read-exposure on day one.
+- **"Fundación unificada + SA fast-follow."** This permission catalog is the shared vocabulary that
+  will **also** serve service accounts later — design it clean and reusable, not coupled to humans.
+
+Constant constraints carried from the auth arc:
+
+- **INV-1 ([[INVARIANTS]]):** authorization is DB-first; a token claim is never an authorization
+  source. Permissions must resolve from DB rows, like roles do.
+- **The ADMIN set is immutable/full** so the last-admin / first-admin invariants ([[INVARIANTS]] INV-7
+  + the ADR-0040 last-admin guard) stay intact — an ADMIN must always be omnipotent.
+- **Permissions are lazyit-local** — they NEVER sync to Zitadel. Only the 3 coarse roles keep their
+  existing `grantRole` write-back ([[0043-zitadel-source-of-truth]] §3); fine-grained permissions are
+  invisible to the IdP.
+
+## Considered options
+
+- **Option A — Fixed roles + configurable permissions, catalog-as-code (chosen).** Keep the 3-role
+  enum; introduce a frozen `Permission` catalog (`domain:action` strings) defined as zod-in-shared,
+  and a `RolePermission` table mapping each role → its permissions. Authorization shifts from
+  "is your role in this set" to "does your role hold this permission". The catalog is closed and
+  reviewable; the matrix is data (seeded, later editable via an ADMIN config surface). One vocabulary,
+  reusable for service accounts later.
+- **Option B — Dynamic custom roles (a `Role` table + arbitrary role creation).** Maximum flexibility:
+  operators define their own roles and assign permissions freely. Rejected for now: it breaks the
+  fixed-role invariants the whole auth stack leans on (last-admin, first-user-ADMIN, the IdP role
+  mirror of exactly three project roles), adds a role-management UI + lifecycle, and over-serves a
+  5–20-person single-org team. **Deferred to a future ADR**, not discarded.
+- **Option C — Keep ADR-0040 as-is (coarse `@Roles` only).** Zero new surface. Rejected: it leaves the
+  role→capability mapping uneditable-without-code and the sensitive reads wide open — the two gaps
+  this ADR exists to close.
+
+## Decision
+
+Adopt **Option A**. The shape:
+
+### 1. Roles stay fixed; permissions become the unit of authorization
+
+`enum Role { ADMIN MEMBER VIEWER }` is **unchanged** (schema, `RoleSchema` in `@lazyit/shared`, the IdP
+mirror of exactly three project roles — all untouched). What changes is that a privilege decision will
+(in a later wave) ask **"does the actor's role hold permission `X`?"** instead of **"is the actor's
+role in set `{…}`?"**. The role is still the thing a user *has*; permissions are what a role *grants*.
+
+### 2. Catalog-as-code — a frozen `Permission` vocabulary in `@lazyit/shared`
+
+The catalog is a **closed zod enum** of `domain:action` literals (`PermissionSchema` /
+`PERMISSIONS`), with the inferred `Permission` type and a `RolePermissionMatrix` wire shape
+(`Record<Role, Permission[]>`) — all in `@lazyit/shared` so `api` (seed, guard) and `web` (a future
+config UI) share one definition. **Catalog-as-code, not a DB-driven dictionary:** a typo can't mint a
+permission, CI fails on an unknown literal, and the set is greppable and reviewable. Domains are the
+existing modules (`asset`, `application`, `accessGrant`, `consumable`, `article`/KB, `location`,
+`assetModel`, `category`, `user`, `dashboard`, `search`, `settings`). Actions are `read | write |
+delete` plus the **coarse capability verbs** that map to today's ADMIN-only gates: `accessGrant:grant`,
+`user:manage`, `settings:manage`. Read-only surfaces (`dashboard`, `search`) expose only `:read`.
+
+The catalog is deliberately **not coupled to the `User`/`Role` model** — it is a flat capability list,
+so the same vocabulary authorizes **service accounts** in the fast-follow ("fundación unificada + SA").
+
+### 3. `RolePermission` table — the DB-first authorization source
+
+```prisma
+model RolePermission {
+  role       Role
+  permission String
+  @@id([role, permission])
+  @@map("role_permissions")
+}
+```
+
+`permission` is a plain `String` (not a Postgres enum) on purpose: the closed catalog lives as zod in
+shared, so the DB stays a flat key/value the seed and a future config endpoint write 1:1 — adding a
+permission never needs an enum migration. **INV-1 holds:** authorization resolves from these rows,
+never a token claim. The table has no soft-delete / timestamps — the composite PK is the row's
+identity (it is small configuration, not domain data).
+
+### 4. Read-authz rollout — default-open, then tighten the two sensitive reads
+
+The seed (P1) is taken **1:1 from the [[0040-rbac-roles]] capability matrix** with the CEO's
+pre-tightening:
+
+| Role | Seeded permissions |
+| --- | --- |
+| **ADMIN** | the **COMPLETE** catalog (every permission) — immutable/full |
+| **MEMBER** | every `:read` + every `:write` (no `:delete`, no coarse verb — all ADMIN-only per ADR-0040) |
+| **VIEWER** | every `:read` **except** `accessGrant:read` and `user:read` |
+
+So **every `<domain>:read` is granted to all three roles** (behavior-preserving — today's GETs stay
+reachable by any authenticated user) **except the two pre-tightened reads**, which become ADMIN +
+MEMBER only. VIEWER loses the user directory and the access-grant ledger — the worst read-exposure —
+on day one. This is the **only** behavior delta in the foundation, and it only takes effect once the
+enforcement wave annotates those GETs; the table + seed alone change nothing.
+
+The seeded matrix is derived from a **single source-of-truth constant** (`DEFAULT_ROLE_PERMISSIONS` in
+`@lazyit/shared`) that both the seed and a golden test consume, so the documented matrix and the
+seeded rows can never drift (a wrong seed fails CI).
+
+### 5. ADMIN is immutable/full; permissions never touch the IdP
+
+The ADMIN permission set is, by decision, the entire catalog and is **never editable** — the future
+config surface must refuse to edit it, so the last-admin / first-admin invariants stay intact and an
+ADMIN is always omnipotent. Fine-grained permissions are **lazyit-local**: they are NEVER written back
+to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
+([[0043-zitadel-source-of-truth]] §3); the IdP knows nothing of permissions.
+
+### Phased delivery
+
+- **P0 — this ADR + the new invariant.** (done)
+- **P1 — the contract + the table.** The shared `Permission` catalog + `RolePermissionMatrix`; the
+  `RolePermission` model + migration; the idempotent seed from `DEFAULT_ROLE_PERMISSIONS`; the golden
+  test. **Additive, behavior-preserving — nothing consumes `RolePermission` yet.** (done)
+- **P2 (later) — `@RequirePermission` decorator + the guard evolution** that reads `RolePermission`.
+- **P3 (later) — annotate the GETs** (this is where the two pre-tightened reads actually bite).
+- **P4 (later) — migrate the existing `@Roles` sites** to `@RequirePermission`.
+- **P5 (later) — the config endpoints** (read/update the matrix; ADMIN row immutable).
+- **Fast-follow — service accounts** reuse this same catalog.
+- **Future ADR — dynamic custom roles** (Option B), if ever needed.
+
+## Consequences
+
+- **Positive:**
+  - The role→capability mapping becomes **data** (a seeded matrix), the groundwork for editing it
+    without a code change (P5) — and a single place that states the whole matrix.
+  - The two worst read exposures (`user:read`, `accessGrant:read`) are pre-tightened to ADMIN+MEMBER
+    on day one (once P3 lands), closing them without a configurability project.
+  - One **reusable** permission vocabulary for humans *and* service accounts.
+  - Authorization stays **DB-first and IdP-neutral** (INV-1); permissions never leak to the IdP.
+  - The ADMIN-is-full invariant keeps the last-admin / first-admin safety net intact.
+
+- **Negative / trade-offs:**
+  - A second authorization axis (roles *and* permissions) is more surface than ADR-0040's single
+    `@Roles`. Mitigated by catalog-as-code (closed, typed, CI-checked) and a phased rollout.
+  - Still per-domain, not per-record — a richer/multi-tenant deployment would need more (Option B);
+    accepted for the 5–20-person target.
+  - The foundation ships a table nothing reads yet. **Intentional**: it lets the contract + seed + test
+    land and be reviewed before any enforcement behavior changes.
+
+- **Follow-ups (separate PRs / ADRs):** P2–P5 above; the service-account fast-follow; the
+  dynamic-custom-roles future ADR (Option B).
+
+Related: [[0040-rbac-roles]] · [[0043-zitadel-source-of-truth]] · [[0038-jit-user-provisioning]] ·
+[[INVARIANTS]] · [[user]] · [[shared-package]]
