@@ -8,6 +8,7 @@ import type {
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
+import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { Prisma } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -122,15 +123,21 @@ export class AssetsService {
   ) {}
 
   /**
-   * A single page of non-deleted assets (the inventory pillar's main, heaviest list), newest first.
-   * Uses the LEAN projection ({@link ASSET_LIST_SELECT}): no `specs` blob and trimmed joins — the
-   * full relation graph stays on {@link findOne}. Runs the page `findMany(take/skip)` and the `count`
+   * A single page of assets (the inventory pillar's main, heaviest list), newest first. Uses the
+   * LEAN projection ({@link ASSET_LIST_SELECT}): no `specs` blob and trimmed joins — the full
+   * relation graph stays on {@link findOne}. Runs the page `findMany(take/skip)` and the `count`
    * over the **same** `where` inside one `$transaction`, so the `total` can't drift from the page.
    * Optional filters: category (via the model), location, status, and `q` (substring over
-   * name/serial/assetTag).
+   * name/serial/assetTag). The `deleted` slice (`active` default | `only`) scopes the page to live or
+   * soft-deleted assets; `only` carries the ADR-0032 `includeSoftDeleted` escape hatch so the read
+   * filter doesn't re-hide them (ADMIN-gated at the controller).
    */
   async findPage(filters: AssetFilters = {}, page: PageQuery) {
-    const where = this.buildWhere(filters);
+    const where = {
+      ...this.buildWhere(filters),
+      ...deletedWhere(page.deleted),
+    };
+    const includeSoftDeleted = includeSoftDeletedFor(page.deleted);
     const { take, skip } = offsetOf(page);
     // Server-side sort over the FULL result set (not page-local) via the per-resource allowlist
     // (ADR-0030 amendment). No `sort` ⇒ undefined ⇒ the default `createdAt desc` order below.
@@ -140,6 +147,12 @@ export class AssetsService {
         ASSET_SORT_ALLOWLIST,
       ) ??
       ({ createdAt: 'desc' } satisfies Prisma.AssetOrderByWithRelationInput);
+    // `includeSoftDeleted` is the ADR-0032 custom arg (stripped by the extension before Prisma sees
+    // it); Prisma's generated args type carries it only as `undefined`, so spread it in via an opaque
+    // object — keeping the `select` inference intact so the lean row type is preserved.
+    const escapeHatch: Record<string, unknown> = includeSoftDeleted
+      ? { includeSoftDeleted }
+      : {};
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.asset.findMany({
         where,
@@ -147,8 +160,9 @@ export class AssetsService {
         take,
         skip,
         select: ASSET_LIST_SELECT,
+        ...escapeHatch,
       }),
-      this.prisma.asset.count({ where }),
+      this.prisma.asset.count({ where, ...escapeHatch }),
     ]);
     // The lean rows carry `Date`s; the API serializes them to ISO strings at the HTTP boundary (same
     // as findOne) — the AssetListPage DTO documents the resulting wire shape (specs omitted, joins
