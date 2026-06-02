@@ -5,7 +5,7 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { XIcon } from "lucide-react"
+import { XMarkIcon } from "@heroicons/react/24/outline"
 
 function Dialog({
   ...props
@@ -76,7 +76,7 @@ function DialogContent({
               className="absolute top-2 right-2"
               size="icon-sm"
             >
-              <XIcon
+              <XMarkIcon
               />
               <span className="sr-only">Close</span>
             </Button>
