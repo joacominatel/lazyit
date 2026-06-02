@@ -270,7 +270,7 @@ describe('ArticlesService', () => {
   // --- listing visibility (paginated, lean) --------------------------------
 
   describe('findPage visibility', () => {
-    const PAGE = { limit: 50, offset: 0 };
+    const PAGE = { limit: 50, offset: 0, deleted: 'active' as const };
 
     it('shows only PUBLISHED to anonymous callers', async () => {
       await service.findPage({}, PAGE, undefined);
@@ -329,7 +329,11 @@ describe('ArticlesService', () => {
       )[0][0];
 
     it('uses the LEAN select: omits `content`, keeps `excerpt`', async () => {
-      await service.findPage({}, { limit: 50, offset: 0 }, undefined);
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, deleted: 'active' },
+        undefined,
+      );
       const select = listArgs().select;
       expect(select).not.toHaveProperty('content');
       expect(select.excerpt).toBe(true);
@@ -342,7 +346,7 @@ describe('ArticlesService', () => {
 
       const result = await service.findPage(
         { status: 'PUBLISHED' },
-        { limit: 5, offset: 10 },
+        { limit: 5, offset: 10, deleted: 'active' },
         undefined,
       );
 
@@ -807,7 +811,7 @@ describe('ArticlesService', () => {
       articleVersion.count.mockResolvedValueOnce(2);
       const page = await service.listVersions(
         'a',
-        { limit: 50, offset: 0 },
+        { limit: 50, offset: 0, deleted: 'active' },
         AUTHOR_USER as never,
       );
       expect(page).toEqual({
@@ -837,7 +841,7 @@ describe('ArticlesService', () => {
       await expect(
         service.listVersions(
           'a',
-          { limit: 50, offset: 0 },
+          { limit: 50, offset: 0, deleted: 'active' },
           OTHER_USER as never,
         ),
       ).rejects.toBeInstanceOf(NotFoundException);
