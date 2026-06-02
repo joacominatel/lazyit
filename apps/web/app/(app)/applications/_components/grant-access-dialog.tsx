@@ -1,10 +1,8 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { CreateAssetAssignmentSchema } from "@lazyit/shared";
 import { useEffect, useMemo } from "react";
-import { Controller, type Resolver, useForm, useWatch } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { UserFormDialog } from "@/app/(app)/users/_components/user-form-dialog";
 import { AccessLevelCombobox } from "@/components/access-level-combobox";
@@ -47,12 +45,14 @@ function dateInputToIso(value: string): string | undefined {
 }
 
 /**
- * Form values. Only `userId` is validated (required, a real uuid) via the resolver — its constraint
- * is picked off the shared schema. `accessLevel` (free-form), `expiresAt` (a `YYYY-MM-DD` date input,
- * not the wire ISO) and `notes` are optional and RHF-managed without a resolver rule; the API's
- * CreateAccessGrantSchema is the authority for the cross-field grantedAt≤expiresAt rule.
+ * Form values. Only `userId` is required (validated via RHF's field-level `rules` — the value is a
+ * real user id picked from the Select, so a `required` check is enough; the API re-validates).
+ * `accessLevel` (free-form), `expiresAt` (a `YYYY-MM-DD` date input, not the wire ISO) and `notes`
+ * are optional. We deliberately do NOT use a zod resolver here: the shared create schemas are
+ * `strictObject`s, so picking one field and validating the wider form object would reject the extra
+ * keys as "unrecognized" — the submit then silently fails (no toast, no field error). The API's
+ * CreateAccessGrantSchema stays the authority for the cross-field grantedAt≤expiresAt rule.
  */
-const FormSchema = CreateAssetAssignmentSchema.pick({ userId: true });
 type FormValues = {
   userId: string;
   accessLevel?: string;
@@ -91,7 +91,6 @@ export function GrantAccessDialog({
   const grant = useGrantAccess();
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(FormSchema) as Resolver<FormValues>,
     mode: "onTouched",
     defaultValues: { userId: "", accessLevel: "", expiresAt: "", notes: "" },
   });
@@ -154,6 +153,7 @@ export function GrantAccessDialog({
             <Controller
               control={form.control}
               name="userId"
+              rules={{ required: "Select a user" }}
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
                   <FieldLabel htmlFor="grant-user" required>
