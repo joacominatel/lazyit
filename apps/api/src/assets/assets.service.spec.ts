@@ -377,10 +377,11 @@ describe('AssetsService', () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
 
-    await service.findPage({}, { limit: 50, offset: 0 });
+    await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
 
     expect(asset.findMany).toHaveBeenCalledWith({
-      where: {},
+      // The default `active` slice scopes the list to live assets (ADR-0041).
+      where: { deletedAt: null },
       orderBy: { createdAt: 'desc' },
       take: 50,
       skip: 0,
@@ -399,7 +400,7 @@ describe('AssetsService', () => {
 
     const result = await service.findPage(
       { status: 'RETIRED', locationId: 'l1' },
-      { limit: 10, offset: 20 },
+      { limit: 10, offset: 20, deleted: 'active' },
     );
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -411,11 +412,19 @@ describe('AssetsService', () => {
     const countArgs = (
       asset.count.mock.calls as Array<[{ where: unknown }]>
     )[0][0];
-    // Identical where feeds both queries; take/skip come from the window.
-    expect(findManyArgs.where).toEqual({ locationId: 'l1', status: 'RETIRED' });
+    // Identical where feeds both queries (incl. the live-rows scope); take/skip come from the window.
+    expect(findManyArgs.where).toEqual({
+      locationId: 'l1',
+      status: 'RETIRED',
+      deletedAt: null,
+    });
     expect(findManyArgs.take).toBe(10);
     expect(findManyArgs.skip).toBe(20);
-    expect(countArgs.where).toEqual({ locationId: 'l1', status: 'RETIRED' });
+    expect(countArgs.where).toEqual({
+      locationId: 'l1',
+      status: 'RETIRED',
+      deletedAt: null,
+    });
     // The envelope echoes the window and carries the total.
     expect(result.total).toBe(7);
     expect(result.limit).toBe(10);
@@ -433,7 +442,10 @@ describe('AssetsService', () => {
     ]);
     asset.count.mockResolvedValue(1);
 
-    const result = await service.findPage({}, { limit: 50, offset: 0 });
+    const result = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
 
     expect(result.items[0]).not.toHaveProperty('assignments');
     expect(result.items[0]).not.toHaveProperty('specs');
@@ -444,7 +456,7 @@ describe('AssetsService', () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
 
-    await service.findPage({}, { limit: 50, offset: 0 });
+    await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
 
     const calls = asset.findMany.mock.calls as Array<
       [{ select: { assignments: { where: unknown } } }]
@@ -456,19 +468,28 @@ describe('AssetsService', () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
 
-    await service.findPage({ categoryId: 'c1' }, { limit: 50, offset: 0 });
+    await service.findPage(
+      { categoryId: 'c1' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
 
     const findManyArgs = (
       asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
     )[0][0];
-    expect(findManyArgs.where).toEqual({ model: { categoryId: 'c1' } });
+    expect(findManyArgs.where).toEqual({
+      model: { categoryId: 'c1' },
+      deletedAt: null,
+    });
   });
 
   it('findPage filters by q (case-insensitive OR over name/serial/assetTag)', async () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
 
-    await service.findPage({ q: 'srv' }, { limit: 50, offset: 0 });
+    await service.findPage(
+      { q: 'srv' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
 
     const calls = asset.findMany.mock.calls as Array<
       [{ where: Record<string, unknown> }]
@@ -479,7 +500,30 @@ describe('AssetsService', () => {
         { serial: { contains: 'srv', mode: 'insensitive' } },
         { assetTag: { contains: 'srv', mode: 'insensitive' } },
       ],
+      deletedAt: null,
     });
+  });
+
+  it('findPage deleted=only returns soft-deleted assets via the includeSoftDeleted escape hatch (ADR-0041)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage({}, { limit: 50, offset: 0, deleted: 'only' });
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<
+        [{ where: unknown; includeSoftDeleted?: boolean }]
+      >
+    )[0][0];
+    expect(findManyArgs.where).toEqual({ deletedAt: { not: null } });
+    expect(findManyArgs.includeSoftDeleted).toBe(true);
+    const countArgs = (
+      asset.count.mock.calls as Array<
+        [{ where: unknown; includeSoftDeleted?: boolean }]
+      >
+    )[0][0];
+    expect(countArgs.where).toEqual({ deletedAt: { not: null } });
+    expect(countArgs.includeSoftDeleted).toBe(true);
   });
 
   // --- findPage server-side sort (ADR-0030 amendment) ---------------------
@@ -487,7 +531,7 @@ describe('AssetsService', () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
 
-    await service.findPage({}, { limit: 50, offset: 0 });
+    await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
 
     const args = (
       asset.findMany.mock.calls as Array<[{ orderBy: unknown }]>
@@ -501,7 +545,7 @@ describe('AssetsService', () => {
 
     await service.findPage(
       {},
-      { limit: 50, offset: 0, sort: 'name', dir: 'asc' },
+      { limit: 50, offset: 0, sort: 'name', dir: 'asc', deleted: 'active' },
     );
 
     const args = (
@@ -516,7 +560,7 @@ describe('AssetsService', () => {
 
     await service.findPage(
       {},
-      { limit: 50, offset: 0, sort: 'status', dir: 'desc' },
+      { limit: 50, offset: 0, sort: 'status', dir: 'desc', deleted: 'active' },
     );
     const args = (
       asset.findMany.mock.calls as Array<[{ orderBy: unknown }]>
@@ -526,7 +570,10 @@ describe('AssetsService', () => {
 
   it('findPage REJECTS an unknown sort field with 400 (never silently ignored)', async () => {
     await expect(
-      service.findPage({}, { limit: 50, offset: 0, sort: 'specs', dir: 'asc' }),
+      service.findPage(
+        {},
+        { limit: 50, offset: 0, sort: 'specs', dir: 'asc', deleted: 'active' },
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
     // The 400 is raised before any DB work.
     expect(asset.findMany).not.toHaveBeenCalled();
