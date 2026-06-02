@@ -32,6 +32,7 @@ import { UsersService, USER_SORT_ALLOWLIST } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parsePageQuery } from '../common/parse-page-query';
+import { assertCanListDeleted } from '../common/deleted-filter';
 import { AssetAssignmentDto } from '../asset-assignments/asset-assignment.dto';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
@@ -56,7 +57,7 @@ export class UsersController {
   @Get()
   @ApiOperation({
     summary:
-      'List users (paginated; excludes soft-deleted). Server-side q search + sort.',
+      'List users (paginated; active by default). Server-side q search + sort. deleted=only lists offboarded (archived) users (ADMIN).',
   })
   @ApiQuery({
     name: 'q',
@@ -95,6 +96,13 @@ export class UsersController {
     enum: ['asc', 'desc'],
     description: 'Sort direction (default asc when sort is set).',
   })
+  @ApiQuery({
+    name: 'deleted',
+    required: false,
+    enum: ['active', 'only'],
+    description:
+      'Soft-delete slice. active (default) = live users; only = offboarded (soft-deleted) users — ADMIN only (403 otherwise). (ADR-0041)',
+  })
   @ApiOkResponse({ type: UserListPageDto })
   findAll(
     @Query('q') q?: string,
@@ -103,11 +111,21 @@ export class UsersController {
     @Query('page') page?: string,
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.users.findPage(
-      { q },
-      parsePageQuery({ limit, offset, page, sort, dir }),
-    );
+    const pageQuery = parsePageQuery({
+      limit,
+      offset,
+      page,
+      sort,
+      dir,
+      deleted,
+    });
+    // The list route carries no @Roles (any authenticated user may list ACTIVE users), so gate the
+    // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
+    assertCanListDeleted(pageQuery.deleted, user);
+    return this.users.findPage({ q }, pageQuery);
   }
 
   @Get('me')
