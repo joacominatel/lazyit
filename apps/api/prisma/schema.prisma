@@ -80,6 +80,26 @@ enum Role {
   VIEWER
 }
 
+/// Roles & Permissions v2 (ADR-0046) — the FOUNDATION. A configurable mapping from each fixed
+/// `Role` to the fine-grained `domain:action` permissions it holds. The 3 roles stay fixed
+/// (ADR-0040); only the PERMISSIONS behind them become configurable. This table is purely additive
+/// in this wave: nothing consumes it yet (the `@RequirePermission` guard is a later wave) — it is
+/// the seed/contract groundwork, behavior-preserving.
+///
+/// `permission` is a plain String (not an enum) deliberately: the closed catalog lives as zod in
+/// `@lazyit/shared` (`PermissionSchema`), so the DB stays a flat key/value store the seed and a
+/// future config endpoint write 1:1 — adding a permission never needs an enum migration. INV-1
+/// (ADR-0043 #1): authorization resolves from THESE rows, never a token claim. The ADMIN row set is
+/// the COMPLETE catalog and is immutable/full (the future config surface must never edit it).
+/// Append-only-ish config (no soft delete / timestamps): the composite PK is the row's identity.
+model RolePermission {
+  role       Role
+  permission String
+
+  @@id([role, permission])
+  @@map("role_permissions")
+}
+
 /// Where an asset physically lives — office, datacenter, rack, warehouse or
 /// "remote / with employee". Flat (non-hierarchical) for now.
 /// See docs/02-domain/entities/location.md
