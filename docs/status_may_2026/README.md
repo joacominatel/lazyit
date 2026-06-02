@@ -10,13 +10,15 @@ updated: 2026-06-01
 
 A point-in-time, multi-analyst review of the whole lazyit codebase (backend-weighted), run on
 **2026-05-30** (22 senior analysts · 218 findings). **Round 1** then shipped the urgent / quick-win
-cluster as 8 PRs (#61–#72). This folder is now the **living record** of that arc.
+cluster as 8 PRs (#61–#72); the **UX northstar cycle** later closed a large slice of the frontend /
+contract backlog as PRs (#100–#115). This folder is now the **living record** of that arc.
 
 ## Read this
 
-- **[[00-EXECUTIVE-SUMMARY|Round 1 closed, Round 2 backlog]]** (`00-EXECUTIVE-SUMMARY.md`) — what
-  Round 1 delivered, and the **prioritized Round 2 backlog** with the CEO decisions that gate it.
-  Verified against `dev` @ `d5b3b73` on 2026-06-01. **Start here.**
+- **[[00-EXECUTIVE-SUMMARY|Round 1 + UX cycle closed, residual backlog]]** (`00-EXECUTIVE-SUMMARY.md`) —
+  what Round 1 (§A) and the UX cycle (§A2) delivered, the **prioritized Round-2 backlog** with the CEO
+  decisions that gate it (§B), and **what is still pending after the UX cycle** (§D). Verified against
+  `dev` on 2026-06-01. **Start here.**
 
 ## What changed since the original review
 

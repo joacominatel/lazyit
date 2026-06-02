@@ -5,7 +5,8 @@
 > **Owner**: CTO. Updated when a new ADR is accepted, or when a non-ADR strategic decision lands in a session.
 >
 > Initially populated: 2026-05-26 (first CTO session), from all 36 ADRs in `docs/03-decisions/`.
-> Refreshed 2026-06-01 (post auth epic) — now covers all 44 ADRs (0001–0044).
+> Refreshed 2026-06-01 (post auth epic) — covered all 44 ADRs (0001–0044).
+> Refreshed 2026-06-01 (post UX northstar cycle, PRs #100–#115) — now covers all 45 ADRs (0001–0045; ADR-0045 = heroicons) + the ADR-0011/0030 amendments.
 
 ---
 
@@ -58,9 +59,16 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 ---
 
 **ADR-0011** — *Tailwind CSS + shadcn/ui for styling*
-**Status**: accepted
-**One-liner**: Tailwind v4 + shadcn/ui (`radix-nova`, `neutral` base); heroicons in app code, lucide only inside `components/ui/*`.
-**CTO note**: enforce heroicons rule; lucide-react must not leak into app code.
+**Status**: accepted — **amendment 3 (2026-06)**: the semantic tokens were activated/tuned
+**One-liner**: Tailwind v4 + shadcn/ui (`radix-nova`, `neutral` base).
+**CTO note**: amendment 3 (#102) **activated + tuned** `--success/--warning/--info` (+fg) for AA contrast on the bone canvas (solid pills, light + dark) and repurposed `--chart-1..5` as the categorical/avatar palette. The lucide-vs-heroicons icon rule moved to its own ADR-0045 (lucide is now fully dropped).
+
+---
+
+**ADR-0045** — *Standardize on Heroicons (drop lucide-react) + a two-weight convention*
+**Status**: accepted (2026-06-01)
+**One-liner**: app standardizes on **@heroicons only**; `lucide-react` removed entirely (the 6 vendored shadcn primitives + sonner re-skinned); two-weight convention — `24/outline` default + `16/solid` inline.
+**CTO note**: a deliberate divergence from shadcn's lucide default — heroicons was chosen for least churn. There is now **no lucide anywhere** in the tree (the old "lucide only inside `components/ui/*`" carve-out is gone). Annotated ADR-0011 + code-conventions.
 
 ---
 
@@ -209,7 +217,7 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 **ADR-0042** — *Knowledge Base depth — append-only versioning + asset/application linking*
 **Status**: accepted (2026-06-01); deepens ADR-0021
 **One-liner**: append-only `ArticleVersion` (snapshot on every versioned-field edit, autoincrement id, `@@unique([articleId, version])`) + `ArticleLink` join (article↔asset OR application, DB CHECK = exactly one target, two partial unique indexes) + article **content** now indexed in search.
-**CTO note**: this CORRECTS the long-standing doc drift (ArticleVersion did NOT exist before; this ADR creates it). Snapshot written in the same `$transaction` as the article write. Reads paginated + draft-privacy-gated. No rollback-to-version and no version/link UI yet (later wave). Linking is asset/app only.
+**CTO note**: this CORRECTS the long-standing doc drift (ArticleVersion did NOT exist before; this ADR creates it). Snapshot written in the same `$transaction` as the article write. Reads paginated + draft-privacy-gated. **Linking UI shipped in the UX cycle (#111)**: reverse endpoints `GET /assets/:id/articles` + `GET /applications/:id/articles` (#104) feed a "Related articles" panel on asset/application detail and a "Linked to" panel on the article. Still no rollback-to-version and no version-history UI (later wave). Linking is asset/app only.
 
 ---
 
@@ -294,10 +302,10 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 
 ---
 
-**ADR-0030** — *List endpoint pagination contract (offset; implementation deferred)*
-**Status**: accepted
-**One-liner**: `PageQuery` + `Page<T>` in `@lazyit/shared`; default 50, max 200. Existing 11 `findAll`s not yet retrofitted.
-**CTO note**: contract defined; implementation deferred. New list endpoints must use it. Prioritize `GET /access-grants` first when building. Spans front+back (two subagents).
+**ADR-0030** — *List endpoint pagination contract (offset) + sort/filter/archived amendments*
+**Status**: accepted; **amendment §6 (sort/`dir`) + §7 (`deleted=active|only`) — 2026-06-01**
+**One-liner**: `PageQuery` + `Page<T>` in `@lazyit/shared`; default 50, max 200. Amendment §6 added `sort` + `dir` (per-resource ALLOWLIST, unknown→400); §7 added `deleted` (`active`|`only`, ADMIN-only for `only`, invalid→400) over the ADR-0032 `includeSoftDeleted` hatch.
+**CTO note**: contract is now fully implemented — `Page<T>` + server `q`/sort/`dir`/`deleted` live on all 6 main lists + /articles + /access-grants + /dashboard/activity (#104/#114). New list endpoints must use it. ADMIN batch endpoints (`POST /assets/batch/{delete,restore,status}` + `POST /access-grants/batch/revoke`, body `{ids}` → `{requested,succeeded,skipped}`) landed alongside (#104). Cross-linked from ADR-0041 (restore).
 
 ---
 
@@ -359,6 +367,11 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 | 2026-06-01 | **Soft-delete restore policy: restore + partial unique indexes + citext email** | Soft delete was a one-way door that burned values forever; OIDC made case-sensitive email a duplicate-user trap | ADR-0041; restore endpoints ADMIN-gated; `User.externalId` deliberately stays a FULL unique |
 | 2026-06-01 | **Scheduler / async workers still DEFERRED** | No recurring job is actually needed yet; BullMQ+Redis not chosen | Don't build cron/queue work (expiry reminders, periodic role-sync) without an ADR |
 | 2026-06-01 | **No existing-user → Zitadel bulk role-sync built** | lazyit runs only on `dev`; operator uses `docker compose down -v` for a clean slate | ADR-0043 Fork #6; **revisit before any production deployment** |
+| 2026-06-01 | **UX/UI overhaul run as a 21-agent read-only audit → implemented in dependency waves** | The web lagged backend capability; a parallel audit surfaced the gaps, then work shipped as ordered waves (#100–#115) so contracts landed before consumers | Confirms the "fan-out read-only audit, then serialize the build by dependency" pattern; tokens/primitives before pages, backend list contract (#104) before the list chain (#110) |
+| 2026-06-01 | **Approved Fase 1+2 + four NEW surfaces** (settings admin area · KB runbooks UI · soft-delete restore UI · bulk actions) | Beyond polish, the cycle added net-new operator capability that the backend already supported (restore endpoints, ArticleLink, batch) | Delivered as #108 (settings), #111 (runbooks), #112 (restore + bulk); access-grants bulk-revoke data layer shipped but UI deferred (no owned grants table) |
+| 2026-06-01 | **Chose heroicons over the brief's lucide** (least churn) | The audit brief proposed lucide; the app already leaned heroicons, so standardizing on heroicons minimized rework | Recorded as **ADR-0045** (accepted); lucide dropped entirely; two-weight convention |
+| 2026-06-01 | **Approved the `Page<T>` sort/`dir` contract + migrating the 4 remaining lists server-side + `deleted=only` archived listing** | Real pagination/sort/search UI needs an authoritative server contract; archived listing needs an ADMIN-only escape hatch | ADR-0030 amendment §6 (sort/`dir`, per-resource allowlist, unknown→400) + §7 (`deleted=active\|only`); applications/consumables/users/locations migrated onto `Page<T>` + server `q` (#104/#114); fixed a consumable soft-delete leak |
+| 2026-06-01 | **Authorized the CTO to merge the UX-cycle PRs to `dev`** (not `master`) | A large multi-wave cycle; the CEO delegated `dev` merges for this cycle while keeping `dev → master` promotion to themselves | Exception scoped to this cycle's PRs; the standard "agents never merge; CEO promotes to master" rule otherwise stands |
 
 ---
 
@@ -386,7 +399,7 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 | BYOI write-back interface (SCIM/webhook) + bidirectional role sync | Deferred in ADR-0043 (Fork #5) | When a BYOI customer needs write-back |
 | CD / image publishing (GHCR + deploy flow + tagging) | Deferred in ADR-0027 | When a deploy target exists |
 | E2E / integration testing tooling | Deferred in ADR-0012 | When critical flows stabilize |
-| Settings backend (general app settings) | Deferred; `/config` covers first-run only | When a settings need appears |
+| Settings backend (general app settings store) | Deferred; `/config` covers first-run only. The new `/settings` web area (#108) is ADMIN UI over existing endpoints (taxonomies, asset-models, roles, config-status) — no general settings store yet | When a general settings need appears |
 
 ---
 
