@@ -264,7 +264,7 @@ describe('AccessGrantsService', () => {
 
     const result = await service.findPage(
       { userId: USER_ID },
-      { limit: 2, offset: 4 },
+      { limit: 2, offset: 4, deleted: 'active' },
     );
 
     // One transaction wrapping both queries (count can't drift from the page).
@@ -299,7 +299,7 @@ describe('AccessGrantsService', () => {
     accessGrant.findMany.mockResolvedValue([]);
     accessGrant.count.mockResolvedValue(0);
 
-    await service.findPage({}, { limit: 50, offset: 0 });
+    await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
 
     const findManyArgs = (
       accessGrant.findMany.mock.calls as FindManyCall[]
