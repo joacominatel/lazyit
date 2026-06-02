@@ -3,6 +3,7 @@ import type { CreateConsumable, UpdateConsumable } from "@lazyit/shared";
 import {
   createConsumable,
   deleteConsumable,
+  restoreConsumable,
   updateConsumable,
 } from "../endpoints/consumables";
 import { consumableKeys } from "./use-consumables";
@@ -34,6 +35,15 @@ export function useDeleteConsumable() {
   const invalidate = useInvalidateConsumables();
   return useMutation({
     mutationFn: (id: string) => deleteConsumable(id),
+    onSuccess: invalidate,
+  });
+}
+
+/** Restore one soft-deleted consumable (ADMIN). Invalidates so the archived list updates. */
+export function useRestoreConsumable() {
+  const invalidate = useInvalidateConsumables();
+  return useMutation({
+    mutationFn: (id: string) => restoreConsumable(id),
     onSuccess: invalidate,
   });
 }
