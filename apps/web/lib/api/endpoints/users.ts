@@ -26,7 +26,8 @@ const users = createCrudEndpoints<User, CreateUser, UpdateUser>(BASE);
  * Server-side params for the user list (#104). `q` matches firstName/lastName/email;
  * `sort` is allowlisted to `firstName|lastName|email|role|createdAt` (unknown → 400). The
  * active/inactive status filter is NOT a server param — the screen applies it client-side over the
- * page. `limit`/`offset` thread the pagination window (ADR-0030).
+ * page. `limit`/`offset` thread the pagination window (ADR-0030). `deleted: "only"` is the
+ * ADMIN-only archived view (soft-deleted / offboarded users).
  */
 export interface UserListParams {
   q?: string;
@@ -34,12 +35,14 @@ export interface UserListParams {
   dir?: "asc" | "desc";
   limit?: number;
   offset?: number;
+  deleted?: "only";
 }
 
 /**
- * List non-deleted users, paged. `GET /users` returns a `Page<User>` envelope; we return the whole
+ * List users, paged. `GET /users` returns a `Page<User>` envelope; we return the whole
  * envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only the server-supported
- * params are forwarded (extra client-only filter keys are ignored).
+ * params are forwarded (extra client-only filter keys are ignored). Default is active-only; pass
+ * `deleted: "only"` (ADMIN) for the archived view.
  */
 export function getUsers(params: UserListParams = {}): Promise<Page<User>> {
   const qs = new URLSearchParams();
@@ -50,6 +53,7 @@ export function getUsers(params: UserListParams = {}): Promise<Page<User>> {
   }
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
   return apiFetch<Page<User>>(search ? `${BASE}?${search}` : BASE);
 }
@@ -57,6 +61,14 @@ export const getUser = users.get;
 export const createUser = users.create;
 export const updateUser = users.update;
 export const deleteUser = users.remove;
+
+/**
+ * Restore (re-onboard) a soft-deleted user (`POST /users/:id/restore`, ADMIN). Clears `deletedAt` so
+ * the account exists and can log in again; does NOT re-grant prior access/assignments (ADR-0041).
+ */
+export function restoreUser(id: string): Promise<User> {
+  return apiFetch<User>(`${BASE}/${id}/restore`, { method: "POST" });
+}
 
 /**
  * The current authenticated user (`GET /users/me`). The OIDC token does NOT carry the lazyit RBAC

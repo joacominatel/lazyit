@@ -1,13 +1,20 @@
 "use client";
 
-import { PlusIcon, UserPlusIcon } from "@heroicons/react/24/outline";
-import type { User } from "@lazyit/shared";
+import {
+  ArrowUturnLeftIcon,
+  PlusIcon,
+  UserPlusIcon,
+} from "@heroicons/react/24/outline";
+import type { BatchResult, User } from "@lazyit/shared";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
+import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { PageHeader } from "@/components/page-header";
 import {
+  BatchActionBar,
   EmptyState,
   ErrorState,
   Pagination,
@@ -15,7 +22,9 @@ import {
   ResourceCardMeta,
   type ResourceColumn,
   ResourceTable,
+  RestoreRowAction,
   RowActions,
+  SelectCell,
   SortableHeader,
 } from "@/components/resource-table";
 import { SearchInput } from "@/components/search-input";
@@ -31,9 +40,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
 import { useUserList } from "@/lib/api/hooks/use-users";
-import { useDeleteUser } from "@/lib/api/hooks/use-user-mutations";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import {
+  useDeleteUser,
+  useRestoreUser,
+} from "@/lib/api/hooks/use-user-mutations";
+import { restoreUser } from "@/lib/api/endpoints/users";
+import { notifyBatchResult } from "@/lib/api/notify-batch-result";
+import { notifyError } from "@/lib/api/notify-error";
+import { runPerIdBatch } from "@/lib/api/per-id-batch";
+import { usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
+import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { formatDate } from "@/lib/utils/format";
 import { ByoiBanner } from "./_components/byoi-banner";
 import { UserFormDialog } from "./_components/user-form-dialog";
@@ -42,8 +59,11 @@ import { UserStatusBadge } from "./_components/user-status-badge";
 
 type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
 
-/** Filter param defaults. `status` (active/inactive) is filtered client-side over the page. */
-const FILTER_DEFAULTS = { status: "ALL" } as const;
+/**
+ * Filter param defaults. `status` (active/inactive) is filtered client-side over the page.
+ * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
+ */
+const FILTER_DEFAULTS = { status: "ALL", archived: "ALL" } as const;
 
 const STATUS_LABEL: Record<StatusFilter, string> = {
   ALL: "All",
@@ -52,7 +72,7 @@ const STATUS_LABEL: Record<StatusFilter, string> = {
 };
 
 export default function UsersPage() {
-  const canWrite = useCanWrite();
+  const { canWrite, isAdmin } = usePermissions();
   const {
     q,
     sort,
@@ -73,6 +93,8 @@ export default function UsersPage() {
   });
 
   const statusFilter = filters.status as StatusFilter;
+  // The archived view is ADMIN-only.
+  const archived = isAdmin && filters.archived === "only";
 
   // Forward only the server-supported params; `status` is filtered client-side over the page below.
   const { data: page, isLoading, isFetching, isError, error, refetch } =
@@ -82,12 +104,15 @@ export default function UsersPage() {
       dir: sort ? dir : undefined,
       limit,
       offset,
+      deleted: archived ? "only" : undefined,
     });
   const deleteUser = useDeleteUser();
+  const restoreUserMutation = useRestoreUser();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<User | undefined>(undefined);
   const [deleting, setDeleting] = useState<User | undefined>(undefined);
+  const [bulkRestoring, setBulkRestoring] = useState(false);
 
   const rows = useMemo(() => {
     const items = page?.items ?? [];
@@ -96,6 +121,37 @@ export default function UsersPage() {
       statusFilter === "ACTIVE" ? user.isActive : !user.isActive,
     );
   }, [page?.items, statusFilter]);
+
+  // Selection only matters in the archived view (its sole bulk action: Restore).
+  const visibleIds = useMemo(() => rows.map((user) => user.id), [rows]);
+  const selection = useRowSelection(visibleIds);
+  const selectable = archived;
+
+  function handleRestoreRow(user: User) {
+    const name = `${user.firstName} ${user.lastName}`;
+    restoreUserMutation.mutate(user.id, {
+      onSuccess: () => toast.success(`${name} restored`),
+      onError: (err) => notifyError(err, "Couldn't restore the user"),
+    });
+  }
+
+  /** Bulk restore via a per-id fan-out (no user batch endpoint exists). */
+  async function handleBulkRestore() {
+    setBulkRestoring(true);
+    try {
+      const result: BatchResult = await runPerIdBatch(
+        selection.selectedIds,
+        restoreUser,
+      );
+      notifyBatchResult(result, { noun: "user", verb: "restored" });
+      selection.clear();
+      await refetch();
+    } catch (err) {
+      notifyError(err, "Couldn't restore the selected users");
+    } finally {
+      setBulkRestoring(false);
+    }
+  }
 
   const columns = useMemo<ResourceColumn[]>(
     () => [
@@ -195,12 +251,23 @@ export default function UsersPage() {
         title="Users"
         subtitle="The people in your organization."
         actions={
-          canWrite ? (
-            <Button onClick={openCreate}>
-              <PlusIcon />
-              New user
-            </Button>
-          ) : null
+          <>
+            {isAdmin ? (
+              <ArchivedToggle
+                checked={archived}
+                onCheckedChange={(on) => {
+                  setFilter("archived", on ? "only" : FILTER_DEFAULTS.archived);
+                  selection.clear();
+                }}
+              />
+            ) : null}
+            {canWrite ? (
+              <Button onClick={openCreate}>
+                <PlusIcon />
+                New user
+              </Button>
+            ) : null}
+          </>
         }
       />
 
@@ -260,12 +327,29 @@ export default function UsersPage() {
           <ResourceTable
             columns={columns}
             isFilteredEmpty={rows.length === 0}
-            filteredEmptyMessage="No users match your filters."
+            filteredEmptyMessage={
+              archived ? "No archived users." : "No users match your filters."
+            }
             filteredEmptyAction={<ClearFiltersLink onClick={clearFilters} />}
+            selection={
+              selectable
+                ? {
+                    enabled: true,
+                    allSelected: selection.allSelected,
+                    someSelected: selection.someSelected,
+                    onToggleAll: selection.toggleAll,
+                    selectAllLabel: "Select all users on this page",
+                  }
+                : undefined
+            }
             mobileChildren={rows.map((user) => (
               <ResourceCard
                 key={user.id}
                 href={`/users/${user.id}`}
+                selectable={selectable}
+                selected={selection.isSelected(user.id)}
+                onSelectedChange={(on) => selection.setSelected(user.id, on)}
+                selectLabel={`Select ${user.firstName} ${user.lastName}`}
                 title={
                   <span className="inline-flex items-center gap-2">
                     <UserAvatar
@@ -292,7 +376,14 @@ export default function UsersPage() {
                   </>
                 }
                 actions={
-                  canWrite ? (
+                  archived ? (
+                    isAdmin ? (
+                      <RestoreRowAction
+                        onRestore={() => handleRestoreRow(user)}
+                        disabled={restoreUserMutation.isPending}
+                      />
+                    ) : undefined
+                  ) : canWrite ? (
                     <RowActions
                       onEdit={() => openEdit(user)}
                       onDelete={() => setDeleting(user)}
@@ -303,7 +394,21 @@ export default function UsersPage() {
             ))}
           >
             {rows.map((user) => (
-              <TableRow key={user.id}>
+              <TableRow
+                key={user.id}
+                data-state={
+                  selectable && selection.isSelected(user.id)
+                    ? "selected"
+                    : undefined
+                }
+              >
+                {selectable ? (
+                  <SelectCell
+                    checked={selection.isSelected(user.id)}
+                    onCheckedChange={(on) => selection.setSelected(user.id, on)}
+                    label={`Select ${user.firstName} ${user.lastName}`}
+                  />
+                ) : null}
                 <TableCell>
                   <UserAvatar
                     firstName={user.firstName}
@@ -329,7 +434,16 @@ export default function UsersPage() {
                   {formatDate(user.updatedAt)}
                 </TableCell>
                 <TableCell className="text-right">
-                  {canWrite ? (
+                  {archived ? (
+                    isAdmin ? (
+                      <div className="flex justify-end">
+                        <RestoreRowAction
+                          onRestore={() => handleRestoreRow(user)}
+                          disabled={restoreUserMutation.isPending}
+                        />
+                      </div>
+                    ) : null
+                  ) : canWrite ? (
                     <RowActions
                       onEdit={() => openEdit(user)}
                       onDelete={() => setDeleting(user)}
@@ -339,6 +453,23 @@ export default function UsersPage() {
               </TableRow>
             ))}
           </ResourceTable>
+
+          {archived ? (
+            <BatchActionBar
+              count={selection.count}
+              onClear={selection.clear}
+              noun="user"
+            >
+              <Button
+                size="sm"
+                onClick={handleBulkRestore}
+                disabled={bulkRestoring}
+              >
+                <ArrowUturnLeftIcon />
+                Restore
+              </Button>
+            </BatchActionBar>
+          ) : null}
 
           <Pagination
             total={total}

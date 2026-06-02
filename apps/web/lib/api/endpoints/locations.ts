@@ -26,7 +26,7 @@ const locations = createCrudEndpoints<Location, CreateLocation, UpdateLocation>(
  * Server-side params for the location list (#104). `q` matches name/address/floor/description;
  * `sort` is allowlisted to `name|type|createdAt|updatedAt` (unknown → 400). The location-type filter
  * is NOT a server param — the screen applies it client-side over the page. `limit`/`offset` thread
- * the pagination window (ADR-0030).
+ * the pagination window (ADR-0030). `deleted: "only"` is the ADMIN-only archived view.
  */
 export interface LocationListParams {
   q?: string;
@@ -34,12 +34,14 @@ export interface LocationListParams {
   dir?: "asc" | "desc";
   limit?: number;
   offset?: number;
+  deleted?: "only";
 }
 
 /**
- * List non-deleted locations, paged. `GET /locations` returns a `Page<Location>` envelope; we return
+ * List locations, paged. `GET /locations` returns a `Page<Location>` envelope; we return
  * the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
- * server-supported params are forwarded (extra client-only filter keys are ignored).
+ * server-supported params are forwarded (extra client-only filter keys are ignored). Default is
+ * active-only; pass `deleted: "only"` (ADMIN) for the archived view.
  */
 export function getLocations(
   params: LocationListParams = {},
@@ -52,6 +54,7 @@ export function getLocations(
   }
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
   return apiFetch<Page<Location>>(search ? `${BASE}?${search}` : BASE);
 }
@@ -59,3 +62,11 @@ export const getLocation = locations.get;
 export const createLocation = locations.create;
 export const updateLocation = locations.update;
 export const deleteLocation = locations.remove;
+
+/**
+ * Restore one soft-deleted location (`POST /locations/:id/restore`, ADMIN). Clears `deletedAt` and
+ * returns the restored row.
+ */
+export function restoreLocation(id: string): Promise<Location> {
+  return apiFetch<Location>(`${BASE}/${id}/restore`, { method: "POST" });
+}

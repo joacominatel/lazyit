@@ -3,6 +3,7 @@ import type { CreateLocation, UpdateLocation } from "@lazyit/shared";
 import {
   createLocation,
   deleteLocation,
+  restoreLocation,
   updateLocation,
 } from "../endpoints/locations";
 import { locationKeys } from "./use-locations";
@@ -38,6 +39,16 @@ export function useDeleteLocation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => deleteLocation(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: locationKeys.all }),
+  });
+}
+
+/** Restore one soft-deleted location (ADMIN). Invalidates so the archived list updates. */
+export function useRestoreLocation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => restoreLocation(id),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: locationKeys.all }),
   });

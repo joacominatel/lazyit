@@ -1,13 +1,17 @@
 "use client";
 
-import { CubeIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { ArrowUturnLeftIcon, CubeIcon, PlusIcon } from "@heroicons/react/24/outline";
+import type { BatchResult } from "@lazyit/shared";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
+import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { PageHeader } from "@/components/page-header";
 import {
+  BatchActionBar,
   EmptyState,
   ErrorState,
   Pagination,
@@ -15,7 +19,9 @@ import {
   ResourceCardMeta,
   type ResourceColumn,
   ResourceTable,
+  RestoreRowAction,
   RowActions,
+  SelectCell,
   SortableHeader,
 } from "@/components/resource-table";
 import { SearchInput } from "@/components/search-input";
@@ -32,22 +38,35 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { useConsumableCategories } from "@/lib/api/hooks/use-consumable-categories";
 import { useConsumables } from "@/lib/api/hooks/use-consumables";
-import { useDeleteConsumable } from "@/lib/api/hooks/use-consumable-mutations";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import {
+  useDeleteConsumable,
+  useRestoreConsumable,
+} from "@/lib/api/hooks/use-consumable-mutations";
+import { restoreConsumable } from "@/lib/api/endpoints/consumables";
+import { notifyBatchResult } from "@/lib/api/notify-batch-result";
+import { notifyError } from "@/lib/api/notify-error";
+import { runPerIdBatch } from "@/lib/api/per-id-batch";
+import { usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
+import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { formatDate } from "@/lib/utils/format";
 import { QuickAdjustButtons } from "./_components/quick-adjust-buttons";
 import { StockBadge } from "./_components/stock-badge";
 
 /**
  * Filter param defaults. `lowStock` is a server filter ("true"); `category` is client-side over the
- * page (the API has no category param).
+ * page (the API has no category param). `archived` ("ALL" | "only") drives the ADMIN-only
+ * `deleted=only` view via the URL.
  */
-const FILTER_DEFAULTS = { lowStock: "", category: "ALL" } as const;
+const FILTER_DEFAULTS = {
+  lowStock: "",
+  category: "ALL",
+  archived: "ALL",
+} as const;
 
 export default function ConsumablesPage() {
   const router = useRouter();
-  const canWrite = useCanWrite();
+  const { canWrite, isAdmin } = usePermissions();
   const {
     q,
     sort,
@@ -69,6 +88,8 @@ export default function ConsumablesPage() {
 
   const categoryFilter = filters.category;
   const lowStockOnly = filters.lowStock === "true";
+  // The archived view is ADMIN-only.
+  const archived = isAdmin && filters.archived === "only";
 
   // Forward only the server-supported params (`q`/`sort`/`dir`/`lowStock` + the window). `category`
   // is filtered client-side over the page below.
@@ -80,13 +101,16 @@ export default function ConsumablesPage() {
       lowStock: lowStockOnly,
       limit,
       offset,
+      deleted: archived ? "only" : undefined,
     });
   const { data: categories } = useConsumableCategories();
   const deleteConsumable = useDeleteConsumable();
+  const restoreConsumableMutation = useRestoreConsumable();
 
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(
     null,
   );
+  const [bulkRestoring, setBulkRestoring] = useState(false);
 
   const categoryNameById = useMemo(
     () =>
@@ -100,6 +124,38 @@ export default function ConsumablesPage() {
       ? items
       : items.filter((consumable) => consumable.categoryId === categoryFilter);
   }, [page?.items, categoryFilter]);
+
+  // Selection only matters in the archived view (the one place with a bulk action: Restore).
+  const visibleIds = useMemo(() => rows.map((c) => c.id), [rows]);
+  const selection = useRowSelection(visibleIds);
+  const selectable = archived;
+
+  function handleRestoreRow(id: string, name: string) {
+    restoreConsumableMutation.mutate(id, {
+      onSuccess: () => toast.success(`${name} restored`),
+      onError: (err) => notifyError(err, "Couldn't restore the consumable"),
+    });
+  }
+
+  /** Bulk restore via a per-id fan-out (no consumable batch endpoint exists). */
+  async function handleBulkRestore() {
+    setBulkRestoring(true);
+    try {
+      const result: BatchResult = await runPerIdBatch(
+        selection.selectedIds,
+        restoreConsumable,
+      );
+      // The per-id calls bypass the mutation hook, so refetch the list explicitly via a no-op restore
+      // is unnecessary — invalidate by re-running the query through the mutation's invalidator.
+      notifyBatchResult(result, { noun: "consumable", verb: "restored" });
+      selection.clear();
+      await refetch();
+    } catch (err) {
+      notifyError(err, "Couldn't restore the selected consumables");
+    } finally {
+      setBulkRestoring(false);
+    }
+  }
 
   const columns = useMemo<ResourceColumn[]>(
     () => [
@@ -214,14 +270,25 @@ export default function ConsumablesPage() {
         title="Consumables"
         subtitle="Stock-counted supplies — cables, adapters, toner and the like."
         actions={
-          canWrite ? (
-            <Button asChild>
-              <Link href="/consumables/new">
-                <PlusIcon />
-                New consumable
-              </Link>
-            </Button>
-          ) : null
+          <>
+            {isAdmin ? (
+              <ArchivedToggle
+                checked={archived}
+                onCheckedChange={(on) => {
+                  setFilter("archived", on ? "only" : FILTER_DEFAULTS.archived);
+                  selection.clear();
+                }}
+              />
+            ) : null}
+            {canWrite ? (
+              <Button asChild>
+                <Link href="/consumables/new">
+                  <PlusIcon />
+                  New consumable
+                </Link>
+              </Button>
+            ) : null}
+          </>
         }
       />
 
@@ -298,8 +365,23 @@ export default function ConsumablesPage() {
           <ResourceTable
             columns={columns}
             isFilteredEmpty={rows.length === 0}
-            filteredEmptyMessage="No consumables match your filters."
+            filteredEmptyMessage={
+              archived
+                ? "No archived consumables."
+                : "No consumables match your filters."
+            }
             filteredEmptyAction={<ClearFiltersLink onClick={clearFilters} />}
+            selection={
+              selectable
+                ? {
+                    enabled: true,
+                    allSelected: selection.allSelected,
+                    someSelected: selection.someSelected,
+                    onToggleAll: selection.toggleAll,
+                    selectAllLabel: "Select all consumables on this page",
+                  }
+                : undefined
+            }
             mobileChildren={rows.map((consumable) => (
               <ResourceCard
                 key={consumable.id}
@@ -311,6 +393,12 @@ export default function ConsumablesPage() {
                     minStock={consumable.minStock}
                   />
                 }
+                selectable={selectable}
+                selected={selection.isSelected(consumable.id)}
+                onSelectedChange={(on) =>
+                  selection.setSelected(consumable.id, on)
+                }
+                selectLabel={`Select ${consumable.name}`}
                 meta={
                   <>
                     <ResourceCardMeta label="Category">
@@ -328,7 +416,16 @@ export default function ConsumablesPage() {
                   </>
                 }
                 actions={
-                  canWrite ? (
+                  archived ? (
+                    isAdmin ? (
+                      <RestoreRowAction
+                        onRestore={() =>
+                          handleRestoreRow(consumable.id, consumable.name)
+                        }
+                        disabled={restoreConsumableMutation.isPending}
+                      />
+                    ) : undefined
+                  ) : canWrite ? (
                     <>
                       <QuickAdjustButtons
                         consumableId={consumable.id}
@@ -355,7 +452,23 @@ export default function ConsumablesPage() {
             ))}
           >
             {rows.map((consumable) => (
-              <TableRow key={consumable.id}>
+              <TableRow
+                key={consumable.id}
+                data-state={
+                  selectable && selection.isSelected(consumable.id)
+                    ? "selected"
+                    : undefined
+                }
+              >
+                {selectable ? (
+                  <SelectCell
+                    checked={selection.isSelected(consumable.id)}
+                    onCheckedChange={(on) =>
+                      selection.setSelected(consumable.id, on)
+                    }
+                    label={`Select ${consumable.name}`}
+                  />
+                ) : null}
                 <TableCell className="font-medium">
                   <Link
                     href={`/consumables/${consumable.id}`}
@@ -381,7 +494,7 @@ export default function ConsumablesPage() {
                   {formatDate(consumable.updatedAt)}
                 </TableCell>
                 <TableCell>
-                  {canWrite ? (
+                  {!archived && canWrite ? (
                     <div className="flex justify-end">
                       <QuickAdjustButtons
                         consumableId={consumable.id}
@@ -393,7 +506,18 @@ export default function ConsumablesPage() {
                   ) : null}
                 </TableCell>
                 <TableCell className="text-right">
-                  {canWrite ? (
+                  {archived ? (
+                    isAdmin ? (
+                      <div className="flex justify-end">
+                        <RestoreRowAction
+                          onRestore={() =>
+                            handleRestoreRow(consumable.id, consumable.name)
+                          }
+                          disabled={restoreConsumableMutation.isPending}
+                        />
+                      </div>
+                    ) : null
+                  ) : canWrite ? (
                     <RowActions
                       onEdit={() =>
                         router.push(`/consumables/${consumable.id}/edit`)
@@ -407,6 +531,23 @@ export default function ConsumablesPage() {
               </TableRow>
             ))}
           </ResourceTable>
+
+          {archived ? (
+            <BatchActionBar
+              count={selection.count}
+              onClear={selection.clear}
+              noun="consumable"
+            >
+              <Button
+                size="sm"
+                onClick={handleBulkRestore}
+                disabled={bulkRestoring}
+              >
+                <ArrowUturnLeftIcon />
+                Restore
+              </Button>
+            </BatchActionBar>
+          ) : null}
 
           <Pagination
             total={total}

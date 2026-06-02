@@ -1,17 +1,26 @@
 "use client";
 
-import { PlusIcon, ServerStackIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowUturnLeftIcon,
+  PlusIcon,
+  ServerStackIcon,
+  TrashIcon,
+} from "@heroicons/react/24/outline";
 import {
   type AssetStatus,
   AssetStatusSchema,
+  type BatchResult,
 } from "@lazyit/shared";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
+import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { PageHeader } from "@/components/page-header";
 import {
+  BatchActionBar,
   EmptyState,
   ErrorState,
   Pagination,
@@ -19,7 +28,9 @@ import {
   ResourceCardMeta,
   type ResourceColumn,
   ResourceTable,
+  RestoreRowAction,
   RowActions,
+  SelectCell,
   SortableHeader,
 } from "@/components/resource-table";
 import { SearchInput } from "@/components/search-input";
@@ -36,10 +47,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useAssets } from "@/lib/api/hooks/use-assets";
-import { useDeleteAsset } from "@/lib/api/hooks/use-asset-mutations";
+import {
+  useBatchDeleteAssets,
+  useBatchRestoreAssets,
+  useBatchSetAssetStatus,
+  useDeleteAsset,
+  useRestoreAsset,
+} from "@/lib/api/hooks/use-asset-mutations";
 import { useLocations } from "@/lib/api/hooks/use-locations";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { notifyBatchResult } from "@/lib/api/notify-batch-result";
+import { notifyError } from "@/lib/api/notify-error";
+import { usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
+import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { formatDate } from "@/lib/utils/format";
 import {
   AssetStatusBadge,
@@ -52,12 +72,14 @@ type OwnershipFilter = "ALL" | "HAS" | "NONE";
 /**
  * Filter param defaults for the URL list-state. `status`/`category`/`location` map to the server's
  * `status`/`categoryId`/`locationId` params; `ownership` is filtered client-side over the page.
+ * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
  */
 const FILTER_DEFAULTS = {
   status: "ALL",
   category: "ALL",
   location: "ALL",
   ownership: "ALL",
+  archived: "ALL",
 } as const;
 
 const OWNERSHIP_LABEL: Record<OwnershipFilter, string> = {
@@ -68,7 +90,7 @@ const OWNERSHIP_LABEL: Record<OwnershipFilter, string> = {
 
 export default function AssetsPage() {
   const router = useRouter();
-  const canWrite = useCanWrite();
+  const { canWrite, isAdmin } = usePermissions();
   const {
     q,
     sort,
@@ -92,6 +114,9 @@ export default function AssetsPage() {
   const categoryFilter = filters.category;
   const locationFilter = filters.location;
   const ownershipFilter = filters.ownership as OwnershipFilter;
+  // The archived view is ADMIN-only; a non-admin can never set it (toggle hidden) and we never send
+  // the param for them, so the API stays on the active-only list.
+  const archived = isAdmin && filters.archived === "only";
 
   // Forward server-supported params; `ownership` is filtered client-side over the page below.
   const { data: page, isLoading, isFetching, isError, error, refetch } =
@@ -104,10 +129,15 @@ export default function AssetsPage() {
       dir: sort ? dir : undefined,
       limit,
       offset,
+      deleted: archived ? "only" : undefined,
     });
   const { data: categories } = useAssetCategories();
   const { data: locations } = useLocations();
   const deleteAsset = useDeleteAsset();
+  const restoreAsset = useRestoreAsset();
+  const batchDelete = useBatchDeleteAssets();
+  const batchRestore = useBatchRestoreAssets();
+  const batchStatus = useBatchSetAssetStatus();
 
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(
     null,
@@ -121,6 +151,33 @@ export default function AssetsPage() {
       return true;
     });
   }, [page?.items, ownershipFilter]);
+
+  // Multi-select over the currently visible rows — ADMIN-only (the API batch endpoints are too).
+  const visibleIds = useMemo(() => rows.map((asset) => asset.id), [rows]);
+  const selection = useRowSelection(visibleIds);
+  const selectable = isAdmin;
+
+  /** Run a batch mutation, toast the per-id outcome, and clear the selection. */
+  async function runBatch(
+    run: () => Promise<BatchResult>,
+    labels: { noun: string; verb: string },
+    fallback: string,
+  ) {
+    try {
+      const result = await run();
+      notifyBatchResult(result, labels);
+      selection.clear();
+    } catch (err) {
+      notifyError(err, fallback);
+    }
+  }
+
+  function handleRestoreRow(id: string, name: string) {
+    restoreAsset.mutate(id, {
+      onSuccess: () => toast.success(`${name} restored`),
+      onError: (err) => notifyError(err, "Couldn't restore the asset"),
+    });
+  }
 
   const columns = useMemo<ResourceColumn[]>(
     () => [
@@ -252,14 +309,25 @@ export default function AssetsPage() {
         title="Assets"
         subtitle="Everything your team tracks and owns."
         actions={
-          canWrite ? (
-            <Button asChild>
-              <Link href="/assets/new">
-                <PlusIcon />
-                New asset
-              </Link>
-            </Button>
-          ) : null
+          <>
+            {isAdmin ? (
+              <ArchivedToggle
+                checked={archived}
+                onCheckedChange={(on) => {
+                  setFilter("archived", on ? "only" : FILTER_DEFAULTS.archived);
+                  selection.clear();
+                }}
+              />
+            ) : null}
+            {canWrite ? (
+              <Button asChild>
+                <Link href="/assets/new">
+                  <PlusIcon />
+                  New asset
+                </Link>
+              </Button>
+            ) : null}
+          </>
         }
       />
 
@@ -367,14 +435,33 @@ export default function AssetsPage() {
           <ResourceTable
             columns={columns}
             isFilteredEmpty={rows.length === 0}
-            filteredEmptyMessage="No assets match your filters."
+            filteredEmptyMessage={
+              archived
+                ? "No archived assets."
+                : "No assets match your filters."
+            }
             filteredEmptyAction={<ClearFiltersLink onClick={clearFilters} />}
+            selection={
+              selectable
+                ? {
+                    enabled: true,
+                    allSelected: selection.allSelected,
+                    someSelected: selection.someSelected,
+                    onToggleAll: selection.toggleAll,
+                    selectAllLabel: "Select all assets on this page",
+                  }
+                : undefined
+            }
             mobileChildren={rows.map((asset) => (
               <ResourceCard
                 key={asset.id}
                 href={`/assets/${asset.id}`}
                 title={asset.name}
                 badge={<AssetStatusBadge status={asset.status} />}
+                selectable={selectable}
+                selected={selection.isSelected(asset.id)}
+                onSelectedChange={(on) => selection.setSelected(asset.id, on)}
+                selectLabel={`Select ${asset.name}`}
                 meta={
                   <>
                     <ResourceCardMeta label="Asset tag">
@@ -406,7 +493,16 @@ export default function AssetsPage() {
                   </>
                 }
                 actions={
-                  canWrite ? (
+                  archived ? (
+                    isAdmin ? (
+                      <RestoreRowAction
+                        onRestore={() =>
+                          handleRestoreRow(asset.id, asset.name)
+                        }
+                        disabled={restoreAsset.isPending}
+                      />
+                    ) : undefined
+                  ) : canWrite ? (
                     <RowActions
                       onEdit={() => router.push(`/assets/${asset.id}/edit`)}
                       onDelete={() =>
@@ -419,7 +515,23 @@ export default function AssetsPage() {
             ))}
           >
             {rows.map((asset) => (
-              <TableRow key={asset.id}>
+              <TableRow
+                key={asset.id}
+                data-state={
+                  selectable && selection.isSelected(asset.id)
+                    ? "selected"
+                    : undefined
+                }
+              >
+                {selectable ? (
+                  <SelectCell
+                    checked={selection.isSelected(asset.id)}
+                    onCheckedChange={(on) =>
+                      selection.setSelected(asset.id, on)
+                    }
+                    label={`Select ${asset.name}`}
+                  />
+                ) : null}
                 <TableCell className="font-medium">
                   <Link href={`/assets/${asset.id}`} className="hover:underline">
                     {asset.name}
@@ -451,7 +563,18 @@ export default function AssetsPage() {
                   {formatDate(asset.updatedAt)}
                 </TableCell>
                 <TableCell className="text-right">
-                  {canWrite ? (
+                  {archived ? (
+                    isAdmin ? (
+                      <div className="flex justify-end">
+                        <RestoreRowAction
+                          onRestore={() =>
+                            handleRestoreRow(asset.id, asset.name)
+                          }
+                          disabled={restoreAsset.isPending}
+                        />
+                      </div>
+                    ) : null
+                  ) : canWrite ? (
                     <RowActions
                       onEdit={() => router.push(`/assets/${asset.id}/edit`)}
                       onDelete={() =>
@@ -463,6 +586,71 @@ export default function AssetsPage() {
               </TableRow>
             ))}
           </ResourceTable>
+
+          <BatchActionBar
+            count={selection.count}
+            onClear={selection.clear}
+            noun="asset"
+          >
+            {archived ? (
+              <Button
+                size="sm"
+                onClick={() =>
+                  runBatch(
+                    () => batchRestore.mutateAsync(selection.selectedIds),
+                    { noun: "asset", verb: "restored" },
+                    "Couldn't restore the selected assets",
+                  )
+                }
+                disabled={batchRestore.isPending}
+              >
+                <ArrowUturnLeftIcon />
+                Restore
+              </Button>
+            ) : (
+              <>
+                <Select
+                  onValueChange={(value) =>
+                    runBatch(
+                      () =>
+                        batchStatus.mutateAsync({
+                          ids: selection.selectedIds,
+                          status: value as AssetStatus,
+                        }),
+                      { noun: "asset", verb: "updated" },
+                      "Couldn't update the selected assets",
+                    )
+                  }
+                >
+                  <SelectTrigger size="sm" className="w-40">
+                    <SelectValue placeholder="Set status…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AssetStatusSchema.options.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {formatAssetStatus(status)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() =>
+                    runBatch(
+                      () => batchDelete.mutateAsync(selection.selectedIds),
+                      { noun: "asset", verb: "deleted" },
+                      "Couldn't delete the selected assets",
+                    )
+                  }
+                  disabled={batchDelete.isPending}
+                >
+                  <TrashIcon />
+                  Delete
+                </Button>
+              </>
+            )}
+          </BatchActionBar>
 
           <Pagination
             total={total}

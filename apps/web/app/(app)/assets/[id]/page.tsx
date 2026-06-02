@@ -135,13 +135,33 @@ export default function AssetDetailPage() {
       <DetailPanel title="Details">
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
           <DetailField label="Model">
-            {asset.model
-              ? `${asset.model.manufacturer} ${asset.model.name}`
-              : "—"}
+            {asset.model ? (
+              // No server `model` filter on the asset list — deep-link the model to its category
+              // (the closest filter that exists), falling back to plain text when uncategorized.
+              asset.model.category ? (
+                <Link
+                  href={`/assets?category=${asset.model.category.id}`}
+                  className="hover:underline"
+                >
+                  {asset.model.manufacturer} {asset.model.name}
+                </Link>
+              ) : (
+                `${asset.model.manufacturer} ${asset.model.name}`
+              )
+            ) : (
+              "—"
+            )}
           </DetailField>
           <DetailField label="Category">
             {asset.model?.category ? (
-              <Badge variant="outline">{asset.model.category.name}</Badge>
+              <Link
+                href={`/assets?category=${asset.model.category.id}`}
+                className="rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Badge variant="outline" className="hover:bg-muted">
+                  {asset.model.category.name}
+                </Badge>
+              </Link>
             ) : (
               "—"
             )}

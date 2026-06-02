@@ -25,6 +25,7 @@ const crud = createCrudEndpoints<Application, CreateApplication, UpdateApplicati
  * `sort` is allowlisted to `name|vendor|isCritical|createdAt|updatedAt` (unknown → 400). Category and
  * criticality are NOT server params — the Access screen applies them client-side over the page (it
  * already joins category + grants client-side). `limit`/`offset` thread the pagination window.
+ * `deleted: "only"` is the ADMIN-only archived view.
  */
 export interface ApplicationListParams {
   q?: string;
@@ -32,12 +33,14 @@ export interface ApplicationListParams {
   dir?: "asc" | "desc";
   limit?: number;
   offset?: number;
+  deleted?: "only";
 }
 
 /**
- * List non-deleted applications, paged. `GET /applications` returns a `Page<Application>` envelope;
+ * List applications, paged. `GET /applications` returns a `Page<Application>` envelope;
  * we return the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
- * server-supported params are forwarded (extra client-only filter keys are ignored).
+ * server-supported params are forwarded (extra client-only filter keys are ignored). Default is
+ * active-only; pass `deleted: "only"` (ADMIN) for the archived view.
  */
 export function getApplications(
   params: ApplicationListParams = {},
@@ -50,6 +53,7 @@ export function getApplications(
   }
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
   return apiFetch<Page<Application>>(search ? `${BASE}?${search}` : BASE);
 }
@@ -57,6 +61,14 @@ export const getApplication = crud.get;
 export const createApplication = crud.create;
 export const updateApplication = crud.update;
 export const deleteApplication = crud.remove;
+
+/**
+ * Restore one soft-deleted application (`POST /applications/:id/restore`, ADMIN). Clears `deletedAt`
+ * and returns the restored row.
+ */
+export function restoreApplication(id: string): Promise<Application> {
+  return apiFetch<Application>(`${BASE}/${id}/restore`, { method: "POST" });
+}
 
 export interface ApplicationGrantsOptions {
   /** Default true — only active (non-revoked) grants. Pass false for the full history. */
