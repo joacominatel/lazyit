@@ -23,7 +23,35 @@ behind Caddy with local HTTPS — to validate a production-shaped deployment. Ba
 - Docker + Docker Compose (BuildKit recommended; the Dockerfiles also build on the legacy builder).
 - The repo checked out. All commands run from the **repo root**.
 
-## Steps
+## Recommended — the guided bootstrap (`infra/start.sh`)
+
+The fastest, safest first boot is the guided bootstrap script ([[0047-guided-first-deploy-bootstrap]]).
+It detects your environment, asks a few questions, generates `infra/env/.env.prod` with **real random
+secrets** (including a correctly-sized `ZITADEL_MASTERKEY`), `chmod 600`s it, and brings the stack up
+— then points you at the in-app `/setup` wizard. It is **idempotent and non-destructive**: re-running
+it on an existing install skips generation and just brings the stack up.
+
+```sh
+./infra/start.sh            # interactive, guided
+./infra/start.sh --yes      # non-interactive localhost defaults (smoke test; aborts if 8080/8443 busy)
+./infra/start.sh --dry-run  # run all checks + prompts, but write nothing and don't run docker
+./infra/start.sh --help
+```
+
+For a local prod-like smoke test, accept the defaults (mode `local`, bundled Zitadel, bundled
+Postgres). The script ends by printing the public URL and the single next step: **open
+`https://localhost:8443/setup`** to create the first ADMIN. It does **not** create any user (that is
+the wizard's job) and makes no Zitadel API calls (that is the `zitadel-bootstrap` sidecar's job).
+
+> [!warning] Back up `infra/env/.env.prod` off-host
+> The script generates the unrotatable `ZITADEL_MASTERKEY` into this file. Copy it off-host
+> (encrypted) — lose it and a restored backup is undecryptable (see [[backups]]). The script never
+> tears anything down; a destructive reset is the manual `down -v` op documented under **Teardown**.
+
+Prefer to do it by hand (or to understand exactly what the script writes)? The manual steps below are
+the explicit fallback — the script automates precisely these.
+
+## Steps (manual — the explicit fallback)
 
 ```sh
 # 1. Create the prod env file from the template and fill in real values (replace every CHANGE_ME).
@@ -105,4 +133,5 @@ see [[backups]].
 
 Problems building or booting? → [[docker-build-troubleshooting]]. Real deployment → [[deploy-self-hosted]].
 
-Related: [[deployment]] · [[setup]] · [[prisma-migrations]] · [[0026-reverse-proxy-tls]]
+Related: [[deployment]] · [[setup]] · [[prisma-migrations]] · [[0026-reverse-proxy-tls]] ·
+[[0047-guided-first-deploy-bootstrap]]
