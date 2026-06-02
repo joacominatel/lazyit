@@ -33,6 +33,7 @@ import {
 } from './consumables.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parsePageQuery } from '../common/parse-page-query';
+import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
@@ -54,7 +55,7 @@ export class ConsumablesController {
   @Get()
   @ApiOperation({
     summary:
-      'List consumables (paginated; excludes soft-deleted). Server-side q search + sort + lowStock filter.',
+      'List consumables (paginated; active by default). Server-side q search + sort + lowStock filter. deleted=only lists archived rows (ADMIN).',
   })
   @ApiQuery({
     name: 'lowStock',
@@ -99,6 +100,13 @@ export class ConsumablesController {
     enum: ['asc', 'desc'],
     description: 'Sort direction (default asc when sort is set).',
   })
+  @ApiQuery({
+    name: 'deleted',
+    required: false,
+    enum: ['active', 'only'],
+    description:
+      'Soft-delete slice. active (default) = live rows; only = archived (soft-deleted) rows — ADMIN only (403 otherwise). (ADR-0041)',
+  })
   @ApiOkResponse({ type: ConsumableListPageDto })
   findAll(
     @Query('lowStock') lowStock?: string,
@@ -108,10 +116,23 @@ export class ConsumablesController {
     @Query('page') page?: string,
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
   ) {
+    const pageQuery = parsePageQuery({
+      limit,
+      offset,
+      page,
+      sort,
+      dir,
+      deleted,
+    });
+    // The list route carries no @Roles (any authenticated user may list ACTIVE rows), so gate the
+    // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
+    assertCanListDeleted(pageQuery.deleted, user);
     return this.consumables.findPage(
       { lowStock: parseBooleanQuery(lowStock), q },
-      parsePageQuery({ limit, offset, page, sort, dir }),
+      pageQuery,
     );
   }
 

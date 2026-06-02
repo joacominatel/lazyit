@@ -112,9 +112,15 @@ Concretely:
 - **No bulk/cascade restore:** restoring a parent (e.g. a category) does not restore its children, and
   vice-versa — each restore is a single, explicit action. Acceptable at small-team scale; revisit if a
   "restore tree" need appears.
+- **Listing the soft-deleted rows (so they can be restored from the UI):** the five primary lists
+  (`/assets`, `/applications`, `/consumables`, `/users`, `/locations`) take an ADMIN-only
+  **`deleted=only`** query param that returns the archived slice (default/absent = `active`, live rows
+  only). It bypasses the [[0032-soft-delete-middleware]] read filter via the sanctioned
+  `includeSoftDeleted` escape hatch and is gated at the controller (a non-admin → 403). Full contract:
+  [[0030-list-pagination-contract]] amendment §7.
 
 ## Related
 
 [[0006-soft-delete-and-auditing]] · [[0032-soft-delete-middleware]] · [[0033-asset-history-event-model]] ·
 [[0019-asset-assignment-integrity]] · [[0038-jit-user-provisioning]] · [[0040-rbac-roles]] ·
-[[prisma-migrations]] · [[user]] · [[asset]] · [[asset-history]]
+[[0030-list-pagination-contract]] · [[prisma-migrations]] · [[user]] · [[asset]] · [[asset-history]]

@@ -41,6 +41,7 @@ import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
+import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
@@ -77,7 +78,7 @@ export class AssetsController {
   @Get()
   @ApiOperation({
     summary:
-      'List assets (paginated; lean: model/category, location, activeAssignments — no specs). Excludes soft-deleted.',
+      'List assets (paginated; lean: model/category, location, activeAssignments — no specs). Active by default; deleted=only lists archived assets (ADMIN).',
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'locationId', required: false })
@@ -123,6 +124,13 @@ export class AssetsController {
     enum: ['asc', 'desc'],
     description: 'Sort direction (default asc when sort is set).',
   })
+  @ApiQuery({
+    name: 'deleted',
+    required: false,
+    enum: ['active', 'only'],
+    description:
+      'Soft-delete slice. active (default) = live assets; only = archived (soft-deleted) assets — ADMIN only (403 otherwise). (ADR-0041)',
+  })
   @ApiOkResponse({ type: AssetListPageDto })
   findAll(
     @Query('categoryId') categoryId?: string,
@@ -134,6 +142,8 @@ export class AssetsController {
     @Query('page') page?: string,
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
   ) {
     let parsedStatus: AssetStatus | undefined;
     if (status !== undefined) {
@@ -145,6 +155,17 @@ export class AssetsController {
       }
       parsedStatus = result.data;
     }
+    const pageQuery = parsePageQuery({
+      limit,
+      offset,
+      page,
+      sort,
+      dir,
+      deleted,
+    });
+    // The list route carries no @Roles (any authenticated user may list ACTIVE assets), so gate the
+    // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
+    assertCanListDeleted(pageQuery.deleted, user);
     return this.assets.findPage(
       {
         categoryId: parseCuidQuery(categoryId, 'categoryId'),
@@ -152,7 +173,7 @@ export class AssetsController {
         status: parsedStatus,
         q,
       },
-      parsePageQuery({ limit, offset, page, sort, dir }),
+      pageQuery,
     );
   }
 

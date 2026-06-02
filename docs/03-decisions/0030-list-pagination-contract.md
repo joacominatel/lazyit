@@ -205,11 +205,49 @@ users, locations, kb). This supersedes the "Frontend pagination UI" bullet above
   surfaces as "Updated <relative>" beside a **Refresh** button; ADMIN-gated quick actions (New asset
   / Add stock / Grant access); the bespoke error card is replaced by the shared `ErrorState`; and the
   activity feed's avatar-color copy is deduped onto `lib/avatar-color.ts`'s `avatarColorFor`.
-- **Deferred** (a follow-on wave, building on this): bulk multi-select / batch-action bar (§5) and
-  the "Show archived"/restore toggle.
+- **Deferred** (a follow-on wave, building on this): bulk multi-select / batch-action bar (§5). The
+  **backend** for the "Show archived"/restore toggle now exists (§7 below); the web "Show archived"
+  view that consumes it is the in-flight UX wave.
+
+### 7. `deleted` list param — the "Show archived" slice (2026-06-01)
+
+Backend support for the web "Show archived" + Restore view (builds on [[0041-soft-delete-reuse-and-restore]]'s
+restore endpoints + [[0032-soft-delete-middleware]]'s read filter). The five primary lists —
+`GET /assets`, `/applications`, `/consumables`, `/users`, `/locations` — accept an optional
+**`deleted`** query param (added to the shared `PageQuerySchema`, so it is typed and OpenAPI-documented
+for every list):
+
+- **`deleted=active`** (the default; also when the param is absent) — only LIVE rows
+  (`deletedAt IS NULL`). The historical behaviour, unchanged.
+- **`deleted=only`** — ONLY soft-deleted rows (`deletedAt IS NOT NULL`). **ADMIN-only** (a non-admin —
+  or anonymous — asking for it is **403**), enforced **at the controller**: the list `GET` routes carry
+  no `@Roles()` (any authenticated user may list active rows), so an in-route `assertCanListDeleted`
+  gate guards just the privileged slice rather than locking the whole route. There is intentionally no
+  "all" (live + deleted mixed): a list is one slice at a time.
+
+The full `Page<T>` envelope, `q`, `sort`/`dir` and pagination are preserved; the list item already
+carries `deletedAt`, so the web can render an archived badge + a Restore button. Mechanics:
+
+- The slice is applied as an **explicit `deletedAt` `where` fragment** (`deletedAt: null` for `active`,
+  `{ not: null }` for `only`) in each service's list `where` + its paired `count` — uniform across all
+  five regardless of whether the model is in `SOFT_DELETABLE_MODELS`. **`only` also passes the ADR-0032
+  `includeSoftDeleted: true` escape hatch** so the read filter does not re-hide the rows for the
+  extension-filtered models (User, Location, Asset, Application).
+- **Consumable correctness side-effect:** `Consumable` / `ConsumableCategory` have `deletedAt` columns
+  but are **not** in `SOFT_DELETABLE_MODELS`, so the read filter never auto-scoped them — `GET /consumables`
+  previously leaked soft-deleted rows. The explicit `active` fragment now hides them by default (the
+  list endpoint, not `GET /consumables/:id`).
+- **Restore** is the per-entity `POST /<resource>/:id/restore` (ADMIN, [[0041-soft-delete-reuse-and-restore]]),
+  which all five already had; assets additionally have `POST /assets/batch/restore` (§5).
+
+Shared helper: `apps/api/src/common/deleted-filter.ts` (`assertCanListDeleted` + `deletedWhere` +
+`includeSoftDeletedFor`). Shape: `DeletedFilterSchema` (`active` | `only`) on `PageQuerySchema`.
 
 ## References
 
 - [[SEC-007-no-pagination-list-endpoints|SEC-007]].
 - [[0018-api-documentation-swagger]] (response DTOs / OpenAPI) · [[0020-frontend-data-layer]] ·
   [[0009-bun-first-vs-app-stack]] (stack).
+- [[0041-soft-delete-reuse-and-restore]] (restore endpoints; the `deleted=only` slice, §7) ·
+  [[0032-soft-delete-middleware]] (the read filter `deleted=only` bypasses) · [[0040-rbac-roles]]
+  (the ADMIN gate).

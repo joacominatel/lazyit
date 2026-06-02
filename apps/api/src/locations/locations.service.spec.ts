@@ -178,10 +178,14 @@ describe('LocationsService', () => {
     location.findMany.mockResolvedValue([{ id: 'loc1' }]);
     location.count.mockResolvedValue(1);
 
-    const page = await service.findPage({}, { limit: 50, offset: 0 });
+    const page = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
 
     expect(location.findMany).toHaveBeenCalledWith({
-      where: {},
+      // The default `active` slice scopes the list to live rows (ADR-0041).
+      where: { deletedAt: null },
       orderBy: { createdAt: 'desc' },
       take: 50,
       skip: 0,
@@ -198,7 +202,10 @@ describe('LocationsService', () => {
     location.findMany.mockResolvedValue([]);
     location.count.mockResolvedValue(0);
 
-    await service.findPage({ q: 'hq' }, { limit: 50, offset: 0 });
+    await service.findPage(
+      { q: 'hq' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
 
     const call = (
       location.findMany.mock.calls as Array<
@@ -212,6 +219,7 @@ describe('LocationsService', () => {
         { floor: { contains: 'hq', mode: 'insensitive' } },
         { description: { contains: 'hq', mode: 'insensitive' } },
       ],
+      deletedAt: null,
     });
   });
 
@@ -221,7 +229,7 @@ describe('LocationsService', () => {
 
     await service.findPage(
       {},
-      { limit: 50, offset: 0, sort: 'name', dir: 'asc' },
+      { limit: 50, offset: 0, sort: 'name', dir: 'asc', deleted: 'active' },
     );
     const call = (
       location.findMany.mock.calls as Array<
@@ -231,7 +239,71 @@ describe('LocationsService', () => {
     expect(call.orderBy).toEqual({ name: 'asc' });
 
     await expect(
-      service.findPage({}, { limit: 50, offset: 0, sort: 'nope', dir: 'asc' }),
+      service.findPage(
+        {},
+        { limit: 50, offset: 0, sort: 'nope', dir: 'asc', deleted: 'active' },
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('findPage deleted=only returns soft-deleted rows via the includeSoftDeleted escape hatch (ADR-0041)', async () => {
+    location.findMany.mockResolvedValue([{ id: 'gone' }]);
+    location.count.mockResolvedValue(1);
+
+    const page = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'only' },
+    );
+
+    // The archived slice scopes to soft-deleted rows AND passes the ADR-0032 escape hatch so the
+    // read filter doesn't re-hide them.
+    expect(location.findMany).toHaveBeenCalledWith({
+      where: { deletedAt: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      skip: 0,
+      includeSoftDeleted: true,
+    });
+    expect(location.count).toHaveBeenCalledWith({
+      where: { deletedAt: { not: null } },
+      includeSoftDeleted: true,
+    });
+    expect(page.items).toEqual([{ id: 'gone' }]);
+  });
+
+  // --- restore (ADR-0041) --------------------------------------------------
+  it('restore clears deletedAt for a soft-deleted location and re-indexes it', async () => {
+    location.findFirst.mockResolvedValue({ id: 'loc1', deletedAt: new Date() });
+    location.update.mockResolvedValue({ id: 'loc1', deletedAt: null });
+
+    const restored = await service.restore('loc1');
+
+    // Found via the includeSoftDeleted escape hatch (the read filter would hide it).
+    expect(location.findFirst).toHaveBeenCalledWith({
+      where: { id: 'loc1' },
+      includeSoftDeleted: true,
+    });
+    expect(location.update).toHaveBeenCalledWith({
+      where: { id: 'loc1' },
+      data: { deletedAt: null },
+    });
+    expect(restored.deletedAt).toBeNull();
+    expect(search.upsert).toHaveBeenCalledWith('locations', expect.anything());
+  });
+
+  it('restore is idempotent (no update) when the location is already live', async () => {
+    location.findFirst.mockResolvedValue({ id: 'loc1', deletedAt: null });
+
+    await service.restore('loc1');
+
+    expect(location.update).not.toHaveBeenCalled();
+  });
+
+  it('restore 404s when the location never existed', async () => {
+    location.findFirst.mockResolvedValue(null);
+
+    await expect(service.restore('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

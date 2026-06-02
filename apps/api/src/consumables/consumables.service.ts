@@ -15,6 +15,7 @@ import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
+import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 
 /**
  * PostgreSQL `int4` upper bound — the max value a Prisma `Int` column (here `currentStock`) can
@@ -60,15 +61,22 @@ export class ConsumablesService {
   ) {}
 
   /**
-   * A single page of non-deleted consumables (default `name asc`). Server-side `q` search (over
+   * A single page of consumables (default `name asc`). Server-side `q` search (over
    * name/sku/description) and an allowlisted sort make the list authoritative — migrated off the
    * raw-array contract that filtered client-side and silently truncated past the window (ADR-0030).
    * The `lowStock` filter is preserved (items at or below their reorder threshold — a column-to-column
-   * comparison via the Prisma field reference). Runs `findMany(take/skip)` + `count` over the same
-   * `where` in one `$transaction`.
+   * comparison via the Prisma field reference). The `deleted` slice (`active` default | `only`)
+   * scopes the page to live or soft-deleted rows; the `deletedAt` clause is applied EXPLICITLY here
+   * (the Consumable model is not in the ADR-0032 SOFT_DELETABLE_MODELS set, so the read filter does
+   * NOT auto-scope it). `only` is ADMIN-gated at the controller. Runs `findMany(take/skip)` + `count`
+   * over the same `where` in one `$transaction`.
    */
   async findPage(filters: ConsumableFilters, page: PageQuery) {
-    const where = this.buildWhere(filters);
+    const where = {
+      ...this.buildWhere(filters),
+      ...deletedWhere(page.deleted),
+    };
+    const includeSoftDeleted = includeSoftDeletedFor(page.deleted);
     const { take, skip } = offsetOf(page);
     const orderBy =
       resolveSortOrBadRequest<Prisma.ConsumableOrderByWithRelationInput>(
@@ -76,9 +84,21 @@ export class ConsumablesService {
         CONSUMABLE_SORT_ALLOWLIST,
       ) ??
       ({ name: 'asc' } satisfies Prisma.ConsumableOrderByWithRelationInput);
+    // `includeSoftDeleted` is the ADR-0032 custom arg (stripped by the extension before Prisma sees
+    // it); Prisma's generated args type carries it only as `undefined`, so spread it in via an opaque
+    // object rather than fighting the type.
+    const escapeHatch: Record<string, unknown> = includeSoftDeleted
+      ? { includeSoftDeleted }
+      : {};
     const [items, total] = await this.prisma.$transaction([
-      this.prisma.consumable.findMany({ where, orderBy, take, skip }),
-      this.prisma.consumable.count({ where }),
+      this.prisma.consumable.findMany({
+        where,
+        orderBy,
+        take,
+        skip,
+        ...escapeHatch,
+      }),
+      this.prisma.consumable.count({ where, ...escapeHatch }),
     ]);
     return pageOf(items, total, page);
   }

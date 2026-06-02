@@ -13,6 +13,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectUser } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
+import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import {
   IDENTITY_PROVIDER,
@@ -62,13 +63,20 @@ export class UsersService {
   ) {}
 
   /**
-   * A single page of non-deleted users (default `createdAt desc`). Server-side `q` search (over
+   * A single page of users (default `createdAt desc`). Server-side `q` search (over
    * firstName/lastName/email) and an allowlisted sort make the list authoritative — migrated off the
    * raw-array contract that filtered client-side and silently truncated past the window (ADR-0030).
-   * Runs `findMany(take/skip)` + `count` over the same `where` in one `$transaction`.
+   * The `deleted` slice (`active` default | `only`) scopes the page to live or soft-deleted
+   * (offboarded) users; `only` carries the ADR-0032 `includeSoftDeleted` escape hatch so the read
+   * filter doesn't re-hide them (ADMIN-gated at the controller). Runs `findMany(take/skip)` + `count`
+   * over the same `where` in one `$transaction`.
    */
   async findPage(filters: UserFilters, page: PageQuery) {
-    const where = this.buildWhere(filters);
+    const where = {
+      ...this.buildWhere(filters),
+      ...deletedWhere(page.deleted),
+    };
+    const includeSoftDeleted = includeSoftDeletedFor(page.deleted);
     const { take, skip } = offsetOf(page);
     const orderBy =
       resolveSortOrBadRequest<Prisma.UserOrderByWithRelationInput>(
@@ -76,9 +84,15 @@ export class UsersService {
         USER_SORT_ALLOWLIST,
       ) ??
       ({ createdAt: 'desc' } satisfies Prisma.UserOrderByWithRelationInput);
+    // `includeSoftDeleted` is the ADR-0032 custom arg (stripped by the extension before Prisma sees
+    // it); Prisma's generated args type carries it only as `undefined`, so spread it in via an opaque
+    // object rather than fighting the type.
+    const escapeHatch: Record<string, unknown> = includeSoftDeleted
+      ? { includeSoftDeleted }
+      : {};
     const [items, total] = await this.prisma.$transaction([
-      this.prisma.user.findMany({ where, orderBy, take, skip }),
-      this.prisma.user.count({ where }),
+      this.prisma.user.findMany({ where, orderBy, take, skip, ...escapeHatch }),
+      this.prisma.user.count({ where, ...escapeHatch }),
     ]);
     return pageOf(items, total, page);
   }

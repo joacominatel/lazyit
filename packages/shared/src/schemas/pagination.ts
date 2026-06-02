@@ -19,6 +19,14 @@ import { z } from "zod";
  * ALLOWLIST (an unknown field is rejected → 400, never silently ignored), so the sort is real and
  * authoritative across the full result set — not a page-local re-order. `dir` defaults to `asc` only
  * when a `sort` is given; with no `sort` the service keeps its own default ordering.
+ *
+ * Soft-delete view (ADR-0030 addendum, 2026-06-01): the caller may also pass `deleted` to choose
+ * which soft-delete slice a list returns — `active` (the default: only LIVE rows, the historical
+ * behaviour) or `only` (ONLY soft-deleted rows, powering the web "Show archived" + Restore view).
+ * `deleted=only` is **ADMIN-gated at the controller** (a non-admin asking for it → 403); the shape
+ * here only types/documents the contract. There is intentionally no "all" (live + deleted mixed): a
+ * list is one slice at a time. See ADR-0041 (restore endpoints) and ADR-0032 (the read filter the
+ * `only` slice bypasses via the `includeSoftDeleted` escape hatch).
  */
 
 /** Default page size when `limit` is omitted. */
@@ -31,13 +39,24 @@ export const SortDirSchema = z.enum(["asc", "desc"]);
 export type SortDir = z.infer<typeof SortDirSchema>;
 
 /**
+ * Which soft-delete slice a paginated list returns (ADR-0030 addendum / ADR-0041):
+ *   - `active` — only LIVE rows (`deletedAt IS NULL`). The default and the historical behaviour.
+ *   - `only`   — only SOFT-DELETED rows (`deletedAt IS NOT NULL`). ADMIN-only (403 otherwise); powers
+ *                the web "Show archived" + Restore view. Bypasses the ADR-0032 read filter via its
+ *                sanctioned `includeSoftDeleted` escape hatch.
+ */
+export const DeletedFilterSchema = z.enum(["active", "only"]);
+export type DeletedFilter = z.infer<typeof DeletedFilterSchema>;
+
+/**
  * Raw pagination query as it arrives on the wire (all strings via `@Query`, hence `z.coerce`).
  * `limit` is bounded 1..{@link MAX_PAGE_LIMIT}. `offset` (≥0) and `page` (≥1) are mutually-redundant
  * ways to address the window; the transform below normalizes them to a canonical
  * `{ limit, offset, sort?, dir? }`. `offset` wins if both are given (it is the lower-level address).
  * `sort` is carried through verbatim (the per-resource allowlist validates it downstream); `dir` is
  * normalized to `asc` when a `sort` is present but `dir` is omitted, and dropped entirely when no
- * `sort` is given (so the service falls back to its own default ordering).
+ * `sort` is given (so the service falls back to its own default ordering). `deleted` selects the
+ * soft-delete slice (default `active`); the ADMIN gate for `only` lives at the controller.
  */
 export const PageQuerySchema = z
   .object({
@@ -54,21 +73,27 @@ export const PageQuerySchema = z
     sort: z.string().trim().min(1).max(64).optional(),
     // Sort direction. Only meaningful alongside `sort`; defaults to `asc` in the transform.
     dir: SortDirSchema.optional(),
+    // Soft-delete slice (ADR-0030 addendum / ADR-0041). Omitted → `active` (live rows only). `only`
+    // returns soft-deleted rows and is ADMIN-gated at the controller (a non-admin → 403).
+    deleted: DeletedFilterSchema.default("active"),
   })
-  .transform(({ limit, offset, page, sort, dir }) => ({
+  .transform(({ limit, offset, page, sort, dir, deleted }) => ({
     limit,
     // Prefer an explicit offset; otherwise derive it from the 1-based page; default to the first page.
     offset: offset ?? (page !== undefined ? (page - 1) * limit : 0),
     // Carry the sort field through verbatim; the per-resource allowlist validates it. Only attach a
     // direction when a sort field is present (default asc) — no sort ⇒ no dir ⇒ service default order.
     ...(sort !== undefined ? { sort, dir: dir ?? "asc" } : {}),
+    // Always present (defaulted to `active`), so a service never has to guess the soft-delete slice.
+    deleted,
   }));
 
 /**
- * The normalized pagination window: a `limit` (page size), a zero-based `offset`, and an optional
- * `sort`/`dir` pair. This is the **output** of {@link PageQuerySchema} — what services receive —
- * regardless of which input shape (`offset` or `page`) the caller used. `sort`/`dir` are present
- * together or not at all.
+ * The normalized pagination window: a `limit` (page size), a zero-based `offset`, an optional
+ * `sort`/`dir` pair, and the resolved soft-delete slice (`deleted`, always present, default
+ * `active`). This is the **output** of {@link PageQuerySchema} — what services receive — regardless
+ * of which input shape (`offset` or `page`) the caller used. `sort`/`dir` are present together or
+ * not at all.
  */
 export type PageQuery = z.infer<typeof PageQuerySchema>;
 

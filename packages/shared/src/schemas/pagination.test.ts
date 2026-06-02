@@ -21,14 +21,19 @@ import {
 const parse = (input: unknown): PageQuery => PageQuerySchema.parse(input);
 
 describe("PageQuerySchema — defaults & limit", () => {
-  test("empty query → default limit, offset 0", () => {
-    expect(parse({})).toEqual({ limit: DEFAULT_PAGE_LIMIT, offset: 0 });
+  test("empty query → default limit, offset 0, deleted active", () => {
+    expect(parse({})).toEqual({
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+      deleted: "active",
+    });
   });
 
   test("coerces string limit/offset (the wire shape from @Query)", () => {
     expect(parse({ limit: "25", offset: "50" })).toEqual({
       limit: 25,
       offset: 50,
+      deleted: "active",
     });
   });
 
@@ -56,17 +61,26 @@ describe("PageQuerySchema — defaults & limit", () => {
 
 describe("PageQuerySchema — page ↔ offset normalization", () => {
   test("page=1 → offset 0", () => {
-    expect(parse({ page: 1, limit: 20 })).toEqual({ limit: 20, offset: 0 });
+    expect(parse({ page: 1, limit: 20 })).toEqual({
+      limit: 20,
+      offset: 0,
+      deleted: "active",
+    });
   });
 
   test("page=3 with limit=20 → offset 40", () => {
-    expect(parse({ page: 3, limit: 20 })).toEqual({ limit: 20, offset: 40 });
+    expect(parse({ page: 3, limit: 20 })).toEqual({
+      limit: 20,
+      offset: 40,
+      deleted: "active",
+    });
   });
 
   test("page uses the default limit when limit is omitted", () => {
     expect(parse({ page: 2 })).toEqual({
       limit: DEFAULT_PAGE_LIMIT,
       offset: DEFAULT_PAGE_LIMIT,
+      deleted: "active",
     });
   });
 
@@ -74,6 +88,7 @@ describe("PageQuerySchema — page ↔ offset normalization", () => {
     expect(parse({ page: 5, offset: 0, limit: 10 })).toEqual({
       limit: 10,
       offset: 0,
+      deleted: "active",
     });
   });
 
@@ -84,7 +99,11 @@ describe("PageQuerySchema — page ↔ offset normalization", () => {
 
 describe("PageQuerySchema — sort & dir (ADR-0030 amendment)", () => {
   test("no sort → no sort/dir on the normalized window", () => {
-    expect(parse({ limit: 10 })).toEqual({ limit: 10, offset: 0 });
+    expect(parse({ limit: 10 })).toEqual({
+      limit: 10,
+      offset: 0,
+      deleted: "active",
+    });
   });
 
   test("sort with no dir defaults dir to asc", () => {
@@ -93,6 +112,7 @@ describe("PageQuerySchema — sort & dir (ADR-0030 amendment)", () => {
       offset: 0,
       sort: "name",
       dir: "asc",
+      deleted: "active",
     });
   });
 
@@ -102,6 +122,7 @@ describe("PageQuerySchema — sort & dir (ADR-0030 amendment)", () => {
       offset: 0,
       sort: "createdAt",
       dir: "desc",
+      deleted: "active",
     });
   });
 
@@ -109,6 +130,7 @@ describe("PageQuerySchema — sort & dir (ADR-0030 amendment)", () => {
     expect(parse({ dir: "desc" })).toEqual({
       limit: DEFAULT_PAGE_LIMIT,
       offset: 0,
+      deleted: "active",
     });
   });
 
@@ -120,6 +142,28 @@ describe("PageQuerySchema — sort & dir (ADR-0030 amendment)", () => {
 
   test("rejects an empty sort string", () => {
     expect(PageQuerySchema.safeParse({ sort: "" }).success).toBe(false);
+  });
+});
+
+describe("PageQuerySchema — deleted slice (ADR-0030 addendum / ADR-0041)", () => {
+  test("omitted → defaults to active (live rows only)", () => {
+    expect(parse({}).deleted).toBe("active");
+  });
+
+  test("deleted=active is carried through", () => {
+    expect(parse({ deleted: "active" }).deleted).toBe("active");
+  });
+
+  test("deleted=only is carried through", () => {
+    expect(parse({ deleted: "only" })).toEqual({
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+      deleted: "only",
+    });
+  });
+
+  test("rejects an unknown deleted value (e.g. all)", () => {
+    expect(PageQuerySchema.safeParse({ deleted: "all" }).success).toBe(false);
   });
 });
 

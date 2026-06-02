@@ -62,15 +62,19 @@ describe('ApplicationsService', () => {
     service = moduleRef.get(ApplicationsService);
   });
 
-  it('findPage defaults to name asc, no where, and returns the Page envelope', async () => {
+  it('findPage defaults to name asc, scopes to live rows, and returns the Page envelope', async () => {
     application.findMany.mockResolvedValue([{ id: 'app1' }]);
     application.count.mockResolvedValue(1);
 
-    const page = await service.findPage({}, { limit: 50, offset: 0 });
+    const page = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
 
     const calls = application.findMany.mock.calls as FindManyCall[];
     expect(calls[0][0].orderBy).toEqual({ name: 'asc' });
-    expect(calls[0][0].where).toEqual({});
+    // The default `active` slice scopes the list to live rows (ADR-0041).
+    expect(calls[0][0].where).toEqual({ deletedAt: null });
     expect(page).toEqual({
       items: [{ id: 'app1' }],
       total: 1,
@@ -83,7 +87,10 @@ describe('ApplicationsService', () => {
     application.findMany.mockResolvedValue([]);
     application.count.mockResolvedValue(0);
 
-    await service.findPage({ q: 'jira' }, { limit: 50, offset: 0 });
+    await service.findPage(
+      { q: 'jira' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
 
     const calls = application.findMany.mock.calls as FindManyCall[];
     expect(calls[0][0].where).toEqual({
@@ -93,6 +100,7 @@ describe('ApplicationsService', () => {
         { url: { contains: 'jira', mode: 'insensitive' } },
         { description: { contains: 'jira', mode: 'insensitive' } },
       ],
+      deletedAt: null,
     });
   });
 
@@ -102,7 +110,7 @@ describe('ApplicationsService', () => {
 
     await service.findPage(
       {},
-      { limit: 50, offset: 0, sort: 'vendor', dir: 'desc' },
+      { limit: 50, offset: 0, sort: 'vendor', dir: 'desc', deleted: 'active' },
     );
 
     const calls = application.findMany.mock.calls as FindManyCall[];
@@ -113,10 +121,28 @@ describe('ApplicationsService', () => {
     await expect(
       service.findPage(
         {},
-        { limit: 50, offset: 0, sort: 'secret', dir: 'asc' },
+        { limit: 50, offset: 0, sort: 'secret', dir: 'asc', deleted: 'active' },
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(application.findMany).not.toHaveBeenCalled();
+  });
+
+  it('findPage deleted=only returns soft-deleted rows via the includeSoftDeleted escape hatch (ADR-0041)', async () => {
+    application.findMany.mockResolvedValue([{ id: 'gone' }]);
+    application.count.mockResolvedValue(1);
+
+    const page = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'only' },
+    );
+
+    const calls = application.findMany.mock.calls as FindManyCall[];
+    expect(calls[0][0].where).toEqual({ deletedAt: { not: null } });
+    expect(
+      (calls[0][0] as unknown as { includeSoftDeleted?: boolean })
+        .includeSoftDeleted,
+    ).toBe(true);
+    expect(page.items).toEqual([{ id: 'gone' }]);
   });
 
   it('creates an application (no metadata key when omitted)', async () => {
@@ -220,5 +246,47 @@ describe('ApplicationsService', () => {
     );
     expect(application.update).not.toHaveBeenCalled();
     expect(search.remove).not.toHaveBeenCalled();
+  });
+
+  // --- restore (ADR-0041) --------------------------------------------------
+  it('restore clears deletedAt for a soft-deleted application and re-indexes it', async () => {
+    application.findFirst.mockResolvedValue({
+      id: 'app1',
+      deletedAt: new Date(),
+    });
+    application.update.mockResolvedValue({ id: 'app1', deletedAt: null });
+
+    const restored = await service.restore('app1');
+
+    // Found via the includeSoftDeleted escape hatch (the read filter would hide it).
+    expect(application.findFirst).toHaveBeenCalledWith({
+      where: { id: 'app1' },
+      includeSoftDeleted: true,
+    });
+    expect(application.update).toHaveBeenCalledWith({
+      where: { id: 'app1' },
+      data: { deletedAt: null },
+    });
+    expect(restored.deletedAt).toBeNull();
+    expect(search.upsert).toHaveBeenCalledWith(
+      'applications',
+      expect.anything(),
+    );
+  });
+
+  it('restore is idempotent (no update) when the application is already live', async () => {
+    application.findFirst.mockResolvedValue({ id: 'app1', deletedAt: null });
+
+    await service.restore('app1');
+
+    expect(application.update).not.toHaveBeenCalled();
+  });
+
+  it('restore 404s when the application never existed', async () => {
+    application.findFirst.mockResolvedValue(null);
+
+    await expect(service.restore('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });
