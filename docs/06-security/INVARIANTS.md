@@ -153,8 +153,33 @@ always leave exactly one administrator.
   ADMIN for the first user overrides the column default).
 - `apps/api/src/config/config.service.ts` — `setup()` locks the first-run bootstrap role to ADMIN.
 
+## INV-8 — Permissions resolve from `RolePermission` DB rows, never a token claim; the ADMIN set is immutable/full
+
+**Rule.** Fine-grained permissions (Roles & Permissions v2, [[0046-roles-permissions-v2]]) resolve from
+the `RolePermission` **database rows**, never from a token claim — the same DB-first rule as roles
+(INV-1). The **ADMIN permission set is immutable/full** (the complete catalog): it is never editable,
+so an ADMIN is always omnipotent and the last-admin / first-admin invariants (INV-7 + the ADR-0040
+last-admin guard) stay intact. Permissions are **lazyit-local** — they are NEVER mirrored to the IdP;
+only the three coarse roles keep their `grantRole` write-back ([[0043-zitadel-source-of-truth]] §3).
+
+**Why.** Permissions are an authorization source, so a forged/misconfigured token must not be able to
+confer one; and an editable ADMIN set could strip the last administrator of a power and wedge the
+install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-safe.
+
+**Where enforced.**
+- `apps/api/prisma/schema.prisma` — `model RolePermission { role Role; permission String; @@id([role,
+  permission]) }`: permissions are DB rows keyed by `(role, permission)`.
+- `packages/shared/src/schemas/permission.ts` — the frozen catalog (`PermissionSchema`) + the
+  `DEFAULT_ROLE_PERMISSIONS` single source of truth in which `ADMIN` is the **complete** catalog.
+- `apps/api/prisma/seed.ts` — seeds the matrix 1:1 from `DEFAULT_ROLE_PERMISSIONS` (idempotent upsert).
+- `apps/api/src/auth/role-permissions.golden.spec.ts` — golden test: a wrong/edited matrix (e.g. an
+  incomplete ADMIN set, or the pre-tightening drifting) fails CI.
+- **Foundation note (P0+P1):** no guard reads `RolePermission` yet — the `@RequirePermission`
+  enforcement is a later wave (ADR-0046 §Phased delivery). This invariant is the *baseline* that wave
+  must uphold; today it is enforced by the schema + the catalog/seed/golden test, not a runtime guard.
+
 ---
 
-Related: [[0043-zitadel-source-of-truth]] · [[auth-zitadel-sot]] · [[0038-jit-user-provisioning]] ·
-[[0040-rbac-roles]] · [[0041-soft-delete-reuse-and-restore]] · [[0028-secrets-and-config]] ·
-[[deferred]] · [[summary]] · [[_MOC]]
+Related: [[0043-zitadel-source-of-truth]] · [[0046-roles-permissions-v2]] · [[auth-zitadel-sot]] ·
+[[0038-jit-user-provisioning]] · [[0040-rbac-roles]] · [[0041-soft-delete-reuse-and-restore]] ·
+[[0028-secrets-and-config]] · [[deferred]] · [[summary]] · [[_MOC]]
