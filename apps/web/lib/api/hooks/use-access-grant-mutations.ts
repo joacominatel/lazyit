@@ -1,11 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
+  BatchRevokeGrants,
   CreateAccessGrant,
   RevokeAccessGrant,
   UpdateAccessGrantExpiry,
   UpdateAccessGrantNotes,
 } from "@lazyit/shared";
 import {
+  batchRevokeGrants,
   createAccessGrant,
   revokeAccessGrant,
   updateAccessGrantExpiry,
@@ -43,6 +45,24 @@ export function useRevokeGrant() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data?: RevokeAccessGrant }) =>
       revokeAccessGrant(id, data),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Bulk revoke active grants (ADMIN, #104). Returns a `BatchResult` so the caller can toast the
+ * `{ succeeded, skipped }` outcome; invalidates the same caches as a single revoke on settle.
+ */
+export function useBatchRevokeGrants() {
+  const invalidate = useInvalidateGrants();
+  return useMutation({
+    mutationFn: ({
+      ids,
+      notes,
+    }: {
+      ids: string[];
+      notes?: BatchRevokeGrants["notes"];
+    }) => batchRevokeGrants(ids, notes),
     onSuccess: invalidate,
   });
 }
