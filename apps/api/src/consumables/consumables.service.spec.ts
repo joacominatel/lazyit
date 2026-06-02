@@ -113,10 +113,15 @@ describe('ConsumablesService', () => {
     consumable.findMany.mockResolvedValue([{ id: 'k1' }]);
     consumable.count.mockResolvedValue(1);
 
-    const page = await service.findPage({}, { limit: 50, offset: 0 });
+    const page = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
 
     expect(consumable.findMany).toHaveBeenCalledWith({
-      where: {},
+      // Consumable is NOT in the ADR-0032 SOFT_DELETABLE_MODELS set, so the `active` slice scopes to
+      // live rows EXPLICITLY here (the read filter does not auto-scope it) — ADR-0041 addendum.
+      where: { deletedAt: null },
       orderBy: { name: 'asc' },
       take: 50,
       skip: 0,
@@ -133,7 +138,10 @@ describe('ConsumablesService', () => {
     consumable.findMany.mockResolvedValue([]);
     consumable.count.mockResolvedValue(0);
 
-    await service.findPage({ lowStock: true }, { limit: 50, offset: 0 });
+    await service.findPage(
+      { lowStock: true },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
 
     const call = (
       consumable.findMany.mock.calls as Array<
@@ -143,6 +151,7 @@ describe('ConsumablesService', () => {
     expect(call.where).toEqual({
       minStock: { not: null },
       currentStock: { lte: MIN_STOCK_FIELD },
+      deletedAt: null,
     });
   });
 
@@ -150,7 +159,10 @@ describe('ConsumablesService', () => {
     consumable.findMany.mockResolvedValue([]);
     consumable.count.mockResolvedValue(0);
 
-    await service.findPage({ q: 'hdmi' }, { limit: 50, offset: 0 });
+    await service.findPage(
+      { q: 'hdmi' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
 
     const call = (
       consumable.findMany.mock.calls as Array<
@@ -163,6 +175,7 @@ describe('ConsumablesService', () => {
         { sku: { contains: 'hdmi', mode: 'insensitive' } },
         { description: { contains: 'hdmi', mode: 'insensitive' } },
       ],
+      deletedAt: null,
     });
   });
 
@@ -172,7 +185,13 @@ describe('ConsumablesService', () => {
 
     await service.findPage(
       {},
-      { limit: 50, offset: 0, sort: 'currentStock', dir: 'desc' },
+      {
+        limit: 50,
+        offset: 0,
+        sort: 'currentStock',
+        dir: 'desc',
+        deleted: 'active',
+      },
     );
     const call = (
       consumable.findMany.mock.calls as Array<
@@ -182,8 +201,34 @@ describe('ConsumablesService', () => {
     expect(call.orderBy).toEqual({ currentStock: 'desc' });
 
     await expect(
-      service.findPage({}, { limit: 50, offset: 0, sort: 'evil', dir: 'asc' }),
+      service.findPage(
+        {},
+        { limit: 50, offset: 0, sort: 'evil', dir: 'asc', deleted: 'active' },
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('findPage deleted=only returns soft-deleted rows (explicit deletedAt + escape hatch) (ADR-0041)', async () => {
+    consumable.findMany.mockResolvedValue([{ id: 'gone' }]);
+    consumable.count.mockResolvedValue(1);
+
+    const page = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'only' },
+    );
+
+    expect(consumable.findMany).toHaveBeenCalledWith({
+      where: { deletedAt: { not: null } },
+      orderBy: { name: 'asc' },
+      take: 50,
+      skip: 0,
+      includeSoftDeleted: true,
+    });
+    expect(consumable.count).toHaveBeenCalledWith({
+      where: { deletedAt: { not: null } },
+      includeSoftDeleted: true,
+    });
+    expect(page.items).toEqual([{ id: 'gone' }]);
   });
 
   // --- findOne / create / update / remove ---------------------------------
@@ -479,5 +524,40 @@ describe('ConsumablesService', () => {
       NotFoundException,
     );
     expect(consumableMovement.findMany).not.toHaveBeenCalled();
+  });
+
+  // --- restore (ADR-0041) --------------------------------------------------
+  it('restore clears deletedAt for a soft-deleted consumable', async () => {
+    consumable.findFirst.mockResolvedValue({ id: 'k1', deletedAt: new Date() });
+    consumable.update.mockResolvedValue({ id: 'k1', deletedAt: null });
+
+    const restored = await service.restore('k1');
+
+    // Found via the includeSoftDeleted escape hatch (the read filter would hide it).
+    expect(consumable.findFirst).toHaveBeenCalledWith({
+      where: { id: 'k1' },
+      includeSoftDeleted: true,
+    });
+    expect(consumable.update).toHaveBeenCalledWith({
+      where: { id: 'k1' },
+      data: { deletedAt: null },
+    });
+    expect(restored.deletedAt).toBeNull();
+  });
+
+  it('restore is idempotent (no update) when the consumable is already live', async () => {
+    consumable.findFirst.mockResolvedValue({ id: 'k1', deletedAt: null });
+
+    await service.restore('k1');
+
+    expect(consumable.update).not.toHaveBeenCalled();
+  });
+
+  it('restore 404s when the consumable never existed', async () => {
+    consumable.findFirst.mockResolvedValue(null);
+
+    await expect(service.restore('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });
