@@ -10,8 +10,7 @@ import {
   PencilSquareIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
-import { ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/16/solid";
-import { XMarkIcon } from "@heroicons/react/16/solid";
+import { ChevronDownIcon, ChevronUpIcon, XMarkIcon } from "@heroicons/react/16/solid";
 import Link from "next/link";
 import type { ComponentType, ReactNode } from "react";
 import { cn } from "@/lib/utils";
