@@ -3,6 +3,7 @@ import type { CreateApplication, UpdateApplication } from "@lazyit/shared";
 import {
   createApplication,
   deleteApplication,
+  restoreApplication,
   updateApplication,
 } from "../endpoints/applications";
 import { applicationKeys } from "./use-applications";
@@ -34,6 +35,15 @@ export function useDeleteApplication() {
   const invalidate = useInvalidateApplications();
   return useMutation({
     mutationFn: (id: string) => deleteApplication(id),
+    onSuccess: invalidate,
+  });
+}
+
+/** Restore one soft-deleted application (ADMIN). Invalidates so the archived list updates. */
+export function useRestoreApplication() {
+  const invalidate = useInvalidateApplications();
+  return useMutation({
+    mutationFn: (id: string) => restoreApplication(id),
     onSuccess: invalidate,
   });
 }
