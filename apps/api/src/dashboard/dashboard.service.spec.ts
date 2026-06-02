@@ -49,10 +49,7 @@ function buildPrismaMock(): PrismaMock {
 
 async function buildService(prisma: PrismaMock): Promise<DashboardService> {
   const moduleRef = await Test.createTestingModule({
-    providers: [
-      DashboardService,
-      { provide: PrismaService, useValue: prisma },
-    ],
+    providers: [DashboardService, { provide: PrismaService, useValue: prisma }],
   }).compile();
   return moduleRef.get(DashboardService);
 }
@@ -261,7 +258,11 @@ describe('DashboardService', () => {
     });
 
     it('returns a Page<RecentActivityItem> with ISO timestamps and the echoed window', async () => {
-      const page = await service.getActivity({ limit: 20, offset: 0 });
+      const page = await service.getActivity({
+        limit: 20,
+        offset: 0,
+        deleted: 'active',
+      });
       expect(page.total).toBe(3);
       expect(page.limit).toBe(20);
       expect(page.offset).toBe(0);
@@ -278,21 +279,29 @@ describe('DashboardService', () => {
     });
 
     it('keeps a null actor (system / unknown / deleted actor) as null id + name', async () => {
-      const page = await service.getActivity({ limit: 20, offset: 0 });
+      const page = await service.getActivity({
+        limit: 20,
+        offset: 0,
+        deleted: 'active',
+      });
       const assetRow = page.items.find((i) => i.entityType === 'asset');
       expect(assetRow?.actorId).toBeNull();
       expect(assetRow?.actorName).toBeNull();
     });
 
     it('every returned row validates against the shared RecentActivityItemSchema', async () => {
-      const page = await service.getActivity({ limit: 20, offset: 0 });
+      const page = await service.getActivity({
+        limit: 20,
+        offset: 0,
+        deleted: 'active',
+      });
       for (const item of page.items) {
         expect(() => RecentActivityItemSchema.parse(item)).not.toThrow();
       }
     });
 
     it('batches the page read and the count in a single $transaction', async () => {
-      await service.getActivity({ limit: 20, offset: 0 });
+      await service.getActivity({ limit: 20, offset: 0, deleted: 'active' });
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(prisma.$transaction).toHaveBeenCalledWith([
         'PAGE_QUERY',
@@ -302,7 +311,11 @@ describe('DashboardService', () => {
 
     it('coerces a bigint count from COUNT(*)::bigint to a JS number', async () => {
       prisma.$transaction.mockResolvedValue([viewRows, [{ count: 42n }]]);
-      const page = await service.getActivity({ limit: 20, offset: 10 });
+      const page = await service.getActivity({
+        limit: 20,
+        offset: 10,
+        deleted: 'active',
+      });
       expect(page.total).toBe(42);
       expect(typeof page.total).toBe('number');
       expect(page.offset).toBe(10);
