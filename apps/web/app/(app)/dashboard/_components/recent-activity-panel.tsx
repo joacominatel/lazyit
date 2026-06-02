@@ -27,6 +27,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api/client";
 import { useDashboardActivity } from "@/lib/api/hooks/use-dashboard";
+import { avatarColorFor } from "@/lib/avatar-color";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/format";
 
@@ -191,23 +192,6 @@ function ActivityRow({
   );
 }
 
-/** Solid, deterministic palette for the small actor chip (mirrors UserAvatar's color scheme). */
-const ACTOR_PALETTE = [
-  "bg-rose-600 text-white",
-  "bg-emerald-600 text-white",
-  "bg-sky-600 text-white",
-  "bg-violet-600 text-white",
-  "bg-amber-600 text-white",
-] as const;
-
-function actorColor(seed: string): string {
-  let hash = 5381;
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash * 33 + seed.charCodeAt(i)) | 0;
-  }
-  return ACTOR_PALETTE[Math.abs(hash) % ACTOR_PALETTE.length];
-}
-
 function actorInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   const first = parts[0]?.[0] ?? "";
@@ -218,12 +202,13 @@ function actorInitials(name: string): string {
 /**
  * Tiny actor avatar for the feed. The activity row carries only a display name + id (no email), so
  * initials come from the name and the color is seeded by the actor id (stable per person), falling
- * back to the name when the id is null.
+ * back to the name when the id is null. Uses the canonical {@link avatarColorFor} palette so the
+ * same identity gets the same color here as on Users, asset owners and access grantees.
  */
 function ActorAvatar({ name, seed }: { name: string; seed: string | null }) {
   return (
     <Avatar size="sm" title={name}>
-      <AvatarFallback className={cn("font-medium", actorColor(seed ?? name))}>
+      <AvatarFallback className={cn("font-medium", avatarColorFor(seed ?? name))}>
         {actorInitials(name)}
       </AvatarFallback>
     </Avatar>

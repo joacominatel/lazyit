@@ -1,6 +1,8 @@
 import type {
   AccessGrant,
   AccessGrantListPage,
+  BatchResult,
+  BatchRevokeGrants,
   CreateAccessGrant,
   RevokeAccessGrant,
   UpdateAccessGrantExpiry,
@@ -75,6 +77,22 @@ export function revokeAccessGrant(
   return apiFetch<AccessGrant>(`${BASE}/${id}/revoke`, {
     method: "PATCH",
     body: data,
+  });
+}
+
+/**
+ * Bulk revoke active grants (`POST /access-grants/batch/revoke`, ADMIN) — per-grant
+ * `revokedAt`/`revokedById` in one transaction (#104). Optional `notes` is applied to each. Returns a
+ * {@link BatchResult} (`{ requested, succeeded, skipped }`) so a partial outcome (e.g. grants already
+ * revoked) can be surfaced. `ids` is bounded by `MAX_BATCH_IDS`.
+ */
+export function batchRevokeGrants(
+  ids: BatchRevokeGrants["ids"],
+  notes?: BatchRevokeGrants["notes"],
+): Promise<BatchResult> {
+  return apiFetch<BatchResult>(`${BASE}/batch/revoke`, {
+    method: "POST",
+    body: notes != null ? { ids, notes } : { ids },
   });
 }
 

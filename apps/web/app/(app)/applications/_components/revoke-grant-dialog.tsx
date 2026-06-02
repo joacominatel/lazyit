@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 
 interface RevokeGrantDialogProps {
@@ -39,6 +40,7 @@ export function RevokeGrantDialog({
   accessLevel,
   onConfirm,
 }: RevokeGrantDialogProps) {
+  const canWrite = useCanWrite();
   const [isPending, setIsPending] = useState(false);
 
   async function handleRevoke() {
@@ -53,6 +55,10 @@ export function RevokeGrantDialog({
       setIsPending(false);
     }
   }
+
+  // RBAC: revoking a grant is an Access write (ADMIN-only — ADR-0040). Render nothing for non-writers
+  // so the affordance never appears; the API's RolesGuard is the real gate (fails closed).
+  if (!canWrite) return null;
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>

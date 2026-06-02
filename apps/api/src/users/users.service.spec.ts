@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -79,8 +80,12 @@ describe('UsersService', () => {
     };
     const prisma = {
       user,
-      // $transaction runs the callback with the tx client (synchronously resolved here).
-      $transaction: jest.fn((cb: (client: TxMock) => unknown) => cb(tx)),
+      // Handles BOTH forms: callback (offboard) with the tx client, and array (findPage's
+      // [findMany, count]) which resolves each promise in the array.
+      $transaction: jest.fn(
+        (arg: ((client: TxMock) => unknown) | Promise<unknown>[]) =>
+          Array.isArray(arg) ? Promise.all(arg) : arg(tx),
+      ),
     };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
     // AssetAssignmentsService is mocked; its own logic is covered in its spec. Default: no active
@@ -500,13 +505,103 @@ describe('UsersService', () => {
     });
   });
 
-  it('findAll excludes soft-deleted users', async () => {
-    user.findMany.mockResolvedValue([]);
+  describe('findPage', () => {
+    it('defaults to createdAt desc, scopes to live users, and returns the Page envelope', async () => {
+      user.findMany.mockResolvedValue([{ id: 'u1' }]);
+      user.count.mockResolvedValue(1);
 
-    await service.findAll();
+      const page = await service.findPage(
+        {},
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
 
-    expect(user.findMany).toHaveBeenCalledWith({
-      orderBy: { createdAt: 'desc' },
+      expect(user.findMany).toHaveBeenCalledWith({
+        // The default `active` slice scopes the list to live users (ADR-0041).
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        skip: 0,
+      });
+      expect(page).toEqual({
+        items: [{ id: 'u1' }],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      });
+    });
+
+    it('applies a case-insensitive q over firstName/lastName/email', async () => {
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage(
+        { q: 'bob' },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      expect(call.where).toEqual({
+        OR: [
+          { firstName: { contains: 'bob', mode: 'insensitive' } },
+          { lastName: { contains: 'bob', mode: 'insensitive' } },
+          { email: { contains: 'bob', mode: 'insensitive' } },
+        ],
+        deletedAt: null,
+      });
+    });
+
+    it('honors an allowlisted sort and rejects an unknown one (400)', async () => {
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, sort: 'email', dir: 'asc', deleted: 'active' },
+      );
+      const call = (
+        user.findMany.mock.calls as Array<
+          [{ orderBy: Record<string, unknown> }]
+        >
+      )[0][0];
+      expect(call.orderBy).toEqual({ email: 'asc' });
+
+      await expect(
+        service.findPage(
+          {},
+          {
+            limit: 50,
+            offset: 0,
+            sort: 'password',
+            dir: 'asc',
+            deleted: 'active',
+          },
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('deleted=only returns soft-deleted (offboarded) users via the includeSoftDeleted escape hatch (ADR-0041)', async () => {
+      user.findMany.mockResolvedValue([{ id: 'gone' }]);
+      user.count.mockResolvedValue(1);
+
+      const page = await service.findPage(
+        {},
+        { limit: 50, offset: 0, deleted: 'only' },
+      );
+
+      expect(user.findMany).toHaveBeenCalledWith({
+        where: { deletedAt: { not: null } },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        skip: 0,
+        includeSoftDeleted: true,
+      });
+      expect(user.count).toHaveBeenCalledWith({
+        where: { deletedAt: { not: null } },
+        includeSoftDeleted: true,
+      });
+      expect(page.items).toEqual([{ id: 'gone' }]);
     });
   });
 
@@ -676,6 +771,44 @@ describe('UsersService', () => {
       // A local-only row (externalId null) has nothing to deactivate.
       expect(idp.deactivateUser).not.toHaveBeenCalled();
       expect(tx.user.update).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // --- restore (re-onboard) (ADR-0041) -------------------------------------
+  describe('restore', () => {
+    it('clears deletedAt for a soft-deleted user and re-indexes them', async () => {
+      user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
+      user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+
+      const restored = await service.restore('uuid-1');
+
+      // Found via the includeSoftDeleted escape hatch (the read filter would hide it).
+      expect(user.findFirst).toHaveBeenCalledWith({
+        where: { id: 'uuid-1' },
+        includeSoftDeleted: true,
+      });
+      expect(user.update).toHaveBeenCalledWith({
+        where: { id: 'uuid-1' },
+        data: { deletedAt: null },
+      });
+      expect(restored.deletedAt).toBeNull();
+      expect(search.upsert).toHaveBeenCalledWith('users', expect.anything());
+    });
+
+    it('is idempotent (no update) when the user is already live', async () => {
+      user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+
+      await service.restore('uuid-1');
+
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('404s when the user never existed', async () => {
+      user.findFirst.mockResolvedValue(null);
+
+      await expect(service.restore('missing')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 });

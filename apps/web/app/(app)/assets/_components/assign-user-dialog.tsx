@@ -1,7 +1,10 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
-import { useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { CreateAssetAssignmentSchema } from "@lazyit/shared";
+import { useEffect } from "react";
+import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { UserFormDialog } from "@/app/(app)/users/_components/user-form-dialog";
 import { CreatableField } from "@/components/creatable-field";
@@ -14,7 +17,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import {
   Select,
   SelectContent,
@@ -26,6 +34,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { notifyError } from "@/lib/api/notify-error";
+import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
+
+/**
+ * Form schema — `assetId` is supplied by the prop, so only the user choice + notes are validated.
+ * Picked off the shared create schema (so the `userId`/`notes` constraints stay in one place).
+ */
+const FormSchema = CreateAssetAssignmentSchema.pick({
+  userId: true,
+  notes: true,
+});
+type FormValues = { userId: string; notes?: string };
+
+const FORM_ID = "assign-user-form";
 
 interface AssignUserDialogProps {
   open: boolean;
@@ -36,9 +57,11 @@ interface AssignUserDialogProps {
 }
 
 /**
- * Assign a user to an asset (opens an AssetAssignment). Only active users who
- * aren't already current owners are selectable. Notes are optional. Author of the
- * assignment (`assignedById`) is omitted — set by auth once it lands (ADR-0022).
+ * Assign a user to an asset (opens an AssetAssignment). Only active users who aren't already current
+ * owners are selectable. Notes are optional. Author of the assignment (`assignedById`) comes from
+ * the authenticated caller (ADR-0039). Converged onto react-hook-form + zod + the
+ * `Field`/`FieldError`/`aria-invalid` contract (validation onTouched; scroll-to-first-error on
+ * submit) — public props unchanged.
  */
 export function AssignUserDialog({
   open,
@@ -48,42 +71,41 @@ export function AssignUserDialog({
 }: AssignUserDialogProps) {
   const { data: users } = useUsers();
   const assign = useAssignUser();
-  const [userId, setUserId] = useState("");
-  const [notes, setNotes] = useState("");
 
-  function handleOpenChange(next: boolean) {
-    if (!next) {
-      setUserId("");
-      setNotes("");
-    }
-    onOpenChange(next);
-  }
+  const form = useForm<FormValues>({
+    resolver: zodResolver(FormSchema) as Resolver<FormValues>,
+    mode: "onTouched",
+    defaultValues: { userId: "", notes: "" },
+  });
 
-  function handleAssign() {
-    if (!userId) {
-      toast.error("Choose a user to assign");
-      return;
-    }
-    const trimmed = notes.trim();
-    assign.mutate(
-      { assetId, userId, ...(trimmed ? { notes: trimmed } : {}) },
-      {
-        onSuccess: () => {
-          toast.success("User assigned");
-          handleOpenChange(false);
+  // Reset whenever it reopens, so a reused dialog never shows stale values/errors.
+  useEffect(() => {
+    if (open) form.reset({ userId: "", notes: "" });
+  }, [open, form]);
+
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      const trimmed = values.notes?.trim();
+      assign.mutate(
+        { assetId, userId: values.userId, ...(trimmed ? { notes: trimmed } : {}) },
+        {
+          onSuccess: () => {
+            toast.success("User assigned");
+            onOpenChange(false);
+          },
+          onError: (error) => notifyError(error, "Couldn't assign the user"),
         },
-        onError: (error) =>
-          notifyError(error, "Couldn't assign the user"),
-      },
-    );
-  }
+      );
+    },
+    (_errors, event) => scrollToFirstError(event?.target ?? null),
+  );
 
   const available = (users ?? []).filter(
     (user) => user.isActive && !excludeUserIds.includes(user.id),
   );
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Assign user</DialogTitle>
@@ -93,62 +115,88 @@ export function AssignUserDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="assign-user">User</FieldLabel>
-            <CreatableField
-              label="user"
-              renderDialog={(dialog) => (
-                <UserFormDialog
-                  open={dialog.open}
-                  onOpenChange={dialog.onOpenChange}
-                  onCreated={(user) => setUserId(user.id)}
-                />
+        <form id={FORM_ID} onSubmit={onSubmit} noValidate>
+          <FieldGroup>
+            <Controller
+              control={form.control}
+              name="userId"
+              render={({ field, fieldState }) => (
+                <Field data-invalid={fieldState.invalid || undefined}>
+                  <FieldLabel htmlFor="assign-user" required>
+                    User
+                  </FieldLabel>
+                  <CreatableField
+                    label="user"
+                    renderDialog={(dialog) => (
+                      <UserFormDialog
+                        open={dialog.open}
+                        onOpenChange={dialog.onOpenChange}
+                        onCreated={(user) => field.onChange(user.id)}
+                      />
+                    )}
+                  >
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger
+                        id="assign-user"
+                        className="w-full"
+                        aria-invalid={fieldState.invalid || undefined}
+                      >
+                        <SelectValue
+                          placeholder={
+                            available.length > 0
+                              ? "Select a user"
+                              : "No assignable users"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {available.map((user) => (
+                          <SelectItem key={user.id} value={user.id}>
+                            {user.firstName} {user.lastName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </CreatableField>
+                  <FieldError errors={[fieldState.error]} />
+                </Field>
               )}
-            >
-              <Select value={userId} onValueChange={setUserId}>
-                <SelectTrigger id="assign-user" className="w-full">
-                  <SelectValue
-                    placeholder={
-                      available.length > 0
-                        ? "Select a user"
-                        : "No assignable users"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {available.map((user) => (
-                    <SelectItem key={user.id} value={user.id}>
-                      {user.firstName} {user.lastName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CreatableField>
-          </Field>
-
-          <Field>
-            <FieldLabel htmlFor="assign-notes">Notes</FieldLabel>
-            <Textarea
-              id="assign-notes"
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              placeholder="Optional — e.g. primary work laptop"
-              rows={2}
             />
-          </Field>
-        </FieldGroup>
+
+            <Controller
+              control={form.control}
+              name="notes"
+              render={({ field, fieldState }) => (
+                <Field data-invalid={fieldState.invalid || undefined}>
+                  <FieldLabel htmlFor="assign-notes">Notes</FieldLabel>
+                  <Textarea
+                    id="assign-notes"
+                    name={field.name}
+                    ref={field.ref}
+                    value={field.value ?? ""}
+                    onBlur={field.onBlur}
+                    onChange={(event) => field.onChange(event.target.value)}
+                    placeholder="Optional — e.g. primary work laptop"
+                    rows={2}
+                    aria-invalid={fieldState.invalid || undefined}
+                  />
+                  <FieldError errors={[fieldState.error]} />
+                </Field>
+              )}
+            />
+          </FieldGroup>
+        </form>
 
         <DialogFooter>
           <Button
             type="button"
             variant="outline"
-            onClick={() => handleOpenChange(false)}
+            onClick={() => onOpenChange(false)}
             disabled={assign.isPending}
           >
             Cancel
           </Button>
-          <Button type="button" onClick={handleAssign} disabled={assign.isPending}>
+          <Button type="submit" form={FORM_ID} disabled={assign.isPending}>
             {assign.isPending && <ArrowPathIcon className="animate-spin" />}
             Assign
           </Button>

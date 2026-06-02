@@ -18,6 +18,7 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ConsumableListPageSchema,
   ConsumableMovementQuerySchema,
   ConsumableMovementSchema,
   ConsumableMovementTypeSchema,
@@ -26,13 +27,19 @@ import {
   CreateConsumableSchema,
   UpdateConsumableSchema,
 } from '@lazyit/shared';
-import { ConsumablesService } from './consumables.service';
+import {
+  ConsumablesService,
+  CONSUMABLE_SORT_ALLOWLIST,
+} from './consumables.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
+import { parsePageQuery } from '../common/parse-page-query';
+import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
 
 class ConsumableDto extends createZodDto(ConsumableSchema) {}
+class ConsumableListPageDto extends createZodDto(ConsumableListPageSchema) {}
 class CreateConsumableDto extends createZodDto(CreateConsumableSchema) {}
 class UpdateConsumableDto extends createZodDto(UpdateConsumableSchema) {}
 class ConsumableMovementDto extends createZodDto(ConsumableMovementSchema) {}
@@ -46,16 +53,87 @@ export class ConsumablesController {
   constructor(private readonly consumables: ConsumablesService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List consumables (excludes soft-deleted)' })
+  @ApiOperation({
+    summary:
+      'List consumables (paginated; active by default). Server-side q search + sort + lowStock filter. deleted=only lists archived rows (ADMIN).',
+  })
   @ApiQuery({
     name: 'lowStock',
     required: false,
     type: Boolean,
     description: 'When true, only items at or below their reorder threshold.',
   })
-  @ApiOkResponse({ type: [ConsumableDto] })
-  findAll(@Query('lowStock') lowStock?: string) {
-    return this.consumables.findAll({ lowStock: parseBooleanQuery(lowStock) });
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description:
+      'Case-insensitive substring match on name, sku and description',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: Object.keys(CONSUMABLE_SORT_ALLOWLIST),
+    description:
+      'Server-side sort field. Unknown field → 400. Default: name asc.',
+  })
+  @ApiQuery({
+    name: 'dir',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default asc when sort is set).',
+  })
+  @ApiQuery({
+    name: 'deleted',
+    required: false,
+    enum: ['active', 'only'],
+    description:
+      'Soft-delete slice. active (default) = live rows; only = archived (soft-deleted) rows — ADMIN only (403 otherwise). (ADR-0041)',
+  })
+  @ApiOkResponse({ type: ConsumableListPageDto })
+  findAll(
+    @Query('lowStock') lowStock?: string,
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
+  ) {
+    const pageQuery = parsePageQuery({
+      limit,
+      offset,
+      page,
+      sort,
+      dir,
+      deleted,
+    });
+    // The list route carries no @Roles (any authenticated user may list ACTIVE rows), so gate the
+    // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
+    assertCanListDeleted(pageQuery.deleted, user);
+    return this.consumables.findPage(
+      { lowStock: parseBooleanQuery(lowStock), q },
+      pageQuery,
+    );
   }
 
   @Get(':id')
@@ -102,7 +180,9 @@ export class ConsumablesController {
 
   @Post()
   @Roles('ADMIN', 'MEMBER')
-  @ApiOperation({ summary: 'Create a consumable (stock starts at 0) (ADMIN or MEMBER)' })
+  @ApiOperation({
+    summary: 'Create a consumable (stock starts at 0) (ADMIN or MEMBER)',
+  })
   @ApiCreatedResponse({ type: ConsumableDto })
   create(@Body() dto: CreateConsumableDto) {
     return this.consumables.create(dto);
@@ -111,7 +191,8 @@ export class ConsumablesController {
   @Patch(':id')
   @Roles('ADMIN', 'MEMBER')
   @ApiOperation({
-    summary: 'Update a consumable (currentStock is not editable) (ADMIN or MEMBER)',
+    summary:
+      'Update a consumable (currentStock is not editable) (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ConsumableDto })
   update(@Param('id') id: string, @Body() dto: UpdateConsumableDto) {

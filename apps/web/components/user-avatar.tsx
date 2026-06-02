@@ -1,4 +1,5 @@
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { avatarColorFor } from "@/lib/avatar-color";
 import { cn } from "@/lib/utils";
 
 /**
@@ -10,31 +11,11 @@ import { cn } from "@/lib/utils";
  * be reused well beyond the Users screen — asset assignments, ticket
  * requesters/assignees, access grants, etc. This is the documented exception to
  * the "promote on the second reuse" rule (ADR-0020).
+ *
+ * The color comes from the shared {@link avatarColorFor} (the token-driven categorical
+ * palette) — the single source of truth, so a person reads the same color here, in the
+ * activity feed, and anywhere else avatars appear.
  */
-
-// Solid, white-on-color chips. Full class strings (never interpolated) so the
-// Tailwind v4 scanner keeps them. Chosen to read in both light and dark themes.
-const PALETTE = [
-  "bg-rose-600 text-white",
-  "bg-orange-600 text-white",
-  "bg-amber-600 text-white",
-  "bg-emerald-600 text-white",
-  "bg-teal-600 text-white",
-  "bg-sky-600 text-white",
-  "bg-blue-600 text-white",
-  "bg-indigo-600 text-white",
-  "bg-violet-600 text-white",
-  "bg-fuchsia-600 text-white",
-] as const;
-
-/** Stable string hash (djb2) → palette index. Same seed ⇒ same color. */
-function colorFor(seed: string): string {
-  let hash = 5381;
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash * 33 + seed.charCodeAt(i)) | 0;
-  }
-  return PALETTE[Math.abs(hash) % PALETTE.length];
-}
 
 /** "Ada" + "Lovelace" → "AL"; falls back to the email's first letter. */
 function initialsFor(
@@ -70,7 +51,7 @@ export function UserAvatar({
 }: UserAvatarProps) {
   return (
     <Avatar size={size} className={className} title={title}>
-      <AvatarFallback className={cn("font-medium", colorFor(email))}>
+      <AvatarFallback className={cn("font-medium", avatarColorFor(email))}>
         {initialsFor(firstName, lastName, email)}
       </AvatarFallback>
     </Avatar>

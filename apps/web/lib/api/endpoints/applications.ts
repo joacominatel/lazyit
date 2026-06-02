@@ -2,6 +2,7 @@ import type {
   AccessGrant,
   Application,
   CreateApplication,
+  Page,
   UpdateApplication,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
@@ -18,11 +19,56 @@ const BASE = "/applications";
 const crud = createCrudEndpoints<Application, CreateApplication, UpdateApplication>(
   BASE,
 );
-export const getApplications = crud.list;
+
+/**
+ * Server-side params for the application list (#104). `q` matches name/vendor/url/description;
+ * `sort` is allowlisted to `name|vendor|isCritical|createdAt|updatedAt` (unknown → 400). Category and
+ * criticality are NOT server params — the Access screen applies them client-side over the page (it
+ * already joins category + grants client-side). `limit`/`offset` thread the pagination window.
+ * `deleted: "only"` is the ADMIN-only archived view.
+ */
+export interface ApplicationListParams {
+  q?: string;
+  sort?: string;
+  dir?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+  deleted?: "only";
+}
+
+/**
+ * List applications, paged. `GET /applications` returns a `Page<Application>` envelope;
+ * we return the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
+ * server-supported params are forwarded (extra client-only filter keys are ignored). Default is
+ * active-only; pass `deleted: "only"` (ADMIN) for the archived view.
+ */
+export function getApplications(
+  params: ApplicationListParams = {},
+): Promise<Page<Application>> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.sort) {
+    qs.set("sort", params.sort);
+    if (params.dir) qs.set("dir", params.dir);
+  }
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  if (params.deleted) qs.set("deleted", params.deleted);
+  const search = qs.toString();
+  return apiFetch<Page<Application>>(search ? `${BASE}?${search}` : BASE);
+}
 export const getApplication = crud.get;
 export const createApplication = crud.create;
 export const updateApplication = crud.update;
 export const deleteApplication = crud.remove;
+
+/**
+ * Restore one soft-deleted application (`POST /applications/:id/restore`, ADMIN). Clears `deletedAt`
+ * and returns the restored row.
+ */
+export function restoreApplication(id: string): Promise<Application> {
+  return apiFetch<Application>(`${BASE}/${id}/restore`, { method: "POST" });
+}
 
 export interface ApplicationGrantsOptions {
   /** Default true — only active (non-revoked) grants. Pass false for the full history. */

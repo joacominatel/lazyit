@@ -66,10 +66,14 @@ describe('AccessGrantsService', () => {
     };
     user = { findFirst: jest.fn() };
     application = { findFirst: jest.fn() };
-    // findPage uses the array form of $transaction (a tuple of two queries). The mock simply awaits
-    // the promises the service passes in (findMany + count), preserving their resolved order.
+    // findPage uses the array form of $transaction (a tuple of two queries); batchRevoke uses the
+    // callback form with the tx client. The mock supports BOTH: array → await each query; callback →
+    // invoke with a tx whose accessGrant is the same mock (so per-item updates are asserted on it).
     prisma = {
-      $transaction: jest.fn((ops: Array<Promise<unknown>>) => Promise.all(ops)),
+      $transaction: jest.fn(
+        (arg: Array<Promise<unknown>> | ((tx: unknown) => unknown)) =>
+          Array.isArray(arg) ? Promise.all(arg) : arg({ accessGrant }),
+      ),
     };
     // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
     actor = { resolve: jest.fn().mockReturnValue(undefined) };
@@ -193,7 +197,10 @@ describe('AccessGrantsService', () => {
     });
 
     await expect(
-      service.create({ userId: USER_ID, applicationId: APP_ID }, ACTOR_USER as never),
+      service.create(
+        { userId: USER_ID, applicationId: APP_ID },
+        ACTOR_USER as never,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(accessGrant.create).not.toHaveBeenCalled();
     expect(application.findFirst).not.toHaveBeenCalled();
@@ -257,14 +264,18 @@ describe('AccessGrantsService', () => {
 
     const result = await service.findPage(
       { userId: USER_ID },
-      { limit: 2, offset: 4 },
+      { limit: 2, offset: 4, deleted: 'active' },
     );
 
     // One transaction wrapping both queries (count can't drift from the page).
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    const findManyArgs = (accessGrant.findMany.mock.calls as FindManyCall[])[0][0];
+    const findManyArgs = (
+      accessGrant.findMany.mock.calls as FindManyCall[]
+    )[0][0];
     const countArgs = (
-      accessGrant.count.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      accessGrant.count.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >
     )[0][0];
     // take/skip come from the page window.
     expect(findManyArgs).toEqual({
@@ -288,9 +299,11 @@ describe('AccessGrantsService', () => {
     accessGrant.findMany.mockResolvedValue([]);
     accessGrant.count.mockResolvedValue(0);
 
-    await service.findPage({}, { limit: 50, offset: 0 });
+    await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
 
-    const findManyArgs = (accessGrant.findMany.mock.calls as FindManyCall[])[0][0];
+    const findManyArgs = (
+      accessGrant.findMany.mock.calls as FindManyCall[]
+    )[0][0];
     expect(findManyArgs).toMatchObject({
       where: { revokedAt: null },
       orderBy: { grantedAt: 'desc' },
@@ -324,7 +337,11 @@ describe('AccessGrantsService', () => {
     actor.resolve.mockReturnValue(VALID_ACTOR);
     accessGrant.update.mockResolvedValue({ id: 'g1', revokedAt: new Date() });
 
-    await service.revoke('g1', { notes: 'left the company' }, ACTOR_USER as never);
+    await service.revoke(
+      'g1',
+      { notes: 'left the company' },
+      ACTOR_USER as never,
+    );
 
     expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     const calls = accessGrant.update.mock.calls as UpdateCall[];
@@ -421,6 +438,70 @@ describe('AccessGrantsService', () => {
       service.updateExpiry('missing', { expiresAt: null }),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(accessGrant.update).not.toHaveBeenCalled();
+  });
+
+  // --- batchRevoke (bulk, ADR-0030 amendment) -----------------------------
+  describe('batchRevoke', () => {
+    it('revokes each active grant individually (per-grant revokedAt) in one transaction', async () => {
+      // g1, g2 active; g3 already revoked; g4 not found.
+      accessGrant.findMany.mockResolvedValue([
+        { id: 'g1', revokedAt: null },
+        { id: 'g2', revokedAt: null },
+        { id: 'g3', revokedAt: new Date() },
+      ]);
+      accessGrant.update.mockResolvedValue({});
+
+      const result = await service.batchRevoke(
+        ['g1', 'g2', 'g3', 'g4'],
+        'offboarding',
+      );
+
+      // One transaction wraps the whole batch.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      // Per-grant: one update per succeeded id (NOT one for the whole batch).
+      expect(accessGrant.update).toHaveBeenCalledTimes(2);
+      const calls = accessGrant.update.mock.calls as UpdateCall[];
+      expect(calls[0][0].where).toEqual({ id: 'g1' });
+      expect(calls[0][0].data.revokedAt).toBeInstanceOf(Date);
+      expect(calls[0][0].data.notes).toBe('offboarding');
+      expect(calls[1][0].where).toEqual({ id: 'g2' });
+      // Per-id outcome: g1/g2 succeeded; g3 already revoked; g4 not found.
+      expect(result).toEqual({
+        requested: 4,
+        succeeded: ['g1', 'g2'],
+        skipped: [
+          { id: 'g3', reason: 'already_in_state' },
+          { id: 'g4', reason: 'not_found' },
+        ],
+      });
+    });
+
+    it('stamps the resolved actor as revokedById on each grant', async () => {
+      actor.resolve.mockReturnValue(VALID_ACTOR);
+      accessGrant.findMany.mockResolvedValue([{ id: 'g1', revokedAt: null }]);
+      accessGrant.update.mockResolvedValue({});
+
+      await service.batchRevoke(['g1'], null, ACTOR_USER as never);
+
+      const calls = accessGrant.update.mock.calls as UpdateCall[];
+      expect(calls[0][0].data.revokedById).toBe(VALID_ACTOR);
+      // null notes → no notes key written (explicit clear is a no-op for revoke).
+      expect('notes' in calls[0][0].data).toBe(false);
+    });
+
+    it('opens no transaction when nothing is revocable', async () => {
+      accessGrant.findMany.mockResolvedValue([
+        { id: 'g1', revokedAt: new Date() },
+      ]);
+
+      const result = await service.batchRevoke(['g1'], undefined);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(result.succeeded).toEqual([]);
+      expect(result.skipped).toEqual([
+        { id: 'g1', reason: 'already_in_state' },
+      ]);
+    });
   });
 
   // NOTE: two rules are enforced at the DB layer and verified against Postgres rather than here

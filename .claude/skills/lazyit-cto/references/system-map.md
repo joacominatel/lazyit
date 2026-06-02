@@ -20,7 +20,7 @@ This file is structured for **scanning, not reading end-to-end**. The CTO opens 
 > **Apps**: `apps/api` (NestJS `11.0.1`), `apps/web` (Next.js `16.2.6` + React `19.2.4`)
 > **Shared**: `packages/shared` (zod schemas, types, utilities)
 > **Infra**: consolidated root `compose.yaml` (canonical, all services) + committed `compose.override.yaml` (dev tuning) + a `prod` profile + a thin `infra/docker-compose.prod.yaml` overlay; Caddy, env templates, Dockerfiles, bootstrap scripts
-> **Docs**: `docs/` (Obsidian vault — 44 ADRs (0001–0044) as of 2026-06-01) + `docs/06-security/INVARIANTS.md` (the 7 auth non-negotiables)
+> **Docs**: `docs/` (Obsidian vault — 45 ADRs (0001–0045) as of 2026-06-01) + `docs/06-security/INVARIANTS.md` (the 7 auth non-negotiables)
 > **Skills**: `.claude/skills/` (cto, navigator, devops, sentinel, remediator)
 
 Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` (loopback) · Meilisearch → `:7700` (loopback). In prod only Caddy publishes ports (8080/8443 by default); db/api/web/zitadel stay internal.
@@ -48,19 +48,19 @@ Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` (loopback) · 
 | ConfigModule | `config/` | `@Public()` GET /config/status + idempotent CSRF+rate-limited POST /config/setup (first-ADMIN bootstrap, ADR-0043 §4) | stable |
 | DashboardModule | `dashboard/` | GET /dashboard/summary (cross-pillar counts) + GET /dashboard/activity (recent_activity VIEW, ADR-0044) — read-only, no schema | stable |
 | AssetHistoryModule | `asset-history/` | AssetHistory (read-only, no controller) | stable |
-| UsersModule | `users/` | User + role management (GET /users/me, set-role, last-admin/self guards) + ADMIN-gated CRUD + IdP write-back | stable |
-| LocationsModule | `locations/` | Location | stable |
+| UsersModule | `users/` | User + role management (GET /users/me, set-role, last-admin/self guards) + ADMIN-gated CRUD + IdP write-back; **list now `Page<T>` + server `q`/sort/`deleted` (#104/#114)** | stable |
+| LocationsModule | `locations/` | Location; **list now `Page<T>` + server `q`/sort/`deleted` (#104/#114)** | stable |
 | AssetCategoriesModule | `asset-categories/` | AssetCategory | stable |
 | AssetModelsModule | `asset-models/` | AssetModel | stable |
-| AssetsModule | `assets/` | Asset (specs jsonb custom fields) + restore | stable |
+| AssetsModule | `assets/` | Asset (specs jsonb custom fields) + restore; **batch `POST /assets/batch/{delete,restore,status}` (ADMIN, #104)**; reverse KB endpoint `GET /assets/:id/articles` (#104) | stable |
 | AssetAssignmentsModule | `asset-assignments/` | AssetAssignment | stable |
 | ArticleCategoriesModule | `article-categories/` | ArticleCategory | stable |
 | ArticlesModule | `articles/` | Article + append-only ArticleVersion + ArticleLink (article↔asset/app), .docx import, content indexed (ADR-0042) | stable |
 | ApplicationCategoriesModule | `application-categories/` | ApplicationCategory | stable |
-| ApplicationsModule | `applications/` | Application | stable |
-| AccessGrantsModule | `access-grants/` | AccessGrant (ADMIN-gated writes) | stable |
-| ConsumableCategoriesModule | `consumable-categories/` | ConsumableCategory | stable |
-| ConsumablesModule | `consumables/` | Consumable + ConsumableMovement (int4-guarded, stock-race-safe) | stable |
+| ApplicationsModule | `applications/` | Application; **list now `Page<T>` + server `q`/sort/`deleted` (#104/#114)**; reverse KB endpoint `GET /applications/:id/articles` (#104) | stable |
+| AccessGrantsModule | `access-grants/` | AccessGrant (ADMIN-gated writes); **batch `POST /access-grants/batch/revoke` (ADMIN, #104 — data layer ready, no owned UI)** | stable |
+| ConsumableCategoriesModule | `consumable-categories/` | ConsumableCategory; **added to ADR-0032 `SOFT_DELETABLE_MODELS` (#114) — was leaking soft-deleted rows** | stable |
+| ConsumablesModule | `consumables/` | Consumable + ConsumableMovement (int4-guarded, stock-race-safe); **list now `Page<T>` + server `q`/sort/`deleted`; FIXED a pre-existing soft-delete leak (Consumable/ConsumableCategory were missing from `SOFT_DELETABLE_MODELS`, #114)** | stable |
 | LoggingModule (via LoggerModule.forRoot) | `logging/` | Pino config (ADR-0031) | stable |
 
 Module registration order is load-bearing in two places: `LoggerModule.forRoot(...)` is imported first (wraps every route), and inside AuthModule the two `APP_GUARD`s run in registration order — `JwtAuthGuard` (sets `request.user`) **then** `RolesGuard` (enforces `@Roles()`).
@@ -128,70 +128,107 @@ Zitadel). The seven non-negotiables are codified in `docs/06-security/INVARIANTS
 
 - Next.js `16.2.6` (App Router) + React `19.2.4`
 - Tailwind v4 + shadcn/ui (preset `radix-nova`, base `neutral`)
-- **Palette (Round 1 #65 + Round 3 #81)**: softened neutral — warm bone (light) + dark warm gray (dark), keeping the indigo brand accent. KB markdown rendered via `rehype-sanitize` (closes SEC-003 render-time XSS). Mobile nav added.
+- **Palette (Round 1 #65 + Round 3 #81 + UX cycle #102)**: softened neutral — warm bone (light) + dark warm gray (dark), keeping the indigo brand accent. UX cycle (#102, ADR-0011 amendment 3) **activated + tuned** the `--success/--warning/--info` (+fg) tokens for AA contrast on the bone canvas (solid pills, light + dark) and repurposed `--chart-1..5` as the **categorical / avatar palette** (`lib/avatar-color.ts` → `avatarColorFor`). KB markdown rendered via `rehype-sanitize` (closes SEC-003 render-time XSS). Mobile nav added.
 - TanStack Query for data layer (ADR-0020); `keepPreviousData` on paginated lists
-- react-hook-form + zodResolver for forms
+- react-hook-form + zodResolver for forms (the 5 hand-rolled detail/edit dialogs converged onto this in #111 — Field/FieldError/aria-invalid, onTouched, scroll-to-error)
+- **URL is the source of truth for list state** (#105/#110): `useListParams` maps `q`/`sort`/`dir`/`page`/`deleted`/client-filters to the URL and onto the #104 server params
 - next-themes for dark mode; Sonner for toasts
-- **heroicons only** in app code (lucide-react only inside `components/ui/*` vendored shadcn)
+- **heroicons ONLY** — `lucide-react` was dropped entirely in #115 (ADR-0045): the 6 vendored shadcn primitives + sonner were re-skinned to heroicons, two-weight convention (`24/outline` default + `16/solid` inline). No lucide anywhere in the tree.
 
 ### Route groups
 
-- `(app)` — authenticated app (Auth.js session; sidebar layout in `app/(app)/layout.tsx`)
-- `(auth)` — login flow (functional; redirects to IdP)
-- `(marketing)` — landing / public surface (minimal)
+- `(app)` — authenticated app (Auth.js session; sidebar layout in `app/(app)/layout.tsx`). Sidebar is grouped into **3 product pillars + Manage** (#100): **Inventory** (Assets, Consumables) · **Access** (Applications) · **Knowledge** (KB) · **Manage** (Users, Locations, Settings [ADMIN-only])
+- `(auth)` — login flow (functional; redirects to IdP). **First-run onboarding gate**: login + marketing surfaces read `GET /config/status` and, when `isConfigured === false`, surface a prominent "Set up lazyit" link to `/setup` (fail-safe — no link if the API is down) so a fresh operator is never stranded
+- `(marketing)` — landing / public surface (minimal; carries the same first-run "Set up lazyit" gate)
 - `app/setup` — full-screen first-run wizard (top-level, outside `(app)`; ADR-0043)
 - `app/api/auth/[...nextauth]` — Auth.js route handler
 
-### Live screens (functional as of 2026-06-01)
+### Live screens (functional as of 2026-06-01 — post UX cycle)
+
+All **list pages** now share the same chrome (#100/#110): `PageHeader` + route-driven `Breadcrumb` +
+accessible `SearchInput`; write affordances **RBAC-gated** via `useCanWrite`; URL-driven list state →
+server `q`/`sort`/`dir` + real pagination UI; `ActiveFilters` chips; an ADMIN-only "Show archived"
+toggle (`deleted=only`) + per-row Restore. All **detail/edit/new pages** use `DetailPanel`/`DetailField`/
+`DetailSkeleton` + PageHeader/Breadcrumb + the shared `ErrorState`, with cross-links (Location, owner/actor,
+Category/Model) to detail routes.
 
 | Route | Screen | Notes |
 |-------|--------|-------|
 | `/setup` | First-run wizard | 4-step: welcome/integration choice → optional Zitadel config → create first ADMIN → done. Self-locks once an ADMIN exists (ADR-0043) |
-| `/dashboard` | Dashboard | **Wired** to GET /dashboard/summary (counts) + a Recent-activity panel (infinite query over GET /dashboard/activity, ADR-0044) |
-| `/assets` | Asset list | ResourceTable + search/filter + delete (paginated) |
+| `/dashboard` | Dashboard | **Wired** to GET /dashboard/summary (counts) + a Recent-activity panel (infinite query over GET /dashboard/activity, ADR-0044). #110 added: "Needs attention" cards **deep-link to pre-filtered lists**, freshness/Refresh, ADMIN quick-actions, shared ErrorState |
+| `/assets` | Asset list | ResourceTable + server q/sort/pagination; **server-side bulk** delete/status/restore (#104/#112) via row selection + BatchActionBar; archived toggle + per-row Restore; departed owners dimmed |
 | `/assets/new` | Create asset | Full form with inline creatable fields + custom-fields editor (specs jsonb) |
-| `/assets/[id]` | Asset detail | Assignments + AssetHistory timeline |
-| `/assets/[id]/edit` | Edit asset | Same form |
-| `/locations` | Location list | Inline create/edit dialog |
-| `/locations/[id]` | Location detail | Detail view |
-| `/users` | User list | Inline create/edit dialog + per-row role (UserRoleSelect/Badge) |
-| `/users/[id]` | User detail | Profile + role management (ADMIN-only Select, confirmation, 409/403 surfaced) |
-| `/kb` | KB article list | Draft/published, author visibility |
+| `/assets/[id]` | Asset detail | DetailPanel; Assignments + AssetHistory timeline; Category/Model + Location + owner cross-links; **"Related articles"** panel (KB runbooks, #111) |
+| `/assets/[id]/edit` | Edit asset | Same form (RHF+zod) |
+| `/locations` | Location list | ResourceTable + server q/sort/pagination; **type filter is CLIENT-side** over the page (no backend param); bulk restore (client per-id fan-out) + archived toggle |
+| `/locations/[id]` | Location detail | DetailPanel; "assets here" + cross-links |
+| `/users` | User list | Per-row role (UserRoleSelect/Badge); server q/sort/pagination; **status filter CLIENT-side**; bulk restore (client per-id fan-out) + archived toggle |
+| `/users/[id]` | User detail | DetailPanel; profile + role management (ADMIN-only Select, confirmation, 409/403 surfaced) |
+| `/kb` | KB article list | Draft/published, author visibility; PageHeader/SearchInput |
 | `/kb/new` | Create article | Markdown editor + .docx import |
-| `/kb/[slug]` | Article detail | Markdown rendered, `rehype-sanitize` (SEC-003 closed) |
+| `/kb/[slug]` | Article detail | DetailPanel; Markdown rendered, `rehype-sanitize` (SEC-003 closed); **"Linked to"** panel (linked assets/apps, #111) |
 | `/kb/[slug]/edit` | Edit article | Markdown editor |
-| `/applications` | Application list | With grant access inline |
+| `/applications` | Application list | Grant access inline; server q/sort/pagination; **category/criticality filters CLIENT-side** over the page |
 | `/applications/new` | Create application | Full form |
-| `/applications/[id]` | Application detail | Grant list + revoke |
+| `/applications/[id]` | Application detail | DetailPanel; grant list + revoke (grants live here — there is no owned grants table); **"Related articles"** panel (#111) |
 | `/applications/[id]/edit` | Edit application | |
-| `/consumables` | Consumable list | Stock badges + one-click +1/-1 quick-adjust |
+| `/consumables` | Consumable list | Stock badges + one-click +1/-1 quick-adjust; server q/sort/pagination; bulk restore (client per-id fan-out) + archived toggle |
 | `/consumables/new` | Create consumable | |
-| `/consumables/[id]` | Consumable detail | Movement ledger + quick-adjust |
+| `/consumables/[id]` | Consumable detail | DetailPanel; movement ledger + quick-adjust |
 | `/consumables/[id]/edit` | Edit consumable | |
-| `/login` | Login page | Functional — redirects to IdP |
+| `/settings` | Settings landing | **NEW (#108)** — ADMIN-gated (`admin-gate.tsx`) admin area landing |
+| `/settings/taxonomies` | Taxonomies CRUD | CRUD for the 4 category kinds + asset-models (completed the web category/model write data layer) |
+| `/settings/roles` | Roles overview | Read-only roles reference |
+| `/settings/instance` | Instance config-status | Reads `GET /config/status` (integration mode, configured state) |
+| `/login` | Login page | Functional — redirects to IdP; first-run "Set up lazyit" gate |
 
 ### Shared components and primitives
 
+**Chrome & layout primitives (UX cycle #100/#102/#111)**
+
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| `ResourceTable` | `components/resource-table.tsx` | Reusable table with search/sort/delete |
+| `PageHeader` | `components/page-header.tsx` | Standard page title + actions header (all list/detail/new/edit) |
+| `Breadcrumb` | `components/breadcrumb.tsx` | Route-driven breadcrumb |
+| `SearchInput` | `components/search-input.tsx` | Accessible debounced search box (lists) |
+| `ActiveFilters` | `components/active-filters.tsx` | Dismissible filter chips reflecting the URL list state |
+| `DetailPanel` / `DetailField` / `DetailSkeleton` | `components/detail-panel.tsx` | Shared detail layout + labelled fields + loading skeleton (all 5 detail pages + KB) |
+| `StatusBadge` / `StatusDot` | `components/ui/status-badge.tsx` | Tone-based status pill/dot (`tone: success\|warning\|info\|danger\|neutral`); the per-entity status badges were refactored onto it (#102) |
+| `Checkbox` | `components/ui/checkbox.tsx` | shadcn checkbox primitive (powers row selection) |
+
+**Reusable feature components**
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `ResourceTable` (+ `SelectCell`, `ResourceCard`, `ResourceCardMeta`, `RestoreRowAction`, `BatchActionBar`) | `components/resource-table.tsx` | Responsive table — `mobileChildren`/`ResourceCard` for the card layout below sm; row **selection** + `BatchActionBar` for bulk actions; per-row Restore (#110/#112) |
 | `DeleteConfirmDialog` | `components/delete-confirm-dialog.tsx` | Reusable soft-delete confirmation |
-| `GlobalSearch` | `components/global-search.tsx` | Cmd+K palette, calls GET /search |
+| `GlobalSearch` | `components/global-search.tsx` | Cmd+K palette, calls GET /search (icon-only below sm in the mobile shell) |
 | `MarkdownEditor` | `components/markdown-editor.tsx` | KB editing surface |
 | `MarkdownView` | `components/markdown-view.tsx` | KB rendering, `rehype-sanitize` allow-list (SEC-003 closed) |
 | `CreatableField` | `components/creatable-field.tsx` | Inline "New" beside selects → dialog → auto-select |
 | `CreateCategoryDialog` | `components/create-category-dialog.tsx` | Reusable category inline create |
 | `CreateAssetModelDialog` | `components/create-asset-model-dialog.tsx` | Reusable model inline create |
-| `UserAvatar` | `components/user-avatar.tsx` | Avatar from user initials |
-| `UserMenu` | `components/user-menu.tsx` | Topbar user menu |
+| `UserAvatar` | `components/user-avatar.tsx` | Avatar from user initials (color via `lib/avatar-color.ts` `avatarColorFor`) |
+| `UserMenu` | `components/user-menu.tsx` | Topbar user menu (+ role badge, #105) |
 | `RequestIdNote` | `components/request-id-note.tsx` | Copy-to-clipboard request ID in error surfaces |
 | `ThemeToggle` | `components/theme-toggle.tsx` | Dark/light mode |
-| `SidebarNav` | `components/sidebar-nav.tsx` | App navigation sidebar (+ mobile nav) |
+| `SidebarNav` | `components/sidebar-nav.tsx` | App navigation — 3 pillars + Manage (#100); mobile shell gutter |
 | `UserRoleSelect` / `UserRoleBadge` | `app/(app)/users/_components/` | Role read-only badge vs ADMIN-only Select (reads `GET /users/me`) |
 | `CustomFieldsEditor` | `app/(app)/assets/_components/custom-fields-editor.tsx` | Edits the asset `specs` jsonb |
 | `QuickAdjustButtons` | `app/(app)/consumables/_components/quick-adjust-buttons.tsx` | One-click +1/-1 stock movement |
 | `RecentActivityPanel` | `app/(app)/dashboard/_components/recent-activity-panel.tsx` | Infinite-query feed over GET /dashboard/activity |
 | `SetupWizard` (+ steps) | `app/setup/_components/` | First-run wizard (welcome → configure → create-admin → done) |
+| Settings managers | `app/(app)/settings/_components/` | `admin-gate.tsx`, `category-manager`/`category-form-dialog`, `asset-model-manager`/`asset-model-form-dialog` (#108) |
+
+**Hooks (UX cycle #105/#111/#112)**
+
+| Hook | Location | Purpose |
+|------|----------|---------|
+| `usePermissions` / `useCanWrite` | `lib/hooks/use-permissions.ts` | RBAC gating in the UI — `canWrite === isAdmin`; **fails closed** while loading |
+| `useListParams` | `lib/hooks/use-list-params.ts` | URL-as-source-of-truth list state → the #104 server params (`q`/`sort`/`dir`/`page`/`deleted`) |
+| `useRowSelection` | `lib/hooks/use-row-selection.ts` | Row-selection state for bulk actions |
+| `useArticleLinks` | `lib/api/hooks/use-article-links.ts` | KB runbook links (over `lib/api/endpoints/article-links.ts` → the reverse `GET /assets/:id/articles` + `GET /applications/:id/articles`) |
+| `useDebouncedValue` | `lib/hooks/use-debounced-value.ts` | Debounce for the search input |
 
 ### Error UX (delivered sub-issue #30, 2026-05-26) + error boundaries (Round 1 #65)
 
@@ -202,8 +239,10 @@ Zitadel). The seven non-negotiables are codified in `docs/06-security/INVARIANTS
 
 ### Data layer convention (ADR-0020)
 
-- `lib/api/endpoints/*.ts` — pure fetch wrappers (one file per entity); paginated endpoints unwrap the `Page<T>` envelope (`.items`, ADR-0030)
-- `lib/api/hooks/*.ts` — TanStack Query hooks (incl. `useUserMe`, `useConfigStatus`, `useDashboardActivity` infinite query)
+- `lib/api/endpoints/*.ts` — pure fetch wrappers (one file per entity); paginated endpoints unwrap the `Page<T>` envelope (`.items`, ADR-0030). The 4 newly server-paginated lists (applications/consumables/users/locations) unwrap `.items` too (#106 hotfix — the #104 contract briefly merged ahead of its web consumer)
+- `lib/api/hooks/*.ts` — TanStack Query hooks (incl. `useUserMe`, `useConfigStatus`, `useDashboardActivity` infinite query, `useArticleLinks`, the bulk/restore mutations)
+- `lib/api/per-id-batch.ts` — client-side per-id fan-out helper for resources WITHOUT a server batch endpoint (consumables/users/locations bulk restore); mirrors the server `{requested,succeeded,skipped}` shape
+- **Server batch endpoints** (#104): `POST /assets/batch/{delete,restore,status}` + `POST /access-grants/batch/revoke` (ADMIN, body `{ids}`, one audit entry per item). Assets bulk is wired to the UI; access-grants bulk-revoke data layer (`useBatchRevokeGrants`) **exists but is NOT wired** (no owned grants table)
 - `lib/api/query-keys.ts` — query key factory per entity
 - `lib/api/client.ts` — base fetch; Bearer injection from the Auth.js `session-token` store (the X-User-Id/`acting-user.ts` dev shim was removed with auth)
 - Pages and components consume hooks; never call endpoints directly
@@ -220,7 +259,7 @@ Compiled CJS + d.ts (ADR-0014). Exported via barrel `src/index.ts`.
 - asset, asset-assignment, asset-category, asset-expanded, asset-history, asset-list, asset-model
 - consumable, consumable-category, consumable-movement
 - location, primitives, search, user (incl. `RoleSchema`/`Role`, `roleSource`)
-- **pagination** (`PageQuerySchema`, `Page<T>` via `pageSchema()`, `offsetOf()`/`pageOf()` helpers — ADR-0030, now implemented)
+- **pagination** (`PageQuerySchema`, `Page<T>` via `pageSchema()`, `offsetOf()`/`pageOf()` helpers — ADR-0030). The UX cycle (#104, ADR-0030 amendment §6) added **`sort`** + **`dir`** (`asc`|`desc`) and (#114, §7) **`deleted`** (`active`|`only`) to `PageQuerySchema`. The shape only validates well-formed strings; the **sortable-field set is a per-resource ALLOWLIST** (unknown sort → 400); `deleted=only` is ADMIN-only (400 on invalid)
 - **config** (setup/status contract — ADR-0043)
 - **dashboard** (`DashboardSummarySchema`), **recent-activity** (`RecentActivityItemSchema` + `RecentActivityPageSchema` — ADR-0044)
 - **api-error** (typed ApiError shape)
@@ -367,7 +406,7 @@ the next AuthZ wave. The rest is the **Round-2 backlog** the CEO parked while th
 |------|----------|-------------|----------------|
 | **Read-authorization** — all GETs open to any authenticated user (incl. VIEWER); no per-resource read scoping | Medium | RBAC v1 gated writes only (ADR-0040); read scoping is the next wave | When a tenant/visibility need appears |
 | **Revoke/release races** — AccessGrant revoke + AssetAssignment release are not fully race-guarded | Low–Medium | Round-2 backlog | When concurrency observed or before prod |
-| **Paginate the still-unpaginated list endpoints** — only /assets, /articles, /access-grants (+ /dashboard/activity) use `Page<T>`; the rest still `findAll` (SEC-007 still `open`) | Low | ADR-0030 done for the heavy lists; the rest deferred | When any other list grows |
+| **Server-side filters still client-side** — applications category/criticality, users status, locations type filters run CLIENT-side over the loaded page (backend has no such param); asset Model deep-link is by Category only (no server model filter) | Low | UX cycle migrated all 6 main lists to `Page<T>` + server `q`/sort (#104); these category-ish filters deferred | When a list grows past one page often enough to need server filtering |
 | **DB indexes** — missing partial/sort indexes + `pg_trgm` for search-ish lookups | Low | Round-2 backlog; MVP scale tolerable | When query latency shows up |
 | **Integration-test tier** — only unit (Jest/`bun test`); no API integration suite | Low | ADR-0012 deferred | When critical flows stabilize |
 | **CSV import/export** — not built | Low | Round-2 backlog (product feature) | When operators ask |
@@ -389,12 +428,12 @@ the next AuthZ wave. The rest is the **Round-2 backlog** the CEO parked while th
 |----------|--------|------|
 | **IdP / auth architecture** | ✅ **DECIDED — Option B** (ADR-0043): Zitadel = source of truth for identity+roles+tokens, write-back via Management API, in-app setup wizard, DEFAULT VIEWER, DB-first authZ, BYOI graceful | — |
 | **IdP provider / database / BYOI surface** | ✅ Decided (ADR-0037/0043): Zitadel bundled (own Postgres) + `IdentityProvider` adapter keyed on `IDENTITY_PROVIDER_TYPE`; BYOI via env (read-only role mgmt) | — |
-| **Frontend pagination implementation** | ✅ Decided + partly done (ADR-0030): `Page<T>` live on /assets,/articles,/access-grants,/dashboard/activity; remaining lists pending | When other lists grow |
+| **Frontend pagination + list contract** | ✅ Decided + done (ADR-0030 + amendment §6/§7): `Page<T>` + server `q`/sort/`dir`/`deleted` live on all 6 main lists + /articles + /access-grants + /dashboard/activity; full pagination UI + URL list-state shipped (#104/#110/#114) | — |
 | **Read-authorization model** | ⬛ Not decided | Next AuthZ wave (see debt) |
 | Async workers: BullMQ + Redis (+ scheduler) | ⬛ Not decided | SEC-002 + any recurring job unblocks on this |
 | CD / image publishing (GHCR + deploy flow) | ⬛ Not decided | Deferred in ADR-0027 |
 | E2E / integration testing tooling | ⬛ Not decided | Deferred in ADR-0012 |
-| Settings backend (general app settings) | ⬛ Not decided | `/config` covers first-run only; no general settings store yet |
+| Settings backend (general app settings store) | ⬛ Not decided | `/config` covers first-run only; the new `/settings` web area is ADMIN UI over existing endpoints (taxonomies, asset-models, roles overview, config-status) — there is still no general settings store |
 | BYOI write-back interface (SCIM/webhook) + bidirectional role sync | ⬛ Deferred to a future ADR | ADR-0043 Fork #5 |
 
 ---
@@ -406,9 +445,10 @@ the next AuthZ wave. The rest is the **Round-2 backlog** the CEO parked while th
   - **Round 1 (PRs #61–72)**: dashboard backend, Health + `@Public()`, pagination ACTUALLY implemented (ADR-0030), user-offboarding integrity, auth hardening (RS256 pin, isActive reject, JIT no-resurrect, shim prod-guard, fail-loud boot-config), consumable stock-race + int4 guard, search hardening (content indexed), frontend UX foundation (#65: palette/mobile-nav/rehype-sanitize/error-boundaries/keepPreviousData), DR/infra hardening (#66: digest pins, log rotation, mem_limit, backup sidecar), doc drift fixed (#64).
   - **Auth epic (ADR-0040–0043)**: RBAC, soft-delete reuse + restore (ADR-0041), KB versioning + linking (ADR-0042), Zitadel source-of-truth + write-back + wizard (ADR-0043).
   - **Round 3 + extras (#81–84, #86)**: softened palette, role-management UI in Users, consumable quick-adjust, asset custom-fields editor, dashboard recent-activity VIEW (ADR-0044).
+- **UX northstar cycle (PRs #100–#115) merged to `dev` 2026-06-01** — Fase 1+2 + four new surfaces (settings / KB runbooks UI / restore / bulk). Backend: list contracts extended with `sort`/`dir` (ADR-0030 §6) + `q` + `deleted=only` (§7) on the 5 lists, batch endpoints, KB reverse endpoints, consumable soft-delete leak fixed (#114). Frontend: shared chrome (PageHeader/Breadcrumb/SearchInput), StatusBadge/tokens (ADR-0011 amd 3), DetailPanel, RBAC-gated writes (`useCanWrite`), URL-driven list state, real pagination UI, bulk/restore + archived toggle, `/settings` admin area, KB runbooks panels, **heroicons-only (ADR-0045, lucide dropped)**. CEO authorized the CTO to merge these PRs to `dev`.
 - Infra consolidated to a single `compose.yaml` + `compose.override.yaml` + `prod` profile + `infra/docker-compose.prod.yaml`; old `docker-compose.yml` / `infra/docker-compose.prod.yml` gone. Zero-touch Zitadel sidecars + `zitadel_secrets` volume.
-- ADR count: 44 (0001–0044). `docs/06-security/INVARIANTS.md` records the 7 auth non-negotiables.
-- Next candidates: read-authorization wave, the Round-2 backlog (revoke/release races, paginate remaining lists, DB indexes/pg_trgm, integration tests, CSV import/export, warranty/expiry filters), KB version/link UI; scheduler still deferred.
+- ADR count: 45 (0001–0045). `docs/06-security/INVARIANTS.md` records the 7 auth non-negotiables.
+- Next candidates: read-authorization wave, the residual UX Phase-3 polish (Timeline primitive, command-palette/quick-create, specs-editor niceties, unsaved-changes guards, sticky-header/column-visibility/density, two-column detail history, brand logo) + the not-yet-wired access-grants bulk-revoke UI + server-side filters for the client-side filter cases; the Round-2 backlog (revoke/release races, DB indexes/pg_trgm, integration tests, CSV import/export, warranty/expiry filters); scheduler still deferred.
 
 ---
 

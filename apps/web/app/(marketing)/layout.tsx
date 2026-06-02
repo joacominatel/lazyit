@@ -11,13 +11,13 @@ export default function MarketingLayout({
   return (
     <div className="flex min-h-svh flex-col">
       <header className="flex h-16 items-center justify-between border-b border-border px-6">
-        <Link href="/" className="text-base font-semibold tracking-tight">
+        <Link
+          href="/"
+          className="font-mono text-base font-semibold tracking-tight"
+        >
           lazyit
         </Link>
         <nav className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/dashboard">Dashboard</Link>
-          </Button>
           <ThemeToggle />
           <Button size="sm" asChild>
             <Link href="/login">Sign in</Link>

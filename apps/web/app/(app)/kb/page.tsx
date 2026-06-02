@@ -3,16 +3,17 @@
 import {
   ArrowUpTrayIcon,
   BookOpenIcon,
-  MagnifyingGlassIcon,
   PlusIcon,
 } from "@heroicons/react/24/outline";
-import { type ArticleStatus, DEFAULT_PAGE_LIMIT } from "@lazyit/shared";
+import { type ArticleStatus } from "@lazyit/shared";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
+import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState, Pagination } from "@/components/resource-table";
+import { SearchInput } from "@/components/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -24,42 +25,50 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useArticles } from "@/lib/api/hooks/use-articles";
 import { useUsers } from "@/lib/api/hooks/use-users";
-import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useListParams } from "@/lib/hooks/use-list-params";
 import { formatDate } from "@/lib/utils/format";
 import { ArticleStatusBadge } from "./_components/article-status-badge";
 import { ImportArticleDialog } from "./_components/import-article-dialog";
 
 type StatusFilter = "ALL" | ArticleStatus;
 
+/** Filter param defaults. `status` and `categoryId` are both server-side filters. */
+const FILTER_DEFAULTS = { status: "ALL", categoryId: "ALL" } as const;
+
+const STATUS_LABEL: Record<StatusFilter, string> = {
+  ALL: "All",
+  DRAFT: "Drafts",
+  PUBLISHED: "Published",
+};
+
 export default function KnowledgeBasePage() {
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
-  const [offset, setOffset] = useState(0);
+  const canWrite = useCanWrite();
+  const {
+    q,
+    offset,
+    limit,
+    filters,
+    setQ,
+    setFilter,
+    setOffset,
+    clearFilters,
+    filtersActive,
+  } = useListParams({ filters: FILTER_DEFAULTS });
+
+  const statusFilter = filters.status as StatusFilter;
+  const categoryFilter = filters.categoryId;
+
   const [importOpen, setImportOpen] = useState(false);
 
-  const debouncedSearch = useDebouncedValue(search.trim(), 300);
-
-  const serverFilters = useMemo(
-    () => ({
-      q: debouncedSearch || undefined,
+  const { data: page, isLoading, isFetching, isError, error, refetch } =
+    useArticles({
+      q: q || undefined,
       status: statusFilter === "ALL" ? undefined : statusFilter,
       categoryId: categoryFilter === "ALL" ? undefined : categoryFilter,
-    }),
-    [debouncedSearch, statusFilter, categoryFilter],
-  );
-
-  // Reset paging to the first page whenever the filters change (a different result set). Done during
-  // render rather than in an effect so the reset and the new fetch happen in one pass.
-  const filterKey = JSON.stringify(serverFilters);
-  const [lastFilterKey, setLastFilterKey] = useState(filterKey);
-  if (filterKey !== lastFilterKey) {
-    setLastFilterKey(filterKey);
-    setOffset(0);
-  }
-
-  const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useArticles({ ...serverFilters, offset });
+      limit,
+      offset,
+    });
   const { data: categories } = useArticleCategories();
   const { data: users } = useUsers();
 
@@ -72,48 +81,67 @@ export default function KnowledgeBasePage() {
     return user ? `${user.firstName} ${user.lastName}` : "Unknown author";
   };
 
-  const filtersActive =
-    debouncedSearch !== "" || statusFilter !== "ALL" || categoryFilter !== "ALL";
-  const isEmpty = (page?.total ?? 0) === 0;
+  const total = page?.total ?? 0;
+  const isEmpty = total === 0;
+
+  const chips = [
+    ...(q ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }] : []),
+    ...(statusFilter !== "ALL"
+      ? [
+          {
+            key: "status",
+            label: `Status: ${STATUS_LABEL[statusFilter]}`,
+            onClear: () => setFilter("status", FILTER_DEFAULTS.status),
+          },
+        ]
+      : []),
+    ...(categoryFilter !== "ALL"
+      ? [
+          {
+            key: "categoryId",
+            label: `Category: ${categoryName(categoryFilter)}`,
+            onClear: () => setFilter("categoryId", FILTER_DEFAULTS.categoryId),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Knowledge Base
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Internal documentation for the team.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setImportOpen(true)}>
-            <ArrowUpTrayIcon />
-            Import
-          </Button>
-          <Button asChild>
-            <Link href="/kb/new">
-              <PlusIcon />
-              New article
-            </Link>
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Knowledge Base"
+        subtitle="Internal documentation for the team."
+        actions={
+          canWrite ? (
+            <>
+              <Button variant="outline" onClick={() => setImportOpen(true)}>
+                <ArrowUpTrayIcon />
+                Import
+              </Button>
+              <Button asChild>
+                <Link href="/kb/new">
+                  <PlusIcon />
+                  New article
+                </Link>
+              </Button>
+            </>
+          ) : null
+        }
+      />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative sm:max-w-xs sm:flex-1">
-          <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by title…"
-            className="pl-8"
-          />
-        </div>
+        <SearchInput
+          value={q}
+          onChange={setQ}
+          debounceMs={300}
+          onDebouncedChange={setQ}
+          label="Search articles"
+          placeholder="Search by title…"
+          className="sm:max-w-xs sm:flex-1"
+        />
         <Select
           value={statusFilter}
-          onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+          onValueChange={(value) => setFilter("status", value)}
         >
           <SelectTrigger className="sm:w-40">
             <SelectValue />
@@ -124,7 +152,10 @@ export default function KnowledgeBasePage() {
             <SelectItem value="PUBLISHED">Published only</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+        <Select
+          value={categoryFilter}
+          onValueChange={(value) => setFilter("categoryId", value)}
+        >
           <SelectTrigger className="sm:w-48">
             <SelectValue />
           </SelectTrigger>
@@ -139,6 +170,8 @@ export default function KnowledgeBasePage() {
         </Select>
       </div>
 
+      <ActiveFilters chips={chips} onClearAll={clearFilters} />
+
       {isLoading ? (
         <SkeletonCards />
       ) : isError ? (
@@ -149,21 +182,24 @@ export default function KnowledgeBasePage() {
         />
       ) : isEmpty ? (
         filtersActive ? (
-          <p className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
-            No articles match your filters.
-          </p>
+          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
+            <span>No articles match your filters.</span>
+            <ClearFiltersLink onClick={clearFilters} />
+          </div>
         ) : (
           <EmptyState
             icon={BookOpenIcon}
             title="No articles yet"
             description="Write your first article or import one from a file."
             action={
-              <Button asChild>
-                <Link href="/kb/new">
-                  <PlusIcon />
-                  Write your first article
-                </Link>
-              </Button>
+              canWrite ? (
+                <Button asChild>
+                  <Link href="/kb/new">
+                    <PlusIcon />
+                    Write your first article
+                  </Link>
+                </Button>
+              ) : undefined
             }
           />
         )
@@ -187,7 +223,9 @@ export default function KnowledgeBasePage() {
                   </p>
                 )}
                 <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                  <Badge variant="outline">{categoryName(article.categoryId)}</Badge>
+                  <Badge variant="outline">
+                    {categoryName(article.categoryId)}
+                  </Badge>
                   <span>{authorName(article.authorId)}</span>
                   <span aria-hidden>·</span>
                   <span className="tabular-nums">
@@ -202,9 +240,9 @@ export default function KnowledgeBasePage() {
 
       {!isLoading && !isError && !isEmpty ? (
         <Pagination
-          total={page?.total ?? 0}
-          limit={page?.limit ?? DEFAULT_PAGE_LIMIT}
-          offset={page?.offset ?? 0}
+          total={total}
+          limit={page?.limit ?? limit}
+          offset={page?.offset ?? offset}
           itemCount={articles?.length ?? 0}
           onOffsetChange={setOffset}
           isFetching={isFetching}

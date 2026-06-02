@@ -1,18 +1,23 @@
 "use client";
 
 import {
+  ArrowPathIcon,
   ArrowRightIcon,
   BookOpenIcon,
   CubeIcon,
   ExclamationTriangleIcon,
   KeyIcon,
+  PlusIcon,
   ServerStackIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
 import type { AssetStatus, DashboardSummary } from "@lazyit/shared";
 import Link from "next/link";
-import type { ComponentType, ReactNode } from "react";
-import { RequestIdNote } from "@/components/request-id-note";
+import type { ComponentType } from "react";
+import { useState } from "react";
+import { PageHeader } from "@/components/page-header";
+import { ErrorState } from "@/components/resource-table";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -21,35 +26,67 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ApiError } from "@/lib/api/client";
 import { useDashboardSummary } from "@/lib/api/hooks/use-dashboard";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
+import { formatRelativeTime } from "@/lib/utils/format";
 import { formatAssetStatus } from "../assets/_components/asset-status-badge";
 import { RecentActivityPanel } from "./_components/recent-activity-panel";
 
 /**
  * Dashboard landing — live metrics across lazyit's three pillars (Inventory / Access / Knowledge).
  * Everything here is read from `GET /dashboard/summary` (a point-in-time aggregation, never a
- * subscription) via `useDashboardSummary`. The view has three states: loading skeletons, an error
- * surface (with the API request id for reporting), and the loaded metrics + a "Needs attention"
- * zone that highlights anything operationally noteworthy. No writes happen here.
+ * subscription) via `useDashboardSummary`. The view has three states: loading skeletons, a shared
+ * `ErrorState` surface, and the loaded metrics. The loaded view leads with "Needs attention", then
+ * the per-pillar count cards, then the cross-pillar activity feed. Every metric / attention row
+ * deep-links into a PRE-FILTERED list (using the same URL filter params the lists read), and ADMIN
+ * callers get quick write actions. No writes happen on this page itself.
  */
 export default function DashboardPage() {
-  const { data, isLoading, isError, error, refetch } = useDashboardSummary();
+  const { data, isLoading, isError, error, refetch, isFetching } =
+    useDashboardSummary();
+  const canWrite = useCanWrite();
+  // Snapshot "now" once so the "Updated <relative>" stamp stays pure across renders.
+  const [now] = useState(() => Date.now());
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">
-          Your IT estate at a glance — Inventory, Access and Knowledge.
-        </p>
-      </div>
+      <PageHeader
+        title="Dashboard"
+        subtitle="Your IT estate at a glance — Inventory, Access and Knowledge."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {data ? (
+              <span
+                className="text-xs text-muted-foreground tabular-nums"
+                title={new Date(data.generatedAt).toLocaleString()}
+              >
+                Updated {formatRelativeTime(data.generatedAt, now)}
+              </span>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isFetching}
+            >
+              <ArrowPathIcon className={cn(isFetching && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
+        }
+      />
+
+      {canWrite ? <QuickActions /> : null}
 
       {isLoading ? (
         <DashboardSkeleton />
       ) : isError ? (
-        <DashboardError error={error} onRetry={() => refetch()} />
+        <ErrorState
+          title="Could not load the dashboard"
+          onRetry={() => refetch()}
+          error={error}
+        />
       ) : data ? (
         <DashboardContent summary={data} />
       ) : null}
@@ -57,12 +94,35 @@ export default function DashboardPage() {
   );
 }
 
-/** The loaded dashboard: pillar health cards + the needs-attention zone. */
+/** ADMIN-only quick write actions — the most common "start something" jumps off the dashboard. */
+function QuickActions() {
+  const actions: { href: string; label: string }[] = [
+    { href: "/assets/new", label: "New asset" },
+    { href: "/consumables/new", label: "Add stock" },
+    { href: "/applications", label: "Grant access" },
+  ];
+  return (
+    <div className="flex flex-wrap gap-2">
+      {actions.map((action) => (
+        <Button key={action.href} variant="outline" size="sm" asChild>
+          <Link href={action.href}>
+            <PlusIcon />
+            {action.label}
+          </Link>
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+/** The loaded dashboard: the needs-attention zone leads, then pillar cards, then the activity feed. */
 function DashboardContent({ summary }: { summary: DashboardSummary }) {
   const { assets, access, consumables, articles } = summary;
 
   return (
     <div className="space-y-6">
+      <NeedsAttention summary={summary} />
+
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <PillarCard
           icon={ServerStackIcon}
@@ -76,8 +136,12 @@ function DashboardContent({ summary }: { summary: DashboardSummary }) {
           ).map((status) => ({
             label: formatAssetStatus(status),
             value: assets.byStatus[status] ?? 0,
+            href: `/assets?status=${status}`,
           }))}
-          footer={`${assets.assigned} currently assigned`}
+          footer={{
+            label: `${assets.assigned} currently assigned`,
+            href: "/assets?ownership=HAS",
+          }}
         />
         <PillarCard
           icon={KeyIcon}
@@ -87,10 +151,15 @@ function DashboardContent({ summary }: { summary: DashboardSummary }) {
           href="/applications"
           cta="Manage access"
           breakdown={[
-            { label: "On critical apps", value: access.onCriticalApps },
+            {
+              label: "On critical apps",
+              value: access.onCriticalApps,
+              href: "/applications?criticality=CRITICAL",
+            },
             {
               label: `Expiring ≤ ${access.expiringWithinDays}d`,
               value: access.expiringSoon,
+              href: "/applications",
             },
           ]}
         />
@@ -102,8 +171,12 @@ function DashboardContent({ summary }: { summary: DashboardSummary }) {
           href="/kb"
           cta="Open the knowledge base"
           breakdown={[
-            { label: "Published", value: articles.published },
-            { label: "Drafts", value: articles.draft },
+            {
+              label: "Published",
+              value: articles.published,
+              href: "/kb?status=PUBLISHED",
+            },
+            { label: "Drafts", value: articles.draft, href: "/kb?status=DRAFT" },
           ]}
         />
         <PillarCard
@@ -113,11 +186,15 @@ function DashboardContent({ summary }: { summary: DashboardSummary }) {
           metricLabel={consumables.total === 1 ? "item" : "items"}
           href="/consumables"
           cta="Browse consumables"
-          breakdown={[{ label: "Low on stock", value: consumables.lowStock }]}
+          breakdown={[
+            {
+              label: "Low on stock",
+              value: consumables.lowStock,
+              href: "/consumables?lowStock=true",
+            },
+          ]}
         />
       </section>
-
-      <NeedsAttention summary={summary} />
 
       <RecentActivityPanel />
     </div>
@@ -137,9 +214,11 @@ const ASSET_STATUS_ORDER: AssetStatus[] = [
 interface BreakdownRow {
   label: string;
   value: number;
+  /** Deep-link into the pre-filtered list for this bucket. */
+  href: string;
 }
 
-/** One pillar's health card: a headline count, a small breakdown, and a link into the area. */
+/** One pillar's health card: a headline count, a deep-linked breakdown, and a link into the area. */
 function PillarCard({
   icon: Icon,
   title,
@@ -155,7 +234,7 @@ function PillarCard({
   metric: number;
   metricLabel: string;
   breakdown: BreakdownRow[];
-  footer?: string;
+  footer?: { label: string; href: string };
   href: string;
   cta: string;
 }) {
@@ -174,23 +253,29 @@ function PillarCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-3">
-        <dl className="space-y-1.5 text-sm">
+        <dl className="space-y-0.5 text-sm">
           {breakdown.length === 0 ? (
             <p className="text-muted-foreground">No data yet.</p>
           ) : (
             breakdown.map((row) => (
-              <div
+              <Link
                 key={row.label}
-                className="flex items-center justify-between gap-2"
+                href={row.href}
+                className="-mx-1.5 flex items-center justify-between gap-2 rounded px-1.5 py-1 outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <dt className="text-muted-foreground">{row.label}</dt>
                 <dd className="font-medium tabular-nums">{row.value}</dd>
-              </div>
+              </Link>
             ))
           )}
         </dl>
         {footer ? (
-          <p className="text-xs text-muted-foreground">{footer}</p>
+          <Link
+            href={footer.href}
+            className="-mx-1.5 rounded px-1.5 text-xs text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {footer.label}
+          </Link>
         ) : null}
         <Link
           href={href}
@@ -217,9 +302,9 @@ interface AttentionItem {
 
 /**
  * "Needs attention" zone — the operationally noteworthy subset of the summary: in-maintenance and
- * lost assets, low-stock consumables, soon-to-expire grants and grants on critical apps. Items with
- * a zero count are dropped; if nothing needs attention, an all-clear note is shown instead. (The
- * summary contract carries no warranty-expiry figure, so that signal is not surfaced here.)
+ * lost assets, low-stock consumables, soon-to-expire grants and grants on critical apps. Each row
+ * deep-links into the PRE-FILTERED list it describes (same URL filter params the lists read). Items
+ * with a zero count are dropped; if nothing needs attention, an all-clear note is shown instead.
  */
 function NeedsAttention({ summary }: { summary: DashboardSummary }) {
   const { assets, access, consumables } = summary;
@@ -243,7 +328,7 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
         label: `${access.onCriticalApps} active grant${access.onCriticalApps === 1 ? "" : "s"} on critical applications`,
         count: access.onCriticalApps,
         tone: "warning",
-        href: "/applications",
+        href: "/applications?criticality=CRITICAL",
       },
       {
         key: "low-stock",
@@ -251,7 +336,7 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
         label: `${consumables.lowStock} consumable${consumables.lowStock === 1 ? "" : "s"} at or below the reorder threshold`,
         count: consumables.lowStock,
         tone: "warning",
-        href: "/consumables",
+        href: "/consumables?lowStock=true",
       },
       {
         key: "in-maintenance",
@@ -259,7 +344,7 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
         label: `${inMaintenance} asset${inMaintenance === 1 ? "" : "s"} in maintenance`,
         count: inMaintenance,
         tone: "warning",
-        href: "/assets",
+        href: "/assets?status=IN_MAINTENANCE",
       },
       {
         key: "lost",
@@ -267,7 +352,7 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
         label: `${lost} asset${lost === 1 ? "" : "s"} marked lost`,
         count: lost,
         tone: "danger",
-        href: "/assets",
+        href: "/assets?status=LOST",
       },
     ] satisfies AttentionItem[]
   ).filter((item) => item.count > 0);
@@ -332,10 +417,18 @@ function AttentionRow({ item }: { item: AttentionItem }) {
 const SKELETON_PILLAR_KEYS = ["a", "b", "c", "d"] as const;
 const SKELETON_ATTENTION_KEYS = ["a", "b"] as const;
 
-/** Loading placeholder mirroring the four pillar cards + the needs-attention zone. */
+/** Loading placeholder mirroring the needs-attention zone + the four pillar cards. */
 function DashboardSkeleton() {
   return (
     <div className="space-y-6">
+      <div className="space-y-3">
+        <Skeleton className="h-6 w-40" />
+        <div className="grid gap-3 sm:grid-cols-2">
+          {SKELETON_ATTENTION_KEYS.map((key) => (
+            <Skeleton key={key} className="h-14 w-full rounded-lg" />
+          ))}
+        </div>
+      </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {SKELETON_PILLAR_KEYS.map((key) => (
           <Card key={key} className="h-full">
@@ -352,48 +445,6 @@ function DashboardSkeleton() {
           </Card>
         ))}
       </div>
-      <div className="space-y-3">
-        <Skeleton className="h-6 w-40" />
-        <div className="grid gap-3 sm:grid-cols-2">
-          {SKELETON_ATTENTION_KEYS.map((key) => (
-            <Skeleton key={key} className="h-14 w-full rounded-lg" />
-          ))}
-        </div>
-      </div>
     </div>
-  );
-}
-
-/** Error surface for the summary fetch, with the API request id for reporting (ADR-0031). */
-function DashboardError({
-  error,
-  onRetry,
-}: {
-  error: unknown;
-  onRetry: () => void;
-}): ReactNode {
-  const requestId = error instanceof ApiError ? error.requestId : undefined;
-  return (
-    <Card>
-      <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-        <div className="flex size-11 items-center justify-center rounded-full bg-muted">
-          <ExclamationTriangleIcon className="size-5 text-muted-foreground" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-sm font-medium">Could not load the dashboard</p>
-          <p className="text-sm text-muted-foreground">
-            The API may be down or unreachable.
-          </p>
-        </div>
-        <RequestIdNote requestId={requestId} />
-        <button
-          type="button"
-          onClick={onRetry}
-          className="rounded-md border px-3 py-1.5 text-sm font-medium outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          Retry
-        </button>
-      </CardContent>
-    </Card>
   );
 }

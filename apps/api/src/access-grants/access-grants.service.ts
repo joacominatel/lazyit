@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type {
+  BatchResult,
   CreateAccessGrant,
   PageQuery,
   RevokeAccessGrant,
@@ -176,6 +177,51 @@ export class AccessGrantsService {
         expiresAt: data.expiresAt === null ? null : new Date(data.expiresAt),
       },
     });
+  }
+
+  /**
+   * Bulk revoke (ADMIN, ADR-0030 amendment): revoke a set of active grants in ONE transaction. Each
+   * grant is revoked INDIVIDUALLY (its own `revokedAt` / `revokedById` / optional shared `notes`) —
+   * auditability stays per-grant, exactly as the single-item {@link revoke} records it, never one
+   * entry for the whole batch. An id that is missing or already revoked is SKIPPED (reported in the
+   * result), not an error, so a partial multi-select still commits. Returns the per-id outcome.
+   */
+  async batchRevoke(
+    ids: string[],
+    notes: string | null | undefined,
+    user?: User,
+  ): Promise<BatchResult> {
+    const revokedById = this.actor.resolve(user);
+    const grants = await this.prisma.accessGrant.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, revokedAt: true },
+    });
+    const found = new Map(grants.map((g) => [g.id, g.revokedAt]));
+    const succeeded: string[] = [];
+    const skipped: { id: string; reason: string }[] = [];
+    for (const id of ids) {
+      if (!found.has(id)) skipped.push({ id, reason: 'not_found' });
+      else if (found.get(id) !== null)
+        skipped.push({ id, reason: 'already_in_state' });
+      else succeeded.push(id);
+    }
+
+    if (succeeded.length > 0) {
+      const now = new Date();
+      await this.prisma.$transaction(async (tx) => {
+        for (const id of succeeded) {
+          await tx.accessGrant.update({
+            where: { id },
+            data: {
+              revokedAt: now,
+              ...(revokedById !== undefined ? { revokedById } : {}),
+              ...(notes !== undefined && notes !== null ? { notes } : {}),
+            },
+          });
+        }
+      });
+    }
+    return { requested: ids.length, succeeded, skipped };
   }
 
   // --- internals -----------------------------------------------------------

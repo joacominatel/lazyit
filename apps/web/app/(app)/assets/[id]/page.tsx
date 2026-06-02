@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowLeftIcon,
   ArrowPathIcon,
   PencilSquareIcon,
   TrashIcon,
@@ -10,13 +9,18 @@ import {
 import type { AssetAssignmentWithUser } from "@lazyit/shared";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
+import { PageHeader } from "@/components/page-header";
+import { Breadcrumb } from "@/components/breadcrumb";
+import { RelatedArticlesPanel } from "@/components/related-articles-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/user-avatar";
+import { ErrorState } from "@/components/resource-table";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
 import { useAsset, useAssetAssignments } from "@/lib/api/hooks/use-assets";
 import { useDeleteAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
@@ -34,8 +38,9 @@ export default function AssetDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
+  const canWrite = useCanWrite();
 
-  const { data: asset, isLoading, isError } = useAsset(id);
+  const { data: asset, isLoading, isError, error, refetch } = useAsset(id);
   // All assignments (active + released), each with its user, for owners + history.
   const { data: assignments } = useAssetAssignments(id, false);
   const release = useReleaseAssignment();
@@ -47,27 +52,21 @@ export default function AssetDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-4xl space-y-4">
-        <Skeleton className="h-4 w-20" />
-        <Skeleton className="h-8 w-1/2" />
-        <Skeleton className="h-40 w-full" />
+      <div className="mx-auto max-w-4xl">
+        <DetailSkeleton panels={3} />
       </div>
     );
   }
 
   if (isError || !asset) {
     return (
-      <div className="mx-auto flex max-w-4xl flex-col items-center gap-3 rounded-lg border border-dashed py-16 text-center">
-        <p className="text-sm font-medium">Asset not found</p>
-        <p className="text-sm text-muted-foreground">
-          It may have been deleted.
-        </p>
-        <Button variant="outline" asChild>
-          <Link href="/assets">
-            <ArrowLeftIcon />
-            Back to Assets
-          </Link>
-        </Button>
+      <div className="mx-auto max-w-4xl">
+        <ErrorState
+          title="Asset not found"
+          description="It may have been deleted, or the API is unreachable."
+          onRetry={() => refetch()}
+          error={error}
+        />
       </div>
     );
   }
@@ -95,71 +94,102 @@ export default function AssetDetailPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <Button variant="ghost" size="sm" asChild className="-ml-2">
-            <Link href="/assets">
-              <ArrowLeftIcon />
-              Assets
-            </Link>
-          </Button>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight">
-              {asset.name}
-            </h1>
-            <AssetStatusBadge status={asset.status} />
-          </div>
-          {asset.assetTag && (
-            <p className="font-mono text-sm text-muted-foreground">
-              {asset.assetTag}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/assets/${asset.id}/edit`}>
-              <PencilSquareIcon />
-              Edit
-            </Link>
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Delete asset"
-            onClick={() => setDeleteOpen(true)}
-          >
-            <TrashIcon />
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        breadcrumb={
+          <Breadcrumb
+            items={[
+              { label: "Assets", href: "/assets" },
+              { label: asset.name },
+            ]}
+          />
+        }
+        title={asset.name}
+        subtitle={
+          asset.assetTag ? (
+            <span className="font-mono">{asset.assetTag}</span>
+          ) : undefined
+        }
+        badge={<AssetStatusBadge status={asset.status} />}
+        actions={
+          canWrite ? (
+            <>
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/assets/${asset.id}/edit`}>
+                  <PencilSquareIcon />
+                  Edit
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Delete asset"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <TrashIcon />
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
 
-      <Panel title="Details">
+      <DetailPanel title="Details">
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <Detail label="Model">
-            {asset.model
-              ? `${asset.model.manufacturer} ${asset.model.name}`
-              : "—"}
-          </Detail>
-          <Detail label="Category">
-            {asset.model?.category ? (
-              <Badge variant="outline">{asset.model.category.name}</Badge>
+          <DetailField label="Model">
+            {asset.model ? (
+              // No server `model` filter on the asset list — deep-link the model to its category
+              // (the closest filter that exists), falling back to plain text when uncategorized.
+              asset.model.category ? (
+                <Link
+                  href={`/assets?category=${asset.model.category.id}`}
+                  className="hover:underline"
+                >
+                  {asset.model.manufacturer} {asset.model.name}
+                </Link>
+              ) : (
+                `${asset.model.manufacturer} ${asset.model.name}`
+              )
             ) : (
               "—"
             )}
-          </Detail>
-          <Detail label="Location">{asset.location?.name ?? "—"}</Detail>
-          <Detail label="Serial">
+          </DetailField>
+          <DetailField label="Category">
+            {asset.model?.category ? (
+              <Link
+                href={`/assets?category=${asset.model.category.id}`}
+                className="rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Badge variant="outline" className="hover:bg-muted">
+                  {asset.model.category.name}
+                </Badge>
+              </Link>
+            ) : (
+              "—"
+            )}
+          </DetailField>
+          <DetailField label="Location">
+            {asset.location ? (
+              <Link
+                href={`/locations/${asset.location.id}`}
+                className="hover:underline"
+              >
+                {asset.location.name}
+              </Link>
+            ) : (
+              "—"
+            )}
+          </DetailField>
+          <DetailField label="Serial">
             <span className="font-mono">{asset.serial ?? "—"}</span>
-          </Detail>
-          <Detail label="Asset tag">
+          </DetailField>
+          <DetailField label="Asset tag">
             <span className="font-mono">{asset.assetTag ?? "—"}</span>
-          </Detail>
-          <Detail label="Purchase date">
+          </DetailField>
+          <DetailField label="Purchase date">
             {asset.purchaseDate ? formatDate(asset.purchaseDate) : "—"}
-          </Detail>
-          <Detail label="Warranty end">
+          </DetailField>
+          <DetailField label="Warranty end">
             {asset.warrantyEnd ? formatDate(asset.warrantyEnd) : "—"}
-          </Detail>
+          </DetailField>
         </dl>
         {asset.notes && (
           <div className="mt-4 space-y-1">
@@ -167,9 +197,9 @@ export default function AssetDetailPage() {
             <dd className="text-sm whitespace-pre-wrap">{asset.notes}</dd>
           </div>
         )}
-      </Panel>
+      </DetailPanel>
 
-      <Panel title="Custom fields">
+      <DetailPanel title="Custom fields">
         {specsEntries.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No custom fields recorded.
@@ -186,15 +216,21 @@ export default function AssetDetailPage() {
             ))}
           </dl>
         )}
-      </Panel>
+      </DetailPanel>
 
-      <Panel
+      <DetailPanel
         title="Owners"
-        action={
-          <Button size="sm" variant="outline" onClick={() => setAssignOpen(true)}>
-            <UserPlusIcon />
-            Assign user
-          </Button>
+        actions={
+          canWrite ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAssignOpen(true)}
+            >
+              <UserPlusIcon />
+              Assign user
+            </Button>
+          ) : undefined
         }
       >
         {active.length === 0 ? (
@@ -219,9 +255,12 @@ export default function AssetDetailPage() {
                     />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="truncate font-medium">
+                        <Link
+                          href={`/users/${assignment.userId}`}
+                          className="truncate font-medium hover:underline"
+                        >
                           {ownerName(assignment)}
-                        </span>
+                        </Link>
                         {gone && (
                           <Badge variant="outline" className="text-muted-foreground">
                             Deactivated
@@ -235,37 +274,46 @@ export default function AssetDetailPage() {
                       </p>
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRelease(assignment.id)}
-                    disabled={release.isPending}
-                  >
-                    {releasingId === assignment.id && (
-                      <ArrowPathIcon className="animate-spin" />
-                    )}
-                    Release
-                  </Button>
+                  {canWrite && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRelease(assignment.id)}
+                      disabled={release.isPending}
+                    >
+                      {releasingId === assignment.id && (
+                        <ArrowPathIcon className="animate-spin" />
+                      )}
+                      Release
+                    </Button>
+                  )}
                 </li>
               );
             })}
           </ul>
         )}
-      </Panel>
+      </DetailPanel>
 
-      <Panel title="Activity">
+      <RelatedArticlesPanel assetId={asset.id} />
+
+      <DetailPanel title="Activity">
         <AssetHistoryTimeline assetId={asset.id} />
-      </Panel>
+      </DetailPanel>
 
       {history.length > 0 && (
-        <Panel title="Ownership history">
+        <DetailPanel title="Ownership history">
           <ul className="divide-y text-sm">
             {history.map((assignment) => (
               <li
                 key={assignment.id}
                 className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0"
               >
-                <span className="font-medium">{ownerName(assignment)}</span>
+                <Link
+                  href={`/users/${assignment.userId}`}
+                  className="font-medium hover:underline"
+                >
+                  {ownerName(assignment)}
+                </Link>
                 <span className="tabular-nums text-muted-foreground">
                   {formatDate(assignment.assignedAt)} →{" "}
                   {assignment.releasedAt
@@ -280,7 +328,7 @@ export default function AssetDetailPage() {
               </li>
             ))}
           </ul>
-        </Panel>
+        </DetailPanel>
       )}
 
       <AssignUserDialog
@@ -297,37 +345,6 @@ export default function AssetDetailPage() {
         onConfirm={() => deleteAsset.mutateAsync(asset.id)}
         onDeleted={() => router.push("/assets")}
       />
-    </div>
-  );
-}
-
-/** A bordered section with a heading and optional header action. */
-function Panel({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-lg border p-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** A label/value pair in the details grid. */
-function Detail({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="text-sm">{children}</dd>
     </div>
   );
 }

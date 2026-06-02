@@ -1,5 +1,6 @@
 import type {
   Consumable,
+  ConsumableListPage,
   ConsumableMovement,
   ConsumableMovementQuery,
   CreateConsumable,
@@ -26,19 +27,52 @@ export const createConsumable = crud.create;
 export const updateConsumable = crud.update;
 export const deleteConsumable = crud.remove;
 
-export interface ConsumableFilters {
-  /** Server-side: only items at or below their reorder threshold (`currentStock <= minStock`). */
-  lowStock?: boolean;
+/**
+ * Restore one soft-deleted consumable (`POST /consumables/:id/restore`, ADMIN). Clears `deletedAt`
+ * and returns the restored row.
+ */
+export function restoreConsumable(id: string): Promise<Consumable> {
+  return apiFetch<Consumable>(`${BASE}/${id}/restore`, { method: "POST" });
 }
 
-/** List non-deleted consumables, optionally only low-stock ones. */
+/**
+ * Server-side params for the consumable list (#104). `q` matches name/sku/description; `sort` is
+ * allowlisted to `name|sku|currentStock|createdAt|updatedAt` (unknown → 400); `lowStock=true` keeps
+ * only items at or below their reorder threshold (`currentStock <= minStock`). Category is NOT a
+ * server param — the screen filters it client-side over the page. `limit`/`offset` thread the
+ * pagination window (ADR-0030). `deleted: "only"` is the ADMIN-only archived view (soft-deleted rows).
+ */
+export interface ConsumableListParams {
+  q?: string;
+  sort?: string;
+  dir?: "asc" | "desc";
+  lowStock?: boolean;
+  limit?: number;
+  offset?: number;
+  deleted?: "only";
+}
+
+/**
+ * List consumables, paged. `GET /consumables` returns a `Page<Consumable>` envelope; we
+ * return the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
+ * server-supported params are forwarded (extra client-only filter keys are ignored). Default is
+ * active-only; pass `deleted: "only"` (ADMIN) for the archived view.
+ */
 export function getConsumables(
-  filters: ConsumableFilters = {},
-): Promise<Consumable[]> {
-  const params = new URLSearchParams();
-  if (filters.lowStock) params.set("lowStock", "true");
-  const qs = params.toString();
-  return apiFetch<Consumable[]>(qs ? `${BASE}?${qs}` : BASE);
+  params: ConsumableListParams = {},
+): Promise<ConsumableListPage> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.sort) {
+    qs.set("sort", params.sort);
+    if (params.dir) qs.set("dir", params.dir);
+  }
+  if (params.lowStock) qs.set("lowStock", "true");
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  if (params.deleted) qs.set("deleted", params.deleted);
+  const search = qs.toString();
+  return apiFetch<ConsumableListPage>(search ? `${BASE}?${search}` : BASE);
 }
 
 /** A consumable's stock movement ledger (newest first), optionally filtered by type / date range. */

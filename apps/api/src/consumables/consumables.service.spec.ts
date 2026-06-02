@@ -19,6 +19,7 @@ type ConsumableModelMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
   // Field reference used by the lowStock filter (prisma.consumable.fields.minStock).
   fields: { minStock: unknown };
 };
@@ -71,6 +72,7 @@ describe('ConsumablesService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
       fields: { minStock: MIN_STOCK_FIELD },
     };
     consumableMovement = { findMany: jest.fn(), create: jest.fn() };
@@ -85,7 +87,11 @@ describe('ConsumablesService', () => {
     prisma = {
       consumable,
       consumableMovement,
-      $transaction: jest.fn((cb: (client: TxMock) => unknown) => cb(tx)),
+      // Handles BOTH forms: callback (createMovement) and array (findPage's [findMany, count]).
+      $transaction: jest.fn(
+        (arg: ((client: TxMock) => unknown) | Promise<unknown>[]) =>
+          Array.isArray(arg) ? Promise.all(arg) : arg(tx),
+      ),
     };
     // ActorService is mocked; guard validation detail lives in jwt-auth.guard.spec.ts. Default: no actor.
     // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
@@ -102,30 +108,127 @@ describe('ConsumablesService', () => {
     service = moduleRef.get(ConsumablesService);
   });
 
-  // --- findAll ------------------------------------------------------------
-  it('findAll lists by name asc with no filter by default', async () => {
-    consumable.findMany.mockResolvedValue([]);
+  // --- findPage -----------------------------------------------------------
+  it('findPage lists by name asc with no filter by default, returning the Page envelope', async () => {
+    consumable.findMany.mockResolvedValue([{ id: 'k1' }]);
+    consumable.count.mockResolvedValue(1);
 
-    await service.findAll();
+    const page = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
 
     expect(consumable.findMany).toHaveBeenCalledWith({
-      where: {},
+      // Consumable is NOT in the ADR-0032 SOFT_DELETABLE_MODELS set, so the `active` slice scopes to
+      // live rows EXPLICITLY here (the read filter does not auto-scope it) — ADR-0041 addendum.
+      where: { deletedAt: null },
       orderBy: { name: 'asc' },
+      take: 50,
+      skip: 0,
+    });
+    expect(page).toEqual({
+      items: [{ id: 'k1' }],
+      total: 1,
+      limit: 50,
+      offset: 0,
     });
   });
 
-  it('findAll lowStock compares currentStock against the minStock field reference', async () => {
+  it('findPage lowStock compares currentStock against the minStock field reference', async () => {
     consumable.findMany.mockResolvedValue([]);
+    consumable.count.mockResolvedValue(0);
 
-    await service.findAll({ lowStock: true });
+    await service.findPage(
+      { lowStock: true },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const call = (
+      consumable.findMany.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.where).toEqual({
+      minStock: { not: null },
+      currentStock: { lte: MIN_STOCK_FIELD },
+      deletedAt: null,
+    });
+  });
+
+  it('findPage applies a case-insensitive q over name/sku/description', async () => {
+    consumable.findMany.mockResolvedValue([]);
+    consumable.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { q: 'hdmi' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const call = (
+      consumable.findMany.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.where).toEqual({
+      OR: [
+        { name: { contains: 'hdmi', mode: 'insensitive' } },
+        { sku: { contains: 'hdmi', mode: 'insensitive' } },
+        { description: { contains: 'hdmi', mode: 'insensitive' } },
+      ],
+      deletedAt: null,
+    });
+  });
+
+  it('findPage honors an allowlisted sort and rejects an unknown one (400)', async () => {
+    consumable.findMany.mockResolvedValue([]);
+    consumable.count.mockResolvedValue(0);
+
+    await service.findPage(
+      {},
+      {
+        limit: 50,
+        offset: 0,
+        sort: 'currentStock',
+        dir: 'desc',
+        deleted: 'active',
+      },
+    );
+    const call = (
+      consumable.findMany.mock.calls as Array<
+        [{ orderBy: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.orderBy).toEqual({ currentStock: 'desc' });
+
+    await expect(
+      service.findPage(
+        {},
+        { limit: 50, offset: 0, sort: 'evil', dir: 'asc', deleted: 'active' },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('findPage deleted=only returns soft-deleted rows (explicit deletedAt + escape hatch) (ADR-0041)', async () => {
+    consumable.findMany.mockResolvedValue([{ id: 'gone' }]);
+    consumable.count.mockResolvedValue(1);
+
+    const page = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'only' },
+    );
 
     expect(consumable.findMany).toHaveBeenCalledWith({
-      where: {
-        minStock: { not: null },
-        currentStock: { lte: MIN_STOCK_FIELD },
-      },
+      where: { deletedAt: { not: null } },
       orderBy: { name: 'asc' },
+      take: 50,
+      skip: 0,
+      includeSoftDeleted: true,
     });
+    expect(consumable.count).toHaveBeenCalledWith({
+      where: { deletedAt: { not: null } },
+      includeSoftDeleted: true,
+    });
+    expect(page.items).toEqual([{ id: 'gone' }]);
   });
 
   // --- findOne / create / update / remove ---------------------------------
@@ -349,10 +452,16 @@ describe('ConsumablesService', () => {
   });
 
   it('propagates a thrown error from the actor resolver and never opens the transaction', async () => {
-    actor.resolve.mockImplementation(() => { throw new BadRequestException(); });
+    actor.resolve.mockImplementation(() => {
+      throw new BadRequestException();
+    });
 
     await expect(
-      service.createMovement('k1', { type: 'IN', quantity: 1 }, ACTOR_USER as never),
+      service.createMovement(
+        'k1',
+        { type: 'IN', quantity: 1 },
+        ACTOR_USER as never,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
@@ -415,5 +524,40 @@ describe('ConsumablesService', () => {
       NotFoundException,
     );
     expect(consumableMovement.findMany).not.toHaveBeenCalled();
+  });
+
+  // --- restore (ADR-0041) --------------------------------------------------
+  it('restore clears deletedAt for a soft-deleted consumable', async () => {
+    consumable.findFirst.mockResolvedValue({ id: 'k1', deletedAt: new Date() });
+    consumable.update.mockResolvedValue({ id: 'k1', deletedAt: null });
+
+    const restored = await service.restore('k1');
+
+    // Found via the includeSoftDeleted escape hatch (the read filter would hide it).
+    expect(consumable.findFirst).toHaveBeenCalledWith({
+      where: { id: 'k1' },
+      includeSoftDeleted: true,
+    });
+    expect(consumable.update).toHaveBeenCalledWith({
+      where: { id: 'k1' },
+      data: { deletedAt: null },
+    });
+    expect(restored.deletedAt).toBeNull();
+  });
+
+  it('restore is idempotent (no update) when the consumable is already live', async () => {
+    consumable.findFirst.mockResolvedValue({ id: 'k1', deletedAt: null });
+
+    await service.restore('k1');
+
+    expect(consumable.update).not.toHaveBeenCalled();
+  });
+
+  it('restore 404s when the consumable never existed', async () => {
+    consumable.findFirst.mockResolvedValue(null);
+
+    await expect(service.restore('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

@@ -119,8 +119,9 @@ reshaping of `Article`.
 - **Restore-to-version** — replay a past `ArticleVersion` onto the live article (writes a new
   version)? Deferred.
 - **Retention** — cap/prune very old versions? Not for now (append-only, keep everything).
-- **Reverse link list for applications** — `GET /applications/:id/articles` (the asset reverse
-  shipped; the application reverse is a trivial follow-up if the UI needs it).
+- ~~**Reverse link list for applications** — `GET /applications/:id/articles`~~ **Resolved
+  (2026-06-01, ADR-0030 amendment):** the application reverse lookup shipped, symmetric to the asset
+  one (PUBLISHED only, lean list shape).
 
 Related: [[article]] · [[article-version]] · [[article-link]] · [[asset-history]] ·
 [[0021-knowledge-base-design]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·

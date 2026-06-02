@@ -25,6 +25,14 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  /* Categorical / avatar palette — the chart hues realized at a lightness that clears
+     white-text AA, so the same 5 categorical identities drive charts AND initials chips. */
+  --color-avatar-1: var(--avatar-1);
+  --color-avatar-2: var(--avatar-2);
+  --color-avatar-3: var(--avatar-3);
+  --color-avatar-4: var(--avatar-4);
+  --color-avatar-5: var(--avatar-5);
+  --color-avatar-foreground: var(--avatar-foreground);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -80,13 +88,18 @@
   --accent: oklch(0.955 0.005 95);
   --accent-foreground: oklch(0.27 0.006 75);
   --destructive: oklch(0.577 0.245 27.325);
-  /* Semantic status tokens — success / warning / info, paired with a readable
-     foreground. Kept distinct from --destructive (already defined). */
-  --success: oklch(0.62 0.16 150);
+  /* Semantic status tokens — the single source of truth for status color. Hue-aligned
+     with the chart ramp (green ~150 / amber ~85 / blue ~240) and the brand's single-hue
+     discipline. Each token is paired with a foreground that clears WCAG AA (≥4.5:1) as a
+     SOLID fill, so a solid status pill is always readable on the warm "bone" canvas — a
+     tinted amber-text-on-amber-tint pill cannot reach AA on light, which is why StatusBadge
+     fills solid. Kept distinct from --destructive (already defined). Light fg-on-token:
+     success 4.74:1 · warning 8.58:1 · info 4.69:1. */
+  --success: oklch(0.53 0.14 150);
   --success-foreground: oklch(0.985 0 0);
-  --warning: oklch(0.74 0.16 75);
-  --warning-foreground: oklch(0.205 0 0);
-  --info: oklch(0.6 0.13 240);
+  --warning: oklch(0.82 0.15 85);
+  --warning-foreground: oklch(0.27 0.03 75);
+  --info: oklch(0.54 0.14 240);
   --info-foreground: oklch(0.985 0 0);
   --border: oklch(0.9 0.005 95);
   --input: oklch(0.9 0.005 95);
@@ -98,6 +111,15 @@
   --chart-3: oklch(0.65 0.15 150);
   --chart-4: oklch(0.74 0.16 75);
   --chart-5: oklch(0.62 0.2 15);
+  /* Avatar/categorical fills — same 5 hues as the chart ramp (indigo/teal/green/amber/rose),
+     darkened to the lightness where white text clears AA on both themes (≈4.7–6.1:1), so one
+     set serves light and dark. Seed → index maps a person to a stable color everywhere. */
+  --avatar-1: oklch(0.5 0.18 275);
+  --avatar-2: oklch(0.52 0.13 200);
+  --avatar-3: oklch(0.5 0.14 150);
+  --avatar-4: oklch(0.52 0.13 75);
+  --avatar-5: oklch(0.52 0.2 15);
+  --avatar-foreground: oklch(0.985 0 0);
   --radius: 0.625rem;
   /* Sidebar tracks the bone canvas: a hair deeper than --background so the rail
      reads as a distinct surface without going gray. */
@@ -134,12 +156,15 @@
   --accent: oklch(0.3 0.007 75);
   --accent-foreground: oklch(0.96 0.004 95);
   --destructive: oklch(0.704 0.191 22.216);
-  --success: oklch(0.7 0.15 150);
-  --success-foreground: oklch(0.145 0 0);
-  --warning: oklch(0.8 0.15 80);
-  --warning-foreground: oklch(0.205 0 0);
-  --info: oklch(0.68 0.13 240);
-  --info-foreground: oklch(0.145 0 0);
+  /* Dark status: lighter tokens so the fill carries the near-black canvas, with a dark
+     foreground (the same near-black) — all clear AA comfortably. Same hues as light.
+     Dark fg-on-token: success 8.08:1 · warning 10.99:1 · info 7.16:1. */
+  --success: oklch(0.72 0.16 150);
+  --success-foreground: oklch(0.18 0 0);
+  --warning: oklch(0.84 0.15 85);
+  --warning-foreground: oklch(0.2 0.02 80);
+  --info: oklch(0.7 0.13 240);
+  --info-foreground: oklch(0.18 0 0);
   /* Warm-tinted hairlines: a touch of the bone hue in the translucent white so
      borders read warm against the dark warm-gray canvas. */
   --border: oklch(0.97 0.004 95 / 10%);

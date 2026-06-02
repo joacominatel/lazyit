@@ -1,23 +1,34 @@
 "use client";
 
 import {
-  MagnifyingGlassIcon,
+  ArrowUturnLeftIcon,
   PlusIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
-import type { User } from "@lazyit/shared";
+import type { BatchResult, User } from "@lazyit/shared";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
+import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { PageHeader } from "@/components/page-header";
 import {
+  BatchActionBar,
   EmptyState,
   ErrorState,
+  Pagination,
+  ResourceCard,
+  ResourceCardMeta,
   type ResourceColumn,
   ResourceTable,
+  RestoreRowAction,
   RowActions,
+  SelectCell,
+  SortableHeader,
 } from "@/components/resource-table";
+import { SearchInput } from "@/components/search-input";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -28,8 +39,18 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
-import { useDeleteUser } from "@/lib/api/hooks/use-user-mutations";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import { useUserList } from "@/lib/api/hooks/use-users";
+import {
+  useDeleteUser,
+  useRestoreUser,
+} from "@/lib/api/hooks/use-user-mutations";
+import { restoreUser } from "@/lib/api/endpoints/users";
+import { notifyBatchResult } from "@/lib/api/notify-batch-result";
+import { notifyError } from "@/lib/api/notify-error";
+import { runPerIdBatch } from "@/lib/api/per-id-batch";
+import { usePermissions } from "@/lib/hooks/use-permissions";
+import { useListParams } from "@/lib/hooks/use-list-params";
+import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { formatDate } from "@/lib/utils/format";
 import { ByoiBanner } from "./_components/byoi-banner";
 import { UserFormDialog } from "./_components/user-form-dialog";
@@ -38,64 +59,168 @@ import { UserStatusBadge } from "./_components/user-status-badge";
 
 type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
 
-const COLUMNS: ResourceColumn[] = [
-  {
-    key: "avatar",
-    header: "Avatar",
-    srOnlyHeader: true,
-    headClassName: "w-12",
-    skeleton: <Skeleton className="size-8 rounded-full" />,
-  },
-  { key: "name", header: "Name", skeleton: <Skeleton className="h-4 w-32" /> },
-  { key: "email", header: "Email", skeleton: <Skeleton className="h-4 w-48" /> },
-  {
-    key: "role",
-    header: "Role",
-    skeleton: <Skeleton className="h-8 w-[7.5rem] rounded-lg" />,
-  },
-  {
-    key: "status",
-    header: "Status",
-    skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
-  },
-  {
-    key: "updated",
-    header: "Updated",
-    skeleton: <Skeleton className="h-4 w-20" />,
-  },
-  {
-    key: "actions",
-    header: "Actions",
-    srOnlyHeader: true,
-    headClassName: "w-12 text-right",
-    skeleton: <Skeleton className="ml-auto size-7" />,
-  },
-];
+/**
+ * Filter param defaults. `status` (active/inactive) is filtered client-side over the page.
+ * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
+ */
+const FILTER_DEFAULTS = { status: "ALL", archived: "ALL" } as const;
+
+const STATUS_LABEL: Record<StatusFilter, string> = {
+  ALL: "All",
+  ACTIVE: "Active",
+  INACTIVE: "Inactive",
+};
 
 export default function UsersPage() {
-  const { data: users, isLoading, isError, error, refetch } = useUsers();
-  const deleteUser = useDeleteUser();
+  const { canWrite, isAdmin } = usePermissions();
+  const {
+    q,
+    sort,
+    dir,
+    offset,
+    limit,
+    filters,
+    setQ,
+    toggleSort,
+    setFilter,
+    setOffset,
+    clearFilters,
+    filtersActive,
+  } = useListParams({
+    filters: FILTER_DEFAULTS,
+    defaultSort: "createdAt",
+    defaultDir: "desc",
+  });
 
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const statusFilter = filters.status as StatusFilter;
+  // The archived view is ADMIN-only.
+  const archived = isAdmin && filters.archived === "only";
+
+  // Forward only the server-supported params; `status` is filtered client-side over the page below.
+  const { data: page, isLoading, isFetching, isError, error, refetch } =
+    useUserList({
+      q: q || undefined,
+      sort,
+      dir: sort ? dir : undefined,
+      limit,
+      offset,
+      deleted: archived ? "only" : undefined,
+    });
+  const deleteUser = useDeleteUser();
+  const restoreUserMutation = useRestoreUser();
+
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<User | undefined>(undefined);
   const [deleting, setDeleting] = useState<User | undefined>(undefined);
+  const [bulkRestoring, setBulkRestoring] = useState(false);
 
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return (users ?? []).filter((user) => {
-      const matchesStatus =
-        statusFilter === "ALL" ||
-        (statusFilter === "ACTIVE" ? user.isActive : !user.isActive);
-      const haystack =
-        `${user.firstName} ${user.lastName} ${user.email}`.toLowerCase();
-      const matchesSearch = query === "" || haystack.includes(query);
-      return matchesStatus && matchesSearch;
+  const rows = useMemo(() => {
+    const items = page?.items ?? [];
+    if (statusFilter === "ALL") return items;
+    return items.filter((user) =>
+      statusFilter === "ACTIVE" ? user.isActive : !user.isActive,
+    );
+  }, [page?.items, statusFilter]);
+
+  // Selection only matters in the archived view (its sole bulk action: Restore).
+  const visibleIds = useMemo(() => rows.map((user) => user.id), [rows]);
+  const selection = useRowSelection(visibleIds);
+  const selectable = archived;
+
+  function handleRestoreRow(user: User) {
+    const name = `${user.firstName} ${user.lastName}`;
+    restoreUserMutation.mutate(user.id, {
+      onSuccess: () => toast.success(`${name} restored`),
+      onError: (err) => notifyError(err, "Couldn't restore the user"),
     });
-  }, [users, search, statusFilter]);
+  }
 
-  const hasData = (users?.length ?? 0) > 0;
+  /** Bulk restore via a per-id fan-out (no user batch endpoint exists). */
+  async function handleBulkRestore() {
+    setBulkRestoring(true);
+    try {
+      const result: BatchResult = await runPerIdBatch(
+        selection.selectedIds,
+        restoreUser,
+      );
+      notifyBatchResult(result, { noun: "user", verb: "restored" });
+      selection.clear();
+      await refetch();
+    } catch (err) {
+      notifyError(err, "Couldn't restore the selected users");
+    } finally {
+      setBulkRestoring(false);
+    }
+  }
+
+  const columns = useMemo<ResourceColumn[]>(
+    () => [
+      {
+        key: "avatar",
+        header: "Avatar",
+        srOnlyHeader: true,
+        headClassName: "w-12",
+        skeleton: <Skeleton className="size-8 rounded-full" />,
+      },
+      {
+        key: "name",
+        header: (
+          <SortableHeader
+            label="Name"
+            active={sort === "firstName"}
+            direction={dir}
+            onToggle={() => toggleSort("firstName")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-32" />,
+      },
+      {
+        key: "email",
+        header: (
+          <SortableHeader
+            label="Email"
+            active={sort === "email"}
+            direction={dir}
+            onToggle={() => toggleSort("email")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-48" />,
+      },
+      {
+        key: "role",
+        header: (
+          <SortableHeader
+            label="Role"
+            active={sort === "role"}
+            direction={dir}
+            onToggle={() => toggleSort("role")}
+          />
+        ),
+        skeleton: <Skeleton className="h-8 w-[7.5rem] rounded-lg" />,
+      },
+      {
+        key: "status",
+        header: "Status",
+        skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
+      },
+      {
+        key: "updated",
+        header: "Updated",
+        skeleton: <Skeleton className="h-4 w-20" />,
+      },
+      {
+        key: "actions",
+        header: "Actions",
+        srOnlyHeader: true,
+        headClassName: "w-12 text-right",
+        skeleton: <Skeleton className="ml-auto size-7" />,
+      },
+    ],
+    [sort, dir, toggleSort],
+  );
+
+  const total = page?.total ?? 0;
+  const isEmpty = total === 0;
 
   function openCreate() {
     setEditing(undefined);
@@ -107,58 +232,84 @@ export default function UsersPage() {
     setFormOpen(true);
   }
 
+  const chips = [
+    ...(q ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }] : []),
+    ...(statusFilter !== "ALL"
+      ? [
+          {
+            key: "status",
+            label: `Status: ${STATUS_LABEL[statusFilter]}`,
+            onClear: () => setFilter("status", FILTER_DEFAULTS.status),
+          },
+        ]
+      : []),
+  ];
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
-          <p className="text-sm text-muted-foreground">
-            The people in your organization.
-          </p>
-        </div>
-        <Button onClick={openCreate}>
-          <PlusIcon />
-          New user
-        </Button>
-      </div>
+      <PageHeader
+        title="Users"
+        subtitle="The people in your organization."
+        actions={
+          <>
+            {isAdmin ? (
+              <ArchivedToggle
+                checked={archived}
+                onCheckedChange={(on) => {
+                  setFilter("archived", on ? "only" : FILTER_DEFAULTS.archived);
+                  selection.clear();
+                }}
+              />
+            ) : null}
+            {canWrite ? (
+              <Button onClick={openCreate}>
+                <PlusIcon />
+                New user
+              </Button>
+            ) : null}
+          </>
+        }
+      />
 
       <ByoiBanner />
 
       {isLoading ? (
-        <ResourceTable columns={COLUMNS} isLoading />
+        <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
       ) : isError ? (
         <ErrorState
           title="Could not load users"
           onRetry={() => refetch()}
           error={error}
         />
-      ) : !hasData ? (
+      ) : isEmpty && !filtersActive ? (
         <EmptyState
           icon={UserPlusIcon}
           title="No users yet"
           description="Add your first user to start tracking who is in your organization."
           action={
-            <Button onClick={openCreate}>
-              <PlusIcon />
-              Create your first user
-            </Button>
+            canWrite ? (
+              <Button onClick={openCreate}>
+                <PlusIcon />
+                Create your first user
+              </Button>
+            ) : undefined
           }
         />
       ) : (
         <>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative sm:max-w-xs sm:flex-1">
-              <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search by name or email…"
-                className="pl-8"
-              />
-            </div>
+            <SearchInput
+              value={q}
+              onChange={setQ}
+              debounceMs={300}
+              onDebouncedChange={setQ}
+              label="Search users"
+              placeholder="Search by name or email…"
+              className="sm:max-w-xs sm:flex-1"
+            />
             <Select
               value={statusFilter}
-              onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+              onValueChange={(value) => setFilter("status", value)}
             >
               <SelectTrigger className="sm:w-44">
                 <SelectValue />
@@ -171,13 +322,93 @@ export default function UsersPage() {
             </Select>
           </div>
 
+          <ActiveFilters chips={chips} onClearAll={clearFilters} />
+
           <ResourceTable
-            columns={COLUMNS}
-            isFilteredEmpty={filtered.length === 0}
-            filteredEmptyMessage="No users match your filters."
+            columns={columns}
+            isFilteredEmpty={rows.length === 0}
+            filteredEmptyMessage={
+              archived ? "No archived users." : "No users match your filters."
+            }
+            filteredEmptyAction={<ClearFiltersLink onClick={clearFilters} />}
+            selection={
+              selectable
+                ? {
+                    enabled: true,
+                    allSelected: selection.allSelected,
+                    someSelected: selection.someSelected,
+                    onToggleAll: selection.toggleAll,
+                    selectAllLabel: "Select all users on this page",
+                  }
+                : undefined
+            }
+            mobileChildren={rows.map((user) => (
+              <ResourceCard
+                key={user.id}
+                href={`/users/${user.id}`}
+                selectable={selectable}
+                selected={selection.isSelected(user.id)}
+                onSelectedChange={(on) => selection.setSelected(user.id, on)}
+                selectLabel={`Select ${user.firstName} ${user.lastName}`}
+                title={
+                  <span className="inline-flex items-center gap-2">
+                    <UserAvatar
+                      size="sm"
+                      firstName={user.firstName}
+                      lastName={user.lastName}
+                      email={user.email}
+                    />
+                    {user.firstName} {user.lastName}
+                  </span>
+                }
+                badge={<UserStatusBadge isActive={user.isActive} />}
+                meta={
+                  <>
+                    <ResourceCardMeta label="Email" className="col-span-2">
+                      <span className="break-all">{user.email}</span>
+                    </ResourceCardMeta>
+                    <ResourceCardMeta label="Role">
+                      <UserRoleSelect user={user} size="sm" />
+                    </ResourceCardMeta>
+                    <ResourceCardMeta label="Updated">
+                      {formatDate(user.updatedAt)}
+                    </ResourceCardMeta>
+                  </>
+                }
+                actions={
+                  archived ? (
+                    isAdmin ? (
+                      <RestoreRowAction
+                        onRestore={() => handleRestoreRow(user)}
+                        disabled={restoreUserMutation.isPending}
+                      />
+                    ) : undefined
+                  ) : canWrite ? (
+                    <RowActions
+                      onEdit={() => openEdit(user)}
+                      onDelete={() => setDeleting(user)}
+                    />
+                  ) : undefined
+                }
+              />
+            ))}
           >
-            {filtered.map((user) => (
-              <TableRow key={user.id}>
+            {rows.map((user) => (
+              <TableRow
+                key={user.id}
+                data-state={
+                  selectable && selection.isSelected(user.id)
+                    ? "selected"
+                    : undefined
+                }
+              >
+                {selectable ? (
+                  <SelectCell
+                    checked={selection.isSelected(user.id)}
+                    onCheckedChange={(on) => selection.setSelected(user.id, on)}
+                    label={`Select ${user.firstName} ${user.lastName}`}
+                  />
+                ) : null}
                 <TableCell>
                   <UserAvatar
                     firstName={user.firstName}
@@ -186,10 +417,7 @@ export default function UsersPage() {
                   />
                 </TableCell>
                 <TableCell className="font-medium">
-                  <Link
-                    href={`/users/${user.id}`}
-                    className="hover:underline"
-                  >
+                  <Link href={`/users/${user.id}`} className="hover:underline">
                     {user.firstName} {user.lastName}
                   </Link>
                 </TableCell>
@@ -206,14 +434,51 @@ export default function UsersPage() {
                   {formatDate(user.updatedAt)}
                 </TableCell>
                 <TableCell className="text-right">
-                  <RowActions
-                    onEdit={() => openEdit(user)}
-                    onDelete={() => setDeleting(user)}
-                  />
+                  {archived ? (
+                    isAdmin ? (
+                      <div className="flex justify-end">
+                        <RestoreRowAction
+                          onRestore={() => handleRestoreRow(user)}
+                          disabled={restoreUserMutation.isPending}
+                        />
+                      </div>
+                    ) : null
+                  ) : canWrite ? (
+                    <RowActions
+                      onEdit={() => openEdit(user)}
+                      onDelete={() => setDeleting(user)}
+                    />
+                  ) : null}
                 </TableCell>
               </TableRow>
             ))}
           </ResourceTable>
+
+          {archived ? (
+            <BatchActionBar
+              count={selection.count}
+              onClear={selection.clear}
+              noun="user"
+            >
+              <Button
+                size="sm"
+                onClick={handleBulkRestore}
+                disabled={bulkRestoring}
+              >
+                <ArrowUturnLeftIcon />
+                Restore
+              </Button>
+            </BatchActionBar>
+          ) : null}
+
+          <Pagination
+            total={total}
+            limit={page?.limit ?? limit}
+            offset={page?.offset ?? offset}
+            itemCount={page?.items.length ?? 0}
+            onOffsetChange={setOffset}
+            isFetching={isFetching}
+          />
         </>
       )}
 
@@ -233,8 +498,7 @@ export default function UsersPage() {
           name={`${deleting.firstName} ${deleting.lastName}`}
           onConfirm={() => deleteUser.mutateAsync(deleting.id)}
         >
-          To keep a person on record but disable them, set them inactive
-          instead.
+          To keep a person on record but disable them, set them inactive instead.
         </DeleteConfirmDialog>
       ) : null}
     </div>

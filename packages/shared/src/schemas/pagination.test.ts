@@ -5,9 +5,11 @@ import {
   MAX_PAGE_LIMIT,
   PageQuerySchema,
   PageMetaSchema,
+  UnknownSortFieldError,
   offsetOf,
   pageOf,
   pageSchema,
+  resolveSort,
   type PageQuery,
 } from "./pagination";
 
@@ -19,14 +21,19 @@ import {
 const parse = (input: unknown): PageQuery => PageQuerySchema.parse(input);
 
 describe("PageQuerySchema — defaults & limit", () => {
-  test("empty query → default limit, offset 0", () => {
-    expect(parse({})).toEqual({ limit: DEFAULT_PAGE_LIMIT, offset: 0 });
+  test("empty query → default limit, offset 0, deleted active", () => {
+    expect(parse({})).toEqual({
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+      deleted: "active",
+    });
   });
 
   test("coerces string limit/offset (the wire shape from @Query)", () => {
     expect(parse({ limit: "25", offset: "50" })).toEqual({
       limit: 25,
       offset: 50,
+      deleted: "active",
     });
   });
 
@@ -54,17 +61,26 @@ describe("PageQuerySchema — defaults & limit", () => {
 
 describe("PageQuerySchema — page ↔ offset normalization", () => {
   test("page=1 → offset 0", () => {
-    expect(parse({ page: 1, limit: 20 })).toEqual({ limit: 20, offset: 0 });
+    expect(parse({ page: 1, limit: 20 })).toEqual({
+      limit: 20,
+      offset: 0,
+      deleted: "active",
+    });
   });
 
   test("page=3 with limit=20 → offset 40", () => {
-    expect(parse({ page: 3, limit: 20 })).toEqual({ limit: 20, offset: 40 });
+    expect(parse({ page: 3, limit: 20 })).toEqual({
+      limit: 20,
+      offset: 40,
+      deleted: "active",
+    });
   });
 
   test("page uses the default limit when limit is omitted", () => {
     expect(parse({ page: 2 })).toEqual({
       limit: DEFAULT_PAGE_LIMIT,
       offset: DEFAULT_PAGE_LIMIT,
+      deleted: "active",
     });
   });
 
@@ -72,11 +88,125 @@ describe("PageQuerySchema — page ↔ offset normalization", () => {
     expect(parse({ page: 5, offset: 0, limit: 10 })).toEqual({
       limit: 10,
       offset: 0,
+      deleted: "active",
     });
   });
 
   test("rejects page < 1", () => {
     expect(PageQuerySchema.safeParse({ page: 0 }).success).toBe(false);
+  });
+});
+
+describe("PageQuerySchema — sort & dir (ADR-0030 amendment)", () => {
+  test("no sort → no sort/dir on the normalized window", () => {
+    expect(parse({ limit: 10 })).toEqual({
+      limit: 10,
+      offset: 0,
+      deleted: "active",
+    });
+  });
+
+  test("sort with no dir defaults dir to asc", () => {
+    expect(parse({ sort: "name" })).toEqual({
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+      sort: "name",
+      dir: "asc",
+      deleted: "active",
+    });
+  });
+
+  test("sort + explicit dir is carried through verbatim", () => {
+    expect(parse({ sort: "createdAt", dir: "desc" })).toEqual({
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+      sort: "createdAt",
+      dir: "desc",
+      deleted: "active",
+    });
+  });
+
+  test("dir without sort is dropped (no sort ⇒ no dir ⇒ service default order)", () => {
+    expect(parse({ dir: "desc" })).toEqual({
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+      deleted: "active",
+    });
+  });
+
+  test("rejects an invalid dir", () => {
+    expect(
+      PageQuerySchema.safeParse({ sort: "name", dir: "sideways" }).success,
+    ).toBe(false);
+  });
+
+  test("rejects an empty sort string", () => {
+    expect(PageQuerySchema.safeParse({ sort: "" }).success).toBe(false);
+  });
+});
+
+describe("PageQuerySchema — deleted slice (ADR-0030 addendum / ADR-0041)", () => {
+  test("omitted → defaults to active (live rows only)", () => {
+    expect(parse({}).deleted).toBe("active");
+  });
+
+  test("deleted=active is carried through", () => {
+    expect(parse({ deleted: "active" }).deleted).toBe("active");
+  });
+
+  test("deleted=only is carried through", () => {
+    expect(parse({ deleted: "only" })).toEqual({
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+      deleted: "only",
+    });
+  });
+
+  test("rejects an unknown deleted value (e.g. all)", () => {
+    expect(PageQuerySchema.safeParse({ deleted: "all" }).success).toBe(false);
+  });
+});
+
+describe("resolveSort — per-resource allowlist", () => {
+  const allow = { name: "name", updated: "updatedAt" };
+
+  test("no sort on the query → undefined (use the service default order)", () => {
+    expect(resolveSort({ sort: undefined, dir: undefined }, allow)).toBe(
+      undefined,
+    );
+  });
+
+  test("an allowed key maps to its Prisma field with the direction", () => {
+    expect(resolveSort({ sort: "name", dir: "asc" }, allow)).toEqual({
+      name: "asc",
+    });
+    expect(resolveSort({ sort: "updated", dir: "desc" }, allow)).toEqual({
+      updatedAt: "desc",
+    });
+  });
+
+  test("a wire key may differ from its Prisma column", () => {
+    expect(resolveSort({ sort: "updated", dir: "asc" }, allow)).toEqual({
+      updatedAt: "asc",
+    });
+  });
+
+  test("defaults dir to asc when omitted", () => {
+    expect(resolveSort({ sort: "name", dir: undefined }, allow)).toEqual({
+      name: "asc",
+    });
+  });
+
+  test("an unknown key throws UnknownSortFieldError listing the allowed fields", () => {
+    expect(() => resolveSort({ sort: "secret", dir: "asc" }, allow)).toThrow(
+      UnknownSortFieldError,
+    );
+    try {
+      resolveSort({ sort: "secret", dir: "asc" }, allow);
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnknownSortFieldError);
+      expect((err as UnknownSortFieldError).allowed).toEqual(["name", "updated"]);
+    }
   });
 });
 

@@ -127,16 +127,13 @@ describe('ArticlesService', () => {
           arg:
             | Array<Promise<unknown>>
             | ((client: typeof tx) => Promise<unknown>),
-        ) =>
-          typeof arg === 'function' ? arg(tx) : Promise.all(arg),
+        ) => (typeof arg === 'function' ? arg(tx) : Promise.all(arg)),
       ),
     };
     // Any present User resolves to its id; undefined → anonymous (no user).
     // resolve() is now synchronous — returns string | undefined directly.
     actor = {
-      resolve: jest
-        .fn()
-        .mockImplementation((u?: MinimalUser) => u?.id),
+      resolve: jest.fn().mockImplementation((u?: MinimalUser) => u?.id),
     };
     // Category / asset / application exist by default; overridden per-test.
     articleCategory = { findFirst: jest.fn().mockResolvedValue({ id: 'c1' }) };
@@ -246,7 +243,7 @@ describe('ArticlesService', () => {
       expect(article.create).not.toHaveBeenCalled();
     });
 
-    it('propagates a thrown error from the actor resolver (a required author can\'t be resolved)', async () => {
+    it("propagates a thrown error from the actor resolver (a required author can't be resolved)", async () => {
       actor.resolve.mockImplementationOnce(() => {
         throw new BadRequestException('actor error');
       });
@@ -273,7 +270,7 @@ describe('ArticlesService', () => {
   // --- listing visibility (paginated, lean) --------------------------------
 
   describe('findPage visibility', () => {
-    const PAGE = { limit: 50, offset: 0 };
+    const PAGE = { limit: 50, offset: 0, deleted: 'active' as const };
 
     it('shows only PUBLISHED to anonymous callers', async () => {
       await service.findPage({}, PAGE, undefined);
@@ -332,7 +329,11 @@ describe('ArticlesService', () => {
       )[0][0];
 
     it('uses the LEAN select: omits `content`, keeps `excerpt`', async () => {
-      await service.findPage({}, { limit: 50, offset: 0 }, undefined);
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, deleted: 'active' },
+        undefined,
+      );
       const select = listArgs().select;
       expect(select).not.toHaveProperty('content');
       expect(select.excerpt).toBe(true);
@@ -345,7 +346,7 @@ describe('ArticlesService', () => {
 
       const result = await service.findPage(
         { status: 'PUBLISHED' },
-        { limit: 5, offset: 10 },
+        { limit: 5, offset: 10, deleted: 'active' },
         undefined,
       );
 
@@ -389,9 +390,9 @@ describe('ArticlesService', () => {
         status: 'DRAFT',
         authorId: AUTHOR,
       });
-      await expect(service.findOne('a', OTHER_USER as never)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        service.findOne('a', OTHER_USER as never),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('shows a DRAFT to its author', async () => {
@@ -400,16 +401,18 @@ describe('ArticlesService', () => {
         status: 'DRAFT',
         authorId: AUTHOR,
       });
-      await expect(service.findOne('a', AUTHOR_USER as never)).resolves.toMatchObject({
+      await expect(
+        service.findOne('a', AUTHOR_USER as never),
+      ).resolves.toMatchObject({
         id: 'a',
       });
     });
 
     it('404s when the article is missing', async () => {
       article.findFirst.mockResolvedValue(null);
-      await expect(service.findBySlug('nope', AUTHOR_USER as never)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        service.findBySlug('nope', AUTHOR_USER as never),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
@@ -542,9 +545,9 @@ describe('ArticlesService', () => {
         status: 'DRAFT',
         authorId: AUTHOR,
       });
-      await expect(service.publish('a', OTHER_USER as never)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        service.publish('a', OTHER_USER as never),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
@@ -571,9 +574,9 @@ describe('ArticlesService', () => {
         status: 'PUBLISHED',
         authorId: AUTHOR,
       });
-      await expect(service.remove('a', OTHER_USER as never)).rejects.toBeInstanceOf(
-        ForbiddenException,
-      );
+      await expect(
+        service.remove('a', OTHER_USER as never),
+      ).rejects.toBeInstanceOf(ForbiddenException);
       expect(article.update).not.toHaveBeenCalled();
     });
   });
@@ -808,7 +811,7 @@ describe('ArticlesService', () => {
       articleVersion.count.mockResolvedValueOnce(2);
       const page = await service.listVersions(
         'a',
-        { limit: 50, offset: 0 },
+        { limit: 50, offset: 0, deleted: 'active' },
         AUTHOR_USER as never,
       );
       expect(page).toEqual({
@@ -836,7 +839,11 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
       });
       await expect(
-        service.listVersions('a', { limit: 50, offset: 0 }, OTHER_USER as never),
+        service.listVersions(
+          'a',
+          { limit: 50, offset: 0, deleted: 'active' },
+          OTHER_USER as never,
+        ),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(articleVersion.findMany).not.toHaveBeenCalled();
     });
@@ -893,7 +900,11 @@ describe('ArticlesService', () => {
 
     it('links to an application (author only)', async () => {
       article.findFirst.mockResolvedValue(PUBLISHED_OWNED);
-      await service.addLink('a', { applicationId: 'app1' }, AUTHOR_USER as never);
+      await service.addLink(
+        'a',
+        { applicationId: 'app1' },
+        AUTHOR_USER as never,
+      );
       expect(application.findFirst).toHaveBeenCalled();
       expect(articleLink.create).toHaveBeenCalledWith({
         data: {
@@ -945,20 +956,47 @@ describe('ArticlesService', () => {
 
     it('lists an article links to any reader; reverse lists only PUBLISHED articles for an asset', async () => {
       article.findFirst.mockResolvedValue(PUBLISHED_OWNED);
-      articleLink.findMany.mockResolvedValueOnce([{ id: 'link1', articleId: 'a' }]);
+      articleLink.findMany.mockResolvedValueOnce([
+        { id: 'link1', articleId: 'a' },
+      ]);
       await expect(
         service.findLinks('a', AUTHOR_USER as never),
       ).resolves.toEqual([{ id: 'link1', articleId: 'a' }]);
 
-      article.findMany.mockResolvedValueOnce([{ id: 'a', status: 'PUBLISHED' }]);
+      article.findMany.mockResolvedValueOnce([
+        { id: 'a', status: 'PUBLISHED' },
+      ]);
       await service.findArticlesForAsset('as1');
       const where = (
-        article.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+        article.findMany.mock.calls as Array<
+          [{ where: Record<string, unknown> }]
+        >
       ).at(-1)![0].where;
       expect(where).toMatchObject({
         status: 'PUBLISHED',
         links: { some: { assetId: 'as1' } },
       });
+    });
+
+    it('reverse lookup for an application lists only PUBLISHED linked articles (lean shape)', async () => {
+      article.findMany.mockResolvedValueOnce([
+        { id: 'a', status: 'PUBLISHED' },
+      ]);
+
+      await service.findArticlesForApplication('app1');
+
+      const call = (
+        article.findMany.mock.calls as Array<
+          [{ where: Record<string, unknown>; select: Record<string, unknown> }]
+        >
+      ).at(-1)![0];
+      expect(call.where).toMatchObject({
+        status: 'PUBLISHED',
+        links: { some: { applicationId: 'app1' } },
+      });
+      // Lean projection: the full markdown `content` is never requested.
+      expect(call.select).not.toHaveProperty('content');
+      expect(call.select).toHaveProperty('excerpt', true);
     });
   });
 

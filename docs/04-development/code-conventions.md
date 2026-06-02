@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-05-30
+updated: 2026-06-01
 ---
 
 # Code Conventions
@@ -66,13 +66,34 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
   `apps/web/components/ui/*` (copy-in, not a dependency) and are composed by app components in
   `apps/web/components/` and the route trees. Treat `components/ui/*` as vendored: regenerate via
   the shadcn CLI rather than hand-editing, and build features by composing those primitives.
-- **Icons: heroicons only in app code; lucide stays inside `components/ui/*`.** Use
-  `@heroicons/react` (`/24/outline`, `/24/solid`) for every icon you place in pages, layouts and
-  app components — it is the project's single icon vocabulary. `lucide-react` is a transitive
-  dependency of shadcn/ui primitives (e.g. the chevrons baked into `command`, `select`,
-  `dropdown-menu`); leave those as generated. **Do not import `lucide-react` outside
-  `components/ui/*`, and do not introduce a third icon set** — mixing icon families is the most
-  common visual-inconsistency drift on the [[0020-frontend-data-layer]] screens.
+- **Icons: heroicons only — everywhere, including `components/ui/*`** ([[0045-icon-library-heroicons]]).
+  `@heroicons/react` is the project's single icon vocabulary; `lucide-react` was removed entirely
+  (it must not reappear in `apps/web/package.json` or any import). **Two-weight convention:**
+  **`/24/outline` is the default** (nav, actions, standalone icons — the vast majority);
+  **`/16/solid` is the single small variant** for dense inline / indicator / badge contexts (menu
+  check/chevron indicators, select chevrons, checkbox, table sort arrows, toast status badges).
+  Do **not** introduce a third weight (no `/24/solid`, `/20/solid`) or a second icon family. Size
+  via Tailwind classes (`size-4` / `size-5`), not by switching SVG variant. **`shadcn add` caveat:**
+  shadcn's `iconLibrary` has no heroicons option, so a freshly-generated primitive will import
+  `lucide-react` — re-map those imports to heroicons (per ADR-0045's mapping table) before
+  committing.
+- **Chrome primitives — compose, don't re-implement.** The page-frame patterns were copy-pasted
+  ~16× and drifted (title scale `text-2xl` vs `text-3xl`; ad-hoc "Back to X" ghost buttons;
+  unnamed search/filter inputs). Three shared primitives now own them:
+  - `components/page-header.tsx` — `PageHeader` ({ `title`, `subtitle?`, `breadcrumb?`,
+    `actions?`, `badge?` }). The **only** sanctioned page title; the scale is fixed inside it.
+    Never hand-roll an `<h1 className="text-2xl/3xl …">` page title — compose this.
+  - `components/breadcrumb.tsx` — `Breadcrumb` (route-driven via `usePathname`; pass explicit
+    `items` on detail pages to surface a record's real name). Rendered once at the app-shell
+    layout level; it **replaces** per-page "Back to X" buttons.
+  - `components/search-input.tsx` — `SearchInput` ({ `value`, `onChange`, optional
+    `debounceMs`+`onDebouncedChange`, `label` (default "Search"), `placeholder`, clearable }).
+    Carries an accessible name by default — list filters must name their search box.
+- **Navigation IA — three pillars + Manage.** `components/sidebar-nav.tsx` groups nav into
+  **Inventory** (Assets, Consumables) · **Access** (Applications) · **Knowledge** (Knowledge
+  Base) · **Manage** (Users, Locations), with Dashboard ungrouped on top. The user-facing noun
+  is **Applications** (route stays `/applications`); **Access** is the pillar name, not a nav
+  label. `mobile-nav.tsx` reuses `SidebarNav`, so it inherits the grouping.
 
 ## The Bun-first boundary
 

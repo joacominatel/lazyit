@@ -1,27 +1,39 @@
 "use client";
 
 import {
-  MagnifyingGlassIcon,
+  ArrowUturnLeftIcon,
   MapPinIcon,
   PlusIcon,
 } from "@heroicons/react/24/outline";
 import {
+  type BatchResult,
   type Location,
   type LocationType,
   LocationTypeSchema,
 } from "@lazyit/shared";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
+import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { PageHeader } from "@/components/page-header";
 import {
+  BatchActionBar,
   EmptyState,
   ErrorState,
+  Pagination,
+  ResourceCard,
+  ResourceCardMeta,
   type ResourceColumn,
   ResourceTable,
+  RestoreRowAction,
   RowActions,
+  SelectCell,
+  SortableHeader,
 } from "@/components/resource-table";
+import { SearchInput } from "@/components/search-input";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -31,8 +43,18 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell, TableRow } from "@/components/ui/table";
-import { useDeleteLocation } from "@/lib/api/hooks/use-location-mutations";
-import { useLocations } from "@/lib/api/hooks/use-locations";
+import { useLocationList } from "@/lib/api/hooks/use-locations";
+import {
+  useDeleteLocation,
+  useRestoreLocation,
+} from "@/lib/api/hooks/use-location-mutations";
+import { restoreLocation } from "@/lib/api/endpoints/locations";
+import { notifyBatchResult } from "@/lib/api/notify-batch-result";
+import { notifyError } from "@/lib/api/notify-error";
+import { runPerIdBatch } from "@/lib/api/per-id-batch";
+import { usePermissions } from "@/lib/hooks/use-permissions";
+import { useListParams } from "@/lib/hooks/use-list-params";
+import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { formatDate } from "@/lib/utils/format";
 import { LocationFormDialog } from "./_components/location-form-dialog";
 import {
@@ -40,55 +62,149 @@ import {
   LocationTypeBadge,
 } from "./_components/location-type-badge";
 
-const COLUMNS: ResourceColumn[] = [
-  { key: "name", header: "Name", skeleton: <Skeleton className="h-4 w-40" /> },
-  {
-    key: "type",
-    header: "Type",
-    skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
-  },
-  { key: "floor", header: "Floor", skeleton: <Skeleton className="h-4 w-10" /> },
-  {
-    key: "address",
-    header: "Address",
-    skeleton: <Skeleton className="h-4 w-48" />,
-  },
-  {
-    key: "updated",
-    header: "Updated",
-    skeleton: <Skeleton className="h-4 w-20" />,
-  },
-  {
-    key: "actions",
-    header: "Actions",
-    srOnlyHeader: true,
-    headClassName: "w-12 text-right",
-    skeleton: <Skeleton className="ml-auto size-7" />,
-  },
-];
+/**
+ * Filter param defaults for the URL list-state. `type` is filtered client-side over the page.
+ * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
+ */
+const FILTER_DEFAULTS = { type: "ALL", archived: "ALL" } as const;
 
 export default function LocationsPage() {
-  const { data: locations, isLoading, isError, error, refetch } =
-    useLocations();
-  const deleteLocation = useDeleteLocation();
+  const { canWrite, isAdmin } = usePermissions();
+  const {
+    q,
+    sort,
+    dir,
+    offset,
+    limit,
+    filters,
+    setQ,
+    toggleSort,
+    setFilter,
+    setOffset,
+    clearFilters,
+    filtersActive,
+  } = useListParams({
+    filters: FILTER_DEFAULTS,
+    defaultSort: "updatedAt",
+    defaultDir: "desc",
+  });
 
-  const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<LocationType | "ALL">("ALL");
+  const typeFilter = filters.type as LocationType | "ALL";
+  // The archived view is ADMIN-only.
+  const archived = isAdmin && filters.archived === "only";
+
+  // Forward only the server-supported params; `type` is filtered client-side over the page below.
+  const { data: page, isLoading, isFetching, isError, error, refetch } =
+    useLocationList({
+      q: q || undefined,
+      sort,
+      dir: sort ? dir : undefined,
+      limit,
+      offset,
+      deleted: archived ? "only" : undefined,
+    });
+  const deleteLocation = useDeleteLocation();
+  const restoreLocationMutation = useRestoreLocation();
+
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Location | undefined>(undefined);
   const [deleting, setDeleting] = useState<Location | undefined>(undefined);
+  const [bulkRestoring, setBulkRestoring] = useState(false);
 
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return (locations ?? []).filter((location) => {
-      const matchesType = typeFilter === "ALL" || location.type === typeFilter;
-      const matchesSearch =
-        query === "" || location.name.toLowerCase().includes(query);
-      return matchesType && matchesSearch;
+  const rows = useMemo(() => {
+    const items = page?.items ?? [];
+    return typeFilter === "ALL"
+      ? items
+      : items.filter((location) => location.type === typeFilter);
+  }, [page?.items, typeFilter]);
+
+  // Selection only matters in the archived view (its sole bulk action: Restore).
+  const visibleIds = useMemo(() => rows.map((loc) => loc.id), [rows]);
+  const selection = useRowSelection(visibleIds);
+  const selectable = archived;
+
+  function handleRestoreRow(location: Location) {
+    restoreLocationMutation.mutate(location.id, {
+      onSuccess: () => toast.success(`${location.name} restored`),
+      onError: (err) => notifyError(err, "Couldn't restore the location"),
     });
-  }, [locations, search, typeFilter]);
+  }
 
-  const hasData = (locations?.length ?? 0) > 0;
+  /** Bulk restore via a per-id fan-out (no location batch endpoint exists). */
+  async function handleBulkRestore() {
+    setBulkRestoring(true);
+    try {
+      const result: BatchResult = await runPerIdBatch(
+        selection.selectedIds,
+        restoreLocation,
+      );
+      notifyBatchResult(result, { noun: "location", verb: "restored" });
+      selection.clear();
+      await refetch();
+    } catch (err) {
+      notifyError(err, "Couldn't restore the selected locations");
+    } finally {
+      setBulkRestoring(false);
+    }
+  }
+
+  const columns = useMemo<ResourceColumn[]>(
+    () => [
+      {
+        key: "name",
+        header: (
+          <SortableHeader
+            label="Name"
+            active={sort === "name"}
+            direction={dir}
+            onToggle={() => toggleSort("name")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-40" />,
+      },
+      {
+        key: "type",
+        header: (
+          <SortableHeader
+            label="Type"
+            active={sort === "type"}
+            direction={dir}
+            onToggle={() => toggleSort("type")}
+          />
+        ),
+        skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
+      },
+      { key: "floor", header: "Floor", skeleton: <Skeleton className="h-4 w-10" /> },
+      {
+        key: "address",
+        header: "Address",
+        skeleton: <Skeleton className="h-4 w-48" />,
+      },
+      {
+        key: "updated",
+        header: (
+          <SortableHeader
+            label="Updated"
+            active={sort === "updatedAt"}
+            direction={dir}
+            onToggle={() => toggleSort("updatedAt")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-20" />,
+      },
+      {
+        key: "actions",
+        header: "Actions",
+        srOnlyHeader: true,
+        headClassName: "w-12 text-right",
+        skeleton: <Skeleton className="ml-auto size-7" />,
+      },
+    ],
+    [sort, dir, toggleSort],
+  );
+
+  const total = page?.total ?? 0;
+  const isEmpty = total === 0;
 
   function openCreate() {
     setEditing(undefined);
@@ -100,58 +216,82 @@ export default function LocationsPage() {
     setFormOpen(true);
   }
 
+  const chips = [
+    ...(q ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }] : []),
+    ...(typeFilter !== "ALL"
+      ? [
+          {
+            key: "type",
+            label: `Type: ${formatLocationType(typeFilter)}`,
+            onClear: () => setFilter("type", FILTER_DEFAULTS.type),
+          },
+        ]
+      : []),
+  ];
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Locations</h1>
-          <p className="text-sm text-muted-foreground">
-            Where your assets physically live.
-          </p>
-        </div>
-        <Button onClick={openCreate}>
-          <PlusIcon />
-          New location
-        </Button>
-      </div>
+      <PageHeader
+        title="Locations"
+        subtitle="Where your assets physically live."
+        actions={
+          <>
+            {isAdmin ? (
+              <ArchivedToggle
+                checked={archived}
+                onCheckedChange={(on) => {
+                  setFilter("archived", on ? "only" : FILTER_DEFAULTS.archived);
+                  selection.clear();
+                }}
+              />
+            ) : null}
+            {canWrite ? (
+              <Button onClick={openCreate}>
+                <PlusIcon />
+                New location
+              </Button>
+            ) : null}
+          </>
+        }
+      />
 
       {isLoading ? (
-        <ResourceTable columns={COLUMNS} isLoading />
+        <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
       ) : isError ? (
         <ErrorState
           title="Could not load locations"
           onRetry={() => refetch()}
           error={error}
         />
-      ) : !hasData ? (
+      ) : isEmpty && !filtersActive ? (
         <EmptyState
           icon={MapPinIcon}
           title="No locations yet"
           description="Add your first location to start tracking where assets live."
           action={
-            <Button onClick={openCreate}>
-              <PlusIcon />
-              Create your first location
-            </Button>
+            canWrite ? (
+              <Button onClick={openCreate}>
+                <PlusIcon />
+                Create your first location
+              </Button>
+            ) : undefined
           }
         />
       ) : (
         <>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative sm:max-w-xs sm:flex-1">
-              <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search by name…"
-                className="pl-8"
-              />
-            </div>
+            <SearchInput
+              value={q}
+              onChange={setQ}
+              debounceMs={300}
+              onDebouncedChange={setQ}
+              label="Search locations"
+              placeholder="Search by name…"
+              className="sm:max-w-xs sm:flex-1"
+            />
             <Select
               value={typeFilter}
-              onValueChange={(value) =>
-                setTypeFilter(value as LocationType | "ALL")
-              }
+              onValueChange={(value) => setFilter("type", value)}
             >
               <SelectTrigger className="sm:w-44">
                 <SelectValue />
@@ -167,13 +307,93 @@ export default function LocationsPage() {
             </Select>
           </div>
 
+          <ActiveFilters chips={chips} onClearAll={clearFilters} />
+
           <ResourceTable
-            columns={COLUMNS}
-            isFilteredEmpty={filtered.length === 0}
-            filteredEmptyMessage="No locations match your filters."
+            columns={columns}
+            isFilteredEmpty={rows.length === 0}
+            filteredEmptyMessage={
+              archived
+                ? "No archived locations."
+                : "No locations match your filters."
+            }
+            filteredEmptyAction={
+              <ClearFiltersLink onClick={clearFilters} />
+            }
+            selection={
+              selectable
+                ? {
+                    enabled: true,
+                    allSelected: selection.allSelected,
+                    someSelected: selection.someSelected,
+                    onToggleAll: selection.toggleAll,
+                    selectAllLabel: "Select all locations on this page",
+                  }
+                : undefined
+            }
+            mobileChildren={rows.map((location) => (
+              <ResourceCard
+                key={location.id}
+                href={`/locations/${location.id}`}
+                title={location.name}
+                badge={<LocationTypeBadge type={location.type} />}
+                selectable={selectable}
+                selected={selection.isSelected(location.id)}
+                onSelectedChange={(on) =>
+                  selection.setSelected(location.id, on)
+                }
+                selectLabel={`Select ${location.name}`}
+                meta={
+                  <>
+                    <ResourceCardMeta label="Floor">
+                      {location.floor ?? "—"}
+                    </ResourceCardMeta>
+                    <ResourceCardMeta label="Updated">
+                      {formatDate(location.updatedAt)}
+                    </ResourceCardMeta>
+                    {location.address ? (
+                      <ResourceCardMeta label="Address" className="col-span-2">
+                        {location.address}
+                      </ResourceCardMeta>
+                    ) : null}
+                  </>
+                }
+                actions={
+                  archived ? (
+                    isAdmin ? (
+                      <RestoreRowAction
+                        onRestore={() => handleRestoreRow(location)}
+                        disabled={restoreLocationMutation.isPending}
+                      />
+                    ) : undefined
+                  ) : canWrite ? (
+                    <RowActions
+                      onEdit={() => openEdit(location)}
+                      onDelete={() => setDeleting(location)}
+                    />
+                  ) : undefined
+                }
+              />
+            ))}
           >
-            {filtered.map((location) => (
-              <TableRow key={location.id}>
+            {rows.map((location) => (
+              <TableRow
+                key={location.id}
+                data-state={
+                  selectable && selection.isSelected(location.id)
+                    ? "selected"
+                    : undefined
+                }
+              >
+                {selectable ? (
+                  <SelectCell
+                    checked={selection.isSelected(location.id)}
+                    onCheckedChange={(on) =>
+                      selection.setSelected(location.id, on)
+                    }
+                    label={`Select ${location.name}`}
+                  />
+                ) : null}
                 <TableCell className="font-medium">
                   <Link
                     href={`/locations/${location.id}`}
@@ -198,14 +418,51 @@ export default function LocationsPage() {
                   {formatDate(location.updatedAt)}
                 </TableCell>
                 <TableCell className="text-right">
-                  <RowActions
-                    onEdit={() => openEdit(location)}
-                    onDelete={() => setDeleting(location)}
-                  />
+                  {archived ? (
+                    isAdmin ? (
+                      <div className="flex justify-end">
+                        <RestoreRowAction
+                          onRestore={() => handleRestoreRow(location)}
+                          disabled={restoreLocationMutation.isPending}
+                        />
+                      </div>
+                    ) : null
+                  ) : canWrite ? (
+                    <RowActions
+                      onEdit={() => openEdit(location)}
+                      onDelete={() => setDeleting(location)}
+                    />
+                  ) : null}
                 </TableCell>
               </TableRow>
             ))}
           </ResourceTable>
+
+          {archived ? (
+            <BatchActionBar
+              count={selection.count}
+              onClear={selection.clear}
+              noun="location"
+            >
+              <Button
+                size="sm"
+                onClick={handleBulkRestore}
+                disabled={bulkRestoring}
+              >
+                <ArrowUturnLeftIcon />
+                Restore
+              </Button>
+            </BatchActionBar>
+          ) : null}
+
+          <Pagination
+            total={total}
+            limit={page?.limit ?? limit}
+            offset={page?.offset ?? offset}
+            itemCount={page?.items.length ?? 0}
+            onOffsetChange={setOffset}
+            isFetching={isFetching}
+          />
         </>
       )}
 

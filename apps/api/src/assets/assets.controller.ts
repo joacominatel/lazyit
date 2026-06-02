@@ -26,10 +26,14 @@ import {
   AssetSchema,
   AssetStatusSchema,
   AssetWithRelationsSchema,
+  BatchAssetStatusSchema,
+  BatchIdsSchema,
+  BatchResultSchema,
   CreateAssetSchema,
   UpdateAssetSchema,
   type AssetStatus,
 } from '@lazyit/shared';
+import { ASSET_SORT_ALLOWLIST } from './assets.service';
 import { AssetsService } from './assets.service';
 import { ArticlesService } from '../articles/articles.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
@@ -37,6 +41,7 @@ import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
+import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import type { User } from '../../generated/prisma/client';
@@ -54,6 +59,11 @@ class AssetAssignmentWithUserDto extends createZodDto(
 class AssetHistoryDto extends createZodDto(AssetHistorySchema) {}
 // Reverse KB lookup (ADR-0042): the lean article-list shape for GET /assets/:id/articles.
 class ArticleListItemDto extends createZodDto(ArticleListItemSchema) {}
+// Batch (bulk) action DTOs (ADR-0030 amendment): the ids payload, the status payload, and the
+// per-item batch result envelope.
+class BatchIdsDto extends createZodDto(BatchIdsSchema) {}
+class BatchAssetStatusDto extends createZodDto(BatchAssetStatusSchema) {}
+class BatchResultDto extends createZodDto(BatchResultSchema) {}
 
 @ApiTags('assets')
 @Controller('assets')
@@ -68,7 +78,7 @@ export class AssetsController {
   @Get()
   @ApiOperation({
     summary:
-      'List assets (paginated; lean: model/category, location, activeAssignments — no specs). Excludes soft-deleted.',
+      'List assets (paginated; lean: model/category, location, activeAssignments — no specs). Active by default; deleted=only lists archived assets (ADMIN).',
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'locationId', required: false })
@@ -101,6 +111,26 @@ export class AssetsController {
     type: Number,
     description: '1-based page number (alternative to offset).',
   })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: Object.keys(ASSET_SORT_ALLOWLIST),
+    description:
+      'Server-side sort field (over the full result set). Unknown field → 400. Default order: createdAt desc.',
+  })
+  @ApiQuery({
+    name: 'dir',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default asc when sort is set).',
+  })
+  @ApiQuery({
+    name: 'deleted',
+    required: false,
+    enum: ['active', 'only'],
+    description:
+      'Soft-delete slice. active (default) = live assets; only = archived (soft-deleted) assets — ADMIN only (403 otherwise). (ADR-0041)',
+  })
   @ApiOkResponse({ type: AssetListPageDto })
   findAll(
     @Query('categoryId') categoryId?: string,
@@ -110,6 +140,10 @@ export class AssetsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
   ) {
     let parsedStatus: AssetStatus | undefined;
     if (status !== undefined) {
@@ -121,6 +155,17 @@ export class AssetsController {
       }
       parsedStatus = result.data;
     }
+    const pageQuery = parsePageQuery({
+      limit,
+      offset,
+      page,
+      sort,
+      dir,
+      deleted,
+    });
+    // The list route carries no @Roles (any authenticated user may list ACTIVE assets), so gate the
+    // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
+    assertCanListDeleted(pageQuery.deleted, user);
     return this.assets.findPage(
       {
         categoryId: parseCuidQuery(categoryId, 'categoryId'),
@@ -128,7 +173,7 @@ export class AssetsController {
         status: parsedStatus,
         q,
       },
-      parsePageQuery({ limit, offset, page }),
+      pageQuery,
     );
   }
 
@@ -215,6 +260,44 @@ export class AssetsController {
   @ApiCreatedResponse({ type: AssetDto })
   create(@Body() dto: CreateAssetDto, @CurrentUser() user?: User) {
     return this.assets.create(dto, user);
+  }
+
+  // --- batch (bulk) actions — ADMIN only (ADR-0030 amendment) ---------------
+  // Declared as STATIC `batch/*` routes (before the `:id` param routes) so they never collide with
+  // the single-item routes. Each runs in one transaction with per-entity AssetHistory (one event per
+  // item, not per batch) and returns a per-id BatchResult (succeeded + skipped-with-reason).
+
+  @Post('batch/delete')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Bulk soft-delete assets (one DELETED history event per item; one transaction) — ADMIN only',
+  })
+  @ApiOkResponse({ type: BatchResultDto })
+  batchRemove(@Body() dto: BatchIdsDto, @CurrentUser() user?: User) {
+    return this.assets.batchRemove(dto.ids, user);
+  }
+
+  @Post('batch/restore')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Bulk restore soft-deleted assets (one RESTORED history event per item; one transaction) — ADMIN only',
+  })
+  @ApiOkResponse({ type: BatchResultDto })
+  batchRestore(@Body() dto: BatchIdsDto, @CurrentUser() user?: User) {
+    return this.assets.batchRestore(dto.ids, user);
+  }
+
+  @Post('batch/status')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Bulk set asset status (one STATUS_CHANGED history event per changed item; one transaction) — ADMIN only',
+  })
+  @ApiOkResponse({ type: BatchResultDto })
+  batchSetStatus(@Body() dto: BatchAssetStatusDto, @CurrentUser() user?: User) {
+    return this.assets.batchSetStatus(dto.ids, dto.status, user);
   }
 
   @Patch(':id')

@@ -3,7 +3,7 @@ title: "ADR-0030: List endpoint pagination contract (offset; implementation defe
 tags: [adr, security, api]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-30
+updated: 2026-06-01
 deciders: [Joaquín Minatel]
 ---
 
@@ -69,6 +69,8 @@ eleven lists plus the frontend data layer today.
   `sort` param) — the asset table sorts name / asset-tag / status / updated on the loaded rows only; a
   server-side ordered list is a future backend follow-up. Consumables and the small reference lists are
   not backend-paginated, so they gained no controls.
+  **(Superseded 2026-06-01 by amendment §6 below — sort is now server-side and authoritative, all six
+  lists paginate, and list view-state lives in the URL.)**
 
 ## Consequences
 
@@ -86,8 +88,166 @@ eleven lists plus the frontend data layer today.
   (backend) if list-level dimming is wanted; the detail read (`GET /assets/:id`) still carries it.
 - The hard max (200) caps the worst-case response size for any endpoint that adopts the contract.
 
+## Amendment (2026-06-01) — sort contract, full list migration, lean-owner `deletedAt`, batch actions
+
+A UX/UI audit found correctness bugs in the list/data layer. This amendment fixes them — all
+**additive**, **no migration** (query params, projection changes and new endpoints on existing models).
+
+### 1. Sort is now part of the `Page<T>` contract
+
+`PageQuery` gained two optional params — **`sort`** (a field name) and **`dir`** (`asc` | `desc`,
+defaulting to `asc` only when `sort` is present; with no `sort` the service keeps its own default
+order). The shape only validates that they are well-formed strings; **the set of sortable fields is
+per-resource**, validated against an **ALLOWLIST** by each list endpoint. An unknown `sort` is
+**rejected with 400** (`resolveSort` → `UnknownSortFieldError` → `BadRequestException` via
+`common/resolve-sort.ts`), **never silently ignored** — so a sort always means what it says. The
+allowlist maps each PUBLIC `?sort=` key to the Prisma column (the wire key may differ from the
+column, and the surface is bounded so a client can never order by an arbitrary/secret field).
+
+The asset list's previous client-side, page-local sort (a trust bug — it presented as a global sort
+but only re-ordered the loaded page) is replaced by a **real server-side `orderBy` over the full
+result set**.
+
+Per-resource sortable-field allowlists:
+
+| Endpoint | `sort` keys | default order |
+| --- | --- | --- |
+| `GET /assets` | `name`, `assetTag`, `serial`, `status`, `createdAt`, `updatedAt` | `createdAt desc` |
+| `GET /applications` | `name`, `vendor`, `isCritical`, `createdAt`, `updatedAt` | `name asc` |
+| `GET /consumables` | `name`, `sku`, `currentStock`, `createdAt`, `updatedAt` | `name asc` |
+| `GET /users` | `firstName`, `lastName`, `email`, `role`, `createdAt` | `createdAt desc` |
+| `GET /locations` | `name`, `type`, `createdAt`, `updatedAt` | `createdAt desc` |
+
+### 2. Four more lists migrated onto `Page<T>` + server-side `q` + sort
+
+`GET /applications`, `GET /consumables`, `GET /users` and `GET /locations` previously returned **raw
+arrays** that the frontend filtered client-side — so search silently missed anything past the
+backend window (false "no results"). They now use a service `findPage(...)` (`findMany` + `count`
+over one `where` in a `$transaction`), with a **server-side case-insensitive `q`** over the sensible
+text fields and the allowlisted sort. The lists stay lean (no heavy joins/blobs). Search is now
+authoritative; silent truncation is gone. New envelope schemas live in `@lazyit/shared`
+(`application-list.ts`, `consumable-list.ts`, `user-list.ts`, `location-list.ts`). `q` columns:
+applications → name/vendor/url/description · consumables → name/sku/description (the `lowStock`
+filter is preserved) · users → firstName/lastName/email · locations → name/address/floor/description.
+
+### 3. Lean asset-owner `deletedAt` re-added
+
+The Round-1 residual is closed: `AssetListAssignment.user` (and the `ASSET_LIST_SELECT` projection)
+again carries **`deletedAt`**, so the **asset list** can dim a departed (soft-deleted) owner's
+avatar — matching the detail read. (The soft-delete extension only filters the top-level query, so a
+nested join's `user` row is still returned with its `deletedAt`; the field is populated.)
+
+### 4. KB `ArticleLink` reverse lookup for applications (ADR-0042)
+
+`GET /applications/:id/articles` now returns the PUBLISHED articles linked to an application
+("the runbook for THIS app"), mirroring the existing `GET /assets/:id/articles`. The forward
+link endpoints already existed (`GET/POST/DELETE /articles/:id/links`, ADMIN/MEMBER author-gated).
+Reverse lists return the lean `ArticleListItem` shape (no markdown content) and exclude DRAFTs.
+
+### 5. Batch (bulk) mutation endpoints — ADMIN only
+
+Multi-select actions: `POST /assets/batch/delete`, `POST /assets/batch/restore`,
+`POST /assets/batch/status` and `POST /access-grants/batch/revoke`. Payload is a non-empty,
+de-duplicated, **bounded (≤ 200)** id list (`@lazyit/shared/batch.ts`); the response is a
+`BatchResult` (`{ requested, succeeded[], skipped[{id, reason}] }`).
+
+**Auditability semantics (decided):** a batch runs in **ONE transaction** but keeps **per-entity
+auditability — one `AssetHistory` event (or per-grant revoke) per item, never one entry for the
+whole batch.** A batch is a convenience over N single-item actions, not a different audit event, so
+per-entity history is preserved exactly as the single-item path records it (`DELETED` / `RESTORED` /
+`STATUS_CHANGED` with `{from,to}` for assets; `revokedAt`/`revokedById` per grant). An id that is a
+**no-op** (not found, already deleted/restored/revoked, or already at the target status) is
+**skipped** with a reason — never an error — so a partial multi-select still commits.
+
+### 6. Frontend list-chain — URL view-state, server sort UI, pagination + responsive (2026-06-01)
+
+The web consumes §§1–3 across **all six list pages** (assets, applications/Access, consumables,
+users, locations, kb). This supersedes the "Frontend pagination UI" bullet above:
+
+- **URL is the source of truth for list view-state.** Each list page replaced its local
+  `useState` cluster (search / filters / sort / offset) with one **`useListParams(...)`** call
+  (`lib/hooks/use-list-params.ts`): `q` / `sort` / `dir` / `limit` / `offset` / named `filters`
+  all live in the query string, so a filtered list is shareable, bookmarkable and Back-navigable,
+  and the **dashboard deep-links** into a pre-filtered list. `q`/filter changes reset paging to
+  the first page; sort/page changes do not.
+- **The four interim fetchers** (`getUsers` / `getLocations` / `getApplications` /
+  `getConsumables`) now take a params object and **return the whole `Page<T>` envelope** (no more
+  `.then(p => p.items)`). To avoid breaking the screens that join a resource client-side (asset
+  owners, access grantees, article authors, the asset form's location/category pickers), the bare
+  directory hooks (`useUsers` / `useLocations` / `useApplications`) keep their **`Entity[]`**
+  contract by requesting the hard-max page (200) and `select`-ing `items`; new **`useUserList` /
+  `useLocationList` / `useApplicationList`** hooks return the envelope for the list pages.
+  Consumables only powers its own list, so `useConsumables` returns the envelope directly.
+- **Server sort is wired to the UI.** Sortable column headers (`SortableHeader` →
+  `toggleSort(field)`) only expose the per-resource allowlist (§1); the order is recomputed by the
+  API over the **full** result set, not the page. Non-allowlisted columns (model/owners/category,
+  consumable unit, user "Updated", …) are intentionally **not** sortable.
+- **Server vs client filters.** Where the API has a real filter param it is threaded through `q`/the
+  list params (`assets` → `status`/`categoryId`/`locationId`; `consumables` → `lowStock`; `kb` →
+  `status`/`categoryId`). Filters the API does NOT support are applied **client-side over the current
+  page** and documented as such — `assets` ownership, `applications` category + criticality,
+  `consumables` category, `users` active/inactive, `locations` type. The URL param names (the
+  dashboard deep-links + bookmarks depend on these): `assets` `status`/`category`/`location`/`ownership`;
+  `applications` `category`/`criticality`; `consumables` `lowStock`(=`"true"`)/`category`; `users`
+  `status`; `locations` `type`; `kb` `status`/`categoryId`.
+- **Pagination + RBAC + recovery.** Every list renders the shared `Pagination` footer over `total`;
+  the "New X" button, per-row Edit/Delete and the consumables ±1 quick-adjust are gated on
+  `useCanWrite()` (ADR-0040) so a VIEWER never sees a control that would 403. Active filters show as
+  dismissible chips with a **"Clear all"** (`components/active-filters.tsx`), and the filtered-empty
+  row offers a **"Clear filters"** link.
+- **Responsive.** `components/resource-table.tsx` gained a `mobileChildren` slot + `ResourceCard` /
+  `ResourceCardMeta` primitives: below `md` each list stacks into touch-friendly cards (status /
+  owners / quick-adjust kept visible, ≥44px targets); the `<table>` shows at `md` and up.
+- **Departed owners** are dimmed on the asset list using the re-added
+  `activeAssignments[].user.deletedAt` (§3).
+- **Dashboard.** "Needs attention" now leads (above the count cards); every attention row + pillar
+  breakdown deep-links into the matching pre-filtered list (same URL params above); `generatedAt`
+  surfaces as "Updated <relative>" beside a **Refresh** button; ADMIN-gated quick actions (New asset
+  / Add stock / Grant access); the bespoke error card is replaced by the shared `ErrorState`; and the
+  activity feed's avatar-color copy is deduped onto `lib/avatar-color.ts`'s `avatarColorFor`.
+- **Deferred** (a follow-on wave, building on this): bulk multi-select / batch-action bar (§5). The
+  **backend** for the "Show archived"/restore toggle now exists (§7 below); the web "Show archived"
+  view that consumes it is the in-flight UX wave.
+
+### 7. `deleted` list param — the "Show archived" slice (2026-06-01)
+
+Backend support for the web "Show archived" + Restore view (builds on [[0041-soft-delete-reuse-and-restore]]'s
+restore endpoints + [[0032-soft-delete-middleware]]'s read filter). The five primary lists —
+`GET /assets`, `/applications`, `/consumables`, `/users`, `/locations` — accept an optional
+**`deleted`** query param (added to the shared `PageQuerySchema`, so it is typed and OpenAPI-documented
+for every list):
+
+- **`deleted=active`** (the default; also when the param is absent) — only LIVE rows
+  (`deletedAt IS NULL`). The historical behaviour, unchanged.
+- **`deleted=only`** — ONLY soft-deleted rows (`deletedAt IS NOT NULL`). **ADMIN-only** (a non-admin —
+  or anonymous — asking for it is **403**), enforced **at the controller**: the list `GET` routes carry
+  no `@Roles()` (any authenticated user may list active rows), so an in-route `assertCanListDeleted`
+  gate guards just the privileged slice rather than locking the whole route. There is intentionally no
+  "all" (live + deleted mixed): a list is one slice at a time.
+
+The full `Page<T>` envelope, `q`, `sort`/`dir` and pagination are preserved; the list item already
+carries `deletedAt`, so the web can render an archived badge + a Restore button. Mechanics:
+
+- The slice is applied as an **explicit `deletedAt` `where` fragment** (`deletedAt: null` for `active`,
+  `{ not: null }` for `only`) in each service's list `where` + its paired `count` — uniform across all
+  five regardless of whether the model is in `SOFT_DELETABLE_MODELS`. **`only` also passes the ADR-0032
+  `includeSoftDeleted: true` escape hatch** so the read filter does not re-hide the rows for the
+  extension-filtered models (User, Location, Asset, Application).
+- **Consumable correctness side-effect:** `Consumable` / `ConsumableCategory` have `deletedAt` columns
+  but are **not** in `SOFT_DELETABLE_MODELS`, so the read filter never auto-scoped them — `GET /consumables`
+  previously leaked soft-deleted rows. The explicit `active` fragment now hides them by default (the
+  list endpoint, not `GET /consumables/:id`).
+- **Restore** is the per-entity `POST /<resource>/:id/restore` (ADMIN, [[0041-soft-delete-reuse-and-restore]]),
+  which all five already had; assets additionally have `POST /assets/batch/restore` (§5).
+
+Shared helper: `apps/api/src/common/deleted-filter.ts` (`assertCanListDeleted` + `deletedWhere` +
+`includeSoftDeletedFor`). Shape: `DeletedFilterSchema` (`active` | `only`) on `PageQuerySchema`.
+
 ## References
 
 - [[SEC-007-no-pagination-list-endpoints|SEC-007]].
 - [[0018-api-documentation-swagger]] (response DTOs / OpenAPI) · [[0020-frontend-data-layer]] ·
   [[0009-bun-first-vs-app-stack]] (stack).
+- [[0041-soft-delete-reuse-and-restore]] (restore endpoints; the `deleted=only` slice, §7) ·
+  [[0032-soft-delete-middleware]] (the read filter `deleted=only` bypasses) · [[0040-rbac-roles]]
+  (the ADMIN gate).
