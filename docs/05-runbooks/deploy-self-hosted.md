@@ -28,6 +28,30 @@ runbook]]; the differences are a real domain, real secrets, and backups.
 
 ## 1. Configure environment & secrets
 
+> [!tip] Recommended — let the guided bootstrap do steps 1 & 2
+> The guided bootstrap script ([[0047-guided-first-deploy-bootstrap]]) automates this whole
+> section: it asks for your domain, TLS choice + ACME email, ports, IdP (bundled Zitadel or BYOI)
+> and Postgres (bundled or external), then **generates `infra/env/.env.prod` with real random
+> secrets** (a correctly-sized `ZITADEL_MASTERKEY`, `POSTGRES_PASSWORD` mirrored into
+> `DATABASE_URL`, `AUTH_SECRET`, …), `chmod 600`s it, and brings the stack up — then prints the URL
+> and points you at `https://<your-domain>/setup`.
+>
+> ```sh
+> ./infra/start.sh            # interactive; choose 'real' deployment mode and answer ~6 questions
+> ./infra/start.sh --dry-run  # preview: run all checks + prompts, write nothing, run no docker
+> ```
+>
+> It is **idempotent and non-destructive** — re-running it on an existing install (an existing
+> `.env.prod` **or** a `lazyit-prod_*` volume) **skips generation** and just brings the stack up; it
+> **never** regenerates the unrotatable `ZITADEL_MASTERKEY` and has **no** teardown path. For
+> **BYOI**, **external Postgres**, and **Let's Encrypt/HSTS** it writes the relevant env values and
+> **prints** the one or two manual compose/Caddyfile edits to apply (it does not auto-edit those
+> files — see the BYOI / Caddyfile notes in steps 1 & 2 below). After it finishes, continue at
+> **§2a** (search re-index) and **§3a** (the in-app `/setup` first login).
+>
+> The rest of this section is the **manual fallback** — exactly what the script automates. Do it by
+> hand if you want full control or to understand each value.
+
 ```sh
 cp infra/env/.env.prod.example infra/env/.env.prod
 chmod 600 infra/env/.env.prod        # OWNER read/write only — see why below (ADR-0028)
@@ -160,4 +184,5 @@ service is constrained.
 Build/boot problems → [[docker-build-troubleshooting]].
 
 Related: [[deployment]] · [[docker-prod-like-first-boot]] · [[backups]] · [[prisma-migrations]] ·
-[[0015-deployment-model]] · [[0026-reverse-proxy-tls]] · [[0028-secrets-and-config]]
+[[0015-deployment-model]] · [[0026-reverse-proxy-tls]] · [[0028-secrets-and-config]] ·
+[[0047-guided-first-deploy-bootstrap]]
