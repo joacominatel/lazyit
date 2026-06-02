@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectLocation } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
+import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 
 /** Optional filters for listing locations. */
 export interface LocationFilters {
@@ -32,13 +33,20 @@ export class LocationsService {
   ) {}
 
   /**
-   * A single page of non-deleted locations (default `createdAt desc`). Server-side `q` search (over
+   * A single page of locations (default `createdAt desc`). Server-side `q` search (over
    * name/address/floor/description) and an allowlisted sort make the list authoritative — migrated
    * off the raw-array contract that filtered client-side and silently truncated past the window
-   * (ADR-0030). Runs `findMany(take/skip)` + `count` over the same `where` in one `$transaction`.
+   * (ADR-0030). The `deleted` slice (`active` default | `only`) scopes the page to live or
+   * soft-deleted rows; `only` carries the ADR-0032 `includeSoftDeleted` escape hatch so the read
+   * filter doesn't re-hide them (ADMIN-gated at the controller). Runs `findMany(take/skip)` + `count`
+   * over the same `where` in one `$transaction`.
    */
   async findPage(filters: LocationFilters, page: PageQuery) {
-    const where = this.buildWhere(filters);
+    const where = {
+      ...this.buildWhere(filters),
+      ...deletedWhere(page.deleted),
+    };
+    const includeSoftDeleted = includeSoftDeletedFor(page.deleted);
     const { take, skip } = offsetOf(page);
     const orderBy =
       resolveSortOrBadRequest<Prisma.LocationOrderByWithRelationInput>(
@@ -46,9 +54,21 @@ export class LocationsService {
         LOCATION_SORT_ALLOWLIST,
       ) ??
       ({ createdAt: 'desc' } satisfies Prisma.LocationOrderByWithRelationInput);
+    // `includeSoftDeleted` is the ADR-0032 custom arg (stripped by the extension before Prisma sees
+    // it); Prisma's generated args type carries it only as `undefined`, so spread it in via an opaque
+    // object rather than fighting the type.
+    const escapeHatch: Record<string, unknown> = includeSoftDeleted
+      ? { includeSoftDeleted }
+      : {};
     const [items, total] = await this.prisma.$transaction([
-      this.prisma.location.findMany({ where, orderBy, take, skip }),
-      this.prisma.location.count({ where }),
+      this.prisma.location.findMany({
+        where,
+        orderBy,
+        take,
+        skip,
+        ...escapeHatch,
+      }),
+      this.prisma.location.count({ where, ...escapeHatch }),
     ]);
     return pageOf(items, total, page);
   }
