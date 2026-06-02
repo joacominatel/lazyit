@@ -62,6 +62,12 @@ Concrete setup (shadcn CLI `v4.8.0`, which is now **preset-driven** rather than 
 
 ### Icons — Heroicons only (with one boundary)
 
+> **Superseded by [[0045-icon-library-heroicons]] (2026-06-01).** The "Option A" boundary below
+> (keep `lucide-react` inside `components/ui/*`) was dropped: the primitives were re-mapped to
+> Heroicons, `lucide-react` was removed entirely, and a two-weight convention (`24/outline`
+> default, `16/solid` for dense/inline/badge) was adopted. The paragraphs below are retained as
+> the original rationale. See ADR-0045 for the current standard.
+
 App-authored UI uses **`@heroicons/react` exclusively**; we do **not** introduce
 `lucide-react`, `react-icons` or any other icon set in our own code.
 
@@ -136,8 +142,9 @@ black anchors. Two CEO-driven amendments have since refined this **at the token 
   primitives are accessible and owned in-repo; Heroicons gives one coherent icon language for
   our own components.
 - **Trade-offs:** utility-class verbosity; vendored components are maintained in-repo (a
-  feature, but upkeep); **two icon sets physically coexist** — Heroicons (ours) and Lucide
-  (inside `components/ui/*`) — kept apart by the convention above, not by tooling.
+  feature, but upkeep). *(The original "two icon sets physically coexist" trade-off — Heroicons
+  ours, Lucide in the primitives — was eliminated by [[0045-icon-library-heroicons]]: lucide-react
+  is gone and the primitives use Heroicons.)*
 - **Follow-ups:** keep component conventions in [[code-conventions]] in sync as the UI grows;
   [[stack]] still lists shadcn/ui as "not yet installed" and should be updated; revisit if
   shadcn ever supports Heroicons natively. Frontend testing remains deferred
