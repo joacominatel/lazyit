@@ -505,6 +505,7 @@ export default function AssetsPage() {
                   ) : canWrite ? (
                     <RowActions
                       onEdit={() => router.push(`/assets/${asset.id}/edit`)}
+                      onClone={() => router.push(`/assets/${asset.id}/clone`)}
                       onDelete={() =>
                         setDeleting({ id: asset.id, name: asset.name })
                       }
@@ -577,6 +578,7 @@ export default function AssetsPage() {
                   ) : canWrite ? (
                     <RowActions
                       onEdit={() => router.push(`/assets/${asset.id}/edit`)}
+                      onClone={() => router.push(`/assets/${asset.id}/clone`)}
                       onDelete={() =>
                         setDeleting({ id: asset.id, name: asset.name })
                       }

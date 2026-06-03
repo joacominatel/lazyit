@@ -438,6 +438,9 @@ export default function ConsumablesPage() {
                         onEdit={() =>
                           router.push(`/consumables/${consumable.id}/edit`)
                         }
+                        onClone={() =>
+                          router.push(`/consumables/${consumable.id}/clone`)
+                        }
                         onDelete={() =>
                           setDeleting({
                             id: consumable.id,
@@ -521,6 +524,9 @@ export default function ConsumablesPage() {
                     <RowActions
                       onEdit={() =>
                         router.push(`/consumables/${consumable.id}/edit`)
+                      }
+                      onClone={() =>
+                        router.push(`/consumables/${consumable.id}/clone`)
                       }
                       onDelete={() =>
                         setDeleting({ id: consumable.id, name: consumable.name })
