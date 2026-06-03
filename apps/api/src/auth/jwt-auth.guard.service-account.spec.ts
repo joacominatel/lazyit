@@ -98,8 +98,8 @@ describe('JwtAuthGuard — service-account branch (ADR-0048)', () => {
 
     await expect(guard.canActivate(makeCtx(r))).resolves.toBe(true);
 
-    const principal = r.principal as Principal;
-    expect(principal.kind).toBe('service');
+    const principal = (r as { principal?: Principal }).principal;
+    expect(principal?.kind).toBe('service');
     expect(r.serviceAccount).toBeDefined();
     expect(r.user).toBeUndefined();
     // Looked up by id INCLUDING soft-deleted rows (so a revoked account is seen).
@@ -108,7 +108,7 @@ describe('JwtAuthGuard — service-account branch (ADR-0048)', () => {
       includeSoftDeleted: true,
     });
     // Resolved its direct grants DB-first.
-    if (principal.kind === 'service') {
+    if (principal?.kind === 'service') {
       expect(principal.permissions.has('asset:write')).toBe(true);
     }
   });
@@ -116,10 +116,12 @@ describe('JwtAuthGuard — service-account branch (ADR-0048)', () => {
   it('stamps lastUsedAt best-effort on success (fire-and-forget, never blocks)', async () => {
     saFindFirst.mockResolvedValue(liveAccount());
     await guard.canActivate(makeCtx(req(minted.token)));
-    expect(saUpdate).toHaveBeenCalledWith({
-      where: { id: SA_ID },
-      data: { lastUsedAt: expect.any(Date) },
-    });
+    expect(saUpdate).toHaveBeenCalledTimes(1);
+    const calls = saUpdate.mock.calls as Array<
+      [{ where: { id: string }; data: { lastUsedAt: unknown } }]
+    >;
+    expect(calls[0][0].where).toEqual({ id: SA_ID });
+    expect(calls[0][0].data.lastUsedAt).toBeInstanceOf(Date);
   });
 
   it('succeeds even if the lastUsedAt write rejects (best-effort)', async () => {
