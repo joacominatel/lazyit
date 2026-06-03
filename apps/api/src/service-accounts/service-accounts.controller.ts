@@ -33,8 +33,12 @@ class ServiceAccountDto extends createZodDto(ServiceAccountSchema) {}
 class ServiceAccountWithSecretDto extends createZodDto(
   ServiceAccountWithSecretSchema,
 ) {}
-class CreateServiceAccountDto extends createZodDto(CreateServiceAccountSchema) {}
-class UpdateServiceAccountDto extends createZodDto(UpdateServiceAccountSchema) {}
+class CreateServiceAccountDto extends createZodDto(
+  CreateServiceAccountSchema,
+) {}
+class UpdateServiceAccountDto extends createZodDto(
+  UpdateServiceAccountSchema,
+) {}
 
 /**
  * Service Accounts management API (ADR-0048). EVERY route is gated by `@RequirePermission('settings:manage')`
@@ -53,7 +57,8 @@ export class ServiceAccountsController {
   @Post()
   @RequirePermission('settings:manage')
   @ApiOperation({
-    summary: 'Create a service account + mint its token (ADMIN — settings:manage)',
+    summary:
+      'Create a service account + mint its token (ADMIN — settings:manage)',
     description:
       'Creates a non-human principal with the given name + direct permission grants and returns the ' +
       'full lazyit-native token (lzit_sa_<id>_<secret>) EXACTLY ONCE. Store it now — only its SHA-256 ' +
@@ -87,7 +92,9 @@ export class ServiceAccountsController {
 
   @Get(':id')
   @RequirePermission('settings:manage')
-  @ApiOperation({ summary: 'Get a service account by id (ADMIN — settings:manage)' })
+  @ApiOperation({
+    summary: 'Get a service account by id (ADMIN — settings:manage)',
+  })
   @ApiOkResponse({ type: ServiceAccountDto })
   findOne(@Param('id') id: string) {
     return this.serviceAccounts.findOne(id);
