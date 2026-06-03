@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ErrorState } from "@/components/resource-table";
 import { UserAvatar } from "@/components/user-avatar";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useArticles } from "@/lib/api/hooks/use-articles";
 import { useAssets } from "@/lib/api/hooks/use-assets";
@@ -45,7 +45,8 @@ export default function UserDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
-  const canWrite = useCanWrite();
+  // Edit and Offboard are both the coarse user:manage capability (so is the role control below).
+  const canManage = useCan("user:manage");
 
   const { data: user, isLoading, isError, error, refetch } = useUser(id);
   // Active + released assignments and active + revoked grants for the full per-person picture.
@@ -131,7 +132,7 @@ export default function UserDetailPage() {
         subtitle={user.email}
         badge={<UserStatusBadge isActive={user.isActive} />}
         actions={
-          canWrite ? (
+          canManage ? (
             <>
               <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
                 <PencilSquareIcon />
