@@ -2,6 +2,7 @@
 
 import {
   ArrowTopRightOnSquareIcon,
+  DocumentDuplicateIcon,
   PencilIcon,
   PencilSquareIcon,
   TrashIcon,
@@ -136,6 +137,12 @@ export default function ApplicationDetailPage() {
                 <Link href={`/applications/${application.id}/edit`}>
                   <PencilSquareIcon />
                   Edit
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/applications/${application.id}/clone`}>
+                  <DocumentDuplicateIcon />
+                  Clone
                 </Link>
               </Button>
               <Button
