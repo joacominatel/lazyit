@@ -6,6 +6,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ChevronUpDownIcon,
+  DocumentDuplicateIcon,
   EllipsisVerticalIcon,
   PencilSquareIcon,
   TrashIcon,
@@ -392,16 +393,27 @@ export function ResourceCardMeta({
   );
 }
 
-/** Per-row actions dropdown (Edit / Delete) shared by resource tables. */
+/**
+ * Per-row actions dropdown (Edit / optional Clone / Delete) shared by resource tables. `onClone` is
+ * OPTIONAL and additive: when provided, a "Clone" item renders between Edit and the destructive
+ * Delete (separated from Delete) — it opens the create flow pre-filled from this row (issue #125).
+ * Existing call sites that don't pass it are unaffected. Gate `onClone` behind `useCanWrite()` at the
+ * call site (a clone is a create) and never wire it in the archived view.
+ */
 export function RowActions({
   onEdit,
+  onClone,
   onDelete,
   editLabel = "Edit",
+  cloneLabel = "Clone",
   deleteLabel = "Delete",
 }: {
   onEdit: () => void;
+  /** When set, render a "Clone" item that opens the create flow pre-filled from this row. */
+  onClone?: () => void;
   onDelete: () => void;
   editLabel?: string;
+  cloneLabel?: string;
   deleteLabel?: string;
 }) {
   return (
@@ -418,6 +430,12 @@ export function RowActions({
           <PencilSquareIcon />
           {editLabel}
         </DropdownMenuItem>
+        {onClone ? (
+          <DropdownMenuItem onSelect={onClone}>
+            <DocumentDuplicateIcon />
+            {cloneLabel}
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onSelect={onDelete}>
           <TrashIcon />
