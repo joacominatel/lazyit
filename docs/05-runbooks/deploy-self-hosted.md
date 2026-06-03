@@ -33,8 +33,9 @@ runbook]]; the differences are a real domain, real secrets, and backups.
 > section: it asks for your domain, TLS choice + ACME email, ports, IdP (bundled Zitadel or BYOI)
 > and Postgres (bundled or external), then **generates `infra/env/.env.prod` with real random
 > secrets** (a correctly-sized `ZITADEL_MASTERKEY`, `POSTGRES_PASSWORD` mirrored into
-> `DATABASE_URL`, `AUTH_SECRET`, …), `chmod 600`s it, and brings the stack up — then prints the URL
-> and points you at `https://<your-domain>/setup`.
+> `DATABASE_URL`, `AUTH_SECRET`, …) in a file that is **mode 600 from creation** (the secrets are
+> never world-readable, even for an instant), validates your free-text answers, and brings the stack
+> up — then prints the URL and points you at `https://<your-domain>/setup`.
 >
 > ```sh
 > ./infra/start.sh            # interactive; choose 'real' deployment mode and answer ~6 questions
