@@ -151,6 +151,8 @@ const PRE_MIGRATION: Record<string, Role[]> = {
   'UsersController#remove': ['ADMIN'],
   'UsersController#offboard': ['ADMIN'],
   'UsersController#restore': ['ADMIN'],
+  // issue #149 — admin-triggered password reset; same user:manage gate as the rest of user admin.
+  'UsersController#resetPassword': ['ADMIN'],
 };
 
 // The controller classes whose write routes were migrated. Read routes (already on @RequirePermission
