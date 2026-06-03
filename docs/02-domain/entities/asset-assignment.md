@@ -60,6 +60,13 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
 > onto [[access-grant]]'s actor pattern — [[0024-asset-assignment-actor-shim]] superseded the
 > original body-based design of [[0019-asset-assignment-integrity]] (a breaking contract change,
 > safe pre-auth with no external clients).
+>
+> **Now actor = the verified principal.** With auth live, the actor is resolved from the verified
+> principal (`@CurrentPrincipal()` → `request.principal`), not a token claim; the `X-User-Id` header is
+> the dev-only shim. When the caller is a [[service-account]] the attribution lands in
+> `assignedBySaId` / `releasedBySaId` instead (`ActorService.resolveActor`), with a DB **CHECK**
+> enforcing at most one actor per slot — never a fake human ([[0048-service-accounts]],
+> [[INVARIANTS]] INV-SA-4).
 
 > [!warning] Soft delete vs hard delete — `Restrict` is a DB safety net
 > The API's `DELETE /assets/:id` and `DELETE /users/:id` are **soft** deletes (`UPDATE deletedAt`),
@@ -90,8 +97,10 @@ Prisma model `AssetAssignment` → table `asset_assignments`. Validation schemas
 | `userId` | `uuid` | FK → [[user]] (owner), required, `@db.Uuid`, `onDelete: Restrict`. |
 | `assignedAt` | `datetime` | `@default(now())`; part of identity. Optional on create — pass it only to backdate an imported record. |
 | `releasedAt` | `datetime?` | `null` while active; set to end the assignment. Not a soft delete. |
-| `assignedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. Who assigned (null = system/unknown). |
-| `releasedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. Who released. |
+| `assignedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. The **human** who assigned (null = system/unknown). |
+| `releasedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. The **human** who released. |
+| `assignedBySaId` | `cuid?` | FK → [[service-account]], `onDelete: SetNull`. The **non-human** who assigned. At-most-one-actor CHECK with `assignedById`. |
+| `releasedBySaId` | `cuid?` | FK → [[service-account]], `onDelete: SetNull`. The **non-human** who released. At-most-one-actor CHECK with `releasedById`. |
 | `notes` | `string?` | optional free text (assignment or release reason); editable; `null` clears. |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
@@ -125,7 +134,8 @@ Plus the natural sub-resource endpoints on the related entities:
 
 All documented via Swagger ([[0018-api-documentation-swagger]]).
 
-Related: [[asset]] · [[user]] · [[asset-history]] · [[asset-centric]] ·
+Related: [[asset]] · [[user]] · [[service-account]] · [[asset-history]] · [[asset-centric]] ·
 [[0004-asset-centric-design]] · [[0006-soft-delete-and-auditing]] ·
 [[0019-asset-assignment-integrity]] · [[0024-asset-assignment-actor-shim]] ·
-[[0022-draft-visibility-auth-shim]] · [[0033-asset-history-event-model]] · [[prisma-migrations]]
+[[0022-draft-visibility-auth-shim]] · [[0033-asset-history-event-model]] · [[0048-service-accounts]] ·
+[[INVARIANTS]] · [[prisma-migrations]]

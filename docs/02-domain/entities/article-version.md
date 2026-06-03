@@ -28,7 +28,11 @@ this runbook say last quarter?"). A bad edit no longer destroys the prior body.
 - **belongs to** one [[article]] (`articleId`, **required** FK, `onDelete: Restrict` — an article
   with version history cannot be hard-deleted; it can still be soft-deleted, an UPDATE).
 - **edited by** an optional [[user]] (`editedById`, `onDelete: SetNull`) — the actor who produced
-  this revision (creator on v1, editor afterwards).
+  this revision (creator on v1, editor afterwards). A [[service-account]] can **never** author here:
+  `Article.authorId` is a non-null [[user]] FK and the author-only gate is `User`-identity equality, so
+  the article write path 403s an SA principal. The additive `serviceAccountId` actor column (the unified
+  two-actor model + CHECK) is therefore **schema-present but unreachable by design**
+  ([[INVARIANTS]] INV-SA-4).
 
 ## Business rules
 
@@ -69,7 +73,8 @@ Prisma model `ArticleVersion` → table `article_versions`. Validation schema
 | `content` | `text` | frozen copy (the markdown body). |
 | `excerpt` | `string?` | frozen copy. |
 | `status` | `ArticleStatus` | frozen copy (`DRAFT` \| `PUBLISHED`). |
-| `editedById` | `uuid?` | optional FK → [[user]] (`@db.Uuid`), `onDelete: SetNull`. |
+| `editedById` | `uuid?` | optional FK → [[user]] (`@db.Uuid`), `onDelete: SetNull`. The **human** editor. |
+| `serviceAccountId` | `cuid?` | optional FK → [[service-account]], `onDelete: SetNull`; unified two-actor model + at-most-one-actor CHECK. **Unreachable in practice** — the article write path 403s an SA author. |
 | `createdAt` | `datetime` | `@default(now())`. |
 
 Indexes: `@@unique([articleId, version])` (natural key + per-article timeline).
@@ -84,7 +89,7 @@ service, never created/edited via the API.
 - `GET /articles/:id/versions/:version` — a single version by its per-article number (404 if absent
   or the article isn't readable by the caller).
 
-Related: [[article]] · [[article-link]] · [[article-category]] · [[user]] · [[asset-history]] ·
-[[0042-article-versioning-and-linking]] · [[0021-knowledge-base-design]] ·
+Related: [[article]] · [[article-link]] · [[article-category]] · [[user]] · [[service-account]] ·
+[[asset-history]] · [[0042-article-versioning-and-linking]] · [[0021-knowledge-base-design]] ·
 [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] · [[0030-list-pagination-contract]] ·
-[[0022-draft-visibility-auth-shim]]
+[[0022-draft-visibility-auth-shim]] · [[0048-service-accounts]] · [[INVARIANTS]]
