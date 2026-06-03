@@ -4,6 +4,7 @@ import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   type Application,
+  cloneApplicationDefaults,
   CreateApplicationSchema,
   UpdateApplicationSchema,
 } from "@lazyit/shared";
@@ -52,7 +53,15 @@ type ApplicationFormValues = {
   notes?: string;
 };
 
-function toFormValues(application?: Application): ApplicationFormValues {
+/**
+ * Initial form values. Edit → from the persisted `application`. Clone → from the shared
+ * `cloneApplicationDefaults` sanitizer (CREATE mode, " (copy)" name; the safe `url` is carried and
+ * re-validated by the resolver — SEC-008). Otherwise the blank create defaults.
+ */
+function toFormValues(
+  application?: Application,
+  cloneSource?: Application,
+): ApplicationFormValues {
   if (application) {
     return {
       name: application.name,
@@ -64,19 +73,38 @@ function toFormValues(application?: Application): ApplicationFormValues {
       notes: application.notes ?? undefined,
     };
   }
+  if (cloneSource) {
+    const d = cloneApplicationDefaults(cloneSource);
+    return {
+      name: d.name ?? "",
+      description: d.description,
+      url: d.url,
+      vendor: d.vendor,
+      categoryId: d.categoryId,
+      isCritical: d.isCritical ?? false,
+      notes: d.notes,
+    };
+  }
   return { name: "", isCritical: false };
 }
 
 /**
- * Create/edit form for an Application. Per-mode validation (CreateApplicationSchema vs the partial
- * UpdateApplicationSchema — ADR-0020). `url` is a lenient free string but the shared schema rejects
- * dangerous schemes (javascript:/data:/… — SEC-008), surfaced here as a field error. `metadata`
- * (jsonb) is not edited here — same deferred debt as Asset.specs (ADR-0007/0023).
+ * Create/edit/clone form for an Application. Per-mode validation (CreateApplicationSchema vs the
+ * partial UpdateApplicationSchema — ADR-0020). Clone (`cloneSource`, no `application`) stays in CREATE
+ * mode but pre-fills from the shared `cloneApplicationDefaults` sanitizer (issue #125): name
+ * " (copy)" and the carried `url`. `url` is a lenient free string but the shared schema rejects
+ * dangerous schemes (javascript:/data:/… — SEC-008), surfaced here as a field error — a cloned url is
+ * re-validated by the create resolver. `metadata` (jsonb) is not edited here (same deferred debt as
+ * Asset.specs — ADR-0007/0023) but, on a clone, the sanitizer's deep-copied `metadata` is carried
+ * through to the create payload so the duplicate keeps it.
  */
 export function ApplicationForm({
   application,
+  cloneSource,
 }: {
   application?: Application;
+  /** When set (and `application` is not), pre-fill a CREATE form from this record — see issue #125. */
+  cloneSource?: Application;
 }) {
   const isEdit = application != null;
   const router = useRouter();
@@ -85,11 +113,18 @@ export function ApplicationForm({
   const updateApplication = useUpdateApplication();
   const isPending = createApplication.isPending || updateApplication.isPending;
 
+  // `metadata` has no UI field; on a clone, carry the sanitizer's deep-copied blob into the create
+  // payload (computed once) so the duplicate keeps it. Undefined for plain create / edit.
+  const clonedMetadata =
+    cloneSource && !application
+      ? cloneApplicationDefaults(cloneSource).metadata
+      : undefined;
+
   const form = useForm<ApplicationFormValues>({
     resolver: zodResolver(
       isEdit ? UpdateApplicationSchema : CreateApplicationSchema,
     ) as Resolver<ApplicationFormValues>,
-    defaultValues: toFormValues(application),
+    defaultValues: toFormValues(application, cloneSource),
   });
 
   const onSubmit = form.handleSubmit((values) => {
@@ -116,7 +151,11 @@ export function ApplicationForm({
         },
       );
     } else {
-      createApplication.mutate(payload, {
+      // On a clone, carry the deep-copied metadata (no UI field) into the create body.
+      const createPayload = clonedMetadata
+        ? { ...payload, metadata: clonedMetadata }
+        : payload;
+      createApplication.mutate(createPayload, {
         onSuccess: (created) => {
           toast.success("Application created");
           router.push(`/applications/${created.id}`);
