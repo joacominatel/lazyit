@@ -26,7 +26,6 @@ import { LocationsService, LOCATION_SORT_ALLOWLIST } from './locations.service';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
@@ -125,7 +124,7 @@ export class LocationsController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('location:write')
   @ApiOperation({ summary: 'Create a location (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: LocationDto })
   create(@Body() dto: CreateLocationDto) {
@@ -133,7 +132,7 @@ export class LocationsController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('location:write')
   @ApiOperation({ summary: 'Update a location (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: LocationDto })
   update(@Param('id') id: string, @Body() dto: UpdateLocationDto) {
@@ -141,7 +140,7 @@ export class LocationsController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('location:delete')
   @ApiOperation({ summary: 'Soft-delete a location — ADMIN only' })
   @ApiOkResponse({ type: LocationDto })
   remove(@Param('id') id: string) {
@@ -149,7 +148,7 @@ export class LocationsController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('location:delete')
   @ApiOperation({
     summary: 'Restore a soft-deleted location — ADMIN only (ADR-0041)',
   })
