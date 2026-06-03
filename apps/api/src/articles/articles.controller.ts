@@ -41,8 +41,10 @@ import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
+import type { Principal } from '../auth/principal';
 
 // The detail reads return the full Article (with `content`); the paginated list returns the lean
 // ArticleListItem envelope (content omitted, excerpt kept).
@@ -135,10 +137,7 @@ export class ArticlesController {
   @RequirePermission('article:read')
   @ApiOperation({ summary: 'Get an article by slug' })
   @ApiOkResponse({ type: ArticleDto })
-  findBySlug(
-    @Param('slug') slug: string,
-    @CurrentUser() user?: User,
-  ) {
+  findBySlug(@Param('slug') slug: string, @CurrentUser() user?: User) {
     return this.articles.findBySlug(slug, user);
   }
 
@@ -182,7 +181,8 @@ export class ArticlesController {
   @Get(':id/versions/:version')
   @RequirePermission('article:read')
   @ApiOperation({
-    summary: 'Get a single version of an article by its version number (ADR-0042)',
+    summary:
+      'Get a single version of an article by its version number (ADR-0042)',
   })
   @ApiOkResponse({ type: ArticleVersionDto })
   findVersion(
@@ -214,8 +214,11 @@ export class ArticlesController {
     summary: 'Create an article (author = current user) (ADMIN or MEMBER)',
   })
   @ApiCreatedResponse({ type: ArticleDto })
-  create(@Body() dto: CreateArticleDto, @CurrentUser() user?: User) {
-    return this.articles.create(dto, user);
+  create(
+    @Body() dto: CreateArticleDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.articles.create(dto, principal);
   }
 
   @Post('import')
@@ -250,9 +253,9 @@ export class ArticlesController {
   importArticle(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: ImportArticleDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.articles.importArticle(file, dto, user);
+    return this.articles.importArticle(file, dto, principal);
   }
 
   @Patch(':id')
@@ -265,9 +268,9 @@ export class ArticlesController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateArticleDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.articles.update(id, dto, user);
+    return this.articles.update(id, dto, principal);
   }
 
   @Post(':id/links')
@@ -280,23 +283,24 @@ export class ArticlesController {
   addLink(
     @Param('id') id: string,
     @Body() dto: CreateArticleLinkDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.articles.addLink(id, dto, user);
+    return this.articles.addLink(id, dto, principal);
   }
 
   @Delete(':id/links/:linkId')
   @RequirePermission('article:write')
   @ApiOperation({
-    summary: 'Remove a link from an article (author only). (ADMIN or MEMBER) (ADR-0042)',
+    summary:
+      'Remove a link from an article (author only). (ADMIN or MEMBER) (ADR-0042)',
   })
   @ApiOkResponse({ type: ArticleLinkDto })
   removeLink(
     @Param('id') id: string,
     @Param('linkId') linkId: string,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.articles.removeLink(id, linkId, user);
+    return this.articles.removeLink(id, linkId, principal);
   }
 
   @Post(':id/publish')
@@ -306,8 +310,8 @@ export class ArticlesController {
       'Publish an article (author only). Sets publishedAt on first publish. (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ArticleDto })
-  publish(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.publish(id, user);
+  publish(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.articles.publish(id, principal);
   }
 
   @Post(':id/unpublish')
@@ -317,8 +321,11 @@ export class ArticlesController {
       'Unpublish an article back to DRAFT (author only). Keeps publishedAt. (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ArticleDto })
-  unpublish(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.unpublish(id, user);
+  unpublish(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.articles.unpublish(id, principal);
   }
 
   @Delete(':id')
@@ -327,8 +334,8 @@ export class ArticlesController {
     summary: 'Soft-delete an article (destructive) — ADMIN only',
   })
   @ApiOkResponse({ type: ArticleDto })
-  remove(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.remove(id, user);
+  remove(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.articles.remove(id, principal);
   }
 
   @Post(':id/restore')
@@ -338,7 +345,7 @@ export class ArticlesController {
       'Restore a soft-deleted article (author only) — ADMIN only (ADR-0041)',
   })
   @ApiOkResponse({ type: ArticleDto })
-  restore(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.restore(id, user);
+  restore(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.articles.restore(id, principal);
   }
 }
