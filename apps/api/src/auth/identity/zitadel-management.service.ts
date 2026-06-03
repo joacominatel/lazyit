@@ -191,6 +191,61 @@ export class ZitadelManagementService {
   }
 
   /**
+   * Mirror an admin profile edit (name and/or email) onto the EXISTING Zitadel user (issue #149). The
+   * `externalId` is the Zitadel user id and never changes — this is an update, NOT a re-link.
+   *
+   * Two v2 user-service sub-resources, each issued only when its field actually changed:
+   *  - PROFILE (givenName / familyName) → PUT /v2/users/human/{id} { profile: { givenName, familyName } }.
+   *  - EMAIL → POST /v2/users/{id}/email { email, isVerified: true }. We set it PRE-VERIFIED (the same
+   *    trusted-IdP stance as createUser, ADR-0037/0038): the operator's directory owns the mailbox, so
+   *    the new address is trusted and Zitadel does NOT enter a re-verification flow that could disrupt
+   *    login / the account link. Omitting `isVerified` would make Zitadel generate a verification code
+   *    and (depending on config) email it — re-verification we deliberately avoid.
+   *
+   * Each call surfaces a non-2xx as a 503 (no silent partial write); the Users service runs this inside
+   * its compensation so a failure reverts the local row (no split-brain, INV-5).
+   */
+  async updateUser(
+    externalId: string,
+    input: { firstName?: string; lastName?: string; email?: string },
+  ): Promise<void> {
+    this.assertConfigured();
+    const id = encodeURIComponent(externalId);
+    // Profile (name) — only when a name field is present.
+    if (input.firstName !== undefined || input.lastName !== undefined) {
+      const profile: { givenName?: string; familyName?: string } = {};
+      if (input.firstName !== undefined) profile.givenName = input.firstName;
+      if (input.lastName !== undefined) profile.familyName = input.lastName;
+      await this.request('PUT', `/v2/users/human/${id}`, { profile });
+    }
+    // Email — pre-verified so the change never forces re-verification (INV-2 / account link intact).
+    if (input.email !== undefined) {
+      await this.request('POST', `/v2/users/${id}/email`, {
+        email: input.email,
+        isVerified: true,
+      });
+    }
+  }
+
+  /**
+   * Trigger Zitadel's password-reset notification for the user (issue #149). lazyit never sets or sends
+   * a password (ADR-0016/0037): this asks Zitadel to email the reset link via ZITADEL's own SMTP.
+   *
+   * POST /v2/users/{id}/password_reset { sendLink: {} } — `sendLink` makes Zitadel deliver the reset
+   * link by email (vs `returnCode`, which would hand the raw code back to lazyit; we explicitly do NOT
+   * want lazyit to handle the credential). Delivery requires Zitadel's SMTP to be configured — if it is
+   * not, the notification is queued/dropped by Zitadel, not by lazyit. A non-2xx surfaces as a 503.
+   */
+  async requestPasswordReset(externalId: string): Promise<void> {
+    this.assertConfigured();
+    await this.request(
+      'POST',
+      `/v2/users/${encodeURIComponent(externalId)}/password_reset`,
+      { sendLink: {} },
+    );
+  }
+
+  /**
    * Find the user's single grant id on the configured project, or `undefined` if they have none.
    * POST /management/v1/users/grants/_search with a userIdQuery + projectIdQuery (combined with AND).
    * An empty result is the COMMON case (a freshly-JIT'd user) and is NOT an error.
