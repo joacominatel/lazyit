@@ -35,8 +35,10 @@ import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
+import type { Principal } from '../auth/principal';
 
 class ConsumableDto extends createZodDto(ConsumableSchema) {}
 class ConsumableListPageDto extends createZodDto(ConsumableListPageSchema) {}
@@ -230,8 +232,8 @@ export class ConsumablesController {
   createMovement(
     @Param('id') id: string,
     @Body() dto: CreateConsumableMovementDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.consumables.createMovement(id, dto, user);
+    return this.consumables.createMovement(id, dto, principal);
   }
 }
