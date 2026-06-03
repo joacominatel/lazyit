@@ -26,6 +26,8 @@ import {
 } from '@lazyit/shared';
 import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import type { Principal } from '../auth/principal';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { ActorService } from '../common/actor.service';
 import { UsersService, USER_SORT_ALLOWLIST } from './users.service';
@@ -269,9 +271,11 @@ export class UsersController {
   })
   remove(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() actor?: User,
+    @CurrentPrincipal() principal?: Principal,
   ): ReturnType<UsersService['remove']> {
-    return this.users.remove(id, this.actor.resolve(actor));
+    // Resolve to the unified attribution so the offboarding's FK writes (revokedById / releasedById or
+    // their *SaId counterparts) name the right actor — an SA holding user:manage attributes to itself.
+    return this.users.remove(id, this.actor.resolveActor(principal));
   }
 
   @Post(':id/offboard')
@@ -294,9 +298,9 @@ export class UsersController {
   })
   offboard(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() actor?: User,
+    @CurrentPrincipal() principal?: Principal,
   ): ReturnType<UsersService['remove']> {
-    return this.users.remove(id, this.actor.resolve(actor));
+    return this.users.remove(id, this.actor.resolveActor(principal));
   }
 
   @Post(':id/restore')
