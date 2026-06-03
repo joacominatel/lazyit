@@ -23,9 +23,11 @@ that, like roles, is never read from a token claim and never synced to the IdP.
 > guard; P3: the GETs annotated + the two pre-tightened reads; P4: the `@Roles` write-gates migrated
 > and the legacy `@Roles` decorator + dual-mode branch **retired**), the configurable surface (P5: the
 > `GET/PUT /config/permissions` + `/config/my-permissions` endpoints, audited + cache-coherent, ADMIN
-> immutable) and the config UI (P7: the role-first ADMIN screen + `can()` infra) are all shipped. The
-> coarse `@Roles` mechanism from [[0040-rbac-roles]] no longer exists in code — `@RequirePermission`
-> is the SINGLE enforcement primitive. Still **outstanding**: the service-account fast-follow — see
+> immutable), the config UI (P7: the role-first ADMIN screen + `can()` infra) and the permission-aware
+> UI gating (P6b: every `useCanWrite`/`isAdmin` write-gate migrated to `can('domain:action')`,
+> `useCanWrite` retired) are all shipped. The coarse `@Roles` mechanism from [[0040-rbac-roles]] no
+> longer exists in code — `@RequirePermission` is the SINGLE enforcement primitive. Still
+> **outstanding**: the service-account fast-follow — see
 > [§Phased delivery](#phased-delivery).
 
 ## Context
@@ -229,6 +231,13 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
   (the backend has no block either; an admin-initiated delegation is accepted). `can(permission)` infra
   added (`useMyPermissions`/`useCan` over `/config/my-permissions`, fails closed); the app-wide
   migration of existing `useCanWrite` gate sites to `can()` is a separate follow-up.
+- **P6b — permission-aware UI gating** (the call-site migration, `apps/web`). (done) Every former
+  `useCanWrite`/`isAdmin` write/delete gate now uses `can('domain:action')` matching its backend
+  `@RequirePermission` (write→`:write`, delete/restore→`:delete`, grants→`accessGrant:grant`, user
+  admin→`user:manage`, settings shell + taxonomy managers→`settings:manage`/`category`·`assetModel`);
+  `useCanWrite` was retired. The ONE deliberate exception is the "Show archived" toggle, kept on
+  `isAdmin` because the API's `assertCanListDeleted` keeps the `deleted=only` slice role-based, not a
+  permission.
 - **Fast-follow — service accounts** reuse this same catalog.
 - **Future ADR — dynamic custom roles** (Option B), if ever needed.
 
