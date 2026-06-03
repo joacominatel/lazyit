@@ -10,6 +10,7 @@ import request from 'supertest';
 import { AccessGrantsController } from './access-grants.controller';
 import { AccessGrantsService } from './access-grants.service';
 import { RolesGuard } from '../auth/roles.guard';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // Mock the generated Prisma client so importing the service token never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -21,10 +22,13 @@ jest.mock('../../generated/prisma/client', () => ({
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 /**
- * RBAC gating (ADR-0040) — proves the RolesGuard enforces `@Roles('ADMIN')` on an AccessGrant write
- * end-to-end through the HTTP pipeline: a MEMBER is rejected with 403 and never reaches the service,
- * while an ADMIN succeeds. A stand-in auth guard sets `request.user.role` from an `X-Test-Role`
- * header (the real JwtAuthGuard's job in production); the RolesGuard runs after it.
+ * RBAC gating (ADR-0040, still enforced under the ADR-0046 P2 dual-mode guard) — proves the RolesGuard
+ * enforces `@Roles('ADMIN')` on an AccessGrant WRITE end-to-end through the HTTP pipeline: a MEMBER is
+ * rejected with 403 and never reaches the service, while an ADMIN succeeds. This is the `@Roles` half
+ * of the dual-mode guard — the write sites were NOT migrated to `@RequirePermission` (that is P4), so
+ * the permission resolver is never consulted on this path (a stub provider satisfies DI only). A
+ * stand-in auth guard sets `request.user.role` from an `X-Test-Role` header (the real JwtAuthGuard's
+ * job in production); the RolesGuard runs after it.
  */
 
 // Stand-in for JwtAuthGuard: populate request.user from a test header, mimicking what the real auth
@@ -51,6 +55,9 @@ describe('AccessGrants RBAC gating (ADR-0040)', () => {
       providers: [
         Reflector,
         { provide: AccessGrantsService, useValue: { create } },
+        // The dual-mode RolesGuard injects the permission resolver; the @Roles path under test never
+        // calls it, so a never-invoked stub satisfies DI without a DB.
+        { provide: PermissionResolverService, useValue: { hasAll: jest.fn() } },
         // Auth first (sets request.user), then authZ (RolesGuard) — same order as AuthModule.
         { provide: APP_GUARD, useClass: FakeAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
