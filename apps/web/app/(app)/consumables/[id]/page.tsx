@@ -3,6 +3,7 @@
 import {
   ArrowDownTrayIcon,
   ArrowUpTrayIcon,
+  DocumentDuplicateIcon,
   PencilSquareIcon,
   ScaleIcon,
   TrashIcon,
@@ -132,6 +133,12 @@ export default function ConsumableDetailPage() {
                 <Link href={`/consumables/${consumable.id}/edit`}>
                   <PencilSquareIcon />
                   Edit
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/consumables/${consumable.id}/clone`}>
+                  <DocumentDuplicateIcon />
+                  Clone
                 </Link>
               </Button>
               <Button
