@@ -17,6 +17,7 @@ dev tuning. This folder keeps only the **thin prod override**. See
 │                            # api/web/migrate/caddy/backup/zitadel-bootstrap behind profiles: [prod]
 ├── compose.override.yaml    # dev tuning of the backing services (loopback ports, no TLS, no limits)
 infra/
+├── start.sh                 # guided, idempotent, non-destructive first-deploy bootstrap   — ADR-0047
 ├── docker-compose.prod.yaml # THIN prod override: env-file path, internal-only net, zitadel_secrets vol
 ├── docker/
 │   ├── api.Dockerfile               # NestJS on Node, built with Bun (multi-stage)        — ADR-0025
@@ -31,6 +32,13 @@ infra/
     └── .env.prod.example     # template for the (gitignored) .env.prod             — ADR-0028
 ```
 
+## Scripts
+
+| Script | What it does | Run | Ref |
+| --- | --- | --- | --- |
+| `start.sh` | **Guided first-deploy bootstrap.** Detects the environment, asks ~6 questions (free-text answers validated), generates `env/.env.prod` (real `openssl` secrets, **mode 600 from creation**, atomic write) and brings the prod stack up — then points you at `/setup`. Idempotent + non-destructive (skips generation on an existing install; never regenerates `ZITADEL_MASTERKEY`; no teardown path). | `./infra/start.sh` (`--yes` / `--dry-run` / `--help`) | ADR-0047 |
+| `scripts/zitadel-bootstrap.sh` | One-shot, fail-loud, idempotent Zitadel provisioner (the `zitadel-bootstrap` sidecar's entrypoint). Wires the OIDC project/app/roles/SA — **no console clicking**. Not run by hand. | runs as the sidecar under `--profile prod` | ADR-0043 |
+
 ## Deployment levels
 
 | Level | How | Notes |
@@ -40,6 +48,16 @@ infra/
 | **Self-hosted real** | same command + real domain | Let's Encrypt, real secrets, backups. See runbooks. |
 
 ## Quick start (local prod-like)
+
+Recommended — the guided bootstrap (ADR-0047) generates `env/.env.prod` with real secrets,
+`chmod 600`s it, brings the stack up, and points you at `/setup`:
+
+```sh
+./infra/start.sh            # guided; accept the defaults for a localhost prod-like smoke test
+# open https://localhost:8443/setup  (Caddy's internal CA → accept/trust the local cert)
+```
+
+Manual fallback — do exactly what the script automates, by hand:
 
 ```sh
 cp infra/env/.env.prod.example infra/env/.env.prod   # then edit: replace every CHANGE_ME

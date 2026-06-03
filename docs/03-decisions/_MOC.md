@@ -70,6 +70,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0044-recent-activity-view]] | Dashboard recent-activity feed backed by a unified `recent_activity` DB view | accepted |
 | [[0045-icon-library-heroicons]] | Standardize web on Heroicons (drop lucide-react) + a two-weight convention (24/outline default, 16/solid dense) | accepted |
 | [[0046-roles-permissions-v2]] | Roles & Permissions v2 — fixed roles + configurable permissions (catalog-as-code); supersedes the ADR-0040 authZ mechanism | accepted |
+| [[0047-guided-first-deploy-bootstrap]] | Guided, idempotent, non-destructive first-deploy bootstrap (`infra/start.sh`) — a thin wrapper over the env contract + prod compose | accepted |
 
 ## Pending ADRs (to write when decided)
 - **Async workers** — BullMQ + Redis (note the [[0009-bun-first-vs-app-stack]] tension:
