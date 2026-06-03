@@ -83,6 +83,28 @@ reshaping of `Article`.
   reference a **live** row (400 otherwise). The reverse `GET /assets/:id/articles` returns the
   **PUBLISHED** articles linked to an asset (lean list shape, no content).
 
+### KB list affordances for the card UI (2026-06-03)
+
+The KB card redesign needs the article list to (a) filter by whether an article is linked and (b)
+show a reading-time + "linked" indicator per card — **without** loading the markdown body for the
+whole page (the list is deliberately lean, content omitted — ADR-0030). Backend support (frontend is
+a separate follow-up — #150):
+
+- **`linked` / `linkedTo` filter on `GET /articles`.** `?linked=only` keeps only articles with ≥1
+  `ArticleLink` (a relation `some` EXISTS predicate — no row multiplication, composes with the page +
+  count); `?linkedTo=asset|application` narrows that to a single target kind. Both are **allowlisted**
+  (the value sets live in `@lazyit/shared` `article-list.ts`); an unknown value is rejected with
+  **400**, never silently ignored (consistent with ADR-0030). The filter is ANDed **on top of** the
+  draft-visibility + soft-delete gate, so privacy is unchanged.
+- **`linkCount` per row.** The lean `select` adds a relation `_count` of `links`, flattened to a flat
+  `linkCount` on the DTO — the card's "linked" indicator (`linkCount > 0`) with **no N+1**.
+- **`readingMinutes` metric.** Rather than `length(content)` at read time (which would force loading
+  the body or hand-writing raw SQL — and break the typed `findMany` + `_count` composition), a
+  **maintained `Article.readingMinutes` column** (migration + one-time backfill) is recomputed on
+  every write that touches `content` (create/import/edit) at ~200 words/min (min 1 for a non-empty
+  body). The list reads it through the same typed lean `select` — no body load, and it is
+  future-sortable via the ADR-0030 sort allowlist. The owner is already exposed as `authorId`.
+
 ### Search: index article content
 
 - `projectArticle` now includes **`content`** in the Meilisearch document ([[0035-search-architecture]]),
