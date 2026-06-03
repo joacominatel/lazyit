@@ -5,15 +5,18 @@ import {
   BookOpenIcon,
   PlusIcon,
 } from "@heroicons/react/24/outline";
-import { type ArticleStatus } from "@lazyit/shared";
+import {
+  type ArticleLinkedTo,
+  type ArticleStatus,
+} from "@lazyit/shared";
 import Link from "next/link";
 import { useState } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState, Pagination } from "@/components/resource-table";
 import { SearchInput } from "@/components/search-input";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -22,24 +25,41 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useArticles } from "@/lib/api/hooks/use-articles";
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
-import { formatDate } from "@/lib/utils/format";
-import { ArticleStatusBadge } from "./_components/article-status-badge";
+import { ArticleCard } from "./_components/article-card";
 import { ImportArticleDialog } from "./_components/import-article-dialog";
 
 type StatusFilter = "ALL" | ArticleStatus;
+type LinkedToFilter = "ALL" | ArticleLinkedTo;
 
-/** Filter param defaults. `status` and `categoryId` are both server-side filters. */
-const FILTER_DEFAULTS = { status: "ALL", categoryId: "ALL" } as const;
+/**
+ * Filter param defaults — every key here is a server-side filter routed through the URL by
+ * `useListParams`. `linked` flips to `"only"` to keep just linked articles (ADR-0042) and
+ * `linkedTo` narrows that to a single target kind; both default to `"ALL"` (the inactive
+ * sentinel) so they're omitted from the URL and the server query until set.
+ */
+const FILTER_DEFAULTS = {
+  status: "ALL",
+  categoryId: "ALL",
+  linked: "ALL",
+  linkedTo: "ALL",
+} as const;
 
 const STATUS_LABEL: Record<StatusFilter, string> = {
   ALL: "All",
   DRAFT: "Drafts",
   PUBLISHED: "Published",
+};
+
+const LINKED_TO_LABEL: Record<LinkedToFilter, string> = {
+  ALL: "Any target",
+  asset: "Assets",
+  application: "Applications",
 };
 
 export default function KnowledgeBasePage() {
@@ -59,6 +79,8 @@ export default function KnowledgeBasePage() {
 
   const statusFilter = filters.status as StatusFilter;
   const categoryFilter = filters.categoryId;
+  const linkedOnly = filters.linked === "only";
+  const linkedToFilter = filters.linkedTo as LinkedToFilter;
 
   const [importOpen, setImportOpen] = useState(false);
 
@@ -67,6 +89,10 @@ export default function KnowledgeBasePage() {
       q: q || undefined,
       status: statusFilter === "ALL" ? undefined : statusFilter,
       categoryId: categoryFilter === "ALL" ? undefined : categoryFilter,
+      linked: linkedOnly ? "only" : undefined,
+      // linkedTo is only meaningful alongside linked=only; never send it on its own.
+      linkedTo:
+        linkedOnly && linkedToFilter !== "ALL" ? linkedToFilter : undefined,
       limit,
       offset,
     });
@@ -77,13 +103,17 @@ export default function KnowledgeBasePage() {
 
   const categoryName = (id: string) =>
     categories?.find((category) => category.id === id)?.name ?? "Uncategorized";
-  const authorName = (id: string) => {
-    const user = users?.find((candidate) => candidate.id === id);
-    return user ? `${user.firstName} ${user.lastName}` : "Unknown author";
-  };
+  const authorOf = (id: string) =>
+    users?.find((candidate) => candidate.id === id);
 
   const total = page?.total ?? 0;
   const isEmpty = total === 0;
+
+  // Toggling "Linked only" off also clears any linkedTo narrowing (it's meaningless alone).
+  const setLinkedOnly = (next: boolean) => {
+    setFilter("linked", next ? "only" : FILTER_DEFAULTS.linked);
+    if (!next) setFilter("linkedTo", FILTER_DEFAULTS.linkedTo);
+  };
 
   const chips = [
     ...(q ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }] : []),
@@ -102,6 +132,18 @@ export default function KnowledgeBasePage() {
             key: "categoryId",
             label: `Category: ${categoryName(categoryFilter)}`,
             onClear: () => setFilter("categoryId", FILTER_DEFAULTS.categoryId),
+          },
+        ]
+      : []),
+    ...(linkedOnly
+      ? [
+          {
+            key: "linked",
+            label:
+              linkedToFilter !== "ALL"
+                ? `Linked to: ${LINKED_TO_LABEL[linkedToFilter]}`
+                : "Linked only",
+            onClear: () => setLinkedOnly(false),
           },
         ]
       : []),
@@ -169,6 +211,36 @@ export default function KnowledgeBasePage() {
             ))}
           </SelectContent>
         </Select>
+
+        {/* Linked filter: a "Linked only" toggle, plus a target narrowing once it's on. */}
+        <div className="flex items-center gap-2">
+          <Label
+            htmlFor="kb-linked-only"
+            className="flex cursor-pointer items-center gap-2 whitespace-nowrap"
+          >
+            <Switch
+              id="kb-linked-only"
+              checked={linkedOnly}
+              onCheckedChange={setLinkedOnly}
+            />
+            Linked only
+          </Label>
+          {linkedOnly ? (
+            <Select
+              value={linkedToFilter}
+              onValueChange={(value) => setFilter("linkedTo", value)}
+            >
+              <SelectTrigger className="sm:w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">Any target</SelectItem>
+                <SelectItem value="asset">Assets</SelectItem>
+                <SelectItem value="application">Applications</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : null}
+        </div>
       </div>
 
       <ActiveFilters chips={chips} onClearAll={clearFilters} />
@@ -205,35 +277,14 @@ export default function KnowledgeBasePage() {
           />
         )
       ) : (
-        <ul className="space-y-3">
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {articles?.map((article) => (
             <li key={article.id}>
-              <Link
-                href={`/kb/${article.slug}`}
-                className="block rounded-lg border p-4 transition-colors hover:bg-accent/50"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <h2 className="font-medium">{article.title}</h2>
-                  {article.status === "DRAFT" && (
-                    <ArticleStatusBadge status="DRAFT" />
-                  )}
-                </div>
-                {article.excerpt && (
-                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                    {article.excerpt}
-                  </p>
-                )}
-                <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                  <Badge variant="outline">
-                    {categoryName(article.categoryId)}
-                  </Badge>
-                  <span>{authorName(article.authorId)}</span>
-                  <span aria-hidden>·</span>
-                  <span className="tabular-nums">
-                    Updated {formatDate(article.updatedAt)}
-                  </span>
-                </div>
-              </Link>
+              <ArticleCard
+                article={article}
+                categoryName={categoryName(article.categoryId)}
+                author={authorOf(article.authorId)}
+              />
             </li>
           ))}
         </ul>
@@ -255,16 +306,23 @@ export default function KnowledgeBasePage() {
   );
 }
 
-const SKELETON_CARD_KEYS = ["a", "b", "c"] as const;
+const SKELETON_CARD_KEYS = ["a", "b", "c", "d", "e", "f"] as const;
 
 function SkeletonCards() {
   return (
-    <div className="space-y-3">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {SKELETON_CARD_KEYS.map((key) => (
-        <div key={key} className="space-y-3 rounded-lg border p-4">
-          <Skeleton className="h-5 w-1/3" />
+        <div key={key} className="space-y-3 rounded-xl border p-4">
+          <div className="flex items-center justify-between gap-2">
+            <Skeleton className="h-5 w-1/2" />
+            <Skeleton className="h-5 w-16 rounded-full" />
+          </div>
+          <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-2/3" />
-          <Skeleton className="h-4 w-40" />
+          <div className="flex items-center justify-between gap-2 pt-3">
+            <Skeleton className="h-6 w-28 rounded-full" />
+            <Skeleton className="h-4 w-20" />
+          </div>
         </div>
       ))}
     </div>
