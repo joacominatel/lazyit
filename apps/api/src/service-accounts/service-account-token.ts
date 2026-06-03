@@ -57,6 +57,17 @@ export function hashSecret(secret: string): string {
 }
 
 /**
+ * A fresh, collision-proof random hash (32 bytes, hex) for a transient placeholder `tokenHash`. Used
+ * by create's two-step (insert row to allocate the id, then write the real hash): a UNIQUE random value
+ * avoids colliding on the partial-unique `tokenHash` index during overlapping create transactions,
+ * whereas a constant placeholder (e.g. "") would. It is overwritten with the real hash before commit,
+ * so it never authenticates anything (no secret hashes to it).
+ */
+export function randomHash(): string {
+  return randomBytes(32).toString('hex');
+}
+
+/**
  * Mint a token for a service account id. Generates a fresh 32-byte base64url secret, assembles the
  * `lzit_sa_<id>_<secret>` token, and returns the cleartext alongside what to persist (`tokenHash` +
  * `tokenPrefix`). Used by both create and rotate — rotate simply replaces the stored hash/prefix.
