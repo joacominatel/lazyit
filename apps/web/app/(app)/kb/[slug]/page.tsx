@@ -8,7 +8,6 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -28,6 +27,7 @@ import {
   useUnpublishArticle,
 } from "@/lib/api/hooks/use-article-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 import { formatDate } from "@/lib/utils/format";
 import { ArticleLinksPanel } from "../_components/article-links-panel";
@@ -42,7 +42,11 @@ export default function ArticleDetailPage() {
     useArticleBySlug(slug);
   const { data: categories } = useArticleCategories();
   const { data: users } = useUsers();
-  const { data: session } = useSession();
+  // Edit / Publish / Unpublish / link are article:write; deletion is article:delete. The API
+  // additionally enforces authorship (only the author may mutate), so a holder who isn't the author
+  // still gets a 403 — the permission is the coarse gate, authorship the finer server-side one.
+  const canWrite = useCan("article:write");
+  const canDelete = useCan("article:delete");
 
   const publishArticle = usePublishArticle();
   const unpublishArticle = useUnpublishArticle();
@@ -72,12 +76,6 @@ export default function ArticleDetailPage() {
 
   const category = categories?.find((item) => item.id === article.categoryId);
   const author = users?.find((item) => item.id === article.authorId);
-  /**
-   * Edit controls: shown to any authenticated user. The API enforces authorship —
-   * only the article's author can publish/unpublish/delete (returns 403 otherwise).
-   * The frontend shows the controls optimistically; the server is the authority.
-   */
-  const canWrite = session != null;
   const isDraft = article.status === "DRAFT";
 
   function handlePublish() {
@@ -132,50 +130,56 @@ export default function ArticleDetailPage() {
           </span>
         }
         actions={
-          canWrite ? (
+          canWrite || canDelete ? (
             <>
-              <Button variant="outline" size="sm" asChild>
-                <Link href={`/kb/${article.slug}/edit`}>
-                  <PencilSquareIcon />
-                  Edit
-                </Link>
-              </Button>
-              {isDraft ? (
-                <Button
-                  size="sm"
-                  onClick={handlePublish}
-                  disabled={publishArticle.isPending}
-                >
-                  {publishArticle.isPending ? (
-                    <ArrowPathIcon className="animate-spin" />
+              {canWrite ? (
+                <>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={`/kb/${article.slug}/edit`}>
+                      <PencilSquareIcon />
+                      Edit
+                    </Link>
+                  </Button>
+                  {isDraft ? (
+                    <Button
+                      size="sm"
+                      onClick={handlePublish}
+                      disabled={publishArticle.isPending}
+                    >
+                      {publishArticle.isPending ? (
+                        <ArrowPathIcon className="animate-spin" />
+                      ) : (
+                        <ArrowUpCircleIcon />
+                      )}
+                      Publish
+                    </Button>
                   ) : (
-                    <ArrowUpCircleIcon />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleUnpublish}
+                      disabled={unpublishArticle.isPending}
+                    >
+                      {unpublishArticle.isPending ? (
+                        <ArrowPathIcon className="animate-spin" />
+                      ) : (
+                        <ArrowDownCircleIcon />
+                      )}
+                      Unpublish
+                    </Button>
                   )}
-                  Publish
-                </Button>
-              ) : (
+                </>
+              ) : null}
+              {canDelete ? (
                 <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleUnpublish}
-                  disabled={unpublishArticle.isPending}
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Delete article"
+                  onClick={() => setDeleteOpen(true)}
                 >
-                  {unpublishArticle.isPending ? (
-                    <ArrowPathIcon className="animate-spin" />
-                  ) : (
-                    <ArrowDownCircleIcon />
-                  )}
-                  Unpublish
+                  <TrashIcon />
                 </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Delete article"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <TrashIcon />
-              </Button>
+              ) : null}
             </>
           ) : undefined
         }

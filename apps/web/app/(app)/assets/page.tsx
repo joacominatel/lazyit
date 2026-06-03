@@ -57,7 +57,7 @@ import {
 import { useLocations } from "@/lib/api/hooks/use-locations";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
-import { usePermissions } from "@/lib/hooks/use-permissions";
+import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { formatDate } from "@/lib/utils/format";
@@ -90,7 +90,12 @@ const OWNERSHIP_LABEL: Record<OwnershipFilter, string> = {
 
 export default function AssetsPage() {
   const router = useRouter();
-  const { canWrite, isAdmin } = usePermissions();
+  // `isAdmin` still gates the archived (`deleted=only`) slice: the API's `assertCanListDeleted` keeps
+  // that view ADMIN-only (it was NOT migrated to a permission), so a MEMBER with asset:delete still
+  // can't list archived rows. Write/delete affordances use the fine-grained permissions.
+  const { isAdmin } = usePermissions();
+  const canWrite = useCan("asset:write");
+  const canDelete = useCan("asset:delete");
   const {
     q,
     sort,
@@ -152,10 +157,11 @@ export default function AssetsPage() {
     });
   }, [page?.items, ownershipFilter]);
 
-  // Multi-select over the currently visible rows — ADMIN-only (the API batch endpoints are too).
+  // Multi-select over the currently visible rows — the API batch endpoints all require asset:delete
+  // (bulk delete/restore/status are lifecycle ops), so gate the selection column on canDelete.
   const visibleIds = useMemo(() => rows.map((asset) => asset.id), [rows]);
   const selection = useRowSelection(visibleIds);
-  const selectable = isAdmin;
+  const selectable = canDelete;
 
   /** Run a batch mutation, toast the per-id outcome, and clear the selection. */
   async function runBatch(
@@ -494,7 +500,7 @@ export default function AssetsPage() {
                 }
                 actions={
                   archived ? (
-                    isAdmin ? (
+                    canDelete ? (
                       <RestoreRowAction
                         onRestore={() =>
                           handleRestoreRow(asset.id, asset.name)
@@ -502,12 +508,22 @@ export default function AssetsPage() {
                         disabled={restoreAsset.isPending}
                       />
                     ) : undefined
-                  ) : canWrite ? (
+                  ) : canWrite || canDelete ? (
                     <RowActions
-                      onEdit={() => router.push(`/assets/${asset.id}/edit`)}
-                      onClone={() => router.push(`/assets/${asset.id}/clone`)}
-                      onDelete={() =>
-                        setDeleting({ id: asset.id, name: asset.name })
+                      onEdit={
+                        canWrite
+                          ? () => router.push(`/assets/${asset.id}/edit`)
+                          : undefined
+                      }
+                      onClone={
+                        canWrite
+                          ? () => router.push(`/assets/${asset.id}/clone`)
+                          : undefined
+                      }
+                      onDelete={
+                        canDelete
+                          ? () => setDeleting({ id: asset.id, name: asset.name })
+                          : undefined
                       }
                     />
                   ) : undefined
@@ -565,7 +581,7 @@ export default function AssetsPage() {
                 </TableCell>
                 <TableCell className="text-right">
                   {archived ? (
-                    isAdmin ? (
+                    canDelete ? (
                       <div className="flex justify-end">
                         <RestoreRowAction
                           onRestore={() =>
@@ -575,12 +591,22 @@ export default function AssetsPage() {
                         />
                       </div>
                     ) : null
-                  ) : canWrite ? (
+                  ) : canWrite || canDelete ? (
                     <RowActions
-                      onEdit={() => router.push(`/assets/${asset.id}/edit`)}
-                      onClone={() => router.push(`/assets/${asset.id}/clone`)}
-                      onDelete={() =>
-                        setDeleting({ id: asset.id, name: asset.name })
+                      onEdit={
+                        canWrite
+                          ? () => router.push(`/assets/${asset.id}/edit`)
+                          : undefined
+                      }
+                      onClone={
+                        canWrite
+                          ? () => router.push(`/assets/${asset.id}/clone`)
+                          : undefined
+                      }
+                      onDelete={
+                        canDelete
+                          ? () => setDeleting({ id: asset.id, name: asset.name })
+                          : undefined
                       }
                     />
                   ) : null}

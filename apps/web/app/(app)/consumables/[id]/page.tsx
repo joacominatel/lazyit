@@ -28,7 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { useConsumableCategories } from "@/lib/api/hooks/use-consumable-categories";
 import { useDeleteConsumable } from "@/lib/api/hooks/use-consumable-mutations";
 import {
@@ -65,7 +65,9 @@ export default function ConsumableDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
-  const canWrite = useCanWrite();
+  // Edit/Clone + quick-adjust + stock movements are consumable:write; deletion is consumable:delete.
+  const canWrite = useCan("consumable:write");
+  const canDelete = useCan("consumable:delete");
 
   const { data: consumable, isLoading, isError, error, refetch } =
     useConsumable(id);
@@ -127,28 +129,34 @@ export default function ConsumableDetailPage() {
           ) : undefined
         }
         actions={
-          canWrite ? (
+          canWrite || canDelete ? (
             <>
-              <Button variant="outline" size="sm" asChild>
-                <Link href={`/consumables/${consumable.id}/edit`}>
-                  <PencilSquareIcon />
-                  Edit
-                </Link>
-              </Button>
-              <Button variant="outline" size="sm" asChild>
-                <Link href={`/consumables/${consumable.id}/clone`}>
-                  <DocumentDuplicateIcon />
-                  Clone
-                </Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Delete consumable"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <TrashIcon />
-              </Button>
+              {canWrite ? (
+                <>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={`/consumables/${consumable.id}/edit`}>
+                      <PencilSquareIcon />
+                      Edit
+                    </Link>
+                  </Button>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={`/consumables/${consumable.id}/clone`}>
+                      <DocumentDuplicateIcon />
+                      Clone
+                    </Link>
+                  </Button>
+                </>
+              ) : null}
+              {canDelete ? (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Delete consumable"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <TrashIcon />
+                </Button>
+              ) : null}
             </>
           ) : undefined
         }

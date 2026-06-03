@@ -48,7 +48,7 @@ import { restoreUser } from "@/lib/api/endpoints/users";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
 import { runPerIdBatch } from "@/lib/api/per-id-batch";
-import { usePermissions } from "@/lib/hooks/use-permissions";
+import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { formatDate } from "@/lib/utils/format";
@@ -72,7 +72,11 @@ const STATUS_LABEL: Record<StatusFilter, string> = {
 };
 
 export default function UsersPage() {
-  const { canWrite, isAdmin } = usePermissions();
+  // User administration (create / edit / clone / role-change / offboard / restore) is the single
+  // coarse `user:manage` capability on the backend. `isAdmin` still gates the archived (`deleted=only`)
+  // slice, which the API keeps ADMIN-only.
+  const { isAdmin } = usePermissions();
+  const canManage = useCan("user:manage");
   const {
     q,
     sort,
@@ -270,7 +274,7 @@ export default function UsersPage() {
                 }}
               />
             ) : null}
-            {canWrite ? (
+            {canManage ? (
               <Button onClick={openCreate}>
                 <PlusIcon />
                 New user
@@ -296,7 +300,7 @@ export default function UsersPage() {
           title="No users yet"
           description="Add your first user to start tracking who is in your organization."
           action={
-            canWrite ? (
+            canManage ? (
               <Button onClick={openCreate}>
                 <PlusIcon />
                 Create your first user
@@ -386,13 +390,13 @@ export default function UsersPage() {
                 }
                 actions={
                   archived ? (
-                    isAdmin ? (
+                    canManage ? (
                       <RestoreRowAction
                         onRestore={() => handleRestoreRow(user)}
                         disabled={restoreUserMutation.isPending}
                       />
                     ) : undefined
-                  ) : canWrite ? (
+                  ) : canManage ? (
                     <RowActions
                       onEdit={() => openEdit(user)}
                       onClone={() => openClone(user)}
@@ -445,7 +449,7 @@ export default function UsersPage() {
                 </TableCell>
                 <TableCell className="text-right">
                   {archived ? (
-                    isAdmin ? (
+                    canManage ? (
                       <div className="flex justify-end">
                         <RestoreRowAction
                           onRestore={() => handleRestoreRow(user)}
@@ -453,7 +457,7 @@ export default function UsersPage() {
                         />
                       </div>
                     ) : null
-                  ) : canWrite ? (
+                  ) : canManage ? (
                     <RowActions
                       onEdit={() => openEdit(user)}
                       onClone={() => openClone(user)}

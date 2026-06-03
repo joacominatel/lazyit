@@ -36,7 +36,7 @@ import { useApplicationCategories } from "@/lib/api/hooks/use-application-catego
 import { useApplicationList } from "@/lib/api/hooks/use-applications";
 import { useDeleteApplication } from "@/lib/api/hooks/use-application-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { formatDate } from "@/lib/utils/format";
 import { StackedUserAvatars } from "./_components/stacked-user-avatars";
@@ -57,7 +57,8 @@ const CRITICALITY_LABEL: Record<CriticalityFilter, string> = {
 
 export default function ApplicationsPage() {
   const router = useRouter();
-  const canWrite = useCanWrite();
+  const canWrite = useCan("application:write");
+  const canDelete = useCan("application:delete");
   const {
     q,
     sort,
@@ -394,19 +395,32 @@ export default function ApplicationsPage() {
                     </>
                   }
                   actions={
-                    canWrite ? (
+                    canWrite || canDelete ? (
                       <RowActions
-                        onEdit={() =>
-                          router.push(`/applications/${application.id}/edit`)
+                        onEdit={
+                          canWrite
+                            ? () =>
+                                router.push(
+                                  `/applications/${application.id}/edit`,
+                                )
+                            : undefined
                         }
-                        onClone={() =>
-                          router.push(`/applications/${application.id}/clone`)
+                        onClone={
+                          canWrite
+                            ? () =>
+                                router.push(
+                                  `/applications/${application.id}/clone`,
+                                )
+                            : undefined
                         }
-                        onDelete={() =>
-                          setDeleting({
-                            id: application.id,
-                            name: application.name,
-                          })
+                        onDelete={
+                          canDelete
+                            ? () =>
+                                setDeleting({
+                                  id: application.id,
+                                  name: application.name,
+                                })
+                            : undefined
                         }
                       />
                     ) : undefined
@@ -459,19 +473,32 @@ export default function ApplicationsPage() {
                     {formatDate(application.updatedAt)}
                   </TableCell>
                   <TableCell className="text-right">
-                    {canWrite ? (
+                    {canWrite || canDelete ? (
                       <RowActions
-                        onEdit={() =>
-                          router.push(`/applications/${application.id}/edit`)
+                        onEdit={
+                          canWrite
+                            ? () =>
+                                router.push(
+                                  `/applications/${application.id}/edit`,
+                                )
+                            : undefined
                         }
-                        onClone={() =>
-                          router.push(`/applications/${application.id}/clone`)
+                        onClone={
+                          canWrite
+                            ? () =>
+                                router.push(
+                                  `/applications/${application.id}/clone`,
+                                )
+                            : undefined
                         }
-                        onDelete={() =>
-                          setDeleting({
-                            id: application.id,
-                            name: application.name,
-                          })
+                        onDelete={
+                          canDelete
+                            ? () =>
+                                setDeleting({
+                                  id: application.id,
+                                  name: application.name,
+                                })
+                            : undefined
                         }
                       />
                     ) : null}

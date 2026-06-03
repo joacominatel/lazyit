@@ -46,7 +46,7 @@ import { restoreConsumable } from "@/lib/api/endpoints/consumables";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
 import { runPerIdBatch } from "@/lib/api/per-id-batch";
-import { usePermissions } from "@/lib/hooks/use-permissions";
+import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { formatDate } from "@/lib/utils/format";
@@ -66,7 +66,11 @@ const FILTER_DEFAULTS = {
 
 export default function ConsumablesPage() {
   const router = useRouter();
-  const { canWrite, isAdmin } = usePermissions();
+  // `isAdmin` still gates the archived (`deleted=only`) slice (API keeps it ADMIN-only). Create/edit/
+  // quick-adjust are consumable:write; delete/restore are consumable:delete.
+  const { isAdmin } = usePermissions();
+  const canWrite = useCan("consumable:write");
+  const canDelete = useCan("consumable:delete");
   const {
     q,
     sort,
@@ -417,7 +421,7 @@ export default function ConsumablesPage() {
                 }
                 actions={
                   archived ? (
-                    isAdmin ? (
+                    canDelete ? (
                       <RestoreRowAction
                         onRestore={() =>
                           handleRestoreRow(consumable.id, consumable.name)
@@ -425,27 +429,40 @@ export default function ConsumablesPage() {
                         disabled={restoreConsumableMutation.isPending}
                       />
                     ) : undefined
-                  ) : canWrite ? (
+                  ) : canWrite || canDelete ? (
                     <>
-                      <QuickAdjustButtons
-                        consumableId={consumable.id}
-                        name={consumable.name}
-                        currentStock={consumable.currentStock}
-                        unit={consumable.unit}
-                        size="sm"
-                      />
+                      {canWrite ? (
+                        <QuickAdjustButtons
+                          consumableId={consumable.id}
+                          name={consumable.name}
+                          currentStock={consumable.currentStock}
+                          unit={consumable.unit}
+                          size="sm"
+                        />
+                      ) : null}
                       <RowActions
-                        onEdit={() =>
-                          router.push(`/consumables/${consumable.id}/edit`)
+                        onEdit={
+                          canWrite
+                            ? () =>
+                                router.push(`/consumables/${consumable.id}/edit`)
+                            : undefined
                         }
-                        onClone={() =>
-                          router.push(`/consumables/${consumable.id}/clone`)
+                        onClone={
+                          canWrite
+                            ? () =>
+                                router.push(
+                                  `/consumables/${consumable.id}/clone`,
+                                )
+                            : undefined
                         }
-                        onDelete={() =>
-                          setDeleting({
-                            id: consumable.id,
-                            name: consumable.name,
-                          })
+                        onDelete={
+                          canDelete
+                            ? () =>
+                                setDeleting({
+                                  id: consumable.id,
+                                  name: consumable.name,
+                                })
+                            : undefined
                         }
                       />
                     </>
@@ -510,7 +527,7 @@ export default function ConsumablesPage() {
                 </TableCell>
                 <TableCell className="text-right">
                   {archived ? (
-                    isAdmin ? (
+                    canDelete ? (
                       <div className="flex justify-end">
                         <RestoreRowAction
                           onRestore={() =>
@@ -520,16 +537,28 @@ export default function ConsumablesPage() {
                         />
                       </div>
                     ) : null
-                  ) : canWrite ? (
+                  ) : canWrite || canDelete ? (
                     <RowActions
-                      onEdit={() =>
-                        router.push(`/consumables/${consumable.id}/edit`)
+                      onEdit={
+                        canWrite
+                          ? () =>
+                              router.push(`/consumables/${consumable.id}/edit`)
+                          : undefined
                       }
-                      onClone={() =>
-                        router.push(`/consumables/${consumable.id}/clone`)
+                      onClone={
+                        canWrite
+                          ? () =>
+                              router.push(`/consumables/${consumable.id}/clone`)
+                          : undefined
                       }
-                      onDelete={() =>
-                        setDeleting({ id: consumable.id, name: consumable.name })
+                      onDelete={
+                        canDelete
+                          ? () =>
+                              setDeleting({
+                                id: consumable.id,
+                                name: consumable.name,
+                              })
+                          : undefined
                       }
                     />
                   ) : null}
