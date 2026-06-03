@@ -11,6 +11,16 @@
 	admin off
 	# Real domain (Let's Encrypt): set an ACME contact email. Leave commented for local.
 	# email {$LAZYIT_TLS_EMAIL}
+
+	# Trusted proxies (SEC-010). Caddy is the ONLY hop in front of the API, and api/web/db sit on a
+	# private Docker network. `static private_ranges` tells Caddy to trust X-Forwarded-For only from
+	# private-range peers (the Docker network) and to use the real connecting client IP otherwise —
+	# so a public caller's FORGED leftmost X-Forwarded-For is dropped and the value Caddy forwards to
+	# the API is trustworthy. The API then sets Express `trust proxy=1` (TRUST_PROXY) so `req.ip` is
+	# this verified client, which keys the /config/setup rate-limiter + the first-run audit IP.
+	servers {
+		trusted_proxies static private_ranges
+	}
 }
 
 # --- Reusable snippets ------------------------------------------------------
@@ -71,11 +81,13 @@ auth.{$LAZYIT_DOMAIN:localhost} {
 	# HTTPS-only for every localhost project. See the (hsts) snippet note above.
 	# import hsts
 
-	# Swagger UI + raw OpenAPI live at the API's OWN /api/docs* — forward WITHOUT stripping.
-	@apidocs path /api/docs*
-	handle @apidocs {
-		reverse_proxy api:3001
-	}
+	# Swagger UI / raw OpenAPI (/api/docs*) is NO LONGER forwarded on the public origin (SEC-009).
+	# The OpenAPI doc enumerates the full authenticated attack surface and was the one anonymous
+	# surface once DEF-001 closed (every route now needs a Bearer JWT). The API also stops serving it
+	# in production (NODE_ENV gate, main.ts). Docs remain reachable on the internal Docker network and
+	# in local dev. There is intentionally no @apidocs handle here: a public /api/docs* now falls to
+	# @api below, which strips /api -> /docs* and the API does not serve that path (Swagger mounts at
+	# /api/docs, unstripped) -> 404, never a docs page.
 
 	# /api/* -> API, stripping the /api prefix (e.g. /api/users -> /users), EXCEPT Auth.js
 	# routes (/api/auth/*) which the Next.js web app owns (ADR-0039). They are excluded here

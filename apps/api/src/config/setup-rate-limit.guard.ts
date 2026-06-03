@@ -68,12 +68,17 @@ export class SetupRateLimitGuard implements CanActivate {
     return true;
   }
 
-  /** Resolve a client key from the request: the first X-Forwarded-For hop, else the socket IP. */
+  /**
+   * Resolve a client key from the request: Express's VERIFIED `req.ip` (SEC-010).
+   *
+   * `req.ip` is the trusted client address derived per the app's `trust proxy` setting (main.ts):
+   * behind Caddy it is the real client the proxy reports (Caddy has `trusted_proxies`, so a forged
+   * X-Forwarded-For from the public client is dropped); in dev with no proxy it is the socket
+   * address. Keying on the raw leftmost X-Forwarded-For token — as before — let any caller rotate
+   * the rate-limit bucket per request by sending a fresh fake hop, defeating the 5/min cap.
+   */
   private clientKey(request: Request): string {
-    const forwarded = request.headers['x-forwarded-for'];
-    const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-    const xff = first?.split(',')[0]?.trim();
-    return xff || request.ip || request.socket?.remoteAddress || 'unknown';
+    return request.ip || request.socket?.remoteAddress || 'unknown';
   }
 
   /** Drop windows that have fully elapsed so the map stays bounded. */

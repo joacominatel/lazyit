@@ -3,7 +3,7 @@ title: Deferred / accepted risks
 tags: [security, deferred]
 status: draft
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-06-02
 ---
 
 # Deferred / accepted risks
@@ -46,12 +46,20 @@ the accepted baseline.
   `User.externalId`), and the same rules must hold. Track [[SEC-006|SEC-006]]: `externalId` should be
   server-set by then, not client-set.
 
-## DEF-003 — Swagger docs are public
+## DEF-003 — Swagger docs are public ✅ RESOLVED (2026-06-02)
 
 - **ADR:** [[0018-api-documentation-swagger]] (accepted). `GET /api/docs` and `/api/docs-json` are
-  unauthenticated. Accepted because the API itself is unauthenticated and dev-only.
-- **Why not a finding:** consistent with DEF-001; protecting the docs is explicitly deferred to the auth
-  work. (It does enumerate the full surface to an attacker — relevant only once exposed.)
+  unauthenticated. Originally accepted because the API itself was unauthenticated and dev-only —
+  consistent with DEF-001; protecting the docs was deferred to the auth work.
+- **Why the rationale went stale:** DEF-001 is now **resolved** — every non-`@Public()` route requires
+  a Bearer JWT ([[0038-jit-user-provisioning]]). So the anonymous OpenAPI doc became the **one**
+  anonymous surface enumerating the full *authenticated* attack surface — no longer "just describing an
+  open API". That makes it a finding: [[SEC-009|SEC-009]] (info-leak, Low).
+- **Resolved** (belt-and-suspenders, [[SEC-009|SEC-009]], closed in the same PR as
+  [[SEC-010|SEC-010]]): (1) `apps/api/src/main.ts` mounts Swagger **only** when
+  `NODE_ENV !== 'production'`, so a prod server doesn't serve it at all; (2) `infra/caddy/Caddyfile`
+  no longer forwards `/api/docs*` on the public origin. The docs stay reachable on the internal Docker
+  network and in local dev (DX unchanged). Residual: deliberate internal/dev reachability only.
 
 ## DEF-004 — `metadata` / `specs` jsonb is unvalidated
 

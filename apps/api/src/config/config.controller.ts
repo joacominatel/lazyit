@@ -184,11 +184,15 @@ export class ConfigController {
     return this.permissions.resolveFor(user.role);
   }
 
-  /** First X-Forwarded-For hop, else the socket IP — for the setup audit line. */
+  /**
+   * Express's VERIFIED `req.ip`, else the socket IP — for the first-run setup audit line (SEC-010).
+   *
+   * `req.ip` honours the app's `trust proxy` setting (main.ts): behind Caddy it is the real client
+   * (Caddy's `trusted_proxies` drops a forged X-Forwarded-For from the public caller); in dev with
+   * no proxy it is the socket address. Reading the raw leftmost X-Forwarded-For token — as before —
+   * let a caller forge the audited first-run IP.
+   */
   private clientIp(req: Request): string | undefined {
-    const forwarded = req.headers['x-forwarded-for'];
-    const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-    const xff = first?.split(',')[0]?.trim();
-    return xff || req.ip || req.socket?.remoteAddress || undefined;
+    return req.ip || req.socket?.remoteAddress || undefined;
   }
 }

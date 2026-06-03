@@ -1,11 +1,17 @@
 import { HttpException, type ExecutionContext } from '@nestjs/common';
 import { SetupRateLimitGuard } from './setup-rate-limit.guard';
 
-/** Build an ExecutionContext whose HTTP request reports the given client IP. */
-function contextFor(ip: string): ExecutionContext {
+/**
+ * Build an ExecutionContext whose HTTP request reports the given verified `req.ip` and an optional
+ * raw X-Forwarded-For header. Mirrors Express: `req.ip` is what the app's `trust proxy` setting has
+ * already resolved (the guard keys on it, NOT on the raw header — SEC-010).
+ */
+function contextFor(ip: string, xff?: string): ExecutionContext {
   const request = {
     ip,
-    headers: {} as Record<string, string | string[] | undefined>,
+    headers: (xff !== undefined
+      ? { 'x-forwarded-for': xff }
+      : {}) as Record<string, string | string[] | undefined>,
     socket: { remoteAddress: ip },
   };
   return {
@@ -47,20 +53,35 @@ describe('SetupRateLimitGuard', () => {
     expect(guard.canActivate(b)).toBe(true);
   });
 
-  it('prefers the first X-Forwarded-For hop as the client key', () => {
-    const request = {
-      ip: '127.0.0.1',
-      headers: { 'x-forwarded-for': '203.0.113.5, 10.0.0.1' },
-      socket: { remoteAddress: '127.0.0.1' },
-    };
-    const ctx = {
-      switchToHttp: () => ({ getRequest: () => request }),
-    } as unknown as ExecutionContext;
-    // 5 from the same forwarded client, then 429 — proving the XFF hop, not the proxy socket IP,
-    // is the rate-limit key.
+  it('keys on the verified req.ip, not the socket header', () => {
+    // req.ip is what Express resolved per `trust proxy`; the guard trusts it directly.
+    const ctx = contextFor('203.0.113.5');
     for (let i = 0; i < 5; i++) {
       expect(guard.canActivate(ctx)).toBe(true);
     }
     expect(() => guard.canActivate(ctx)).toThrow(HttpException);
+  });
+
+  it('a forged X-Forwarded-For does NOT rotate the bucket — same req.ip is still capped (SEC-010)', () => {
+    // The attacker sends a DIFFERENT spoofed leftmost XFF on every request, but `req.ip` (the value
+    // Express verified via `trust proxy`) is the same real client each time. The guard keys on
+    // `req.ip`, so the spoofed header is ignored and the 5/min cap still bites on the 6th attempt.
+    // Before SEC-010 the guard keyed on the leftmost XFF token, so each forged hop minted a fresh
+    // bucket and the cap was never reached — this test would fail (every call returns true).
+    const realIp = '198.51.100.9';
+    for (let i = 0; i < 5; i++) {
+      const ctx = contextFor(realIp, `1.1.1.${i}, ${realIp}`);
+      expect(guard.canActivate(ctx)).toBe(true);
+    }
+    // 6th request, yet another forged leftmost hop — same verified client → still 429.
+    const blocked = contextFor(realIp, `9.9.9.9, ${realIp}`);
+    let thrown: unknown;
+    try {
+      guard.canActivate(blocked);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(HttpException);
+    expect((thrown as HttpException).getStatus()).toBe(429);
   });
 });
