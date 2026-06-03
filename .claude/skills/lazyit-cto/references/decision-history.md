@@ -7,6 +7,7 @@
 > Initially populated: 2026-05-26 (first CTO session), from all 36 ADRs in `docs/03-decisions/`.
 > Refreshed 2026-06-01 (post auth epic) — covered all 44 ADRs (0001–0044).
 > Refreshed 2026-06-01 (post UX northstar cycle, PRs #100–#115) — now covers all 45 ADRs (0001–0045; ADR-0045 = heroicons) + the ADR-0011/0030 amendments.
+> Refreshed 2026-06-03 (post RBAC v2 + Service-Accounts epic) — now covers all 48 ADRs (0001–0048; ADR-0046 = Roles & Permissions v2, ADR-0047 = `start.sh`, ADR-0048 = Service Accounts). Read-authorization is now CLOSED; `@Roles` retired in favor of `@RequirePermission`.
 
 ---
 
@@ -118,6 +119,13 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 **Status**: accepted
 **One-liner**: one `.env` per scope (root for Postgres, `apps/api/.env`, `infra/env/.env.prod`); committed `.env.example` only.
 **CTO note**: no secrets in code; always add to `.env.example` first.
+
+---
+
+**ADR-0047** — *`start.sh` — guided first-deploy bootstrap*
+**Status**: accepted (2026-06-03)
+**One-liner**: a single guided, **idempotent, non-destructive** `start.sh` entry point for first deploy — generates/validates `.env.prod`, brings up the prod profile, and walks the operator to the `/setup` wizard. Safe to re-run.
+**CTO note**: DevOps lane. Pairs with the zero-touch Zitadel sidecars (ADR-0043) and the `/setup` wizard — closes the "operator doesn't know where to start" gap for a self-hosted product. Idempotent = re-running never destroys data.
 
 ---
 
@@ -280,9 +288,23 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 ---
 
 **ADR-0040** — *Minimal RBAC — ADMIN / MEMBER / VIEWER role on User*
-**Status**: accepted (2026-06-01); default flipped MEMBER→VIEWER by ADR-0043
+**Status**: accepted (2026-06-01); default flipped MEMBER→VIEWER by ADR-0043 → **authZ MECHANISM superseded by ADR-0046** (the `@Roles`/`RolesGuard` machinery is retired; the per-domain authZ *philosophy* is kept)
 **One-liner**: single `Role` enum on `User`; `@Roles()` + `RolesGuard` composed AFTER `JwtAuthGuard`; gate AccessGrant writes, Users administration and all destructive DELETEs to ADMIN; VIEWER read-only.
-**CTO note**: closes the May review's #1 finding (authN-without-authZ). **AuthZ is DB-first** — `RolesGuard` reads `User.role` from the DB, never a token claim. First-ever user (seed / first JIT) is ADMIN so an install is never un-administrable. Round 3 added role-management UI + `GET /users/me` + last-admin (409) & no-self-role-change (403) guards + a `set-role` bootstrap script. NO per-resource ACL matrix (Option B rejected).
+**CTO note**: closed the May review's #1 finding (authN-without-authZ). **AuthZ is DB-first** — never a token claim — and that survives into ADR-0046. The hardcoded role→capability mapping and `@Roles`/`RolesGuard` were **replaced** by the configurable permission catalog + `@RequirePermission`/`PermissionGuard` (ADR-0046); the 3 roles themselves remain FIXED. First-ever user ADMIN; last-admin (409) & no-self-role-change (403) guards + `set-role` script remain.
+
+---
+
+**ADR-0046** — *Roles & Permissions v2 — fixed roles, fully-configurable permissions*
+**Status**: accepted (2026-06-03); **supersedes the authZ MECHANISM of ADR-0040** (keeps its DB-first, per-domain philosophy) and **extends ADR-0043**
+**One-liner**: the **3 roles stay FIXED** (ADMIN/MEMBER/VIEWER) but each role's **permissions are fully configurable at runtime** — a **permission catalog-as-code** (33 entries) in `@lazyit/shared`, a `RolePermission` matrix table, and a single `@RequirePermission('<domain>:<verb>')` + `PermissionGuard` + `PermissionResolverService` primitive (`@Roles`/`RolesGuard` RETIRED).
+**CTO note**: **AuthZ is DB-first** (INV-1) and ADMIN is **immutable + always-full** (INV-8). The matrix is seeded by `buildDefaultRolePermissions` (a **safe-default** seed) and edited via GET/PUT `/config/permissions` (`settings:manage`); the UI reads its effective set from GET `/config/my-permissions`. **Read-authorization is CLOSED here** — 41 read GETs are `<domain>:read`-annotated and the seed pre-tightens `accessGrant:read` + `user:read` to **ADMIN+MEMBER**; 63 write gates migrated. The matrix is fully configurable with **friction not blocks**: coarse verbs (`settings:manage`/`user:manage`/`accessGrant:grant`) and `:delete` CAN be granted to MEMBER/VIEWER, surfaced with a ⚠ (admin-initiated delegation, accepted, no server prohibition). UX is **role-first** (presets + capability toggles + fine-tune), NOT a permission grid. **Permissions are never synced to the IdP** (BYOI-safe — Zitadel mirrors identity + the 3 roles only). Per-resource/row ACLs still out of scope.
+
+---
+
+**ADR-0048** — *Service Accounts — non-human principals with native tokens + direct permission grants*
+**Status**: accepted (2026-06-03); extends ADR-0046; **annotates ADR-0040 as mechanism-superseded**
+**One-liner**: a **separate `ServiceAccount` model** authenticated by a **lazyit-native hashed token** `lzit_sa_<id>_<secret>` (NOT a Zitadel machine-user → BYOI-safe; NOT a User flag), with **direct** permission grants from the same catalog (`ServiceAccountPermission`) — never a Role, never ADMIN; fail-closed.
+**CTO note**: a **SA-token branch in `JwtAuthGuard`** resolves a ServiceAccount *principal* (not a User); `PermissionResolverService` resolves its direct grants. Token secret is **revealed once** on create (one-time reveal in the UI). **Audit attribution** (INV-SA-1..4): the 6 append-only tables (AssetAssignment, AssetHistory, AccessGrant, ConsumableMovement, ArticleVersion, PermissionAuditLog) gained a nullable `serviceAccountId` actor column alongside the human `actorId` + an **at-most-one-actor CHECK**. Two deliberate carve-outs: the **ServiceAccountAuditLog's own SA-actor column** is deferred to a future ADR (SA-on-SA management → `null` for now), and **SA-authored Articles are rejected by design** (KB authorship stays human). `@CurrentPrincipal()` does the human→`actorId` / SA→`serviceAccountId` split.
 
 ---
 
@@ -372,6 +394,15 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 | 2026-06-01 | **Chose heroicons over the brief's lucide** (least churn) | The audit brief proposed lucide; the app already leaned heroicons, so standardizing on heroicons minimized rework | Recorded as **ADR-0045** (accepted); lucide dropped entirely; two-weight convention |
 | 2026-06-01 | **Approved the `Page<T>` sort/`dir` contract + migrating the 4 remaining lists server-side + `deleted=only` archived listing** | Real pagination/sort/search UI needs an authoritative server contract; archived listing needs an ADMIN-only escape hatch | ADR-0030 amendment §6 (sort/`dir`, per-resource allowlist, unknown→400) + §7 (`deleted=active\|only`); applications/consumables/users/locations migrated onto `Page<T>` + server `q` (#104/#114); fixed a consumable soft-delete leak |
 | 2026-06-01 | **Authorized the CTO to merge the UX-cycle PRs to `dev`** (not `master`) | A large multi-wave cycle; the CEO delegated `dev` merges for this cycle while keeping `dev → master` promotion to themselves | Exception scoped to this cycle's PRs; the standard "agents never merge; CEO promotes to master" rule otherwise stands |
+| 2026-06-03 | **RBAC v2: keep 3 FIXED roles, make permissions fully configurable** (not a free-form role system, not a per-resource ACL matrix) | Configurability where operators need it (capabilities), stability where they don't (the role set); avoids the complexity of arbitrary roles/ACLs | ADR-0046; catalog-as-code in `@lazyit/shared`, `RolePermission` table, `@RequirePermission`; ADMIN immutable/full (INV-8) |
+| 2026-06-03 | **Read-authorization CLOSED via a safe-default seed** (`accessGrant:read` + `user:read` pre-tightened to ADMIN+MEMBER) | The headline Medium debt; closed without a blocking redesign — every read GET is `:read`-gated and the default seed scopes the two sensitive reads | Resolves the long-standing "all GETs open to any authenticated user" gap; VIEWER no longer reads grants/users by default |
+| 2026-06-03 | **Fully-configurable matrix = friction, not blocks** — `:delete` + coarse verbs ARE grantable to MEMBER/VIEWER (⚠ in the UI) | Admin-initiated delegation is the operator's call; the product warns but does not forbid | No server-side prohibition; the ⚠ is the guardrail; role-first UX (presets + capabilities), not a grid |
+| 2026-06-03 | **Service Accounts = a SEPARATE principal with a lazyit-native token** (NOT a Zitadel machine-user, NOT a User flag) | Keeps SAs BYOI-safe and decoupled from the IdP; SAs are a lazyit concept, not an identity-provider one | ADR-0048; `lzit_sa_<id>_<secret>` hashed token, SA-token branch in JwtAuthGuard, direct catalog grants (never Role/ADMIN), fail-closed |
+| 2026-06-03 | **SA audit attribution via nullable `serviceAccountId` columns + at-most-one-actor CHECK** on the 6 append-only tables | A row must be attributable to a human XOR a SA (or neither); keeps the audit trail honest without overloading `actorId` | INV-SA-1..4; ServiceAccountAuditLog's OWN SA-actor column deferred to a future ADR; **SA-authored Articles rejected by design** |
+| 2026-06-03 | **`start.sh` first-deploy bootstrap** (idempotent, non-destructive) | A self-hosted product needs a single obvious entry point for first deploy | ADR-0047; DevOps lane; pairs with the zero-touch sidecars + `/setup` wizard |
+| 2026-06-03 | **SEC-009 (Swagger public in prod) + SEC-010 (XFF-spoof setup rate-limit) CLOSED** | Two findings remediated within the epic | Swagger no longer mounted under `NODE_ENV=production`; the `/config/setup` rate-limit no longer trusts a spoofable XFF header |
+| 2026-06-03 | **`migrate.Dockerfile` hotfix committed DIRECTLY to `dev`** (`69fb9cf`) at the CEO's explicit request | The migrate image must build `@lazyit/shared` before the seed runs (the seed imports the permission catalog); an urgent fix, not a feature | A deliberate one-off exception to the branch+PR flow, authorized by the CEO |
+| 2026-06-03 | **Epic run as: read-only design/audit workflow → CEO forks → serialized implementation waves, each gated by an adversarial multi-agent review** (correctness + sentinel, with verification) before merge | Re-applied and validated the "fan-out read-only audit, then serialize the build" pattern, now with an adversarial review gate per wave | Confirms the pattern for high-stakes (authZ) epics; no agent scope changed |
 
 ---
 
@@ -385,17 +416,18 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 | ADR-0040 default role `@default(MEMBER)` | ADR-0043 §5 (`@default(VIEWER)`) | Least-privilege default flipped MEMBER→VIEWER (uniform across app-create + non-first JIT) |
 | ADR-0037 §6 manual OIDC-client registration (primary path) | ADR-0043 §4 (zero-touch sidecar + in-app wizard) | "One build, one run"; manual runbook kept as the BYOI/fallback path |
 | ADR-0038 "roles never sync to the IdP" posture | ADR-0043 §3 (roles written back to Zitadel) | One-way mirror app→Zitadel; the reverse (token role→authZ) is explicitly NOT adopted |
+| ADR-0040 authZ MECHANISM (`@Roles` + `RolesGuard`, hardcoded role→capability) | ADR-0046 (`@RequirePermission` + `PermissionGuard` + `PermissionResolverService`, configurable `RolePermission` matrix) | RBAC v2: 3 roles stay FIXED, but capabilities become a runtime-configurable permission catalog; the DB-first, per-domain philosophy is kept |
 
 ---
 
 ## Open questions (not yet decided)
 
-> Resolved since 2026-05-26 — moved out of this table: **IdP provider/database/BYOI surface** → ADR-0037/0043 (Zitadel bundled, own Postgres, `IdentityProvider` adapter); **frontend pagination** → ADR-0030 implemented on the heavy lists.
+> Resolved since 2026-05-26 — moved out of this table: **IdP provider/database/BYOI surface** → ADR-0037/0043 (Zitadel bundled, own Postgres, `IdentityProvider` adapter); **frontend pagination** → ADR-0030 implemented on the heavy lists; **read-authorization** → ADR-0046 (every read GET `<domain>:read`-gated; the safe-default seed pre-tightens `accessGrant:read`/`user:read` to ADMIN+MEMBER); **non-human principals / API tokens** → ADR-0048 (Service Accounts).
 
 | Question | Blocker | How to unblock |
 |----------|---------|---------------|
-| **Read-authorization model** (per-resource read scoping; today all GETs are open to any authenticated user, incl. VIEWER) | RBAC v1 gated writes only | CEO decision + an ADR; next AuthZ wave |
-| Async workers (BullMQ + Redis) + a scheduler (cron/queue) | SEC-002 fix; expiry reminders / periodic role-sync | CEO decision; an ADR needed before implementation |
+| Async workers (BullMQ + Redis) + a scheduler (cron/queue) | SEC-002 fix; expiry reminders / periodic role-sync; **now also gates backups-from-frontend + the Application workflow engine (P4)** | CEO decision; an ADR needed before implementation |
+| **ServiceAccountAuditLog SA-actor column** (a SA managing another SA is attributed `null`) | Carved out of ADR-0048 | Its own future ADR when SA-on-SA attribution is needed |
 | BYOI write-back interface (SCIM/webhook) + bidirectional role sync | Deferred in ADR-0043 (Fork #5) | When a BYOI customer needs write-back |
 | CD / image publishing (GHCR + deploy flow + tagging) | Deferred in ADR-0027 | When a deploy target exists |
 | E2E / integration testing tooling | Deferred in ADR-0012 | When critical flows stabilize |
