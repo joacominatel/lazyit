@@ -100,8 +100,9 @@ Cheap invariants verified this sweep — re-check each pass (a regression here *
 - **No command injection** — no `child_process`/`exec`/`eval`/`new Function`.
 - **No path traversal in import** — the uploaded file is parsed from a buffer and **never written to
   disk**; the filename feeds only extension detection + title (path stripped, `article-import.ts:42`).
-- **No sensitive logging** — no logger/`console` in `apps/api/src` (nothing to leak; also no audit log
-  yet — a feature gap, not a vuln).
+- **No sensitive logging** — structured Pino lines never log a secret; the auth-epic audit tables
+  ([[permission-audit-log]], [[service-account-audit-log]]) record the *event*, never a credential — a
+  service-account token cleartext is shown once and never persisted/logged ([[INVARIANTS]] INV-SA-1).
 - **Mass assignment mostly contained** — create/update schemas are `z.strictObject` (unknown keys
   **rejected**) and omit server-owned fields (`authorId`, article `status`, `id`, timestamps). The
   exception is [[SEC-006|SEC-006]] (`externalId`).
