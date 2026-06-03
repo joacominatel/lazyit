@@ -2,6 +2,7 @@
 
 import {
   ArrowPathIcon,
+  DocumentDuplicateIcon,
   PencilSquareIcon,
   TrashIcon,
   UserPlusIcon,
@@ -117,6 +118,12 @@ export default function AssetDetailPage() {
                 <Link href={`/assets/${asset.id}/edit`}>
                   <PencilSquareIcon />
                   Edit
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/assets/${asset.id}/clone`}>
+                  <DocumentDuplicateIcon />
+                  Clone
                 </Link>
               </Button>
               <Button
