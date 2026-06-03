@@ -97,11 +97,16 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     });
   });
 
-  it('SOFT_DELETABLE_MODELS lists exactly the 9 mutable domain entities', () => {
+  it('SOFT_DELETABLE_MODELS lists exactly the 10 mutable domain entities', () => {
     expect(SOFT_DELETABLE_MODELS.has('User')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('Asset')).toBe(true);
+    // ServiceAccount is soft-deletable (revoke = soft delete; ADR-0048).
+    expect(SOFT_DELETABLE_MODELS.has('ServiceAccount')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('AssetAssignment')).toBe(false);
     expect(SOFT_DELETABLE_MODELS.has('AccessGrant')).toBe(false);
-    expect(SOFT_DELETABLE_MODELS.size).toBe(9);
+    // ServiceAccountPermission (join) and ServiceAccountAuditLog (append-only) are NOT soft-deletable.
+    expect(SOFT_DELETABLE_MODELS.has('ServiceAccountPermission')).toBe(false);
+    expect(SOFT_DELETABLE_MODELS.has('ServiceAccountAuditLog')).toBe(false);
+    expect(SOFT_DELETABLE_MODELS.size).toBe(10);
   });
 });
