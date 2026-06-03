@@ -55,7 +55,8 @@ type Target = "asset" | "application";
  * pick an asset XOR application) and per-row removal. The reverse "Related articles" panels on the
  * asset/application details are read-only and refetch automatically (shared invalidation key).
  *
- * `canWrite` is gated by the page on `useCanWrite()`; the API additionally enforces author-only.
+ * `canWrite` is gated by the page on `can('article:write')` (linking is an article write); the API
+ * additionally enforces author-only.
  */
 export function ArticleLinksPanel({
   articleId,
