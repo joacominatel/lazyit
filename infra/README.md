@@ -36,7 +36,7 @@ infra/
 
 | Script | What it does | Run | Ref |
 | --- | --- | --- | --- |
-| `start.sh` | **Guided first-deploy bootstrap.** Detects the environment, asks ~6 questions, generates `env/.env.prod` (real `openssl` secrets, `chmod 600`, atomic write) and brings the prod stack up — then points you at `/setup`. Idempotent + non-destructive (skips generation on an existing install; never regenerates `ZITADEL_MASTERKEY`; no teardown path). | `./infra/start.sh` (`--yes` / `--dry-run` / `--help`) | ADR-0047 |
+| `start.sh` | **Guided first-deploy bootstrap.** Detects the environment, asks ~6 questions (free-text answers validated), generates `env/.env.prod` (real `openssl` secrets, **mode 600 from creation**, atomic write) and brings the prod stack up — then points you at `/setup`. Idempotent + non-destructive (skips generation on an existing install; never regenerates `ZITADEL_MASTERKEY`; no teardown path). | `./infra/start.sh` (`--yes` / `--dry-run` / `--help`) | ADR-0047 |
 | `scripts/zitadel-bootstrap.sh` | One-shot, fail-loud, idempotent Zitadel provisioner (the `zitadel-bootstrap` sidecar's entrypoint). Wires the OIDC project/app/roles/SA — **no console clicking**. Not run by hand. | runs as the sidecar under `--profile prod` | ADR-0043 |
 
 ## Deployment levels
