@@ -9,10 +9,7 @@ jest.mock('../../generated/prisma/client', () => ({
 jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 
 import { ServiceAccountsService } from './service-accounts.service';
-import {
-  hashSecret,
-  parseToken,
-} from './service-account-token';
+import { hashSecret, parseToken } from './service-account-token';
 import type { PrismaService } from '../prisma/prisma.service';
 
 interface SaRow {
@@ -152,11 +149,7 @@ class FakePrisma {
         ),
     },
     serviceAccountPermission: {
-      findMany: ({
-        where,
-      }: {
-        where: { serviceAccountId: string };
-      }) =>
+      findMany: ({ where }: { where: { serviceAccountId: string } }) =>
         Promise.resolve(
           this.perms
             .filter((p) => p.serviceAccountId === where.serviceAccountId)
@@ -274,14 +267,18 @@ describe('ServiceAccountsService (ADR-0048)', () => {
         { name: 'x', permissions: ['asset:read'] },
         ADMIN,
       );
-      const oldHash = prisma.accounts.find((a) => a.id === created.id)!.tokenHash;
+      const oldHash = prisma.accounts.find(
+        (a) => a.id === created.id,
+      )!.tokenHash;
 
       const rotated = await service.rotate(created.id, ADMIN);
 
       // A different cleartext token (same id segment), and the stored hash changed.
       expect(rotated.token).not.toBe(created.token);
       expect(rotated.token.startsWith(`lzit_sa_${created.id}_`)).toBe(true);
-      const newHash = prisma.accounts.find((a) => a.id === created.id)!.tokenHash;
+      const newHash = prisma.accounts.find(
+        (a) => a.id === created.id,
+      )!.tokenHash;
       expect(newHash).not.toBe(oldHash);
       // The OLD secret no longer hashes to the stored hash → it can never authenticate again.
       const oldSecret = parseToken(created.token)!.secret;
@@ -325,7 +322,11 @@ describe('ServiceAccountsService (ADR-0048)', () => {
         ADMIN,
       );
       prisma.audit = [];
-      const updated = await service.update(created.id, { name: 'renamed' }, ADMIN);
+      const updated = await service.update(
+        created.id,
+        { name: 'renamed' },
+        ADMIN,
+      );
       expect(updated.name).toBe('renamed');
       expect(prisma.audit.some((a) => a.action === 'PERMISSION_CHANGE')).toBe(
         false,

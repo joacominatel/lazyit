@@ -24,7 +24,9 @@ describe('resolveServiceAccountPermissions', () => {
   });
 
   it('has NO ADMIN / wildcard short-circuit — only the explicit grants are held', () => {
-    const set = resolveServiceAccountPermissions([{ permission: 'asset:read' }]);
+    const set = resolveServiceAccountPermissions([
+      { permission: 'asset:read' },
+    ]);
     // It holds exactly asset:read, nothing else — not user:manage, not settings:manage.
     expect(set.has('asset:read')).toBe(true);
     expect(set.has('user:manage')).toBe(false);
