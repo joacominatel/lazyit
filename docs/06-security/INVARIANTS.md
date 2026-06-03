@@ -190,13 +190,28 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   EXACTLY equal the role-set the old `@Roles` gate allowed — a mismatch (e.g. an AccessGrant write wired
   to `accessGrant:write` instead of `accessGrant:grant`, or a user-admin route on `user:write` instead of
   `user:manage`) fails CI. This is the behavior-preservation proof for the mechanism swap.
-- **As-built (P2+P3+P4, ADR-0046 §Phased delivery):** the `@RequirePermission` guard + the GET
-  annotations + ALL the migrated write gates are now LIVE — the invariant is enforced by the runtime
-  guard + resolver, not the schema/seed alone. The only behavior delta is VIEWER losing
-  `accessGrant:read` + `user:read` (and the `/search` users facet); see
+- `apps/api/src/config/permissions-config.service.ts` + `apps/api/src/config/config.controller.ts` —
+  **the configurable surface (P5):** `GET`/`PUT /config/permissions` (`@RequirePermission('settings:manage')`,
+  ADMIN-only) read/replace the MEMBER + VIEWER sets. The **ADMIN-immutable** half of this invariant is
+  ACTIVELY enforced here: the strict PUT body (`UpdateRolePermissionsSchema` in
+  `packages/shared/src/schemas/permission.ts`) accepts ONLY `MEMBER`/`VIEWER` keys, so an `ADMIN`/extra
+  key → 400; the service never writes ADMIN rows, and the resolver's ADMIN short-circuit means a row edit
+  could never scope ADMIN down anyway. Every grant/revoke is validated against the frozen catalog
+  (unknown → 400), applied in one `$transaction`, and **audited** append-only (`PermissionAuditLog`,
+  one immutable row per change attributed to the actor); on commit `PermissionResolverService.invalidate()`
+  is called so the next authZ decision is cache-coherent. `GET /config/my-permissions` exposes the
+  caller's effective set via the same resolver (no `User`-shape pollution). Covered by
+  `apps/api/src/config/permissions-config.service.spec.ts` (round-trip, audit, cache-coherence,
+  ADMIN-never-written) and `apps/api/src/config/config.controller.spec.ts` (the `settings:manage` gate:
+  MEMBER/VIEWER → 403 on GET/PUT; `my-permissions` open to any authenticated user).
+- **As-built (P2+P3+P4+P5, ADR-0046 §Phased delivery):** the `@RequirePermission` guard + the GET
+  annotations + ALL the migrated write gates + the editable matrix are now LIVE — the invariant is
+  enforced by the runtime guard + resolver, not the schema/seed alone. The only behavior delta is VIEWER
+  losing `accessGrant:read` + `user:read` (and the `/search` users facet); see
   `apps/api/src/auth/read-authz-matrix.spec.ts` for the per-role read matrix. The 63 former `@Roles`
   write sites now carry `@RequirePermission` with the EXACT same effective role-set (parity-tested), and
-  the legacy `@Roles` path is retired — `@RequirePermission` is the single enforcement primitive.
+  the legacy `@Roles` path is retired — `@RequirePermission` is the single enforcement primitive. The
+  matrix is now ADMIN-editable for MEMBER/VIEWER (audited, cache-coherent), ADMIN immutable (P5).
 
 ---
 

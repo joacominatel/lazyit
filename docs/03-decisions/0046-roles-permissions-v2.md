@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-06-02
+updated: 2026-06-03
 deciders: [Joaquín Minatel]
 ---
 
@@ -186,14 +186,36 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
       using it would have silently handed MEMBER an ADMIN-only Access write.
     - Users administration (create/update incl. role/offboard/restore) → `user:manage` (ADMIN-only
       coarse verb), **not** `user:write` (which MEMBER holds).
-    - the config `/setup` surface stays `@Public` (no authenticated session at first-run), so there is
-      **no `settings:manage` enforcement site yet** — that permission stays catalog-only until P5.
+    - the config `/setup` surface stays `@Public` (no authenticated session at first-run), so there was
+      **no `settings:manage` enforcement site yet** — that permission stayed catalog-only until P5, which
+      makes `GET`/`PUT /config/permissions` its first real gate.
   With every site migrated, the legacy `@Roles` decorator + `ROLES_KEY` and the guard's dual-mode
   `@Roles` branch were **removed**: the authorization guard is now the SINGLE `@RequirePermission`
   primitive — `@Public` → `@RequirePermission` → open-by-default (the handful of unannotated routes,
   e.g. hello-world / `GET /users/me`, stay reachable per INV-8). `@Public` and `JwtAuthGuard` are
   untouched.
-- **P5 (later) — the config endpoints** (read/update the matrix; ADMIN row immutable).
+- **P5 — the config endpoints** (read/update the matrix; ADMIN row immutable). (done) The configurable
+  surface, all on the `config` module:
+    - `GET /config/permissions` + `PUT /config/permissions`, both `@RequirePermission('settings:manage')`
+      — the **first real enforcement site** for `settings:manage` (ADMIN-only in the seed; catalog-only
+      until now). GET returns the current `RolePermissionMatrix` from the `RolePermission` rows (ADMIN
+      reported as the COMPLETE catalog — what the resolver enforces, never the rows). PUT replaces the
+      **MEMBER + VIEWER** sets wholesale (a full PUT), validated against the frozen `@lazyit/shared`
+      catalog — an unknown permission → 400.
+    - **ADMIN is immutable**: the strict PUT body (`UpdateRolePermissionsSchema`) accepts ONLY `MEMBER`
+      and `VIEWER` keys, so an `ADMIN`/extra key → 400; combined with the resolver's ADMIN-is-full
+      short-circuit, ADMIN can never be scoped down (INV-8). MEMBER/VIEWER are otherwise fully
+      configurable within the catalog (granting MEMBER a `:delete` or a coarse verb is the intended
+      feature — the only guardrails are ADMIN-immutable + catalog-membership).
+    - **Transactional + audited + cache-coherent**: per editable role the desired set is diffed against
+      the current rows; revoked rows are deleted and granted rows created in ONE `$transaction`, and one
+      immutable `PermissionAuditLog` row is appended per change (`GRANT`/`REVOKE`, attributed to the
+      actor — append-only per ADR-0006, new model + migration). On commit, `PermissionResolverService
+      .invalidate()` drops the lazy cache so the very next authZ decision re-reads the DB.
+    - `GET /config/my-permissions` (any authenticated user — `@RequirePermission()` with no gate)
+      returns the CALLER's effective set `{ role, permissions: Permission[] }`, resolved via the SAME
+      `PermissionResolverService` the guard uses, so the frontend can derive `can('domain:action')`
+      without polluting the `User` wire shape.
 - **Fast-follow — service accounts** reuse this same catalog.
 - **Future ADR — dynamic custom roles** (Option B), if ever needed.
 
