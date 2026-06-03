@@ -35,7 +35,6 @@ import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
@@ -183,7 +182,7 @@ export class ConsumablesController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('consumable:write')
   @ApiOperation({
     summary: 'Create a consumable (stock starts at 0) (ADMIN or MEMBER)',
   })
@@ -193,7 +192,7 @@ export class ConsumablesController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('consumable:write')
   @ApiOperation({
     summary:
       'Update a consumable (currentStock is not editable) (ADMIN or MEMBER)',
@@ -204,7 +203,7 @@ export class ConsumablesController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('consumable:delete')
   @ApiOperation({ summary: 'Soft-delete a consumable — ADMIN only' })
   @ApiOkResponse({ type: ConsumableDto })
   remove(@Param('id') id: string) {
@@ -212,7 +211,7 @@ export class ConsumablesController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('consumable:delete')
   @ApiOperation({
     summary: 'Restore a soft-deleted consumable — ADMIN only (ADR-0041)',
   })
@@ -222,7 +221,7 @@ export class ConsumablesController {
   }
 
   @Post(':id/movements')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('consumable:write')
   @ApiOperation({
     summary:
       'Record a stock movement (IN adds, OUT subtracts, ADJUSTMENT sets) (ADMIN or MEMBER)',
