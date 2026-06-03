@@ -7,8 +7,11 @@ import { Switch } from "@/components/ui/switch";
  * The ADMIN-only "Show archived" toggle for a resource list. When on, the page swaps its list query
  * to the `deleted=only` view (soft-deleted rows) — wire `checked`/`onCheckedChange` to a
  * `useListParams` filter (e.g. `filters.archived === "only"`) so the choice lands in the URL and is
- * shareable. Render it ONLY for admins (`usePermissions().isAdmin`); a non-admin can't reach the
- * archived view (and the API would 403 the restore anyway), so the toggle is hidden, not disabled.
+ * shareable. Render it ONLY for admins (`usePermissions().isAdmin`) — note this stays role-based even
+ * after the RBAC v2 gating migration (ADR-0046): the API's `assertCanListDeleted` keeps the
+ * `deleted=only` slice ADMIN-only (it was deliberately NOT migrated to a permission), so this toggle
+ * must match `isAdmin`, not a `can(':delete')` gate. A non-admin can't reach the archived view, so the
+ * toggle is hidden, not disabled.
  */
 export function ArchivedToggle({
   checked,

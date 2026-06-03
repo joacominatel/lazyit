@@ -17,6 +17,7 @@ import { useApplicationCategories, useDeleteApplicationCategory } from "@/lib/ap
 import { useArticleCategories, useDeleteArticleCategory } from "@/lib/api/hooks/use-article-categories";
 import { useAssetCategories, useDeleteAssetCategory } from "@/lib/api/hooks/use-asset-categories";
 import { useConsumableCategories, useDeleteConsumableCategory } from "@/lib/api/hooks/use-consumable-categories";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { formatDate } from "@/lib/utils/format";
 import { CategoryFormDialog } from "./category-form-dialog";
 import {
@@ -87,9 +88,15 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
   const { data, isLoading, isError, error, refetch } = query;
   const hasOrder = kindHasOrder(kind);
   const label = CATEGORY_KIND_LABEL[kind];
+  // The category CRUD endpoints are gated on category:write / category:delete (a clone is a create →
+  // category:write). The surface lives behind the settings:manage AdminGate; these finer gates match
+  // the backend per-affordance and fail closed while the permission set loads.
+  const canWrite = useCan("category:write");
+  const canDelete = useCan("category:delete");
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<AnyCategory | undefined>(undefined);
+  const [cloning, setCloning] = useState<AnyCategory | undefined>(undefined);
   const [deleting, setDeleting] = useState<AnyCategory | undefined>(undefined);
 
   const columns = [
@@ -100,11 +107,19 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
 
   function openCreate() {
     setEditing(undefined);
+    setCloning(undefined);
     setFormOpen(true);
   }
 
   function openEdit(category: AnyCategory) {
+    setCloning(undefined);
     setEditing(category);
+    setFormOpen(true);
+  }
+
+  function openClone(category: AnyCategory) {
+    setEditing(undefined);
+    setCloning(category);
     setFormOpen(true);
   }
 
@@ -113,12 +128,14 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
-        <Button onClick={openCreate} size="sm">
-          <PlusIcon />
-          New {label}
-        </Button>
-      </div>
+      {canWrite ? (
+        <div className="flex items-center justify-end">
+          <Button onClick={openCreate} size="sm">
+            <PlusIcon />
+            New {label}
+          </Button>
+        </div>
+      ) : null}
 
       {isLoading ? (
         <ResourceTable columns={columns} isLoading />
@@ -134,10 +151,12 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
           title={`No ${label} entries yet`}
           description="Create one to start classifying records."
           action={
-            <Button onClick={openCreate}>
-              <PlusIcon />
-              Create the first one
-            </Button>
+            canWrite ? (
+              <Button onClick={openCreate}>
+                <PlusIcon />
+                Create the first one
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -160,10 +179,15 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
                 {formatDate(category.updatedAt)}
               </TableCell>
               <TableCell className="text-right">
-                <RowActions
-                  onEdit={() => openEdit(category)}
-                  onDelete={() => setDeleting(category)}
-                />
+                {canWrite || canDelete ? (
+                  <RowActions
+                    onEdit={canWrite ? () => openEdit(category) : undefined}
+                    onClone={canWrite ? () => openClone(category) : undefined}
+                    onDelete={
+                      canDelete ? () => setDeleting(category) : undefined
+                    }
+                  />
+                ) : null}
               </TableCell>
             </TableRow>
           ))}
@@ -175,6 +199,7 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
         onOpenChange={setFormOpen}
         kind={kind}
         category={editing}
+        cloneSource={cloning}
       />
       {deleting ? (
         <DeleteConfirmDialog

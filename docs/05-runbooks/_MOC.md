@@ -3,7 +3,7 @@ title: Runbooks — MOC
 tags: [moc, runbook]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-03
 ---
 
 # Runbooks — Map of Content
@@ -26,8 +26,12 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
   one-commit-per-migration convention.
 - **[[docker-prod-like-first-boot]]** — run the whole containerized stack locally (Postgres +
   migrate + API + web + Caddy) with local HTTPS; verify it; routine ops.
-- **[[deploy-self-hosted]]** — install on a single host on a real domain: env/secrets, Let's
-  Encrypt, bring-up, updates, the reserved IdP slot.
+- **[[deploy-self-hosted]]** — install on a single host on a real domain: the guided `infra/start.sh`
+  bootstrap ([[0047-guided-first-deploy-bootstrap]]), env/secrets, Let's Encrypt, bring-up, updates, the
+  bundled-Zitadel vs BYOI fork.
+- **[[managing-service-accounts]]** — create / rotate / revoke a [[service-account]] (the lazyit-native
+  non-human API credential): the token is shown **once**, scoping by direct permission grants, rotation
+  and revocation. [[0048-service-accounts]].
 - **[[backups]]** — backups & disaster recovery: the full DR inventory (app DB + Zitadel DB +
   `.env.prod`/masterkey; Meili/Caddy rebuildable), the opt-in backup sidecar (cron + `pg_dump` for
   both DBs, retention, optional offsite), and the correct restore order (env → zitadel → app → up →

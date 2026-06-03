@@ -10,9 +10,9 @@ import type {
   UpdateAssetAssignmentNotes,
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
-import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ActorService } from '../common/actor.service';
+import { ActorService, type ActorAttribution } from '../common/actor.service';
+import type { Principal } from '../auth/principal';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 
 /** Filters for listing assignments. `activeOnly` defaults to true (set at the controller). */
@@ -25,9 +25,10 @@ export interface FindAssignmentsFilters {
 }
 
 /**
- * The actor (`assignedById` on create, `releasedById` on release) comes from the authenticated User
- * resolved by JwtAuthGuard (@CurrentUser()) — never the request body (ADR-0024/0038). Opening and
- * releasing also emit `ASSIGNED` / `RELEASED` asset-history events transactionally (ADR-0033).
+ * The actor comes from the unified PRINCIPAL resolved by JwtAuthGuard (@CurrentPrincipal()) — never the
+ * request body (ADR-0024/0038/0048). A human is attributed to `assignedById` / `releasedById`; a service
+ * account to `assignedBySaId` / `releasedBySaId` (a DB CHECK enforces at-most-one actor per slot).
+ * Opening and releasing also emit `ASSIGNED` / `RELEASED` asset-history events transactionally (ADR-0033).
  */
 @Injectable()
 export class AssetAssignmentsService {
@@ -76,8 +77,8 @@ export class AssetAssignmentsService {
    * via PrismaExceptionFilter). A different user on the same asset is allowed (multi-owner).
    * `assignedById` is set from the authenticated User when present (null = system/unknown).
    */
-  async create(data: CreateAssetAssignment, user?: User) {
-    const assignedById = this.actor.resolve(user);
+  async create(data: CreateAssetAssignment, principal?: Principal) {
+    const actor = this.actor.resolveActor(principal);
     await this.assertAssetUsable(data.assetId);
     await this.assertUserUsable(data.userId);
     const existingActive = await this.prisma.assetAssignment.findFirst({
@@ -92,14 +93,20 @@ export class AssetAssignmentsService {
       const assignment = await tx.assetAssignment.create({
         data: {
           ...data,
-          ...(assignedById !== undefined ? { assignedById } : {}),
+          // Attribute the OPEN action: human → assignedById, service account → assignedBySaId. The DB
+          // at-most-one-actor CHECK on (assignedById, assignedBySaId) is satisfied because resolveActor
+          // returns at most one of the pair (ADR-0048).
+          ...(actor.userId != null ? { assignedById: actor.userId } : {}),
+          ...(actor.serviceAccountId != null
+            ? { assignedBySaId: actor.serviceAccountId }
+            : {}),
         },
       });
       await this.history.record(tx, {
         assetId: data.assetId,
         eventType: 'ASSIGNED',
         payload: { userId: data.userId },
-        performedById: assignedById,
+        actor,
       });
       return assignment;
     });
@@ -110,18 +117,27 @@ export class AssetAssignmentsService {
    * User, optional `notes`). 404 if missing; 409 if already released (release is not repeatable).
    * Releasing one owner does not affect any other active assignment on the same asset.
    */
-  async release(id: string, data: ReleaseAssetAssignment, user?: User) {
+  async release(
+    id: string,
+    data: ReleaseAssetAssignment,
+    principal?: Principal,
+  ) {
     const assignment = await this.findOne(id);
     if (assignment.releasedAt !== null) {
       throw new ConflictException(`AssetAssignment ${id} is already released`);
     }
-    const releasedById = this.actor.resolve(user);
+    const actor = this.actor.resolveActor(principal);
     return this.prisma.$transaction(async (tx) => {
       const released = await tx.assetAssignment.update({
         where: { id },
         data: {
           releasedAt: new Date(),
-          ...(releasedById !== undefined ? { releasedById } : {}),
+          // Attribute the RELEASE action: human → releasedById, service account → releasedBySaId.
+          // CHECK-safe by construction (resolveActor returns at most one of the pair; ADR-0048).
+          ...(actor.userId != null ? { releasedById: actor.userId } : {}),
+          ...(actor.serviceAccountId != null
+            ? { releasedBySaId: actor.serviceAccountId }
+            : {}),
           ...(data.notes !== undefined ? { notes: data.notes } : {}),
         },
       });
@@ -131,7 +147,7 @@ export class AssetAssignmentsService {
         // Mirror ASSIGNED's {userId}: a multi-owner asset can release one of several owners, so the
         // released owner must be on the RELEASED row to disambiguate the timeline.
         payload: { userId: assignment.userId },
-        performedById: releasedById,
+        actor,
       });
       return released;
     });
@@ -152,7 +168,7 @@ export class AssetAssignmentsService {
   async releaseAllForUser(
     tx: Prisma.TransactionClient,
     userId: string,
-    actorId?: string,
+    actor: ActorAttribution = {},
   ): Promise<{ id: string; assetId: string }[]> {
     const active = await tx.assetAssignment.findMany({
       where: { userId, releasedAt: null },
@@ -164,7 +180,12 @@ export class AssetAssignmentsService {
         where: { id: assignment.id },
         data: {
           releasedAt: now,
-          ...(actorId !== undefined ? { releasedById: actorId } : {}),
+          // Attribute the offboarding actor on each release: human → releasedById, SA → releasedBySaId
+          // (an SA holding user:manage may run the offboarding). CHECK-safe (ADR-0048).
+          ...(actor.userId != null ? { releasedById: actor.userId } : {}),
+          ...(actor.serviceAccountId != null
+            ? { releasedBySaId: actor.serviceAccountId }
+            : {}),
         },
       });
       await this.history.record(tx, {
@@ -172,7 +193,7 @@ export class AssetAssignmentsService {
         eventType: 'RELEASED',
         // Stamp the released owner (same as release()): the RELEASED rows are attributable per owner.
         payload: { userId },
-        performedById: actorId,
+        actor,
       });
     }
     return active;

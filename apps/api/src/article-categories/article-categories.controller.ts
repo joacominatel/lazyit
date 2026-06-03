@@ -21,7 +21,7 @@ import {
   UpdateArticleCategorySchema,
 } from '@lazyit/shared';
 import { ArticleCategoriesService } from './article-categories.service';
-import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 
 class ArticleCategoryDto extends createZodDto(ArticleCategorySchema) {}
 class CreateArticleCategoryDto extends createZodDto(
@@ -37,6 +37,7 @@ export class ArticleCategoriesController {
   constructor(private readonly categories: ArticleCategoriesService) {}
 
   @Get()
+  @RequirePermission('category:read')
   @ApiOperation({
     summary: 'List all article categories (excludes soft-deleted)',
   })
@@ -46,6 +47,7 @@ export class ArticleCategoriesController {
   }
 
   @Get(':id')
+  @RequirePermission('category:read')
   @ApiOperation({ summary: 'Get an article category by id' })
   @ApiOkResponse({ type: ArticleCategoryDto })
   findOne(@Param('id') id: string) {
@@ -53,7 +55,7 @@ export class ArticleCategoriesController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('category:write')
   @ApiOperation({ summary: 'Create an article category (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: ArticleCategoryDto })
   create(@Body() dto: CreateArticleCategoryDto) {
@@ -61,7 +63,7 @@ export class ArticleCategoriesController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('category:write')
   @ApiOperation({ summary: 'Update an article category (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: ArticleCategoryDto })
   update(@Param('id') id: string, @Body() dto: UpdateArticleCategoryDto) {
@@ -69,7 +71,7 @@ export class ArticleCategoriesController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('category:delete')
   @ApiOperation({
     summary:
       'Soft-delete an article category (409 if it still has articles) — ADMIN only',
@@ -81,7 +83,7 @@ export class ArticleCategoriesController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('category:delete')
   @ApiOperation({
     summary: 'Restore a soft-deleted article category — ADMIN only (ADR-0041)',
   })

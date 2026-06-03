@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  NotImplementedException,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -12,6 +14,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -26,9 +29,12 @@ import {
 } from '@lazyit/shared';
 import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import type { Principal } from '../auth/principal';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import { ActorService } from '../common/actor.service';
 import { UsersService, USER_SORT_ALLOWLIST } from './users.service';
+import { PasswordResetUnsupportedError } from '../auth/identity/identity-provider.interface';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parsePageQuery } from '../common/parse-page-query';
@@ -55,6 +61,7 @@ export class UsersController {
   ) {}
 
   @Get()
+  @RequirePermission('user:read')
   @ApiOperation({
     summary:
       'List users (paginated; active by default). Server-side q search + sort. deleted=only lists offboarded (archived) users (ADMIN).',
@@ -128,6 +135,10 @@ export class UsersController {
     return this.users.findPage({ q }, pageQuery);
   }
 
+  // INTENTIONALLY NOT gated with `user:read` (ADR-0046 P3): a VIEWER must read its OWN record + role
+  // here — the frontend reads it to decide which admin-only controls to show. It only ever returns the
+  // caller (never another user), so it is a self-read, not a directory read. Gating it would break the
+  // admin-UI gate for VIEWER. Only the cross-user DIRECTORY reads below carry `user:read`.
   @Get('me')
   @ApiOperation({
     summary: 'The current authenticated user (including their RBAC role)',
@@ -146,14 +157,22 @@ export class UsersController {
     return user;
   }
 
+  // A cross-user DIRECTORY read (identity of another user) — gated on `user:read` (ADR-0046
+  // pre-tightened: VIEWER 403). `/users/me` above stays open for the self-read.
   @Get(':id')
+  @RequirePermission('user:read')
   @ApiOperation({ summary: 'Get a user by id' })
   @ApiOkResponse({ type: UserDto })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.users.findOne(id);
   }
 
+  // A cross-user DIRECTORY-relational read (which assets a NAMED user holds — enumeration keyed by a
+  // user id). Gated on `user:read`, NOT `asset:read`: a VIEWER holds `asset:read`, so gating on the
+  // asset domain would leave the cross-user enumeration open. `user:read` makes the VIEWER lose it,
+  // consistent with the directory finding (ADR-0046 P3).
   @Get(':id/assignments')
+  @RequirePermission('user:read')
   @ApiOperation({
     summary: "List a user's asset assignments (active-only by default)",
   })
@@ -175,7 +194,10 @@ export class UsersController {
     });
   }
 
+  // A cross-user access-MAP read (which apps a NAMED user can reach) — access-grant data, gated on
+  // `accessGrant:read` (ADR-0046 pre-tightened: VIEWER 403), matching the access-grant ledger.
   @Get(':id/access-grants')
+  @RequirePermission('accessGrant:read')
   @ApiOperation({
     summary: "List a user's access grants (active-only by default)",
   })
@@ -207,7 +229,7 @@ export class UsersController {
   }
 
   @Post()
-  @Roles('ADMIN')
+  @RequirePermission('user:manage')
   @ApiOperation({
     summary: 'Create a user — ADMIN only (can set the RBAC role)',
   })
@@ -218,9 +240,15 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN')
+  @RequirePermission('user:manage')
   @ApiOperation({
-    summary: 'Update a user — ADMIN only (can change the RBAC role)',
+    summary:
+      'Update a user — ADMIN only. Can change first/last name, email and the RBAC role.',
+    description:
+      'Name/email/role edits are mirrored back to the IdP (Zitadel) inside a no-split-brain ' +
+      'transaction: if the Zitadel write fails the local change is reverted and the request is 503 ' +
+      '(issue #149). The email is the account-linking key and is written pre-verified, so it never ' +
+      'forces re-verification. externalId can never be set here (SEC-006).',
   })
   @ApiOkResponse({ type: UserDto })
   update(
@@ -233,8 +261,39 @@ export class UsersController {
     return this.users.update(id, dto, this.actor.resolve(actor));
   }
 
+  @Post(':id/reset-password')
+  @RequirePermission('user:manage')
+  @HttpCode(204)
+  @ApiOperation({
+    summary: 'Trigger a password reset for a user — ADMIN only (issue #149)',
+    description:
+      'Asks the identity provider to send the user a password-reset link. lazyit NEVER stores, sets ' +
+      'or sends a password (ADR-0016/0037): Zitadel emails the link via ZITADEL’s own SMTP (which the ' +
+      'operator must have configured for delivery). 422 if the user is inactive; 501 ("managed by ' +
+      'your identity provider") under BYOI / generic OIDC or for a user not linked to the IdP; 503 if ' +
+      'the Zitadel Management call fails. Returns 204 No Content on success.',
+  })
+  @ApiNoContentResponse({
+    description: 'Reset notification triggered (Zitadel will email the link).',
+  })
+  async resetPassword(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor?: User,
+  ): Promise<void> {
+    try {
+      await this.users.requestPasswordReset(id, this.actor.resolve(actor));
+    } catch (err) {
+      // BYOI (or a user with no IdP link) cannot trigger a reset: surface that HONESTLY as a 501 rather
+      // than a misleading 2xx (INV-4). Every other error (404/422/503) propagates unchanged.
+      if (err instanceof PasswordResetUnsupportedError) {
+        throw new NotImplementedException(err.message);
+      }
+      throw err;
+    }
+  }
+
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('user:manage')
   @ApiOperation({
     summary: 'Offboard (soft-delete) a user — ADMIN only',
     description:
@@ -253,13 +312,15 @@ export class UsersController {
   })
   remove(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() actor?: User,
+    @CurrentPrincipal() principal?: Principal,
   ): ReturnType<UsersService['remove']> {
-    return this.users.remove(id, this.actor.resolve(actor));
+    // Resolve to the unified attribution so the offboarding's FK writes (revokedById / releasedById or
+    // their *SaId counterparts) name the right actor — an SA holding user:manage attributes to itself.
+    return this.users.remove(id, this.actor.resolveActor(principal));
   }
 
   @Post(':id/offboard')
-  @Roles('ADMIN')
+  @RequirePermission('user:manage')
   @ApiOperation({
     summary:
       'Offboard a user (explicit alias of DELETE /users/:id) — ADMIN only',
@@ -278,13 +339,13 @@ export class UsersController {
   })
   offboard(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() actor?: User,
+    @CurrentPrincipal() principal?: Principal,
   ): ReturnType<UsersService['remove']> {
-    return this.users.remove(id, this.actor.resolve(actor));
+    return this.users.remove(id, this.actor.resolveActor(principal));
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('user:manage')
   @ApiOperation({
     summary: 'Restore (re-onboard) a soft-deleted user — ADMIN only (ADR-0041)',
     description:

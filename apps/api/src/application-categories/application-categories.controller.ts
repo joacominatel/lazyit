@@ -20,7 +20,7 @@ import {
   UpdateApplicationCategorySchema,
 } from '@lazyit/shared';
 import { ApplicationCategoriesService } from './application-categories.service';
-import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 
 class ApplicationCategoryDto extends createZodDto(ApplicationCategorySchema) {}
 class CreateApplicationCategoryDto extends createZodDto(
@@ -36,6 +36,7 @@ export class ApplicationCategoriesController {
   constructor(private readonly categories: ApplicationCategoriesService) {}
 
   @Get()
+  @RequirePermission('category:read')
   @ApiOperation({
     summary: 'List all application categories (excludes soft-deleted)',
   })
@@ -45,6 +46,7 @@ export class ApplicationCategoriesController {
   }
 
   @Get(':id')
+  @RequirePermission('category:read')
   @ApiOperation({ summary: 'Get an application category by id' })
   @ApiOkResponse({ type: ApplicationCategoryDto })
   findOne(@Param('id') id: string) {
@@ -52,7 +54,7 @@ export class ApplicationCategoriesController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('category:write')
   @ApiOperation({ summary: 'Create an application category (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: ApplicationCategoryDto })
   create(@Body() dto: CreateApplicationCategoryDto) {
@@ -60,7 +62,7 @@ export class ApplicationCategoriesController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('category:write')
   @ApiOperation({ summary: 'Update an application category (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: ApplicationCategoryDto })
   update(@Param('id') id: string, @Body() dto: UpdateApplicationCategoryDto) {
@@ -68,7 +70,7 @@ export class ApplicationCategoriesController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('category:delete')
   @ApiOperation({
     summary:
       'Soft-delete an application category (detaches its applications) — ADMIN only',
@@ -79,7 +81,7 @@ export class ApplicationCategoriesController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('category:delete')
   @ApiOperation({
     summary:
       'Restore a soft-deleted application category — ADMIN only (ADR-0041)',

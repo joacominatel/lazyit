@@ -27,11 +27,19 @@ updated: 2026-05-25
 - 🟢 [[asset-category]] — classification of models (laptop, switch, server…).
 - 🟢 [[location]] — where an asset physically lives.
 - 🟢 [[asset-assignment]] — join entity: who owns an asset, with history.
-- ⚪ [[asset-history]] — append-only log of asset state changes.
+- 🟢 [[asset-history]] — append-only log of asset state changes.
 
 ## People
 
-- 🟢 [[user]] — central to access, peripheral to assets.
+- 🟢 [[user]] — central to access, peripheral to assets (role + DB-first permissions).
+
+## Auth / AuthZ
+
+- 🟢 [[role-permission]] — the editable role → permission map (the DB-first authZ source). [[0046-roles-permissions-v2]]
+- 🟢 [[permission-audit-log]] — append-only trail of role-matrix edits. [[0046-roles-permissions-v2]]
+- 🟢 [[service-account]] — a non-human principal (lazyit-native token + direct grants). [[0048-service-accounts]]
+- 🟢 [[service-account-permission]] — a service account's direct permission grants. [[0048-service-accounts]]
+- 🟢 [[service-account-audit-log]] — append-only trail of service-account lifecycle. [[0048-service-accounts]]
 
 ## Tickets
 
@@ -54,7 +62,8 @@ updated: 2026-05-25
 
 - 🟢 [[article]] — knowledge-base document (markdown); simple wiki.
 - 🟢 [[article-category]] — user-managed grouping of articles.
-- ⚪ [[article-version]] — historical version of an article; deferred by [[0021-knowledge-base-design]].
+- 🟢 [[article-version]] — append-only historical version of an article ([[0042-article-versioning-and-linking]]).
+- 🟢 [[article-link]] — links an article to an asset or application ([[0042-article-versioning-and-linking]]).
 
 ## Dashboard (derived)
 

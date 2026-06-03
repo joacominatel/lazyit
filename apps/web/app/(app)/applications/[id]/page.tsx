@@ -2,6 +2,7 @@
 
 import {
   ArrowTopRightOnSquareIcon,
+  DocumentDuplicateIcon,
   PencilIcon,
   PencilSquareIcon,
   TrashIcon,
@@ -21,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { UserAvatar } from "@/components/user-avatar";
 import { ErrorState } from "@/components/resource-table";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { useApplicationCategories } from "@/lib/api/hooks/use-application-categories";
 import { useDeleteApplication } from "@/lib/api/hooks/use-application-mutations";
 import {
@@ -45,7 +46,9 @@ export default function ApplicationDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
-  const canWrite = useCanWrite();
+  const canWrite = useCan("application:write");
+  const canDelete = useCan("application:delete");
+  const canGrant = useCan("accessGrant:grant");
 
   const { data: application, isLoading, isError, error, refetch } =
     useApplication(id);
@@ -130,22 +133,34 @@ export default function ApplicationDetailPage() {
           ) : undefined
         }
         actions={
-          canWrite ? (
+          canWrite || canDelete ? (
             <>
-              <Button variant="outline" size="sm" asChild>
-                <Link href={`/applications/${application.id}/edit`}>
-                  <PencilSquareIcon />
-                  Edit
-                </Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Delete application"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <TrashIcon />
-              </Button>
+              {canWrite ? (
+                <>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={`/applications/${application.id}/edit`}>
+                      <PencilSquareIcon />
+                      Edit
+                    </Link>
+                  </Button>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={`/applications/${application.id}/clone`}>
+                      <DocumentDuplicateIcon />
+                      Clone
+                    </Link>
+                  </Button>
+                </>
+              ) : null}
+              {canDelete ? (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Delete application"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <TrashIcon />
+                </Button>
+              ) : null}
             </>
           ) : undefined
         }
@@ -198,7 +213,7 @@ export default function ApplicationDetailPage() {
       <DetailPanel
         title="Active access"
         actions={
-          canWrite ? (
+          canGrant ? (
             <Button
               size="sm"
               variant="outline"
@@ -276,7 +291,7 @@ export default function ApplicationDetailPage() {
                       </p>
                     </div>
                   </div>
-                  {canWrite && (
+                  {canGrant && (
                     <div className="flex shrink-0 items-center gap-1">
                       <Button
                         variant="ghost"

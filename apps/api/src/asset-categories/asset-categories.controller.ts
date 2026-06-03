@@ -20,7 +20,7 @@ import {
   UpdateAssetCategorySchema,
 } from '@lazyit/shared';
 import { AssetCategoriesService } from './asset-categories.service';
-import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 
 class AssetCategoryDto extends createZodDto(AssetCategorySchema) {}
 class CreateAssetCategoryDto extends createZodDto(CreateAssetCategorySchema) {}
@@ -32,6 +32,7 @@ export class AssetCategoriesController {
   constructor(private readonly categories: AssetCategoriesService) {}
 
   @Get()
+  @RequirePermission('category:read')
   @ApiOperation({ summary: 'List all asset categories (excludes soft-deleted)' })
   @ApiOkResponse({ type: [AssetCategoryDto] })
   findAll() {
@@ -39,6 +40,7 @@ export class AssetCategoriesController {
   }
 
   @Get(':id')
+  @RequirePermission('category:read')
   @ApiOperation({ summary: 'Get an asset category by id' })
   @ApiOkResponse({ type: AssetCategoryDto })
   findOne(@Param('id') id: string) {
@@ -46,7 +48,7 @@ export class AssetCategoriesController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('category:write')
   @ApiOperation({ summary: 'Create an asset category (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: AssetCategoryDto })
   create(@Body() dto: CreateAssetCategoryDto) {
@@ -54,7 +56,7 @@ export class AssetCategoriesController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('category:write')
   @ApiOperation({ summary: 'Update an asset category (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: AssetCategoryDto })
   update(@Param('id') id: string, @Body() dto: UpdateAssetCategoryDto) {
@@ -62,7 +64,7 @@ export class AssetCategoriesController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('category:delete')
   @ApiOperation({ summary: 'Soft-delete an asset category — ADMIN only' })
   @ApiOkResponse({ type: AssetCategoryDto })
   remove(@Param('id') id: string) {
@@ -70,7 +72,7 @@ export class AssetCategoriesController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('category:delete')
   @ApiOperation({
     summary: 'Restore a soft-deleted asset category — ADMIN only (ADR-0041)',
   })

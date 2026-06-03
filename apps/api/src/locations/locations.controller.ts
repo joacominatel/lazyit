@@ -26,7 +26,7 @@ import { LocationsService, LOCATION_SORT_ALLOWLIST } from './locations.service';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
 // DTOs from the shared zod schemas (validation + TS type + OpenAPI). See ADR-0018.
@@ -41,6 +41,7 @@ export class LocationsController {
   constructor(private readonly locations: LocationsService) {}
 
   @Get()
+  @RequirePermission('location:read')
   @ApiOperation({
     summary:
       'List locations (paginated; active by default). Server-side q search + sort. deleted=only lists archived rows (ADMIN).',
@@ -115,6 +116,7 @@ export class LocationsController {
   }
 
   @Get(':id')
+  @RequirePermission('location:read')
   @ApiOperation({ summary: 'Get a location by id' })
   @ApiOkResponse({ type: LocationDto })
   findOne(@Param('id') id: string) {
@@ -122,7 +124,7 @@ export class LocationsController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('location:write')
   @ApiOperation({ summary: 'Create a location (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: LocationDto })
   create(@Body() dto: CreateLocationDto) {
@@ -130,7 +132,7 @@ export class LocationsController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('location:write')
   @ApiOperation({ summary: 'Update a location (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: LocationDto })
   update(@Param('id') id: string, @Body() dto: UpdateLocationDto) {
@@ -138,7 +140,7 @@ export class LocationsController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('location:delete')
   @ApiOperation({ summary: 'Soft-delete a location — ADMIN only' })
   @ApiOkResponse({ type: LocationDto })
   remove(@Param('id') id: string) {
@@ -146,7 +148,7 @@ export class LocationsController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('location:delete')
   @ApiOperation({
     summary: 'Restore a soft-deleted location — ADMIN only (ADR-0041)',
   })

@@ -52,7 +52,7 @@ import { restoreLocation } from "@/lib/api/endpoints/locations";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
 import { runPerIdBatch } from "@/lib/api/per-id-batch";
-import { usePermissions } from "@/lib/hooks/use-permissions";
+import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { formatDate } from "@/lib/utils/format";
@@ -69,7 +69,11 @@ import {
 const FILTER_DEFAULTS = { type: "ALL", archived: "ALL" } as const;
 
 export default function LocationsPage() {
-  const { canWrite, isAdmin } = usePermissions();
+  // `isAdmin` still gates the archived (`deleted=only`) slice (API keeps it ADMIN-only). Create/edit
+  // are location:write; delete/restore are location:delete.
+  const { isAdmin } = usePermissions();
+  const canWrite = useCan("location:write");
+  const canDelete = useCan("location:delete");
   const {
     q,
     sort,
@@ -360,16 +364,18 @@ export default function LocationsPage() {
                 }
                 actions={
                   archived ? (
-                    isAdmin ? (
+                    canDelete ? (
                       <RestoreRowAction
                         onRestore={() => handleRestoreRow(location)}
                         disabled={restoreLocationMutation.isPending}
                       />
                     ) : undefined
-                  ) : canWrite ? (
+                  ) : canWrite || canDelete ? (
                     <RowActions
-                      onEdit={() => openEdit(location)}
-                      onDelete={() => setDeleting(location)}
+                      onEdit={canWrite ? () => openEdit(location) : undefined}
+                      onDelete={
+                        canDelete ? () => setDeleting(location) : undefined
+                      }
                     />
                   ) : undefined
                 }
@@ -419,7 +425,7 @@ export default function LocationsPage() {
                 </TableCell>
                 <TableCell className="text-right">
                   {archived ? (
-                    isAdmin ? (
+                    canDelete ? (
                       <div className="flex justify-end">
                         <RestoreRowAction
                           onRestore={() => handleRestoreRow(location)}
@@ -427,10 +433,12 @@ export default function LocationsPage() {
                         />
                       </div>
                     ) : null
-                  ) : canWrite ? (
+                  ) : canWrite || canDelete ? (
                     <RowActions
-                      onEdit={() => openEdit(location)}
-                      onDelete={() => setDeleting(location)}
+                      onEdit={canWrite ? () => openEdit(location) : undefined}
+                      onDelete={
+                        canDelete ? () => setDeleting(location) : undefined
+                      }
                     />
                   ) : null}
                 </TableCell>

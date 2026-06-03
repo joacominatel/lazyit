@@ -11,9 +11,9 @@ import type {
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
-import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import type { Principal } from '../auth/principal';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 
@@ -187,7 +187,7 @@ export class ConsumablesService {
   /**
    * Record a stock movement and adjust the cached `currentStock` atomically (ADR-0034), in the same
    * transaction as the ledger insert so the cache and the ledger never diverge. The actor comes from
-   * the authenticated User.
+   * the unified PRINCIPAL (a human → `performedById`, a service account → `serviceAccountId`; ADR-0048).
    *
    * The cache write is done with **atomic, conditional SQL** rather than a JS read-modify-write, so
    * two concurrent movements can't lost-update each other under Read Committed:
@@ -204,9 +204,9 @@ export class ConsumablesService {
   async createMovement(
     consumableId: string,
     data: CreateConsumableMovement,
-    user?: User,
+    principal?: Principal,
   ) {
-    const performedById = this.actor.resolve(user);
+    const actor = this.actor.resolveActor(principal);
     const { type, quantity, reason, notes } = data;
 
     return this.prisma.$transaction(async (tx) => {
@@ -268,7 +268,12 @@ export class ConsumablesService {
           quantity,
           ...(reason !== undefined ? { reason } : {}),
           ...(notes !== undefined ? { notes } : {}),
-          ...(performedById != null ? { performedById } : {}),
+          // Attribute the movement: human → performedById, service account → serviceAccountId. CHECK-safe
+          // by construction (resolveActor returns at most one of the pair; ADR-0048).
+          ...(actor.userId != null ? { performedById: actor.userId } : {}),
+          ...(actor.serviceAccountId != null
+            ? { serviceAccountId: actor.serviceAccountId }
+            : {}),
         },
       });
     });

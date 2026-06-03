@@ -18,6 +18,11 @@ COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
 RUN bun install --frozen-lockfile --linker hoisted --filter "@lazyit/api"
 
+# Sources needed for seeding and build. @lazyit/shared is a workspace dependency
+# that must be built to dist/ before it can be imported (ADR-0014).
+COPY packages/shared/ packages/shared/
+RUN bun run --filter @lazyit/shared build
+
 # Prisma schema, migrations history, config and seed (seed.ts imports the generated client only).
 COPY apps/api/prisma/        apps/api/prisma/
 COPY apps/api/prisma.config.ts apps/api/

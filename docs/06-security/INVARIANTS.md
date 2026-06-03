@@ -90,7 +90,10 @@ back to; a write-back capability outage can never lock people out.
 
 **Where enforced.**
 - `apps/api/src/auth/identity/generic-oidc.identity-provider.ts` — management methods no-op with a
-  `warn` (`supportsManagement = false`).
+  `warn` (`supportsManagement = false`). **Exception (issue #149):** `requestPasswordReset` does NOT
+  silently no-op — a reset is a user-visible ACTION, so it REJECTS with `PasswordResetUnsupportedError`,
+  which the Users controller maps to an honest **501** ("managed by your identity provider") rather than
+  a 2xx that falsely implies a reset email was sent. `updateUser` (profile/email mirror) still no-ops.
 - `apps/api/src/auth/identity/zitadel-management.service.ts` — the constructor never throws; a missing
   credential WARNs at boot-config resolution and throws "Zitadel management not configured" from the
   *management methods only*, never on the authN path.
@@ -103,14 +106,38 @@ back to; a write-back capability outage can never lock people out.
 change is rolled back** (or compensated) and the request returns **503** — never a silent partial
 write. Offboarding deactivates the IdP user **inside the offboard transaction**.
 
-**Why.** A soft-deleted-local / still-active-in-IdP (or role-changed-local / un-mirrored) divergence is
-a security drift; failing loud with 503 keeps the two stores consistent.
+The mirror is **best-effort, eventually-consistent across sub-resources**, not a single atomic write:
+`update`'s profile mirror is two non-atomic Zitadel v2 calls — a display-name `PUT` then a
+**committed-LAST** email `POST`. The guarantees are therefore scoped:
+- **The account-linking email never diverges.** It is committed LAST, so on its failure Zitadel's email
+  is untouched and the local revert restores the prior address — the two agree. `externalId` (sub) is
+  never changed by an edit (SEC-006), so the identity link is never at risk.
+- **A mid-sequence display-name (or role) divergence is transient, not permanent.** If the name `PUT`
+  commits but the email `POST` then fails, Zitadel briefly holds the NEW name while local reverts to OLD.
+  The catch makes a **best-effort compensating re-mirror** of the reverted name back to Zitadel to
+  converge them; if even that re-mirror fails it only LOGS (never throws over the original 503), leaving
+  at worst a cosmetic display-name drift fixed by the next edit.
+- **Zero authZ impact regardless.** Authorization is **DB-first** (ADR-0043 #1): permissions resolve
+  from local `RolePermission` rows (INV-8), never from a Zitadel name or claim, so a stale Zitadel
+  display name or role grants nothing. The divergence is cosmetic, bounded, and eventually-fixable — not
+  a security hole. (We deliberately do NOT claim "local and Zitadel never disagree".)
+
+**Why.** A soft-deleted-local / still-active-in-IdP divergence would be a real security drift, so those
+roll back hard (503). The remaining cosmetic display-name/role drift is compensated best-effort because
+it carries no authZ weight; failing loud on the primary write plus best-effort convergence keeps the two
+stores consistent in practice without pretending a multi-call mirror is atomic.
 
 **Where enforced.**
 - `apps/api/src/users/users.service.ts` — `create` hard-deletes the just-created local row on a mirror
-  failure (+503); a role change reverts the local role on a `grantRole` failure (+503); `remove`
-  (offboard) runs `deactivateUser` inside the `$transaction` so a failure rolls the whole offboarding
-  back. Every write-back is audited.
+  failure (+503); a role change reverts the local role on a `grantRole` failure (+503); an ADMIN
+  name/email edit (`update`, issue #149) mirrors `updateUser` (Zitadel v2 profile `PUT` + a PRE-VERIFIED,
+  committed-LAST email `POST`, same `externalId` — no re-link, SEC-006) and, on failure, reverts ONLY the
+  changed local fields (role/name/email) (+503) **and** best-effort re-mirrors the reverted display name
+  back to Zitadel (own try/catch, log-only, never throws over the 503) to converge the one sub-resource
+  that could have committed ahead of the failure; `remove` (offboard) runs `deactivateUser` inside the `$transaction`
+  so a failure rolls the whole offboarding back. Every write-back is audited. `requestPasswordReset`
+  (issue #149) is NOT a mirror but a triggered IdP action — it 404s a missing/soft-deleted user, **422**s
+  an inactive one, and 503s a Zitadel Management failure (the email itself is sent by ZITADEL's SMTP).
 - **Exception (deliberate):** `apps/api/src/config/config.service.ts` `setup()` is the one place that
   **degrades instead of blocking** — a first-run mirror failure keeps the local ADMIN (`mirrored:
   false`, warn) rather than 503, so a Zitadel misconfiguration can never wedge first-run (ADR-0043 §6
@@ -153,8 +180,171 @@ always leave exactly one administrator.
   ADMIN for the first user overrides the column default).
 - `apps/api/src/config/config.service.ts` — `setup()` locks the first-run bootstrap role to ADMIN.
 
+## INV-8 — Permissions resolve from `RolePermission` DB rows, never a token claim; the ADMIN set is immutable/full
+
+**Rule.** Fine-grained permissions (Roles & Permissions v2, [[0046-roles-permissions-v2]]) resolve from
+the `RolePermission` **database rows**, never from a token claim — the same DB-first rule as roles
+(INV-1). The **ADMIN permission set is immutable/full** (the complete catalog): it is never editable,
+so an ADMIN is always omnipotent and the last-admin / first-admin invariants (INV-7 + the ADR-0040
+last-admin guard) stay intact. Permissions are **lazyit-local** — they are NEVER mirrored to the IdP;
+only the three coarse roles keep their `grantRole` write-back ([[0043-zitadel-source-of-truth]] §3).
+
+**Why.** Permissions are an authorization source, so a forged/misconfigured token must not be able to
+confer one; and an editable ADMIN set could strip the last administrator of a power and wedge the
+install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-safe.
+
+**Where enforced.**
+- `apps/api/prisma/schema.prisma` — `model RolePermission { role Role; permission String; @@id([role,
+  permission]) }`: permissions are DB rows keyed by `(role, permission)`.
+- `packages/shared/src/schemas/permission.ts` — the frozen catalog (`PermissionSchema`) + the
+  `DEFAULT_ROLE_PERMISSIONS` single source of truth in which `ADMIN` is the **complete** catalog.
+- `apps/api/prisma/seed.ts` — seeds the matrix 1:1 from `DEFAULT_ROLE_PERMISSIONS` (idempotent upsert).
+- `apps/api/src/auth/role-permissions.golden.spec.ts` — golden test: a wrong/edited matrix (e.g. an
+  incomplete ADMIN set, or the pre-tightening drifting) fails CI.
+- `apps/api/src/auth/permission-resolver.service.ts` — **the runtime resolver (P2):** resolves a role's
+  permission set from the `RolePermission` rows via `prisma.rolePermission.findMany` — DB-first, never a
+  token claim. ADMIN short-circuits to the COMPLETE catalog (immutable/full) WITHOUT a DB read, so a
+  future bad seed can't lock ADMIN out; a catalog-foreign DB row is ignored; an empty seed fails CLOSED.
+- `apps/api/src/auth/roles.guard.ts` — **the SINGLE enforcement point (P2→P4):** for a
+  `@RequirePermission` route the guard calls the resolver with `request.user.role` (the DB-resolved role
+  JwtAuthGuard set, INV-1) and 403s unless the role holds every required permission. The
+  `auth/roles.guard.spec.ts` SENTINEL test asserts the role argument is the DB role, never a token/header
+  claim. As of P4 this is the ONLY authZ gate the guard understands — `@Public` → `@RequirePermission` →
+  open-by-default; the legacy `@Roles` decorator + `ROLES_KEY` + the dual-mode branch are GONE
+  (`auth/roles-decorator-retired.spec.ts` fails CI if they return).
+- `apps/api/src/auth/permission-parity.golden.spec.ts` — **the parity golden test (P4):** for every
+  migrated WRITE route, the role-set its `@RequirePermission` allows (resolved against the seed) must
+  EXACTLY equal the role-set the old `@Roles` gate allowed — a mismatch (e.g. an AccessGrant write wired
+  to `accessGrant:write` instead of `accessGrant:grant`, or a user-admin route on `user:write` instead of
+  `user:manage`) fails CI. This is the behavior-preservation proof for the mechanism swap.
+- `apps/api/src/config/permissions-config.service.ts` + `apps/api/src/config/config.controller.ts` —
+  **the configurable surface (P5):** `GET`/`PUT /config/permissions` (`@RequirePermission('settings:manage')`,
+  ADMIN-only) read/replace the MEMBER + VIEWER sets. The **ADMIN-immutable** half of this invariant is
+  ACTIVELY enforced here: the strict PUT body (`UpdateRolePermissionsSchema` in
+  `packages/shared/src/schemas/permission.ts`) accepts ONLY `MEMBER`/`VIEWER` keys, so an `ADMIN`/extra
+  key → 400; the service never writes ADMIN rows, and the resolver's ADMIN short-circuit means a row edit
+  could never scope ADMIN down anyway. Every grant/revoke is validated against the frozen catalog
+  (unknown → 400), applied in one `$transaction`, and **audited** append-only (`PermissionAuditLog`,
+  one immutable row per change attributed to the actor); on commit `PermissionResolverService.invalidate()`
+  is called so the next authZ decision is cache-coherent. `GET /config/my-permissions` exposes the
+  caller's effective set via the same resolver (no `User`-shape pollution). Covered by
+  `apps/api/src/config/permissions-config.service.spec.ts` (round-trip, audit, cache-coherence,
+  ADMIN-never-written) and `apps/api/src/config/config.controller.spec.ts` (the `settings:manage` gate:
+  MEMBER/VIEWER → 403 on GET/PUT; `my-permissions` open to any authenticated user).
+- **As-built (P2+P3+P4+P5, ADR-0046 §Phased delivery):** the `@RequirePermission` guard + the GET
+  annotations + ALL the migrated write gates + the editable matrix are now LIVE — the invariant is
+  enforced by the runtime guard + resolver, not the schema/seed alone. The only behavior delta is VIEWER
+  losing `accessGrant:read` + `user:read` (and the `/search` users facet); see
+  `apps/api/src/auth/read-authz-matrix.spec.ts` for the per-role read matrix. The 63 former `@Roles`
+  write sites now carry `@RequirePermission` with the EXACT same effective role-set (parity-tested), and
+  the legacy `@Roles` path is retired — `@RequirePermission` is the single enforcement primitive. The
+  matrix is now ADMIN-editable for MEMBER/VIEWER (audited, cache-coherent), ADMIN immutable (P5).
+
+## INV-SA-1 — A service-account token is verified DB-first; the stored secret is a hash, compared in constant time
+
+**Rule.** A service account ([[0048-service-accounts]]) authenticates with a lazyit-native token
+`lzit_sa_<id>_<secret>`. The server stores ONLY a **SHA-256 hash** of the secret (`tokenHash`) + a
+non-secret `tokenPrefix`; the cleartext is shown **once** on create/rotate and is never recoverable or
+logged. Verification is **DB-first** (INV-1): the `id` segment looks the row up in the DB, the presented
+secret's SHA-256 is **constant-time-compared** (`timingSafeEqual`) to the stored `tokenHash`, and a row
+that is missing / revoked (`deletedAt`) / inactive (`isActive=false`) / expired (`expiresAt` past) is
+rejected — all as a **generic 401** (no enumeration oracle). Never a token claim.
+
+**Why.** A high-entropy random secret needs only a fast hash + constant-time compare (not bcrypt); the
+hash-at-rest + once-only reveal means a DB read can never leak a usable credential, and the generic 401
+avoids leaking which check failed. BYOI-safe: no IdP on the bot's auth path.
+
+**Where enforced.**
+- `apps/api/src/service-accounts/service-account-token.ts` — `mintToken`/`hashSecret`/`verifySecret`
+  (constant-time, fails closed on a length/encoding mismatch); never logs a secret.
+- `apps/api/src/auth/jwt-auth.guard.ts` — the SA branch runs BEFORE the OIDC/shim branches: parse → look
+  up by id INCLUDING soft-deleted (so a revoked account is *seen*) → constant-time secret compare →
+  reject revoked/inactive/expired → set `request.principal = {kind:'service', …}`.
+- Tests: `apps/api/src/service-accounts/service-account-token.spec.ts`,
+  `apps/api/src/auth/jwt-auth.guard.service-account.spec.ts`.
+
+## INV-SA-2 — A service account is FAIL-CLOSED; it does NOT inherit the human open-by-default
+
+**Rule.** A service account passes ONLY `@Public()` routes and routes whose `@RequirePermission(...)` it
+**fully holds** (its direct `ServiceAccountPermission` grants, resolved DB-first into a Set). A service
+account hitting an **unannotated, non-`@Public` route → 403** — it does NOT inherit the human
+open-by-default (INV-8). The human open-by-default for unannotated routes is unchanged.
+
+**Why.** A bot should be able to do *only* what it was explicitly granted; a forgotten gate must not
+silently expose an unannotated route to a service account. This is the single most important
+authorization difference from a human caller.
+
+**Where enforced.**
+- `apps/api/src/auth/roles.guard.ts` — for a service principal, an unannotated route is a 403 (not the
+  open-by-default pass); a gated route passes only if its direct grant Set contains EVERY required
+  permission. The human path is unchanged.
+- `apps/api/src/service-accounts/service-account-permissions.ts` — resolves the grants to a catalog Set;
+  a catalog-foreign DB row is ignored (a typo can't confer a power) and there is NO ADMIN/wildcard.
+- Tests: `apps/api/src/auth/roles.guard.service-account.spec.ts`,
+  `apps/api/src/service-accounts/service-account-permissions.spec.ts`.
+
+## INV-SA-3 — A service account NEVER has a Role, is NEVER ADMIN-equivalent, and never enters human-only logic
+
+**Rule.** A service account is a SEPARATE `ServiceAccount` entity, not a `User`. It has **no `Role`**, is
+authorized only by direct permission grants, and can **never** be ADMIN-equivalent. It never enters the
+user directory, JIT provisioning, email-linking, or the last-admin / first-admin counts ([[INVARIANTS]]
+INV-7) — those operate on `User` rows, which a service account is not.
+
+**Why.** Keeping bots out of the human model means no human-only invariant can be satisfied (or broken)
+by a service account, and no bot can accidentally become an administrator.
+
+**Where enforced.**
+- `apps/api/prisma/schema.prisma` — `ServiceAccount` is a distinct model (no `role` column); the
+  authorization source is `ServiceAccountPermission`, never `Role`/`RolePermission`.
+- `apps/api/src/auth/principal.ts` + `roles.guard.ts` — a service principal is authorized by its grant
+  Set; the role resolver (`PermissionResolverService`) is **never** consulted for it.
+
+## INV-SA-4 — Service-account actions are audited to the service account, never a fake human; at most one actor per audited row
+
+**Rule.** When a service account performs an audited action, the audit/append-only row is attributed to
+its `serviceAccountId` (the additive actor column), NEVER a fabricated `userId`. A DB **CHECK** on each
+audit-bearing table enforces **at most one** of (human actor, service-account actor) per actor slot —
+a row attributed to two principals can never be persisted. Management actions (mint/rotate/revoke/restore/
+permission-change) are themselves audited append-only (`ServiceAccountAuditLog`), never recording the secret.
+
+**Why.** Honest attribution: a query for "what did this bot do" must be answerable, and a human must
+never be blamed for a bot's action (or vice-versa). The DB CHECK is the guarantee behind the resolver.
+
+**Where enforced.**
+- `apps/api/prisma/schema.prisma` + the `add_service_accounts` migration — a nullable `serviceAccountId`
+  actor column on the 6 audit-bearing tables (`AssetHistory`, `AssetAssignment` ×2, `AccessGrant` ×2,
+  `ConsumableMovement`, `ArticleVersion`, `ArticleLink`) + the at-most-one-actor CHECK per actor slot,
+  and the append-only `ServiceAccountAuditLog`.
+- `apps/api/src/common/actor.service.ts` — `resolveActor(principal)` returns `{userId}` | `{serviceAccountId}`
+  | `{}` so a write lands in the right column.
+- **The domain write paths consume it (ADR-0048 wiring):** every audited write reads the unified principal
+  (`@CurrentPrincipal()` → `request.principal`, never a token claim) and spreads the resolved attribution
+  onto the right column —
+  `apps/api/src/asset-history/asset-history.service.ts` (`performedById` XOR `serviceAccountId`, the choke
+  point used by `assets.service.ts` + `asset-assignments.service.ts`),
+  `apps/api/src/asset-assignments/asset-assignments.service.ts` (`assignedById|releasedById` /
+  `assignedBySaId|releasedBySaId`, incl. the offboarding `releaseAllForUser`),
+  `apps/api/src/access-grants/access-grants.service.ts` (`grantedById|revokedById` / `grantedBySaId|revokedBySaId`),
+  `apps/api/src/consumables/consumables.service.ts` (`performedById` / `serviceAccountId`),
+  `apps/api/src/users/users.service.ts` (offboarding's inline grant-revoke + asset-release attribution).
+- `apps/api/src/service-accounts/service-accounts.service.ts` — every mutation appends an immutable audit
+  row; the secret is never persisted in cleartext nor audited. The controller self-attributes via
+  `@CurrentPrincipal` (a human → `actorId`; an SA self-managing SAs records `actorId = null`, honest —
+  `ServiceAccountAuditLog` has only a `User` actor FK, no SA actor column yet; a follow-up ADR/migration
+  would add one).
+- **Out of scope by data model — `Article`:** `Article.authorId` is a **non-null `User` FK** (`onDelete: Restrict`)
+  and the author-only edit gate is `User`-identity equality, so a service account cannot author/own an article.
+  The article write paths (`articles.service.ts` `requireAuthor`) **reject an SA principal with 403** rather than
+  write a null-attributed `ArticleVersion`/`ArticleLink`; those tables' SA actor columns therefore stay
+  schema-present but unreachable by design.
+- Tests: `apps/api/src/common/actor.service.spec.ts`,
+  `apps/api/src/service-accounts/service-accounts.service.spec.ts`, and per-write-path SA-vs-human attribution
+  specs in `asset-history`, `assets`, `asset-assignments`, `access-grants`, `consumables`, `articles`,
+  `users`; the CHECK + partial-unique index are verified against a throwaway PG18 in the migration's commit
+  message.
+
 ---
 
-Related: [[0043-zitadel-source-of-truth]] · [[auth-zitadel-sot]] · [[0038-jit-user-provisioning]] ·
-[[0040-rbac-roles]] · [[0041-soft-delete-reuse-and-restore]] · [[0028-secrets-and-config]] ·
-[[deferred]] · [[summary]] · [[_MOC]]
+Related: [[0043-zitadel-source-of-truth]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] ·
+[[auth-zitadel-sot]] · [[0038-jit-user-provisioning]] · [[0040-rbac-roles]] ·
+[[0041-soft-delete-reuse-and-restore]] · [[0028-secrets-and-config]] · [[deferred]] · [[summary]] · [[_MOC]]

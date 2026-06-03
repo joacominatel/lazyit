@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-06-03
 ---
 
 # Security summary
@@ -22,6 +22,19 @@ Snapshot of the security review. Updated each sweep. Method:
 3. **2026-05-26 — Post-sweep remediation.** SEC-001, SEC-004, SEC-005, SEC-006, SEC-008 were
    fixed by the remediator and moved to `docs/06-security/closed/`. Remaining open: SEC-002,
    SEC-003, SEC-007.
+4. **2026-06-02 — Trust-boundary hardening (born-closed).** [[SEC-009-swagger-docs-public-anonymous-surface\|SEC-009]]
+   (Swagger no longer public — `NODE_ENV` gate + Caddy) and
+   [[SEC-010-setup-rate-limit-xff-spoof\|SEC-010]] (setup rate-limit + audit key on the verified
+   `req.ip` via Caddy `trusted_proxies` + Express `trust proxy`) were filed **and** fixed in one PR;
+   both went straight to `closed/`. DEF-003 (public Swagger) resolved by SEC-009.
+5. **2026-06-03 — AuthZ epic (Roles & Permissions v2 + Service Accounts).** Not a sweep but a posture
+   change: authorization moved to a **single DB-first `@RequirePermission` primitive** (the legacy
+   `@Roles` retired), and the **read-authz gap closed** — `accessGrant:read` + `user:read` are
+   pre-tightened to ADMIN + MEMBER, so a VIEWER can no longer enumerate the access map / user directory
+   ([[0046-roles-permissions-v2]]). A second **service-account** principal (fail-closed, lazyit-native
+   token, never ADMIN) landed with its own invariants ([[0048-service-accounts]]). The non-negotiables
+   are [[INVARIANTS]] (INV-8 + INV-SA-1…4). This **resolves the DEF-001 residual** (the long-standing
+   "reads open to any authenticated user").
 
 Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 
@@ -36,7 +49,8 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | Info | 0 |
 | **Total open** | **3** |
 
-Deferred (accepted ADR debt, not findings): **5** — see [[deferred]].
+Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
+now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
 
 ## Open findings
 
@@ -59,16 +73,22 @@ Deferred (accepted ADR debt, not findings): **5** — see [[deferred]].
 
 ## Posture context (not a finding — see [[deferred]])
 
-lazyit now **authenticates** every request (global `JwtAuthGuard`, OIDC JWT or `X-User-Id` shim —
-[[0038-jit-user-provisioning]]) and **authorizes** it (RBAC `RolesGuard` — [[0040-rbac-roles]]):
-Access-grant writes, Users administration and destructive deletes are `ADMIN`-only, `VIEWER` is
-read-only. This closes the May review's #1 finding (the formerly open grant/revoke + user-delete
-surface). **Residual baseline:** reads (`GET`) — including the Access pillar's "who-can-access-what"
-([[0023-access-management-design]]) — are open to any authenticated user by design; public Swagger
-([[0018-api-documentation-swagger]]) and the forgeable, dev-only `X-User-Id` shim
-([[0022-draft-visibility-auth-shim]]) remain. **Aggregate risk:** much reduced now that mutations are
-gated, but the operational guardrail still holds: **do not expose `:3001` (or `:5432`) beyond
-localhost/trusted dev**, and never run production with `AUTH_MODE=shim`.
+lazyit **authenticates** every request (global `JwtAuthGuard`, OIDC JWT or `X-User-Id` shim, plus a
+**service-account** `lzit_sa_…` token branch — [[0038-jit-user-provisioning]], [[0048-service-accounts]])
+and **authorizes** it with a single DB-first **`@RequirePermission`** primitive ([[0046-roles-permissions-v2]];
+the legacy coarse `@Roles` gate is retired). Permissions resolve from DB rows (the [[role-permission]]
+matrix for humans, direct grants for service accounts), never a token claim ([[INVARIANTS]] INV-8/INV-SA-1).
+Writes stay ADMIN-only by seed (`accessGrant:grant`, `user:manage`, `:delete`); **the read map is now
+tightened** — `accessGrant:read` + `user:read` are ADMIN + MEMBER only, so a VIEWER can no longer
+enumerate the access map ([[0023-access-management-design]]) or the user directory. This **closes the May
+review's #1 finding AND the read-authz residual** (the old DEF-001 baseline). Service accounts are
+**fail-closed** (they 403 on unannotated routes — INV-SA-2) and never ADMIN-equivalent. **Residual
+baseline:** the forgeable, dev-only `X-User-Id` shim ([[0022-draft-visibility-auth-shim]]) remains; the
+OpenAPI docs are no longer public ([[SEC-009-swagger-docs-public-anonymous-surface\|SEC-009]]: prod
+doesn't serve them, Caddy doesn't proxy `/api/docs*`; reachable only internally/in dev). **Aggregate
+risk:** much reduced now that mutations are gated and the worst reads tightened, but the operational
+guardrail still holds: **do not expose `:3001` (or `:5432`) beyond localhost/trusted dev**, and never run
+production with `AUTH_MODE=shim`.
 
 ## Coverage & gaps (self-assessment)
 
@@ -86,4 +106,5 @@ localhost/trusted dev**, and never run production with `AUTH_MODE=shim`.
 - **Out of scope:** frontend (`apps/web`, the render sink for SEC-003), dependency CVEs,
   deploy infra (covered by lazyit-devops; SEC-005 now closed).
 
-Related: [[deferred]] · [[06-security/_MOC|Security MOC]]
+Related: [[deferred]] · [[INVARIANTS]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] ·
+[[06-security/_MOC|Security MOC]]

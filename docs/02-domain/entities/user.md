@@ -32,13 +32,26 @@ the reverse.
   handled by an external IdP (OIDC) whose `sub` maps to `externalId`; the global guard JIT-provisions
   a User on first login ([[0038-jit-user-provisioning]]) — we do **not** implement our own auth.
   `AUTH_MODE=shim` keeps the `X-User-Id` header path for dev/test.
-- **Authorization (RBAC):** a single `role` ([[0040-rbac-roles]]) governs what a user may do —
-  `ADMIN` (full access, including Access-grant writes, Users administration and destructive deletes),
-  `MEMBER` (normal inventory / KB / asset operations) and `VIEWER` (read-only everywhere). Enforced by
-  the `RolesGuard`, which composes after the auth guard. The **first** user ever provisioned (seed or
-  first JIT login) is `ADMIN`; everyone else defaults to `VIEWER` (least-privilege; flipped from
-  `MEMBER` by [[0043-zitadel-source-of-truth]] Phase 1). Only an `ADMIN` can change a role (the Users
-  controller is ADMIN-gated), so there is no self-escalation path.
+- **Authorization (Roles & Permissions v2):** the three roles stay **fixed** —
+  `enum Role { ADMIN MEMBER VIEWER }` is unchanged ([[0040-rbac-roles]]) — but what each role *grants*
+  is now a configurable set of **fine-grained permissions** ([[0046-roles-permissions-v2]]). A privilege
+  decision asks **"does the caller's role hold permission `domain:action`?"**, resolved **DB-first** from
+  the [[role-permission]] rows ([[INVARIANTS]] INV-8) — never from a token claim. Enforcement is a
+  **single primitive**, `@RequirePermission(...)` + the permission guard (composing after the auth
+  guard); the legacy coarse `@Roles()` gate from ADR-0040 is **retired**.
+  - **ADMIN** holds the COMPLETE catalog and is **immutable/full** (never editable), so an ADMIN is
+    always omnipotent and the last-admin / first-admin invariants stay intact.
+  - **MEMBER** holds every `:read` + `:write` (ordinary inventory / KB / asset operations); **VIEWER** is
+    read-only **except** it can no longer read the access map (`accessGrant:read`) or the user directory
+    (`user:read`) — those two reads are pre-tightened to ADMIN + MEMBER (the read-authz gap closed).
+  - **MEMBER / VIEWER are fully configurable** by an ADMIN within the catalog (an admin may delegate a
+    `:delete` or a coarse verb; the UI warns ⚠ but the server accepts it). Permissions are
+    **lazyit-local** — never mirrored to the IdP ([[0043-zitadel-source-of-truth]] §3). See
+    [[role-permission]].
+  - The **first** user ever provisioned (seed or first JIT login) is `ADMIN`; everyone else defaults to
+    `VIEWER` (least-privilege; flipped from `MEMBER` by [[0043-zitadel-source-of-truth]] Phase 1). Only an
+    ADMIN can change a role (Users administration is gated `user:manage`, ADMIN-only in the seed), and no
+    user can change their own role — so there is no self-escalation path.
 
 ## Conventions
 
@@ -59,7 +72,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `firstName` | `string` | required. |
 | `lastName` | `string` | required. |
 | `isActive` | `boolean` | `@default(true)`. Activation flag — see note below. |
-| `role` | `Role` | `@default(VIEWER)` (flipped from `MEMBER` by [[0043-zitadel-source-of-truth]]). RBAC role: `ADMIN` / `MEMBER` / `VIEWER` ([[0040-rbac-roles]]). First user ever provisioned = `ADMIN`; all others default to `VIEWER`. |
+| `role` | `Role` | `@default(VIEWER)` (flipped from `MEMBER` by [[0043-zitadel-source-of-truth]]). The fixed role `ADMIN` / `MEMBER` / `VIEWER` ([[0040-rbac-roles]]); what each role *grants* is the configurable [[role-permission]] matrix ([[0046-roles-permissions-v2]]). First user ever provisioned = `ADMIN`; all others default to `VIEWER`. |
 | `externalId` | `string?` | `@unique`, nullable. Holds the IdP `sub`; populated on first OIDC login ([[0038-jit-user-provisioning]]); `null` for unlinked users ([[0016-auth-strategy-deferred]]). |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
@@ -78,9 +91,14 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 `me` isn't parsed as a uuid; the OIDC token doesn't carry the lazyit role, so the web reads it here),
 `GET /users/:id`, `POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete),
 `POST /users/:id/offboard`, `POST /users/:id/restore` (re-onboard: clears `deletedAt`; does NOT
-re-grant access or re-assign assets — [[0041-soft-delete-reuse-and-restore]]).
-All **write** endpoints (create / update / delete / offboard / restore) are **ADMIN-only**
-(`@Roles('ADMIN')`, [[0040-rbac-roles]]); the reads (incl. `me`) are open to any authenticated user. Bodies validated against the
+re-grant access or re-assign assets — [[0041-soft-delete-reuse-and-restore]]), and
+`POST /users/:id/reset-password` (admin-triggered password reset — see the IdP write-back note below).
+All **write** endpoints (create / update incl. name/email/role / delete / offboard / restore /
+reset-password) are gated `@RequirePermission('user:manage')` — ADMIN-only in the seed, **not**
+`user:write` (which MEMBER holds) ([[0046-roles-permissions-v2]] P4). The directory **reads** `GET /users` and `GET /users/:id` (and the
+nested reads below) are gated `@RequirePermission('user:read')` — ADMIN + MEMBER (a VIEWER gets 403;
+this is the pre-tightening). `GET /users/me` stays OPEN (the self-read the web gates its UI off; the
+OIDC token doesn't carry the lazyit role). Bodies validated against the
 shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). Also
 `GET /users/:id/assignments?activeOnly=` lists the assets assigned to the user ([[asset-assignment]])
 and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their application access
@@ -93,11 +111,29 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > management is otherwise done by an `ADMIN` from the **Users** section (a per-user role Select);
 > the very first `ADMIN` on a pre-existing DB is set out-of-band via `bun run set-role` ([[auth-bootstrap]]).
 
+> [!note] Admin profile edits + password reset write back to the IdP (issue #149)
+> `PATCH /users/:id` lets an `ADMIN` edit `firstName` / `lastName` / `email` (alongside `role`). A
+> name/email change is **mirrored back to Zitadel** (the v2 user service: profile `PUT` + a
+> pre-verified email `POST`) inside the same **no-split-brain** pattern as a role change — if the
+> Management call fails, the local row is reverted and the request is **503** ([[INVARIANTS]] INV-5).
+> The `email` is the **account-linking key** ([[INVARIANTS]] INV-2, `citext`): the write-back updates
+> the **existing** Zitadel user (same `sub`/`externalId` — never a re-link, SEC-006) and sets the new
+> address **pre-verified**, so the change does **not** force re-verification or break login. `externalId`
+> can never be set via the API.
+> `POST /users/:id/reset-password` triggers **Zitadel's own** password-reset flow (Management API,
+> `password_reset` with `sendLink`): lazyit **never** stores/sets/sends a password ([[0016-auth-strategy-deferred]],
+> [[0037-idp-choice-zitadel-byoi]]) — **Zitadel emails the link via ZITADEL's SMTP**, which the operator
+> must have configured for delivery. It is refused for an **inactive** user (**422**) and surfaces an
+> honest **501** ("managed by your identity provider") under BYOI / generic OIDC or for a user with no
+> IdP link ([[INVARIANTS]] INV-4) — never a misleading success. Both rely on the same Private-Key-JWT
+> Management auth as the create/role write-backs ([[0043-zitadel-source-of-truth]] §3).
+
 **Web:** `users/[id]` is the asset-centric **per-person** detail page (the counterpart to the asset
 detail) — it composes the two nested reads above plus the user's authored [[article]]s, answering
 "who can access what" for one person and cross-linking user ⇄ asset / application. See
 [[0020-frontend-data-layer]].
 
 Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] · [[ticket]] ·
-[[asset-centric]] · [[shared-package]] · [[0013-zod-validation-pipe]] ·
-[[0016-auth-strategy-deferred]] · [[0038-jit-user-provisioning]] · [[0040-rbac-roles]]
+[[role-permission]] · [[service-account]] · [[asset-centric]] · [[shared-package]] ·
+[[0013-zod-validation-pipe]] · [[0016-auth-strategy-deferred]] · [[0038-jit-user-provisioning]] ·
+[[0040-rbac-roles]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[INVARIANTS]]

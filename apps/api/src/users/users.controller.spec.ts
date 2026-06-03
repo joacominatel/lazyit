@@ -9,6 +9,7 @@ import { APP_GUARD } from '@nestjs/core';
 import request from 'supertest';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
+import { PasswordResetUnsupportedError } from '../auth/identity/identity-provider.interface';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { ActorService } from '../common/actor.service';
@@ -47,7 +48,10 @@ describe('UsersController :id uuid validation (SEC-004)', () => {
         { provide: AccessGrantsService, useValue: { findAll: jest.fn() } },
         {
           provide: ActorService,
-          useValue: { resolve: jest.fn().mockReturnValue(undefined) },
+          useValue: {
+            resolve: jest.fn().mockReturnValue(undefined),
+            resolveActor: jest.fn().mockReturnValue({}),
+          },
         },
       ],
     }).compile();
@@ -121,7 +125,10 @@ describe('UsersController GET /users/me (ADR-0040)', () => {
         { provide: AccessGrantsService, useValue: { findAll: jest.fn() } },
         {
           provide: ActorService,
-          useValue: { resolve: jest.fn().mockReturnValue(undefined) },
+          useValue: {
+            resolve: jest.fn().mockReturnValue(undefined),
+            resolveActor: jest.fn().mockReturnValue({}),
+          },
         },
         { provide: APP_GUARD, useClass: FakeAuthGuard },
       ],
@@ -162,5 +169,77 @@ describe('UsersController GET /users/me (ADR-0040)', () => {
   it('401 when there is no authenticated actor (shim anonymous)', async () => {
     const res = await request(app.getHttpServer()).get('/users/me');
     expect(res.status).toBe(401);
+  });
+});
+
+/**
+ * POST /users/:id/reset-password (issue #149). The endpoint delegates to the service and must (1) return
+ * 204 on success, and (2) map the service's PasswordResetUnsupportedError (BYOI / no IdP link) to an
+ * HONEST 501 — never a 2xx that pretends a reset was sent (INV-4). Other errors propagate unchanged.
+ */
+describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
+  let app: INestApplication;
+  const requestPasswordReset = jest.fn();
+  const VALID_ID = '11111111-1111-4111-8111-111111111111';
+
+  beforeAll(async () => {
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      controllers: [UsersController],
+      providers: [
+        {
+          provide: UsersService,
+          useValue: {
+            findOne: jest.fn(),
+            findAll: jest.fn(),
+            create: jest.fn(),
+            update: jest.fn(),
+            remove: jest.fn(),
+            requestPasswordReset,
+          },
+        },
+        { provide: AssetAssignmentsService, useValue: { findAll: jest.fn() } },
+        { provide: AccessGrantsService, useValue: { findAll: jest.fn() } },
+        {
+          provide: ActorService,
+          useValue: {
+            resolve: jest.fn().mockReturnValue('actor-1'),
+            resolveActor: jest.fn().mockReturnValue({}),
+          },
+        },
+      ],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => requestPasswordReset.mockReset());
+
+  it('returns 204 and calls the service when the reset is triggered', async () => {
+    requestPasswordReset.mockResolvedValue(undefined);
+    const res = await request(app.getHttpServer()).post(
+      `/users/${VALID_ID}/reset-password`,
+    );
+    expect(res.status).toBe(204);
+    expect(requestPasswordReset).toHaveBeenCalledWith(VALID_ID, 'actor-1');
+  });
+
+  it('maps PasswordResetUnsupportedError (BYOI / no IdP link) to 501, not a 2xx', async () => {
+    requestPasswordReset.mockRejectedValue(new PasswordResetUnsupportedError());
+    const res = await request(app.getHttpServer()).post(
+      `/users/${VALID_ID}/reset-password`,
+    );
+    expect(res.status).toBe(501);
+  });
+
+  it('rejects a malformed :id with 400 before reaching the service', async () => {
+    const res = await request(app.getHttpServer()).post(
+      '/users/not-a-uuid/reset-password',
+    );
+    expect(res.status).toBe(400);
+    expect(requestPasswordReset).not.toHaveBeenCalled();
   });
 });

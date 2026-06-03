@@ -5,13 +5,17 @@ import {
   ForbiddenException,
   NotFoundException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { getLoggerToken, PinoLogger } from 'nestjs-pino';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
-import { IDENTITY_PROVIDER } from '../auth/identity/identity-provider.interface';
+import {
+  IDENTITY_PROVIDER,
+  PasswordResetUnsupportedError,
+} from '../auth/identity/identity-provider.interface';
 import type { IdentityProvider } from '../auth/identity/identity-provider.interface';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
@@ -45,6 +49,9 @@ type IdpMock = {
   deactivateUser: jest.Mock;
   grantRole: jest.Mock;
   revokeRole: jest.Mock;
+  // Issue #149: profile (name/email) write-back + password-reset trigger.
+  updateUser: jest.Mock;
+  requestPasswordReset: jest.Mock;
 };
 
 // The transaction client the offboarding writes go through; $transaction runs the callback with it.
@@ -104,6 +111,9 @@ describe('UsersService', () => {
       deactivateUser: jest.fn().mockResolvedValue(undefined),
       grantRole: jest.fn().mockResolvedValue(undefined),
       revokeRole: jest.fn().mockResolvedValue(undefined),
+      // Issue #149: default to a supports-management provider whose profile write-back + reset succeed.
+      updateUser: jest.fn().mockResolvedValue(undefined),
+      requestPasswordReset: jest.fn().mockResolvedValue(undefined),
     };
     // A no-op PinoLogger stand-in (the service uses it for structured write-back audit lines).
     const logger = {
@@ -294,7 +304,7 @@ describe('UsersService', () => {
       { id: 'assign-1', assetId: 'asset-1' },
     ]);
 
-    const result = await service.remove('uuid-1', 'actor-99');
+    const result = await service.remove('uuid-1', { userId: 'actor-99' });
 
     // Soft delete = an UPDATE that stamps deletedAt, never a hard delete().
     expect(tx.user.update).toHaveBeenCalledTimes(1);
@@ -309,7 +319,12 @@ describe('UsersService', () => {
       [
         {
           where: { userId: string; revokedAt: null };
-          data: { revokedAt: Date; revokedById?: string; notes: string };
+          data: {
+            revokedAt: Date;
+            revokedById?: string;
+            revokedBySaId?: string;
+            notes: string;
+          };
         },
       ]
     >;
@@ -318,15 +333,15 @@ describe('UsersService', () => {
       revokedAt: null,
     });
     expect(grantCalls[0][0].data.revokedAt).toBeInstanceOf(Date);
+    // A human offboarder → revokedById, never revokedBySaId (behavior-preserving; ADR-0048).
     expect(grantCalls[0][0].data.revokedById).toBe('actor-99');
+    expect(grantCalls[0][0].data).not.toHaveProperty('revokedBySaId');
     expect(grantCalls[0][0].data.notes).toBe('auto: offboarded');
 
-    // Active assignments are released through the bulk helper with the actor.
-    expect(assignments.releaseAllForUser).toHaveBeenCalledWith(
-      tx,
-      'uuid-1',
-      'actor-99',
-    );
+    // Active assignments are released through the bulk helper with the resolved attribution.
+    expect(assignments.releaseAllForUser).toHaveBeenCalledWith(tx, 'uuid-1', {
+      userId: 'actor-99',
+    });
 
     // Soft-delete drops the user from the search index (ADR-0035).
     expect(search.remove).toHaveBeenCalledWith('users', 'uuid-1');
@@ -477,7 +492,7 @@ describe('UsersService', () => {
       user.count.mockResolvedValue(0); // the only admin
 
       await expect(
-        service.remove('admin-1', 'actor-99'),
+        service.remove('admin-1', { userId: 'actor-99' }),
       ).rejects.toBeInstanceOf(ConflictException);
       // The transaction never runs — nothing is soft-deleted or revoked.
       expect(tx.user.update).not.toHaveBeenCalled();
@@ -497,7 +512,7 @@ describe('UsersService', () => {
       });
 
       await expect(
-        service.remove('admin-1', 'actor-99'),
+        service.remove('admin-1', { userId: 'actor-99' }),
       ).resolves.toMatchObject({
         userId: 'admin-1',
       });
@@ -703,14 +718,299 @@ describe('UsersService', () => {
         service.update('member-1', { role: 'ADMIN' }, 'actor-99'),
       ).rejects.toBeInstanceOf(ServiceUnavailableException);
 
-      // The local role is reverted to MEMBER (the truth) so local + Zitadel agree.
+      // The local role is reverted to MEMBER (the truth) so local + Zitadel agree. A role-only change
+      // reverts ONLY the role (issue #149: the revert is scoped to the fields that actually changed).
       const updateCalls = user.update.mock.calls as Array<
-        [{ where: { id: string }; data: { role?: string } }]
+        [{ where: { id: string }; data: Record<string, unknown> }]
       >;
       expect(updateCalls[1][0]).toEqual({
         where: { id: 'member-1' },
         data: { role: 'MEMBER' },
       });
+    });
+
+    // --- Issue #149: name/email profile write-back + password-reset trigger ----------------------
+    it('name change on a linked user mirrors updateUser to the IdP (no role grant)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'Old',
+        lastName: 'Name',
+        email: 'old@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'New',
+        lastName: 'Name',
+        email: 'old@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+      });
+
+      await service.update(
+        'member-1',
+        { firstName: 'New', lastName: 'Name' },
+        'actor-99',
+      );
+
+      // Only the changed name field is pushed (lastName resent unchanged is omitted); externalId stays.
+      expect(idp.updateUser).toHaveBeenCalledWith('zitadel-user-9', {
+        firstName: 'New',
+      });
+      expect(idp.grantRole).not.toHaveBeenCalled();
+    });
+
+    it('email change on a linked user mirrors updateUser + updates the local citext row', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'A',
+        lastName: 'B',
+        email: 'old@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'A',
+        lastName: 'B',
+        email: 'new@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+      });
+
+      await service.update('member-1', { email: 'new@b.com' }, 'actor-99');
+
+      // The local row is updated with the new (already-normalized) email.
+      expect(user.update).toHaveBeenCalledWith({
+        where: { id: 'member-1' },
+        data: { email: 'new@b.com' },
+      });
+      // The same externalId (sub) is reused — an update, never a re-link (SEC-006).
+      expect(idp.updateUser).toHaveBeenCalledWith('zitadel-user-9', {
+        email: 'new@b.com',
+      });
+    });
+
+    it('a local-only user (no externalId) skips the profile mirror on name/email change', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'local-1',
+        firstName: 'A',
+        lastName: 'B',
+        email: 'a@b.com',
+        role: 'MEMBER',
+        externalId: null,
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({
+        id: 'local-1',
+        firstName: 'A',
+        lastName: 'B',
+        email: 'new@b.com',
+        role: 'MEMBER',
+        externalId: null,
+      });
+
+      await service.update('local-1', { email: 'new@b.com' }, 'actor-99');
+
+      expect(idp.updateUser).not.toHaveBeenCalled();
+    });
+
+    it('resending the same name/email does NOT call the IdP (no needless round-trip)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'A',
+        lastName: 'B',
+        email: 'a@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'A',
+        lastName: 'B',
+        email: 'a@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+      });
+
+      await service.update(
+        'member-1',
+        { firstName: 'A', email: 'a@b.com' },
+        'actor-99',
+      );
+
+      expect(idp.updateUser).not.toHaveBeenCalled();
+      expect(idp.grantRole).not.toHaveBeenCalled();
+    });
+
+    it('no-split-brain: an updateUser failure reverts the local row (role+name+email) and surfaces 503', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'Old',
+        lastName: 'Name',
+        email: 'old@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      user.update
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'New',
+          lastName: 'Name',
+          email: 'new@b.com',
+          role: 'MEMBER',
+          externalId: 'zitadel-user-9',
+        })
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'Old',
+          lastName: 'Name',
+          email: 'old@b.com',
+          role: 'MEMBER',
+          externalId: 'zitadel-user-9',
+        });
+      idp.updateUser.mockRejectedValue(
+        new ServiceUnavailableException('Zitadel management call failed'),
+      );
+
+      await expect(
+        service.update(
+          'member-1',
+          { firstName: 'New', email: 'new@b.com' },
+          'actor-99',
+        ),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      const updateCalls = user.update.mock.calls as Array<
+        [{ where: { id: string }; data: Record<string, unknown> }]
+      >;
+      // The compensating revert restores ONLY the changed fields' prior values (name + email here; no
+      // role, since the role did not change) — no split-brain, no touching untouched columns.
+      expect(updateCalls[1][0]).toEqual({
+        where: { id: 'member-1' },
+        data: {
+          firstName: 'Old',
+          lastName: 'Name',
+          email: 'old@b.com',
+        },
+      });
+    });
+
+    it('best-effort convergence: a mid-sequence Management failure (name PUT ok, email POST fails) re-mirrors the reverted name to Zitadel and still 503s', async () => {
+      // Models the exact split-brain: a combined name+email edit where the profile name PUT commits but
+      // the email POST then fails. The local row reverts to OLD, but Zitadel already holds the NEW name —
+      // so the catch must issue a SECOND, best-effort updateUser pushing the reverted (OLD) name back to
+      // converge the two stores, while the request still surfaces the original 503.
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'Old',
+        lastName: 'Name',
+        email: 'old@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      user.update
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'New',
+          lastName: 'Name',
+          email: 'new@b.com',
+          role: 'MEMBER',
+          externalId: 'zitadel-user-9',
+        })
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'Old',
+          lastName: 'Name',
+          email: 'old@b.com',
+          role: 'MEMBER',
+          externalId: 'zitadel-user-9',
+        });
+      // First updateUser (the name PUT + email POST mirror) fails on the email POST; the SECOND call (the
+      // best-effort re-mirror of the reverted name) succeeds.
+      idp.updateUser
+        .mockRejectedValueOnce(
+          new ServiceUnavailableException('Zitadel email POST failed'),
+        )
+        .mockResolvedValueOnce(undefined);
+
+      await expect(
+        service.update(
+          'member-1',
+          { firstName: 'New', email: 'new@b.com' },
+          'actor-99',
+        ),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      // Two updateUser calls: (1) the original mirror, (2) the best-effort convergence re-mirror.
+      expect(idp.updateUser).toHaveBeenCalledTimes(2);
+      // The re-mirror pushes the reverted (current) name back to the SAME externalId — name only, no
+      // email (the account-linking email is committed last and never diverges).
+      expect(idp.updateUser).toHaveBeenLastCalledWith('zitadel-user-9', {
+        firstName: 'Old',
+        lastName: 'Name',
+      });
+      // The local row was still reverted to its prior truth despite the re-mirror.
+      const updateCalls = user.update.mock.calls as Array<
+        [{ where: { id: string }; data: Record<string, unknown> }]
+      >;
+      expect(updateCalls[1][0]).toEqual({
+        where: { id: 'member-1' },
+        data: { firstName: 'Old', lastName: 'Name', email: 'old@b.com' },
+      });
+    });
+
+    it('best-effort re-mirror failure is swallowed: the original 503 still wins, no second error thrown', async () => {
+      // Even when the convergence re-mirror ALSO fails, the caller must receive the ORIGINAL 503 — the
+      // log-only re-mirror never throws over it (at worst a transient cosmetic drift remains, fixed by
+      // the next edit; zero authZ impact since authorization is DB-first).
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'Old',
+        lastName: 'Name',
+        email: 'old@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      user.update
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'New',
+          lastName: 'Name',
+          email: 'new@b.com',
+          role: 'MEMBER',
+          externalId: 'zitadel-user-9',
+        })
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'Old',
+          lastName: 'Name',
+          email: 'old@b.com',
+          role: 'MEMBER',
+          externalId: 'zitadel-user-9',
+        });
+      // BOTH updateUser calls fail (the mirror and the best-effort re-mirror).
+      idp.updateUser.mockRejectedValue(
+        new ServiceUnavailableException('Zitadel management call failed'),
+      );
+
+      await expect(
+        service.update(
+          'member-1',
+          { firstName: 'New', email: 'new@b.com' },
+          'actor-99',
+        ),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      // The re-mirror was attempted (2 calls) but its failure did not surface a different error.
+      expect(idp.updateUser).toHaveBeenCalledTimes(2);
     });
 
     it('offboarding a linked user deactivates it in the IdP inside the transaction', async () => {
@@ -723,7 +1023,7 @@ describe('UsersService', () => {
       tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
       tx.accessGrant.updateMany.mockResolvedValue({ count: 0 });
 
-      await service.remove('uuid-1', 'actor-99');
+      await service.remove('uuid-1', { userId: 'actor-99' });
 
       expect(idp.deactivateUser).toHaveBeenCalledWith('zitadel-user-9');
       // The soft-delete still happened (the deactivate succeeded, so the txn committed).
@@ -742,9 +1042,9 @@ describe('UsersService', () => {
         new ServiceUnavailableException('Zitadel management call failed'),
       );
 
-      await expect(service.remove('uuid-1', 'actor-99')).rejects.toBeInstanceOf(
-        ServiceUnavailableException,
-      );
+      await expect(
+        service.remove('uuid-1', { userId: 'actor-99' }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
 
       // Because the deactivate ran FIRST in the txn and threw, nothing else was committed: no
       // soft-delete, no grant revocation, no assignment release (the rollback is the no-split-brain).
@@ -764,9 +1064,9 @@ describe('UsersService', () => {
       tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
       tx.accessGrant.updateMany.mockResolvedValue({ count: 0 });
 
-      await expect(service.remove('uuid-1', 'actor-99')).resolves.toMatchObject(
-        { userId: 'uuid-1' },
-      );
+      await expect(
+        service.remove('uuid-1', { userId: 'actor-99' }),
+      ).resolves.toMatchObject({ userId: 'uuid-1' });
 
       // A local-only row (externalId null) has nothing to deactivate.
       expect(idp.deactivateUser).not.toHaveBeenCalled();
@@ -809,6 +1109,80 @@ describe('UsersService', () => {
       await expect(service.restore('missing')).rejects.toBeInstanceOf(
         NotFoundException,
       );
+    });
+  });
+
+  // Issue #149 — trigger a password reset via the IdP (lazyit never sets/sends a password).
+  describe('requestPasswordReset', () => {
+    function linkedActiveUser(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'user-1',
+        firstName: 'A',
+        lastName: 'B',
+        email: 'a@b.com',
+        role: 'MEMBER',
+        isActive: true,
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+        ...overrides,
+      };
+    }
+
+    it('calls idp.requestPasswordReset with the externalId for a linked, active user', async () => {
+      user.findFirst.mockResolvedValue(linkedActiveUser());
+
+      await service.requestPasswordReset('user-1', 'actor-1');
+
+      expect(idp.requestPasswordReset).toHaveBeenCalledWith('zitadel-user-9');
+    });
+
+    it('404s when the user is missing or soft-deleted (findOne filters)', async () => {
+      user.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.requestPasswordReset('missing', 'actor-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(idp.requestPasswordReset).not.toHaveBeenCalled();
+    });
+
+    it('422s an inactive user and never calls the IdP', async () => {
+      user.findFirst.mockResolvedValue(linkedActiveUser({ isActive: false }));
+
+      await expect(
+        service.requestPasswordReset('user-1', 'actor-1'),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
+      expect(idp.requestPasswordReset).not.toHaveBeenCalled();
+    });
+
+    it('throws PasswordResetUnsupportedError for a user with no externalId (honest 501 upstream)', async () => {
+      user.findFirst.mockResolvedValue(linkedActiveUser({ externalId: null }));
+
+      await expect(
+        service.requestPasswordReset('user-1', 'actor-1'),
+      ).rejects.toBeInstanceOf(PasswordResetUnsupportedError);
+      expect(idp.requestPasswordReset).not.toHaveBeenCalled();
+    });
+
+    it('BYOI: propagates the provider PasswordResetUnsupportedError (no pretend success)', async () => {
+      user.findFirst.mockResolvedValue(linkedActiveUser());
+      idp.requestPasswordReset.mockRejectedValue(
+        new PasswordResetUnsupportedError(),
+      );
+
+      await expect(
+        service.requestPasswordReset('user-1', 'actor-1'),
+      ).rejects.toBeInstanceOf(PasswordResetUnsupportedError);
+    });
+
+    it('surfaces a Zitadel Management failure as 503', async () => {
+      user.findFirst.mockResolvedValue(linkedActiveUser());
+      idp.requestPasswordReset.mockRejectedValue(
+        new ServiceUnavailableException('Zitadel management call failed'),
+      );
+
+      await expect(
+        service.requestPasswordReset('user-1', 'actor-1'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
     });
   });
 });

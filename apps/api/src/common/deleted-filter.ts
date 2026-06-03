@@ -7,11 +7,11 @@ import type { User } from '../../generated/prisma/client';
  * pieces a list query needs to scope itself to the right slice, and gate the privileged slice.
  *
  * Two helpers, one for each layer:
- *   - {@link assertCanListDeleted} — the CONTROLLER-side ADMIN gate. The list `GET` routes carry no
- *     `@Roles()` (any authenticated user may list ACTIVE rows), so the RolesGuard can't gate the
- *     `only` slice on its own (it can't see the query string). Instead each list controller calls
- *     this with the parsed `deleted` value and the `@CurrentUser`: asking for `only` as a non-ADMIN
- *     (or anonymous) is a 403, matching the RolesGuard's `@Roles('ADMIN')` semantics elsewhere.
+ *   - {@link assertCanListDeleted} — the CONTROLLER-side ADMIN gate. The list `GET` routes are gated
+ *     only on `<domain>:read` (which a MEMBER/VIEWER may hold, so any reader may list ACTIVE rows),
+ *     and the RolesGuard can't gate the `only` slice on its own (it can't see the query string).
+ *     Instead each list controller calls this with the parsed `deleted` value and the `@CurrentUser`:
+ *     asking for `only` as a non-ADMIN (or anonymous) is a 403 — the archived slice stays ADMIN-only.
  *   - {@link deletedWhere} — the SERVICE-side `where` fragment. For `active` it returns
  *     `{ deletedAt: null }`; for `only`, `{ deletedAt: { not: null } }`. Spread into the list `where`
  *     (and the paired `count`) so both slices are explicit and identical across all five resources —

@@ -11,9 +11,14 @@
  * non-special starting point (see docs/02-domain/entities/asset-category.md etc.). The seeded user is
  * ADMIN (ADR-0040): a freshly-seeded database must always have at least one administrator.
  *
+ * It also seeds the RolePermission matrix (Roles & Permissions v2 — ADR-0046): each fixed Role mapped
+ * to its `domain:action` permissions, taken 1:1 from `DEFAULT_ROLE_PERMISSIONS` in `@lazyit/shared`
+ * (the single source of truth the golden test also asserts against). Idempotent upsert per row.
+ *
  * Run from apps/api: `bunx prisma db seed`.
  */
 import { PrismaPg } from '@prisma/adapter-pg';
+import { DEFAULT_ROLE_PERMISSIONS } from '@lazyit/shared';
 import { PrismaClient, Role } from '../generated/prisma/client';
 
 const connectionString = process.env.DATABASE_URL;
@@ -161,6 +166,25 @@ async function main() {
   console.log(
     `Seeded ${INITIAL_CONSUMABLE_CATEGORIES.length} consumable categories.`,
   );
+
+  // RolePermission matrix (ADR-0046). Seed each Role → permission pair from the shared single source
+  // of truth (DEFAULT_ROLE_PERMISSIONS). Idempotent: the composite PK (role, permission) makes a
+  // re-run a no-op upsert. This is purely additive groundwork — nothing in the API reads these rows
+  // yet (the @RequirePermission guard is a later wave); the seed exists so the table is populated and
+  // the golden test can assert it. NOTE: this does NOT delete permissions removed from the catalog;
+  // pruning stale rows is a config-endpoint concern (a later wave), not a seed concern.
+  let permissionRowCount = 0;
+  for (const [role, permissions] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
+    for (const permission of permissions) {
+      await prisma.rolePermission.upsert({
+        where: { role_permission: { role: role as Role, permission } },
+        create: { role: role as Role, permission },
+        update: {},
+      });
+      permissionRowCount += 1;
+    }
+  }
+  console.log(`Seeded ${permissionRowCount} role-permission rows.`);
 }
 
 main()

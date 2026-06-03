@@ -3,7 +3,7 @@ title: Deferred / accepted risks
 tags: [security, deferred]
 status: draft
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-06-03
 ---
 
 # Deferred / accepted risks
@@ -25,13 +25,17 @@ the accepted baseline.
   - **Authentication** ([[0038-jit-user-provisioning]]): a global `JwtAuthGuard` validates the OIDC
     Bearer JWT (or the `X-User-Id` shim when `AUTH_MODE=shim`) on every non-`@Public()` route and sets
     `request.user`.
-  - **Authorization (RBAC)** ([[0040-rbac-roles]]): a `RolesGuard` composes after the auth guard and
-    enforces `@Roles()`. Access-grant writes, Users administration and all destructive deletes are
-    `ADMIN`-only; `MEMBER` does ordinary inventory/KB/asset writes; `VIEWER` is read-only.
-- **Residual / to verify:** reads (`GET`) are still open to any authenticated user — including
-  `GET /access-grants`, which exposes "who can access what". That is by design (any authenticated team
-  member can see the access map) but is the most sensitive read; a future tightening to ADMIN-only is a
-  judgement call, not a regression. The `X-User-Id` shim remains forgeable (see DEF-002) and is dev-only.
+  - **Authorization (RBAC → Roles & Permissions v2)** ([[0040-rbac-roles]] → [[0046-roles-permissions-v2]]):
+    authorization is now a single DB-first **`@RequirePermission`** primitive (the coarse `@Roles` gate is
+    retired). Access-grant writes (`accessGrant:grant`), Users administration (`user:manage`) and all
+    destructive deletes (`:delete`) are ADMIN-only by seed; `MEMBER` does ordinary inventory/KB/asset
+    writes; `VIEWER` is read-only. MEMBER/VIEWER permissions are ADMIN-configurable.
+- **Read-authz residual ✅ RESOLVED (2026-06-03):** reads were formerly open to *any* authenticated user —
+  including `GET /access-grants` ("who can access what") and the user directory. [[0046-roles-permissions-v2]]
+  pre-tightened the two worst reads: `accessGrant:read` + `user:read` are now ADMIN + MEMBER only, so a
+  **VIEWER gets 403** on the access map and the directory (and the `/search` users facet is dropped for a
+  caller without `user:read`). The judgement call is made; this is no longer a residual. The `X-User-Id`
+  shim remains forgeable (see DEF-002) and is dev-only.
 
 ## DEF-002 — `X-User-Id` is a forgeable identity shim
 
@@ -46,12 +50,20 @@ the accepted baseline.
   `User.externalId`), and the same rules must hold. Track [[SEC-006|SEC-006]]: `externalId` should be
   server-set by then, not client-set.
 
-## DEF-003 — Swagger docs are public
+## DEF-003 — Swagger docs are public ✅ RESOLVED (2026-06-02)
 
 - **ADR:** [[0018-api-documentation-swagger]] (accepted). `GET /api/docs` and `/api/docs-json` are
-  unauthenticated. Accepted because the API itself is unauthenticated and dev-only.
-- **Why not a finding:** consistent with DEF-001; protecting the docs is explicitly deferred to the auth
-  work. (It does enumerate the full surface to an attacker — relevant only once exposed.)
+  unauthenticated. Originally accepted because the API itself was unauthenticated and dev-only —
+  consistent with DEF-001; protecting the docs was deferred to the auth work.
+- **Why the rationale went stale:** DEF-001 is now **resolved** — every non-`@Public()` route requires
+  a Bearer JWT ([[0038-jit-user-provisioning]]). So the anonymous OpenAPI doc became the **one**
+  anonymous surface enumerating the full *authenticated* attack surface — no longer "just describing an
+  open API". That makes it a finding: [[SEC-009|SEC-009]] (info-leak, Low).
+- **Resolved** (belt-and-suspenders, [[SEC-009|SEC-009]], closed in the same PR as
+  [[SEC-010|SEC-010]]): (1) `apps/api/src/main.ts` mounts Swagger **only** when
+  `NODE_ENV !== 'production'`, so a prod server doesn't serve it at all; (2) `infra/caddy/Caddyfile`
+  no longer forwards `/api/docs*` on the public origin. The docs stay reachable on the internal Docker
+  network and in local dev (DX unchanged). Residual: deliberate internal/dev reachability only.
 
 ## DEF-004 — `metadata` / `specs` jsonb is unvalidated
 
@@ -88,8 +100,9 @@ Cheap invariants verified this sweep — re-check each pass (a regression here *
 - **No command injection** — no `child_process`/`exec`/`eval`/`new Function`.
 - **No path traversal in import** — the uploaded file is parsed from a buffer and **never written to
   disk**; the filename feeds only extension detection + title (path stripped, `article-import.ts:42`).
-- **No sensitive logging** — no logger/`console` in `apps/api/src` (nothing to leak; also no audit log
-  yet — a feature gap, not a vuln).
+- **No sensitive logging** — structured Pino lines never log a secret; the auth-epic audit tables
+  ([[permission-audit-log]], [[service-account-audit-log]]) record the *event*, never a credential — a
+  service-account token cleartext is shown once and never persisted/logged ([[INVARIANTS]] INV-SA-1).
 - **Mass assignment mostly contained** — create/update schemas are `z.strictObject` (unknown keys
   **rejected**) and omit server-owned fields (`authorId`, article `status`, `id`, timestamps). The
   exception is [[SEC-006|SEC-006]] (`externalId`).

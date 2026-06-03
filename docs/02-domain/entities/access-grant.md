@@ -62,12 +62,23 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
 > the create-time live-check reduces, but doesn't eliminate, dangling references. Same nuance as
 > [[asset-assignment]] ([[0019-asset-assignment-integrity]], [[0023-access-management-design]]).
 
-> [!note] Access-grant writes are ADMIN-only (RBAC)
-> All grant writes — `POST /access-grants` (open), `PATCH /access-grants/:id/revoke`,
-> `…/notes`, `…/expiry` — require the `ADMIN` role ([[0040-rbac-roles]]); a `MEMBER`/`VIEWER` gets
-> **403**. Reads stay open to any authenticated user, exposing the access map team-wide by design.
-> In production the actor comes from the verified OIDC token ([[0038-jit-user-provisioning]]); the
-> `X-User-Id` shim is dev-only and still forgeable ([[0022-draft-visibility-auth-shim]]).
+> [!note] Access-grant writes need `accessGrant:grant`; reads need `accessGrant:read` (the read map tightened)
+> All grant writes — `POST /access-grants` (open), `PATCH /access-grants/:id/revoke`, `…/notes`,
+> `…/expiry`, and the batch revoke — are gated `@RequirePermission('accessGrant:grant')`
+> ([[0046-roles-permissions-v2]]) — ADMIN-only in the seed; **never** `accessGrant:write` (a MEMBER
+> holds that as an intentional orphan slot, so using it would have silently handed MEMBER an ADMIN-only
+> Access write). The single `@RequirePermission` primitive replaced the retired `@Roles('ADMIN')` gate
+> (behavior-preserving, parity-tested).
+>
+> **The read map is now tightened.** `GET /access-grants` and the nested reads are gated
+> `@RequirePermission('accessGrant:read')` — ADMIN + MEMBER only in the seed. A **VIEWER now gets 403**
+> on the access map (the pre-tightening that closed the long-standing read-authz gap —
+> [[0046-roles-permissions-v2]] §4 / [[INVARIANTS]] INV-8). MEMBER/VIEWER permissions are otherwise
+> ADMIN-configurable.
+>
+> The actor comes from the verified principal ([[0038-jit-user-provisioning]]); the `X-User-Id` shim is
+> dev-only ([[0022-draft-visibility-auth-shim]]). A [[service-account]] actor lands in `grantedBySaId` /
+> `revokedBySaId` instead (at-most-one-actor CHECK — [[0048-service-accounts]]).
 
 ## Conventions
 
@@ -92,8 +103,10 @@ Prisma model `AccessGrant` → table `access_grants`. Validation schemas (`Acces
 | `grantedAt` | `datetime` | `@default(now())`; part of identity. Optional on create (backdate imports). |
 | `revokedAt` | `datetime?` | `null` while active; set to end the grant. Not a soft delete. |
 | `expiresAt` | `datetime?` | informative; no auto-revoke. `null` = no expiry. |
-| `grantedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. From `X-User-Id`; null = system. |
-| `revokedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. From `X-User-Id`; null = system. |
+| `grantedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. The **human** grantor; null = system. |
+| `revokedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. The **human** revoker; null = system. |
+| `grantedBySaId` | `cuid?` | FK → [[service-account]], `onDelete: SetNull`. The **non-human** grantor. At-most-one-actor CHECK with `grantedById`. |
+| `revokedBySaId` | `cuid?` | FK → [[service-account]], `onDelete: SetNull`. The **non-human** revoker. At-most-one-actor CHECK with `revokedById`. |
 | `notes` | `string?` | optional free text; editable; `null` clears. |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
@@ -132,7 +145,8 @@ Plus the natural sub-resource endpoints on the related entities:
   active grants; **retrofitting [[asset-assignment]]** to the same `X-User-Id` actor pattern.
 
 Related: [[user]] · [[application]] · [[application-category]] · [[access-request]] ·
-[[asset-assignment]] · [[shared-package]] · [[0023-access-management-design]] ·
+[[asset-assignment]] · [[service-account]] · [[shared-package]] · [[0023-access-management-design]] ·
 [[0019-asset-assignment-integrity]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
 [[0016-auth-strategy-deferred]] · [[0022-draft-visibility-auth-shim]] ·
-[[0018-api-documentation-swagger]]
+[[0040-rbac-roles]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] ·
+[[0018-api-documentation-swagger]] · [[INVARIANTS]]

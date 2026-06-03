@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDashboardSummary } from "@/lib/api/hooks/use-dashboard";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/format";
 import { formatAssetStatus } from "../assets/_components/asset-status-badge";
@@ -45,7 +45,11 @@ import { RecentActivityPanel } from "./_components/recent-activity-panel";
 export default function DashboardPage() {
   const { data, isLoading, isError, error, refetch, isFetching } =
     useDashboardSummary();
-  const canWrite = useCanWrite();
+  // The quick actions are cross-pillar shortcuts into create flows; each gates on its own permission.
+  const canCreateAsset = useCan("asset:write");
+  const canAdjustStock = useCan("consumable:write");
+  const canGrantAccess = useCan("accessGrant:grant");
+  const showQuickActions = canCreateAsset || canAdjustStock || canGrantAccess;
   // Snapshot "now" once so the "Updated <relative>" stamp stays pure across renders.
   const [now] = useState(() => Date.now());
 
@@ -77,7 +81,13 @@ export default function DashboardPage() {
         }
       />
 
-      {canWrite ? <QuickActions /> : null}
+      {showQuickActions ? (
+        <QuickActions
+          canCreateAsset={canCreateAsset}
+          canAdjustStock={canAdjustStock}
+          canGrantAccess={canGrantAccess}
+        />
+      ) : null}
 
       {isLoading ? (
         <DashboardSkeleton />
@@ -94,13 +104,26 @@ export default function DashboardPage() {
   );
 }
 
-/** ADMIN-only quick write actions — the most common "start something" jumps off the dashboard. */
-function QuickActions() {
-  const actions: { href: string; label: string }[] = [
-    { href: "/assets/new", label: "New asset" },
-    { href: "/consumables/new", label: "Add stock" },
-    { href: "/applications", label: "Grant access" },
-  ];
+/**
+ * Quick write actions — the most common "start something" jumps off the dashboard. Each is shown only
+ * when the caller holds the matching permission, so the row honestly reflects what they can do.
+ */
+function QuickActions({
+  canCreateAsset,
+  canAdjustStock,
+  canGrantAccess,
+}: {
+  canCreateAsset: boolean;
+  canAdjustStock: boolean;
+  canGrantAccess: boolean;
+}) {
+  const actions = (
+    [
+      { href: "/assets/new", label: "New asset", show: canCreateAsset },
+      { href: "/consumables/new", label: "Add stock", show: canAdjustStock },
+      { href: "/applications", label: "Grant access", show: canGrantAccess },
+    ] as const
+  ).filter((action) => action.show);
   return (
     <div className="flex flex-wrap gap-2">
       {actions.map((action) => (

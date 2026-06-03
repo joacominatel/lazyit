@@ -24,8 +24,13 @@ transaction).
 - `type` — `IN` (add) · `OUT` (subtract) · `ADJUSTMENT` (set absolute). See [[0034-consumables-design]].
 - `quantity` — Int, **always positive**.
 - `reason?`, `notes?`.
-- `performedById?` — FK → [[user]], `onDelete: SetNull`; the actor, from the `X-User-Id` shim
-  ([[0022-draft-visibility-auth-shim]]).
+- `performedById?` — FK → [[user]], `onDelete: SetNull`; the **human** actor, from the verified
+  principal (the `X-User-Id` shim is dev-only — [[0038-jit-user-provisioning]],
+  [[0022-draft-visibility-auth-shim]]).
+- `serviceAccountId?` — FK → [[service-account]], `onDelete: SetNull`; the **non-human** actor when a
+  service account performed the movement. A DB **CHECK** enforces at most one of (`performedById`,
+  `serviceAccountId`) — honest attribution, never a fake human ([[0048-service-accounts]],
+  [[INVARIANTS]] INV-SA-4).
 - `createdAt` only — append-only ([[0006-soft-delete-and-auditing]]); no `updatedAt` / `deletedAt`.
 
 ## Business rules
@@ -50,5 +55,6 @@ Two affordances, same `POST /consumables/:id/movements` endpoint:
   `StockMovementDialog` for a chosen quantity, type and optional reason/notes (and an `ADJUSTMENT`
   absolute recount). This is the secondary path, not the default.
 
-Related: [[consumable]] · [[consumable-category]] · [[user]] · [[0034-consumables-design]] ·
-[[0006-soft-delete-and-auditing]] · [[0005-id-strategy]]
+Related: [[consumable]] · [[consumable-category]] · [[user]] · [[service-account]] ·
+[[0034-consumables-design]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
+[[0048-service-accounts]] · [[INVARIANTS]]

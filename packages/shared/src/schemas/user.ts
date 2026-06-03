@@ -82,12 +82,24 @@ export const CreateUserSchema = z.strictObject({
 /**
  * Partial update (an empty body is rejected); `isActive` toggles activation / offboarding. `role`
  * changes a user's RBAC role.
+ *
+ * Admin user-control (issue #149): `firstName` / `lastName` / `email` are an ADMIN edit of the user's
+ * profile, and they are NOT local-only — the API mirrors a name/email change back to the IdP (Zitadel
+ * Management API) inside the same no-split-brain transactional + 503-compensation pattern as a role
+ * change (ADR-0043 §3, INVARIANTS INV-5): if the Zitadel write fails the local row is reverted and the
+ * request is 503. `email` is the account-linking key (citext, INV-2): the write-back updates the
+ * EXISTING Zitadel user (same `sub`/`externalId`) and sets the new address pre-verified, so the change
+ * never forces re-verification or breaks the account link. `externalId` is intentionally absent here —
+ * the strictObject rejects it (SEC-006), so an admin can never re-point a row at a different identity.
  */
 export const UpdateUserSchema = requireAtLeastOneKey(
   z
     .strictObject({
       // Normalized (trim + lowercase) so the stored value matches the citext column (ADR-0041).
+      // Mirrored back to the IdP on change (issue #149): the account-linking key, so the write-back
+      // updates the existing Zitadel user (same sub) pre-verified — never a re-link.
       email: EmailSchema,
+      // Mirrored back to the IdP profile (givenName / familyName) on change (issue #149).
       firstName: z.string().trim().min(1).max(100),
       lastName: z.string().trim().min(1).max(100),
       isActive: z.boolean(),

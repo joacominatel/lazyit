@@ -65,6 +65,15 @@ model User {
   // Consumable stock movements this user performed (ConsumableMovement.performedById). SetNull.
   consumableMovements ConsumableMovement[] @relation("ConsumableMovementActor")
 
+  // Permission-matrix edits this user performed (PermissionAuditLog.actorId). SetNull keeps the
+  // append-only audit row when the actor is deleted (ADR-0046 P5). null = system/unknown actor.
+  permissionAuditEntries PermissionAuditLog[] @relation("PermissionAuditActor")
+
+  // Service accounts this user created + the ServiceAccount lifecycle events they performed (ADR-0048).
+  // SetNull on both: deleting the user keeps the (soft-deletable) account and the append-only audit row.
+  serviceAccountsCreated    ServiceAccount[]         @relation("ServiceAccountCreator")
+  serviceAccountAuditEntries ServiceAccountAuditLog[] @relation("ServiceAccountAuditActor")
+
   @@map("users")
 }
 
@@ -78,6 +87,179 @@ enum Role {
   ADMIN
   MEMBER
   VIEWER
+}
+
+/// Roles & Permissions v2 (ADR-0046) — the FOUNDATION. A configurable mapping from each fixed
+/// `Role` to the fine-grained `domain:action` permissions it holds. The 3 roles stay fixed
+/// (ADR-0040); only the PERMISSIONS behind them become configurable. This table is purely additive
+/// in this wave: nothing consumes it yet (the `@RequirePermission` guard is a later wave) — it is
+/// the seed/contract groundwork, behavior-preserving.
+///
+/// `permission` is a plain String (not an enum) deliberately: the closed catalog lives as zod in
+/// `@lazyit/shared` (`PermissionSchema`), so the DB stays a flat key/value store the seed and a
+/// future config endpoint write 1:1 — adding a permission never needs an enum migration. INV-1
+/// (ADR-0043 #1): authorization resolves from THESE rows, never a token claim. The ADMIN row set is
+/// the COMPLETE catalog and is immutable/full (the future config surface must never edit it).
+/// Append-only-ish config (no soft delete / timestamps): the composite PK is the row's identity.
+model RolePermission {
+  role       Role
+  permission String
+
+  @@id([role, permission])
+  @@map("role_permissions")
+}
+
+/// Roles & Permissions v2 (ADR-0046, P5) — the append-only audit trail of every per-role permission
+/// edit made through the ADMIN config surface (PUT /config/permissions). One row per permission
+/// GRANTED or REVOKED on a role, so the matrix's full edit history is reconstructable. Auditability
+/// by default (ADR-0006): immutable — `createdAt` only, NO updatedAt / deletedAt, never updated or
+/// deleted. The ADMIN row is immutable in the endpoint, so only MEMBER/VIEWER edits land here.
+model PermissionAuditLog {
+  // autoincrement: a log table, never exposed externally (ADR-0005).
+  id         Int                  @id @default(autoincrement())
+  // Who made the edit — the authenticated ADMIN's User.id. SetNull (mirrors AssetHistory.performedBy):
+  // deleting the actor never blocks deletion and the audit row survives. null = system/unknown.
+  // @db.Uuid to match User.id.
+  actorId    String?              @db.Uuid
+  actor      User?                @relation("PermissionAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  // The role whose permission set changed (MEMBER or VIEWER — ADMIN is immutable, never audited here).
+  role       Role
+  // The catalog permission literal (`domain:action`) granted or revoked. Plain String, mirroring
+  // RolePermission.permission — the closed catalog lives as zod in @lazyit/shared.
+  permission String
+  // Whether the permission was added to (GRANT) or removed from (REVOKE) the role's set.
+  action     PermissionAuditAction
+  createdAt  DateTime             @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). Indexed for the per-role / chronological audit query.
+  @@index([role, id])
+  @@map("permission_audit_log")
+}
+
+/// The two directions a permission edit can take (ADR-0046 P5). GRANT = the permission was added to a
+/// role's set on a PUT; REVOKE = it was removed. The ADMIN-immutable / catalog-membership guardrails
+/// are enforced before any row is written.
+enum PermissionAuditAction {
+  GRANT
+  REVOKE
+}
+
+/// A NON-HUMAN principal (ADR-0048): a CI runner, a script, an integration that calls the lazyit API
+/// without a person behind it. Deliberately a SEPARATE entity from `User` (not a `type` flag, not a
+/// Zitadel machine-user), so the human table — JIT provisioning, the last-admin / first-admin
+/// invariants, `externalId` linkage — stays untouched. A service account NEVER has a `Role` and is
+/// NEVER ADMIN-equivalent; it is authorized solely by its direct `ServiceAccountPermission` grants.
+///
+/// AUTH (ADR-0048): authenticates with a LAZYIT-NATIVE token `lzit_sa_<id>_<secret>` (BYOI-safe — no
+/// IdP dependency). The secret is high-entropy (`crypto.randomBytes(32)` base64url), so only its
+/// SHA-256 `tokenHash` (+ a short non-secret `tokenPrefix` for display) is stored; the cleartext token
+/// is shown ONCE on create/rotate and is never recoverable. The JwtAuthGuard SA branch (runs BEFORE
+/// the OIDC branch) looks the row up by id and constant-time-compares SHA-256(secret) to `tokenHash`.
+///
+/// `id` is `cuid()` (a domain entity, embedded in the token — ADR-0005). Soft-deletable (ADR-0006):
+/// DELETE sets `deletedAt` (= REVOKE), POST /restore clears it. `tokenHash` is unique among LIVE rows
+/// only — a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the migration; Prisma can't
+/// express it), mirroring the soft-delete-reuse precedent (ADR-0041): no `@unique` (that re-introduces
+/// the ghost-row collision). See docs/03-decisions/0048-service-accounts.md.
+model ServiceAccount {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  // SHA-256 hash of the token secret (hex). The cleartext secret is NEVER stored. Unique among LIVE
+  // rows via a PARTIAL unique index (raw SQL); rotate replaces this with the new secret's hash.
+  tokenHash   String
+  // A short, non-secret display fragment of the token (e.g. "lzit_sa_ckg9…"). Surfaced in the UI so an
+  // operator can recognise a credential; reveals nothing usable. Refreshed on rotate.
+  tokenPrefix String
+  // Soft disable distinct from revoke (deletedAt). An inactive account authenticates → 401, like an
+  // expired one, but its row and grants are preserved for re-enable. Default active.
+  isActive    Boolean   @default(true)
+  // Optional expiry (ADR-0048): a token presented at/after this instant is rejected (401). No
+  // scheduler force-expires; the guard checks it at auth time. null = no expiry.
+  expiresAt   DateTime?
+  // Set (best-effort, fire-and-forget) on each successful authentication. null until first use.
+  lastUsedAt  DateTime?
+  // The human who created it — the authenticated ADMIN's User.id. SetNull (mirrors AssetHistory):
+  // deleting that user never blocks deletion and the row survives. @db.Uuid to match User.id.
+  createdById String?   @db.Uuid
+  createdBy   User?     @relation("ServiceAccountCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  // Direct permission grants (the authorization source — never a role).
+  permissions ServiceAccountPermission[]
+  // Append-only audit trail of mint / rotate / revoke / restore / permission-change.
+  auditLog    ServiceAccountAuditLog[]
+
+  // Append-only actor attribution (ADR-0048): rows this service account authored on the audit-bearing
+  // tables. SetNull keeps the log row when the account is hard-deleted (which never happens — soft
+  // delete only). Mirrors the human-actor back-relations on User.
+  assetHistoryActed   AssetHistory[]       @relation("AssetHistorySaActor")
+  consumableMovements ConsumableMovement[] @relation("ConsumableMovementSaActor")
+  assignmentsMade     AssetAssignment[]    @relation("AssignmentAssignedBySa")
+  assignmentsReleased AssetAssignment[]    @relation("AssignmentReleasedBySa")
+  accessGrantsGranted AccessGrant[]        @relation("AccessGrantGrantedBySa")
+  accessGrantsRevoked AccessGrant[]        @relation("AccessGrantRevokedBySa")
+  articleVersionsEdited ArticleVersion[]   @relation("ArticleVersionEditorSa")
+  articleLinksCreated   ArticleLink[]      @relation("ArticleLinkCreatorSa")
+
+  @@index([isActive])
+  @@map("service_accounts")
+}
+
+/// A single direct permission grant for a ServiceAccount (ADR-0048). The authorization source: a
+/// service account passes a `@RequirePermission` route only if it holds EVERY required permission in
+/// THIS set — never via a role. `permission` is a plain String (not an enum), mirroring RolePermission:
+/// the closed catalog lives as zod in `@lazyit/shared` (`PermissionSchema`), so adding a permission
+/// never needs an enum migration and a catalog-foreign row is ignored at resolution time. The composite
+/// PK (serviceAccountId, permission) makes a grant idempotent. Cascade on the account: grants are
+/// meaningless without their account and carry no independent audit value (the ServiceAccountAuditLog
+/// records the change history), and the account itself soft-deletes — this cascade only fires on a
+/// (never-issued) hard delete.
+model ServiceAccountPermission {
+  serviceAccountId String
+  serviceAccount   ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  permission       String
+
+  @@id([serviceAccountId, permission])
+  @@index([serviceAccountId])
+  @@map("service_account_permissions")
+}
+
+/// Append-only audit trail of every lifecycle event on a ServiceAccount (ADR-0048): MINT (create),
+/// ROTATE (new secret), REVOKE (soft delete), RESTORE, and PERMISSION_CHANGE. Auditability by default
+/// (ADR-0006): immutable — `createdAt` only, never updated or deleted. `actorId` is the ADMIN who
+/// performed it (SetNull, like PermissionAuditLog). `detail` is optional contextual jsonb (e.g. the
+/// added/removed permissions on a PERMISSION_CHANGE). The secret is NEVER recorded here.
+model ServiceAccountAuditLog {
+  // autoincrement: a log table, never exposed externally (ADR-0005).
+  id               Int                     @id @default(autoincrement())
+  serviceAccountId String
+  serviceAccount   ServiceAccount          @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  action           ServiceAccountAuditAction
+  // Who performed it — the authenticated ADMIN's User.id. SetNull. @db.Uuid to match User.id. null =
+  // system/unknown actor.
+  actorId          String?                 @db.Uuid
+  actor            User?                   @relation("ServiceAccountAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  // Optional contextual jsonb (e.g. { added: [...], removed: [...] } on PERMISSION_CHANGE). Never a secret.
+  detail           Json?
+  createdAt        DateTime                @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). (serviceAccountId, id) serves the per-account
+  // chronological audit query.
+  @@index([serviceAccountId, id])
+  @@map("service_account_audit_log")
+}
+
+/// The lifecycle events recorded in ServiceAccountAuditLog (ADR-0048). MINT on create; ROTATE on a new
+/// secret; REVOKE on soft delete; RESTORE on un-delete; PERMISSION_CHANGE when the grant set is edited.
+enum ServiceAccountAuditAction {
+  MINT
+  ROTATE
+  REVOKE
+  RESTORE
+  PERMISSION_CHANGE
 }
 
 /// Where an asset physically lives — office, datacenter, rack, warehouse or
@@ -228,6 +410,13 @@ model AssetAssignment {
   assignedBy   User?     @relation("AssignmentAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
   releasedById String?   @db.Uuid
   releasedBy   User?     @relation("AssignmentReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
+  // Service-account actors (ADR-0048): set instead of the User actor when a SERVICE ACCOUNT assigned /
+  // released. A DB CHECK enforces at-most-one of (assignedById, assignedBySaId) and likewise for
+  // released. Plain String (cuid → text). SetNull.
+  assignedBySaId String?
+  assignedBySa   ServiceAccount? @relation("AssignmentAssignedBySa", fields: [assignedBySaId], references: [id], onDelete: SetNull)
+  releasedBySaId String?
+  releasedBySa   ServiceAccount? @relation("AssignmentReleasedBySa", fields: [releasedBySaId], references: [id], onDelete: SetNull)
   notes        String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -258,6 +447,11 @@ model AssetHistory {
   // blocks deleting them and the log row survives. null = system/unknown. @db.Uuid to match User.id.
   performedById String?               @db.Uuid
   performedBy   User?                 @relation("AssetHistoryActor", fields: [performedById], references: [id], onDelete: SetNull)
+  // Service-account actor (ADR-0048): set instead of performedById when a SERVICE ACCOUNT caused the
+  // change. A DB CHECK enforces at-most-one of (performedById, serviceAccountId) — never both. SetNull
+  // so the log survives a (never-issued) hard delete of the account. Plain String (cuid → text).
+  serviceAccountId String?
+  serviceAccount   ServiceAccount?    @relation("AssetHistorySaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
   createdAt     DateTime              @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (assetId, id) serves the per-asset timeline
@@ -336,6 +530,12 @@ model Article {
   // Flexible extras (estimatedReadingTime, externalLinks, …). Unvalidated jsonb — same debt as
   // Asset.specs. See ADR-0007 and docs/02-domain/entities/article.md.
   metadata       Json?
+  // Estimated reading time in whole minutes, derived from `content` (~200 words/min; min 1 for any
+  // non-empty body, 0 only for an empty one). A MAINTAINED column: the service recomputes it on every
+  // write that touches `content` (create/import/edit), so the LEAN list (ARTICLE_LIST_SELECT) can ship
+  // a reading metric for the card UI WITHOUT loading the markdown body. Backfilled for existing rows in
+  // the migration. See ADR-0042 and docs/02-domain/entities/article.md.
+  readingMinutes Int             @default(0)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -382,6 +582,10 @@ model ArticleVersion {
   // losing the actor never blocks deleting them and the log row survives. @db.Uuid to match User.id.
   editedById String?       @db.Uuid
   editedBy   User?         @relation("ArticleVersionEditor", fields: [editedById], references: [id], onDelete: SetNull)
+  // Service-account actor (ADR-0048): set instead of editedById when a SERVICE ACCOUNT produced the
+  // revision. A DB CHECK enforces at-most-one of (editedById, serviceAccountId). Plain String. SetNull.
+  serviceAccountId String?
+  serviceAccount   ServiceAccount? @relation("ArticleVersionEditorSa", fields: [serviceAccountId], references: [id], onDelete: SetNull)
   createdAt  DateTime      @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (articleId, version) is the natural unique key
@@ -411,6 +615,10 @@ model ArticleLink {
   // deleting them and the link survives. @db.Uuid to match User.id.
   createdById   String?      @db.Uuid
   createdBy     User?        @relation("ArticleLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  // Service-account actor (ADR-0048): set instead of createdById when a SERVICE ACCOUNT created the
+  // link. A DB CHECK enforces at-most-one of (createdById, serviceAccountId). Plain String. SetNull.
+  serviceAccountId String?
+  serviceAccount   ServiceAccount? @relation("ArticleLinkCreatorSa", fields: [serviceAccountId], references: [id], onDelete: SetNull)
   createdAt     DateTime     @default(now())
 
   // No updatedAt / deletedAt: a link is current-state, created or removed (hard delete), never
@@ -506,6 +714,13 @@ model AccessGrant {
   grantedBy     User?       @relation("AccessGrantGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
   revokedById   String?     @db.Uuid
   revokedBy     User?       @relation("AccessGrantRevokedBy", fields: [revokedById], references: [id], onDelete: SetNull)
+  // Service-account actors (ADR-0048): set instead of the User actor when a SERVICE ACCOUNT granted /
+  // revoked. A DB CHECK enforces at-most-one of (grantedById, grantedBySaId) and likewise for revoked.
+  // Plain String (cuid → text). SetNull.
+  grantedBySaId String?
+  grantedBySa   ServiceAccount? @relation("AccessGrantGrantedBySa", fields: [grantedBySaId], references: [id], onDelete: SetNull)
+  revokedBySaId String?
+  revokedBySa   ServiceAccount? @relation("AccessGrantRevokedBySa", fields: [revokedBySaId], references: [id], onDelete: SetNull)
   notes         String?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
@@ -589,6 +804,10 @@ model ConsumableMovement {
   // Who performed it — from the X-User-Id shim (ADR-0022). SetNull. @db.Uuid to match User.id.
   performedById String?                @db.Uuid
   performedBy   User?                  @relation("ConsumableMovementActor", fields: [performedById], references: [id], onDelete: SetNull)
+  // Service-account actor (ADR-0048): set instead of performedById when a SERVICE ACCOUNT performed the
+  // movement. A DB CHECK enforces at-most-one of (performedById, serviceAccountId). Plain String. SetNull.
+  serviceAccountId String?
+  serviceAccount   ServiceAccount?     @relation("ConsumableMovementSaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
   notes         String?
   createdAt     DateTime               @default(now())
 

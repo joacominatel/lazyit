@@ -2,6 +2,7 @@
 
 import {
   ArrowPathIcon,
+  DocumentDuplicateIcon,
   PencilSquareIcon,
   TrashIcon,
   UserPlusIcon,
@@ -20,7 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user-avatar";
 import { ErrorState } from "@/components/resource-table";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { useAsset, useAssetAssignments } from "@/lib/api/hooks/use-assets";
 import { useDeleteAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
@@ -38,7 +39,9 @@ export default function AssetDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
-  const canWrite = useCanWrite();
+  // Edit/Clone + asset-assignment create/release are asset:write; deletion is asset:delete.
+  const canWrite = useCan("asset:write");
+  const canDelete = useCan("asset:delete");
 
   const { data: asset, isLoading, isError, error, refetch } = useAsset(id);
   // All assignments (active + released), each with its user, for owners + history.
@@ -111,22 +114,34 @@ export default function AssetDetailPage() {
         }
         badge={<AssetStatusBadge status={asset.status} />}
         actions={
-          canWrite ? (
+          canWrite || canDelete ? (
             <>
-              <Button variant="outline" size="sm" asChild>
-                <Link href={`/assets/${asset.id}/edit`}>
-                  <PencilSquareIcon />
-                  Edit
-                </Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Delete asset"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <TrashIcon />
-              </Button>
+              {canWrite ? (
+                <>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={`/assets/${asset.id}/edit`}>
+                      <PencilSquareIcon />
+                      Edit
+                    </Link>
+                  </Button>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={`/assets/${asset.id}/clone`}>
+                      <DocumentDuplicateIcon />
+                      Clone
+                    </Link>
+                  </Button>
+                </>
+              ) : null}
+              {canDelete ? (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Delete asset"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <TrashIcon />
+                </Button>
+              ) : null}
             </>
           ) : undefined
         }

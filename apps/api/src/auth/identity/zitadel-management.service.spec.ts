@@ -360,6 +360,77 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
     expect(deleteCalls).toHaveLength(0);
   });
 
+  it('updateUser PUTs the profile and POSTs a PRE-VERIFIED email to the v2 user service — issue #149', async () => {
+    const svc = configure();
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse()) // token
+      .mockResolvedValueOnce(jsonResponse({})) // PUT /v2/users/human/{id} (profile)
+      .mockResolvedValueOnce(jsonResponse({})); // POST /v2/users/{id}/email
+
+    await svc.updateUser('zitadel-user-9', {
+      firstName: 'New',
+      lastName: 'Name',
+      email: 'new@b.com',
+    });
+
+    const profileCall = callAt(1);
+    expect(profileCall[1].method).toBe('PUT');
+    expect(profileCall[0]).toBe(
+      'http://zitadel:8080/v2/users/human/zitadel-user-9',
+    );
+    expect(JSON.parse(bodyOf(profileCall))).toEqual({
+      profile: { givenName: 'New', familyName: 'Name' },
+    });
+
+    const emailCall = callAt(2);
+    expect(emailCall[1].method).toBe('POST');
+    expect(emailCall[0]).toBe(
+      'http://zitadel:8080/v2/users/zitadel-user-9/email',
+    );
+    // Pre-verified: the new address is trusted, so Zitadel does NOT force re-verification (INV-2).
+    expect(JSON.parse(bodyOf(emailCall))).toEqual({
+      email: 'new@b.com',
+      isVerified: true,
+    });
+  });
+
+  it('updateUser only issues the calls for fields that are present (name-only → no email POST)', async () => {
+    const svc = configure();
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(jsonResponse({})); // PUT profile only
+
+    await svc.updateUser('zitadel-user-9', { firstName: 'New' });
+
+    const calls = fetchMock.mock.calls as FetchCall[];
+    // token + one PUT; no POST to the email sub-resource.
+    expect(calls).toHaveLength(2);
+    expect(calls[1][1].method).toBe('PUT');
+    const emailPosts = calls.filter((c) => c[0].endsWith('/email'));
+    expect(emailPosts).toHaveLength(0);
+    expect(JSON.parse(bodyOf(calls[1]))).toEqual({
+      profile: { givenName: 'New' },
+    });
+  });
+
+  it('requestPasswordReset POSTs /v2/users/{id}/password_reset with sendLink (Zitadel emails the link) — issue #149', async () => {
+    const svc = configure();
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(jsonResponse({}));
+
+    await svc.requestPasswordReset('zitadel-user-9');
+
+    const call = callAt(1);
+    expect(call[1].method).toBe('POST');
+    expect(call[0]).toBe(
+      'http://zitadel:8080/v2/users/zitadel-user-9/password_reset',
+    );
+    // sendLink → Zitadel emails the reset link via its own SMTP (vs returnCode which would hand the
+    // raw code back to lazyit — we deliberately never handle the credential).
+    expect(JSON.parse(bodyOf(call))).toEqual({ sendLink: {} });
+  });
+
   it('a non-2xx Management response throws a 503 (no silent partial write)', async () => {
     const svc = configure();
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);

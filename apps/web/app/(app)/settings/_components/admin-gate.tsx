@@ -3,21 +3,24 @@
 import { LockClosedIcon } from "@heroicons/react/24/outline";
 import type { ReactNode } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { usePermissions } from "@/lib/hooks/use-permissions";
+import { useMyPermissions } from "@/lib/hooks/use-permissions";
 
 /**
- * Client-side ADMIN gate for the whole Settings area. This is a UI affordance only — the API's
- * RolesGuard is the real boundary (every config / taxonomy write is ADMIN-gated server-side), so a
- * non-admin who reaches a route directly still gets 403s on any write. The gate just avoids showing
- * an admin surface to someone who can't use it.
+ * Client-side gate for the whole Settings area, aligned to `settings:manage` (RBAC v2, ADR-0046)
+ * rather than the raw ADMIN role — so a non-ADMIN to whom `settings:manage` was delegated can reach
+ * it, consistent with the fully-configurable model. This is a UI affordance only — the API's
+ * permission guard is the real boundary (every config / taxonomy write is gated server-side), so a
+ * caller who reaches a route directly still gets 403s on any write they can't perform. The gate just
+ * avoids showing the admin surface to someone who can't use it.
  *
  * Three states, all fail-closed:
- *   - loading (`/users/me` in flight) → a neutral skeleton, so we never flash the admin UI;
- *   - non-admin → an explicit "Admins only" empty-state;
- *   - admin → the children.
+ *   - loading (`/config/my-permissions` in flight) → a neutral skeleton, so we never flash the UI;
+ *   - lacks `settings:manage` → an explicit "Admins only" empty-state;
+ *   - holds `settings:manage` → the children.
  */
 export function AdminGate({ children }: { children: ReactNode }) {
-  const { isAdmin, isLoading } = usePermissions();
+  const { can, isLoading } = useMyPermissions();
+  const canManageSettings = can("settings:manage");
 
   if (isLoading) {
     return (
@@ -31,7 +34,7 @@ export function AdminGate({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!isAdmin) {
+  if (!canManageSettings) {
     return (
       <div
         className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed py-16 text-center"

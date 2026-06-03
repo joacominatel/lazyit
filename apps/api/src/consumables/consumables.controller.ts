@@ -35,8 +35,10 @@ import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
+import type { Principal } from '../auth/principal';
 
 class ConsumableDto extends createZodDto(ConsumableSchema) {}
 class ConsumableListPageDto extends createZodDto(ConsumableListPageSchema) {}
@@ -53,6 +55,7 @@ export class ConsumablesController {
   constructor(private readonly consumables: ConsumablesService) {}
 
   @Get()
+  @RequirePermission('consumable:read')
   @ApiOperation({
     summary:
       'List consumables (paginated; active by default). Server-side q search + sort + lowStock filter. deleted=only lists archived rows (ADMIN).',
@@ -137,6 +140,7 @@ export class ConsumablesController {
   }
 
   @Get(':id')
+  @RequirePermission('consumable:read')
   @ApiOperation({ summary: 'Get a consumable by id' })
   @ApiOkResponse({ type: ConsumableDto })
   findOne(@Param('id') id: string) {
@@ -144,6 +148,7 @@ export class ConsumablesController {
   }
 
   @Get(':id/movements')
+  @RequirePermission('consumable:read')
   @ApiOperation({
     summary: "List a consumable's stock movements (newest first)",
   })
@@ -179,7 +184,7 @@ export class ConsumablesController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('consumable:write')
   @ApiOperation({
     summary: 'Create a consumable (stock starts at 0) (ADMIN or MEMBER)',
   })
@@ -189,7 +194,7 @@ export class ConsumablesController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('consumable:write')
   @ApiOperation({
     summary:
       'Update a consumable (currentStock is not editable) (ADMIN or MEMBER)',
@@ -200,7 +205,7 @@ export class ConsumablesController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('consumable:delete')
   @ApiOperation({ summary: 'Soft-delete a consumable — ADMIN only' })
   @ApiOkResponse({ type: ConsumableDto })
   remove(@Param('id') id: string) {
@@ -208,7 +213,7 @@ export class ConsumablesController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('consumable:delete')
   @ApiOperation({
     summary: 'Restore a soft-deleted consumable — ADMIN only (ADR-0041)',
   })
@@ -218,7 +223,7 @@ export class ConsumablesController {
   }
 
   @Post(':id/movements')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('consumable:write')
   @ApiOperation({
     summary:
       'Record a stock movement (IN adds, OUT subtracts, ADJUSTMENT sets) (ADMIN or MEMBER)',
@@ -227,8 +232,8 @@ export class ConsumablesController {
   createMovement(
     @Param('id') id: string,
     @Body() dto: CreateConsumableMovementDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.consumables.createMovement(id, dto, user);
+    return this.consumables.createMovement(id, dto, principal);
   }
 }

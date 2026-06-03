@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/select";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useImportArticle } from "@/lib/api/hooks/use-article-mutations";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 
 /** Accepted upload types — the backend extracts markdown from each (ADR-0021). */
@@ -55,7 +55,7 @@ export function ImportArticleDialog({
   const router = useRouter();
   const { data: categories } = useArticleCategories();
   const { data: session } = useSession();
-  const canWrite = useCanWrite();
+  const canWrite = useCan("article:write");
   const importArticle = useImportArticle();
 
   const [file, setFile] = useState<File | null>(null);
@@ -101,8 +101,8 @@ export function ImportArticleDialog({
 
   const hasCategories = (categories?.length ?? 0) > 0;
 
-  // RBAC: gate the import affordance on write permission (ADR-0040). Render nothing for non-writers
-  // so the dialog never opens; the API still enforces authorship/role server-side (fails closed).
+  // RBAC v2: importing creates an article, so gate on article:write (ADR-0046). Render nothing
+  // without it so the dialog never opens; the API still enforces authorship/permission (fails closed).
   if (!canWrite) return null;
 
   return (

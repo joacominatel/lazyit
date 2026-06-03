@@ -11,8 +11,20 @@ import { Reflector } from '@nestjs/core';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma, Role, type User } from '../../generated/prisma/client';
+import {
+  Prisma,
+  Role,
+  type ServiceAccount,
+  type User,
+} from '../../generated/prisma/client';
 import { IS_PUBLIC_KEY } from './public.decorator';
+import type { Principal } from './principal';
+import {
+  isServiceAccountToken,
+  parseToken,
+  verifySecret,
+} from '../service-accounts/service-account-token';
+import { resolveServiceAccountPermissions } from '../service-accounts/service-account-permissions';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -27,7 +39,15 @@ interface ProfileClaims {
 }
 
 /**
- * Global auth guard (ADR-0038). Two modes:
+ * Global auth guard (ADR-0038, extended for service accounts by ADR-0048).
+ *
+ * SERVICE-ACCOUNT branch (ADR-0048) — runs FIRST, in every mode: a `Bearer lzit_sa_<id>_<secret>`
+ *   token authenticates a NON-HUMAN principal. The id is looked up in the DB (including soft-deleted
+ *   rows so a revoked account is detected), the secret is constant-time-compared to the stored SHA-256
+ *   `tokenHash`, and a revoked / inactive / expired account is rejected — all as a generic 401. On
+ *   success it sets `request.serviceAccount` + `request.principal = {kind:'service', …}` (with the
+ *   direct grants resolved DB-first) and leaves `request.user` undefined (a service account is never a
+ *   human). Any other bearer (or none) falls through to the unchanged human auth below.
  *
  * AUTH_MODE=shim (dev/test) — reads X-User-Id header; resolves user by UUID; never 401s.
  *   Present + valid UUID → user set on request; absent → request.user = undefined (anonymous).
@@ -40,7 +60,9 @@ interface ProfileClaims {
  *   via OIDC Discovery (BYOI-safe; no vendor path hardcoding) and the lookup is fail-soft — any
  *   discovery/userinfo failure falls back to the token's claims, never breaking login.
  *
- * The JWKS RemoteKeySet is created once at module scope (jose caches keys internally).
+ * After a HUMAN path resolves a user, the guard mirrors it onto `request.principal = {kind:'human', …}`
+ * so the authorization guard + ActorService treat both kinds of caller uniformly. The JWKS RemoteKeySet
+ * is created once at module scope (jose caches keys internally).
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -69,15 +91,135 @@ export class JwtAuthGuard implements CanActivate {
       return true;
     }
 
-    const request = context
-      .switchToHttp()
-      .getRequest<Request & { user?: User }>();
+    const request = context.switchToHttp().getRequest<
+      Request & {
+        user?: User;
+        serviceAccount?: ServiceAccount;
+        principal?: Principal;
+      }
+    >();
 
-    if (process.env.AUTH_MODE === 'shim') {
-      return this.handleShim(request);
+    // SERVICE-ACCOUNT branch (ADR-0048) — runs BEFORE the human modes. A lazyit-native token
+    // (`Authorization: Bearer lzit_sa_...`) authenticates a non-human principal in EVERY mode (it has
+    // no IdP dependency, BYOI-safe), so it is checked first. Any other bearer (or none) falls through
+    // to the unchanged human auth (shim or OIDC). The SA branch sets request.principal itself.
+    const bearer = this.extractBearer(request);
+    if (bearer && isServiceAccountToken(bearer)) {
+      return this.handleServiceAccount(request, bearer);
     }
 
-    return this.handleOidc(request);
+    const result =
+      process.env.AUTH_MODE === 'shim'
+        ? await this.handleShim(request)
+        : await this.handleOidc(request);
+
+    // Unify the human principal (ADR-0048): every existing path still sets request.user; mirror it onto
+    // request.principal so the authorization guard + ActorService can read either kind uniformly. An
+    // anonymous shim request (no resolved user) leaves principal undefined.
+    request.principal = request.user
+      ? { kind: 'human', user: request.user }
+      : undefined;
+    return result;
+  }
+
+  /** The raw bearer value (after `Bearer `), or undefined when the header is absent / non-bearer. */
+  private extractBearer(request: Request): string | undefined {
+    const authHeader = request.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return undefined;
+    }
+    return authHeader.slice(7);
+  }
+
+  // ---------- service-account mode (ADR-0048) -------------------------------
+
+  /**
+   * Authenticate a service account from a lazyit-native token (ADR-0048). DB-FIRST (INV-1): everything
+   * is verified against the DB row, never a token claim.
+   *   1. Parse `lzit_sa_<id>_<secret>`; a malformed token → 401.
+   *   2. Look the ServiceAccount up BY ID, INCLUDING soft-deleted rows (the escape hatch), so a
+   *      revoked (deletedAt) account is detected and REJECTED rather than silently re-provisioned.
+   *   3. Constant-time compare SHA-256(secret) to the row's `tokenHash`. A wrong secret → 401. The
+   *      lookup-then-compare order means a token with a real id but wrong secret still 401s, and a
+   *      token for an unknown id 401s without a compare.
+   *   4. Reject (401) a revoked (deletedAt), inactive (isActive=false) or expired (expiresAt past) account.
+   *   5. Resolve its direct permission grants DB-first into a Set and set `request.principal`
+   *      (kind:'service') + `request.serviceAccount`. `request.user` stays undefined — a service
+   *      account is NEVER a human (it never enters the user directory, JIT or last-admin logic).
+   *
+   * Every rejection is a generic 401 ("Invalid service-account token") — it never reveals WHICH check
+   * failed (unknown id vs. wrong secret vs. revoked), avoiding an account-enumeration oracle.
+   */
+  private async handleServiceAccount(
+    request: Request & {
+      user?: User;
+      serviceAccount?: ServiceAccount;
+      principal?: Principal;
+    },
+    bearer: string,
+  ): Promise<boolean> {
+    const invalid = () =>
+      new UnauthorizedException('Invalid service-account token');
+
+    const parsed = parseToken(bearer);
+    if (!parsed) {
+      throw invalid();
+    }
+
+    // Look up INCLUDING soft-deleted rows: a revoked account must be SEEN here (so we 401), not missed
+    // by the read filter. The flag is the ADR-0032 escape hatch the soft-delete extension strips.
+    const account = await this.prisma.serviceAccount.findFirst({
+      where: { id: parsed.serviceAccountId },
+      includeSoftDeleted: true,
+    } as Prisma.ServiceAccountFindFirstArgs);
+
+    // No row for that id → 401 WITHOUT a secret compare. (We still parsed a well-formed token.)
+    if (!account) {
+      throw invalid();
+    }
+
+    // Constant-time secret check FIRST (before leaking state via the revoked/expired branches): a
+    // caller who doesn't hold the secret can't distinguish "wrong secret" from "revoked" — both 401.
+    if (!verifySecret(parsed.secret, account.tokenHash)) {
+      throw invalid();
+    }
+
+    // Account-state gates (all 401, generic): revoked (soft-deleted), disabled, or expired.
+    if (account.deletedAt !== null) {
+      throw invalid();
+    }
+    if (!account.isActive) {
+      throw invalid();
+    }
+    if (
+      account.expiresAt !== null &&
+      account.expiresAt.getTime() <= Date.now()
+    ) {
+      throw invalid();
+    }
+
+    // Resolve the direct grants DB-first (INV-1) into a clean catalog Set — never a token claim.
+    const grantRows = await this.prisma.serviceAccountPermission.findMany({
+      where: { serviceAccountId: account.id },
+      select: { permission: true },
+    });
+    const permissions = resolveServiceAccountPermissions(grantRows);
+
+    request.serviceAccount = account;
+    request.principal = {
+      kind: 'service',
+      serviceAccount: account,
+      permissions,
+    };
+    request.user = undefined;
+
+    // Best-effort last-used stamp (fire-and-forget): never blocks or fails the request. Uses the base
+    // client; a write failure is swallowed (the audit/auth decision is already made).
+    void this.prisma.serviceAccount
+      .update({ where: { id: account.id }, data: { lastUsedAt: new Date() } })
+      .catch(() => undefined);
+
+    return true;
   }
 
   // ---------- shim mode -----------------------------------------------------

@@ -33,6 +33,10 @@ type IdpMock = {
   deactivateUser: jest.Mock;
   grantRole: jest.Mock;
   revokeRole: jest.Mock;
+  // Issue #149: the IdentityProvider gained updateUser + requestPasswordReset. ConfigService never
+  // calls them, but the mock must satisfy the interface shape for the `as IdentityProvider` cast.
+  updateUser: jest.Mock;
+  requestPasswordReset: jest.Mock;
 };
 
 type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
@@ -92,6 +96,8 @@ describe('ConfigService', () => {
       deactivateUser: jest.fn(),
       grantRole: jest.fn(),
       revokeRole: jest.fn(),
+      updateUser: jest.fn(),
+      requestPasswordReset: jest.fn(),
     };
     logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 

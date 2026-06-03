@@ -13,7 +13,9 @@ import { useCallback, useMemo, useState } from "react";
  * list calls it when its rows change) so a batch never targets a row the user can't see.
  *
  * Returned as a single object so a list can spread it into the table's `selection` prop and the
- * batch-action bar. ADMIN-only at the call site (`useCanWrite()`); this hook is purely UI state.
+ * batch-action bar. The bulk actions are lifecycle ops, so gate selection at the call site on
+ * `can('<domain>:delete')` (the archived bulk-restore lists are reached only by ADMINs, who hold it);
+ * this hook is purely UI state.
  */
 export interface RowSelection {
   /** The currently selected row ids. */

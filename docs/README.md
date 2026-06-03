@@ -3,7 +3,7 @@ title: lazyit Documentation
 tags: [moc, root]
 status: draft
 created: 2026-05-25
-updated: 2026-05-26
+updated: 2026-06-03
 ---
 
 # lazyit — Documentation
@@ -23,6 +23,8 @@ frontmatter, and internal references use `[[wiki-links]]`.
   procedure for every change (context-first, ask-don't-assume, subagents, commits, docs-sync).
 - Setting up your machine? Go to [[setup]].
 - Looking for *why* something is the way it is? See [[03-decisions/_MOC|Decisions (ADRs)]].
+- **Latest status snapshot:** [[status_jun_2026/README|Status — June 2026]] (the RBAC v2 + Service
+  Accounts epic + the CEO's decisions). Prior: [[status_may_2026/README|May 2026]].
 
 ## Map of Content
 
@@ -94,11 +96,10 @@ All open questions from the initial briefing are now decided (2026-05-25):
 
 ### Not written yet (intentional stubs)
 
-- `05-runbooks/*` — empty until there is something to operate (deploy, backups, on-call).
-- Entity **field tables** — deliberately omitted; entities are conceptual-only until
-  they exist in Prisma (see each note in [[entities/_MOC|Entities]]).
-- ADRs still pending: the **auth IdP/provider** choice and **async workers** (BullMQ + Redis) —
-  see [[03-decisions/_MOC|Decisions]]. (The auth *strategy* and *deployment model* are now
-  decided: [[0016-auth-strategy-deferred]], [[0015-deployment-model]].)
-- [[deployment]] — deployment *topology* still a skeleton; the *model* is decided
-  ([[0015-deployment-model]]: self-hosted, single-org).
+- Entity **field tables** — added once a model lands in Prisma (most now have them); still conceptual-only
+  for the not-yet-built entities (Ticket, AccessRequest — see [[entities/_MOC|Entities]]).
+- The one ADR still pending: **async workers** (BullMQ + Redis) — see [[03-decisions/_MOC|Decisions]].
+  (The **auth IdP** is decided — Zitadel/BYOI, [[0037-idp-choice-zitadel-byoi]] /
+  [[0043-zitadel-source-of-truth]]; **authorization** is decided — [[0046-roles-permissions-v2]] +
+  [[0048-service-accounts]]; the **deployment model + topology** are built — [[0015-deployment-model]] /
+  [[deployment]].)

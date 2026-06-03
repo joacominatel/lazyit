@@ -8,6 +8,8 @@ import {
   offsetOf,
   pageOf,
   slugify,
+  type ArticleLinkedFilter,
+  type ArticleLinkedTo,
   type ArticleStatus,
   type CreateArticle,
   type CreateArticleLink,
@@ -19,6 +21,7 @@ import { Prisma } from '../../generated/prisma/client';
 import type { Article, User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import { isServicePrincipal, type Principal } from '../auth/principal';
 import { SearchService } from '../search/search.service';
 import { projectArticle, type ArticleRow } from '../search/search.documents';
 import {
@@ -34,6 +37,14 @@ export interface ArticleListFilters {
   authorId?: string;
   status?: ArticleStatus;
   q?: string;
+  /** `only` → restrict to articles that have ≥1 ArticleLink (ADR-0042). Omitted = no link filter. */
+  linked?: ArticleLinkedFilter;
+  /**
+   * Narrows `linked` to a single target kind (ADR-0042): `asset` keeps only articles linked to ≥1
+   * Asset, `application` only those linked to ≥1 Application. Implies the linked filter even if
+   * `linked` is omitted.
+   */
+  linkedTo?: ArticleLinkedTo;
 }
 
 /** The subset of a multer file the import needs. The controller passes Express.Multer.File. */
@@ -45,8 +56,10 @@ export interface UploadedImportFile {
 
 // Lean projection for the LIST (GET /articles, paginated): every Article column EXCEPT `content` —
 // the full Markdown body, the largest column, which a list view never renders (`excerpt` is kept).
+// Adds the maintained `readingMinutes` metric and a relation `_count` of `links` — both produced by
+// the query, so the card UI gets a reading time + "linked" indicator with NO body load and NO N+1.
 // The detail reads (findOne / findBySlug) still return the full Article incl. `content`. See
-// packages/shared/src/schemas/article-list.ts and ADR-0030 / the perf analysis (#3).
+// packages/shared/src/schemas/article-list.ts and ADR-0030 / ADR-0042 / the perf analysis (#3).
 const ARTICLE_LIST_SELECT = {
   id: true,
   slug: true,
@@ -58,9 +71,12 @@ const ARTICLE_LIST_SELECT = {
   lastEditedById: true,
   publishedAt: true,
   metadata: true,
+  readingMinutes: true,
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
+  // Per-row link tally in ONE query (no N+1) — mapped to the flat `linkCount` before returning.
+  _count: { select: { links: true } },
 } satisfies Prisma.ArticleSelect;
 
 /**
@@ -83,7 +99,10 @@ export class ArticlesService {
    * the full Markdown `content` is omitted (`excerpt` kept) — the detail reads still return it. Runs
    * the page `findMany(take/skip)` and the `count` over the **same** `where` inside one
    * `$transaction`, so the `total` can't drift from the page. Optional filters: category, author,
-   * status, and a substring `q` over title/excerpt.
+   * status, a substring `q` over title/excerpt, and a `linked`/`linkedTo` filter (ADR-0042) that
+   * keeps only articles with ≥1 ArticleLink (optionally narrowed to an asset/application target).
+   * Each row carries the precomputed `readingMinutes` and a `linkCount` (relation `_count`, flattened
+   * here) so the card UI gets a reading metric + "linked" indicator with no body load and no N+1.
    */
   async findPage(
     filters: ArticleListFilters,
@@ -92,7 +111,7 @@ export class ArticlesService {
   ) {
     const where = this.buildWhere(filters, currentUser);
     const { take, skip } = offsetOf(page);
-    const [items, total] = await this.prisma.$transaction([
+    const [rows, total] = await this.prisma.$transaction([
       this.prisma.article.findMany({
         where,
         orderBy: { updatedAt: 'desc' },
@@ -102,8 +121,13 @@ export class ArticlesService {
       }),
       this.prisma.article.count({ where }),
     ]);
-    // The lean rows carry `Date`s; the API serializes them to ISO strings at the HTTP boundary (same
-    // as findOne) — the ArticleListPage DTO documents the resulting wire shape (content omitted).
+    // Flatten Prisma's nested `_count.links` into the flat `linkCount` the DTO exposes. The lean rows
+    // carry `Date`s; the API serializes them to ISO strings at the HTTP boundary (same as findOne) —
+    // the ArticleListPage DTO documents the resulting wire shape (content omitted, linkCount added).
+    const items = rows.map(({ _count, ...row }) => ({
+      ...row,
+      linkCount: _count.links,
+    }));
     return pageOf(items, total, page);
   }
 
@@ -128,7 +152,42 @@ export class ArticlesService {
         ],
       });
     }
+    const linkedWhere = this.linkedWhere(filters);
+    if (linkedWhere) and.push(linkedWhere);
     return { AND: and };
+  }
+
+  /**
+   * The `linked`/`linkedTo` clause for the article list (ADR-0042). `linked=only` (or any
+   * `linkedTo`) keeps only articles with ≥1 ArticleLink via a relation `some`; `linkedTo` narrows
+   * that to a single target kind (asset/application). Returns `undefined` when no link filter was
+   * asked for (the list then includes both linked and unlinked articles). The `some` predicate is an
+   * EXISTS subquery — it doesn't multiply rows, so it composes cleanly with the page + count.
+   */
+  private linkedWhere(
+    filters: ArticleListFilters,
+  ): Prisma.ArticleWhereInput | undefined {
+    if (!filters.linked && !filters.linkedTo) return undefined;
+    const linkWhere: Prisma.ArticleLinkWhereInput =
+      filters.linkedTo === 'asset'
+        ? { assetId: { not: null } }
+        : filters.linkedTo === 'application'
+          ? { applicationId: { not: null } }
+          : {};
+    return { links: { some: linkWhere } };
+  }
+
+  /**
+   * Estimated reading time of a markdown body in whole minutes — the value maintained in
+   * `Article.readingMinutes` (ADR-0042). ~200 words/minute; min 1 for any non-empty body, 0 for an
+   * empty/whitespace-only one. A "word" is a whitespace-separated token, matching the SQL backfill in
+   * the migration (`regexp_split_to_array(trim(content), '\s+')`) so the column and this helper agree.
+   */
+  private readingMinutesOf(content: string): number {
+    const trimmed = content.trim();
+    if (trimmed === '') return 0;
+    const words = trimmed.split(/\s+/).length;
+    return Math.max(1, Math.ceil(words / 200));
   }
 
   /** A readable article by id (404 if missing, deleted, or a draft the caller doesn't own). */
@@ -160,8 +219,8 @@ export class ArticlesService {
    * Snapshots version 1 in the same transaction (ADR-0042) so the article's full history starts at
    * creation — editing later never destroys the original body (ADR-0006).
    */
-  async create(data: CreateArticle, currentUser?: User) {
-    const authorId = this.requireCurrentUser(currentUser);
+  async create(data: CreateArticle, principal?: Principal) {
+    const authorId = this.requireAuthor(principal);
     await this.assertCategoryUsable(data.categoryId);
     const slug = data.slug ?? this.deriveSlug(data.title);
     const article = await this.prisma.$transaction(async (tx) => {
@@ -170,6 +229,7 @@ export class ArticlesService {
           slug,
           title: data.title,
           content: data.content,
+          readingMinutes: this.readingMinutesOf(data.content),
           ...(data.excerpt !== undefined ? { excerpt: data.excerpt } : {}),
           status: data.status,
           publishedAt: data.status === 'PUBLISHED' ? new Date() : null,
@@ -199,8 +259,8 @@ export class ArticlesService {
    * same transaction (ADR-0042) — so the prior body is preserved, not overwritten (ADR-0006). A
    * metadata-only or no-op edit does NOT create a version (status is never touched by PATCH).
    */
-  async update(id: string, data: UpdateArticle, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async update(id: string, data: UpdateArticle, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     const current = await this.loadOwned(id, cu);
     if (data.categoryId) await this.assertCategoryUsable(data.categoryId);
     const { metadata, ...rest } = data;
@@ -210,6 +270,11 @@ export class ArticlesService {
         data: {
           ...rest,
           lastEditedById: cu,
+          // Keep the maintained reading metric in sync whenever the body changes (ADR-0042); a
+          // metadata/title-only PATCH leaves `content` absent, so readingMinutes is untouched.
+          ...(data.content !== undefined
+            ? { readingMinutes: this.readingMinutesOf(data.content) }
+            : {}),
           ...(metadata !== undefined
             ? { metadata: metadata as Prisma.InputJsonValue }
             : {}),
@@ -234,8 +299,8 @@ export class ArticlesService {
   }
 
   /** Soft delete (author only). */
-  async remove(id: string, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async remove(id: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     await this.loadOwned(id, cu);
     const article = await this.prisma.article.update({
       where: { id },
@@ -255,8 +320,8 @@ export class ArticlesService {
    * live article took the slug (mapped by the global PrismaExceptionFilter). On success the article is
    * re-indexed only if PUBLISHED (draft privacy — ADR-0022 / ADR-0035).
    */
-  async restore(id: string, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async restore(id: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     const article = await this.prisma.article.findFirst({
       where: { id },
       includeSoftDeleted: true,
@@ -284,8 +349,8 @@ export class ArticlesService {
    * A real transition (DRAFT → PUBLISHED) changes `status`, so it snapshots a new version in the
    * same transaction (ADR-0042); the idempotent no-op does not.
    */
-  async publish(id: string, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async publish(id: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     const article = await this.loadOwned(id, cu);
     if (article.status === 'PUBLISHED') return article;
     const published = await this.prisma.$transaction(async (tx) => {
@@ -310,8 +375,8 @@ export class ArticlesService {
    * transition (PUBLISHED → DRAFT) changes `status`, so it snapshots a new version in the same
    * transaction (ADR-0042); the idempotent no-op does not.
    */
-  async unpublish(id: string, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async unpublish(id: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     const article = await this.loadOwned(id, cu);
     if (article.status === 'DRAFT') return article;
     const unpublished = await this.prisma.$transaction(async (tx) => {
@@ -331,9 +396,9 @@ export class ArticlesService {
   async importArticle(
     file: UploadedImportFile | undefined,
     fields: ImportArticle,
-    currentUser?: User,
+    principal?: Principal,
   ) {
-    const authorId = this.requireCurrentUser(currentUser);
+    const authorId = this.requireAuthor(principal);
     if (!file) {
       throw new BadRequestException('A file is required');
     }
@@ -358,6 +423,7 @@ export class ArticlesService {
           slug,
           title,
           content,
+          readingMinutes: this.readingMinutesOf(content),
           status: fields.status,
           publishedAt: fields.status === 'PUBLISHED' ? new Date() : null,
           categoryId: fields.categoryId,
@@ -429,9 +495,9 @@ export class ArticlesService {
   async addLink(
     articleId: string,
     data: CreateArticleLink,
-    currentUser?: User,
+    principal?: Principal,
   ) {
-    const cu = this.requireCurrentUser(currentUser);
+    const cu = this.requireAuthor(principal);
     await this.loadOwned(articleId, cu);
     if (data.assetId) {
       await this.assertAssetUsable(data.assetId);
@@ -452,8 +518,8 @@ export class ArticlesService {
    * Remove a link from an article (ADR-0042). Author-only (same gate as edits). 404 if the link
    * doesn't exist or doesn't belong to this article (so an actor can't probe another article's links).
    */
-  async removeLink(articleId: string, linkId: string, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async removeLink(articleId: string, linkId: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     await this.loadOwned(articleId, cu);
     const link = await this.prisma.articleLink.findFirst({
       where: { id: linkId, articleId },
@@ -559,12 +625,26 @@ export class ArticlesService {
   }
 
   /**
-   * Like resolveCurrentUser but mandatory (writes): 400 if no authenticated user is present.
-   * In OIDC mode the guard already ensures a user is set, so this only fires in shim mode when
-   * X-User-Id is absent.
+   * Resolve the author/editor of an article WRITE from the unified principal (ADR-0042 + ADR-0048).
+   *
+   * Articles are authored and OWNED by a human: `Article.authorId` is a NON-NULL `User` FK (onDelete
+   * Restrict) and the author-only edit gate is identity equality on `User.id`. A service account has no
+   * `User` identity to own an article — so SA article-authoring is **out of scope by data model**, not
+   * a silent null write: a service-account principal is rejected with **403** (honest: a bot cannot be
+   * the author), exactly where a human would be required. The ArticleVersion/ArticleLink SA actor
+   * columns therefore stay schema-present but unreachable — no audit row is ever produced for an SA here.
+   *
+   * - human  → returns `User.id` (used as `authorId` / the ownership key, behavior-preserving).
+   * - service account → 403 ForbiddenException.
+   * - anonymous (shim, no resolved user) → 400 BadRequestException (unchanged for humans).
    */
-  private requireCurrentUser(currentUser?: User): string {
-    const resolved = this.resolveCurrentUser(currentUser);
+  private requireAuthor(principal?: Principal): string {
+    if (isServicePrincipal(principal)) {
+      throw new ForbiddenException(
+        'Service accounts cannot author or edit articles (an article author is a human user)',
+      );
+    }
+    const resolved = principal?.user.id;
     if (!resolved) {
       throw new BadRequestException(
         'An authenticated user is required for this operation',

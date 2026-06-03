@@ -23,7 +23,7 @@ import {
 } from '@lazyit/shared';
 import { AssetModelsService } from './asset-models.service';
 import { parseCuidQuery } from '../common/parse-cuid-query';
-import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 
 class AssetModelDto extends createZodDto(AssetModelSchema) {}
 class CreateAssetModelDto extends createZodDto(CreateAssetModelSchema) {}
@@ -35,6 +35,7 @@ export class AssetModelsController {
   constructor(private readonly models: AssetModelsService) {}
 
   @Get()
+  @RequirePermission('assetModel:read')
   @ApiOperation({
     summary: 'List asset models (excludes soft-deleted); optional category filter',
   })
@@ -45,6 +46,7 @@ export class AssetModelsController {
   }
 
   @Get(':id')
+  @RequirePermission('assetModel:read')
   @ApiOperation({ summary: 'Get an asset model by id' })
   @ApiOkResponse({ type: AssetModelDto })
   findOne(@Param('id') id: string) {
@@ -52,7 +54,7 @@ export class AssetModelsController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('assetModel:write')
   @ApiOperation({ summary: 'Create an asset model (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: AssetModelDto })
   create(@Body() dto: CreateAssetModelDto) {
@@ -60,7 +62,7 @@ export class AssetModelsController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('assetModel:write')
   @ApiOperation({ summary: 'Update an asset model (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: AssetModelDto })
   update(@Param('id') id: string, @Body() dto: UpdateAssetModelDto) {
@@ -68,7 +70,7 @@ export class AssetModelsController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('assetModel:delete')
   @ApiOperation({ summary: 'Soft-delete an asset model — ADMIN only' })
   @ApiOkResponse({ type: AssetModelDto })
   remove(@Param('id') id: string) {
@@ -76,7 +78,7 @@ export class AssetModelsController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('assetModel:delete')
   @ApiOperation({
     summary: 'Restore a soft-deleted asset model — ADMIN only (ADR-0041)',
   })

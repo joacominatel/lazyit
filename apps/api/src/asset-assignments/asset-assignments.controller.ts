@@ -25,9 +25,9 @@ import {
   ReleaseAssetAssignmentDto,
   UpdateAssetAssignmentNotesDto,
 } from './asset-assignment.dto';
-import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
-import type { User } from '../../generated/prisma/client';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
+import type { Principal } from '../auth/principal';
 
 @ApiTags('asset-assignments')
 @Controller('asset-assignments')
@@ -35,6 +35,7 @@ export class AssetAssignmentsController {
   constructor(private readonly assignments: AssetAssignmentsService) {}
 
   @Get()
+  @RequirePermission('asset:read')
   @ApiOperation({
     summary:
       'List assignments; filter by assetId / userId. Active-only by default.',
@@ -61,6 +62,7 @@ export class AssetAssignmentsController {
   }
 
   @Get(':id')
+  @RequirePermission('asset:read')
   @ApiOperation({ summary: 'Get an assignment by id' })
   @ApiOkResponse({ type: AssetAssignmentDto })
   findOne(@Param('id') id: string) {
@@ -68,20 +70,20 @@ export class AssetAssignmentsController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('asset:write')
   @ApiOperation({
     summary: 'Open an assignment (assign a user to an asset) (ADMIN or MEMBER)',
   })
   @ApiCreatedResponse({ type: AssetAssignmentDto })
   create(
     @Body() dto: CreateAssetAssignmentDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.assignments.create(dto, user);
+    return this.assignments.create(dto, principal);
   }
 
   @Patch(':id/release')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('asset:write')
   @ApiOperation({
     summary:
       'Release an active assignment (sets releasedAt; 409 if already released) (ADMIN or MEMBER)',
@@ -91,13 +93,13 @@ export class AssetAssignmentsController {
   release(
     @Param('id') id: string,
     @Body() dto: ReleaseAssetAssignmentDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.assignments.release(id, dto, user);
+    return this.assignments.release(id, dto, principal);
   }
 
   @Patch(':id/notes')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('asset:write')
   @ApiOperation({
     summary: 'Update only the notes of an assignment (ADMIN or MEMBER)',
   })

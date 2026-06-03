@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { cloneCategoryDefaults } from "@lazyit/shared";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -54,16 +55,32 @@ interface FormState {
   order: string;
 }
 
-function toFormState(category?: AnyCategory): FormState {
-  return {
-    name: category?.name ?? "",
-    description: category?.description ?? "",
-    icon: category?.icon ?? "",
-    order:
-      category && categoryOrder(category) !== null
-        ? String(categoryOrder(category))
-        : "",
-  };
+/**
+ * Initial dialog state. Edit → from `category`. Clone → from the shared `cloneCategoryDefaults`
+ * sanitizer (name " (copy)"; the non-unique description/icon/order are carried). Otherwise blank.
+ */
+function toFormState(category?: AnyCategory, cloneSource?: AnyCategory): FormState {
+  if (category) {
+    return {
+      name: category.name,
+      description: category.description ?? "",
+      icon: category.icon ?? "",
+      order:
+        categoryOrder(category) !== null
+          ? String(categoryOrder(category))
+          : "",
+    };
+  }
+  if (cloneSource) {
+    const d = cloneCategoryDefaults(cloneSource);
+    return {
+      name: d.name ?? "",
+      description: d.description ?? "",
+      icon: d.icon ?? "",
+      order: d.order != null ? String(d.order) : "",
+    };
+  }
+  return { name: "", description: "", icon: "", order: "" };
 }
 
 type BuildResult =
@@ -76,6 +93,12 @@ interface CategoryFormDialogProps {
   kind: CategoryKind;
   /** Present → edit that category; absent → create a new one. */
   category?: AnyCategory;
+  /**
+   * Present (and `category` absent) → CREATE pre-filled from this record (issue #125). Distinct from
+   * the edit `category` prop: the dialog stays in create mode (CreateXCategorySchema + create
+   * mutation) with a " (copy)" name.
+   */
+  cloneSource?: AnyCategory;
 }
 
 /**
@@ -93,15 +116,24 @@ export function CategoryFormDialog({
   onOpenChange,
   kind,
   category,
+  cloneSource,
 }: CategoryFormDialogProps) {
+  // Key by mode + target id so reopening for a different record (edit OR clone) remounts with fresh
+  // state — no setState-in-effect.
+  const recordKey = category
+    ? `edit-${category.id}`
+    : cloneSource
+      ? `clone-${cloneSource.id}`
+      : "new";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         {open ? (
           <CategoryForm
-            key={`${kind}:${category?.id ?? "new"}`}
+            key={`${kind}:${recordKey}`}
             kind={kind}
             category={category}
+            cloneSource={cloneSource}
             onClose={() => onOpenChange(false)}
           />
         ) : null}
@@ -113,10 +145,12 @@ export function CategoryFormDialog({
 function CategoryForm({
   kind,
   category,
+  cloneSource,
   onClose,
 }: {
   kind: CategoryKind;
   category?: AnyCategory;
+  cloneSource?: AnyCategory;
   onClose: () => void;
 }) {
   const isEdit = category != null;
@@ -149,7 +183,9 @@ function CategoryForm({
   const hasOrder = kindHasOrder(kind);
   const label = CATEGORY_KIND_LABEL[kind];
 
-  const [values, setValues] = useState<FormState>(() => toFormState(category));
+  const [values, setValues] = useState<FormState>(() =>
+    toFormState(category, cloneSource),
+  );
   const [error, setError] = useState<string | undefined>(undefined);
 
   function set<K extends keyof FormState>(key: K, value: string) {

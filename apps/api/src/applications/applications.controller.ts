@@ -34,7 +34,7 @@ import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
 class ApplicationDto extends createZodDto(ApplicationSchema) {}
@@ -54,6 +54,7 @@ export class ApplicationsController {
   ) {}
 
   @Get()
+  @RequirePermission('application:read')
   @ApiOperation({
     summary:
       'List applications (paginated; active by default). Server-side q search + sort. deleted=only lists archived rows (ADMIN).',
@@ -128,13 +129,17 @@ export class ApplicationsController {
   }
 
   @Get(':id')
+  @RequirePermission('application:read')
   @ApiOperation({ summary: 'Get an application by id' })
   @ApiOkResponse({ type: ApplicationDto })
   findOne(@Param('id') id: string) {
     return this.applications.findOne(id);
   }
 
+  // The access-MAP for this application (who can reach it) is access-grant data, so it is gated on
+  // `accessGrant:read` (ADR-0046 pre-tightened) — a VIEWER cannot enumerate it, even via an app.
   @Get(':id/access-grants')
+  @RequirePermission('accessGrant:read')
   @ApiOperation({
     summary: "List an application's access grants (active-only by default)",
   })
@@ -166,6 +171,7 @@ export class ApplicationsController {
   }
 
   @Get(':id/articles')
+  @RequirePermission('article:read')
   @ApiOperation({
     summary:
       "List the PUBLISHED knowledge-base articles linked to this application ('the runbook for THIS app'). (ADR-0042)",
@@ -177,7 +183,7 @@ export class ApplicationsController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('application:write')
   @ApiOperation({ summary: 'Create an application (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: ApplicationDto })
   create(@Body() dto: CreateApplicationDto) {
@@ -185,7 +191,7 @@ export class ApplicationsController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('application:write')
   @ApiOperation({ summary: 'Update an application (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: ApplicationDto })
   update(@Param('id') id: string, @Body() dto: UpdateApplicationDto) {
@@ -193,7 +199,7 @@ export class ApplicationsController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('application:delete')
   @ApiOperation({ summary: 'Soft-delete an application — ADMIN only' })
   @ApiOkResponse({ type: ApplicationDto })
   remove(@Param('id') id: string) {
@@ -201,7 +207,7 @@ export class ApplicationsController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('application:delete')
   @ApiOperation({
     summary: 'Restore a soft-deleted application — ADMIN only (ADR-0041)',
   })

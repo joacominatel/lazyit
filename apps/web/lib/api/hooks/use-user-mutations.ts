@@ -3,6 +3,7 @@ import type { CreateUser, Role, UpdateUser } from "@lazyit/shared";
 import {
   createUser,
   deleteUser,
+  resetUserPassword,
   restoreUser,
   updateUser,
 } from "../endpoints/users";
@@ -72,5 +73,17 @@ export function useRestoreUser() {
   return useMutation({
     mutationFn: (id: string) => restoreUser(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: userKeys.all }),
+  });
+}
+
+/**
+ * Trigger an IdP-driven password reset for a user (`POST /users/:id/reset-password`, `user:manage`).
+ * The IdP (Zitadel) emails the reset link via its own SMTP — lazyit never sets the password, so there
+ * is nothing in our cache to invalidate. Toasts and the honest 501/422/404 handling are owned by the
+ * calling component (mapped on the {@link ApiError}'s `.status`); this only wraps the request.
+ */
+export function useResetUserPassword() {
+  return useMutation({
+    mutationFn: (id: string) => resetUserPassword(id),
   });
 }

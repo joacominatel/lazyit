@@ -20,7 +20,7 @@ import {
   UpdateConsumableCategorySchema,
 } from '@lazyit/shared';
 import { ConsumableCategoriesService } from './consumable-categories.service';
-import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 
 class ConsumableCategoryDto extends createZodDto(ConsumableCategorySchema) {}
 class CreateConsumableCategoryDto extends createZodDto(
@@ -36,6 +36,7 @@ export class ConsumableCategoriesController {
   constructor(private readonly categories: ConsumableCategoriesService) {}
 
   @Get()
+  @RequirePermission('category:read')
   @ApiOperation({
     summary: 'List all consumable categories (excludes soft-deleted)',
   })
@@ -45,6 +46,7 @@ export class ConsumableCategoriesController {
   }
 
   @Get(':id')
+  @RequirePermission('category:read')
   @ApiOperation({ summary: 'Get a consumable category by id' })
   @ApiOkResponse({ type: ConsumableCategoryDto })
   findOne(@Param('id') id: string) {
@@ -52,7 +54,7 @@ export class ConsumableCategoriesController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('category:write')
   @ApiOperation({ summary: 'Create a consumable category (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: ConsumableCategoryDto })
   create(@Body() dto: CreateConsumableCategoryDto) {
@@ -60,7 +62,7 @@ export class ConsumableCategoriesController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('category:write')
   @ApiOperation({ summary: 'Update a consumable category (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: ConsumableCategoryDto })
   update(@Param('id') id: string, @Body() dto: UpdateConsumableCategoryDto) {
@@ -68,7 +70,7 @@ export class ConsumableCategoriesController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('category:delete')
   @ApiOperation({
     summary:
       'Soft-delete a consumable category (detaches its consumables) — ADMIN only',
@@ -79,7 +81,7 @@ export class ConsumableCategoriesController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('category:delete')
   @ApiOperation({
     summary:
       'Restore a soft-deleted consumable category — ADMIN only (ADR-0041)',

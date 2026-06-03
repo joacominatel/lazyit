@@ -18,7 +18,7 @@ import {
   type ResourceColumn,
   ResourceTable,
 } from "@/components/resource-table";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { useAssets } from "@/lib/api/hooks/use-assets";
 import { useDeleteLocation } from "@/lib/api/hooks/use-location-mutations";
 import { useLocation } from "@/lib/api/hooks/use-locations";
@@ -37,7 +37,11 @@ export default function LocationDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
-  const canWrite = useCanWrite();
+  // Edit is location:write, Delete is location:delete; the "New asset here" shortcut is an asset
+  // create, so it's gated on asset:write (cross-domain affordance).
+  const canWrite = useCan("location:write");
+  const canDelete = useCan("location:delete");
+  const canCreateAsset = useCan("asset:write");
 
   const { data: location, isLoading, isError, error, refetch } =
     useLocation(id);
@@ -88,20 +92,28 @@ export default function LocationDetailPage() {
         title={location.name}
         badge={<LocationTypeBadge type={location.type} />}
         actions={
-          canWrite ? (
+          canWrite || canDelete ? (
             <>
-              <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-                <PencilSquareIcon />
-                Edit
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Delete location"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <TrashIcon />
-              </Button>
+              {canWrite ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEditOpen(true)}
+                >
+                  <PencilSquareIcon />
+                  Edit
+                </Button>
+              ) : null}
+              {canDelete ? (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Delete location"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <TrashIcon />
+                </Button>
+              ) : null}
             </>
           ) : undefined
         }
@@ -129,7 +141,7 @@ export default function LocationDetailPage() {
       <DetailPanel
         title={`Assets here${assets.length > 0 ? ` (${assets.length})` : ""}`}
         actions={
-          canWrite ? (
+          canCreateAsset ? (
             <Button size="sm" variant="outline" asChild>
               <Link href="/assets/new">
                 <PlusIcon />

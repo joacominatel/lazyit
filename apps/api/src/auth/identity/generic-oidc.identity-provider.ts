@@ -1,9 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { Role } from '../../../generated/prisma/client';
-import type {
-  CreateIdentityUserInput,
-  ExternalRef,
-  IdentityProvider,
+import {
+  PasswordResetUnsupportedError,
+  type CreateIdentityUserInput,
+  type ExternalRef,
+  type IdentityProvider,
+  type UpdateIdentityUserInput,
 } from './identity-provider.interface';
 
 /**
@@ -49,6 +51,27 @@ export class GenericOidcIdentityProvider implements IdentityProvider {
   revokeRole(externalId: string, role: Role): Promise<void> {
     this.warnUnsupported('revokeRole', { externalId, role });
     return Promise.resolve();
+  }
+
+  updateUser(
+    externalId: string,
+    input: UpdateIdentityUserInput,
+  ): Promise<void> {
+    // BYOI: no portable way to write a profile/email back. No-op + warn (the local DB still updated).
+    // Honest: lazyit's row changes, the IdP mirror is skipped — same posture as the other writes.
+    this.warnUnsupported('updateUser', {
+      externalId,
+      fields: Object.keys(input),
+    });
+    return Promise.resolve();
+  }
+
+  requestPasswordReset(externalId: string): Promise<void> {
+    // BYOI: lazyit cannot trigger a reset on a foreign OIDC IdP. Unlike the mirror writes, this is a
+    // user-visible ACTION — a silent no-op would falsely imply "a reset was sent". So we REJECT with a
+    // typed error the controller maps to a 501 "managed by your identity provider" (INV-4), never a 2xx.
+    this.warnUnsupported('requestPasswordReset', { externalId });
+    return Promise.reject(new PasswordResetUnsupportedError());
   }
 
   /** Structured warn used by every degraded management method (BYOI no-op, ADR-0043 #5). */

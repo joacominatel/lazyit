@@ -23,6 +23,8 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ArticleLinkedFilterSchema,
+  ArticleLinkedToSchema,
   ArticleLinkSchema,
   ArticleListPageSchema,
   ArticleSchema,
@@ -33,6 +35,8 @@ import {
   CreateArticleSchema,
   ImportArticleSchema,
   UpdateArticleSchema,
+  type ArticleLinkedFilter,
+  type ArticleLinkedTo,
   type ArticleStatus,
 } from '@lazyit/shared';
 import { ArticlesService } from './articles.service';
@@ -41,8 +45,10 @@ import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
+import type { Principal } from '../auth/principal';
 
 // The detail reads return the full Article (with `content`); the paginated list returns the lean
 // ArticleListItem envelope (content omitted, excerpt kept).
@@ -63,6 +69,7 @@ export class ArticlesController {
   constructor(private readonly articles: ArticlesService) {}
 
   @Get()
+  @RequirePermission('article:read')
   @ApiOperation({
     summary:
       'List articles (paginated; lean — no markdown content, excerpt kept). Excludes soft-deleted; drafts are visible only to their author.',
@@ -78,6 +85,20 @@ export class ArticlesController {
     name: 'q',
     required: false,
     description: 'Case-insensitive substring match on title and excerpt',
+  })
+  @ApiQuery({
+    name: 'linked',
+    required: false,
+    enum: [...ArticleLinkedFilterSchema.options],
+    description:
+      'only → keep just articles with ≥1 link to an Asset/Application (ADR-0042). Omitted = both linked and unlinked. Unknown value → 400.',
+  })
+  @ApiQuery({
+    name: 'linkedTo',
+    required: false,
+    enum: [...ArticleLinkedToSchema.options],
+    description:
+      'Narrow the linked filter to a target kind (asset | application). Implies linked=only. Unknown value → 400.',
   })
   @ApiQuery({
     name: 'limit',
@@ -104,6 +125,8 @@ export class ArticlesController {
     @Query('authorId') authorId?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('linked') linked?: string,
+    @Query('linkedTo') linkedTo?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -124,23 +147,53 @@ export class ArticlesController {
         authorId: parseUuidQuery(authorId, 'authorId'),
         status: parsedStatus,
         q,
+        linked: this.parseLinked(linked),
+        linkedTo: this.parseLinkedTo(linkedTo),
       },
       parsePageQuery({ limit, offset, page }),
       user,
     );
   }
 
+  /**
+   * Validate `?linked=` against the {@link ArticleLinkedFilterSchema} allowlist — the only accepted
+   * value is `only`. An unknown value is rejected with 400 (ADR-0030: an unknown filter value is
+   * never silently ignored). Mirrors the inline `status` check; the global ZodValidationPipe only
+   * validates `@Body()` DTOs, so raw `@Query` strings are otherwise unchecked.
+   */
+  private parseLinked(value?: string): ArticleLinkedFilter | undefined {
+    if (value === undefined) return undefined;
+    const result = ArticleLinkedFilterSchema.safeParse(value);
+    if (!result.success) {
+      throw new BadRequestException(
+        `Invalid linked. Expected one of: ${ArticleLinkedFilterSchema.options.join(', ')}`,
+      );
+    }
+    return result.data;
+  }
+
+  /** Same allowlist/400 contract as {@link parseLinked}, for `?linkedTo=` (asset | application). */
+  private parseLinkedTo(value?: string): ArticleLinkedTo | undefined {
+    if (value === undefined) return undefined;
+    const result = ArticleLinkedToSchema.safeParse(value);
+    if (!result.success) {
+      throw new BadRequestException(
+        `Invalid linkedTo. Expected one of: ${ArticleLinkedToSchema.options.join(', ')}`,
+      );
+    }
+    return result.data;
+  }
+
   @Get('by-slug/:slug')
+  @RequirePermission('article:read')
   @ApiOperation({ summary: 'Get an article by slug' })
   @ApiOkResponse({ type: ArticleDto })
-  findBySlug(
-    @Param('slug') slug: string,
-    @CurrentUser() user?: User,
-  ) {
+  findBySlug(@Param('slug') slug: string, @CurrentUser() user?: User) {
     return this.articles.findBySlug(slug, user);
   }
 
   @Get(':id')
+  @RequirePermission('article:read')
   @ApiOperation({ summary: 'Get an article by id' })
   @ApiOkResponse({ type: ArticleDto })
   findOne(@Param('id') id: string, @CurrentUser() user?: User) {
@@ -148,6 +201,7 @@ export class ArticlesController {
   }
 
   @Get(':id/versions')
+  @RequirePermission('article:read')
   @ApiOperation({
     summary:
       "List an article's version history (append-only; newest first; paginated). Drafts visible only to their author. (ADR-0042)",
@@ -176,8 +230,10 @@ export class ArticlesController {
   }
 
   @Get(':id/versions/:version')
+  @RequirePermission('article:read')
   @ApiOperation({
-    summary: 'Get a single version of an article by its version number (ADR-0042)',
+    summary:
+      'Get a single version of an article by its version number (ADR-0042)',
   })
   @ApiOkResponse({ type: ArticleVersionDto })
   findVersion(
@@ -193,6 +249,7 @@ export class ArticlesController {
   }
 
   @Get(':id/links')
+  @RequirePermission('article:read')
   @ApiOperation({
     summary:
       "List an article's links to assets/applications (readable by any reader of the article). (ADR-0042)",
@@ -203,17 +260,20 @@ export class ArticlesController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary: 'Create an article (author = current user) (ADMIN or MEMBER)',
   })
   @ApiCreatedResponse({ type: ArticleDto })
-  create(@Body() dto: CreateArticleDto, @CurrentUser() user?: User) {
-    return this.articles.create(dto, user);
+  create(
+    @Body() dto: CreateArticleDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.articles.create(dto, principal);
   }
 
   @Post('import')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary:
       'Import an article from a .md, .txt or .docx file (ADMIN or MEMBER)',
@@ -244,13 +304,13 @@ export class ArticlesController {
   importArticle(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: ImportArticleDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.articles.importArticle(file, dto, user);
+    return this.articles.importArticle(file, dto, principal);
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary:
       'Update an article (author only; never changes status) (ADMIN or MEMBER)',
@@ -259,13 +319,13 @@ export class ArticlesController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateArticleDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.articles.update(id, dto, user);
+    return this.articles.update(id, dto, principal);
   }
 
   @Post(':id/links')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary:
       'Link an article to an Asset XOR an Application (author only; exactly one target). (ADMIN or MEMBER) (ADR-0042)',
@@ -274,65 +334,69 @@ export class ArticlesController {
   addLink(
     @Param('id') id: string,
     @Body() dto: CreateArticleLinkDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.articles.addLink(id, dto, user);
+    return this.articles.addLink(id, dto, principal);
   }
 
   @Delete(':id/links/:linkId')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
-    summary: 'Remove a link from an article (author only). (ADMIN or MEMBER) (ADR-0042)',
+    summary:
+      'Remove a link from an article (author only). (ADMIN or MEMBER) (ADR-0042)',
   })
   @ApiOkResponse({ type: ArticleLinkDto })
   removeLink(
     @Param('id') id: string,
     @Param('linkId') linkId: string,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.articles.removeLink(id, linkId, user);
+    return this.articles.removeLink(id, linkId, principal);
   }
 
   @Post(':id/publish')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary:
       'Publish an article (author only). Sets publishedAt on first publish. (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ArticleDto })
-  publish(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.publish(id, user);
+  publish(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.articles.publish(id, principal);
   }
 
   @Post(':id/unpublish')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary:
       'Unpublish an article back to DRAFT (author only). Keeps publishedAt. (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ArticleDto })
-  unpublish(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.unpublish(id, user);
+  unpublish(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.articles.unpublish(id, principal);
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('article:delete')
   @ApiOperation({
     summary: 'Soft-delete an article (destructive) — ADMIN only',
   })
   @ApiOkResponse({ type: ArticleDto })
-  remove(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.remove(id, user);
+  remove(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.articles.remove(id, principal);
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('article:delete')
   @ApiOperation({
     summary:
       'Restore a soft-deleted article (author only) — ADMIN only (ADR-0041)',
   })
   @ApiOkResponse({ type: ArticleDto })
-  restore(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.restore(id, user);
+  restore(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.articles.restore(id, principal);
   }
 }

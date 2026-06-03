@@ -114,6 +114,20 @@ CREATE UNIQUE INDEX "article_links_article_application_key"
   ON "article_links" ("articleId", "applicationId") WHERE "applicationId" IS NOT NULL;
 ```
 
+For service accounts ([[0048-service-accounts]]) the `add_service_accounts` migration carries a
+soft-delete-reuse **partial unique** on `tokenHash` and an **at-most-one-actor CHECK** (`<= 1`, human
+XOR service-account) on each of the 6 audit-bearing tables — `AssetAssignment` and `AccessGrant` carry
+two actor slots each, so they get one CHECK per slot:
+
+```sql
+CREATE UNIQUE INDEX "service_accounts_tokenHash_live_key"
+  ON "service_accounts" ("tokenHash") WHERE "deletedAt" IS NULL;
+ALTER TABLE "asset_history" ADD CONSTRAINT "asset_history_one_actor"
+  CHECK ((("performedById" IS NOT NULL)::int + ("serviceAccountId" IS NOT NULL)::int) <= 1);
+-- …and likewise for consumable_movements, article_versions, article_links, plus
+-- asset_assignments (assigned/released) and access_grants (granted/revoked), one CHECK per actor slot.
+```
+
 > [!note] Prisma does not manage what it can't represent
 > A partial index lives only in the migration SQL. Prisma can't model it, so it neither emits it
 > on `migrate diff` nor reports it as **drift** — the `--exit-code` check in §6 stays green. The

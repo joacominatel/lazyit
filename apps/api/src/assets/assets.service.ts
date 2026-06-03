@@ -10,9 +10,9 @@ import { offsetOf, pageOf } from '@lazyit/shared';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { Prisma } from '../../generated/prisma/client';
-import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ActorService } from '../common/actor.service';
+import { ActorService, type ActorAttribution } from '../common/actor.service';
+import type { Principal } from '../auth/principal';
 import { jsonDeepEqual } from '../common/deep-equal';
 import {
   AssetHistoryService,
@@ -211,8 +211,8 @@ export class AssetsService {
    * Create. Emits a `CREATED` history event transactionally with the insert (ADR-0033); the actor
    * comes from the authenticated User (ADR-0038). Invalid modelId/locationId hit the FK → 400.
    */
-  async create(data: CreateAsset, user?: User) {
-    const performedById = this.actor.resolve(user);
+  async create(data: CreateAsset, principal?: Principal) {
+    const actor = this.actor.resolveActor(principal);
     const { specs, ...rest } = data;
     const asset = await this.prisma.$transaction(async (tx) => {
       // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
@@ -227,7 +227,7 @@ export class AssetsService {
       await this.history.record(tx, {
         assetId: created.id,
         eventType: 'CREATED',
-        performedById,
+        actor,
       });
       return created;
     });
@@ -241,8 +241,8 @@ export class AssetsService {
    * Partial update. Emits a discrete history event per changed dimension (status / location / model
    * / specs), transactionally with the update (ADR-0033). 404 if missing or already soft-deleted.
    */
-  async update(id: string, data: UpdateAsset, user?: User) {
-    const performedById = this.actor.resolve(user);
+  async update(id: string, data: UpdateAsset, principal?: Principal) {
+    const actor = this.actor.resolveActor(principal);
     const before = await this.prisma.asset.findFirst({
       where: { id },
       select: {
@@ -267,7 +267,7 @@ export class AssetsService {
             : {}),
         },
       });
-      for (const event of this.changeEvents(before, row, performedById)) {
+      for (const event of this.changeEvents(before, row, actor)) {
         await this.history.record(tx, event);
       }
       return row;
@@ -278,8 +278,8 @@ export class AssetsService {
   }
 
   /** Soft delete: set deletedAt (never hard-delete). Emits `DELETED` transactionally (ADR-0033). */
-  async remove(id: string, user?: User) {
-    const performedById = this.actor.resolve(user);
+  async remove(id: string, principal?: Principal) {
+    const actor = this.actor.resolveActor(principal);
     await this.assertExists(id);
     const deleted = await this.prisma.$transaction(async (tx) => {
       const row = await tx.asset.update({
@@ -289,7 +289,7 @@ export class AssetsService {
       await this.history.record(tx, {
         assetId: id,
         eventType: 'DELETED',
-        performedById,
+        actor,
       });
       return row;
     });
@@ -306,8 +306,8 @@ export class AssetsService {
    * serial/assetTag on delete, so a restore can 409 if another live asset took one of them in the
    * meantime (mapped by the global PrismaExceptionFilter). Re-indexes for search on success.
    */
-  async restore(id: string, user?: User) {
-    const performedById = this.actor.resolve(user);
+  async restore(id: string, principal?: Principal) {
+    const actor = this.actor.resolveActor(principal);
     const existing = await this.prisma.asset.findFirst({
       where: { id },
       select: { id: true, deletedAt: true },
@@ -328,7 +328,7 @@ export class AssetsService {
       await this.history.record(tx, {
         assetId: id,
         eventType: 'RESTORED',
-        performedById,
+        actor,
       });
       return row;
     });
@@ -351,8 +351,11 @@ export class AssetsService {
    * all inside one `$transaction`. An id that is missing or already soft-deleted is skipped (not an
    * error). Returns the per-id outcome. Drops each mutated id from the search index after the commit.
    */
-  async batchRemove(ids: string[], user?: User): Promise<BatchResult> {
-    const performedById = this.actor.resolve(user);
+  async batchRemove(
+    ids: string[],
+    principal?: Principal,
+  ): Promise<BatchResult> {
+    const actor = this.actor.resolveActor(principal);
     const live = await this.prisma.asset.findMany({
       where: { id: { in: ids } },
       select: { id: true },
@@ -373,7 +376,7 @@ export class AssetsService {
           await this.history.record(tx, {
             assetId: id,
             eventType: 'DELETED',
-            performedById,
+            actor,
           });
         }
       });
@@ -388,8 +391,11 @@ export class AssetsService {
    * the per-id outcome and re-indexes each restored row after the commit. A unique-constraint clash
    * on a freed serial/assetTag surfaces as the usual 409 (the whole batch rolls back).
    */
-  async batchRestore(ids: string[], user?: User): Promise<BatchResult> {
-    const performedById = this.actor.resolve(user);
+  async batchRestore(
+    ids: string[],
+    principal?: Principal,
+  ): Promise<BatchResult> {
+    const actor = this.actor.resolveActor(principal);
     const rows = await this.prisma.asset.findMany({
       where: { id: { in: ids } },
       select: { id: true, deletedAt: true },
@@ -415,7 +421,7 @@ export class AssetsService {
           await this.history.record(tx, {
             assetId: id,
             eventType: 'RESTORED',
-            performedById,
+            actor,
           });
         }
       });
@@ -437,9 +443,9 @@ export class AssetsService {
   async batchSetStatus(
     ids: string[],
     status: AssetStatus,
-    user?: User,
+    principal?: Principal,
   ): Promise<BatchResult> {
-    const performedById = this.actor.resolve(user);
+    const actor = this.actor.resolveActor(principal);
     const live = await this.prisma.asset.findMany({
       where: { id: { in: ids } },
       select: { id: true, status: true },
@@ -465,7 +471,7 @@ export class AssetsService {
               from: current.get(id),
               to: status,
             },
-            performedById,
+            actor,
           });
         }
       });
@@ -514,7 +520,7 @@ export class AssetsService {
       'status' | 'locationId' | 'modelId' | 'specs'
     >,
     updated: { id: string } & typeof before,
-    performedById?: string,
+    actor?: ActorAttribution,
   ): RecordAssetEvent[] {
     const events: RecordAssetEvent[] = [];
     const change = (
@@ -526,7 +532,7 @@ export class AssetsService {
         assetId: updated.id,
         eventType,
         payload: { from, to } as Prisma.InputJsonValue,
-        performedById,
+        actor,
       });
     if (before.status !== updated.status) {
       change('STATUS_CHANGED', before.status, updated.status);
@@ -544,7 +550,7 @@ export class AssetsService {
       events.push({
         assetId: updated.id,
         eventType: 'SPECS_CHANGED',
-        performedById,
+        actor,
       });
     }
     return events;

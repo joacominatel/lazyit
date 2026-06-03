@@ -64,11 +64,14 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0037-idp-choice-zitadel-byoi]] | IdP choice — Zitadel, BYOI strategy, own Postgres | accepted (extended by [[0043-zitadel-source-of-truth]]) |
 | [[0038-jit-user-provisioning]] | JIT user provisioning on first OIDC login | accepted (extended by [[0043-zitadel-source-of-truth]]) |
 | [[0039-authjs-v5-frontend-oidc]] | Auth.js v5 for frontend OIDC login | accepted |
-| [[0040-rbac-roles]] | Minimal RBAC — ADMIN/MEMBER/VIEWER role on User | accepted (default-role + bootstrap extended by [[0043-zitadel-source-of-truth]]) |
+| [[0040-rbac-roles]] | Minimal RBAC — ADMIN/MEMBER/VIEWER role on User | accepted (default-role + bootstrap extended by [[0043-zitadel-source-of-truth]]; authZ MECHANISM superseded by [[0046-roles-permissions-v2]] — the 3 roles stay fixed) |
 | [[0042-article-versioning-and-linking]] | KB depth — append-only ArticleVersion + article↔asset/application linking + content search | accepted |
 | [[0043-zitadel-source-of-truth]] | Zitadel as the identity & authorization source of truth (Option B) | accepted |
 | [[0044-recent-activity-view]] | Dashboard recent-activity feed backed by a unified `recent_activity` DB view | accepted |
 | [[0045-icon-library-heroicons]] | Standardize web on Heroicons (drop lucide-react) + a two-weight convention (24/outline default, 16/solid dense) | accepted |
+| [[0046-roles-permissions-v2]] | Roles & Permissions v2 — fixed roles + configurable permissions (catalog-as-code); supersedes the ADR-0040 authZ mechanism | accepted |
+| [[0047-guided-first-deploy-bootstrap]] | Guided, idempotent, non-destructive first-deploy bootstrap (`infra/start.sh`) — a thin wrapper over the env contract + prod compose | accepted |
+| [[0048-service-accounts]] | Service Accounts — a non-human principal with a lazyit-native token + direct permission grants (fail-closed; never a Role/ADMIN); extends ADR-0040/0043/0046 | accepted |
 
 ## Pending ADRs (to write when decided)
 - **Async workers** — BullMQ + Redis (note the [[0009-bun-first-vs-app-stack]] tension:

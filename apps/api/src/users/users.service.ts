@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type { CreateUser, PageQuery, UpdateUser } from '@lazyit/shared';
@@ -15,8 +16,10 @@ import { projectUser } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
+import type { ActorAttribution } from '../common/actor.service';
 import {
   IDENTITY_PROVIDER,
+  PasswordResetUnsupportedError,
   type IdentityProvider,
 } from '../auth/identity/identity-provider.interface';
 
@@ -221,31 +224,100 @@ export class UsersService {
     }
 
     const roleChanged = data.role !== undefined && data.role !== current.role;
+    // Profile edits an ADMIN can mirror (issue #149). A field only counts as CHANGED when it is present
+    // AND differs from the stored value — so a PATCH that resends the same name/email skips the IdP
+    // round-trip. `email` is already normalized (trim+lowercase, citext) by the schema (ADR-0041).
+    const nameChanged =
+      (data.firstName !== undefined && data.firstName !== current.firstName) ||
+      (data.lastName !== undefined && data.lastName !== current.lastName);
+    const emailChanged =
+      data.email !== undefined && data.email !== current.email;
+    const profileChanged = nameChanged || emailChanged;
 
     const user = await this.prisma.user.update({ where: { id }, data });
 
-    // Mirror a role CHANGE to the IdP (ADR-0043 §3). Only on an actual role change, and only when the
-    // user is IdP-linked (externalId set) — a local-only row has nothing to mirror. If the mirror
-    // fails, compensate by reverting the local role to its previous value (no split-brain) and surface
-    // 503. A non-role update (name change) never touches the IdP. BYOI no-ops grantRole → no throw.
-    if (roleChanged && current.externalId) {
+    // Mirror role and/or profile CHANGES to the IdP (ADR-0043 §3, issue #149). Only when the user is
+    // IdP-linked (externalId set) — a local-only row has nothing to mirror. The Zitadel mirror is a
+    // best-effort, eventually-consistent multi-call (grantRole / a profile-name PUT / a committed-LAST
+    // email POST). If ANY mirror fails we compensate by reverting the local row to its pre-update values
+    // (role + name + email) and surface the failure as 503, then make a best-effort attempt to converge
+    // the one sub-resource that could have committed ahead of the failure — the display name (see the
+    // catch). The account-linking email is committed LAST so it never diverges; a mid-sequence display-
+    // name/role divergence is transient and has zero authZ impact (authorization is DB-first, INV-5 /
+    // ADR-0043 #1). BYOI no-ops grantRole/updateUser → no throw, so this path is Zitadel-only in practice.
+    if ((roleChanged || profileChanged) && current.externalId) {
       try {
-        await this.idp.grantRole(current.externalId, data.role!);
-        this.auditWriteBack('grantRole', actorId, id, {
-          from: current.role,
-          to: data.role,
-          externalId: current.externalId,
-        });
+        if (roleChanged) {
+          await this.idp.grantRole(current.externalId, data.role!);
+          this.auditWriteBack('grantRole', actorId, id, {
+            from: current.role,
+            to: data.role,
+            externalId: current.externalId,
+          });
+        }
+        if (profileChanged) {
+          // externalId (sub) is UNCHANGED — updates the existing Zitadel user, never a re-link
+          // (SEC-006). Email is written PRE-VERIFIED by the adapter, so it never forces re-verification.
+          await this.idp.updateUser(current.externalId, {
+            ...(data.firstName !== undefined &&
+            data.firstName !== current.firstName
+              ? { firstName: data.firstName }
+              : {}),
+            ...(data.lastName !== undefined &&
+            data.lastName !== current.lastName
+              ? { lastName: data.lastName }
+              : {}),
+            ...(emailChanged ? { email: data.email } : {}),
+          });
+          this.auditWriteBack('updateUser', actorId, id, {
+            // Log WHICH fields changed (the new email is not a secret); never the old values.
+            firstName: nameChanged ? data.firstName : undefined,
+            lastName: nameChanged ? data.lastName : undefined,
+            email: emailChanged ? data.email : undefined,
+            externalId: current.externalId,
+          });
+        }
       } catch (err) {
-        // Revert the local role so local and Zitadel agree (the previous role is the truth).
+        // Revert ONLY the fields this update could have changed, back to their pre-update truth, so
+        // local and Zitadel agree (the previous values are authoritative) without touching untouched
+        // columns. role → role; name → firstName/lastName; email → email.
         const reverted = await this.prisma.user.update({
           where: { id },
-          data: { role: current.role },
+          data: {
+            ...(roleChanged ? { role: current.role } : {}),
+            ...(nameChanged
+              ? { firstName: current.firstName, lastName: current.lastName }
+              : {}),
+            ...(emailChanged ? { email: current.email } : {}),
+          },
         });
         this.search.upsert('users', projectUser(reverted));
+        // Best-effort convergence (INV-5): the Zitadel mirror is multi-call — a profile name `PUT`
+        // followed by a committed-LAST email `POST`. If the profile PUT already committed the NEW name
+        // but a later sub-call (the email POST) then failed, Zitadel's display name is now NEW while we
+        // just reverted the local row to OLD — a bounded, cosmetic display-name divergence with ZERO
+        // authZ impact (authorization is DB-first, ADR-0043 #1). Re-mirror the reverted (current) name
+        // back to Zitadel so the two stores converge instead of drifting permanently. The account-
+        // linking email needs no such re-mirror: it is committed LAST, so on its failure Zitadel's email
+        // was never touched and already matches the reverted local row. This is a SEPARATE best-effort
+        // attempt in its OWN try/catch — it only LOGS on failure and NEVER throws over the original
+        // error, so the caller still receives the original 503.
+        if (nameChanged && current.externalId) {
+          try {
+            await this.idp.updateUser(current.externalId, {
+              firstName: current.firstName,
+              lastName: current.lastName,
+            });
+          } catch (mirrorErr) {
+            this.logger.error(
+              { op: 'updateUser', actor: actorId, subjectUserId: id },
+              `best-effort name re-mirror failed after revert; Zitadel display name may transiently diverge until the next edit (no authZ impact, DB-first) (${mirrorErr instanceof Error ? mirrorErr.message : String(mirrorErr)})`,
+            );
+          }
+        }
         this.logger.error(
-          { op: 'grantRole', actor: actorId, subjectUserId: id },
-          `IdP write-back failed on role change; reverted local role to ${current.role} (${err instanceof Error ? err.message : String(err)})`,
+          { op: 'updateUser', actor: actorId, subjectUserId: id },
+          `IdP write-back failed on update; reverted local user to its prior state (${err instanceof Error ? err.message : String(err)})`,
         );
         throw err;
       }
@@ -253,6 +325,41 @@ export class UsersService {
 
     this.search.upsert('users', projectUser(user));
     return user;
+  }
+
+  /**
+   * Trigger a password reset for a user (issue #149). lazyit NEVER stores, sets or sends a password
+   * (ADR-0016/0037) — it asks the IdP to do it: Zitadel emails a reset link via ZITADEL's own SMTP.
+   *
+   * Guards (in order): 404 if the user is missing or soft-deleted (findOne filters those out), 422 if
+   * the user is INACTIVE (`isActive=false`) — a disabled account is not invited to set a new password
+   * until it is reactivated — and an honest 501 (PasswordResetUnsupportedError) for a local-only row
+   * with no `externalId`: there is no IdP identity to reset, so we never pretend an email went out.
+   *
+   * BYOI (generic OIDC) cannot trigger a reset on a foreign IdP: the provider throws
+   * PasswordResetUnsupportedError, which the controller maps to a 501 "managed by your identity
+   * provider" (INV-4). A Zitadel Management failure surfaces as 503 (consistent with the other writes).
+   * Audited via a structured log line (no DB audit table yet — ADR-0043 §3).
+   */
+  async requestPasswordReset(id: string, actorId?: string): Promise<void> {
+    const user = await this.findOne(id); // 404 if missing or already soft-deleted
+
+    if (!user.isActive) {
+      throw new UnprocessableEntityException(
+        'Cannot reset the password of an inactive user. Reactivate the account first.',
+      );
+    }
+    if (!user.externalId) {
+      // No IdP identity to reset — honest 501 (same shape BYOI returns), never a misleading 2xx.
+      throw new PasswordResetUnsupportedError(
+        'This user is not linked to an identity provider, so a password reset cannot be triggered.',
+      );
+    }
+
+    await this.idp.requestPasswordReset(user.externalId);
+    this.auditWriteBack('requestPasswordReset', actorId, id, {
+      externalId: user.externalId,
+    });
   }
 
   /**
@@ -283,12 +390,18 @@ export class UsersService {
    * `deletedAt`. All-or-nothing: a failure rolls the whole offboarding back, so a user is never left
    * half-offboarded (deleted but still holding grants/assets, or vice-versa).
    *
-   * `actorId` is the authenticated user performing the offboarding (from @CurrentUser via the
-   * controller). It is stamped as `revokedById` / `releasedById` so the action is attributable.
-   * Grant revocation is done INLINE here (prisma.accessGrant.updateMany) rather than via the
-   * access-grants service, to keep it inside this single transaction.
+   * `actor` is the authenticated principal performing the offboarding (from @CurrentPrincipal via the
+   * controller). A human is stamped as `revokedById` / `releasedById`; a service account holding
+   * `user:manage` is stamped as `revokedBySaId` / `releasedBySaId` so the action stays attributable and
+   * the at-most-one-actor CHECK is honored (ADR-0048). Grant revocation is done INLINE here
+   * (prisma.accessGrant.updateMany) rather than via the access-grants service, to keep it inside this
+   * single transaction. The IdP write-back JSON audit line still uses the human actor id (a structured
+   * log, not a DB FK column).
    */
-  async remove(id: string, actorId?: string): Promise<OffboardResult> {
+  async remove(
+    id: string,
+    actor: ActorAttribution = {},
+  ): Promise<OffboardResult> {
     const target = await this.findOne(id); // 404 if missing or already soft-deleted
 
     // Last-admin safety guard (ADR-0040): offboarding/deleting the only remaining ADMIN would leave
@@ -307,26 +420,31 @@ export class UsersService {
       // no-ops deactivateUser → no throw, offboarding proceeds locally exactly as before.
       if (target.externalId) {
         await this.idp.deactivateUser(target.externalId);
-        this.auditWriteBack('deactivateUser', actorId, id, {
+        this.auditWriteBack('deactivateUser', actor.userId, id, {
           externalId: target.externalId,
         });
       }
 
-      // 1. Revoke all the user's active (not-yet-revoked) access grants.
+      // 1. Revoke all the user's active (not-yet-revoked) access grants. Attribute the offboarding
+      // actor on each: human → revokedById, service account → revokedBySaId (CHECK-safe; ADR-0048).
       const { count: revokedGrants } = await tx.accessGrant.updateMany({
         where: { userId: id, revokedAt: null },
         data: {
           revokedAt: now,
-          ...(actorId !== undefined ? { revokedById: actorId } : {}),
+          ...(actor.userId != null ? { revokedById: actor.userId } : {}),
+          ...(actor.serviceAccountId != null
+            ? { revokedBySaId: actor.serviceAccountId }
+            : {}),
           notes: 'auto: offboarded',
         },
       });
 
-      // 2. Release all the user's active asset assignments (+ RELEASED history per asset).
+      // 2. Release all the user's active asset assignments (+ RELEASED history per asset). The actor is
+      // threaded so the releases attribute to the right column (releasedById / releasedBySaId).
       const releasedAssignments = await this.assignments.releaseAllForUser(
         tx,
         id,
-        actorId,
+        actor,
       );
 
       // 3. Soft-delete the user.

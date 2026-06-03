@@ -30,9 +30,9 @@ import {
   UpdateAccessGrantExpiryDto,
   UpdateAccessGrantNotesDto,
 } from './access-grant.dto';
-import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
-import type { User } from '../../generated/prisma/client';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
+import type { Principal } from '../auth/principal';
 
 @ApiTags('access-grants')
 @Controller('access-grants')
@@ -40,6 +40,7 @@ export class AccessGrantsController {
   constructor(private readonly grants: AccessGrantsService) {}
 
   @Get()
+  @RequirePermission('accessGrant:read')
   @ApiOperation({
     summary:
       'List grants (paginated; newest first); filter by userId / applicationId. Active-only by default.',
@@ -99,17 +100,21 @@ export class AccessGrantsController {
   }
 
   @Post('batch/revoke')
-  @Roles('ADMIN')
+  @RequirePermission('accessGrant:grant')
   @ApiOperation({
     summary:
       'Bulk revoke active grants (per-grant revokedAt/revokedById; one transaction) — ADMIN only',
   })
   @ApiOkResponse({ type: BatchResultDto })
-  batchRevoke(@Body() dto: BatchRevokeGrantsDto, @CurrentUser() user?: User) {
-    return this.grants.batchRevoke(dto.ids, dto.notes, user);
+  batchRevoke(
+    @Body() dto: BatchRevokeGrantsDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.grants.batchRevoke(dto.ids, dto.notes, principal);
   }
 
   @Get(':id')
+  @RequirePermission('accessGrant:read')
   @ApiOperation({ summary: 'Get a grant by id' })
   @ApiOkResponse({ type: AccessGrantDto })
   findOne(@Param('id') id: string) {
@@ -117,17 +122,20 @@ export class AccessGrantsController {
   }
 
   @Post()
-  @Roles('ADMIN')
+  @RequirePermission('accessGrant:grant')
   @ApiOperation({
     summary: 'Open a grant (give a user access to an application) — ADMIN only',
   })
   @ApiCreatedResponse({ type: AccessGrantDto })
-  create(@Body() dto: CreateAccessGrantDto, @CurrentUser() user?: User) {
-    return this.grants.create(dto, user);
+  create(
+    @Body() dto: CreateAccessGrantDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.grants.create(dto, principal);
   }
 
   @Patch(':id/revoke')
-  @Roles('ADMIN')
+  @RequirePermission('accessGrant:grant')
   @ApiOperation({
     summary:
       'Revoke an active grant (sets revokedAt; 409 if already revoked) — ADMIN only',
@@ -137,13 +145,13 @@ export class AccessGrantsController {
   revoke(
     @Param('id') id: string,
     @Body() dto: RevokeAccessGrantDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.grants.revoke(id, dto, user);
+    return this.grants.revoke(id, dto, principal);
   }
 
   @Patch(':id/notes')
-  @Roles('ADMIN')
+  @RequirePermission('accessGrant:grant')
   @ApiOperation({
     summary: 'Update only the notes of a grant (null clears) — ADMIN only',
   })
@@ -153,7 +161,7 @@ export class AccessGrantsController {
   }
 
   @Patch(':id/expiry')
-  @Roles('ADMIN')
+  @RequirePermission('accessGrant:grant')
   @ApiOperation({
     summary:
       'Change the expiry of a grant (null makes it permanent) — ADMIN only',

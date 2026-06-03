@@ -24,6 +24,9 @@ export const SOFT_DELETABLE_MODELS: ReadonlySet<string> = new Set([
   'Article',
   'ApplicationCategory',
   'Application',
+  // Service accounts soft-delete = revoke (ADR-0048): the read filter hides revoked accounts from the
+  // management list/detail by default; the guard + restore use the includeSoftDeleted escape hatch.
+  'ServiceAccount',
 ]);
 
 // Read operations whose results must hide soft-deleted rows. `findUnique`/`findUniqueOrThrow` are
