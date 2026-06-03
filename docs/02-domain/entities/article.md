@@ -93,6 +93,7 @@ Prisma model `Article` → table `articles`. Validation schemas (`ArticleSchema`
 | `lastEditedById` | `uuid?` | optional FK → [[user]] (`@db.Uuid`), `onDelete: SetNull`. |
 | `publishedAt` | `datetime?` | set on first publish, never cleared. |
 | `metadata` | `jsonb?` | free-form extras; any JSON object for now (see debt note). |
+| `readingMinutes` | `int` | `@default(0)`. **Maintained** reading-time metric derived from `content` (~200 words/min; min 1 for any non-empty body, 0 for empty). Recomputed on every write that touches `content` (create/import/edit) so the lean list can ship it without loading the body ([[0042-article-versioning-and-linking]]). |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete. |
@@ -108,7 +109,12 @@ listings), `@@index([status, publishedAt])` (latest published).
 [[0022-draft-visibility-auth-shim]]). Documented via Swagger ([[0018-api-documentation-swagger]]).
 
 - `GET /articles` — list (excludes soft-deleted; drafts only for their author). Filters
-  `?categoryId=&authorId=&status=&q=` (`q` = case-insensitive substring on title/excerpt).
+  `?categoryId=&authorId=&status=&q=` (`q` = case-insensitive substring on title/excerpt) plus
+  `?linked=only` (keep only articles with ≥1 [[article-link]]) and `?linkedTo=asset|application`
+  (narrow that to a target kind) — both allowlisted, an unknown value → `400` ([[0042-article-versioning-and-linking]]).
+  The lean list item adds two card-UI affordances computed in the query (no body load, no N+1):
+  `linkCount` (relation `_count` of links; `>0` ⇔ linked) and `readingMinutes` (the maintained
+  metric). The owner is already exposed as `authorId`.
 - `GET /articles/by-slug/:slug` · `GET /articles/:id` — a draft requested by a non-author returns
   `404` (never `403`, so existence isn't leaked).
 - `POST /articles` — create (author = `X-User-Id`).

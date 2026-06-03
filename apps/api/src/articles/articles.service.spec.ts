@@ -42,6 +42,7 @@ type ArticleData = {
   slug?: string;
   title?: string;
   content?: string;
+  readingMinutes?: number;
   status?: string;
   categoryId?: string;
   authorId?: string;
@@ -243,6 +244,33 @@ describe('ArticlesService', () => {
       expect(lastCreate().slug).toBe('custom-slug');
     });
 
+    it('maintains the readingMinutes metric from the body (~200 wpm, min 1 for non-empty)', async () => {
+      await service.create(
+        {
+          title: 'Long',
+          content: Array.from({ length: 450 }, (_, i) => `word${i}`).join(' '),
+          categoryId: 'c1',
+          status: 'DRAFT',
+        },
+        AUTHOR_PRINCIPAL,
+      );
+      // 450 words / 200 = 2.25 → ceil → 3 minutes.
+      expect(lastCreate().readingMinutes).toBe(3);
+    });
+
+    it('a short body still reads as 1 minute (never 0 for non-empty content)', async () => {
+      await service.create(
+        {
+          title: 'Tiny',
+          content: 'a few words',
+          categoryId: 'c1',
+          status: 'DRAFT',
+        },
+        AUTHOR_PRINCIPAL,
+      );
+      expect(lastCreate().readingMinutes).toBe(1);
+    });
+
     it('rejects when there is no authenticated principal (400)', async () => {
       await expect(
         service.create(
@@ -312,6 +340,41 @@ describe('ArticlesService', () => {
         ],
       });
     });
+
+    it('no link filter by default: the where has no `links` clause (linked AND unlinked included)', async () => {
+      await service.findPage({}, PAGE, undefined);
+      const and = listWhere().AND;
+      expect(and.some((c) => 'links' in c)).toBe(false);
+    });
+
+    it('linked=only restricts to articles with ≥1 link (relation `some`, no target narrowing)', async () => {
+      await service.findPage({ linked: 'only' }, PAGE, undefined);
+      expect(listWhere().AND).toContainEqual({ links: { some: {} } });
+    });
+
+    it('linkedTo=asset narrows the link filter to articles linked to an Asset', async () => {
+      await service.findPage({ linkedTo: 'asset' }, PAGE, undefined);
+      expect(listWhere().AND).toContainEqual({
+        links: { some: { assetId: { not: null } } },
+      });
+    });
+
+    it('linkedTo=application narrows to articles linked to an Application', async () => {
+      await service.findPage({ linkedTo: 'application' }, PAGE, undefined);
+      expect(listWhere().AND).toContainEqual({
+        links: { some: { applicationId: { not: null } } },
+      });
+    });
+
+    it('the linked filter is ANDed on TOP of the visibility rule (draft privacy still honored)', async () => {
+      // The first AND clause is always the visibility gate; the linked clause is added, not replacing it.
+      await service.findPage({ linked: 'only' }, PAGE, AUTHOR_USER as never);
+      const and = listWhere().AND;
+      expect(and[0]).toEqual({
+        OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: AUTHOR }],
+      });
+      expect(and).toContainEqual({ links: { some: {} } });
+    });
   });
 
   describe('findPage pagination & lean projection', () => {
@@ -338,7 +401,7 @@ describe('ArticlesService', () => {
         >
       )[0][0];
 
-    it('uses the LEAN select: omits `content`, keeps `excerpt`', async () => {
+    it('uses the LEAN select: omits `content`, keeps `excerpt`, adds the metric + link count', async () => {
       await service.findPage(
         {},
         { limit: 50, offset: 0, deleted: 'active' },
@@ -348,10 +411,60 @@ describe('ArticlesService', () => {
       expect(select).not.toHaveProperty('content');
       expect(select.excerpt).toBe(true);
       expect(select.title).toBe(true);
+      // The card affordances are produced by the query (no body load, no N+1).
+      expect(select.readingMinutes).toBe(true);
+      expect(select._count).toEqual({ select: { links: true } });
+    });
+
+    it('flattens Prisma `_count.links` into a `linkCount` and surfaces `readingMinutes` per row', async () => {
+      article.findMany.mockResolvedValueOnce([
+        {
+          id: 'art1',
+          title: 'Linked',
+          excerpt: null,
+          readingMinutes: 3,
+          _count: { links: 2 },
+        },
+        {
+          id: 'art2',
+          title: 'Lonely',
+          excerpt: null,
+          readingMinutes: 1,
+          _count: { links: 0 },
+        },
+      ]);
+      article.count.mockResolvedValueOnce(2);
+
+      const result = await service.findPage(
+        {},
+        { limit: 50, offset: 0, deleted: 'active' },
+        undefined,
+      );
+
+      // `_count` is dropped from the wire shape; `linkCount` carries the tally, readingMinutes passes through.
+      expect(result.items).toEqual([
+        {
+          id: 'art1',
+          title: 'Linked',
+          excerpt: null,
+          readingMinutes: 3,
+          linkCount: 2,
+        },
+        {
+          id: 'art2',
+          title: 'Lonely',
+          excerpt: null,
+          readingMinutes: 1,
+          linkCount: 0,
+        },
+      ]);
+      expect(result.items[0]).not.toHaveProperty('_count');
     });
 
     it('runs findMany(take/skip) + count over the SAME where inside one $transaction', async () => {
-      article.findMany.mockResolvedValueOnce([{ id: 'art1' }]);
+      article.findMany.mockResolvedValueOnce([
+        { id: 'art1', readingMinutes: 2, _count: { links: 0 } },
+      ]);
       article.count.mockResolvedValueOnce(9);
 
       const result = await service.findPage(
@@ -370,9 +483,9 @@ describe('ArticlesService', () => {
       expect(fm.orderBy).toEqual({ updatedAt: 'desc' });
       // count's where is identical to the page's where (so total can't drift from the page).
       expect(countWhere).toEqual(fm.where);
-      // The Page<T> envelope.
+      // The Page<T> envelope — `_count` flattened to `linkCount`.
       expect(result).toEqual({
-        items: [{ id: 'art1' }],
+        items: [{ id: 'art1', readingMinutes: 2, linkCount: 0 }],
         total: 9,
         limit: 5,
         offset: 10,
@@ -459,6 +572,37 @@ describe('ArticlesService', () => {
         status: 'PUBLISHED',
       });
       expect(search.remove).not.toHaveBeenCalled();
+    });
+
+    it('recomputes readingMinutes when the edit changes `content`', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'DRAFT',
+        authorId: AUTHOR,
+        title: 't',
+        content: 'old',
+        excerpt: null,
+      });
+      await service.update(
+        'a',
+        { content: Array.from({ length: 250 }, () => 'w').join(' ') },
+        AUTHOR_PRINCIPAL,
+      );
+      // 250 words / 200 = 1.25 → ceil → 2 minutes.
+      expect(lastUpdate().readingMinutes).toBe(2);
+    });
+
+    it('leaves readingMinutes untouched on a metadata/title-only edit (content absent)', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'DRAFT',
+        authorId: AUTHOR,
+        title: 't',
+        content: 'body',
+        excerpt: null,
+      });
+      await service.update('a', { title: 'Renamed' }, AUTHOR_PRINCIPAL);
+      expect(lastUpdate()).not.toHaveProperty('readingMinutes');
     });
 
     it('returns 403 for a non-author on a PUBLISHED article', async () => {

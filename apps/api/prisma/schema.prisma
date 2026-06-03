@@ -530,6 +530,12 @@ model Article {
   // Flexible extras (estimatedReadingTime, externalLinks, …). Unvalidated jsonb — same debt as
   // Asset.specs. See ADR-0007 and docs/02-domain/entities/article.md.
   metadata       Json?
+  // Estimated reading time in whole minutes, derived from `content` (~200 words/min; min 1 for any
+  // non-empty body, 0 only for an empty one). A MAINTAINED column: the service recomputes it on every
+  // write that touches `content` (create/import/edit), so the LEAN list (ARTICLE_LIST_SELECT) can ship
+  // a reading metric for the card UI WITHOUT loading the markdown body. Backfilled for existing rows in
+  // the migration. See ADR-0042 and docs/02-domain/entities/article.md.
+  readingMinutes Int             @default(0)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?

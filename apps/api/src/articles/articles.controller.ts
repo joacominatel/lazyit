@@ -23,6 +23,8 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ArticleLinkedFilterSchema,
+  ArticleLinkedToSchema,
   ArticleLinkSchema,
   ArticleListPageSchema,
   ArticleSchema,
@@ -33,6 +35,8 @@ import {
   CreateArticleSchema,
   ImportArticleSchema,
   UpdateArticleSchema,
+  type ArticleLinkedFilter,
+  type ArticleLinkedTo,
   type ArticleStatus,
 } from '@lazyit/shared';
 import { ArticlesService } from './articles.service';
@@ -83,6 +87,20 @@ export class ArticlesController {
     description: 'Case-insensitive substring match on title and excerpt',
   })
   @ApiQuery({
+    name: 'linked',
+    required: false,
+    enum: [...ArticleLinkedFilterSchema.options],
+    description:
+      'only → keep just articles with ≥1 link to an Asset/Application (ADR-0042). Omitted = both linked and unlinked. Unknown value → 400.',
+  })
+  @ApiQuery({
+    name: 'linkedTo',
+    required: false,
+    enum: [...ArticleLinkedToSchema.options],
+    description:
+      'Narrow the linked filter to a target kind (asset | application). Implies linked=only. Unknown value → 400.',
+  })
+  @ApiQuery({
     name: 'limit',
     required: false,
     type: Number,
@@ -107,6 +125,8 @@ export class ArticlesController {
     @Query('authorId') authorId?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('linked') linked?: string,
+    @Query('linkedTo') linkedTo?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -127,10 +147,41 @@ export class ArticlesController {
         authorId: parseUuidQuery(authorId, 'authorId'),
         status: parsedStatus,
         q,
+        linked: this.parseLinked(linked),
+        linkedTo: this.parseLinkedTo(linkedTo),
       },
       parsePageQuery({ limit, offset, page }),
       user,
     );
+  }
+
+  /**
+   * Validate `?linked=` against the {@link ArticleLinkedFilterSchema} allowlist — the only accepted
+   * value is `only`. An unknown value is rejected with 400 (ADR-0030: an unknown filter value is
+   * never silently ignored). Mirrors the inline `status` check; the global ZodValidationPipe only
+   * validates `@Body()` DTOs, so raw `@Query` strings are otherwise unchecked.
+   */
+  private parseLinked(value?: string): ArticleLinkedFilter | undefined {
+    if (value === undefined) return undefined;
+    const result = ArticleLinkedFilterSchema.safeParse(value);
+    if (!result.success) {
+      throw new BadRequestException(
+        `Invalid linked. Expected one of: ${ArticleLinkedFilterSchema.options.join(', ')}`,
+      );
+    }
+    return result.data;
+  }
+
+  /** Same allowlist/400 contract as {@link parseLinked}, for `?linkedTo=` (asset | application). */
+  private parseLinkedTo(value?: string): ArticleLinkedTo | undefined {
+    if (value === undefined) return undefined;
+    const result = ArticleLinkedToSchema.safeParse(value);
+    if (!result.success) {
+      throw new BadRequestException(
+        `Invalid linkedTo. Expected one of: ${ArticleLinkedToSchema.options.join(', ')}`,
+      );
+    }
+    return result.data;
   }
 
   @Get('by-slug/:slug')
