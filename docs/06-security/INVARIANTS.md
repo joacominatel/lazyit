@@ -213,8 +213,91 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   the legacy `@Roles` path is retired — `@RequirePermission` is the single enforcement primitive. The
   matrix is now ADMIN-editable for MEMBER/VIEWER (audited, cache-coherent), ADMIN immutable (P5).
 
+## INV-SA-1 — A service-account token is verified DB-first; the stored secret is a hash, compared in constant time
+
+**Rule.** A service account ([[0048-service-accounts]]) authenticates with a lazyit-native token
+`lzit_sa_<id>_<secret>`. The server stores ONLY a **SHA-256 hash** of the secret (`tokenHash`) + a
+non-secret `tokenPrefix`; the cleartext is shown **once** on create/rotate and is never recoverable or
+logged. Verification is **DB-first** (INV-1): the `id` segment looks the row up in the DB, the presented
+secret's SHA-256 is **constant-time-compared** (`timingSafeEqual`) to the stored `tokenHash`, and a row
+that is missing / revoked (`deletedAt`) / inactive (`isActive=false`) / expired (`expiresAt` past) is
+rejected — all as a **generic 401** (no enumeration oracle). Never a token claim.
+
+**Why.** A high-entropy random secret needs only a fast hash + constant-time compare (not bcrypt); the
+hash-at-rest + once-only reveal means a DB read can never leak a usable credential, and the generic 401
+avoids leaking which check failed. BYOI-safe: no IdP on the bot's auth path.
+
+**Where enforced.**
+- `apps/api/src/service-accounts/service-account-token.ts` — `mintToken`/`hashSecret`/`verifySecret`
+  (constant-time, fails closed on a length/encoding mismatch); never logs a secret.
+- `apps/api/src/auth/jwt-auth.guard.ts` — the SA branch runs BEFORE the OIDC/shim branches: parse → look
+  up by id INCLUDING soft-deleted (so a revoked account is *seen*) → constant-time secret compare →
+  reject revoked/inactive/expired → set `request.principal = {kind:'service', …}`.
+- Tests: `apps/api/src/service-accounts/service-account-token.spec.ts`,
+  `apps/api/src/auth/jwt-auth.guard.service-account.spec.ts`.
+
+## INV-SA-2 — A service account is FAIL-CLOSED; it does NOT inherit the human open-by-default
+
+**Rule.** A service account passes ONLY `@Public()` routes and routes whose `@RequirePermission(...)` it
+**fully holds** (its direct `ServiceAccountPermission` grants, resolved DB-first into a Set). A service
+account hitting an **unannotated, non-`@Public` route → 403** — it does NOT inherit the human
+open-by-default (INV-8). The human open-by-default for unannotated routes is unchanged.
+
+**Why.** A bot should be able to do *only* what it was explicitly granted; a forgotten gate must not
+silently expose an unannotated route to a service account. This is the single most important
+authorization difference from a human caller.
+
+**Where enforced.**
+- `apps/api/src/auth/roles.guard.ts` — for a service principal, an unannotated route is a 403 (not the
+  open-by-default pass); a gated route passes only if its direct grant Set contains EVERY required
+  permission. The human path is unchanged.
+- `apps/api/src/service-accounts/service-account-permissions.ts` — resolves the grants to a catalog Set;
+  a catalog-foreign DB row is ignored (a typo can't confer a power) and there is NO ADMIN/wildcard.
+- Tests: `apps/api/src/auth/roles.guard.service-account.spec.ts`,
+  `apps/api/src/service-accounts/service-account-permissions.spec.ts`.
+
+## INV-SA-3 — A service account NEVER has a Role, is NEVER ADMIN-equivalent, and never enters human-only logic
+
+**Rule.** A service account is a SEPARATE `ServiceAccount` entity, not a `User`. It has **no `Role`**, is
+authorized only by direct permission grants, and can **never** be ADMIN-equivalent. It never enters the
+user directory, JIT provisioning, email-linking, or the last-admin / first-admin counts ([[INVARIANTS]]
+INV-7) — those operate on `User` rows, which a service account is not.
+
+**Why.** Keeping bots out of the human model means no human-only invariant can be satisfied (or broken)
+by a service account, and no bot can accidentally become an administrator.
+
+**Where enforced.**
+- `apps/api/prisma/schema.prisma` — `ServiceAccount` is a distinct model (no `role` column); the
+  authorization source is `ServiceAccountPermission`, never `Role`/`RolePermission`.
+- `apps/api/src/auth/principal.ts` + `roles.guard.ts` — a service principal is authorized by its grant
+  Set; the role resolver (`PermissionResolverService`) is **never** consulted for it.
+
+## INV-SA-4 — Service-account actions are audited to the service account, never a fake human; at most one actor per audited row
+
+**Rule.** When a service account performs an audited action, the audit/append-only row is attributed to
+its `serviceAccountId` (the additive actor column), NEVER a fabricated `userId`. A DB **CHECK** on each
+audit-bearing table enforces **at most one** of (human actor, service-account actor) per actor slot —
+a row attributed to two principals can never be persisted. Management actions (mint/rotate/revoke/restore/
+permission-change) are themselves audited append-only (`ServiceAccountAuditLog`), never recording the secret.
+
+**Why.** Honest attribution: a query for "what did this bot do" must be answerable, and a human must
+never be blamed for a bot's action (or vice-versa). The DB CHECK is the guarantee behind the resolver.
+
+**Where enforced.**
+- `apps/api/prisma/schema.prisma` + the `add_service_accounts` migration — a nullable `serviceAccountId`
+  actor column on the 6 audit-bearing tables (`AssetHistory`, `AssetAssignment` ×2, `AccessGrant` ×2,
+  `ConsumableMovement`, `ArticleVersion`, `ArticleLink`) + the at-most-one-actor CHECK per actor slot,
+  and the append-only `ServiceAccountAuditLog`.
+- `apps/api/src/common/actor.service.ts` — `resolveActor(principal)` returns `{userId}` | `{serviceAccountId}`
+  | `{}` so a write lands in the right column.
+- `apps/api/src/service-accounts/service-accounts.service.ts` — every mutation appends an immutable audit
+  row; the secret is never persisted in cleartext nor audited.
+- Tests: `apps/api/src/common/actor.service.spec.ts`,
+  `apps/api/src/service-accounts/service-accounts.service.spec.ts`; the CHECK + partial-unique index are
+  verified against a throwaway PG18 in the migration's commit message.
+
 ---
 
-Related: [[0043-zitadel-source-of-truth]] · [[0046-roles-permissions-v2]] · [[auth-zitadel-sot]] ·
-[[0038-jit-user-provisioning]] · [[0040-rbac-roles]] · [[0041-soft-delete-reuse-and-restore]] ·
-[[0028-secrets-and-config]] · [[deferred]] · [[summary]] · [[_MOC]]
+Related: [[0043-zitadel-source-of-truth]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] ·
+[[auth-zitadel-sot]] · [[0038-jit-user-provisioning]] · [[0040-rbac-roles]] ·
+[[0041-soft-delete-reuse-and-restore]] · [[0028-secrets-and-config]] · [[deferred]] · [[summary]] · [[_MOC]]
