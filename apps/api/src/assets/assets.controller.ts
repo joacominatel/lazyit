@@ -43,8 +43,10 @@ import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
+import type { Principal } from '../auth/principal';
 
 // Writes keep the lean Asset shape; the detail read returns the expanded AssetWithRelations, while
 // the (paginated) list returns the trimmed AssetListItem envelope.
@@ -263,8 +265,11 @@ export class AssetsController {
   @RequirePermission('asset:write')
   @ApiOperation({ summary: 'Create an asset (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: AssetDto })
-  create(@Body() dto: CreateAssetDto, @CurrentUser() user?: User) {
-    return this.assets.create(dto, user);
+  create(
+    @Body() dto: CreateAssetDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.assets.create(dto, principal);
   }
 
   // --- batch (bulk) actions — ADMIN only (ADR-0030 amendment) ---------------
@@ -279,8 +284,11 @@ export class AssetsController {
       'Bulk soft-delete assets (one DELETED history event per item; one transaction) — ADMIN only',
   })
   @ApiOkResponse({ type: BatchResultDto })
-  batchRemove(@Body() dto: BatchIdsDto, @CurrentUser() user?: User) {
-    return this.assets.batchRemove(dto.ids, user);
+  batchRemove(
+    @Body() dto: BatchIdsDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.assets.batchRemove(dto.ids, principal);
   }
 
   @Post('batch/restore')
@@ -290,8 +298,11 @@ export class AssetsController {
       'Bulk restore soft-deleted assets (one RESTORED history event per item; one transaction) — ADMIN only',
   })
   @ApiOkResponse({ type: BatchResultDto })
-  batchRestore(@Body() dto: BatchIdsDto, @CurrentUser() user?: User) {
-    return this.assets.batchRestore(dto.ids, user);
+  batchRestore(
+    @Body() dto: BatchIdsDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.assets.batchRestore(dto.ids, principal);
   }
 
   @Post('batch/status')
@@ -301,8 +312,11 @@ export class AssetsController {
       'Bulk set asset status (one STATUS_CHANGED history event per changed item; one transaction) — ADMIN only',
   })
   @ApiOkResponse({ type: BatchResultDto })
-  batchSetStatus(@Body() dto: BatchAssetStatusDto, @CurrentUser() user?: User) {
-    return this.assets.batchSetStatus(dto.ids, dto.status, user);
+  batchSetStatus(
+    @Body() dto: BatchAssetStatusDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.assets.batchSetStatus(dto.ids, dto.status, principal);
   }
 
   @Patch(':id')
@@ -312,17 +326,17 @@ export class AssetsController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateAssetDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.assets.update(id, dto, user);
+    return this.assets.update(id, dto, principal);
   }
 
   @Delete(':id')
   @RequirePermission('asset:delete')
   @ApiOperation({ summary: 'Soft-delete an asset — ADMIN only' })
   @ApiOkResponse({ type: AssetDto })
-  remove(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.assets.remove(id, user);
+  remove(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.assets.remove(id, principal);
   }
 
   @Post(':id/restore')
@@ -332,7 +346,7 @@ export class AssetsController {
       'Restore a soft-deleted asset (emits a RESTORED history event) — ADMIN only (ADR-0041)',
   })
   @ApiOkResponse({ type: AssetWithRelationsDto })
-  restore(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.assets.restore(id, user);
+  restore(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.assets.restore(id, principal);
   }
 }
