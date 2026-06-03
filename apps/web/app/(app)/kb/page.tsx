@@ -25,7 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useArticles } from "@/lib/api/hooks/use-articles";
 import { useUsers } from "@/lib/api/hooks/use-users";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { formatDate } from "@/lib/utils/format";
 import { ArticleStatusBadge } from "./_components/article-status-badge";
@@ -43,7 +43,8 @@ const STATUS_LABEL: Record<StatusFilter, string> = {
 };
 
 export default function KnowledgeBasePage() {
-  const canWrite = useCanWrite();
+  // New article + Import both create an article, so they gate on article:write.
+  const canWrite = useCan("article:write");
   const {
     q,
     offset,
