@@ -35,6 +35,7 @@ export * from "./schemas/permission-meta";
 export * from "./schemas/primitives";
 export * from "./schemas/recent-activity";
 export * from "./schemas/search";
+export * from "./schemas/service-account";
 export * from "./schemas/user";
 export * from "./schemas/user-list";
 export * from "./utils/slug";
