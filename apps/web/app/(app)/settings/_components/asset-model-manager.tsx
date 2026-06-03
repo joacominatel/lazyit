@@ -19,6 +19,7 @@ import {
   useAssetModels,
   useDeleteAssetModel,
 } from "@/lib/api/hooks/use-asset-models";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
 import { formatDate } from "@/lib/utils/format";
 import { AssetModelFormDialog } from "./asset-model-form-dialog";
 
@@ -58,9 +59,13 @@ export function AssetModelManager() {
   const { data, isLoading, isError, error, refetch } = useAssetModels();
   const { data: categories } = useAssetCategories();
   const remove = useDeleteAssetModel();
+  // A clone is a CREATE — gate the affordance like the New button (the surface is already
+  // ADMIN-gated; this fails closed while the role loads).
+  const canWrite = useCanWrite();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<AssetModel | undefined>(undefined);
+  const [cloning, setCloning] = useState<AssetModel | undefined>(undefined);
   const [deleting, setDeleting] = useState<AssetModel | undefined>(undefined);
 
   const categoryName = useMemo(() => {
@@ -71,11 +76,19 @@ export function AssetModelManager() {
 
   function openCreate() {
     setEditing(undefined);
+    setCloning(undefined);
     setFormOpen(true);
   }
 
   function openEdit(model: AssetModel) {
+    setCloning(undefined);
     setEditing(model);
+    setFormOpen(true);
+  }
+
+  function openClone(model: AssetModel) {
+    setEditing(undefined);
+    setCloning(model);
     setFormOpen(true);
   }
 
@@ -133,6 +146,7 @@ export function AssetModelManager() {
               <TableCell className="text-right">
                 <RowActions
                   onEdit={() => openEdit(model)}
+                  onClone={canWrite ? () => openClone(model) : undefined}
                   onDelete={() => setDeleting(model)}
                 />
               </TableCell>
@@ -145,6 +159,7 @@ export function AssetModelManager() {
         open={formOpen}
         onOpenChange={setFormOpen}
         model={editing}
+        cloneSource={cloning}
       />
       {deleting ? (
         <DeleteConfirmDialog

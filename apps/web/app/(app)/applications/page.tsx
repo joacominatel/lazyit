@@ -399,6 +399,9 @@ export default function ApplicationsPage() {
                         onEdit={() =>
                           router.push(`/applications/${application.id}/edit`)
                         }
+                        onClone={() =>
+                          router.push(`/applications/${application.id}/clone`)
+                        }
                         onDelete={() =>
                           setDeleting({
                             id: application.id,
@@ -460,6 +463,9 @@ export default function ApplicationsPage() {
                       <RowActions
                         onEdit={() =>
                           router.push(`/applications/${application.id}/edit`)
+                        }
+                        onClone={() =>
+                          router.push(`/applications/${application.id}/clone`)
                         }
                         onDelete={() =>
                           setDeleting({

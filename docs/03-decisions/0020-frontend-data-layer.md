@@ -181,6 +181,34 @@ consumables, users, locations, kb) stay identical in structure and behaviour —
 - **RBAC:** write affordances (New X, per-row Edit/Delete, consumable ±1 quick-adjust) are gated on
   `useCanWrite()` (the API is still the real gate).
 
+### "Clone a record" — pre-filled create off the existing forms (2026-06-02)
+
+A **Clone** affordance opens the existing **create** form pre-filled from an existing record (issue
+#125). It is a pure-frontend feature: a clone is just a normal create body against the existing POST
+endpoints (which already enforce the partial-unique indexes and the soft-delete contract) — **no new
+endpoints, no `?cloneFrom=` transport**. The mold:
+
+- **Sanitizers in `@lazyit/shared`** (`src/clone/clone-defaults.ts`, unit-tested with `bun test`):
+  one pure mapper per entity returning a `CreateX`-shaped partial. **Never a blind spread** — each is
+  explicit: unique partial-index fields are CLEARED (`Asset.serial`/`assetTag`, `Consumable.sku`,
+  `AssetModel.sku`) so the create can't 409 and the operator notices the empty field; a category's
+  unique `name` is suffixed " (copy)"; `jsonb` (`specs`/`metadata`) is DEEP-COPIED (`structuredClone`).
+  **`User` is security-sensitive**: it copies only `firstName`/`lastName`, forces `email` to "",
+  **never** carries `externalId` (SEC-006) and **omits** `role` so the server applies its default
+  VIEWER (least privilege — a clone must not carry ADMIN/MEMBER from the source).
+- **Page-route forms** (Asset, Consumable, Application) gain a dedicated `/<res>/[id]/clone` route that
+  mirrors `/[id]/edit` (fetch by id) and renders the create form with a `cloneSource` prop — the form
+  stays in CREATE mode (CreateX resolver + create mutation), pre-filled from the sanitizer.
+- **Dialog forms** (AssetModel, the four Categories, User) gain a `cloneSource` prop (distinct from
+  their edit prop) and a "Clone" row action that opens the create dialog pre-filled, **remounted via
+  `key={`clone-${source.id}`}`** so it stays in create mode with fresh state. Fields with no UI input
+  but a meaningful clone (`AssetModel.specs`, `Application.metadata`) ride straight into the create
+  body.
+- **Entry points & gating:** `RowActions` gained an OPTIONAL `onClone` (a "Clone" item between Edit and
+  Delete, additive — existing call sites unaffected); detail pages get a Clone button beside Edit.
+  Every entry point is gated on `useCanWrite()` (a clone is a create; fails closed while loading) and
+  is **never shown in the archived `deleted=only` view** (where Edit is already hidden).
+
 ## Consequences
 
 - **Positive:** a consistent, testable, copy-pasteable mold; contracts centralized in

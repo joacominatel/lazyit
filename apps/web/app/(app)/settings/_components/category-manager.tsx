@@ -17,6 +17,7 @@ import { useApplicationCategories, useDeleteApplicationCategory } from "@/lib/ap
 import { useArticleCategories, useDeleteArticleCategory } from "@/lib/api/hooks/use-article-categories";
 import { useAssetCategories, useDeleteAssetCategory } from "@/lib/api/hooks/use-asset-categories";
 import { useConsumableCategories, useDeleteConsumableCategory } from "@/lib/api/hooks/use-consumable-categories";
+import { useCanWrite } from "@/lib/hooks/use-permissions";
 import { formatDate } from "@/lib/utils/format";
 import { CategoryFormDialog } from "./category-form-dialog";
 import {
@@ -87,9 +88,13 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
   const { data, isLoading, isError, error, refetch } = query;
   const hasOrder = kindHasOrder(kind);
   const label = CATEGORY_KIND_LABEL[kind];
+  // A clone is a CREATE — gate the affordance like the New button (the surface is already
+  // ADMIN-gated; this fails closed while the role loads).
+  const canWrite = useCanWrite();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<AnyCategory | undefined>(undefined);
+  const [cloning, setCloning] = useState<AnyCategory | undefined>(undefined);
   const [deleting, setDeleting] = useState<AnyCategory | undefined>(undefined);
 
   const columns = [
@@ -100,11 +105,19 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
 
   function openCreate() {
     setEditing(undefined);
+    setCloning(undefined);
     setFormOpen(true);
   }
 
   function openEdit(category: AnyCategory) {
+    setCloning(undefined);
     setEditing(category);
+    setFormOpen(true);
+  }
+
+  function openClone(category: AnyCategory) {
+    setEditing(undefined);
+    setCloning(category);
     setFormOpen(true);
   }
 
@@ -162,6 +175,7 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
               <TableCell className="text-right">
                 <RowActions
                   onEdit={() => openEdit(category)}
+                  onClone={canWrite ? () => openClone(category) : undefined}
                   onDelete={() => setDeleting(category)}
                 />
               </TableCell>
@@ -175,6 +189,7 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
         onOpenChange={setFormOpen}
         kind={kind}
         category={editing}
+        cloneSource={cloning}
       />
       {deleting ? (
         <DeleteConfirmDialog

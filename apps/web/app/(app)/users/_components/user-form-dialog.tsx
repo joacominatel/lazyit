@@ -3,6 +3,7 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  cloneUserDefaults,
   CreateUserSchema,
   type User,
   UpdateUserSchema,
@@ -49,7 +50,13 @@ type UserFormValues = {
   isActive?: boolean;
 };
 
-function toFormValues(user?: User): UserFormValues {
+/**
+ * Initial form values. Edit → from `user`. Clone → from the shared `cloneUserDefaults` sanitizer
+ * (SECURITY-SENSITIVE: copies ONLY firstName/lastName; email forced "", role OMITTED → server default
+ * VIEWER, externalId never set). Otherwise blank. Clone stays in CREATE mode (`user` absent), so the
+ * `isActive` toggle never renders and the create submit never carries a role.
+ */
+function toFormValues(user?: User, cloneSource?: User): UserFormValues {
   if (user) {
     return {
       email: user.email,
@@ -57,6 +64,10 @@ function toFormValues(user?: User): UserFormValues {
       lastName: user.lastName,
       isActive: user.isActive,
     };
+  }
+  if (cloneSource) {
+    const d = cloneUserDefaults(cloneSource);
+    return { email: d.email, firstName: d.firstName, lastName: d.lastName };
   }
   return { email: "", firstName: "", lastName: "" };
 }
@@ -66,21 +77,29 @@ interface UserFormDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Present → edit that user; absent → create a new one. */
   user?: User;
+  /**
+   * Present (and `user` absent) → CREATE pre-filled from this record (issue #125). Distinct from the
+   * edit `user` prop: the dialog stays in create mode (CreateUserSchema + create mutation), and the
+   * shared sanitizer guarantees the privilege-safe reset (no role/externalId, email cleared).
+   */
+  cloneSource?: User;
   /** Called with the created user (create mode) — lets a caller select it inline (#25). */
   onCreated?: (user: User) => void;
 }
 
 /**
- * Create/edit dialog for a User. Unlike Locations (one schema for both modes),
+ * Create/edit/clone dialog for a User. Unlike Locations (one schema for both modes),
  * the two modes validate against different shared schemas: create uses
  * `CreateUserSchema` (email + names, always active); edit uses `UpdateUserSchema`
- * (adds the `isActive` toggle). The parent remounts this via `key` per mode, so
- * `isEdit` — and therefore the resolver — is fixed for the component's lifetime.
+ * (adds the `isActive` toggle). The parent remounts this via `key` per mode (edit/clone/create), so
+ * `isEdit` — and therefore the resolver — is fixed for the component's lifetime. Clone pre-fills via
+ * the privilege-safe `cloneUserDefaults` sanitizer and submits through the normal create flow.
  */
 export function UserFormDialog({
   open,
   onOpenChange,
   user,
+  cloneSource,
   onCreated,
 }: UserFormDialogProps) {
   const isEdit = user != null;
@@ -92,14 +111,14 @@ export function UserFormDialog({
     resolver: zodResolver(
       isEdit ? UpdateUserSchema : CreateUserSchema,
     ) as Resolver<UserFormValues>,
-    defaultValues: toFormValues(user),
+    defaultValues: toFormValues(user, cloneSource),
   });
 
   // Refresh the form whenever it reopens, so a reused dialog never shows stale
-  // values from a previous create/edit.
+  // values from a previous create/edit/clone.
   useEffect(() => {
-    if (open) form.reset(toFormValues(user));
-  }, [open, user, form]);
+    if (open) form.reset(toFormValues(user, cloneSource));
+  }, [open, user, cloneSource, form]);
 
   const onSubmit = form.handleSubmit((values) => {
     if (user) {

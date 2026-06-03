@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
-import type { AssetModel } from "@lazyit/shared";
+import { type AssetModel, cloneAssetModelDefaults } from "@lazyit/shared";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -46,14 +46,33 @@ interface FormState {
   categoryId: string;
 }
 
-function toFormState(model?: AssetModel): FormState {
-  return {
-    name: model?.name ?? "",
-    manufacturer: model?.manufacturer ?? "",
-    sku: model?.sku ?? "",
-    description: model?.description ?? "",
-    categoryId: model?.categoryId ?? "",
-  };
+/**
+ * Initial dialog state. Edit → from `model`. Clone → from the shared `cloneAssetModelDefaults`
+ * sanitizer (name " (copy)", `sku` cleared). Otherwise blank. `specs` has no UI field here; on a
+ * clone it's threaded straight into the create payload (see {@link AssetModelForm}).
+ */
+function toFormState(model?: AssetModel, cloneSource?: AssetModel): FormState {
+  if (model) {
+    return {
+      name: model.name,
+      manufacturer: model.manufacturer,
+      sku: model.sku ?? "",
+      description: model.description ?? "",
+      categoryId: model.categoryId ?? "",
+    };
+  }
+  if (cloneSource) {
+    const d = cloneAssetModelDefaults(cloneSource);
+    return {
+      name: d.name ?? "",
+      manufacturer: d.manufacturer ?? "",
+      // sku is cleared by the sanitizer → render empty.
+      sku: d.sku ?? "",
+      description: d.description ?? "",
+      categoryId: d.categoryId ?? "",
+    };
+  }
+  return { name: "", manufacturer: "", sku: "", description: "", categoryId: "" };
 }
 
 type BuildResult =
@@ -65,27 +84,41 @@ interface AssetModelFormDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Present → edit that model; absent → create a new one. */
   model?: AssetModel;
+  /**
+   * Present (and `model` absent) → CREATE pre-filled from this record (issue #125). Distinct from the
+   * edit `model` prop: the dialog stays in create mode (CreateAssetModelSchema + create mutation).
+   */
+  cloneSource?: AssetModel;
 }
 
 /**
- * Create/edit dialog for an Asset model in the Settings → Taxonomies area. New component (does NOT
- * touch the existing inline `create-asset-model-dialog`). The thin wrapper owns the `<Dialog>`; the
- * body is a keyed inner component so it remounts with fresh state per target model (no
- * setState-in-effect). Name + manufacturer are required; SKU, description and the owning asset
- * category are optional. Specs are out of scope here (edited via the API/seed).
+ * Create/edit/clone dialog for an Asset model in the Settings → Taxonomies area. New component (does
+ * NOT touch the existing inline `create-asset-model-dialog`). The thin wrapper owns the `<Dialog>`;
+ * the body is a keyed inner component so it remounts with fresh state per target (`edit-`/`clone-`/
+ * `new` key) — no setState-in-effect. Name + manufacturer are required; SKU, description and the
+ * owning asset category are optional. Specs have no UI field (edited via the API/seed), but a clone
+ * carries the source's deep-copied specs straight into the create body.
  */
 export function AssetModelFormDialog({
   open,
   onOpenChange,
   model,
+  cloneSource,
 }: AssetModelFormDialogProps) {
+  // A clone keys off the source id so reopening for a different source remounts with fresh state.
+  const key = model
+    ? `edit-${model.id}`
+    : cloneSource
+      ? `clone-${cloneSource.id}`
+      : "new";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         {open ? (
           <AssetModelForm
-            key={model?.id ?? "new"}
+            key={key}
             model={model}
+            cloneSource={cloneSource}
             onClose={() => onOpenChange(false)}
           />
         ) : null}
@@ -96,9 +129,11 @@ export function AssetModelFormDialog({
 
 function AssetModelForm({
   model,
+  cloneSource,
   onClose,
 }: {
   model?: AssetModel;
+  cloneSource?: AssetModel;
   onClose: () => void;
 }) {
   const isEdit = model != null;
@@ -107,7 +142,14 @@ function AssetModelForm({
   const { data: categories } = useAssetCategories();
   const isPending = create.isPending || update.isPending;
 
-  const [values, setValues] = useState<FormState>(() => toFormState(model));
+  const [values, setValues] = useState<FormState>(() =>
+    toFormState(model, cloneSource),
+  );
+  // `specs` has no UI field; on a clone, carry the deep-copied blob into the create body (computed
+  // once at mount, stable because the dialog remounts per source via its key).
+  const [clonedSpecs] = useState(() =>
+    cloneSource && !model ? cloneAssetModelDefaults(cloneSource).specs : undefined,
+  );
   const [error, setError] = useState<string | undefined>(undefined);
 
   function set<K extends keyof FormState>(key: K, value: string) {
@@ -129,6 +171,8 @@ function AssetModelForm({
     if (sku.length > 0) payload.sku = sku;
     if (description.length > 0) payload.description = description;
     if (values.categoryId.length > 0) payload.categoryId = values.categoryId;
+    // On a clone, carry the source's deep-copied specs (no UI field) into the create body.
+    if (clonedSpecs) payload.specs = clonedSpecs;
     return { ok: true, payload };
   }
 
