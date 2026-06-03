@@ -24,6 +24,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { HealthModule } from './health/health.module';
 import { CommonModule } from './common/common.module';
 import { ConfigModule } from './config/config.module';
+import { ServiceAccountsModule } from './service-accounts/service-accounts.module';
 import { SearchModule } from './search/search.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
@@ -63,6 +64,9 @@ import { buildLoggerParams } from './logging/logging.config';
     ConsumablesModule,
     // Read-only cross-pillar aggregation for the web dashboard (CTO Round 1). Additive — no schema.
     DashboardModule,
+    // Service Accounts management (ADR-0048): ADMIN-gated /service-accounts CRUD + token lifecycle.
+    // The SA authentication branch itself lives in AuthModule's JwtAuthGuard.
+    ServiceAccountsModule,
   ],
   controllers: [AppController],
   providers: [
