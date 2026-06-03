@@ -18,11 +18,14 @@ ACLs — Option B's per-resource matrix stays rejected). It **extends** [[0043-z
 (DB-first authorization, IdP write-back, BYOI): permissions are a new DB-first authorization source
 that, like roles, is never read from a token claim and never synced to the IdP.
 
-> This record covers **phases P0 + P1 only** — the *foundation*: the catalog, the `RolePermission`
-> table + seed, and this decision. It is **purely additive and behavior-preserving**: nothing consumes
-> `RolePermission` yet. The enforcement layer (`@RequirePermission` guard, annotating GETs, migrating
-> the existing `@Roles` sites, the config endpoints) is later, separately-shipped waves (see
-> [§Phased delivery](#phased-delivery)).
+> **Delivery status (2026-06-02):** P0–P4 are **delivered**. The foundation (P0+P1: catalog +
+> `RolePermission` table + seed + golden test) and the enforcement layer (P2: the `@RequirePermission`
+> guard; P3: the GETs annotated + the two pre-tightened reads; P4: the `@Roles` write-gates migrated
+> and the legacy `@Roles` decorator + dual-mode branch **retired**) are all shipped. The coarse
+> `@Roles` mechanism from [[0040-rbac-roles]] no longer exists in code — `@RequirePermission` is the
+> SINGLE enforcement primitive. Still **outstanding**: P5 (the config endpoints to read/update the
+> matrix; ADMIN row immutable) and the service-account fast-follow — see
+> [§Phased delivery](#phased-delivery).
 
 ## Context
 
@@ -161,6 +164,8 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
   cache, ADMIN always full) and 403s unless the role holds every required permission; the existing
   `@Roles` sites keep their coarse role-membership check unchanged; a route with neither stays
   open-by-default. Same `APP_GUARD` slot/order (after `JwtAuthGuard`). Behavior-preserving on its own.
+  (The dual-mode was a **migration scaffold**; P4 retired the `@Roles` branch, leaving only the
+  `@RequirePermission` path.)
 - **P3 — annotate the GETs** (this is where the two pre-tightened reads actually bite). (done) Every
   GET carries `@RequirePermission('<domain>:read')`. The ONLY behavior change is VIEWER → 403 on the
   access-grant reads (`GET /access-grants`, `/access-grants/:id`, `/applications/:id/access-grants`,
@@ -168,7 +173,26 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
   `/users/:id/assignments`). `GET /users/me` stays OPEN (the self-read the frontend gates admin UI
   off). `GET /search` is gated `search:read` (open to all) and additionally drops the `users` facet
   from results for a caller without `user:read`, so a VIEWER cannot enumerate emails via search.
-- **P4 (later) — migrate the existing `@Roles` sites** to `@RequirePermission`.
+- **P4 — migrate the existing `@Roles` sites** to `@RequirePermission`, then RETIRE the legacy path.
+  (done) The 63 `@Roles` write/lifecycle gates were swapped 1:1 to the `@RequirePermission` whose
+  seed-holders EXACTLY equal the old `@Roles` set — **behavior-preserving**, proven by a golden parity
+  test (`apps/api/src/auth/permission-parity.golden.spec.ts`) that fails CI on any role-set drift:
+    - ordinary writes (create/update; consumable movements; asset assignments) → `<domain>:write`
+      (ADMIN+MEMBER hold it).
+    - destructive deletes **and** their inverse restores → `<domain>:delete` (ADMIN-only — delete and
+      restore deliberately **share** the lifecycle permission, since restore is the inverse of delete).
+    - AccessGrant mutations (open/revoke/patch notes·expiry/batch-revoke) → `accessGrant:grant`
+      (ADMIN-only) — **never** `accessGrant:write`, which MEMBER holds as an intentional orphan slot;
+      using it would have silently handed MEMBER an ADMIN-only Access write.
+    - Users administration (create/update incl. role/offboard/restore) → `user:manage` (ADMIN-only
+      coarse verb), **not** `user:write` (which MEMBER holds).
+    - the config `/setup` surface stays `@Public` (no authenticated session at first-run), so there is
+      **no `settings:manage` enforcement site yet** — that permission stays catalog-only until P5.
+  With every site migrated, the legacy `@Roles` decorator + `ROLES_KEY` and the guard's dual-mode
+  `@Roles` branch were **removed**: the authorization guard is now the SINGLE `@RequirePermission`
+  primitive — `@Public` → `@RequirePermission` → open-by-default (the handful of unannotated routes,
+  e.g. hello-world / `GET /users/me`, stay reachable per INV-8). `@Public` and `JwtAuthGuard` are
+  untouched.
 - **P5 (later) — the config endpoints** (read/update the matrix; ADMIN row immutable).
 - **Fast-follow — service accounts** reuse this same catalog.
 - **Future ADR — dynamic custom roles** (Option B), if ever needed.

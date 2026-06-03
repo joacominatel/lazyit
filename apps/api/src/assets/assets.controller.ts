@@ -43,7 +43,6 @@ import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
@@ -261,7 +260,7 @@ export class AssetsController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('asset:write')
   @ApiOperation({ summary: 'Create an asset (ADMIN or MEMBER)' })
   @ApiCreatedResponse({ type: AssetDto })
   create(@Body() dto: CreateAssetDto, @CurrentUser() user?: User) {
@@ -274,7 +273,7 @@ export class AssetsController {
   // item, not per batch) and returns a per-id BatchResult (succeeded + skipped-with-reason).
 
   @Post('batch/delete')
-  @Roles('ADMIN')
+  @RequirePermission('asset:delete')
   @ApiOperation({
     summary:
       'Bulk soft-delete assets (one DELETED history event per item; one transaction) — ADMIN only',
@@ -285,7 +284,7 @@ export class AssetsController {
   }
 
   @Post('batch/restore')
-  @Roles('ADMIN')
+  @RequirePermission('asset:delete')
   @ApiOperation({
     summary:
       'Bulk restore soft-deleted assets (one RESTORED history event per item; one transaction) — ADMIN only',
@@ -296,7 +295,7 @@ export class AssetsController {
   }
 
   @Post('batch/status')
-  @Roles('ADMIN')
+  @RequirePermission('asset:delete')
   @ApiOperation({
     summary:
       'Bulk set asset status (one STATUS_CHANGED history event per changed item; one transaction) — ADMIN only',
@@ -307,7 +306,7 @@ export class AssetsController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('asset:write')
   @ApiOperation({ summary: 'Update an asset (ADMIN or MEMBER)' })
   @ApiOkResponse({ type: AssetDto })
   update(
@@ -319,7 +318,7 @@ export class AssetsController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('asset:delete')
   @ApiOperation({ summary: 'Soft-delete an asset — ADMIN only' })
   @ApiOkResponse({ type: AssetDto })
   remove(@Param('id') id: string, @CurrentUser() user?: User) {
@@ -327,7 +326,7 @@ export class AssetsController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('asset:delete')
   @ApiOperation({
     summary:
       'Restore a soft-deleted asset (emits a RESTORED history event) — ADMIN only (ADR-0041)',

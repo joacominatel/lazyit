@@ -31,7 +31,6 @@ import {
   UpdateAccessGrantNotesDto,
 } from './access-grant.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
@@ -101,7 +100,7 @@ export class AccessGrantsController {
   }
 
   @Post('batch/revoke')
-  @Roles('ADMIN')
+  @RequirePermission('accessGrant:grant')
   @ApiOperation({
     summary:
       'Bulk revoke active grants (per-grant revokedAt/revokedById; one transaction) — ADMIN only',
@@ -120,7 +119,7 @@ export class AccessGrantsController {
   }
 
   @Post()
-  @Roles('ADMIN')
+  @RequirePermission('accessGrant:grant')
   @ApiOperation({
     summary: 'Open a grant (give a user access to an application) — ADMIN only',
   })
@@ -130,7 +129,7 @@ export class AccessGrantsController {
   }
 
   @Patch(':id/revoke')
-  @Roles('ADMIN')
+  @RequirePermission('accessGrant:grant')
   @ApiOperation({
     summary:
       'Revoke an active grant (sets revokedAt; 409 if already revoked) — ADMIN only',
@@ -146,7 +145,7 @@ export class AccessGrantsController {
   }
 
   @Patch(':id/notes')
-  @Roles('ADMIN')
+  @RequirePermission('accessGrant:grant')
   @ApiOperation({
     summary: 'Update only the notes of a grant (null clears) — ADMIN only',
   })
@@ -156,7 +155,7 @@ export class AccessGrantsController {
   }
 
   @Patch(':id/expiry')
-  @Roles('ADMIN')
+  @RequirePermission('accessGrant:grant')
   @ApiOperation({
     summary:
       'Change the expiry of a grant (null makes it permanent) — ADMIN only',

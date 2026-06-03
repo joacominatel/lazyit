@@ -26,7 +26,6 @@ import {
 } from '@lazyit/shared';
 import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { ActorService } from '../common/actor.service';
 import { UsersService, USER_SORT_ALLOWLIST } from './users.service';
@@ -224,7 +223,7 @@ export class UsersController {
   }
 
   @Post()
-  @Roles('ADMIN')
+  @RequirePermission('user:manage')
   @ApiOperation({
     summary: 'Create a user — ADMIN only (can set the RBAC role)',
   })
@@ -235,7 +234,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN')
+  @RequirePermission('user:manage')
   @ApiOperation({
     summary: 'Update a user — ADMIN only (can change the RBAC role)',
   })
@@ -251,7 +250,7 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('user:manage')
   @ApiOperation({
     summary: 'Offboard (soft-delete) a user — ADMIN only',
     description:
@@ -276,7 +275,7 @@ export class UsersController {
   }
 
   @Post(':id/offboard')
-  @Roles('ADMIN')
+  @RequirePermission('user:manage')
   @ApiOperation({
     summary:
       'Offboard a user (explicit alias of DELETE /users/:id) — ADMIN only',
@@ -301,7 +300,7 @@ export class UsersController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('user:manage')
   @ApiOperation({
     summary: 'Restore (re-onboard) a soft-deleted user — ADMIN only (ADR-0041)',
     description:
