@@ -20,10 +20,22 @@ jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 const AUTHOR = '11111111-1111-1111-1111-111111111111';
 const OTHER = '22222222-2222-2222-2222-222222222222';
-// Minimal User shapes for tests — the full Prisma User type, but only id matters here.
+const SA_ID = 'sa_abcdefghijklmnopqrstuvwx';
+// Minimal User shapes for tests — the full Prisma User type, but only id matters here. The READS still
+// take a `User` (@CurrentUser); the WRITES take the unified PRINCIPAL (@CurrentPrincipal, ADR-0048).
 type MinimalUser = { id: string };
 const AUTHOR_USER: MinimalUser = { id: AUTHOR };
 const OTHER_USER: MinimalUser = { id: OTHER };
+// Human principals for the write paths; cast through `never` (only the user id drives authorship).
+const AUTHOR_PRINCIPAL = { kind: 'human', user: { id: AUTHOR } } as never;
+const OTHER_PRINCIPAL = { kind: 'human', user: { id: OTHER } } as never;
+// A service-account principal — an SA can never author/own an article (Article.authorId is a non-null
+// User FK), so the write paths must reject it (403) rather than write a null-attributed version.
+const SA_PRINCIPAL = {
+  kind: 'service',
+  serviceAccount: { id: SA_ID },
+  permissions: new Set(),
+} as never;
 
 // Shapes we assert against the recorded Prisma calls (the jest.Mock arrays are otherwise `any`).
 type ArticleData = {
@@ -76,7 +88,7 @@ describe('ArticlesService', () => {
   let prisma: { $transaction: jest.Mock };
   // ActorService is mocked; guard validation lives in jwt-auth.guard.spec.ts. By default it echoes
   // a present user's id back (any caller with a User "exists") and maps undefined to anonymous.
-  let actor: { resolve: jest.Mock };
+  let actor: ActorService;
   let search: { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
 
   beforeEach(async () => {
@@ -130,11 +142,9 @@ describe('ArticlesService', () => {
         ) => (typeof arg === 'function' ? arg(tx) : Promise.all(arg)),
       ),
     };
-    // Any present User resolves to its id; undefined → anonymous (no user).
-    // resolve() is now synchronous — returns string | undefined directly.
-    actor = {
-      resolve: jest.fn().mockImplementation((u?: MinimalUser) => u?.id),
-    };
+    // ActorService is a pure resolver (the guard already validated the caller); the real instance is
+    // used. Reads delegate to resolve(user) for draft visibility; writes read principal.user.id directly.
+    actor = new ActorService();
     // Category / asset / application exist by default; overridden per-test.
     articleCategory = { findFirst: jest.fn().mockResolvedValue({ id: 'c1' }) };
     asset = { findFirst: jest.fn().mockResolvedValue({ id: 'as1' }) };
@@ -181,7 +191,7 @@ describe('ArticlesService', () => {
   // --- create --------------------------------------------------------------
 
   describe('create', () => {
-    it('sets author from current user, autogenerates the slug, leaves a DRAFT unpublished', async () => {
+    it('sets author from the current human principal, autogenerates the slug, leaves a DRAFT unpublished', async () => {
       await service.create(
         {
           title: 'My First Article',
@@ -189,7 +199,7 @@ describe('ArticlesService', () => {
           categoryId: 'c1',
           status: 'DRAFT',
         },
-        AUTHOR_USER as never,
+        AUTHOR_PRINCIPAL,
       );
       const data = lastCreate();
       expect(data.authorId).toBe(AUTHOR);
@@ -204,7 +214,7 @@ describe('ArticlesService', () => {
     it('sets publishedAt when created already PUBLISHED', async () => {
       await service.create(
         { title: 'Live', content: 'b', categoryId: 'c1', status: 'PUBLISHED' },
-        AUTHOR_USER as never,
+        AUTHOR_PRINCIPAL,
       );
       expect(lastCreate().publishedAt).toBeInstanceOf(Date);
       // A PUBLISHED article is indexed on create (ADR-0035).
@@ -228,12 +238,12 @@ describe('ArticlesService', () => {
           categoryId: 'c1',
           status: 'DRAFT',
         },
-        AUTHOR_USER as never,
+        AUTHOR_PRINCIPAL,
       );
       expect(lastCreate().slug).toBe('custom-slug');
     });
 
-    it('rejects when current user is missing (400)', async () => {
+    it('rejects when there is no authenticated principal (400)', async () => {
       await expect(
         service.create(
           { title: 'X', content: 'b', categoryId: 'c1', status: 'DRAFT' },
@@ -243,16 +253,16 @@ describe('ArticlesService', () => {
       expect(article.create).not.toHaveBeenCalled();
     });
 
-    it("propagates a thrown error from the actor resolver (a required author can't be resolved)", async () => {
-      actor.resolve.mockImplementationOnce(() => {
-        throw new BadRequestException('actor error');
-      });
+    it('rejects a SERVICE-ACCOUNT principal (403): an SA cannot author an article — ADR-0048', async () => {
+      // Article.authorId is a non-null User FK; an SA has no user identity to own an article, so the
+      // write path rejects rather than producing a null-attributed version row.
       await expect(
         service.create(
           { title: 'X', content: 'b', categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR_USER as never,
+          SA_PRINCIPAL,
         ),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(article.create).not.toHaveBeenCalled();
     });
 
     it('rejects a missing / soft-deleted category (400)', async () => {
@@ -260,7 +270,7 @@ describe('ArticlesService', () => {
       await expect(
         service.create(
           { title: 'X', content: 'b', categoryId: 'gone', status: 'DRAFT' },
-          AUTHOR_USER as never,
+          AUTHOR_PRINCIPAL,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(article.create).not.toHaveBeenCalled();
@@ -274,8 +284,8 @@ describe('ArticlesService', () => {
 
     it('shows only PUBLISHED to anonymous callers', async () => {
       await service.findPage({}, PAGE, undefined);
+      // Anonymous (no resolved user) → the visibility filter restricts to PUBLISHED only.
       expect(listWhere().AND[0]).toEqual({ status: 'PUBLISHED' });
-      expect(actor.resolve).toHaveBeenCalledWith(undefined);
     });
 
     it("shows PUBLISHED plus the caller's own DRAFTs when logged in", async () => {
@@ -435,7 +445,7 @@ describe('ArticlesService', () => {
         status: 'PUBLISHED',
         lastEditedById: AUTHOR,
       });
-      await service.update('a', { title: 'New title' }, AUTHOR_USER as never);
+      await service.update('a', { title: 'New title' }, AUTHOR_PRINCIPAL);
       expect(lastUpdate()).toEqual({
         title: 'New title',
         lastEditedById: AUTHOR,
@@ -458,7 +468,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
       });
       await expect(
-        service.update('a', { title: 'x' }, OTHER_USER as never),
+        service.update('a', { title: 'x' }, OTHER_PRINCIPAL),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(article.update).not.toHaveBeenCalled();
     });
@@ -470,7 +480,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
       });
       await expect(
-        service.update('a', { title: 'x' }, OTHER_USER as never),
+        service.update('a', { title: 'x' }, OTHER_PRINCIPAL),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -482,7 +492,7 @@ describe('ArticlesService', () => {
       });
       articleCategory.findFirst.mockResolvedValueOnce(null);
       await expect(
-        service.update('a', { categoryId: 'gone' }, AUTHOR_USER as never),
+        service.update('a', { categoryId: 'gone' }, AUTHOR_PRINCIPAL),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
@@ -497,7 +507,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
         publishedAt: null,
       });
-      await service.publish('a', AUTHOR_USER as never);
+      await service.publish('a', AUTHOR_PRINCIPAL);
       const data = lastUpdate();
       expect(data.status).toBe('PUBLISHED');
       expect(data.publishedAt).toBeInstanceOf(Date);
@@ -517,7 +527,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
         publishedAt: new Date(),
       });
-      await service.publish('a', AUTHOR_USER as never);
+      await service.publish('a', AUTHOR_PRINCIPAL);
       expect(article.update).not.toHaveBeenCalled();
       // Idempotent short-circuit: already indexed, no redundant sync.
       expect(search.upsert).not.toHaveBeenCalled();
@@ -530,7 +540,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
         publishedAt: new Date(),
       });
-      await service.unpublish('a', AUTHOR_USER as never);
+      await service.unpublish('a', AUTHOR_PRINCIPAL);
       const data = lastUpdate();
       expect(data.status).toBe('DRAFT');
       expect(data).not.toHaveProperty('publishedAt');
@@ -546,7 +556,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
       });
       await expect(
-        service.publish('a', OTHER_USER as never),
+        service.publish('a', OTHER_PRINCIPAL),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
@@ -560,7 +570,7 @@ describe('ArticlesService', () => {
         status: 'PUBLISHED',
         authorId: AUTHOR,
       });
-      await service.remove('a', AUTHOR_USER as never);
+      await service.remove('a', AUTHOR_PRINCIPAL);
       const data = lastUpdate();
       expect(data.deletedAt).toBeInstanceOf(Date);
       expect(data.lastEditedById).toBe(AUTHOR);
@@ -574,9 +584,9 @@ describe('ArticlesService', () => {
         status: 'PUBLISHED',
         authorId: AUTHOR,
       });
-      await expect(
-        service.remove('a', OTHER_USER as never),
-      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.remove('a', OTHER_PRINCIPAL)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
       expect(article.update).not.toHaveBeenCalled();
     });
   });
@@ -594,7 +604,7 @@ describe('ArticlesService', () => {
       await service.importArticle(
         file('network-guide.md', '# Net'),
         { categoryId: 'c1', status: 'DRAFT' },
-        AUTHOR_USER as never,
+        AUTHOR_PRINCIPAL,
       );
       const data = lastCreate();
       expect(data.title).toBe('network guide');
@@ -610,7 +620,7 @@ describe('ArticlesService', () => {
       await service.importArticle(
         file('guide.md', '# Net'),
         { categoryId: 'c1', status: 'PUBLISHED' },
-        AUTHOR_USER as never,
+        AUTHOR_PRINCIPAL,
       );
       expect(search.upsert).toHaveBeenCalledWith(
         'articles',
@@ -628,7 +638,7 @@ describe('ArticlesService', () => {
         service.importArticle(
           big,
           { categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR_USER as never,
+          AUTHOR_PRINCIPAL,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(article.create).not.toHaveBeenCalled();
@@ -639,7 +649,7 @@ describe('ArticlesService', () => {
         service.importArticle(
           undefined,
           { categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR_USER as never,
+          AUTHOR_PRINCIPAL,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
@@ -649,7 +659,7 @@ describe('ArticlesService', () => {
         service.importArticle(
           file('empty.txt', '   '),
           { categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR_USER as never,
+          AUTHOR_PRINCIPAL,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(article.create).not.toHaveBeenCalled();
@@ -678,7 +688,7 @@ describe('ArticlesService', () => {
           categoryId: 'c1',
           status: 'DRAFT',
         },
-        AUTHOR_USER as never,
+        AUTHOR_PRINCIPAL,
       );
       expect(articleVersion.create).toHaveBeenCalledTimes(1);
       const v = lastVersion();
@@ -702,7 +712,7 @@ describe('ArticlesService', () => {
           size: Buffer.byteLength(body),
         },
         { categoryId: 'c1', status: 'DRAFT' },
-        AUTHOR_USER as never,
+        AUTHOR_PRINCIPAL,
       );
       expect(articleVersion.create).toHaveBeenCalledTimes(1);
       expect(lastVersion()).toMatchObject({ version: 1, editedById: AUTHOR });
@@ -727,7 +737,7 @@ describe('ArticlesService', () => {
       });
       // Two prior versions exist → next is 3.
       articleVersion.aggregate.mockResolvedValueOnce({ _max: { version: 2 } });
-      await service.update('a', { title: 'New' }, AUTHOR_USER as never);
+      await service.update('a', { title: 'New' }, AUTHOR_PRINCIPAL);
       expect(articleVersion.create).toHaveBeenCalledTimes(1);
       expect(lastVersion()).toMatchObject({
         articleId: 'a',
@@ -757,7 +767,7 @@ describe('ArticlesService', () => {
       await service.update(
         'a',
         { metadata: { reviewed: true } },
-        AUTHOR_USER as never,
+        AUTHOR_PRINCIPAL,
       );
       expect(article.update).toHaveBeenCalled();
       expect(articleVersion.create).not.toHaveBeenCalled();
@@ -780,7 +790,7 @@ describe('ArticlesService', () => {
         content: 'b',
         excerpt: null,
       });
-      await service.publish('a', AUTHOR_USER as never);
+      await service.publish('a', AUTHOR_PRINCIPAL);
       expect(articleVersion.create).toHaveBeenCalledTimes(1);
       expect(lastVersion()).toMatchObject({ status: 'PUBLISHED', version: 1 });
     });
@@ -792,7 +802,7 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
         publishedAt: new Date(),
       });
-      await service.publish('a', AUTHOR_USER as never);
+      await service.publish('a', AUTHOR_PRINCIPAL);
       expect(articleVersion.create).not.toHaveBeenCalled();
     });
   });
@@ -884,7 +894,7 @@ describe('ArticlesService', () => {
       const link = await service.addLink(
         'a',
         { assetId: 'as1' },
-        AUTHOR_USER as never,
+        AUTHOR_PRINCIPAL,
       );
       expect(asset.findFirst).toHaveBeenCalled();
       expect(articleLink.create).toHaveBeenCalledWith({
@@ -900,11 +910,7 @@ describe('ArticlesService', () => {
 
     it('links to an application (author only)', async () => {
       article.findFirst.mockResolvedValue(PUBLISHED_OWNED);
-      await service.addLink(
-        'a',
-        { applicationId: 'app1' },
-        AUTHOR_USER as never,
-      );
+      await service.addLink('a', { applicationId: 'app1' }, AUTHOR_PRINCIPAL);
       expect(application.findFirst).toHaveBeenCalled();
       expect(articleLink.create).toHaveBeenCalledWith({
         data: {
@@ -920,7 +926,7 @@ describe('ArticlesService', () => {
       article.findFirst.mockResolvedValue(PUBLISHED_OWNED);
       asset.findFirst.mockResolvedValueOnce(null);
       await expect(
-        service.addLink('a', { assetId: 'gone' }, AUTHOR_USER as never),
+        service.addLink('a', { assetId: 'gone' }, AUTHOR_PRINCIPAL),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(articleLink.create).not.toHaveBeenCalled();
     });
@@ -928,7 +934,7 @@ describe('ArticlesService', () => {
     it('blocks a non-author from linking a PUBLISHED article (403)', async () => {
       article.findFirst.mockResolvedValue(PUBLISHED_OWNED);
       await expect(
-        service.addLink('a', { assetId: 'as1' }, OTHER_USER as never),
+        service.addLink('a', { assetId: 'as1' }, OTHER_PRINCIPAL),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(articleLink.create).not.toHaveBeenCalled();
     });
@@ -939,7 +945,7 @@ describe('ArticlesService', () => {
         id: 'link1',
         articleId: 'a',
       });
-      await service.removeLink('a', 'link1', AUTHOR_USER as never);
+      await service.removeLink('a', 'link1', AUTHOR_PRINCIPAL);
       expect(articleLink.delete).toHaveBeenCalledWith({
         where: { id: 'link1' },
       });
@@ -949,7 +955,7 @@ describe('ArticlesService', () => {
       article.findFirst.mockResolvedValue(PUBLISHED_OWNED);
       articleLink.findFirst.mockResolvedValueOnce(null);
       await expect(
-        service.removeLink('a', 'nope', AUTHOR_USER as never),
+        service.removeLink('a', 'nope', AUTHOR_PRINCIPAL),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(articleLink.delete).not.toHaveBeenCalled();
     });
