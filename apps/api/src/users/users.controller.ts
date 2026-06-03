@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  NotImplementedException,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -12,6 +14,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -31,6 +34,7 @@ import type { Principal } from '../auth/principal';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { ActorService } from '../common/actor.service';
 import { UsersService, USER_SORT_ALLOWLIST } from './users.service';
+import { PasswordResetUnsupportedError } from '../auth/identity/identity-provider.interface';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parsePageQuery } from '../common/parse-page-query';
@@ -238,7 +242,13 @@ export class UsersController {
   @Patch(':id')
   @RequirePermission('user:manage')
   @ApiOperation({
-    summary: 'Update a user — ADMIN only (can change the RBAC role)',
+    summary:
+      'Update a user — ADMIN only. Can change first/last name, email and the RBAC role.',
+    description:
+      'Name/email/role edits are mirrored back to the IdP (Zitadel) inside a no-split-brain ' +
+      'transaction: if the Zitadel write fails the local change is reverted and the request is 503 ' +
+      '(issue #149). The email is the account-linking key and is written pre-verified, so it never ' +
+      'forces re-verification. externalId can never be set here (SEC-006).',
   })
   @ApiOkResponse({ type: UserDto })
   update(
@@ -249,6 +259,37 @@ export class UsersController {
     // Pass the actor so the service can enforce the RBAC self-role-change guard (no self-escalation/
     // demotion → 403) and the last-admin guard (refuse to demote the final ADMIN → 409). ADR-0040.
     return this.users.update(id, dto, this.actor.resolve(actor));
+  }
+
+  @Post(':id/reset-password')
+  @RequirePermission('user:manage')
+  @HttpCode(204)
+  @ApiOperation({
+    summary: 'Trigger a password reset for a user — ADMIN only (issue #149)',
+    description:
+      'Asks the identity provider to send the user a password-reset link. lazyit NEVER stores, sets ' +
+      'or sends a password (ADR-0016/0037): Zitadel emails the link via ZITADEL’s own SMTP (which the ' +
+      'operator must have configured for delivery). 422 if the user is inactive; 501 ("managed by ' +
+      'your identity provider") under BYOI / generic OIDC or for a user not linked to the IdP; 503 if ' +
+      'the Zitadel Management call fails. Returns 204 No Content on success.',
+  })
+  @ApiNoContentResponse({
+    description: 'Reset notification triggered (Zitadel will email the link).',
+  })
+  async resetPassword(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor?: User,
+  ): Promise<void> {
+    try {
+      await this.users.requestPasswordReset(id, this.actor.resolve(actor));
+    } catch (err) {
+      // BYOI (or a user with no IdP link) cannot trigger a reset: surface that HONESTLY as a 501 rather
+      // than a misleading 2xx (INV-4). Every other error (404/422/503) propagates unchanged.
+      if (err instanceof PasswordResetUnsupportedError) {
+        throw new NotImplementedException(err.message);
+      }
+      throw err;
+    }
   }
 
   @Delete(':id')
