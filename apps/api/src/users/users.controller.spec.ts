@@ -47,7 +47,10 @@ describe('UsersController :id uuid validation (SEC-004)', () => {
         { provide: AccessGrantsService, useValue: { findAll: jest.fn() } },
         {
           provide: ActorService,
-          useValue: { resolve: jest.fn().mockReturnValue(undefined) },
+          useValue: {
+            resolve: jest.fn().mockReturnValue(undefined),
+            resolveActor: jest.fn().mockReturnValue({}),
+          },
         },
       ],
     }).compile();
@@ -121,7 +124,10 @@ describe('UsersController GET /users/me (ADR-0040)', () => {
         { provide: AccessGrantsService, useValue: { findAll: jest.fn() } },
         {
           provide: ActorService,
-          useValue: { resolve: jest.fn().mockReturnValue(undefined) },
+          useValue: {
+            resolve: jest.fn().mockReturnValue(undefined),
+            resolveActor: jest.fn().mockReturnValue({}),
+          },
         },
         { provide: APP_GUARD, useClass: FakeAuthGuard },
       ],

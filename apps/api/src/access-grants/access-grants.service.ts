@@ -14,9 +14,9 @@ import type {
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
-import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import type { Principal } from '../auth/principal';
 
 /** Filters for listing grants. `activeOnly` / `includeExpired` default to true (set at the controller). */
 export interface FindAccessGrantsFilters {
@@ -28,8 +28,9 @@ export interface FindAccessGrantsFilters {
 
 /**
  * AccessGrant — the User↔Application access join (append-only, revoked via `revokedAt`; ADR-0023).
- * The actor (`grantedById` on create, `revokedById` on revoke) comes from the authenticated User
- * resolved by JwtAuthGuard (@CurrentUser()) — never the request body (ADR-0022/0024/0038).
+ * The actor comes from the unified PRINCIPAL resolved by JwtAuthGuard (@CurrentPrincipal()) — never the
+ * request body (ADR-0022/0024/0038/0048). A human is attributed to `grantedById` / `revokedById`; a
+ * service account to `grantedBySaId` / `revokedBySaId` (a DB CHECK enforces at-most-one actor per slot).
  */
 @Injectable()
 export class AccessGrantsService {
@@ -108,8 +109,8 @@ export class AccessGrantsService {
    * a departed user). Multi-grant is allowed: no uniqueness check. `grantedById` is set from the
    * authenticated User when present (null = system/unknown).
    */
-  async create(data: CreateAccessGrant, user?: User) {
-    const grantedById = this.actor.resolve(user);
+  async create(data: CreateAccessGrant, principal?: Principal) {
+    const actor = this.actor.resolveActor(principal);
     await this.assertUserUsable(data.userId);
     await this.assertApplicationUsable(data.applicationId);
     return this.prisma.accessGrant.create({
@@ -126,7 +127,12 @@ export class AccessGrantsService {
           ? { grantedAt: new Date(data.grantedAt) }
           : {}),
         ...(data.notes !== undefined ? { notes: data.notes } : {}),
-        ...(grantedById !== undefined ? { grantedById } : {}),
+        // Attribute the GRANT action: human → grantedById, service account → grantedBySaId. CHECK-safe
+        // by construction (resolveActor returns at most one of the pair; ADR-0048).
+        ...(actor.userId != null ? { grantedById: actor.userId } : {}),
+        ...(actor.serviceAccountId != null
+          ? { grantedBySaId: actor.serviceAccountId }
+          : {}),
       },
     });
   }
@@ -136,17 +142,22 @@ export class AccessGrantsService {
    * optional `notes`). 404 if missing; 409 if already revoked (revoke is not repeatable). Revoking
    * one grant does not affect any other grant the same user holds on the same application.
    */
-  async revoke(id: string, data: RevokeAccessGrant, user?: User) {
+  async revoke(id: string, data: RevokeAccessGrant, principal?: Principal) {
     const grant = await this.findOne(id);
     if (grant.revokedAt !== null) {
       throw new ConflictException(`AccessGrant ${id} is already revoked`);
     }
-    const revokedById = this.actor.resolve(user);
+    const actor = this.actor.resolveActor(principal);
     return this.prisma.accessGrant.update({
       where: { id },
       data: {
         revokedAt: new Date(),
-        ...(revokedById !== undefined ? { revokedById } : {}),
+        // Attribute the REVOKE action: human → revokedById, service account → revokedBySaId. CHECK-safe
+        // by construction (ADR-0048).
+        ...(actor.userId != null ? { revokedById: actor.userId } : {}),
+        ...(actor.serviceAccountId != null
+          ? { revokedBySaId: actor.serviceAccountId }
+          : {}),
         ...(data.notes !== undefined ? { notes: data.notes } : {}),
       },
     });
@@ -189,9 +200,9 @@ export class AccessGrantsService {
   async batchRevoke(
     ids: string[],
     notes: string | null | undefined,
-    user?: User,
+    principal?: Principal,
   ): Promise<BatchResult> {
-    const revokedById = this.actor.resolve(user);
+    const actor = this.actor.resolveActor(principal);
     const grants = await this.prisma.accessGrant.findMany({
       where: { id: { in: ids } },
       select: { id: true, revokedAt: true },
@@ -214,7 +225,12 @@ export class AccessGrantsService {
             where: { id },
             data: {
               revokedAt: now,
-              ...(revokedById !== undefined ? { revokedById } : {}),
+              // Per-grant actor attribution (same as the single-item revoke): human → revokedById,
+              // service account → revokedBySaId. CHECK-safe by construction (ADR-0048).
+              ...(actor.userId != null ? { revokedById: actor.userId } : {}),
+              ...(actor.serviceAccountId != null
+                ? { revokedBySaId: actor.serviceAccountId }
+                : {}),
               ...(notes !== undefined && notes !== null ? { notes } : {}),
             },
           });

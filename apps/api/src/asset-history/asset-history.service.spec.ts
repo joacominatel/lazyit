@@ -33,8 +33,10 @@ describe('AssetHistoryService', () => {
     service = moduleRef.get(AssetHistoryService);
   });
 
+  const SA_ID = 'sa_abcdefghijklmnopqrstuvwx';
+
   // --- record (writes through the passed-in client) -----------------------
-  it('appends a row through the given client with all fields when payload + actor are present', async () => {
+  it('appends a row through the given client with all fields when payload + a HUMAN actor are present', async () => {
     const client = {
       assetHistory: { create: jest.fn().mockResolvedValue({}) },
     };
@@ -43,9 +45,10 @@ describe('AssetHistoryService', () => {
       assetId: 'a1',
       eventType: 'STATUS_CHANGED',
       payload: { from: 'OPERATIONAL', to: 'RETIRED' },
-      performedById: ACTOR_ID,
+      actor: { userId: ACTOR_ID },
     });
 
+    // A human attribution writes performedById and never serviceAccountId — behavior-preserving.
     expect(client.assetHistory.create).toHaveBeenCalledWith({
       data: {
         assetId: 'a1',
@@ -56,7 +59,28 @@ describe('AssetHistoryService', () => {
     });
   });
 
-  it('omits payload and performedById from the row when they are not given', async () => {
+  it('attributes a SERVICE-ACCOUNT actor to serviceAccountId (never performedById) — ADR-0048', async () => {
+    const client = {
+      assetHistory: { create: jest.fn().mockResolvedValue({}) },
+    };
+
+    await service.record(client, {
+      assetId: 'a1',
+      eventType: 'CREATED',
+      actor: { serviceAccountId: SA_ID },
+    });
+
+    const calls = client.assetHistory.create.mock.calls as CreateCall[];
+    // serviceAccountId is set, performedById is absent → the at-most-one-actor CHECK is satisfied.
+    expect(calls[0][0].data).toEqual({
+      assetId: 'a1',
+      eventType: 'CREATED',
+      serviceAccountId: SA_ID,
+    });
+    expect(calls[0][0].data).not.toHaveProperty('performedById');
+  });
+
+  it('omits payload and both actor columns from the row when none are given', async () => {
     const client = {
       assetHistory: { create: jest.fn().mockResolvedValue({}) },
     };
@@ -67,9 +91,10 @@ describe('AssetHistoryService', () => {
     expect(calls[0][0].data).toEqual({ assetId: 'a1', eventType: 'CREATED' });
     expect(calls[0][0].data).not.toHaveProperty('payload');
     expect(calls[0][0].data).not.toHaveProperty('performedById');
+    expect(calls[0][0].data).not.toHaveProperty('serviceAccountId');
   });
 
-  it('omits performedById when the actor is undefined (system event) but keeps the payload', async () => {
+  it('omits both actor columns when the actor is empty (system event) but keeps the payload', async () => {
     const client = {
       assetHistory: { create: jest.fn().mockResolvedValue({}) },
     };
@@ -78,7 +103,7 @@ describe('AssetHistoryService', () => {
       assetId: 'a1',
       eventType: 'ASSIGNED',
       payload: { userId: 'u1' },
-      performedById: undefined,
+      actor: {},
     });
 
     const calls = client.assetHistory.create.mock.calls as CreateCall[];
@@ -88,6 +113,7 @@ describe('AssetHistoryService', () => {
       payload: { userId: 'u1' },
     });
     expect(calls[0][0].data).not.toHaveProperty('performedById');
+    expect(calls[0][0].data).not.toHaveProperty('serviceAccountId');
   });
 
   // --- list (reads through PrismaService) ---------------------------------

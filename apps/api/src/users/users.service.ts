@@ -15,6 +15,7 @@ import { projectUser } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
+import type { ActorAttribution } from '../common/actor.service';
 import {
   IDENTITY_PROVIDER,
   type IdentityProvider,
@@ -283,12 +284,18 @@ export class UsersService {
    * `deletedAt`. All-or-nothing: a failure rolls the whole offboarding back, so a user is never left
    * half-offboarded (deleted but still holding grants/assets, or vice-versa).
    *
-   * `actorId` is the authenticated user performing the offboarding (from @CurrentUser via the
-   * controller). It is stamped as `revokedById` / `releasedById` so the action is attributable.
-   * Grant revocation is done INLINE here (prisma.accessGrant.updateMany) rather than via the
-   * access-grants service, to keep it inside this single transaction.
+   * `actor` is the authenticated principal performing the offboarding (from @CurrentPrincipal via the
+   * controller). A human is stamped as `revokedById` / `releasedById`; a service account holding
+   * `user:manage` is stamped as `revokedBySaId` / `releasedBySaId` so the action stays attributable and
+   * the at-most-one-actor CHECK is honored (ADR-0048). Grant revocation is done INLINE here
+   * (prisma.accessGrant.updateMany) rather than via the access-grants service, to keep it inside this
+   * single transaction. The IdP write-back JSON audit line still uses the human actor id (a structured
+   * log, not a DB FK column).
    */
-  async remove(id: string, actorId?: string): Promise<OffboardResult> {
+  async remove(
+    id: string,
+    actor: ActorAttribution = {},
+  ): Promise<OffboardResult> {
     const target = await this.findOne(id); // 404 if missing or already soft-deleted
 
     // Last-admin safety guard (ADR-0040): offboarding/deleting the only remaining ADMIN would leave
@@ -307,26 +314,31 @@ export class UsersService {
       // no-ops deactivateUser → no throw, offboarding proceeds locally exactly as before.
       if (target.externalId) {
         await this.idp.deactivateUser(target.externalId);
-        this.auditWriteBack('deactivateUser', actorId, id, {
+        this.auditWriteBack('deactivateUser', actor.userId, id, {
           externalId: target.externalId,
         });
       }
 
-      // 1. Revoke all the user's active (not-yet-revoked) access grants.
+      // 1. Revoke all the user's active (not-yet-revoked) access grants. Attribute the offboarding
+      // actor on each: human → revokedById, service account → revokedBySaId (CHECK-safe; ADR-0048).
       const { count: revokedGrants } = await tx.accessGrant.updateMany({
         where: { userId: id, revokedAt: null },
         data: {
           revokedAt: now,
-          ...(actorId !== undefined ? { revokedById: actorId } : {}),
+          ...(actor.userId != null ? { revokedById: actor.userId } : {}),
+          ...(actor.serviceAccountId != null
+            ? { revokedBySaId: actor.serviceAccountId }
+            : {}),
           notes: 'auto: offboarded',
         },
       });
 
-      // 2. Release all the user's active asset assignments (+ RELEASED history per asset).
+      // 2. Release all the user's active asset assignments (+ RELEASED history per asset). The actor is
+      // threaded so the releases attribute to the right column (releasedById / releasedBySaId).
       const releasedAssignments = await this.assignments.releaseAllForUser(
         tx,
         id,
-        actorId,
+        actor,
       );
 
       // 3. Soft-delete the user.

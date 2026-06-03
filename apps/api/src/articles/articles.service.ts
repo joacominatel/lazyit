@@ -19,6 +19,7 @@ import { Prisma } from '../../generated/prisma/client';
 import type { Article, User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import { isServicePrincipal, type Principal } from '../auth/principal';
 import { SearchService } from '../search/search.service';
 import { projectArticle, type ArticleRow } from '../search/search.documents';
 import {
@@ -160,8 +161,8 @@ export class ArticlesService {
    * Snapshots version 1 in the same transaction (ADR-0042) so the article's full history starts at
    * creation — editing later never destroys the original body (ADR-0006).
    */
-  async create(data: CreateArticle, currentUser?: User) {
-    const authorId = this.requireCurrentUser(currentUser);
+  async create(data: CreateArticle, principal?: Principal) {
+    const authorId = this.requireAuthor(principal);
     await this.assertCategoryUsable(data.categoryId);
     const slug = data.slug ?? this.deriveSlug(data.title);
     const article = await this.prisma.$transaction(async (tx) => {
@@ -199,8 +200,8 @@ export class ArticlesService {
    * same transaction (ADR-0042) — so the prior body is preserved, not overwritten (ADR-0006). A
    * metadata-only or no-op edit does NOT create a version (status is never touched by PATCH).
    */
-  async update(id: string, data: UpdateArticle, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async update(id: string, data: UpdateArticle, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     const current = await this.loadOwned(id, cu);
     if (data.categoryId) await this.assertCategoryUsable(data.categoryId);
     const { metadata, ...rest } = data;
@@ -234,8 +235,8 @@ export class ArticlesService {
   }
 
   /** Soft delete (author only). */
-  async remove(id: string, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async remove(id: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     await this.loadOwned(id, cu);
     const article = await this.prisma.article.update({
       where: { id },
@@ -255,8 +256,8 @@ export class ArticlesService {
    * live article took the slug (mapped by the global PrismaExceptionFilter). On success the article is
    * re-indexed only if PUBLISHED (draft privacy — ADR-0022 / ADR-0035).
    */
-  async restore(id: string, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async restore(id: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     const article = await this.prisma.article.findFirst({
       where: { id },
       includeSoftDeleted: true,
@@ -284,8 +285,8 @@ export class ArticlesService {
    * A real transition (DRAFT → PUBLISHED) changes `status`, so it snapshots a new version in the
    * same transaction (ADR-0042); the idempotent no-op does not.
    */
-  async publish(id: string, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async publish(id: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     const article = await this.loadOwned(id, cu);
     if (article.status === 'PUBLISHED') return article;
     const published = await this.prisma.$transaction(async (tx) => {
@@ -310,8 +311,8 @@ export class ArticlesService {
    * transition (PUBLISHED → DRAFT) changes `status`, so it snapshots a new version in the same
    * transaction (ADR-0042); the idempotent no-op does not.
    */
-  async unpublish(id: string, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async unpublish(id: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     const article = await this.loadOwned(id, cu);
     if (article.status === 'DRAFT') return article;
     const unpublished = await this.prisma.$transaction(async (tx) => {
@@ -331,9 +332,9 @@ export class ArticlesService {
   async importArticle(
     file: UploadedImportFile | undefined,
     fields: ImportArticle,
-    currentUser?: User,
+    principal?: Principal,
   ) {
-    const authorId = this.requireCurrentUser(currentUser);
+    const authorId = this.requireAuthor(principal);
     if (!file) {
       throw new BadRequestException('A file is required');
     }
@@ -429,9 +430,9 @@ export class ArticlesService {
   async addLink(
     articleId: string,
     data: CreateArticleLink,
-    currentUser?: User,
+    principal?: Principal,
   ) {
-    const cu = this.requireCurrentUser(currentUser);
+    const cu = this.requireAuthor(principal);
     await this.loadOwned(articleId, cu);
     if (data.assetId) {
       await this.assertAssetUsable(data.assetId);
@@ -452,8 +453,8 @@ export class ArticlesService {
    * Remove a link from an article (ADR-0042). Author-only (same gate as edits). 404 if the link
    * doesn't exist or doesn't belong to this article (so an actor can't probe another article's links).
    */
-  async removeLink(articleId: string, linkId: string, currentUser?: User) {
-    const cu = this.requireCurrentUser(currentUser);
+  async removeLink(articleId: string, linkId: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
     await this.loadOwned(articleId, cu);
     const link = await this.prisma.articleLink.findFirst({
       where: { id: linkId, articleId },
@@ -559,12 +560,26 @@ export class ArticlesService {
   }
 
   /**
-   * Like resolveCurrentUser but mandatory (writes): 400 if no authenticated user is present.
-   * In OIDC mode the guard already ensures a user is set, so this only fires in shim mode when
-   * X-User-Id is absent.
+   * Resolve the author/editor of an article WRITE from the unified principal (ADR-0042 + ADR-0048).
+   *
+   * Articles are authored and OWNED by a human: `Article.authorId` is a NON-NULL `User` FK (onDelete
+   * Restrict) and the author-only edit gate is identity equality on `User.id`. A service account has no
+   * `User` identity to own an article — so SA article-authoring is **out of scope by data model**, not
+   * a silent null write: a service-account principal is rejected with **403** (honest: a bot cannot be
+   * the author), exactly where a human would be required. The ArticleVersion/ArticleLink SA actor
+   * columns therefore stay schema-present but unreachable — no audit row is ever produced for an SA here.
+   *
+   * - human  → returns `User.id` (used as `authorId` / the ownership key, behavior-preserving).
+   * - service account → 403 ForbiddenException.
+   * - anonymous (shim, no resolved user) → 400 BadRequestException (unchanged for humans).
    */
-  private requireCurrentUser(currentUser?: User): string {
-    const resolved = this.resolveCurrentUser(currentUser);
+  private requireAuthor(principal?: Principal): string {
+    if (isServicePrincipal(principal)) {
+      throw new ForbiddenException(
+        'Service accounts cannot author or edit articles (an article author is a human user)',
+      );
+    }
+    const resolved = principal?.user.id;
     if (!resolved) {
       throw new BadRequestException(
         'An authenticated user is required for this operation',

@@ -290,11 +290,31 @@ never be blamed for a bot's action (or vice-versa). The DB CHECK is the guarante
   and the append-only `ServiceAccountAuditLog`.
 - `apps/api/src/common/actor.service.ts` — `resolveActor(principal)` returns `{userId}` | `{serviceAccountId}`
   | `{}` so a write lands in the right column.
+- **The domain write paths consume it (ADR-0048 wiring):** every audited write reads the unified principal
+  (`@CurrentPrincipal()` → `request.principal`, never a token claim) and spreads the resolved attribution
+  onto the right column —
+  `apps/api/src/asset-history/asset-history.service.ts` (`performedById` XOR `serviceAccountId`, the choke
+  point used by `assets.service.ts` + `asset-assignments.service.ts`),
+  `apps/api/src/asset-assignments/asset-assignments.service.ts` (`assignedById|releasedById` /
+  `assignedBySaId|releasedBySaId`, incl. the offboarding `releaseAllForUser`),
+  `apps/api/src/access-grants/access-grants.service.ts` (`grantedById|revokedById` / `grantedBySaId|revokedBySaId`),
+  `apps/api/src/consumables/consumables.service.ts` (`performedById` / `serviceAccountId`),
+  `apps/api/src/users/users.service.ts` (offboarding's inline grant-revoke + asset-release attribution).
 - `apps/api/src/service-accounts/service-accounts.service.ts` — every mutation appends an immutable audit
-  row; the secret is never persisted in cleartext nor audited.
+  row; the secret is never persisted in cleartext nor audited. The controller self-attributes via
+  `@CurrentPrincipal` (a human → `actorId`; an SA self-managing SAs records `actorId = null`, honest —
+  `ServiceAccountAuditLog` has only a `User` actor FK, no SA actor column yet; a follow-up ADR/migration
+  would add one).
+- **Out of scope by data model — `Article`:** `Article.authorId` is a **non-null `User` FK** (`onDelete: Restrict`)
+  and the author-only edit gate is `User`-identity equality, so a service account cannot author/own an article.
+  The article write paths (`articles.service.ts` `requireAuthor`) **reject an SA principal with 403** rather than
+  write a null-attributed `ArticleVersion`/`ArticleLink`; those tables' SA actor columns therefore stay
+  schema-present but unreachable by design.
 - Tests: `apps/api/src/common/actor.service.spec.ts`,
-  `apps/api/src/service-accounts/service-accounts.service.spec.ts`; the CHECK + partial-unique index are
-  verified against a throwaway PG18 in the migration's commit message.
+  `apps/api/src/service-accounts/service-accounts.service.spec.ts`, and per-write-path SA-vs-human attribution
+  specs in `asset-history`, `assets`, `asset-assignments`, `access-grants`, `consumables`, `articles`,
+  `users`; the CHECK + partial-unique index are verified against a throwaway PG18 in the migration's commit
+  message.
 
 ---
 
