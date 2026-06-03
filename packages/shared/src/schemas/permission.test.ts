@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_ROLE_PERMISSIONS,
+  EDITABLE_ROLES,
+  MyPermissionsSchema,
   PERMISSIONS,
+  PERMISSION_AUDIT_ACTIONS,
   PERMISSION_BASE_ACTIONS,
   PERMISSION_DOMAINS,
+  PermissionAuditActionSchema,
   PermissionSchema,
   READ_PERMISSIONS,
   RolePermissionMatrixSchema,
+  UpdateRolePermissionsSchema,
   VIEWER_DENIED_READS,
   WRITE_PERMISSIONS,
   type Permission,
@@ -148,5 +153,101 @@ describe("DEFAULT_ROLE_PERMISSIONS (the seed source of truth)", () => {
         expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain(p);
       }
     }
+  });
+});
+
+// Roles & Permissions v2 — P5: the configurable surface (ADR-0046 §Phased delivery P5). These guard
+// the wire contracts of the ADMIN config endpoints and the caller's effective-permission response.
+
+describe("UpdateRolePermissionsSchema (PUT /config/permissions body)", () => {
+  test("accepts a body with both editable roles and valid catalog permissions", () => {
+    const result = UpdateRolePermissionsSchema.safeParse({
+      MEMBER: ["asset:read", "asset:write", "asset:delete"],
+      VIEWER: ["asset:read"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("the editable roles are exactly MEMBER + VIEWER (ADMIN is immutable)", () => {
+    expect([...EDITABLE_ROLES].sort()).toEqual(["MEMBER", "VIEWER"]);
+  });
+
+  test("rejects an ADMIN key — the ADMIN row is immutable (strict body)", () => {
+    const result = UpdateRolePermissionsSchema.safeParse({
+      ADMIN: ["asset:read"],
+      MEMBER: ["asset:read"],
+      VIEWER: ["asset:read"],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects any unknown extra key (strict body)", () => {
+    const result = UpdateRolePermissionsSchema.safeParse({
+      MEMBER: ["asset:read"],
+      VIEWER: ["asset:read"],
+      SUPERADMIN: ["asset:read"],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects an unknown permission literal → caller gets a 400", () => {
+    const result = UpdateRolePermissionsSchema.safeParse({
+      MEMBER: ["asset:read", "asset:teleport"],
+      VIEWER: ["asset:read"],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("requires BOTH MEMBER and VIEWER (a full PUT, not a patch)", () => {
+    expect(UpdateRolePermissionsSchema.safeParse({ MEMBER: [] }).success).toBe(false);
+    expect(UpdateRolePermissionsSchema.safeParse({ VIEWER: [] }).success).toBe(false);
+  });
+
+  test("accepts empty permission sets (a role may hold nothing)", () => {
+    const result = UpdateRolePermissionsSchema.safeParse({ MEMBER: [], VIEWER: [] });
+    expect(result.success).toBe(true);
+  });
+
+  test("deduplicates a role's permission list", () => {
+    const result = UpdateRolePermissionsSchema.parse({
+      MEMBER: ["asset:read", "asset:read", "asset:write"],
+      VIEWER: [],
+    });
+    expect(result.MEMBER).toEqual(["asset:read", "asset:write"]);
+  });
+});
+
+describe("MyPermissionsSchema (GET /config/my-permissions response)", () => {
+  test("accepts a role + its catalog permission list", () => {
+    const result = MyPermissionsSchema.safeParse({
+      role: "MEMBER",
+      permissions: ["asset:read", "asset:write"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects an unknown role", () => {
+    const result = MyPermissionsSchema.safeParse({
+      role: "ROBOT",
+      permissions: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects an unknown permission in the list", () => {
+    const result = MyPermissionsSchema.safeParse({
+      role: "ADMIN",
+      permissions: ["asset:fly"],
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("PermissionAuditActionSchema (audit direction)", () => {
+  test("the audited actions are exactly grant + revoke", () => {
+    expect([...PERMISSION_AUDIT_ACTIONS].sort()).toEqual(["grant", "revoke"]);
+    expect(PermissionAuditActionSchema.safeParse("grant").success).toBe(true);
+    expect(PermissionAuditActionSchema.safeParse("revoke").success).toBe(true);
+    expect(PermissionAuditActionSchema.safeParse("toggle").success).toBe(false);
   });
 });
