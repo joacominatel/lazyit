@@ -3,7 +3,7 @@ title: Deployment
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-03
 ---
 
 # Deployment
@@ -27,7 +27,7 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   browser ──HTTPS:443──▶  │  Caddy  (TLS, reverse proxy)│
                           │    │ /            ─▶ web :3000 (Next.js standalone, Node)
                           │    │ /api/*       ─▶ api :3001 (NestJS, Node)  [prefix stripped]
-                          │    │ /api/docs*   ─▶ api :3001 (Swagger, passthrough)
+                          │    │ /api/docs*   ─▶ NOT proxied in prod (SEC-009; internal/dev only)
                           │   api ──▶ db :5432 (Postgres 18)               │
                           │   migrate (one-shot: prisma migrate deploy + seed)
                           │   internal network — only Caddy publishes ports │
@@ -60,18 +60,40 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
 | **Local prod-like** | `compose.yaml` + `infra/docker-compose.prod.yaml` + `--profile prod`, local HTTPS, high ports 8080/8443 | [[docker-prod-like-first-boot]] |
 | **Self-hosted real** | same compose, real domain + Let's Encrypt, real secrets, backups | [[deploy-self-hosted]] |
 
+## First deploy — the guided bootstrap (`infra/start.sh`)
+
+The **recommended** first-deploy path is the guided, idempotent, **non-destructive** `infra/start.sh`
+([[0047-guided-first-deploy-bootstrap]]) — a thin POSIX-`sh` wrapper over the existing env contract +
+prod compose (it adds no app logic and changes no contract). Shape **DETECT → ASK → GENERATE → UP →
+POINT**: it checks prerequisites, asks ~6 questions, renders `infra/env/.env.prod` with strong random
+secrets (eliminating the three classic foot-guns — the exactly-32-char `ZITADEL_MASTERKEY`, the
+`DATABASE_URL`/`POSTGRES_PASSWORD` coupling, and the forgotten `chmod 600`), runs the canonical prod
+compose, and points the operator at **`https://<host>/setup`**. It **never** regenerates the unrotatable
+`MASTERKEY` or runs any teardown — a destructive reset stays a documented manual operation. The manual
+`cp`/`openssl`/`chmod`/`up` steps remain documented as the explicit fallback ([[deploy-self-hosted]],
+[[docker-prod-like-first-boot]]).
+
 ## CI/CD
 
 CI (GitHub Actions) gates every PR/push: typecheck, lint, test, build, and a Docker image build
 (not published). **CD is deferred** — there's no deploy target yet; the registry will be GHCR when
 one exists. → [[0027-ci-pipeline]].
 
-## Reserved, not configured — the IdP
+## Identity & authorization (as built)
 
-Auth is deferred to an external IdP ([[0016-auth-strategy-deferred]]). Infra leaves a **slot**: a
-commented service in the compose file, a commented route in the `Caddyfile`, and commented `OIDC_*`
-placeholders in `.env.prod.example`. When it lands, the IdP `sub` maps to `User.externalId`. The
-provider (Authentik/Keycloak/Zitadel) is a future ADR.
+Auth is **live**, not reserved: the IdP is **Zitadel** with a **BYOI** (bring-your-own-OIDC) escape
+hatch ([[0037-idp-choice-zitadel-byoi]], [[0043-zitadel-source-of-truth]]). In the bundled flow a
+one-shot **`zitadel-bootstrap` sidecar** (prod profile) provisions the project / OIDC app / roles / a
+runtime service-account key zero-touch and writes `oidc-client.json` to the `zitadel_secrets` volume,
+which `api`/`web` read at startup; Caddy reverse-proxies `auth.<domain>` → `zitadel:8080`. The first
+ADMIN is created by the in-app **`/setup` wizard** (the bootstrap script never creates a user). The IdP
+`sub` maps to `User.externalId` (JIT on first login — [[0038-jit-user-provisioning]]). Full topology +
+gotchas: [[auth-zitadel-sot]].
+
+**Authorization** is DB-first fine-grained permissions (`@RequirePermission`) for two principal kinds —
+humans and non-human [[service-account]]s — entirely **lazyit-local** (permissions never touch the IdP,
+so they ride BYOI unchanged). Service accounts authenticate with a lazyit-native token, no IdP on their
+path. See [[authorization]], [[0046-roles-permissions-v2]], [[0048-service-accounts]].
 
 ## Open questions
 
@@ -79,6 +101,7 @@ provider (Authentik/Keycloak/Zitadel) is a future ADR.
 - **Backup automation** — scheduled + offsite, when there's a real deployment ([[backups]]).
 - **Async workers** — BullMQ + Redis topology, when adopted ([[stack]]).
 
-Related: [[stack]] · [[monorepo]] · [[setup]] · [[05-runbooks/_MOC|Runbooks]] ·
-[[0025-containerization-strategy]] · [[0026-reverse-proxy-tls]] · [[0027-ci-pipeline]] ·
-[[0028-secrets-and-config]]
+Related: [[stack]] · [[monorepo]] · [[setup]] · [[authorization]] · [[auth-zitadel-sot]] ·
+[[05-runbooks/_MOC|Runbooks]] · [[0025-containerization-strategy]] · [[0026-reverse-proxy-tls]] ·
+[[0027-ci-pipeline]] · [[0028-secrets-and-config]] · [[0043-zitadel-source-of-truth]] ·
+[[0047-guided-first-deploy-bootstrap]]
