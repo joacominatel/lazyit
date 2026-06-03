@@ -8,6 +8,8 @@ import {
   offsetOf,
   pageOf,
   slugify,
+  type ArticleLinkedFilter,
+  type ArticleLinkedTo,
   type ArticleStatus,
   type CreateArticle,
   type CreateArticleLink,
@@ -35,6 +37,14 @@ export interface ArticleListFilters {
   authorId?: string;
   status?: ArticleStatus;
   q?: string;
+  /** `only` → restrict to articles that have ≥1 ArticleLink (ADR-0042). Omitted = no link filter. */
+  linked?: ArticleLinkedFilter;
+  /**
+   * Narrows `linked` to a single target kind (ADR-0042): `asset` keeps only articles linked to ≥1
+   * Asset, `application` only those linked to ≥1 Application. Implies the linked filter even if
+   * `linked` is omitted.
+   */
+  linkedTo?: ArticleLinkedTo;
 }
 
 /** The subset of a multer file the import needs. The controller passes Express.Multer.File. */
@@ -46,8 +56,10 @@ export interface UploadedImportFile {
 
 // Lean projection for the LIST (GET /articles, paginated): every Article column EXCEPT `content` —
 // the full Markdown body, the largest column, which a list view never renders (`excerpt` is kept).
+// Adds the maintained `readingMinutes` metric and a relation `_count` of `links` — both produced by
+// the query, so the card UI gets a reading time + "linked" indicator with NO body load and NO N+1.
 // The detail reads (findOne / findBySlug) still return the full Article incl. `content`. See
-// packages/shared/src/schemas/article-list.ts and ADR-0030 / the perf analysis (#3).
+// packages/shared/src/schemas/article-list.ts and ADR-0030 / ADR-0042 / the perf analysis (#3).
 const ARTICLE_LIST_SELECT = {
   id: true,
   slug: true,
@@ -59,9 +71,12 @@ const ARTICLE_LIST_SELECT = {
   lastEditedById: true,
   publishedAt: true,
   metadata: true,
+  readingMinutes: true,
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
+  // Per-row link tally in ONE query (no N+1) — mapped to the flat `linkCount` before returning.
+  _count: { select: { links: true } },
 } satisfies Prisma.ArticleSelect;
 
 /**
@@ -84,7 +99,10 @@ export class ArticlesService {
    * the full Markdown `content` is omitted (`excerpt` kept) — the detail reads still return it. Runs
    * the page `findMany(take/skip)` and the `count` over the **same** `where` inside one
    * `$transaction`, so the `total` can't drift from the page. Optional filters: category, author,
-   * status, and a substring `q` over title/excerpt.
+   * status, a substring `q` over title/excerpt, and a `linked`/`linkedTo` filter (ADR-0042) that
+   * keeps only articles with ≥1 ArticleLink (optionally narrowed to an asset/application target).
+   * Each row carries the precomputed `readingMinutes` and a `linkCount` (relation `_count`, flattened
+   * here) so the card UI gets a reading metric + "linked" indicator with no body load and no N+1.
    */
   async findPage(
     filters: ArticleListFilters,
@@ -93,7 +111,7 @@ export class ArticlesService {
   ) {
     const where = this.buildWhere(filters, currentUser);
     const { take, skip } = offsetOf(page);
-    const [items, total] = await this.prisma.$transaction([
+    const [rows, total] = await this.prisma.$transaction([
       this.prisma.article.findMany({
         where,
         orderBy: { updatedAt: 'desc' },
@@ -103,8 +121,13 @@ export class ArticlesService {
       }),
       this.prisma.article.count({ where }),
     ]);
-    // The lean rows carry `Date`s; the API serializes them to ISO strings at the HTTP boundary (same
-    // as findOne) — the ArticleListPage DTO documents the resulting wire shape (content omitted).
+    // Flatten Prisma's nested `_count.links` into the flat `linkCount` the DTO exposes. The lean rows
+    // carry `Date`s; the API serializes them to ISO strings at the HTTP boundary (same as findOne) —
+    // the ArticleListPage DTO documents the resulting wire shape (content omitted, linkCount added).
+    const items = rows.map(({ _count, ...row }) => ({
+      ...row,
+      linkCount: _count.links,
+    }));
     return pageOf(items, total, page);
   }
 
@@ -129,7 +152,42 @@ export class ArticlesService {
         ],
       });
     }
+    const linkedWhere = this.linkedWhere(filters);
+    if (linkedWhere) and.push(linkedWhere);
     return { AND: and };
+  }
+
+  /**
+   * The `linked`/`linkedTo` clause for the article list (ADR-0042). `linked=only` (or any
+   * `linkedTo`) keeps only articles with ≥1 ArticleLink via a relation `some`; `linkedTo` narrows
+   * that to a single target kind (asset/application). Returns `undefined` when no link filter was
+   * asked for (the list then includes both linked and unlinked articles). The `some` predicate is an
+   * EXISTS subquery — it doesn't multiply rows, so it composes cleanly with the page + count.
+   */
+  private linkedWhere(
+    filters: ArticleListFilters,
+  ): Prisma.ArticleWhereInput | undefined {
+    if (!filters.linked && !filters.linkedTo) return undefined;
+    const linkWhere: Prisma.ArticleLinkWhereInput =
+      filters.linkedTo === 'asset'
+        ? { assetId: { not: null } }
+        : filters.linkedTo === 'application'
+          ? { applicationId: { not: null } }
+          : {};
+    return { links: { some: linkWhere } };
+  }
+
+  /**
+   * Estimated reading time of a markdown body in whole minutes — the value maintained in
+   * `Article.readingMinutes` (ADR-0042). ~200 words/minute; min 1 for any non-empty body, 0 for an
+   * empty/whitespace-only one. A "word" is a whitespace-separated token, matching the SQL backfill in
+   * the migration (`regexp_split_to_array(trim(content), '\s+')`) so the column and this helper agree.
+   */
+  private readingMinutesOf(content: string): number {
+    const trimmed = content.trim();
+    if (trimmed === '') return 0;
+    const words = trimmed.split(/\s+/).length;
+    return Math.max(1, Math.ceil(words / 200));
   }
 
   /** A readable article by id (404 if missing, deleted, or a draft the caller doesn't own). */
@@ -171,6 +229,7 @@ export class ArticlesService {
           slug,
           title: data.title,
           content: data.content,
+          readingMinutes: this.readingMinutesOf(data.content),
           ...(data.excerpt !== undefined ? { excerpt: data.excerpt } : {}),
           status: data.status,
           publishedAt: data.status === 'PUBLISHED' ? new Date() : null,
@@ -211,6 +270,11 @@ export class ArticlesService {
         data: {
           ...rest,
           lastEditedById: cu,
+          // Keep the maintained reading metric in sync whenever the body changes (ADR-0042); a
+          // metadata/title-only PATCH leaves `content` absent, so readingMinutes is untouched.
+          ...(data.content !== undefined
+            ? { readingMinutes: this.readingMinutesOf(data.content) }
+            : {}),
           ...(metadata !== undefined
             ? { metadata: metadata as Prisma.InputJsonValue }
             : {}),
@@ -359,6 +423,7 @@ export class ArticlesService {
           slug,
           title,
           content,
+          readingMinutes: this.readingMinutesOf(content),
           status: fields.status,
           publishedAt: fields.status === 'PUBLISHED' ? new Date() : null,
           categoryId: fields.categoryId,
