@@ -90,7 +90,10 @@ back to; a write-back capability outage can never lock people out.
 
 **Where enforced.**
 - `apps/api/src/auth/identity/generic-oidc.identity-provider.ts` — management methods no-op with a
-  `warn` (`supportsManagement = false`).
+  `warn` (`supportsManagement = false`). **Exception (issue #149):** `requestPasswordReset` does NOT
+  silently no-op — a reset is a user-visible ACTION, so it REJECTS with `PasswordResetUnsupportedError`,
+  which the Users controller maps to an honest **501** ("managed by your identity provider") rather than
+  a 2xx that falsely implies a reset email was sent. `updateUser` (profile/email mirror) still no-ops.
 - `apps/api/src/auth/identity/zitadel-management.service.ts` — the constructor never throws; a missing
   credential WARNs at boot-config resolution and throws "Zitadel management not configured" from the
   *management methods only*, never on the authN path.
@@ -108,9 +111,13 @@ a security drift; failing loud with 503 keeps the two stores consistent.
 
 **Where enforced.**
 - `apps/api/src/users/users.service.ts` — `create` hard-deletes the just-created local row on a mirror
-  failure (+503); a role change reverts the local role on a `grantRole` failure (+503); `remove`
-  (offboard) runs `deactivateUser` inside the `$transaction` so a failure rolls the whole offboarding
-  back. Every write-back is audited.
+  failure (+503); a role change reverts the local role on a `grantRole` failure (+503); an ADMIN
+  name/email edit (`update`, issue #149) mirrors `updateUser` (Zitadel v2 profile `PUT` + a PRE-VERIFIED
+  email `POST`, same `externalId` — no re-link, SEC-006) and, on failure, reverts ONLY the changed local
+  fields (role/name/email) (+503); `remove` (offboard) runs `deactivateUser` inside the `$transaction`
+  so a failure rolls the whole offboarding back. Every write-back is audited. `requestPasswordReset`
+  (issue #149) is NOT a mirror but a triggered IdP action — it 404s a missing/soft-deleted user, **422**s
+  an inactive one, and 503s a Zitadel Management failure (the email itself is sent by ZITADEL's SMTP).
 - **Exception (deliberate):** `apps/api/src/config/config.service.ts` `setup()` is the one place that
   **degrades instead of blocking** — a first-run mirror failure keeps the local ADMIN (`mirrored:
   false`, warn) rather than 503, so a Zitadel misconfiguration can never wedge first-run (ADR-0043 §6

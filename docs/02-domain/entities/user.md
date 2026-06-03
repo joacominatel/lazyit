@@ -91,10 +91,11 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 `me` isn't parsed as a uuid; the OIDC token doesn't carry the lazyit role, so the web reads it here),
 `GET /users/:id`, `POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete),
 `POST /users/:id/offboard`, `POST /users/:id/restore` (re-onboard: clears `deletedAt`; does NOT
-re-grant access or re-assign assets — [[0041-soft-delete-reuse-and-restore]]).
-All **write** endpoints (create / update incl. role / delete / offboard / restore) are gated
-`@RequirePermission('user:manage')` — ADMIN-only in the seed, **not** `user:write` (which MEMBER holds)
-([[0046-roles-permissions-v2]] P4). The directory **reads** `GET /users` and `GET /users/:id` (and the
+re-grant access or re-assign assets — [[0041-soft-delete-reuse-and-restore]]), and
+`POST /users/:id/reset-password` (admin-triggered password reset — see the IdP write-back note below).
+All **write** endpoints (create / update incl. name/email/role / delete / offboard / restore /
+reset-password) are gated `@RequirePermission('user:manage')` — ADMIN-only in the seed, **not**
+`user:write` (which MEMBER holds) ([[0046-roles-permissions-v2]] P4). The directory **reads** `GET /users` and `GET /users/:id` (and the
 nested reads below) are gated `@RequirePermission('user:read')` — ADMIN + MEMBER (a VIEWER gets 403;
 this is the pre-tightening). `GET /users/me` stays OPEN (the self-read the web gates its UI off; the
 OIDC token doesn't carry the lazyit role). Bodies validated against the
@@ -109,6 +110,23 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > returns **409 Conflict** — and **no user can change their own role** (**403 Forbidden**). Role
 > management is otherwise done by an `ADMIN` from the **Users** section (a per-user role Select);
 > the very first `ADMIN` on a pre-existing DB is set out-of-band via `bun run set-role` ([[auth-bootstrap]]).
+
+> [!note] Admin profile edits + password reset write back to the IdP (issue #149)
+> `PATCH /users/:id` lets an `ADMIN` edit `firstName` / `lastName` / `email` (alongside `role`). A
+> name/email change is **mirrored back to Zitadel** (the v2 user service: profile `PUT` + a
+> pre-verified email `POST`) inside the same **no-split-brain** pattern as a role change — if the
+> Management call fails, the local row is reverted and the request is **503** ([[INVARIANTS]] INV-5).
+> The `email` is the **account-linking key** ([[INVARIANTS]] INV-2, `citext`): the write-back updates
+> the **existing** Zitadel user (same `sub`/`externalId` — never a re-link, SEC-006) and sets the new
+> address **pre-verified**, so the change does **not** force re-verification or break login. `externalId`
+> can never be set via the API.
+> `POST /users/:id/reset-password` triggers **Zitadel's own** password-reset flow (Management API,
+> `password_reset` with `sendLink`): lazyit **never** stores/sets/sends a password ([[0016-auth-strategy-deferred]],
+> [[0037-idp-choice-zitadel-byoi]]) — **Zitadel emails the link via ZITADEL's SMTP**, which the operator
+> must have configured for delivery. It is refused for an **inactive** user (**422**) and surfaces an
+> honest **501** ("managed by your identity provider") under BYOI / generic OIDC or for a user with no
+> IdP link ([[INVARIANTS]] INV-4) — never a misleading success. Both rely on the same Private-Key-JWT
+> Management auth as the create/role write-backs ([[0043-zitadel-source-of-truth]] §3).
 
 **Web:** `users/[id]` is the asset-centric **per-person** detail page (the counterpart to the asset
 detail) — it composes the two nested reads above plus the user's authored [[article]]s, answering
