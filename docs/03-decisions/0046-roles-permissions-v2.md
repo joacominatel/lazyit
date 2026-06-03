@@ -18,13 +18,14 @@ ACLs — Option B's per-resource matrix stays rejected). It **extends** [[0043-z
 (DB-first authorization, IdP write-back, BYOI): permissions are a new DB-first authorization source
 that, like roles, is never read from a token claim and never synced to the IdP.
 
-> **Delivery status (2026-06-02):** P0–P4 are **delivered**. The foundation (P0+P1: catalog +
-> `RolePermission` table + seed + golden test) and the enforcement layer (P2: the `@RequirePermission`
+> **Delivery status (2026-06-02):** P0–P7 are **delivered**. The foundation (P0+P1: catalog +
+> `RolePermission` table + seed + golden test), the enforcement layer (P2: the `@RequirePermission`
 > guard; P3: the GETs annotated + the two pre-tightened reads; P4: the `@Roles` write-gates migrated
-> and the legacy `@Roles` decorator + dual-mode branch **retired**) are all shipped. The coarse
-> `@Roles` mechanism from [[0040-rbac-roles]] no longer exists in code — `@RequirePermission` is the
-> SINGLE enforcement primitive. Still **outstanding**: P5 (the config endpoints to read/update the
-> matrix; ADMIN row immutable) and the service-account fast-follow — see
+> and the legacy `@Roles` decorator + dual-mode branch **retired**), the configurable surface (P5: the
+> `GET/PUT /config/permissions` + `/config/my-permissions` endpoints, audited + cache-coherent, ADMIN
+> immutable) and the config UI (P7: the role-first ADMIN screen + `can()` infra) are all shipped. The
+> coarse `@Roles` mechanism from [[0040-rbac-roles]] no longer exists in code — `@RequirePermission`
+> is the SINGLE enforcement primitive. Still **outstanding**: the service-account fast-follow — see
 > [§Phased delivery](#phased-delivery).
 
 ## Context
@@ -216,6 +217,18 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
       returns the CALLER's effective set `{ role, permissions: Permission[] }`, resolved via the SAME
       `PermissionResolverService` the guard uses, so the frontend can derive `can('domain:action')`
       without polluting the `User` wire shape.
+- **P7 — the config UI** (the ADMIN screen, `apps/web`). (done) Role-first design (CEO decision, NOT a
+  comparison grid): `settings/roles/permissions` edits ONE editable role at a time (ADMIN shown locked),
+  via one-click **presets** + plain-language **capability toggles** grouped by the four pillars, with an
+  advanced **fine-tune** disclosure for raw per-permission control and a live "what this role can do"
+  summary. The human layer (`PERMISSION_META` + `CAPABILITIES` + presets) lives in `@lazyit/shared` next
+  to the catalog, guarded by a covering-set test so the wording can't drift from the machine catalog.
+  **Fully configurable**: coarse verbs (`accessGrant:grant`/`user:manage`/`settings:manage`) and
+  `:delete` ARE grantable to MEMBER/VIEWER — the UI marks them ⚠ "Admin-level" and routes a save that
+  grants one (or revokes a read) through a neutral-tone consequential confirm, but never client-blocks
+  (the backend has no block either; an admin-initiated delegation is accepted). `can(permission)` infra
+  added (`useMyPermissions`/`useCan` over `/config/my-permissions`, fails closed); the app-wide
+  migration of existing `useCanWrite` gate sites to `can()` is a separate follow-up.
 - **Fast-follow — service accounts** reuse this same catalog.
 - **Future ADR — dynamic custom roles** (Option B), if ever needed.
 

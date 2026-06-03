@@ -1,4 +1,5 @@
-import type { Role } from "@lazyit/shared";
+import type { Permission, Role } from "@lazyit/shared";
+import { useMyPermissionsQuery } from "@/lib/api/hooks/use-permissions-config";
 import { useCurrentUser } from "@/lib/api/hooks/use-users";
 
 /**
@@ -67,4 +68,56 @@ export function usePermissions(): Permissions {
  */
 export function useCanWrite(): boolean {
   return usePermissions().canWrite;
+}
+
+/**
+ * The caller's FINE-GRAINED permission set (Roles & Permissions v2, ADR-0046) over
+ * `GET /config/my-permissions`. This is the permission-level counterpart to {@link usePermissions}'s
+ * coarse role booleans: instead of "is the caller ADMIN?", it answers "does the caller hold permission
+ * `X`?" via {@link can}.
+ *
+ * Additive and NON-breaking: the existing `useCanWrite()` / `isAdmin` gating is untouched and keeps
+ * working off the role. The app-wide migration of gating call-sites to `can()` is a separate
+ * follow-up — for now only the permissions matrix screen (and future call-sites) opt in.
+ *
+ * Fails CLOSED: while the query is loading or errored, the permission set is empty, so `can()` returns
+ * `false` and a gated control stays hidden until the real set arrives — never a brief flash of an
+ * action the API would 403.
+ */
+export interface MyPermissionsState {
+  /** The caller's role, or `undefined` until `/config/my-permissions` resolves. */
+  role: Role | undefined;
+  /** The flat set of permissions the caller's role holds (empty while loading / on error). */
+  permissions: ReadonlySet<Permission>;
+  /** Whether the caller holds `permission`. Fails closed (false) while loading or on error. */
+  can: (permission: Permission) => boolean;
+  /** True while `/config/my-permissions` has not yet resolved. */
+  isLoading: boolean;
+  /** The query error, if the effective-permissions read failed. */
+  error: unknown;
+}
+
+export function useMyPermissions(): MyPermissionsState {
+  const { data, isLoading, error } = useMyPermissionsQuery();
+
+  const permissions: ReadonlySet<Permission> = new Set(data?.permissions ?? []);
+
+  return {
+    role: data?.role,
+    permissions,
+    // Fails closed: an empty set while loading/errored means `can()` is false everywhere.
+    can: (permission: Permission) => permissions.has(permission),
+    isLoading,
+    error,
+  };
+}
+
+/**
+ * Convenience selector for a single permission gate: `can('settings:manage')`. Equivalent to
+ * `useMyPermissions().can(permission)`. Fails closed (false) while the effective-permission set is
+ * loading or on error. The API's `@RequirePermission` guard is still the real gate — this only decides
+ * whether to *render* an affordance.
+ */
+export function useCan(permission: Permission): boolean {
+  return useMyPermissions().can(permission);
 }

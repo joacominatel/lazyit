@@ -1,4 +1,11 @@
-import type { ConfigStatus, SetupAdmin, SetupResult } from "@lazyit/shared";
+import type {
+  ConfigStatus,
+  MyPermissions,
+  RolePermissionMatrix,
+  SetupAdmin,
+  SetupResult,
+  UpdateRolePermissions,
+} from "@lazyit/shared";
 import { apiFetch } from "../client";
 
 /**
@@ -33,4 +40,41 @@ export function setupConfig(
     body: data,
     headers: { "X-CSRF-Token": csrfToken },
   });
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────────────────────
+ * Roles & Permissions v2 — the configurable matrix (ADR-0046 P5/P7). These three require an ADMIN
+ * Bearer (the read/update are gated `settings:manage`; my-permissions only needs authentication),
+ * unlike the public first-run endpoints above. The wire shapes are the shared zod contracts.
+ * ────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Read the full role→permission matrix (`GET /config/permissions`). ADMIN-only (`settings:manage`).
+ * ADMIN is reported as the COMPLETE catalog (immutable/full); MEMBER/VIEWER are their stored rows.
+ */
+export function getPermissionMatrix(): Promise<RolePermissionMatrix> {
+  return apiFetch<RolePermissionMatrix>(`${BASE}/permissions`);
+}
+
+/**
+ * Replace the MEMBER + VIEWER permission sets wholesale (`PUT /config/permissions`). ADMIN-only. The
+ * body names ONLY the two editable roles (ADMIN is immutable — a smuggled ADMIN/extra key → 400); an
+ * unknown permission → 400. Returns the new matrix.
+ */
+export function updatePermissionMatrix(
+  body: UpdateRolePermissions,
+): Promise<RolePermissionMatrix> {
+  return apiFetch<RolePermissionMatrix>(`${BASE}/permissions`, {
+    method: "PUT",
+    body,
+  });
+}
+
+/**
+ * The caller's effective permissions (`GET /config/my-permissions`) — any authenticated user. Lets
+ * the frontend derive `can('domain:action')` without polluting the `User` wire shape (ADMIN → the
+ * complete catalog; MEMBER/VIEWER → their DB rows, exactly what the guard enforces).
+ */
+export function getMyPermissions(): Promise<MyPermissions> {
+  return apiFetch<MyPermissions>(`${BASE}/my-permissions`);
 }
