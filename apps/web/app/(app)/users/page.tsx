@@ -111,6 +111,7 @@ export default function UsersPage() {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<User | undefined>(undefined);
+  const [cloning, setCloning] = useState<User | undefined>(undefined);
   const [deleting, setDeleting] = useState<User | undefined>(undefined);
   const [bulkRestoring, setBulkRestoring] = useState(false);
 
@@ -224,11 +225,19 @@ export default function UsersPage() {
 
   function openCreate() {
     setEditing(undefined);
+    setCloning(undefined);
     setFormOpen(true);
   }
 
   function openEdit(user: User) {
+    setCloning(undefined);
     setEditing(user);
+    setFormOpen(true);
+  }
+
+  function openClone(user: User) {
+    setEditing(undefined);
+    setCloning(user);
     setFormOpen(true);
   }
 
@@ -386,6 +395,7 @@ export default function UsersPage() {
                   ) : canWrite ? (
                     <RowActions
                       onEdit={() => openEdit(user)}
+                      onClone={() => openClone(user)}
                       onDelete={() => setDeleting(user)}
                     />
                   ) : undefined
@@ -446,6 +456,7 @@ export default function UsersPage() {
                   ) : canWrite ? (
                     <RowActions
                       onEdit={() => openEdit(user)}
+                      onClone={() => openClone(user)}
                       onDelete={() => setDeleting(user)}
                     />
                   ) : null}
@@ -483,10 +494,17 @@ export default function UsersPage() {
       )}
 
       <UserFormDialog
-        key={editing ? `edit-${editing.id}` : "create"}
+        key={
+          editing
+            ? `edit-${editing.id}`
+            : cloning
+              ? `clone-${cloning.id}`
+              : "create"
+        }
         open={formOpen}
         onOpenChange={setFormOpen}
         user={editing}
+        cloneSource={cloning}
       />
       {deleting ? (
         <DeleteConfirmDialog
