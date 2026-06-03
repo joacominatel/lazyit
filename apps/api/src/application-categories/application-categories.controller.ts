@@ -21,6 +21,7 @@ import {
 } from '@lazyit/shared';
 import { ApplicationCategoriesService } from './application-categories.service';
 import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 
 class ApplicationCategoryDto extends createZodDto(ApplicationCategorySchema) {}
 class CreateApplicationCategoryDto extends createZodDto(
@@ -36,6 +37,7 @@ export class ApplicationCategoriesController {
   constructor(private readonly categories: ApplicationCategoriesService) {}
 
   @Get()
+  @RequirePermission('category:read')
   @ApiOperation({
     summary: 'List all application categories (excludes soft-deleted)',
   })
@@ -45,6 +47,7 @@ export class ApplicationCategoriesController {
   }
 
   @Get(':id')
+  @RequirePermission('category:read')
   @ApiOperation({ summary: 'Get an application category by id' })
   @ApiOkResponse({ type: ApplicationCategoryDto })
   findOne(@Param('id') id: string) {
