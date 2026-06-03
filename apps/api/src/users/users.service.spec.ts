@@ -294,7 +294,7 @@ describe('UsersService', () => {
       { id: 'assign-1', assetId: 'asset-1' },
     ]);
 
-    const result = await service.remove('uuid-1', 'actor-99');
+    const result = await service.remove('uuid-1', { userId: 'actor-99' });
 
     // Soft delete = an UPDATE that stamps deletedAt, never a hard delete().
     expect(tx.user.update).toHaveBeenCalledTimes(1);
@@ -309,7 +309,12 @@ describe('UsersService', () => {
       [
         {
           where: { userId: string; revokedAt: null };
-          data: { revokedAt: Date; revokedById?: string; notes: string };
+          data: {
+            revokedAt: Date;
+            revokedById?: string;
+            revokedBySaId?: string;
+            notes: string;
+          };
         },
       ]
     >;
@@ -318,15 +323,15 @@ describe('UsersService', () => {
       revokedAt: null,
     });
     expect(grantCalls[0][0].data.revokedAt).toBeInstanceOf(Date);
+    // A human offboarder → revokedById, never revokedBySaId (behavior-preserving; ADR-0048).
     expect(grantCalls[0][0].data.revokedById).toBe('actor-99');
+    expect(grantCalls[0][0].data).not.toHaveProperty('revokedBySaId');
     expect(grantCalls[0][0].data.notes).toBe('auto: offboarded');
 
-    // Active assignments are released through the bulk helper with the actor.
-    expect(assignments.releaseAllForUser).toHaveBeenCalledWith(
-      tx,
-      'uuid-1',
-      'actor-99',
-    );
+    // Active assignments are released through the bulk helper with the resolved attribution.
+    expect(assignments.releaseAllForUser).toHaveBeenCalledWith(tx, 'uuid-1', {
+      userId: 'actor-99',
+    });
 
     // Soft-delete drops the user from the search index (ADR-0035).
     expect(search.remove).toHaveBeenCalledWith('users', 'uuid-1');
@@ -477,7 +482,7 @@ describe('UsersService', () => {
       user.count.mockResolvedValue(0); // the only admin
 
       await expect(
-        service.remove('admin-1', 'actor-99'),
+        service.remove('admin-1', { userId: 'actor-99' }),
       ).rejects.toBeInstanceOf(ConflictException);
       // The transaction never runs — nothing is soft-deleted or revoked.
       expect(tx.user.update).not.toHaveBeenCalled();
@@ -497,7 +502,7 @@ describe('UsersService', () => {
       });
 
       await expect(
-        service.remove('admin-1', 'actor-99'),
+        service.remove('admin-1', { userId: 'actor-99' }),
       ).resolves.toMatchObject({
         userId: 'admin-1',
       });
@@ -723,7 +728,7 @@ describe('UsersService', () => {
       tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
       tx.accessGrant.updateMany.mockResolvedValue({ count: 0 });
 
-      await service.remove('uuid-1', 'actor-99');
+      await service.remove('uuid-1', { userId: 'actor-99' });
 
       expect(idp.deactivateUser).toHaveBeenCalledWith('zitadel-user-9');
       // The soft-delete still happened (the deactivate succeeded, so the txn committed).
@@ -742,9 +747,9 @@ describe('UsersService', () => {
         new ServiceUnavailableException('Zitadel management call failed'),
       );
 
-      await expect(service.remove('uuid-1', 'actor-99')).rejects.toBeInstanceOf(
-        ServiceUnavailableException,
-      );
+      await expect(
+        service.remove('uuid-1', { userId: 'actor-99' }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
 
       // Because the deactivate ran FIRST in the txn and threw, nothing else was committed: no
       // soft-delete, no grant revocation, no assignment release (the rollback is the no-split-brain).
@@ -764,9 +769,9 @@ describe('UsersService', () => {
       tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
       tx.accessGrant.updateMany.mockResolvedValue({ count: 0 });
 
-      await expect(service.remove('uuid-1', 'actor-99')).resolves.toMatchObject(
-        { userId: 'uuid-1' },
-      );
+      await expect(
+        service.remove('uuid-1', { userId: 'actor-99' }),
+      ).resolves.toMatchObject({ userId: 'uuid-1' });
 
       // A local-only row (externalId null) has nothing to deactivate.
       expect(idp.deactivateUser).not.toHaveBeenCalled();
