@@ -6,6 +6,7 @@ import {
   type Asset,
   type AssetStatus,
   AssetStatusSchema,
+  cloneAssetDefaults,
   CreateAssetSchema,
   UpdateAssetSchema,
 } from "@lazyit/shared";
@@ -71,7 +72,12 @@ function dateInputToIso(value: string): string | undefined {
   return value ? new Date(`${value}T00:00:00.000Z`).toISOString() : undefined;
 }
 
-function toFormValues(asset?: Asset): AssetFormValues {
+/**
+ * Initial form values. Edit → from the persisted `asset`. Clone → from the shared
+ * `cloneAssetDefaults` sanitizer (CREATE mode, unique fields cleared, " (copy)" name). Otherwise the
+ * blank create defaults.
+ */
+function toFormValues(asset?: Asset, cloneSource?: Asset): AssetFormValues {
   if (asset) {
     return {
       name: asset.name,
@@ -85,18 +91,42 @@ function toFormValues(asset?: Asset): AssetFormValues {
       notes: asset.notes ?? undefined,
     };
   }
+  if (cloneSource) {
+    const d = cloneAssetDefaults(cloneSource);
+    return {
+      name: d.name ?? "",
+      status: d.status ?? "OPERATIONAL",
+      modelId: d.modelId,
+      locationId: d.locationId,
+      // serial/assetTag are cleared by the sanitizer → render empty.
+      serial: d.serial,
+      assetTag: d.assetTag,
+      purchaseDate: d.purchaseDate,
+      warrantyEnd: d.warrantyEnd,
+      notes: d.notes,
+    };
+  }
   return { name: "", status: "OPERATIONAL" };
 }
 
 /**
- * Create/edit form for an Asset. Per-mode validation (CreateAssetSchema vs the
- * partial UpdateAssetSchema — ADR-0020). `specs` is free-form jsonb edited through
- * the {@link CustomFieldsEditor}: a dynamic list of `{ name, value }` rows that
- * serialize into the `specs` object on submit (per-category schemas are deferred —
- * ADR-0007). Non-scalar legacy entries (arrays/objects) are preserved untouched.
- * Dates are edited as date inputs and stored as ISO datetimes (the wire shape).
+ * Create/edit/clone form for an Asset. Per-mode validation (CreateAssetSchema vs the
+ * partial UpdateAssetSchema — ADR-0020). Clone (`cloneSource`, no `asset`) stays in CREATE mode but
+ * pre-fills from the shared `cloneAssetDefaults` sanitizer (issue #125): name " (copy)", deep-copied
+ * specs, and the unique `serial`/`assetTag` cleared so they render empty for the operator. `specs` is
+ * free-form jsonb edited through the {@link CustomFieldsEditor}: a dynamic list of `{ name, value }`
+ * rows that serialize into the `specs` object on submit (per-category schemas are deferred —
+ * ADR-0007). Non-scalar legacy entries (arrays/objects) are preserved untouched. Dates are edited as
+ * date inputs and stored as ISO datetimes (the wire shape).
  */
-export function AssetForm({ asset }: { asset?: Asset }) {
+export function AssetForm({
+  asset,
+  cloneSource,
+}: {
+  asset?: Asset;
+  /** When set (and `asset` is not), pre-fill a CREATE form from this record — see issue #125. */
+  cloneSource?: Asset;
+}) {
   const isEdit = asset != null;
   const router = useRouter();
   const { data: models } = useAssetModels();
@@ -105,9 +135,11 @@ export function AssetForm({ asset }: { asset?: Asset }) {
   const updateAsset = useUpdateAsset();
   const isPending = createAsset.isPending || updateAsset.isPending;
 
+  // Specs source: the edited asset's specs, or the clone source's (deep-copied by the sanitizer).
+  const specsSource = asset?.specs ?? cloneSource?.specs;
   // Split existing specs into editable scalar rows + preserved non-scalar entries.
   const [{ rows: initialRows, preserved }] = useState(() =>
-    specsToRows(asset?.specs),
+    specsToRows(specsSource),
   );
   const [specRows, setSpecRows] = useState<CustomFieldRow[]>(initialRows);
   const [specErrors, setSpecErrors] = useState<Record<string, string>>({});
@@ -118,7 +150,7 @@ export function AssetForm({ asset }: { asset?: Asset }) {
     resolver: zodResolver(
       isEdit ? UpdateAssetSchema : CreateAssetSchema,
     ) as Resolver<AssetFormValues>,
-    defaultValues: toFormValues(asset),
+    defaultValues: toFormValues(asset, cloneSource),
   });
 
   const onSubmit = form.handleSubmit((values) => {
