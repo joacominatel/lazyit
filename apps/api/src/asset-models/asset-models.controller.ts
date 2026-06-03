@@ -24,6 +24,7 @@ import {
 import { AssetModelsService } from './asset-models.service';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 
 class AssetModelDto extends createZodDto(AssetModelSchema) {}
 class CreateAssetModelDto extends createZodDto(CreateAssetModelSchema) {}
@@ -35,6 +36,7 @@ export class AssetModelsController {
   constructor(private readonly models: AssetModelsService) {}
 
   @Get()
+  @RequirePermission('assetModel:read')
   @ApiOperation({
     summary: 'List asset models (excludes soft-deleted); optional category filter',
   })
@@ -45,6 +47,7 @@ export class AssetModelsController {
   }
 
   @Get(':id')
+  @RequirePermission('assetModel:read')
   @ApiOperation({ summary: 'Get an asset model by id' })
   @ApiOkResponse({ type: AssetModelDto })
   findOne(@Param('id') id: string) {
