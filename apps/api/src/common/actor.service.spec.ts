@@ -33,10 +33,14 @@ describe('ActorService', () => {
 
   it('is synchronous — no DB lookup, no async', () => {
     // resolve() must return string | undefined, never a Promise.
-    const result = service.resolve(makeUser('aaaabbbb-1111-1111-1111-111111111111') as never);
+    const result = service.resolve(
+      makeUser('aaaabbbb-1111-1111-1111-111111111111') as never,
+    );
     expect(result).toBe('aaaabbbb-1111-1111-1111-111111111111');
     // Confirm it is not a Promise (no .then).
-    expect(typeof (result as unknown as Promise<unknown>)?.then).not.toBe('function');
+    expect(typeof (result as unknown as Promise<unknown>)?.then).not.toBe(
+      'function',
+    );
   });
 
   // resolveActor (ADR-0048): maps a unified principal to the right audit actor column.
