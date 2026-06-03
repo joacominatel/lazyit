@@ -9,6 +9,7 @@ import type { DashboardSummary } from '@lazyit/shared';
 import { DashboardService } from './dashboard.service';
 import { parsePageQuery } from '../common/parse-page-query';
 import { DashboardSummaryDto, RecentActivityPageDto } from './dashboard.dto';
+import { RequirePermission } from '../auth/require-permission.decorator';
 
 const DEFAULT_EXPIRING_WITHIN_DAYS = 30;
 const MIN_EXPIRING_WITHIN_DAYS = 1;
@@ -20,6 +21,7 @@ export class DashboardController {
   constructor(private readonly dashboard: DashboardService) {}
 
   @Get('summary')
+  @RequirePermission('dashboard:read')
   @ApiOperation({
     summary:
       'Read-only aggregation across the three pillars: assets by status + assigned count, active/expiring/critical grants, consumable low-stock, articles published vs draft, and a recent AssetHistory slice.',
@@ -38,6 +40,7 @@ export class DashboardController {
   }
 
   @Get('activity')
+  @RequirePermission('dashboard:read')
   @ApiOperation({
     summary:
       'Unified recent-activity feed (newest first, paginated): one chronological stream merging AssetHistory, AssetAssignment (assigned/released), AccessGrant (granted/revoked) and ConsumableMovement (stock in/out/adjustment), backed by the recent_activity DB view. Actor display name resolved where available.',
