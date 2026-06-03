@@ -23,10 +23,25 @@ import {
   UpdateServiceAccountSchema,
 } from '@lazyit/shared';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
-import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
-import type { User } from '../../generated/prisma/client';
+import { isHumanPrincipal, type Principal } from '../auth/principal';
 import { ServiceAccountsService } from './service-accounts.service';
+
+/**
+ * The actor id stamped on a ServiceAccountAuditLog row (ADR-0048). The audit log's `actorId` is a
+ * `User` FK (SetNull) — it has NO service-account actor column — so a human self-manager is attributed
+ * to their `User.id`, and a SERVICE ACCOUNT managing other service accounts (it holds `settings:manage`)
+ * is recorded with `actorId = null` (system/unknown) rather than a fake human id: honest, never a lie.
+ *
+ * NOTE (schema gap surfaced by issue #141): DB-faithful self-attribution of an SA-performed management
+ * action would require an additive `actorSaId` column + at-most-one CHECK on `service_account_audit_log`
+ * (the 6 domain audit tables already have their SA actor column; this 7th table does not). That is a
+ * data-model change deferred to its own ADR/migration — out of scope here, by design.
+ */
+function auditActorId(principal?: Principal): string | null {
+  return isHumanPrincipal(principal) ? principal.user.id : null;
+}
 
 // DTOs from the shared zod schemas (validation + TS type + OpenAPI). See ADR-0018.
 class ServiceAccountDto extends createZodDto(ServiceAccountSchema) {}
@@ -65,8 +80,11 @@ export class ServiceAccountsController {
       'hash is persisted; the secret is never returned again. expiresAt (optional) must be in the future.',
   })
   @ApiCreatedResponse({ type: ServiceAccountWithSecretDto })
-  create(@Body() dto: CreateServiceAccountDto, @CurrentUser() user?: User) {
-    return this.serviceAccounts.create(dto, user?.id ?? null);
+  create(
+    @Body() dto: CreateServiceAccountDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.serviceAccounts.create(dto, auditActorId(principal));
   }
 
   @Get()
@@ -113,9 +131,9 @@ export class ServiceAccountsController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateServiceAccountDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.serviceAccounts.update(id, dto, user?.id ?? null);
+    return this.serviceAccounts.update(id, dto, auditActorId(principal));
   }
 
   @Post(':id/rotate')
@@ -127,8 +145,8 @@ export class ServiceAccountsController {
       'EXACTLY ONCE. The account id (and the token id segment) is unchanged.',
   })
   @ApiCreatedResponse({ type: ServiceAccountWithSecretDto })
-  rotate(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.serviceAccounts.rotate(id, user?.id ?? null);
+  rotate(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.serviceAccounts.rotate(id, auditActorId(principal));
   }
 
   @Delete(':id')
@@ -140,8 +158,8 @@ export class ServiceAccountsController {
       'its grants are preserved; POST /:id/restore brings it back. Audited (REVOKE).',
   })
   @ApiOkResponse({ type: ServiceAccountDto })
-  remove(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.serviceAccounts.revoke(id, user?.id ?? null);
+  remove(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.serviceAccounts.revoke(id, auditActorId(principal));
   }
 
   @Post(':id/restore')
@@ -153,7 +171,7 @@ export class ServiceAccountsController {
       'invalidate it. Idempotent if already live. Audited (RESTORE).',
   })
   @ApiOkResponse({ type: ServiceAccountDto })
-  restore(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.serviceAccounts.restore(id, user?.id ?? null);
+  restore(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.serviceAccounts.restore(id, auditActorId(principal));
   }
 }
