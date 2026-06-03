@@ -65,6 +65,10 @@ model User {
   // Consumable stock movements this user performed (ConsumableMovement.performedById). SetNull.
   consumableMovements ConsumableMovement[] @relation("ConsumableMovementActor")
 
+  // Permission-matrix edits this user performed (PermissionAuditLog.actorId). SetNull keeps the
+  // append-only audit row when the actor is deleted (ADR-0046 P5). null = system/unknown actor.
+  permissionAuditEntries PermissionAuditLog[] @relation("PermissionAuditActor")
+
   @@map("users")
 }
 
@@ -98,6 +102,41 @@ model RolePermission {
 
   @@id([role, permission])
   @@map("role_permissions")
+}
+
+/// Roles & Permissions v2 (ADR-0046, P5) — the append-only audit trail of every per-role permission
+/// edit made through the ADMIN config surface (PUT /config/permissions). One row per permission
+/// GRANTED or REVOKED on a role, so the matrix's full edit history is reconstructable. Auditability
+/// by default (ADR-0006): immutable — `createdAt` only, NO updatedAt / deletedAt, never updated or
+/// deleted. The ADMIN row is immutable in the endpoint, so only MEMBER/VIEWER edits land here.
+model PermissionAuditLog {
+  // autoincrement: a log table, never exposed externally (ADR-0005).
+  id         Int                  @id @default(autoincrement())
+  // Who made the edit — the authenticated ADMIN's User.id. SetNull (mirrors AssetHistory.performedBy):
+  // deleting the actor never blocks deletion and the audit row survives. null = system/unknown.
+  // @db.Uuid to match User.id.
+  actorId    String?              @db.Uuid
+  actor      User?                @relation("PermissionAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  // The role whose permission set changed (MEMBER or VIEWER — ADMIN is immutable, never audited here).
+  role       Role
+  // The catalog permission literal (`domain:action`) granted or revoked. Plain String, mirroring
+  // RolePermission.permission — the closed catalog lives as zod in @lazyit/shared.
+  permission String
+  // Whether the permission was added to (GRANT) or removed from (REVOKE) the role's set.
+  action     PermissionAuditAction
+  createdAt  DateTime             @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). Indexed for the per-role / chronological audit query.
+  @@index([role, id])
+  @@map("permission_audit_log")
+}
+
+/// The two directions a permission edit can take (ADR-0046 P5). GRANT = the permission was added to a
+/// role's set on a PUT; REVOKE = it was removed. The ADMIN-immutable / catalog-membership guardrails
+/// are enforced before any row is written.
+enum PermissionAuditAction {
+  GRANT
+  REVOKE
 }
 
 /// Where an asset physically lives — office, datacenter, rack, warehouse or

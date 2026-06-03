@@ -196,3 +196,65 @@ export function buildDefaultRolePermissions(): RolePermissionMatrix {
  */
 export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix =
   buildDefaultRolePermissions();
+
+/* ──────────────────────────────────────────────────────────────────────────────────────────────
+ * P5 — the CONFIGURABLE surface (ADR-0046 §Phased delivery P5): the wire contracts for the ADMIN
+ * config endpoints (GET/PUT /config/permissions) and the caller's effective permissions
+ * (GET /config/my-permissions). The catalog itself (above) is frozen; these only describe the
+ * editable surface around it.
+ * ────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The set of roles whose permissions are EDITABLE through the config surface. ADMIN is deliberately
+ * absent: it is immutable/full (ADR-0046 — the entire catalog, never editable), so the PUT body can
+ * never even name it. Only `MEMBER` and `VIEWER` are configurable within the catalog.
+ */
+export const EDITABLE_ROLES = ["MEMBER", "VIEWER"] as const;
+export type EditableRole = (typeof EDITABLE_ROLES)[number];
+
+/**
+ * A single role's desired permission list in a PUT body: a deduplicated, catalog-validated array of
+ * `Permission` literals. An unknown literal fails the `PermissionSchema` enum (→ 400). Order is not
+ * significant; duplicates are squashed so the audit diff is computed against a clean set.
+ */
+const PermissionSetSchema = z
+  .array(PermissionSchema)
+  .transform((perms) => [...new Set(perms)]);
+
+/**
+ * Request body for `PUT /config/permissions` (ADR-0046 P5). Replaces the MEMBER and VIEWER permission
+ * sets wholesale (a full PUT, not a patch); both keys are REQUIRED. The ADMIN row is IMMUTABLE and is
+ * not a key here — `.strict()` rejects any extra key (including `ADMIN`) with a 400, so an attempt to
+ * edit ADMIN can never be silently accepted. Every listed permission is validated against the frozen
+ * `@lazyit/shared` catalog; an unknown permission → 400. Granting MEMBER/VIEWER any catalog permission
+ * (even a `:delete` or a coarse verb) is intentional — the only guardrails are ADMIN-immutable and
+ * catalog-membership (ADR-0046 P5).
+ */
+export const UpdateRolePermissionsSchema = z
+  .object({
+    MEMBER: PermissionSetSchema,
+    VIEWER: PermissionSetSchema,
+  })
+  .strict();
+export type UpdateRolePermissions = z.infer<typeof UpdateRolePermissionsSchema>;
+
+/**
+ * Response for `GET /config/my-permissions` (ADR-0046 P5) — the CALLER's effective permission set, so
+ * the frontend can derive `can('domain:action')` without polluting the `User` wire shape. Resolved via
+ * the `PermissionResolverService` (DB-first; ADMIN → the complete catalog). `role` is the caller's
+ * fixed role; `permissions` is the flat list of catalog literals that role currently holds.
+ */
+export const MyPermissionsSchema = z.object({
+  role: RoleSchema,
+  permissions: z.array(PermissionSchema),
+});
+export type MyPermissions = z.infer<typeof MyPermissionsSchema>;
+
+/**
+ * The direction of a single audited permission edit (ADR-0046 P5), mirroring the `PermissionAuditAction`
+ * DB enum: `grant` = the permission was added to a role's set on a PUT; `revoke` = it was removed.
+ * Lower-case on the wire (the API surface), upper-case in the DB enum.
+ */
+export const PERMISSION_AUDIT_ACTIONS = ["grant", "revoke"] as const;
+export const PermissionAuditActionSchema = z.enum(PERMISSION_AUDIT_ACTIONS);
+export type PermissionAuditAction = z.infer<typeof PermissionAuditActionSchema>;

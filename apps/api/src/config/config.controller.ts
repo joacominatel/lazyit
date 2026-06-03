@@ -5,6 +5,7 @@ import {
   Get,
   Headers,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -19,12 +20,21 @@ import type { Request } from 'express';
 import {
   ConfigStatusSchema,
   CsrfTokenSchema,
+  MyPermissionsSchema,
+  RolePermissionMatrixSchema,
   SetupAdminSchema,
   SetupResultSchema,
+  UpdateRolePermissionsSchema,
+  type MyPermissions,
+  type RolePermissionMatrix,
   type SetupResult,
 } from '@lazyit/shared';
+import type { User } from '../../generated/prisma/client';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { Public } from '../auth/public.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import { ConfigService } from './config.service';
+import { PermissionsConfigService } from './permissions-config.service';
 import { SetupCsrfService } from './setup-csrf.service';
 import { SetupRateLimitGuard } from './setup-rate-limit.guard';
 
@@ -33,6 +43,11 @@ class ConfigStatusDto extends createZodDto(ConfigStatusSchema) {}
 class CsrfTokenDto extends createZodDto(CsrfTokenSchema) {}
 class SetupAdminDto extends createZodDto(SetupAdminSchema) {}
 class SetupResultDto extends createZodDto(SetupResultSchema) {}
+class RolePermissionMatrixDto extends createZodDto(RolePermissionMatrixSchema) {}
+class UpdateRolePermissionsDto extends createZodDto(
+  UpdateRolePermissionsSchema,
+) {}
+class MyPermissionsDto extends createZodDto(MyPermissionsSchema) {}
 
 /**
  * ConfigController — the first-run setup surface (ADR-0043 Phase 3 §5).
@@ -53,6 +68,7 @@ export class ConfigController {
   constructor(
     private readonly config: ConfigService,
     private readonly csrf: SetupCsrfService,
+    private readonly permissions: PermissionsConfigService,
   ) {}
 
   @Public()
@@ -110,6 +126,62 @@ export class ConfigController {
       mirrored: outcome.mirrored,
       setupCompletedAt: outcome.setupCompletedAt.toISOString(),
     };
+  }
+
+  // ── Roles & Permissions v2 — P5: the configurable matrix (ADR-0046) ──────────────────────────────
+
+  @RequirePermission('settings:manage')
+  @Get('permissions')
+  @ApiOperation({
+    summary: 'Read the role→permission matrix (ADMIN — settings:manage)',
+    description:
+      'Returns the current RolePermissionMatrix (Record<Role, Permission[]>) read from the ' +
+      'RolePermission rows. ADMIN is reported as the COMPLETE catalog (immutable/full — what the ' +
+      'resolver enforces, never the DB rows). Gated by settings:manage (ADMIN-only in the seed).',
+  })
+  @ApiOkResponse({ type: RolePermissionMatrixDto })
+  getPermissions(): Promise<RolePermissionMatrix> {
+    return this.permissions.getMatrix();
+  }
+
+  @RequirePermission('settings:manage')
+  @Put('permissions')
+  @ApiOperation({
+    summary: 'Replace the MEMBER + VIEWER permission sets (ADMIN — settings:manage)',
+    description:
+      'Replaces the MEMBER and VIEWER permission sets wholesale (a full PUT). The ADMIN row is ' +
+      'IMMUTABLE — the strict body cannot name it (an ADMIN/extra key → 400); every permission must ' +
+      'be in the @lazyit/shared catalog (unknown → 400). Applied transactionally; every added/removed ' +
+      'permission is audited (PermissionAuditLog) with the actor, and the resolver cache is ' +
+      'invalidated so the NEXT authorization decision reflects the change. Returns the new matrix.',
+  })
+  @ApiOkResponse({ type: RolePermissionMatrixDto })
+  updatePermissions(
+    @Body() dto: UpdateRolePermissionsDto,
+    @CurrentUser() user?: User,
+  ): Promise<RolePermissionMatrix> {
+    return this.permissions.updateMatrix(dto, user?.id ?? null);
+  }
+
+  @RequirePermission()
+  @Get('my-permissions')
+  @ApiOperation({
+    summary: "The caller's effective permissions (any authenticated user)",
+    description:
+      'Returns { role, permissions: Permission[] } for the CALLER, resolved via the ' +
+      'PermissionResolverService — exactly what the guard enforces (ADMIN → the full catalog; ' +
+      'MEMBER/VIEWER → their DB rows). Lets the frontend derive can(\'domain:action\') without ' +
+      'polluting the User wire shape. No permission gate beyond authentication.',
+  })
+  @ApiOkResponse({ type: MyPermissionsDto })
+  myPermissions(@CurrentUser() user?: User): Promise<MyPermissions> {
+    // A @RequirePermission() with no args carries no gate (open to any authenticated user, per the
+    // guard's state 3). In OIDC mode `user` is always set; in the anonymous shim edge it is absent —
+    // then there is no role to resolve, so 403 (a missing actor can't have effective permissions).
+    if (!user) {
+      throw new ForbiddenException('Authentication required for this action');
+    }
+    return this.permissions.resolveFor(user.role);
   }
 
   /** First X-Forwarded-For hop, else the socket IP — for the setup audit line. */
