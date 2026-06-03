@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type { CreateUser, PageQuery, UpdateUser } from '@lazyit/shared';
@@ -18,6 +19,7 @@ import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.
 import type { ActorAttribution } from '../common/actor.service';
 import {
   IDENTITY_PROVIDER,
+  PasswordResetUnsupportedError,
   type IdentityProvider,
 } from '../auth/identity/identity-provider.interface';
 
@@ -222,31 +224,73 @@ export class UsersService {
     }
 
     const roleChanged = data.role !== undefined && data.role !== current.role;
+    // Profile edits an ADMIN can mirror (issue #149). A field only counts as CHANGED when it is present
+    // AND differs from the stored value — so a PATCH that resends the same name/email skips the IdP
+    // round-trip. `email` is already normalized (trim+lowercase, citext) by the schema (ADR-0041).
+    const nameChanged =
+      (data.firstName !== undefined && data.firstName !== current.firstName) ||
+      (data.lastName !== undefined && data.lastName !== current.lastName);
+    const emailChanged =
+      data.email !== undefined && data.email !== current.email;
+    const profileChanged = nameChanged || emailChanged;
 
     const user = await this.prisma.user.update({ where: { id }, data });
 
-    // Mirror a role CHANGE to the IdP (ADR-0043 §3). Only on an actual role change, and only when the
-    // user is IdP-linked (externalId set) — a local-only row has nothing to mirror. If the mirror
-    // fails, compensate by reverting the local role to its previous value (no split-brain) and surface
-    // 503. A non-role update (name change) never touches the IdP. BYOI no-ops grantRole → no throw.
-    if (roleChanged && current.externalId) {
+    // Mirror role and/or profile CHANGES to the IdP (ADR-0043 §3, issue #149). Only when the user is
+    // IdP-linked (externalId set) — a local-only row has nothing to mirror. If ANY mirror fails we
+    // compensate by reverting the local row back to its pre-update values (role + name + email), so
+    // local and Zitadel never disagree (no split-brain, INV-5), and surface the failure as 503. BYOI
+    // no-ops grantRole/updateUser → no throw, so this compensation path is Zitadel-only in practice.
+    if ((roleChanged || profileChanged) && current.externalId) {
       try {
-        await this.idp.grantRole(current.externalId, data.role!);
-        this.auditWriteBack('grantRole', actorId, id, {
-          from: current.role,
-          to: data.role,
-          externalId: current.externalId,
-        });
+        if (roleChanged) {
+          await this.idp.grantRole(current.externalId, data.role!);
+          this.auditWriteBack('grantRole', actorId, id, {
+            from: current.role,
+            to: data.role,
+            externalId: current.externalId,
+          });
+        }
+        if (profileChanged) {
+          // externalId (sub) is UNCHANGED — updates the existing Zitadel user, never a re-link
+          // (SEC-006). Email is written PRE-VERIFIED by the adapter, so it never forces re-verification.
+          await this.idp.updateUser(current.externalId, {
+            ...(data.firstName !== undefined &&
+            data.firstName !== current.firstName
+              ? { firstName: data.firstName }
+              : {}),
+            ...(data.lastName !== undefined &&
+            data.lastName !== current.lastName
+              ? { lastName: data.lastName }
+              : {}),
+            ...(emailChanged ? { email: data.email } : {}),
+          });
+          this.auditWriteBack('updateUser', actorId, id, {
+            // Log WHICH fields changed (the new email is not a secret); never the old values.
+            firstName: nameChanged ? data.firstName : undefined,
+            lastName: nameChanged ? data.lastName : undefined,
+            email: emailChanged ? data.email : undefined,
+            externalId: current.externalId,
+          });
+        }
       } catch (err) {
-        // Revert the local role so local and Zitadel agree (the previous role is the truth).
+        // Revert ONLY the fields this update could have changed, back to their pre-update truth, so
+        // local and Zitadel agree (the previous values are authoritative) without touching untouched
+        // columns. role → role; name → firstName/lastName; email → email.
         const reverted = await this.prisma.user.update({
           where: { id },
-          data: { role: current.role },
+          data: {
+            ...(roleChanged ? { role: current.role } : {}),
+            ...(nameChanged
+              ? { firstName: current.firstName, lastName: current.lastName }
+              : {}),
+            ...(emailChanged ? { email: current.email } : {}),
+          },
         });
         this.search.upsert('users', projectUser(reverted));
         this.logger.error(
-          { op: 'grantRole', actor: actorId, subjectUserId: id },
-          `IdP write-back failed on role change; reverted local role to ${current.role} (${err instanceof Error ? err.message : String(err)})`,
+          { op: 'updateUser', actor: actorId, subjectUserId: id },
+          `IdP write-back failed on update; reverted local user to its prior state (${err instanceof Error ? err.message : String(err)})`,
         );
         throw err;
       }
@@ -254,6 +298,41 @@ export class UsersService {
 
     this.search.upsert('users', projectUser(user));
     return user;
+  }
+
+  /**
+   * Trigger a password reset for a user (issue #149). lazyit NEVER stores, sets or sends a password
+   * (ADR-0016/0037) — it asks the IdP to do it: Zitadel emails a reset link via ZITADEL's own SMTP.
+   *
+   * Guards (in order): 404 if the user is missing or soft-deleted (findOne filters those out), 422 if
+   * the user is INACTIVE (`isActive=false`) — a disabled account is not invited to set a new password
+   * until it is reactivated — and an honest 501 (PasswordResetUnsupportedError) for a local-only row
+   * with no `externalId`: there is no IdP identity to reset, so we never pretend an email went out.
+   *
+   * BYOI (generic OIDC) cannot trigger a reset on a foreign IdP: the provider throws
+   * PasswordResetUnsupportedError, which the controller maps to a 501 "managed by your identity
+   * provider" (INV-4). A Zitadel Management failure surfaces as 503 (consistent with the other writes).
+   * Audited via a structured log line (no DB audit table yet — ADR-0043 §3).
+   */
+  async requestPasswordReset(id: string, actorId?: string): Promise<void> {
+    const user = await this.findOne(id); // 404 if missing or already soft-deleted
+
+    if (!user.isActive) {
+      throw new UnprocessableEntityException(
+        'Cannot reset the password of an inactive user. Reactivate the account first.',
+      );
+    }
+    if (!user.externalId) {
+      // No IdP identity to reset — honest 501 (same shape BYOI returns), never a misleading 2xx.
+      throw new PasswordResetUnsupportedError(
+        'This user is not linked to an identity provider, so a password reset cannot be triggered.',
+      );
+    }
+
+    await this.idp.requestPasswordReset(user.externalId);
+    this.auditWriteBack('requestPasswordReset', actorId, id, {
+      externalId: user.externalId,
+    });
   }
 
   /**
