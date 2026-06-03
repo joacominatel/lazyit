@@ -91,15 +91,13 @@ export class JwtAuthGuard implements CanActivate {
       return true;
     }
 
-    const request = context
-      .switchToHttp()
-      .getRequest<
-        Request & {
-          user?: User;
-          serviceAccount?: ServiceAccount;
-          principal?: Principal;
-        }
-      >();
+    const request = context.switchToHttp().getRequest<
+      Request & {
+        user?: User;
+        serviceAccount?: ServiceAccount;
+        principal?: Principal;
+      }
+    >();
 
     // SERVICE-ACCOUNT branch (ADR-0048) — runs BEFORE the human modes. A lazyit-native token
     // (`Authorization: Bearer lzit_sa_...`) authenticates a non-human principal in EVERY mode (it has
@@ -170,10 +168,10 @@ export class JwtAuthGuard implements CanActivate {
 
     // Look up INCLUDING soft-deleted rows: a revoked account must be SEEN here (so we 401), not missed
     // by the read filter. The flag is the ADR-0032 escape hatch the soft-delete extension strips.
-    const account = (await this.prisma.serviceAccount.findFirst({
+    const account = await this.prisma.serviceAccount.findFirst({
       where: { id: parsed.serviceAccountId },
       includeSoftDeleted: true,
-    } as Prisma.ServiceAccountFindFirstArgs)) as ServiceAccount | null;
+    } as Prisma.ServiceAccountFindFirstArgs);
 
     // No row for that id → 401 WITHOUT a secret compare. (We still parsed a well-formed token.)
     if (!account) {
@@ -193,7 +191,10 @@ export class JwtAuthGuard implements CanActivate {
     if (!account.isActive) {
       throw invalid();
     }
-    if (account.expiresAt !== null && account.expiresAt.getTime() <= Date.now()) {
+    if (
+      account.expiresAt !== null &&
+      account.expiresAt.getTime() <= Date.now()
+    ) {
       throw invalid();
     }
 
@@ -205,7 +206,11 @@ export class JwtAuthGuard implements CanActivate {
     const permissions = resolveServiceAccountPermissions(grantRows);
 
     request.serviceAccount = account;
-    request.principal = { kind: 'service', serviceAccount: account, permissions };
+    request.principal = {
+      kind: 'service',
+      serviceAccount: account,
+      permissions,
+    };
     request.user = undefined;
 
     // Best-effort last-used stamp (fire-and-forget): never blocks or fails the request. Uses the base
