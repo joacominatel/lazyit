@@ -25,9 +25,9 @@ import {
   ReleaseAssetAssignmentDto,
   UpdateAssetAssignmentNotesDto,
 } from './asset-assignment.dto';
-import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
-import type { User } from '../../generated/prisma/client';
+import type { Principal } from '../auth/principal';
 
 @ApiTags('asset-assignments')
 @Controller('asset-assignments')
@@ -77,9 +77,9 @@ export class AssetAssignmentsController {
   @ApiCreatedResponse({ type: AssetAssignmentDto })
   create(
     @Body() dto: CreateAssetAssignmentDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.assignments.create(dto, user);
+    return this.assignments.create(dto, principal);
   }
 
   @Patch(':id/release')
@@ -93,9 +93,9 @@ export class AssetAssignmentsController {
   release(
     @Param('id') id: string,
     @Body() dto: ReleaseAssetAssignmentDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.assignments.release(id, dto, user);
+    return this.assignments.release(id, dto, principal);
   }
 
   @Patch(':id/notes')
