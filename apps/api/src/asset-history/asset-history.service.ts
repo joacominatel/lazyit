@@ -1,14 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import type { AssetHistoryEventType } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
+import type { ActorAttribution } from '../common/actor.service';
 import { PrismaService } from '../prisma/prisma.service';
 
-/** One asset event to append. `payload` is contextual jsonb; `performedById` is the shim actor. */
+/**
+ * One asset event to append. `payload` is contextual jsonb. `actor` is the resolved attribution
+ * (ADR-0048): a HUMAN write sets `{ userId }` → `performedById`; a SERVICE-ACCOUNT write sets
+ * `{ serviceAccountId }` → `serviceAccountId`; system/unknown leaves both null. The DB at-most-one-actor
+ * CHECK guarantees the two columns can never both be set — `ActorService.resolveActor` already returns
+ * at most one of the pair, so spreading it here is CHECK-safe by construction.
+ */
 export interface RecordAssetEvent {
   assetId: string;
   eventType: AssetHistoryEventType;
   payload?: Prisma.InputJsonValue;
-  performedById?: string;
+  actor?: ActorAttribution;
 }
 
 /**
@@ -37,13 +44,18 @@ export class AssetHistoryService {
     client: AssetHistoryWriter,
     event: RecordAssetEvent,
   ): Promise<unknown> {
+    // Spread the actor attribution: a human → performedById, a service account → serviceAccountId,
+    // system/unknown → neither (both FKs stay null). resolveActor guarantees at most one is set, so the
+    // at-most-one-actor CHECK on asset_history is always satisfied (ADR-0048).
+    const actor = event.actor ?? {};
     return client.assetHistory.create({
       data: {
         assetId: event.assetId,
         eventType: event.eventType,
         ...(event.payload !== undefined ? { payload: event.payload } : {}),
-        ...(event.performedById != null
-          ? { performedById: event.performedById }
+        ...(actor.userId != null ? { performedById: actor.userId } : {}),
+        ...(actor.serviceAccountId != null
+          ? { serviceAccountId: actor.serviceAccountId }
           : {}),
       },
     });
