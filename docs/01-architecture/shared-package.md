@@ -49,8 +49,10 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
   `.d.ts`); `main`/`types`/`exports` point at `dist/`. The base `tsconfig.json` stays no-emit
   (editor / Bun). Turbo runs the build before dependents (`build`/`dev`/`test` `dependsOn`
   `^build`). Why a build (and not source-direct): [[0014-shared-package-build]].
-- Organize `src/` by kind — `schemas/` (zod + inferred types), `constants/`, `utils/` — then
-  re-export from the barrel `src/index.ts` (extensionless imports); import as `@lazyit/shared`.
+- Organize `src/` by kind — `schemas/` (zod + inferred types), `constants/`, `utils/` (pure fns),
+  `clone/` (the per-entity "clone a record" sanitizers — pure mappers from a persisted record to a
+  `CreateX`-shaped partial, used to pre-fill the create forms) — then re-export from the barrel
+  `src/index.ts` (extensionless imports); import as `@lazyit/shared`.
 - Validation flow: define the **zod schema here** → API uses it for request validation, web
   uses it for forms → share the type via `z.infer`. One definition, no duplication.
 - Tests for `shared` run with `bun test` ([[0012-testing-strategy]]).
