@@ -22,6 +22,7 @@ import {
 } from '@lazyit/shared';
 import { ArticleCategoriesService } from './article-categories.service';
 import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 
 class ArticleCategoryDto extends createZodDto(ArticleCategorySchema) {}
 class CreateArticleCategoryDto extends createZodDto(
@@ -37,6 +38,7 @@ export class ArticleCategoriesController {
   constructor(private readonly categories: ArticleCategoriesService) {}
 
   @Get()
+  @RequirePermission('category:read')
   @ApiOperation({
     summary: 'List all article categories (excludes soft-deleted)',
   })
@@ -46,6 +48,7 @@ export class ArticleCategoriesController {
   }
 
   @Get(':id')
+  @RequirePermission('category:read')
   @ApiOperation({ summary: 'Get an article category by id' })
   @ApiOkResponse({ type: ArticleCategoryDto })
   findOne(@Param('id') id: string) {
