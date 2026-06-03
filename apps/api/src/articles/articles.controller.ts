@@ -41,7 +41,6 @@ import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
@@ -210,7 +209,7 @@ export class ArticlesController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary: 'Create an article (author = current user) (ADMIN or MEMBER)',
   })
@@ -220,7 +219,7 @@ export class ArticlesController {
   }
 
   @Post('import')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary:
       'Import an article from a .md, .txt or .docx file (ADMIN or MEMBER)',
@@ -257,7 +256,7 @@ export class ArticlesController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary:
       'Update an article (author only; never changes status) (ADMIN or MEMBER)',
@@ -272,7 +271,7 @@ export class ArticlesController {
   }
 
   @Post(':id/links')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary:
       'Link an article to an Asset XOR an Application (author only; exactly one target). (ADMIN or MEMBER) (ADR-0042)',
@@ -287,7 +286,7 @@ export class ArticlesController {
   }
 
   @Delete(':id/links/:linkId')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary: 'Remove a link from an article (author only). (ADMIN or MEMBER) (ADR-0042)',
   })
@@ -301,7 +300,7 @@ export class ArticlesController {
   }
 
   @Post(':id/publish')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary:
       'Publish an article (author only). Sets publishedAt on first publish. (ADMIN or MEMBER)',
@@ -312,7 +311,7 @@ export class ArticlesController {
   }
 
   @Post(':id/unpublish')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('article:write')
   @ApiOperation({
     summary:
       'Unpublish an article back to DRAFT (author only). Keeps publishedAt. (ADMIN or MEMBER)',
@@ -323,7 +322,7 @@ export class ArticlesController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @RequirePermission('article:delete')
   @ApiOperation({
     summary: 'Soft-delete an article (destructive) — ADMIN only',
   })
@@ -333,7 +332,7 @@ export class ArticlesController {
   }
 
   @Post(':id/restore')
-  @Roles('ADMIN')
+  @RequirePermission('article:delete')
   @ApiOperation({
     summary:
       'Restore a soft-deleted article (author only) — ADMIN only (ADR-0041)',
