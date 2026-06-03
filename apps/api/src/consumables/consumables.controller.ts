@@ -36,6 +36,7 @@ import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
 class ConsumableDto extends createZodDto(ConsumableSchema) {}
@@ -53,6 +54,7 @@ export class ConsumablesController {
   constructor(private readonly consumables: ConsumablesService) {}
 
   @Get()
+  @RequirePermission('consumable:read')
   @ApiOperation({
     summary:
       'List consumables (paginated; active by default). Server-side q search + sort + lowStock filter. deleted=only lists archived rows (ADMIN).',
@@ -137,6 +139,7 @@ export class ConsumablesController {
   }
 
   @Get(':id')
+  @RequirePermission('consumable:read')
   @ApiOperation({ summary: 'Get a consumable by id' })
   @ApiOkResponse({ type: ConsumableDto })
   findOne(@Param('id') id: string) {
@@ -144,6 +147,7 @@ export class ConsumablesController {
   }
 
   @Get(':id/movements')
+  @RequirePermission('consumable:read')
   @ApiOperation({
     summary: "List a consumable's stock movements (newest first)",
   })
