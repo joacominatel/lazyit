@@ -38,4 +38,32 @@ describe('ActorService', () => {
     // Confirm it is not a Promise (no .then).
     expect(typeof (result as unknown as Promise<unknown>)?.then).not.toBe('function');
   });
+
+  // resolveActor (ADR-0048): maps a unified principal to the right audit actor column.
+  describe('resolveActor', () => {
+    it('returns {} for an undefined principal (system/unknown actor — both FKs null)', () => {
+      expect(service.resolveActor(undefined)).toEqual({});
+    });
+
+    it('returns { userId } for a HUMAN principal (never serviceAccountId)', () => {
+      const principal = {
+        kind: 'human' as const,
+        user: makeUser('11111111-1111-4111-8111-111111111111') as never,
+      };
+      const actor = service.resolveActor(principal);
+      expect(actor).toEqual({ userId: '11111111-1111-4111-8111-111111111111' });
+      expect(actor.serviceAccountId).toBeUndefined();
+    });
+
+    it('returns { serviceAccountId } for a SERVICE principal (never a fake userId)', () => {
+      const principal = {
+        kind: 'service' as const,
+        serviceAccount: { id: 'sa_ckg9z1a2b' } as never,
+        permissions: new Set<never>(),
+      };
+      const actor = service.resolveActor(principal);
+      expect(actor).toEqual({ serviceAccountId: 'sa_ckg9z1a2b' });
+      expect(actor.userId).toBeUndefined();
+    });
+  });
 });
