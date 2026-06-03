@@ -12,14 +12,17 @@ import {
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { usePermissions } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
   label: string;
   href: string;
   icon: typeof Squares2X2Icon;
-  /** Render only for ADMINs (the API still gates the routes server-side). */
+  /**
+   * Render only for callers who can manage settings (`settings:manage`) — the Settings shell. The API
+   * still gates the routes server-side; this just hides the link from those who can't use it.
+   */
   adminOnly?: boolean;
 };
 
@@ -79,13 +82,15 @@ const NAV: NavSection[] = [
 
 export function SidebarNav() {
   const pathname = usePathname();
-  const { isAdmin } = usePermissions();
+  const canManageSettings = useCan("settings:manage");
 
   return (
     <nav className="flex-1 space-y-4 p-2">
       {NAV.map((section, index) => {
-        // Hide admin-only items for non-admins; drop a section that ends up empty.
-        const items = section.items.filter((item) => !item.adminOnly || isAdmin);
+        // Hide the settings-only items from those without settings:manage; drop an empty section.
+        const items = section.items.filter(
+          (item) => !item.adminOnly || canManageSettings,
+        );
         if (items.length === 0) return null;
         return (
         <div key={section.heading ?? `section-${index}`} className="space-y-0.5">
