@@ -82,10 +82,24 @@ Add **`infra/start.sh`** — an executable, POSIX `sh` (`set -eu`), guided first
     `AUTH_SECRET` = `openssl rand -base64 33`.
   - `POSTGRES_PASSWORD` is substituted **identically** into `DATABASE_URL` (internal-DB mode).
   - A Zitadel-complexity console admin password (random, surfaced **once** in the final output).
-  - The operator's domain/origin/issuer/port answers.
-  - **Atomic, validated write:** render to a `.tmp`, validate (every active `CHANGE_ME` replaced,
-    `MASTERKEY` length 32, ports numeric, `DATABASE_URL` password matches `POSTGRES_PASSWORD`),
-    `chmod 600`, then `mv` into place; `stat` verifies the mode.
+  - The operator's domain/origin/issuer/port answers. **Every free-text answer is validated**
+    before use (newline + control characters rejected outright — they could inject an extra
+    `KEY=value` line or shell metacharacters; FQDN against a hostname charset; ACME email against a
+    basic shape; ports numeric 1–65535; BYOI issuer must be an `https://` URL); a bad value
+    re-prompts (interactive) or aborts (`--yes`).
+  - **Atomic, validated write, secret-safe from the first byte:** the `.tmp` is created under
+    `umask 077` so it is **mode 600 at creation — before any secret is written** (a plain
+    `: >tmp` would honour the shell umask → 644, leaving the whole secret set world-readable in a
+    world-traversable dir for the render+validate window — [[0028-secrets-and-config]]). Then
+    render, validate (every active `CHANGE_ME` replaced, `MASTERKEY` length 32 in bundled mode,
+    ports numeric, `DATABASE_URL` password matches `POSTGRES_PASSWORD`, and in **BYOI** no bundled
+    Zitadel key / internal `zitadel:8080` URL survives as an active line), and `mv` into place
+    (`mv` preserves the 600 mode); `stat` verifies it.
+  - **BYOI consistency:** in BYOI mode the bundled-Zitadel-only vars (`ZITADEL_MASTERKEY`,
+    `ZITADEL_DB_PASSWORD`, `ZITADEL_EXTERNALDOMAIN`, `ZITADEL_ADMIN_PASSWORD`) and the internal
+    server-to-server URLs (`OIDC_JWKS_URI`, `AUTH_INTERNAL_ISSUER` → `zitadel:8080`) are left
+    **unset** (commented), so the rendered file reflects the operator's own issuer with no stale
+    bundled-Zitadel leftovers.
 - **UP** — the exact canonical bring-up (unchanged from the runbooks):
   `docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod
   --env-file infra/env/.env.prod up -d --build` (+ `--profile backup` if chosen).
