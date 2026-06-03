@@ -155,8 +155,19 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
 - **P1 — the contract + the table.** The shared `Permission` catalog + `RolePermissionMatrix`; the
   `RolePermission` model + migration; the idempotent seed from `DEFAULT_ROLE_PERMISSIONS`; the golden
   test. **Additive, behavior-preserving — nothing consumes `RolePermission` yet.** (done)
-- **P2 (later) — `@RequirePermission` decorator + the guard evolution** that reads `RolePermission`.
-- **P3 (later) — annotate the GETs** (this is where the two pre-tightened reads actually bite).
+- **P2 — `@RequirePermission` decorator + the guard evolution** that reads `RolePermission`. (done)
+  The `RolesGuard` is now DUAL-MODE: `@Public` skips; `@RequirePermission` resolves the caller's
+  permission set from the `RolePermission` rows (via a lazy in-process `PermissionResolverService`
+  cache, ADMIN always full) and 403s unless the role holds every required permission; the existing
+  `@Roles` sites keep their coarse role-membership check unchanged; a route with neither stays
+  open-by-default. Same `APP_GUARD` slot/order (after `JwtAuthGuard`). Behavior-preserving on its own.
+- **P3 — annotate the GETs** (this is where the two pre-tightened reads actually bite). (done) Every
+  GET carries `@RequirePermission('<domain>:read')`. The ONLY behavior change is VIEWER → 403 on the
+  access-grant reads (`GET /access-grants`, `/access-grants/:id`, `/applications/:id/access-grants`,
+  `/users/:id/access-grants`) and the user-DIRECTORY reads (`GET /users`, `/users/:id`,
+  `/users/:id/assignments`). `GET /users/me` stays OPEN (the self-read the frontend gates admin UI
+  off). `GET /search` is gated `search:read` (open to all) and additionally drops the `users` facet
+  from results for a caller without `user:read`, so a VIEWER cannot enumerate emails via search.
 - **P4 (later) — migrate the existing `@Roles` sites** to `@RequirePermission`.
 - **P5 (later) — the config endpoints** (read/update the matrix; ADMIN row immutable).
 - **Fast-follow — service accounts** reuse this same catalog.

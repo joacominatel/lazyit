@@ -13,6 +13,10 @@ import {
   type SearchIndex,
   type SearchResults,
 } from './search.service';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import type { User } from '../../generated/prisma/client';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
@@ -25,12 +29,23 @@ class SearchResultsDto extends createZodDto(SearchResultsSchema) {}
 @ApiTags('search')
 @Controller('search')
 export class SearchController {
-  constructor(private readonly search: SearchService) {}
+  constructor(
+    private readonly search: SearchService,
+    private readonly permissions: PermissionResolverService,
+  ) {}
 
+  // `search:read` is held by all three roles, so gating the endpoint is behavior-preserving. The
+  // ADDITIONAL tightening (ADR-0046 P3) is at the RESULT level: a caller that lacks `user:read` (a
+  // VIEWER) must not be able to enumerate the user directory — emails, names — via the `users` index.
+  // So we drop `users` from the requested indexes for such a caller (whether they asked for it
+  // explicitly or implicitly via "search all"). This keeps /search a useful cross-entity search for
+  // VIEWER while closing the email-enumeration backdoor that gating the dedicated user reads would
+  // otherwise leave open.
   @Get()
+  @RequirePermission('search:read')
   @ApiOperation({
     summary:
-      'Cross-entity search (Meilisearch). Returns { assets, articles, users, locations, applications } — only the requested entities, or all when omitted.',
+      'Cross-entity search (Meilisearch). Returns { assets, articles, users, locations, applications } — only the requested entities, or all when omitted. The `users` facet is omitted for callers without user:read (VIEWER).',
   })
   @ApiQuery({
     name: 'q',
@@ -51,15 +66,46 @@ export class SearchController {
   })
   @ApiOkResponse({ type: SearchResultsDto })
   async find(
+    @CurrentUser() user?: User,
     @Query('q') q?: string,
     @Query('entities') entities?: string,
     @Query('limit') limit?: string,
   ): Promise<SearchResults> {
+    const requested = parseEntities(entities);
+    const allowed = await this.allowedEntities(requested, user);
+    // An empty `allowed` (a VIEWER who asked ONLY for `users`) must return an empty envelope — NOT be
+    // re-expanded to "all" by the service (which treats `[]` as all). Short-circuit it here.
+    if (allowed !== undefined && allowed.length === 0) {
+      return {} as SearchResults;
+    }
     return this.search.search({
       q: q ?? '',
-      entities: parseEntities(entities),
+      entities: allowed,
       limit: parseLimit(limit),
     });
+  }
+
+  /**
+   * Drop the `users` index unless the caller holds `user:read` (ADR-0046 P3 — VIEWER cannot enumerate
+   * the directory via search). `requested === undefined` means "search all": we materialize the full
+   * index list so we can subtract `users` for a caller without the permission. An authorized caller's
+   * request is returned unchanged (still `undefined` = all when they asked for everything).
+   *
+   * Returns `[]` (not `undefined`) when a deprivileged caller asked ONLY for `users`, so the caller can
+   * tell "nothing left to search" from "search everything" — the `find` handler short-circuits it.
+   */
+  private async allowedEntities(
+    requested: SearchIndex[] | undefined,
+    user?: User,
+  ): Promise<SearchIndex[] | undefined> {
+    const canReadUsers =
+      user !== undefined &&
+      (await this.permissions.hasAll(user.role, ['user:read']));
+    if (canReadUsers) {
+      return requested;
+    }
+    const base = requested ?? [...SEARCH_INDEXES];
+    return base.filter((index) => index !== 'users');
   }
 }
 

@@ -174,9 +174,19 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
 - `apps/api/prisma/seed.ts` — seeds the matrix 1:1 from `DEFAULT_ROLE_PERMISSIONS` (idempotent upsert).
 - `apps/api/src/auth/role-permissions.golden.spec.ts` — golden test: a wrong/edited matrix (e.g. an
   incomplete ADMIN set, or the pre-tightening drifting) fails CI.
-- **Foundation note (P0+P1):** no guard reads `RolePermission` yet — the `@RequirePermission`
-  enforcement is a later wave (ADR-0046 §Phased delivery). This invariant is the *baseline* that wave
-  must uphold; today it is enforced by the schema + the catalog/seed/golden test, not a runtime guard.
+- `apps/api/src/auth/permission-resolver.service.ts` — **the runtime resolver (P2):** resolves a role's
+  permission set from the `RolePermission` rows via `prisma.rolePermission.findMany` — DB-first, never a
+  token claim. ADMIN short-circuits to the COMPLETE catalog (immutable/full) WITHOUT a DB read, so a
+  future bad seed can't lock ADMIN out; a catalog-foreign DB row is ignored; an empty seed fails CLOSED.
+- `apps/api/src/auth/roles.guard.ts` — **the enforcement point (P2):** for a `@RequirePermission` route
+  the guard calls the resolver with `request.user.role` (the DB-resolved role JwtAuthGuard set, INV-1)
+  and 403s unless the role holds every required permission. The `auth/roles.guard.spec.ts` SENTINEL
+  test asserts the role argument is the DB role, never a token/header claim.
+- **As-built (P2+P3, ADR-0046 §Phased delivery):** the `@RequirePermission` guard + the GET annotations
+  are now LIVE — the invariant is enforced by the runtime guard + resolver, not just the schema/seed.
+  The only behavior delta is VIEWER losing `accessGrant:read` + `user:read` (and the `/search` users
+  facet); see `apps/api/src/auth/read-authz-matrix.spec.ts` for the per-role read matrix. The 63 `@Roles`
+  WRITE sites are unchanged (dual-mode); migrating them to `@RequirePermission` is P4 (later).
 
 ---
 

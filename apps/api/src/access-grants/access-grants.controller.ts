@@ -32,6 +32,7 @@ import {
 } from './access-grant.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
 @ApiTags('access-grants')
@@ -40,6 +41,7 @@ export class AccessGrantsController {
   constructor(private readonly grants: AccessGrantsService) {}
 
   @Get()
+  @RequirePermission('accessGrant:read')
   @ApiOperation({
     summary:
       'List grants (paginated; newest first); filter by userId / applicationId. Active-only by default.',
@@ -110,6 +112,7 @@ export class AccessGrantsController {
   }
 
   @Get(':id')
+  @RequirePermission('accessGrant:read')
   @ApiOperation({ summary: 'Get a grant by id' })
   @ApiOkResponse({ type: AccessGrantDto })
   findOne(@Param('id') id: string) {

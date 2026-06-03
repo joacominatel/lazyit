@@ -44,6 +44,7 @@ import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
 // Writes keep the lean Asset shape; the detail read returns the expanded AssetWithRelations, while
@@ -76,6 +77,7 @@ export class AssetsController {
   ) {}
 
   @Get()
+  @RequirePermission('asset:read')
   @ApiOperation({
     summary:
       'List assets (paginated; lean: model/category, location, activeAssignments — no specs). Active by default; deleted=only lists archived assets (ADMIN).',
@@ -178,6 +180,7 @@ export class AssetsController {
   }
 
   @Get(':id')
+  @RequirePermission('asset:read')
   @ApiOperation({
     summary: 'Get an asset by id (expanded with its relations)',
   })
@@ -187,6 +190,7 @@ export class AssetsController {
   }
 
   @Get(':id/assignments')
+  @RequirePermission('asset:read')
   @ApiOperation({
     summary:
       "List an asset's ownership assignments, each with its user (active-only by default)",
@@ -211,6 +215,7 @@ export class AssetsController {
   }
 
   @Get(':id/history')
+  @RequirePermission('asset:read')
   @ApiOperation({
     summary:
       "List an asset's history (newest first; cursor pagination via `before`)",
@@ -244,6 +249,7 @@ export class AssetsController {
   }
 
   @Get(':id/articles')
+  @RequirePermission('article:read')
   @ApiOperation({
     summary:
       "List the PUBLISHED knowledge-base articles linked to this asset ('the runbook for THIS server'). (ADR-0042)",

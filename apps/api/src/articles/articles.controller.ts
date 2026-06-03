@@ -42,6 +42,7 @@ import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
 // The detail reads return the full Article (with `content`); the paginated list returns the lean
@@ -63,6 +64,7 @@ export class ArticlesController {
   constructor(private readonly articles: ArticlesService) {}
 
   @Get()
+  @RequirePermission('article:read')
   @ApiOperation({
     summary:
       'List articles (paginated; lean — no markdown content, excerpt kept). Excludes soft-deleted; drafts are visible only to their author.',
@@ -131,6 +133,7 @@ export class ArticlesController {
   }
 
   @Get('by-slug/:slug')
+  @RequirePermission('article:read')
   @ApiOperation({ summary: 'Get an article by slug' })
   @ApiOkResponse({ type: ArticleDto })
   findBySlug(
@@ -141,6 +144,7 @@ export class ArticlesController {
   }
 
   @Get(':id')
+  @RequirePermission('article:read')
   @ApiOperation({ summary: 'Get an article by id' })
   @ApiOkResponse({ type: ArticleDto })
   findOne(@Param('id') id: string, @CurrentUser() user?: User) {
@@ -148,6 +152,7 @@ export class ArticlesController {
   }
 
   @Get(':id/versions')
+  @RequirePermission('article:read')
   @ApiOperation({
     summary:
       "List an article's version history (append-only; newest first; paginated). Drafts visible only to their author. (ADR-0042)",
@@ -176,6 +181,7 @@ export class ArticlesController {
   }
 
   @Get(':id/versions/:version')
+  @RequirePermission('article:read')
   @ApiOperation({
     summary: 'Get a single version of an article by its version number (ADR-0042)',
   })
@@ -193,6 +199,7 @@ export class ArticlesController {
   }
 
   @Get(':id/links')
+  @RequirePermission('article:read')
   @ApiOperation({
     summary:
       "List an article's links to assets/applications (readable by any reader of the article). (ADR-0042)",
