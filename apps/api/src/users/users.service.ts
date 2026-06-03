@@ -237,10 +237,14 @@ export class UsersService {
     const user = await this.prisma.user.update({ where: { id }, data });
 
     // Mirror role and/or profile CHANGES to the IdP (ADR-0043 §3, issue #149). Only when the user is
-    // IdP-linked (externalId set) — a local-only row has nothing to mirror. If ANY mirror fails we
-    // compensate by reverting the local row back to its pre-update values (role + name + email), so
-    // local and Zitadel never disagree (no split-brain, INV-5), and surface the failure as 503. BYOI
-    // no-ops grantRole/updateUser → no throw, so this compensation path is Zitadel-only in practice.
+    // IdP-linked (externalId set) — a local-only row has nothing to mirror. The Zitadel mirror is a
+    // best-effort, eventually-consistent multi-call (grantRole / a profile-name PUT / a committed-LAST
+    // email POST). If ANY mirror fails we compensate by reverting the local row to its pre-update values
+    // (role + name + email) and surface the failure as 503, then make a best-effort attempt to converge
+    // the one sub-resource that could have committed ahead of the failure — the display name (see the
+    // catch). The account-linking email is committed LAST so it never diverges; a mid-sequence display-
+    // name/role divergence is transient and has zero authZ impact (authorization is DB-first, INV-5 /
+    // ADR-0043 #1). BYOI no-ops grantRole/updateUser → no throw, so this path is Zitadel-only in practice.
     if ((roleChanged || profileChanged) && current.externalId) {
       try {
         if (roleChanged) {
@@ -288,6 +292,29 @@ export class UsersService {
           },
         });
         this.search.upsert('users', projectUser(reverted));
+        // Best-effort convergence (INV-5): the Zitadel mirror is multi-call — a profile name `PUT`
+        // followed by a committed-LAST email `POST`. If the profile PUT already committed the NEW name
+        // but a later sub-call (the email POST) then failed, Zitadel's display name is now NEW while we
+        // just reverted the local row to OLD — a bounded, cosmetic display-name divergence with ZERO
+        // authZ impact (authorization is DB-first, ADR-0043 #1). Re-mirror the reverted (current) name
+        // back to Zitadel so the two stores converge instead of drifting permanently. The account-
+        // linking email needs no such re-mirror: it is committed LAST, so on its failure Zitadel's email
+        // was never touched and already matches the reverted local row. This is a SEPARATE best-effort
+        // attempt in its OWN try/catch — it only LOGS on failure and NEVER throws over the original
+        // error, so the caller still receives the original 503.
+        if (nameChanged && current.externalId) {
+          try {
+            await this.idp.updateUser(current.externalId, {
+              firstName: current.firstName,
+              lastName: current.lastName,
+            });
+          } catch (mirrorErr) {
+            this.logger.error(
+              { op: 'updateUser', actor: actorId, subjectUserId: id },
+              `best-effort name re-mirror failed after revert; Zitadel display name may transiently diverge until the next edit (no authZ impact, DB-first) (${mirrorErr instanceof Error ? mirrorErr.message : String(mirrorErr)})`,
+            );
+          }
+        }
         this.logger.error(
           { op: 'updateUser', actor: actorId, subjectUserId: id },
           `IdP write-back failed on update; reverted local user to its prior state (${err instanceof Error ? err.message : String(err)})`,
