@@ -19,7 +19,7 @@ import {
   useAssetModels,
   useDeleteAssetModel,
 } from "@/lib/api/hooks/use-asset-models";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { formatDate } from "@/lib/utils/format";
 import { AssetModelFormDialog } from "./asset-model-form-dialog";
 
@@ -59,9 +59,11 @@ export function AssetModelManager() {
   const { data, isLoading, isError, error, refetch } = useAssetModels();
   const { data: categories } = useAssetCategories();
   const remove = useDeleteAssetModel();
-  // A clone is a CREATE — gate the affordance like the New button (the surface is already
-  // ADMIN-gated; this fails closed while the role loads).
-  const canWrite = useCanWrite();
+  // Asset-model CRUD is gated on assetModel:write / assetModel:delete (a clone is a create →
+  // assetModel:write). The surface lives behind the settings:manage AdminGate; these finer gates
+  // match the backend per-affordance and fail closed while the permission set loads.
+  const canWrite = useCan("assetModel:write");
+  const canDelete = useCan("assetModel:delete");
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<AssetModel | undefined>(undefined);
@@ -97,12 +99,14 @@ export function AssetModelManager() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
-        <Button onClick={openCreate} size="sm">
-          <PlusIcon />
-          New model
-        </Button>
-      </div>
+      {canWrite ? (
+        <div className="flex items-center justify-end">
+          <Button onClick={openCreate} size="sm">
+            <PlusIcon />
+            New model
+          </Button>
+        </div>
+      ) : null}
 
       {isLoading ? (
         <ResourceTable columns={COLUMNS} isLoading />
@@ -118,10 +122,12 @@ export function AssetModelManager() {
           title="No asset models yet"
           description="Create a make/model so assets can reference it."
           action={
-            <Button onClick={openCreate}>
-              <PlusIcon />
-              Create the first model
-            </Button>
+            canWrite ? (
+              <Button onClick={openCreate}>
+                <PlusIcon />
+                Create the first model
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -144,11 +150,13 @@ export function AssetModelManager() {
                 {formatDate(model.updatedAt)}
               </TableCell>
               <TableCell className="text-right">
-                <RowActions
-                  onEdit={() => openEdit(model)}
-                  onClone={canWrite ? () => openClone(model) : undefined}
-                  onDelete={() => setDeleting(model)}
-                />
+                {canWrite || canDelete ? (
+                  <RowActions
+                    onEdit={canWrite ? () => openEdit(model) : undefined}
+                    onClone={canWrite ? () => openClone(model) : undefined}
+                    onDelete={canDelete ? () => setDeleting(model) : undefined}
+                  />
+                ) : null}
               </TableCell>
             </TableRow>
           ))}
