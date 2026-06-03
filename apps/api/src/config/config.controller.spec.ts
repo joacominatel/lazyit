@@ -187,6 +187,10 @@ describe('ConfigController — permissions (ADR-0046 P5)', () => {
  * REAL guard wired on `POST /config/setup` and asserts that, once the per-IP cap is exceeded, the
  * endpoint responds **429 Too Many Requests** and the service is NOT invoked (the guard short-circuits
  * before the handler). `MAX_ATTEMPTS = 5` (setup-rate-limit.guard.ts), so the 6th call from one IP trips.
+ *
+ * SEC-010: `trust proxy` is left at Express's default (off) here — supertest connects over loopback,
+ * so every request shares one verified `req.ip` and a client-sent X-Forwarded-For is ignored. The
+ * spoofing test below proves a rotating forged XFF can no longer mint a fresh bucket.
  */
 describe('POST /config/setup — rate-limit guard 429 propagation (e2e pipeline)', () => {
   let app: INestApplication;
@@ -224,28 +228,32 @@ describe('POST /config/setup — rate-limit guard 429 propagation (e2e pipeline)
     await app.close();
   });
 
-  it('returns 429 once the per-IP cap is exceeded and never calls the service for the blocked attempt', async () => {
+  it('a rotating forged X-Forwarded-For does NOT bypass the cap, then 429s — and never calls the service for the blocked attempt (SEC-010)', async () => {
     const token = csrfService.issue();
     const server = app.getHttpServer();
-    // 5 attempts are allowed within the window (each 201). A fixed IP keys the bucket.
+    // `trust proxy` is off here (Express default), so the client-sent X-Forwarded-For is IGNORED:
+    // every request resolves to the same loopback req.ip and shares ONE bucket. The attacker rotates
+    // the spoofed leftmost hop on each call hoping each one mints a fresh window — it never works.
+    // Pre-SEC-010 the guard keyed on the leftmost XFF token, so each distinct fake hop started a new
+    // bucket and the 6th would have returned 201; this test would fail.
     for (let i = 0; i < 5; i++) {
       const ok = await request(server)
         .post('/config/setup')
         .set('X-CSRF-Token', token)
-        .set('X-Forwarded-For', '198.51.100.9')
+        .set('X-Forwarded-For', `1.2.3.${i}`)
         .send(SETUP_DTO);
       expect(ok.status).toBe(201);
     }
     expect(setup).toHaveBeenCalledTimes(5);
 
-    // The 6th from the same IP is rejected by the guard with 429 — before the handler runs.
+    // 6th with yet another forged hop — still the same verified client → 429, not a fresh 201, and
+    // the guard short-circuits before the handler (the service is not called a 6th time).
     const blocked = await request(server)
       .post('/config/setup')
       .set('X-CSRF-Token', token)
-      .set('X-Forwarded-For', '198.51.100.9')
+      .set('X-Forwarded-For', '9.9.9.9')
       .send(SETUP_DTO);
     expect(blocked.status).toBe(429);
-    // The guard short-circuited: the service was not called a 6th time.
     expect(setup).toHaveBeenCalledTimes(5);
   });
 });
