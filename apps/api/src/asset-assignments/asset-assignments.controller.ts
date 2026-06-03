@@ -27,6 +27,7 @@ import {
 } from './asset-assignment.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
 @ApiTags('asset-assignments')
@@ -35,6 +36,7 @@ export class AssetAssignmentsController {
   constructor(private readonly assignments: AssetAssignmentsService) {}
 
   @Get()
+  @RequirePermission('asset:read')
   @ApiOperation({
     summary:
       'List assignments; filter by assetId / userId. Active-only by default.',
@@ -61,6 +63,7 @@ export class AssetAssignmentsController {
   }
 
   @Get(':id')
+  @RequirePermission('asset:read')
   @ApiOperation({ summary: 'Get an assignment by id' })
   @ApiOkResponse({ type: AssetAssignmentDto })
   findOne(@Param('id') id: string) {
