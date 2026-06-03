@@ -26,7 +26,6 @@ import {
   UpdateAssetAssignmentNotesDto,
 } from './asset-assignment.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
@@ -71,7 +70,7 @@ export class AssetAssignmentsController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('asset:write')
   @ApiOperation({
     summary: 'Open an assignment (assign a user to an asset) (ADMIN or MEMBER)',
   })
@@ -84,7 +83,7 @@ export class AssetAssignmentsController {
   }
 
   @Patch(':id/release')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('asset:write')
   @ApiOperation({
     summary:
       'Release an active assignment (sets releasedAt; 409 if already released) (ADMIN or MEMBER)',
@@ -100,7 +99,7 @@ export class AssetAssignmentsController {
   }
 
   @Patch(':id/notes')
-  @Roles('ADMIN', 'MEMBER')
+  @RequirePermission('asset:write')
   @ApiOperation({
     summary: 'Update only the notes of an assignment (ADMIN or MEMBER)',
   })
