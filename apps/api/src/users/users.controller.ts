@@ -27,6 +27,7 @@ import {
 import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 import { ActorService } from '../common/actor.service';
 import { UsersService, USER_SORT_ALLOWLIST } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
@@ -55,6 +56,7 @@ export class UsersController {
   ) {}
 
   @Get()
+  @RequirePermission('user:read')
   @ApiOperation({
     summary:
       'List users (paginated; active by default). Server-side q search + sort. deleted=only lists offboarded (archived) users (ADMIN).',
@@ -128,6 +130,10 @@ export class UsersController {
     return this.users.findPage({ q }, pageQuery);
   }
 
+  // INTENTIONALLY NOT gated with `user:read` (ADR-0046 P3): a VIEWER must read its OWN record + role
+  // here — the frontend reads it to decide which admin-only controls to show. It only ever returns the
+  // caller (never another user), so it is a self-read, not a directory read. Gating it would break the
+  // admin-UI gate for VIEWER. Only the cross-user DIRECTORY reads below carry `user:read`.
   @Get('me')
   @ApiOperation({
     summary: 'The current authenticated user (including their RBAC role)',
@@ -146,14 +152,22 @@ export class UsersController {
     return user;
   }
 
+  // A cross-user DIRECTORY read (identity of another user) — gated on `user:read` (ADR-0046
+  // pre-tightened: VIEWER 403). `/users/me` above stays open for the self-read.
   @Get(':id')
+  @RequirePermission('user:read')
   @ApiOperation({ summary: 'Get a user by id' })
   @ApiOkResponse({ type: UserDto })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.users.findOne(id);
   }
 
+  // A cross-user DIRECTORY-relational read (which assets a NAMED user holds — enumeration keyed by a
+  // user id). Gated on `user:read`, NOT `asset:read`: a VIEWER holds `asset:read`, so gating on the
+  // asset domain would leave the cross-user enumeration open. `user:read` makes the VIEWER lose it,
+  // consistent with the directory finding (ADR-0046 P3).
   @Get(':id/assignments')
+  @RequirePermission('user:read')
   @ApiOperation({
     summary: "List a user's asset assignments (active-only by default)",
   })
@@ -175,7 +189,10 @@ export class UsersController {
     });
   }
 
+  // A cross-user access-MAP read (which apps a NAMED user can reach) — access-grant data, gated on
+  // `accessGrant:read` (ADR-0046 pre-tightened: VIEWER 403), matching the access-grant ledger.
   @Get(':id/access-grants')
+  @RequirePermission('accessGrant:read')
   @ApiOperation({
     summary: "List a user's access grants (active-only by default)",
   })
