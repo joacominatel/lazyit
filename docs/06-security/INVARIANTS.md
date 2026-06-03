@@ -178,15 +178,25 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   permission set from the `RolePermission` rows via `prisma.rolePermission.findMany` — DB-first, never a
   token claim. ADMIN short-circuits to the COMPLETE catalog (immutable/full) WITHOUT a DB read, so a
   future bad seed can't lock ADMIN out; a catalog-foreign DB row is ignored; an empty seed fails CLOSED.
-- `apps/api/src/auth/roles.guard.ts` — **the enforcement point (P2):** for a `@RequirePermission` route
-  the guard calls the resolver with `request.user.role` (the DB-resolved role JwtAuthGuard set, INV-1)
-  and 403s unless the role holds every required permission. The `auth/roles.guard.spec.ts` SENTINEL
-  test asserts the role argument is the DB role, never a token/header claim.
-- **As-built (P2+P3, ADR-0046 §Phased delivery):** the `@RequirePermission` guard + the GET annotations
-  are now LIVE — the invariant is enforced by the runtime guard + resolver, not just the schema/seed.
-  The only behavior delta is VIEWER losing `accessGrant:read` + `user:read` (and the `/search` users
-  facet); see `apps/api/src/auth/read-authz-matrix.spec.ts` for the per-role read matrix. The 63 `@Roles`
-  WRITE sites are unchanged (dual-mode); migrating them to `@RequirePermission` is P4 (later).
+- `apps/api/src/auth/roles.guard.ts` — **the SINGLE enforcement point (P2→P4):** for a
+  `@RequirePermission` route the guard calls the resolver with `request.user.role` (the DB-resolved role
+  JwtAuthGuard set, INV-1) and 403s unless the role holds every required permission. The
+  `auth/roles.guard.spec.ts` SENTINEL test asserts the role argument is the DB role, never a token/header
+  claim. As of P4 this is the ONLY authZ gate the guard understands — `@Public` → `@RequirePermission` →
+  open-by-default; the legacy `@Roles` decorator + `ROLES_KEY` + the dual-mode branch are GONE
+  (`auth/roles-decorator-retired.spec.ts` fails CI if they return).
+- `apps/api/src/auth/permission-parity.golden.spec.ts` — **the parity golden test (P4):** for every
+  migrated WRITE route, the role-set its `@RequirePermission` allows (resolved against the seed) must
+  EXACTLY equal the role-set the old `@Roles` gate allowed — a mismatch (e.g. an AccessGrant write wired
+  to `accessGrant:write` instead of `accessGrant:grant`, or a user-admin route on `user:write` instead of
+  `user:manage`) fails CI. This is the behavior-preservation proof for the mechanism swap.
+- **As-built (P2+P3+P4, ADR-0046 §Phased delivery):** the `@RequirePermission` guard + the GET
+  annotations + ALL the migrated write gates are now LIVE — the invariant is enforced by the runtime
+  guard + resolver, not the schema/seed alone. The only behavior delta is VIEWER losing
+  `accessGrant:read` + `user:read` (and the `/search` users facet); see
+  `apps/api/src/auth/read-authz-matrix.spec.ts` for the per-role read matrix. The 63 former `@Roles`
+  write sites now carry `@RequirePermission` with the EXACT same effective role-set (parity-tested), and
+  the legacy `@Roles` path is retired — `@RequirePermission` is the single enforcement primitive.
 
 ---
 
