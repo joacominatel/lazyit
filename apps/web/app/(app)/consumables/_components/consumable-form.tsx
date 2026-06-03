@@ -3,6 +3,7 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  cloneConsumableDefaults,
   type Consumable,
   CreateConsumableSchema,
   UpdateConsumableSchema,
@@ -50,7 +51,15 @@ type ConsumableFormValues = {
   notes?: string;
 };
 
-function toFormValues(consumable?: Consumable): ConsumableFormValues {
+/**
+ * Initial form values. Edit → from the persisted `consumable`. Clone → from the shared
+ * `cloneConsumableDefaults` sanitizer (CREATE mode, unique `sku` cleared, " (copy)" name). Otherwise
+ * the blank create defaults.
+ */
+function toFormValues(
+  consumable?: Consumable,
+  cloneSource?: Consumable,
+): ConsumableFormValues {
   if (consumable) {
     return {
       name: consumable.name,
@@ -62,15 +71,37 @@ function toFormValues(consumable?: Consumable): ConsumableFormValues {
       notes: consumable.notes ?? undefined,
     };
   }
+  if (cloneSource) {
+    const d = cloneConsumableDefaults(cloneSource);
+    return {
+      name: d.name ?? "",
+      // sku is cleared by the sanitizer → render empty.
+      sku: d.sku,
+      categoryId: d.categoryId,
+      description: d.description,
+      minStock: d.minStock,
+      unit: d.unit ?? "units",
+      notes: d.notes,
+    };
+  }
   return { name: "", unit: "units" };
 }
 
 /**
- * Create/edit form for a Consumable. Per-mode validation (CreateConsumableSchema vs the partial
- * UpdateConsumableSchema — ADR-0020). `currentStock` is intentionally absent: it starts at 0 and only
- * changes through stock movements (ADR-0034), never this form.
+ * Create/edit/clone form for a Consumable. Per-mode validation (CreateConsumableSchema vs the partial
+ * UpdateConsumableSchema — ADR-0020). Clone (`cloneSource`, no `consumable`) stays in CREATE mode but
+ * pre-fills from the shared `cloneConsumableDefaults` sanitizer (issue #125): name " (copy)" and the
+ * unique `sku` cleared. `currentStock` is intentionally absent: it starts at 0 and only changes
+ * through stock movements (ADR-0034), never this form — so it is never cloned either.
  */
-export function ConsumableForm({ consumable }: { consumable?: Consumable }) {
+export function ConsumableForm({
+  consumable,
+  cloneSource,
+}: {
+  consumable?: Consumable;
+  /** When set (and `consumable` is not), pre-fill a CREATE form from this record — see issue #125. */
+  cloneSource?: Consumable;
+}) {
   const isEdit = consumable != null;
   const router = useRouter();
   const { data: categories } = useConsumableCategories();
@@ -82,7 +113,7 @@ export function ConsumableForm({ consumable }: { consumable?: Consumable }) {
     resolver: zodResolver(
       isEdit ? UpdateConsumableSchema : CreateConsumableSchema,
     ) as Resolver<ConsumableFormValues>,
-    defaultValues: toFormValues(consumable),
+    defaultValues: toFormValues(consumable, cloneSource),
   });
 
   const onSubmit = form.handleSubmit((values) => {
