@@ -156,6 +156,108 @@ ask_yn() {
   esac
 }
 
+# ---------- input validation for operator free-text -------------------------
+# Every free-text answer is written verbatim into .env.prod (KEY=value lines) and flows toward
+# the docker invocation. An embedded NEWLINE would inject a rogue KEY=value line; control chars,
+# `$()`, backticks and other shell metacharacters are an injection risk. We reject them at the
+# prompt. POSIX-sh, minimal, no bashisms.
+#
+# has_ctrl_or_newline <value> -> 0 (true) if the value contains a newline/CR or any other
+# control character (everything below 0x20 plus DEL). We COUNT bytes before vs after stripping
+# the printable set: if the count drops, a control char (incl. \n, \r, \t) was present. Counting
+# via `wc -c` inside the pipe is essential — capturing with $() would itself eat trailing newlines
+# and miss a newline-only residue.
+has_ctrl_or_newline() {
+  _v=$1
+  # Count the bytes that REMAIN after deleting the printable set. Any survivor is a control char.
+  _ctrl=$(printf '%s' "$_v" | tr -d '[:print:]' | wc -c | tr -d ' ')
+  [ "$_ctrl" -ne 0 ]
+}
+
+# ask_text "<prompt>" "<default>" "<validator-fn>" "<error hint>"
+#   Prompts (honouring --yes), then rejects newline/control chars ALWAYS and, if a validator fn
+#   is given, re-prompts until the value passes. In non-interactive mode a bad default aborts
+#   (it cannot prompt). The validated answer is echoed on stdout.
+ask_text() {
+  _p=$1; _d=$2; _vfn=$3; _hint=$4
+  while :; do
+    _val=$(ask "$_p" "$_d")
+    if has_ctrl_or_newline "$_val"; then
+      if [ "$ASSUME_YES" -eq 1 ]; then
+        die "value for '$_p' contains a newline or control character — refusing (it could inject an env line)."
+      fi
+      warn "that value contains a newline or control character — not allowed (it could inject an extra env line). Try again."
+      continue
+    fi
+    if [ -n "$_vfn" ] && ! "$_vfn" "$_val"; then
+      if [ "$ASSUME_YES" -eq 1 ]; then
+        die "value for '$_p' is invalid: ${_hint}. Got '$_val'."
+      fi
+      warn "invalid: ${_hint}. Try again."
+      continue
+    fi
+    printf '%s' "$_val"
+    return 0
+  done
+}
+
+# Validators — return 0 when the value is acceptable. Kept deliberately strict-but-simple.
+valid_fqdn() {
+  # Hostname charset only: letters, digits, dot, hyphen. Non-empty. (We allow "localhost" too.)
+  _h=$1
+  [ -n "$_h" ] || return 1
+  case "$_h" in
+    *[!A-Za-z0-9.-]*) return 1 ;;   # any char outside the hostname set -> reject
+    .*|*.|-*|*-)      return 1 ;;   # no leading/trailing dot or hyphen
+    *..*)             return 1 ;;   # no empty label
+    *) return 0 ;;
+  esac
+}
+valid_email() {
+  # Basic shape: <local>@<domain>.<tld>, no spaces, exactly one '@', a dot in the domain.
+  # An EMPTY value is allowed (the ACME email is optional — skip it intentionally).
+  _e=$1
+  [ -n "$_e" ] || return 0
+  case "$_e" in
+    *[![:graph:]]*) return 1 ;;     # only printable, no spaces
+    *@*@*)          return 1 ;;     # at most one '@'
+    *@*.*)          return 0 ;;     # local@domain.tld
+    *)              return 1 ;;
+  esac
+}
+valid_port() {
+  # Numeric, 1..65535.
+  _pn=$1
+  case "$_pn" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$_pn" -ge 1 ] && [ "$_pn" -le 65535 ]
+}
+valid_issuer_url() {
+  # https URL with a hostname charset host. Must start https:// (OIDC issuers are TLS).
+  _u=$1
+  case "$_u" in
+    https://*) : ;;
+    *) return 1 ;;
+  esac
+  _rest=${_u#https://}
+  [ -n "$_rest" ] || return 1
+  # host[:port][/path] — restrict the host[:port] segment to a safe charset; allow a path tail.
+  _hostport=${_rest%%/*}
+  case "$_hostport" in
+    *[!A-Za-z0-9.:-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+valid_database_url() {
+  # postgresql://user:pass@host:port/db?... — we only assert the scheme + an '@host' and reject
+  # control chars (already handled). Password may contain symbols, so we DON'T charset-restrict it;
+  # the newline/control-char gate is the security boundary here.
+  _du=$1
+  case "$_du" in
+    postgresql://*@*|postgres://*@*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # ---------- host-port availability (Caddy only; DB/Meili/Zitadel are internal) ----
 port_in_use() {
   _p=$1
@@ -229,7 +331,20 @@ render_env_file() {
   _tmp="${ENV_FILE}.tmp.$$"
   trap 'rm -f "$_tmp" 2>/dev/null || true' EXIT INT TERM
 
-  : >"$_tmp"
+  # Create the temp file with mode 600 FROM CREATION — BEFORE a single secret is written.
+  # A plain `: >"$_tmp"` honours the shell umask (022 -> 644), leaving the full secret set
+  # (incl. the unrotatable ZITADEL_MASTERKEY) world-readable in a world-traversable dir for
+  # the whole render+validate window. The (umask 077; ...) subshell makes it 600 at birth so
+  # the file is never group/world-readable for even an instant (ADR-0028).
+  (umask 077; : >"$_tmp") || die "cannot create the temp env file ($_tmp)."
+  # Verify the create-time mode is 600 before we trust it with secrets (defensive; a non-600
+  # mode would mean umask did not apply and we must NOT proceed to write secrets).
+  _tmpperm=$(stat -c '%a' "$_tmp" 2>/dev/null || stat -f '%Lp' "$_tmp" 2>/dev/null || echo "?")
+  if [ "$_tmpperm" != "600" ]; then
+    chmod 600 "$_tmp" 2>/dev/null || true
+    _tmpperm=$(stat -c '%a' "$_tmp" 2>/dev/null || stat -f '%Lp' "$_tmp" 2>/dev/null || echo "?")
+    [ "$_tmpperm" = "600" ] || die "refusing to write secrets: temp env file is mode '$_tmpperm', not 600."
+  fi
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       POSTGRES_PASSWORD=*)      printf 'POSTGRES_PASSWORD=%s\n'      "$POSTGRES_PASSWORD"   >>"$_tmp" ;;
@@ -240,10 +355,30 @@ render_env_file() {
       LAZYIT_HTTPS_PORT=*)      printf 'LAZYIT_HTTPS_PORT=%s\n'      "$HTTPS_PORT"          >>"$_tmp" ;;
       MEILI_MASTER_KEY=*)       printf 'MEILI_MASTER_KEY=%s\n'       "$MEILI_MASTER_KEY"    >>"$_tmp" ;;
       LAZYIT_DOMAIN=*)          printf 'LAZYIT_DOMAIN=%s\n'          "$DOMAIN"              >>"$_tmp" ;;
-      ZITADEL_DB_PASSWORD=*)    printf 'ZITADEL_DB_PASSWORD=%s\n'    "$ZITADEL_DB_PASSWORD" >>"$_tmp" ;;
-      ZITADEL_MASTERKEY=*)      printf 'ZITADEL_MASTERKEY=%s\n'      "$MASTERKEY"           >>"$_tmp" ;;
-      ZITADEL_EXTERNALDOMAIN=*) printf 'ZITADEL_EXTERNALDOMAIN=%s\n' "$AUTH_SUBDOMAIN"      >>"$_tmp" ;;
-      ZITADEL_ADMIN_PASSWORD=*) printf 'ZITADEL_ADMIN_PASSWORD=%s\n' "$ZITADEL_ADMIN_PASSWORD" >>"$_tmp" ;;
+      # --- Bundled-Zitadel-only keys. In BYOI mode the bundled IdP services do NOT run, so these
+      #     MUST be unset/omitted (a stale bundled value here is wrong + misleading). We comment
+      #     them out in BYOI so the file stays self-documenting but the var is genuinely UNSET.
+      ZITADEL_DB_PASSWORD=*)
+        if [ "$IDP_MODE" = "byoi" ]; then printf '# ZITADEL_DB_PASSWORD=  # unset in BYOI (no bundled Zitadel DB)\n' >>"$_tmp"
+        else printf 'ZITADEL_DB_PASSWORD=%s\n' "$ZITADEL_DB_PASSWORD" >>"$_tmp"; fi ;;
+      ZITADEL_MASTERKEY=*)
+        if [ "$IDP_MODE" = "byoi" ]; then printf '# ZITADEL_MASTERKEY=  # unset in BYOI (no bundled Zitadel)\n' >>"$_tmp"
+        else printf 'ZITADEL_MASTERKEY=%s\n' "$MASTERKEY" >>"$_tmp"; fi ;;
+      ZITADEL_EXTERNALDOMAIN=*)
+        if [ "$IDP_MODE" = "byoi" ]; then printf '# ZITADEL_EXTERNALDOMAIN=  # unset in BYOI (your IdP advertises its own issuer)\n' >>"$_tmp"
+        else printf 'ZITADEL_EXTERNALDOMAIN=%s\n' "$AUTH_SUBDOMAIN" >>"$_tmp"; fi ;;
+      ZITADEL_ADMIN_PASSWORD=*)
+        if [ "$IDP_MODE" = "byoi" ]; then printf '# ZITADEL_ADMIN_PASSWORD=  # unset in BYOI (no bundled Zitadel console)\n' >>"$_tmp"
+        else printf 'ZITADEL_ADMIN_PASSWORD=%s\n' "$ZITADEL_ADMIN_PASSWORD" >>"$_tmp"; fi ;;
+      # --- Internal Zitadel server-to-server URLs. Bundled: keep (containers reach zitadel:8080).
+      #     BYOI: the bundled container is absent, so the example's http://zitadel:8080 default is
+      #     stale; comment it out (the API/web fall back to the BYOI issuer for JWKS/token calls).
+      OIDC_JWKS_URI=*)
+        if [ "$IDP_MODE" = "byoi" ]; then printf '# OIDC_JWKS_URI=  # unset in BYOI (derived from your issuer; no internal zitadel:8080)\n' >>"$_tmp"
+        else printf '%s\n' "$line" >>"$_tmp"; fi ;;
+      AUTH_INTERNAL_ISSUER=*)
+        if [ "$IDP_MODE" = "byoi" ]; then printf '# AUTH_INTERNAL_ISSUER=  # unset in BYOI (no internal zitadel:8080; use the external issuer)\n' >>"$_tmp"
+        else printf '%s\n' "$line" >>"$_tmp"; fi ;;
       OIDC_ISSUER=*)            printf 'OIDC_ISSUER=%s\n'            "$ISSUER_URL"          >>"$_tmp" ;;
       AUTH_ISSUER=*)            printf 'AUTH_ISSUER=%s\n'            "$ISSUER_URL"          >>"$_tmp" ;;
       AUTH_SECRET=*)            printf 'AUTH_SECRET=%s\n'            "$AUTH_SECRET"         >>"$_tmp" ;;
@@ -267,8 +402,19 @@ render_env_file() {
   if grep -v '^[[:space:]]*#' "$_tmp" | grep -q 'CHANGE_ME'; then
     die "render failed: a CHANGE_ME placeholder survived on an active line. Aborting (the env file would be invalid)."
   fi
-  _rk=$(grep -E '^ZITADEL_MASTERKEY=' "$_tmp" | head -n1 | cut -d= -f2-)
-  [ "${#_rk}" -eq 32 ] || die "render check failed: ZITADEL_MASTERKEY in the file is ${#_rk} chars, not 32."
+  # ZITADEL_MASTERKEY length is asserted only in BUNDLED mode (in BYOI it is intentionally unset).
+  if [ "$IDP_MODE" = "bundled" ]; then
+    _rk=$(grep -E '^ZITADEL_MASTERKEY=' "$_tmp" | head -n1 | cut -d= -f2-)
+    [ "${#_rk}" -eq 32 ] || die "render check failed: ZITADEL_MASTERKEY in the file is ${#_rk} chars, not 32."
+  else
+    # BYOI consistency guard: the bundled-Zitadel internal URLs must NOT survive as active lines.
+    if grep -E '^(ZITADEL_EXTERNALDOMAIN|ZITADEL_MASTERKEY|ZITADEL_DB_PASSWORD|ZITADEL_ADMIN_PASSWORD)=' "$_tmp" >/dev/null 2>&1; then
+      die "render check failed (BYOI): a bundled-Zitadel key is still active — it must be unset in BYOI mode."
+    fi
+    if grep -E '^(OIDC_JWKS_URI|AUTH_INTERNAL_ISSUER)=.*zitadel:8080' "$_tmp" >/dev/null 2>&1; then
+      die "render check failed (BYOI): an internal zitadel:8080 URL survived — it must be unset in BYOI mode."
+    fi
+  fi
   _hp=$(grep -E '^LAZYIT_HTTP_PORT='  "$_tmp" | head -n1 | cut -d= -f2-)
   _sp=$(grep -E '^LAZYIT_HTTPS_PORT=' "$_tmp" | head -n1 | cut -d= -f2-)
   case "$_hp" in ''|*[!0-9]*) die "render check failed: LAZYIT_HTTP_PORT is not numeric ('$_hp')." ;; esac
@@ -292,7 +438,8 @@ render_env_file() {
     return 0
   fi
 
-  # Go live: chmod 600 the temp file, then atomically move it into place.
+  # Go live: the temp is already 600 (created under umask 077); re-assert defensively, then
+  # atomically move it into place. mv preserves the source mode, so .env.prod inherits 600.
   chmod 600 "$_tmp"
   mv "$_tmp" "$ENV_FILE"
   trap - EXIT INT TERM   # temp is now the real file; cancel the cleanup trap.
@@ -418,23 +565,25 @@ ask_questions() {
     ISSUER_URL="https://auth.localhost"
     info "local prod-like: HTTPS via Caddy's internal CA, high ports ${HTTP_PORT}/${HTTPS_PORT}."
   else
-    # --- Q2. public FQDN ---
-    DOMAIN=$(ask "2) Public domain (FQDN), e.g. lazyit.example.com" "lazyit.example.com")
+    # --- Q2. public FQDN (validated: hostname charset only) ---
+    DOMAIN=$(ask_text "2) Public domain (FQDN), e.g. lazyit.example.com" "lazyit.example.com" \
+      valid_fqdn "a hostname (letters, digits, dots, hyphens; no scheme, no path)")
     [ -n "$DOMAIN" ] || die "a public domain is required for a real deployment."
     SITE_ADDRESS="$DOMAIN"
     AUTH_SUBDOMAIN="auth.${DOMAIN}"
 
-    # --- Q3. TLS / ACME email ---
+    # --- Q3. TLS / ACME email (validated: basic email shape) ---
     if ask_yn "3) Use Let's Encrypt (real publicly-trusted HTTPS)? (n = Caddy internal CA)" "y"; then
-      TLS_EMAIL=$(ask "   ACME contact email for Let's Encrypt" "")
+      TLS_EMAIL=$(ask_text "   ACME contact email for Let's Encrypt" "" \
+        valid_email "an email address like ops@example.com")
       [ -n "$TLS_EMAIL" ] || warn "no ACME email given — Let's Encrypt still works but you lose expiry notices."
     else
       info "keeping Caddy's internal CA (browsers will warn until the CA is trusted)."
     fi
 
-    # --- Q4. host ports ---
-    HTTP_PORT=$(ask "4) HTTP host port for Caddy" "80")
-    HTTPS_PORT=$(ask "   HTTPS host port for Caddy" "443")
+    # --- Q4. host ports (validated: numeric, 1..65535) ---
+    HTTP_PORT=$(ask_text "4) HTTP host port for Caddy" "80" valid_port "a port number 1-65535")
+    HTTPS_PORT=$(ask_text "   HTTPS host port for Caddy" "443" valid_port "a port number 1-65535")
   fi
 
   # Ports must be numeric (re-validated again before write).
@@ -465,9 +614,11 @@ ask_questions() {
   else
     IDP_MODE="byoi"
     info "BYOI: enter your existing IdP's OIDC details."
-    BYOI_ISSUER=$(ask "   OIDC_ISSUER (your IdP issuer URL)" "$ISSUER_URL")
-    BYOI_CLIENT_ID=$(ask "   OIDC_CLIENT_ID" "")
-    BYOI_CLIENT_SECRET=$(ask "   OIDC_CLIENT_SECRET" "")
+    BYOI_ISSUER=$(ask_text "   OIDC_ISSUER (your IdP issuer URL)" "$ISSUER_URL" \
+      valid_issuer_url "an https:// issuer URL (e.g. https://login.example.com)")
+    # Client id/secret: opaque tokens — only the newline/control-char gate applies (no charset rule).
+    BYOI_CLIENT_ID=$(ask_text "   OIDC_CLIENT_ID" "" "" "")
+    BYOI_CLIENT_SECRET=$(ask_text "   OIDC_CLIENT_SECRET" "" "" "")
     ISSUER_URL="$BYOI_ISSUER"
   fi
 
@@ -476,7 +627,8 @@ ask_questions() {
     PG_MODE="internal"
   else
     PG_MODE="external"
-    EXTERNAL_DATABASE_URL=$(ask "   external DATABASE_URL (postgresql://user:pass@host:5432/db?schema=public)" "")
+    EXTERNAL_DATABASE_URL=$(ask_text "   external DATABASE_URL (postgresql://user:pass@host:5432/db?schema=public)" "" \
+      valid_database_url "a postgresql://user:pass@host:port/db URL")
     [ -n "$EXTERNAL_DATABASE_URL" ] || die "an external DATABASE_URL is required when not using the bundled Postgres."
   fi
 
