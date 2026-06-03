@@ -96,7 +96,7 @@ apps/web           Next.js frontend (@lazyit/web)
 apps/api           NestJS + Prisma backend (@lazyit/api)
 packages/shared    @lazyit/shared — shared types & zod (leaf: depends on nothing)
 docs/              documentation vault
-docker-compose.yml Postgres for dev
+compose.yaml        backing services for dev (Postgres, Meili, Zitadel); prod adds a `prod` profile
 ```
 
 `web` and `api` never import each other — they talk over HTTP. Shared contracts go in

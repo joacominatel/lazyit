@@ -82,3 +82,22 @@ OIDC tokens, so you can run the stack without bootstrapping Zitadel.
 > [!warning] Never run production with `AUTH_MODE=shim`
 > The shim trusts a forgeable header and is **dev/test only**. Production must run OIDC mode
 > (unset `AUTH_MODE`); see [`docs/05-runbooks/auth-bootstrap.md`](docs/05-runbooks/auth-bootstrap.md).
+
+## Authorization
+
+Authorization is **DB-first, fine-grained permissions** behind a single enforcement primitive,
+`@RequirePermission('domain:action')`. The three roles are **fixed** (`ADMIN` / `MEMBER` / `VIEWER`),
+but **what each role grants is configurable** by an ADMIN — a closed permission catalog lives in
+`@lazyit/shared`, the role→permission matrix is editable data, and permissions are **lazyit-local**
+(never synced to the IdP, so they ride bring-your-own-IdP unchanged). ADMIN is immutable/full; the most
+sensitive reads (the access map, the user directory) are restricted to ADMIN + MEMBER by default
+([`ADR-0046`](docs/03-decisions/0046-roles-permissions-v2.md)).
+
+**Service accounts** give automation (CI, scripts, integrations) a first-class **non-human** credential —
+a lazyit-native token `lzit_sa_…` (hashed at rest, shown once), authorized by direct permission grants
+from the same catalog, **never** ADMIN, **fail-closed** ([`ADR-0048`](docs/03-decisions/0048-service-accounts.md)).
+Manage them at `/settings/service-accounts`; see
+[`docs/05-runbooks/managing-service-accounts.md`](docs/05-runbooks/managing-service-accounts.md).
+
+Architecture: [`docs/01-architecture/authorization.md`](docs/01-architecture/authorization.md) ·
+non-negotiables: [`docs/06-security/INVARIANTS.md`](docs/06-security/INVARIANTS.md).
