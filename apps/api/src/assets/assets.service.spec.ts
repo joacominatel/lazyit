@@ -36,11 +36,17 @@ type AssetData = Record<string, unknown>;
 type CreateCall = [{ data: AssetData }];
 type UpdateCall = [{ where: { id: string }; data: AssetData }];
 
-// A well-formed UUID used as the actor where a resolved actor matters.
+// A well-formed UUID used as the human actor, and a service-account id (ADR-0048).
 const ACTOR_ID = '11111111-1111-1111-1111-111111111111';
-// Minimal User shape for tests — the full Prisma User type, but only id matters here.
-type MinimalUser = { id: string };
-const ACTOR_USER: MinimalUser = { id: ACTOR_ID };
+const SA_ID = 'sa_abcdefghijklmnopqrstuvwx';
+// The unified principals passed to the service (the guard builds these at runtime). Cast through
+// `never` so the test needn't shape the full User/ServiceAccount — only the actor id drives attribution.
+const HUMAN_PRINCIPAL = { kind: 'human', user: { id: ACTOR_ID } } as never;
+const SA_PRINCIPAL = {
+  kind: 'service',
+  serviceAccount: { id: SA_ID },
+  permissions: new Set(),
+} as never;
 
 // The nested relations the expanded reads request. Mirrors ASSET_RELATIONS in the service: model
 // (+category), location, and the active owners (releasedAt null) each with their user.
@@ -183,7 +189,7 @@ describe('AssetsService', () => {
     asset: PrismaAssetMock;
     $transaction: jest.Mock;
   };
-  let actor: { resolve: jest.Mock };
+  let actor: ActorService;
   let history: { record: jest.Mock; list: jest.Mock };
   let search: { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
 
@@ -209,10 +215,9 @@ describe('AssetsService', () => {
         ) => (Array.isArray(arg) ? Promise.all(arg) : arg({ asset: tx })),
       ),
     };
-    // ActorService is mocked; the guard validation detail lives in jwt-auth.guard.spec.ts. Here we
-    // just steer resolve() and assert the service delegates to it. Default: no actor (undefined).
-    // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
-    actor = { resolve: jest.fn().mockReturnValue(undefined) };
+    // ActorService is a pure, dependency-free resolver (the guard already validated the principal), so
+    // the real instance is used — it produces the genuine ActorAttribution from the principal we pass.
+    actor = new ActorService();
     history = { record: jest.fn(), list: jest.fn() };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
@@ -265,7 +270,7 @@ describe('AssetsService', () => {
     expect(history.record).toHaveBeenCalledTimes(1);
     expect(history.record).toHaveBeenCalledWith(
       { asset: tx },
-      { assetId: 'a1', eventType: 'CREATED', performedById: undefined },
+      { assetId: 'a1', eventType: 'CREATED', actor: {} },
     );
     // Fire-and-forget search sync after the commit (ADR-0035): the new asset is upserted.
     expect(search.upsert).toHaveBeenCalledWith('assets', {
@@ -278,33 +283,34 @@ describe('AssetsService', () => {
     });
   });
 
-  it('resolves the actor via ActorService and stamps it onto the CREATED event', async () => {
-    actor.resolve.mockReturnValue(ACTOR_ID);
+  it('resolves a HUMAN principal and stamps userId onto the CREATED event', async () => {
     const dto = { name: 'SRV-01', status: 'OPERATIONAL' as const };
     tx.create.mockResolvedValue({ id: 'a1', ...dto });
 
-    await service.create(dto, ACTOR_USER as never);
+    await service.create(dto, HUMAN_PRINCIPAL);
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     expect(history.record).toHaveBeenCalledWith(
       { asset: tx },
-      { assetId: 'a1', eventType: 'CREATED', performedById: ACTOR_ID },
+      { assetId: 'a1', eventType: 'CREATED', actor: { userId: ACTOR_ID } },
     );
   });
 
-  it('propagates a thrown error from the actor resolver and never opens the transaction', async () => {
-    actor.resolve.mockImplementation(() => {
-      throw new BadRequestException();
-    });
+  it('resolves a SERVICE-ACCOUNT principal and stamps serviceAccountId onto the CREATED event — ADR-0048', async () => {
+    const dto = { name: 'SRV-01', status: 'OPERATIONAL' as const };
+    tx.create.mockResolvedValue({ id: 'a1', ...dto });
 
-    await expect(
-      service.create(
-        { name: 'SRV-01', status: 'OPERATIONAL' },
-        ACTOR_USER as never,
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(tx.create).not.toHaveBeenCalled();
+    await service.create(dto, SA_PRINCIPAL);
+
+    // The history row carries the SA attribution; AssetHistoryService maps it to serviceAccountId (and
+    // never performedById), so the at-most-one-actor CHECK holds.
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      {
+        assetId: 'a1',
+        eventType: 'CREATED',
+        actor: { serviceAccountId: SA_ID },
+      },
+    );
   });
 
   // --- findOne (expanded) -------------------------------------------------
@@ -594,11 +600,11 @@ describe('AssetsService', () => {
     expect(history.record).toHaveBeenCalledTimes(2);
     expect(history.record).toHaveBeenCalledWith(
       { asset: tx },
-      { assetId: 'a1', eventType: 'DELETED', performedById: undefined },
+      { assetId: 'a1', eventType: 'DELETED', actor: {} },
     );
     expect(history.record).toHaveBeenCalledWith(
       { asset: tx },
-      { assetId: 'a2', eventType: 'DELETED', performedById: undefined },
+      { assetId: 'a2', eventType: 'DELETED', actor: {} },
     );
     // Per-id outcome: a1/a2 succeeded, a3 skipped (not_found).
     expect(result).toEqual({
@@ -640,7 +646,7 @@ describe('AssetsService', () => {
     expect(history.record).toHaveBeenCalledTimes(1);
     expect(history.record).toHaveBeenCalledWith(
       { asset: tx },
-      { assetId: 'a1', eventType: 'RESTORED', performedById: undefined },
+      { assetId: 'a1', eventType: 'RESTORED', actor: {} },
     );
     expect(result).toEqual({
       requested: 3,
@@ -676,7 +682,7 @@ describe('AssetsService', () => {
         assetId: 'a1',
         eventType: 'STATUS_CHANGED',
         payload: { from: 'OPERATIONAL', to: 'RETIRED' },
-        performedById: undefined,
+        actor: {},
       },
     );
     expect(result).toEqual({
@@ -689,16 +695,31 @@ describe('AssetsService', () => {
     });
   });
 
-  it('batch actions stamp the resolved actor onto every per-item event', async () => {
-    actor.resolve.mockReturnValue(ACTOR_ID);
+  it('batch actions stamp a HUMAN principal onto every per-item event', async () => {
     asset.findMany.mockResolvedValue([{ id: 'a1' }]);
     tx.update.mockResolvedValue({});
 
-    await service.batchRemove(['a1'], ACTOR_USER as never);
+    await service.batchRemove(['a1'], HUMAN_PRINCIPAL);
 
     expect(history.record).toHaveBeenCalledWith(
       { asset: tx },
-      { assetId: 'a1', eventType: 'DELETED', performedById: ACTOR_ID },
+      { assetId: 'a1', eventType: 'DELETED', actor: { userId: ACTOR_ID } },
+    );
+  });
+
+  it('batch actions stamp a SERVICE-ACCOUNT principal onto every per-item event — ADR-0048', async () => {
+    asset.findMany.mockResolvedValue([{ id: 'a1' }]);
+    tx.update.mockResolvedValue({});
+
+    await service.batchRemove(['a1'], SA_PRINCIPAL);
+
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      {
+        assetId: 'a1',
+        eventType: 'DELETED',
+        actor: { serviceAccountId: SA_ID },
+      },
     );
   });
 
@@ -741,20 +762,36 @@ describe('AssetsService', () => {
     expect(tx.update).not.toHaveBeenCalled();
   });
 
-  it('update resolves the actor via ActorService before opening the transaction', async () => {
-    actor.resolve.mockReturnValue(ACTOR_ID);
+  it('update resolves a HUMAN principal and stamps userId onto every change event', async () => {
     asset.findFirst.mockResolvedValue(beforeRow());
     tx.update.mockResolvedValue(beforeRow({ status: 'RETIRED' }));
 
-    await service.update('a1', { status: 'RETIRED' }, ACTOR_USER as never);
+    await service.update('a1', { status: 'RETIRED' }, HUMAN_PRINCIPAL);
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     const calls = history.record.mock.calls as Array<
-      [unknown, { performedById?: string }]
+      [unknown, { actor?: { userId?: string; serviceAccountId?: string } }]
     >;
-    expect(calls.every(([, event]) => event.performedById === ACTOR_ID)).toBe(
+    expect(calls.every(([, event]) => event.actor?.userId === ACTOR_ID)).toBe(
       true,
     );
+  });
+
+  it('update resolves a SERVICE-ACCOUNT principal and stamps serviceAccountId onto every change event — ADR-0048', async () => {
+    asset.findFirst.mockResolvedValue(beforeRow());
+    tx.update.mockResolvedValue(beforeRow({ status: 'RETIRED' }));
+
+    await service.update('a1', { status: 'RETIRED' }, SA_PRINCIPAL);
+
+    const calls = history.record.mock.calls as Array<
+      [unknown, { actor?: { userId?: string; serviceAccountId?: string } }]
+    >;
+    expect(
+      calls.every(
+        ([, event]) =>
+          event.actor?.serviceAccountId === SA_ID &&
+          event.actor?.userId === undefined,
+      ),
+    ).toBe(true);
   });
 
   it('emits STATUS_CHANGED with {from,to} when only the status changes', async () => {
@@ -770,7 +807,7 @@ describe('AssetsService', () => {
         assetId: 'a1',
         eventType: 'STATUS_CHANGED',
         payload: { from: 'OPERATIONAL', to: 'RETIRED' },
-        performedById: undefined,
+        actor: {},
       },
     );
   });
@@ -788,7 +825,7 @@ describe('AssetsService', () => {
         assetId: 'a1',
         eventType: 'LOCATION_CHANGED',
         payload: { from: 'l1', to: 'l2' },
-        performedById: undefined,
+        actor: {},
       },
     );
   });
@@ -806,7 +843,7 @@ describe('AssetsService', () => {
         assetId: 'a1',
         eventType: 'MODEL_CHANGED',
         payload: { from: 'm1', to: 'm2' },
-        performedById: undefined,
+        actor: {},
       },
     );
   });
@@ -820,7 +857,7 @@ describe('AssetsService', () => {
     expect(history.record).toHaveBeenCalledTimes(1);
     expect(history.record).toHaveBeenCalledWith(
       { asset: tx },
-      { assetId: 'a1', eventType: 'SPECS_CHANGED', performedById: undefined },
+      { assetId: 'a1', eventType: 'SPECS_CHANGED', actor: {} },
     );
   });
 
@@ -902,17 +939,16 @@ describe('AssetsService', () => {
     expect(search.upsert).not.toHaveBeenCalled();
   });
 
-  it('records a DELETED history event on soft delete', async () => {
-    actor.resolve.mockReturnValue(ACTOR_ID);
+  it('records a DELETED history event on soft delete, attributed to the HUMAN', async () => {
     asset.findFirst.mockResolvedValue({ id: 'a1' });
     tx.update.mockResolvedValue({ id: 'a1', deletedAt: new Date() });
 
-    await service.remove('a1', ACTOR_USER as never);
+    await service.remove('a1', HUMAN_PRINCIPAL);
 
     expect(history.record).toHaveBeenCalledTimes(1);
     expect(history.record).toHaveBeenCalledWith(
       { asset: tx },
-      { assetId: 'a1', eventType: 'DELETED', performedById: ACTOR_ID },
+      { assetId: 'a1', eventType: 'DELETED', actor: { userId: ACTOR_ID } },
     );
   });
 
@@ -930,7 +966,6 @@ describe('AssetsService', () => {
 
   // --- restore (ADR-0041) --------------------------------------------------
   it('restore clears deletedAt and emits a RESTORED history event in the transaction', async () => {
-    actor.resolve.mockReturnValue(ACTOR_ID);
     // 1st findFirst: the soft-deleted lookup (includeSoftDeleted). 2nd: findOne after restore.
     asset.findFirst
       .mockResolvedValueOnce({ id: 'a1', deletedAt: new Date() })
@@ -943,7 +978,7 @@ describe('AssetsService', () => {
       });
     tx.update.mockResolvedValue({ id: 'a1', deletedAt: null });
 
-    await service.restore('a1', ACTOR_USER as never);
+    await service.restore('a1', HUMAN_PRINCIPAL);
 
     // The first lookup uses the includeSoftDeleted escape hatch (so a soft-deleted asset is visible).
     const firstLookup = asset.findFirst.mock.calls[0][0] as {
@@ -955,11 +990,11 @@ describe('AssetsService', () => {
     const calls = tx.update.mock.calls as UpdateCall[];
     expect(calls[0][0].where).toEqual({ id: 'a1' });
     expect(calls[0][0].data.deletedAt).toBeNull();
-    // RESTORED is emitted atomically (ADR-0033/0041), attributed to the actor.
+    // RESTORED is emitted atomically (ADR-0033/0041), attributed to the human actor.
     expect(history.record).toHaveBeenCalledTimes(1);
     expect(history.record).toHaveBeenCalledWith(
       { asset: tx },
-      { assetId: 'a1', eventType: 'RESTORED', performedById: ACTOR_ID },
+      { assetId: 'a1', eventType: 'RESTORED', actor: { userId: ACTOR_ID } },
     );
     // Re-indexed after restore (ADR-0035).
     expect(search.upsert).toHaveBeenCalledWith(
