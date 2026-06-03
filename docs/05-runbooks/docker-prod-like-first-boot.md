@@ -27,7 +27,8 @@ behind Caddy with local HTTPS — to validate a production-shaped deployment. Ba
 
 The fastest, safest first boot is the guided bootstrap script ([[0047-guided-first-deploy-bootstrap]]).
 It detects your environment, asks a few questions, generates `infra/env/.env.prod` with **real random
-secrets** (including a correctly-sized `ZITADEL_MASTERKEY`), `chmod 600`s it, and brings the stack up
+secrets** (including a correctly-sized `ZITADEL_MASTERKEY`) in a file that is **mode 600 from creation**
+(secrets are never world-readable, even briefly), and brings the stack up
 — then points you at the in-app `/setup` wizard. It is **idempotent and non-destructive**: re-running
 it on an existing install skips generation and just brings the stack up.
 
