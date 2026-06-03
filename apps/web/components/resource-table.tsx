@@ -60,8 +60,9 @@ const SKELETON_CARD_KEYS = ["a", "b", "c"] as const;
  * The select-all header state a list feeds {@link ResourceTable} to enable multi-row selection (the
  * bulk / batch-action wave). When present, the table renders a leading checkbox column whose header
  * toggles the whole visible page; rows render their own {@link SelectCell}. Wire this straight from
- * `useRowSelection(...)`. ADMIN-gate the whole thing at the call site (`useCanWrite()`) — omit
- * `selection` entirely for non-admins so the column never appears.
+ * `useRowSelection(...)`. The bulk actions are all lifecycle ops, so gate the whole thing at the call
+ * site on `can('<domain>:delete')` — omit `selection` entirely when the caller can't delete, so the
+ * column never appears.
  */
 export interface ResourceTableSelection {
   /** Whether the leading checkbox column renders at all (and a header select-all is shown). */
@@ -315,7 +316,8 @@ export function ResourceCard({
   actions?: ReactNode;
   /**
    * Enables a leading selection checkbox on the card (the mobile twin of {@link SelectCell}). Pair
-   * with `selected`/`onSelectedChange` from `useRowSelection(...)`; ADMIN-gate at the call site.
+   * with `selected`/`onSelectedChange` from `useRowSelection(...)`; gate at the call site on
+   * `can('<domain>:delete')` (the bulk actions are lifecycle ops).
    */
   selectable?: boolean;
   /** Whether this card is selected (controlled). */
@@ -394,11 +396,13 @@ export function ResourceCardMeta({
 }
 
 /**
- * Per-row actions dropdown (Edit / optional Clone / Delete) shared by resource tables. `onClone` is
- * OPTIONAL and additive: when provided, a "Clone" item renders between Edit and the destructive
- * Delete (separated from Delete) — it opens the create flow pre-filled from this row (issue #125).
- * Existing call sites that don't pass it are unaffected. Gate `onClone` behind `useCanWrite()` at the
- * call site (a clone is a create) and never wire it in the archived view.
+ * Per-row actions dropdown (Edit / optional Clone / Delete) shared by resource tables. Every item is
+ * INDEPENDENTLY OPTIONAL so the row honestly reflects fine-grained permissions (RBAC v2 P6b): gate
+ * `onEdit`/`onClone` behind `can('<domain>:write')` (a clone is a create) and `onDelete` behind
+ * `can('<domain>:delete')` at the call site. With only write held, the row shows Edit/Clone and no
+ * destructive item; with only delete held, it shows Delete alone. The page must not render
+ * `RowActions` at all when no handler would render (an empty menu = a dead trigger), and Clone is
+ * never wired in the archived view.
  */
 export function RowActions({
   onEdit,
@@ -408,14 +412,18 @@ export function RowActions({
   cloneLabel = "Clone",
   deleteLabel = "Delete",
 }: {
-  onEdit: () => void;
+  /** When set, render an "Edit" item (gate on `can('<domain>:write')`). */
+  onEdit?: () => void;
   /** When set, render a "Clone" item that opens the create flow pre-filled from this row. */
   onClone?: () => void;
-  onDelete: () => void;
+  /** When set, render the destructive "Delete" item (gate on `can('<domain>:delete')`). */
+  onDelete?: () => void;
   editLabel?: string;
   cloneLabel?: string;
   deleteLabel?: string;
 }) {
+  // Separate the non-destructive group (Edit/Clone) from Delete only when both groups are present.
+  const hasWriteItems = onEdit != null || onClone != null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -426,21 +434,27 @@ export function RowActions({
       {/* Dialogs are opened via page state (siblings of the menu), not nested
           here — the documented Radix way to avoid focus/pointer-event locks. */}
       <DropdownMenuContent align="end" className="w-40">
-        <DropdownMenuItem onSelect={onEdit}>
-          <PencilSquareIcon />
-          {editLabel}
-        </DropdownMenuItem>
+        {onEdit ? (
+          <DropdownMenuItem onSelect={onEdit}>
+            <PencilSquareIcon />
+            {editLabel}
+          </DropdownMenuItem>
+        ) : null}
         {onClone ? (
           <DropdownMenuItem onSelect={onClone}>
             <DocumentDuplicateIcon />
             {cloneLabel}
           </DropdownMenuItem>
         ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onSelect={onDelete}>
-          <TrashIcon />
-          {deleteLabel}
-        </DropdownMenuItem>
+        {onDelete ? (
+          <>
+            {hasWriteItems ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+              <TrashIcon />
+              {deleteLabel}
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -478,8 +492,8 @@ export function RestoreRowAction({
  * sticky at the bottom of the viewport so it stays reachable while scrolling a long list, shows the
  * selected count + a "Clear" affordance, and renders the page-supplied `actions` (bulk delete /
  * restore / status-change / revoke buttons). Renders nothing when `count` is 0, so a page can mount
- * it unconditionally. ADMIN-gate at the call site — the selection column shouldn't even appear for a
- * non-admin.
+ * it unconditionally. Gate at the call site on `can('<domain>:delete')` — the selection column
+ * shouldn't even appear when the caller can't run the lifecycle bulk actions.
  */
 export function BatchActionBar({
   count,
