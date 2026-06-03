@@ -25,8 +25,14 @@ the "what changed, when, by whom?" trail that auditing requires ([[problem-space
 - `payload` — optional jsonb; contextual data (e.g. `{ from, to }` on `STATUS_CHANGED`,
   `{ userId }` on **both `ASSIGNED` and `RELEASED`** — so a multi-owner asset's timeline can tell
   which owner was assigned/released). Unvalidated, same debt as `Asset.specs` ([[0007-flexible-asset-specs-jsonb]]).
-- `performedById` — optional FK → [[user]], `onDelete: SetNull`; the actor, from the `X-User-Id`
-  shim ([[0022-draft-visibility-auth-shim]]). `null` = system / unknown.
+- `performedById` — optional FK → [[user]], `onDelete: SetNull`; the **human** actor, resolved from the
+  verified principal (`@CurrentPrincipal()` → `request.user`, not a token claim; the `X-User-Id` header
+  is the dev-only shim path — [[0038-jit-user-provisioning]], [[0022-draft-visibility-auth-shim]]).
+  `null` = system / unknown.
+- `serviceAccountId` — optional FK → [[service-account]], `onDelete: SetNull`; the **non-human** actor
+  when a service account performed the action ([[0048-service-accounts]]). A DB **CHECK** enforces
+  *at most one* of (`performedById`, `serviceAccountId`) per row — honest attribution, never a fake human
+  ([[INVARIANTS]] INV-SA-4). `ActorService.resolveActor(principal)` picks the right column.
 - `createdAt` only — append-only ([[0006-soft-delete-and-auditing]]).
 
 ## Events (`AssetHistoryEventType`)
@@ -57,5 +63,6 @@ is an exclusive cursor on the autoincrement id. 404 if the asset is missing or s
 - **ID:** `autoincrement()` — log entity ([[0005-id-strategy]]).
 - **Timestamps:** `createdAt` only (no `updatedAt` / `deletedAt`, [[0006-soft-delete-and-auditing]]).
 
-Related: [[asset]] · [[asset-assignment]] · [[user]] · [[0033-asset-history-event-model]] ·
-[[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] · [[0022-draft-visibility-auth-shim]]
+Related: [[asset]] · [[asset-assignment]] · [[user]] · [[service-account]] ·
+[[0033-asset-history-event-model]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
+[[0022-draft-visibility-auth-shim]] · [[0048-service-accounts]] · [[INVARIANTS]]

@@ -43,8 +43,14 @@ filter hides the endpoint), it isn't removed.
   delete) — never edited or soft-deleted. (If a change-trail is ever needed it becomes an
   append-only ledger — a later ADR.)
 - **Author-only writes.** Only the article's author may add/remove links (same gate as edits); the
-  route is `@Roles('ADMIN','MEMBER')` ([[0040-rbac-roles]]). The target must reference a **live**
-  (non-soft-deleted) asset/application (400 otherwise).
+  route is gated `@RequirePermission('article:write')` ([[0046-roles-permissions-v2]], the single
+  enforcement primitive — the legacy `@Roles('ADMIN','MEMBER')` gate is retired). The target must
+  reference a **live** (non-soft-deleted) asset/application (400 otherwise).
+- **No service-account author.** `Article.authorId` is a non-null [[user]] FK and the author-only gate is
+  `User`-identity equality, so a [[service-account]] cannot author/own an article — the link write path
+  **rejects an SA principal with 403** rather than write a null-attributed row. The additive
+  `serviceAccountId` actor column (added for the unified two-actor model across the 6 audit tables) is
+  therefore **schema-present but unreachable by design** here ([[INVARIANTS]] INV-SA-4).
 - **Reads** are open to anyone who can read the article.
 
 ## Conventions
@@ -65,6 +71,7 @@ Prisma model `ArticleLink` → table `article_links`. Validation schemas (`Artic
 | `assetId` | `cuid?` | nullable FK → [[asset]], `onDelete: Cascade`. Set XOR `applicationId`. |
 | `applicationId` | `cuid?` | nullable FK → [[application]], `onDelete: Cascade`. Set XOR `assetId`. |
 | `createdById` | `uuid?` | optional FK → [[user]] (`@db.Uuid`), `onDelete: SetNull`. |
+| `serviceAccountId` | `cuid?` | optional FK → [[service-account]], `onDelete: SetNull`; part of the unified two-actor model + at-most-one-actor CHECK. **Unreachable in practice** — the write path 403s an SA author (above). |
 | `createdAt` | `datetime` | `@default(now())`. |
 
 Constraints/indexes (raw SQL — Prisma can't express them): CHECK exactly-one-target; two partial
@@ -75,9 +82,9 @@ unique indexes (one per target); `@@index` on `articleId`, `assetId`, `applicati
 `apps/api/src/articles/` and `apps/api/src/assets/` (`ArticlesModule` / `AssetsModule`).
 
 - `POST /articles/:id/links` — add a link (body: `assetId` XOR `applicationId`). Author-only,
-  `ADMIN`/`MEMBER`.
+  `@RequirePermission('article:write')`.
 - `DELETE /articles/:id/links/:linkId` — remove a link (404 if it doesn't belong to the article).
-  Author-only, `ADMIN`/`MEMBER`.
+  Author-only, `@RequirePermission('article:write')`.
 - `GET /articles/:id/links` — list an article's links (any reader of the article).
 - `GET /assets/:id/articles` — reverse lookup: the **PUBLISHED** articles linked to an asset (lean
   list shape, no `content`).
@@ -85,5 +92,6 @@ unique indexes (one per target); `@@index` on `articleId`, `assetId`, `applicati
   (PUBLISHED only, lean list shape). Shipped in the ADR-0030 amendment (2026-06-01).
 
 Related: [[article]] · [[article-version]] · [[asset]] · [[application]] · [[user]] ·
-[[0042-article-versioning-and-linking]] · [[0021-knowledge-base-design]] · [[0005-id-strategy]] ·
-[[0006-soft-delete-and-auditing]] · [[0040-rbac-roles]] · [[0041-soft-delete-reuse-and-restore]]
+[[service-account]] · [[0042-article-versioning-and-linking]] · [[0021-knowledge-base-design]] ·
+[[0005-id-strategy]] · [[0006-soft-delete-and-auditing]] · [[0040-rbac-roles]] ·
+[[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0041-soft-delete-reuse-and-restore]] · [[INVARIANTS]]
