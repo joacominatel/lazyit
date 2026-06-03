@@ -30,9 +30,9 @@ import {
   UpdateAccessGrantExpiryDto,
   UpdateAccessGrantNotesDto,
 } from './access-grant.dto';
-import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
-import type { User } from '../../generated/prisma/client';
+import type { Principal } from '../auth/principal';
 
 @ApiTags('access-grants')
 @Controller('access-grants')
@@ -106,8 +106,11 @@ export class AccessGrantsController {
       'Bulk revoke active grants (per-grant revokedAt/revokedById; one transaction) — ADMIN only',
   })
   @ApiOkResponse({ type: BatchResultDto })
-  batchRevoke(@Body() dto: BatchRevokeGrantsDto, @CurrentUser() user?: User) {
-    return this.grants.batchRevoke(dto.ids, dto.notes, user);
+  batchRevoke(
+    @Body() dto: BatchRevokeGrantsDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.grants.batchRevoke(dto.ids, dto.notes, principal);
   }
 
   @Get(':id')
@@ -124,8 +127,11 @@ export class AccessGrantsController {
     summary: 'Open a grant (give a user access to an application) — ADMIN only',
   })
   @ApiCreatedResponse({ type: AccessGrantDto })
-  create(@Body() dto: CreateAccessGrantDto, @CurrentUser() user?: User) {
-    return this.grants.create(dto, user);
+  create(
+    @Body() dto: CreateAccessGrantDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.grants.create(dto, principal);
   }
 
   @Patch(':id/revoke')
@@ -139,9 +145,9 @@ export class AccessGrantsController {
   revoke(
     @Param('id') id: string,
     @Body() dto: RevokeAccessGrantDto,
-    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.grants.revoke(id, dto, user);
+    return this.grants.revoke(id, dto, principal);
   }
 
   @Patch(':id/notes')
