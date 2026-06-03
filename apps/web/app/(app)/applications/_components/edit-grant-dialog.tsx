@@ -25,7 +25,7 @@ import {
   useUpdateGrantExpiry,
   useUpdateGrantNotes,
 } from "@/lib/api/hooks/use-access-grant-mutations";
-import { useCanWrite } from "@/lib/hooks/use-permissions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 
 /** "YYYY-MM-DD" from a date input → ISO datetime (null when empty — clears the expiry). */
@@ -57,7 +57,7 @@ export function EditGrantDialog({
   onOpenChange,
   userName,
 }: EditGrantDialogProps) {
-  const canWrite = useCanWrite();
+  const canGrant = useCan("accessGrant:grant");
   const updateExpiry = useUpdateGrantExpiry();
   const updateNotes = useUpdateGrantNotes();
   const [expiresAt, setExpiresAt] = useState(""); // YYYY-MM-DD
@@ -108,9 +108,10 @@ export function EditGrantDialog({
     }
   }
 
-  // RBAC: editing a grant is an Access write (ADMIN-only — ADR-0040). Render nothing for non-writers
-  // so the affordance never appears; the API's RolesGuard is the real gate (fails closed).
-  if (!canWrite) return null;
+  // RBAC v2: editing a grant is an AccessGrant mutation gated on `accessGrant:grant` (ADR-0046).
+  // Render nothing without it so the affordance never appears; the API's permission guard is the real
+  // gate (fails closed).
+  if (!canGrant) return null;
 
   return (
     <Dialog open={grant != null} onOpenChange={onOpenChange}>
