@@ -90,7 +90,10 @@ back to; a write-back capability outage can never lock people out.
 
 **Where enforced.**
 - `apps/api/src/auth/identity/generic-oidc.identity-provider.ts` — management methods no-op with a
-  `warn` (`supportsManagement = false`).
+  `warn` (`supportsManagement = false`). **Exception (issue #149):** `requestPasswordReset` does NOT
+  silently no-op — a reset is a user-visible ACTION, so it REJECTS with `PasswordResetUnsupportedError`,
+  which the Users controller maps to an honest **501** ("managed by your identity provider") rather than
+  a 2xx that falsely implies a reset email was sent. `updateUser` (profile/email mirror) still no-ops.
 - `apps/api/src/auth/identity/zitadel-management.service.ts` — the constructor never throws; a missing
   credential WARNs at boot-config resolution and throws "Zitadel management not configured" from the
   *management methods only*, never on the authN path.
@@ -103,14 +106,38 @@ back to; a write-back capability outage can never lock people out.
 change is rolled back** (or compensated) and the request returns **503** — never a silent partial
 write. Offboarding deactivates the IdP user **inside the offboard transaction**.
 
-**Why.** A soft-deleted-local / still-active-in-IdP (or role-changed-local / un-mirrored) divergence is
-a security drift; failing loud with 503 keeps the two stores consistent.
+The mirror is **best-effort, eventually-consistent across sub-resources**, not a single atomic write:
+`update`'s profile mirror is two non-atomic Zitadel v2 calls — a display-name `PUT` then a
+**committed-LAST** email `POST`. The guarantees are therefore scoped:
+- **The account-linking email never diverges.** It is committed LAST, so on its failure Zitadel's email
+  is untouched and the local revert restores the prior address — the two agree. `externalId` (sub) is
+  never changed by an edit (SEC-006), so the identity link is never at risk.
+- **A mid-sequence display-name (or role) divergence is transient, not permanent.** If the name `PUT`
+  commits but the email `POST` then fails, Zitadel briefly holds the NEW name while local reverts to OLD.
+  The catch makes a **best-effort compensating re-mirror** of the reverted name back to Zitadel to
+  converge them; if even that re-mirror fails it only LOGS (never throws over the original 503), leaving
+  at worst a cosmetic display-name drift fixed by the next edit.
+- **Zero authZ impact regardless.** Authorization is **DB-first** (ADR-0043 #1): permissions resolve
+  from local `RolePermission` rows (INV-8), never from a Zitadel name or claim, so a stale Zitadel
+  display name or role grants nothing. The divergence is cosmetic, bounded, and eventually-fixable — not
+  a security hole. (We deliberately do NOT claim "local and Zitadel never disagree".)
+
+**Why.** A soft-deleted-local / still-active-in-IdP divergence would be a real security drift, so those
+roll back hard (503). The remaining cosmetic display-name/role drift is compensated best-effort because
+it carries no authZ weight; failing loud on the primary write plus best-effort convergence keeps the two
+stores consistent in practice without pretending a multi-call mirror is atomic.
 
 **Where enforced.**
 - `apps/api/src/users/users.service.ts` — `create` hard-deletes the just-created local row on a mirror
-  failure (+503); a role change reverts the local role on a `grantRole` failure (+503); `remove`
-  (offboard) runs `deactivateUser` inside the `$transaction` so a failure rolls the whole offboarding
-  back. Every write-back is audited.
+  failure (+503); a role change reverts the local role on a `grantRole` failure (+503); an ADMIN
+  name/email edit (`update`, issue #149) mirrors `updateUser` (Zitadel v2 profile `PUT` + a PRE-VERIFIED,
+  committed-LAST email `POST`, same `externalId` — no re-link, SEC-006) and, on failure, reverts ONLY the
+  changed local fields (role/name/email) (+503) **and** best-effort re-mirrors the reverted display name
+  back to Zitadel (own try/catch, log-only, never throws over the 503) to converge the one sub-resource
+  that could have committed ahead of the failure; `remove` (offboard) runs `deactivateUser` inside the `$transaction`
+  so a failure rolls the whole offboarding back. Every write-back is audited. `requestPasswordReset`
+  (issue #149) is NOT a mirror but a triggered IdP action — it 404s a missing/soft-deleted user, **422**s
+  an inactive one, and 503s a Zitadel Management failure (the email itself is sent by ZITADEL's SMTP).
 - **Exception (deliberate):** `apps/api/src/config/config.service.ts` `setup()` is the one place that
   **degrades instead of blocking** — a first-run mirror failure keeps the local ADMIN (`mirrored:
   false`, warn) rather than 503, so a Zitadel misconfiguration can never wedge first-run (ADR-0043 §6

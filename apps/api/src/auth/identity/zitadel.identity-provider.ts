@@ -4,6 +4,7 @@ import type {
   CreateIdentityUserInput,
   ExternalRef,
   IdentityProvider,
+  UpdateIdentityUserInput,
 } from './identity-provider.interface';
 import { ZitadelManagementService } from './zitadel-management.service';
 
@@ -60,5 +61,20 @@ export class ZitadelIdentityProvider implements IdentityProvider {
     // grant regardless of which role it held (a role CHANGE is grantRole's revoke-then-grant).
     void _role;
     return this.management.revokeRole(externalId);
+  }
+
+  updateUser(
+    externalId: string,
+    input: UpdateIdentityUserInput,
+  ): Promise<void> {
+    // Mirror the admin name/email edit onto the existing Zitadel user (issue #149). Same externalId —
+    // never a re-link. The management service sets a new email pre-verified (no re-verification).
+    return this.management.updateUser(externalId, input);
+  }
+
+  requestPasswordReset(externalId: string): Promise<void> {
+    // Ask Zitadel to email the reset link via its own SMTP (issue #149). lazyit never sets/sends a
+    // password. A missing Management credential surfaces as the usual 503 (assertConfigured upstream).
+    return this.management.requestPasswordReset(externalId);
   }
 }

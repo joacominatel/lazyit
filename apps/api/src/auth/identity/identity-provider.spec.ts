@@ -42,6 +42,7 @@ jest.mock('../../../generated/prisma/client', () => ({
 import { createIdentityProvider } from './identity-provider.factory';
 import { GenericOidcIdentityProvider } from './generic-oidc.identity-provider';
 import { ZitadelIdentityProvider } from './zitadel.identity-provider';
+import { PasswordResetUnsupportedError } from './identity-provider.interface';
 
 describe('createIdentityProvider (ADR-0043 factory)', () => {
   it('returns the Zitadel provider for "zitadel"', () => {
@@ -137,6 +138,35 @@ describe('GenericOidcIdentityProvider (BYOI — ADR-0043 #5)', () => {
     );
     warnSpy.mockRestore();
   });
+
+  it('no-ops updateUser (profile/email write-back) with a warn — issue #149', async () => {
+    const warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+
+    await expect(
+      provider.updateUser('ext-1', { firstName: 'New', email: 'new@b.com' }),
+    ).resolves.toBeUndefined();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('management not supported for generic OIDC IdP'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('REJECTS requestPasswordReset with PasswordResetUnsupportedError (honest, not a silent no-op) — issue #149', async () => {
+    const warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+
+    // Unlike the mirror writes, a reset is a user-visible ACTION: a silent no-op would falsely imply a
+    // reset was sent. BYOI must reject so the controller can surface an honest 501 (INV-4).
+    await expect(
+      provider.requestPasswordReset('ext-1'),
+    ).rejects.toBeInstanceOf(PasswordResetUnsupportedError);
+
+    warnSpy.mockRestore();
+  });
 });
 
 describe('ZitadelIdentityProvider (write-back — ADR-0043 Phase 2)', () => {
@@ -193,6 +223,13 @@ describe('ZitadelIdentityProvider (write-back — ADR-0043 Phase 2)', () => {
     await expect(provider.revokeRole('ext-1', 'ADMIN')).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
+    // Issue #149: the new write-backs degrade the same way — 503, never blocking login.
+    await expect(
+      provider.updateUser('ext-1', { email: 'new@b.com' }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(
+      provider.requestPasswordReset('ext-1'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
 
     // The absent credential is reported via a structured WARN, never blocking boot/login.
     expect(warnSpy).toHaveBeenCalledWith(
