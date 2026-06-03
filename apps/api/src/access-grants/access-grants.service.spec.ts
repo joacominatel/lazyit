@@ -32,8 +32,10 @@ type GrantData = {
   grantedAt?: Date;
   notes?: string | null;
   grantedById?: string;
+  grantedBySaId?: string;
   revokedAt?: Date;
   revokedById?: string;
+  revokedBySaId?: string;
 };
 type CreateCall = [{ data: GrantData }];
 type UpdateCall = [{ where: { id: string }; data: GrantData }];
@@ -42,9 +44,14 @@ type FindManyCall = [{ where: Record<string, unknown>; orderBy: unknown }];
 const VALID_ACTOR = '11111111-1111-1111-1111-111111111111';
 const USER_ID = '22222222-2222-2222-2222-222222222222';
 const APP_ID = 'app_cuid_1';
-// Minimal User shape for tests — the full Prisma User type, but only id matters here.
-type MinimalUser = { id: string };
-const ACTOR_USER: MinimalUser = { id: VALID_ACTOR };
+const SA_ID = 'sa_abcdefghijklmnopqrstuvwx';
+// The unified principals (ADR-0048) — only the actor id matters to attribution; cast through `never`.
+const HUMAN_PRINCIPAL = { kind: 'human', user: { id: VALID_ACTOR } } as never;
+const SA_PRINCIPAL = {
+  kind: 'service',
+  serviceAccount: { id: SA_ID },
+  permissions: new Set(),
+} as never;
 
 describe('AccessGrantsService', () => {
   let service: AccessGrantsService;
@@ -52,9 +59,9 @@ describe('AccessGrantsService', () => {
   let user: { findFirst: jest.Mock };
   let application: { findFirst: jest.Mock };
   let prisma: { $transaction: jest.Mock };
-  // ActorService is mocked; the X-User-Id validation detail lives in actor.service.spec.ts. Here we
-  // steer resolve() and assert the service delegates to it. Default: no actor (undefined).
-  let actor: { resolve: jest.Mock };
+  // ActorService is a pure resolver (the guard already validated the principal); the real instance is
+  // used so it produces the genuine ActorAttribution from the principal each test passes (ADR-0048).
+  let actor: ActorService;
 
   beforeEach(async () => {
     accessGrant = {
@@ -75,8 +82,7 @@ describe('AccessGrantsService', () => {
           Array.isArray(arg) ? Promise.all(arg) : arg({ accessGrant }),
       ),
     };
-    // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
-    actor = { resolve: jest.fn().mockReturnValue(undefined) };
+    actor = new ActorService();
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -112,20 +118,34 @@ describe('AccessGrantsService', () => {
     expect(calls[0][0].data.grantedById).toBeUndefined();
   });
 
-  it('records grantedById from the authenticated actor when present', async () => {
+  it('records grantedById from a HUMAN principal (grantedBySaId stays null)', async () => {
     allUsersLive();
     application.findFirst.mockResolvedValue({ id: APP_ID });
     accessGrant.create.mockResolvedValue({ id: 'g1' });
-    actor.resolve.mockReturnValue(VALID_ACTOR);
 
     await service.create(
       { userId: USER_ID, applicationId: APP_ID },
-      ACTOR_USER as never,
+      HUMAN_PRINCIPAL,
     );
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     const calls = accessGrant.create.mock.calls as CreateCall[];
     expect(calls[0][0].data.grantedById).toBe(VALID_ACTOR);
+    expect(calls[0][0].data.grantedBySaId).toBeUndefined();
+  });
+
+  it('records grantedBySaId from a SERVICE-ACCOUNT principal (grantedById stays null) — ADR-0048', async () => {
+    allUsersLive();
+    application.findFirst.mockResolvedValue({ id: APP_ID });
+    accessGrant.create.mockResolvedValue({ id: 'g1' });
+
+    await service.create(
+      { userId: USER_ID, applicationId: APP_ID },
+      SA_PRINCIPAL,
+    );
+
+    const calls = accessGrant.create.mock.calls as CreateCall[];
+    expect(calls[0][0].data.grantedBySaId).toBe(SA_ID);
+    expect(calls[0][0].data.grantedById).toBeUndefined();
   });
 
   it('persists accessLevel and converts expiresAt / grantedAt to Date', async () => {
@@ -187,23 +207,6 @@ describe('AccessGrantsService', () => {
       service.create({ userId: USER_ID, applicationId: APP_ID }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(accessGrant.create).not.toHaveBeenCalled();
-  });
-
-  it('propagates a thrown error from the actor resolver and short-circuits (no create, no app lookup)', async () => {
-    // If the actor resolver throws (e.g. from guard internals), create() must surface the error
-    // before touching the grantee/application checks.
-    actor.resolve.mockImplementation(() => {
-      throw new BadRequestException('actor error');
-    });
-
-    await expect(
-      service.create(
-        { userId: USER_ID, applicationId: APP_ID },
-        ACTOR_USER as never,
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(accessGrant.create).not.toHaveBeenCalled();
-    expect(application.findFirst).not.toHaveBeenCalled();
   });
 
   // --- findAll ------------------------------------------------------------
@@ -332,26 +335,32 @@ describe('AccessGrantsService', () => {
   });
 
   // --- revoke -------------------------------------------------------------
-  it('revokes an active grant: sets revokedAt + revokedById (from actor) + notes', async () => {
+  it('revokes an active grant: sets revokedAt + revokedById (HUMAN) + notes', async () => {
     accessGrant.findUnique.mockResolvedValue({ id: 'g1', revokedAt: null });
-    actor.resolve.mockReturnValue(VALID_ACTOR);
     accessGrant.update.mockResolvedValue({ id: 'g1', revokedAt: new Date() });
 
-    await service.revoke(
-      'g1',
-      { notes: 'left the company' },
-      ACTOR_USER as never,
-    );
+    await service.revoke('g1', { notes: 'left the company' }, HUMAN_PRINCIPAL);
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     const calls = accessGrant.update.mock.calls as UpdateCall[];
     expect(calls[0][0].where).toEqual({ id: 'g1' });
     expect(calls[0][0].data.revokedAt).toBeInstanceOf(Date);
     expect(calls[0][0].data.revokedById).toBe(VALID_ACTOR);
+    expect(calls[0][0].data.revokedBySaId).toBeUndefined();
     expect(calls[0][0].data.notes).toBe('left the company');
   });
 
-  it('revokes without an actor header (revokedById stays unset)', async () => {
+  it('revokes for a SERVICE-ACCOUNT principal: sets revokedBySaId (revokedById stays null) — ADR-0048', async () => {
+    accessGrant.findUnique.mockResolvedValue({ id: 'g1', revokedAt: null });
+    accessGrant.update.mockResolvedValue({ id: 'g1', revokedAt: new Date() });
+
+    await service.revoke('g1', {}, SA_PRINCIPAL);
+
+    const calls = accessGrant.update.mock.calls as UpdateCall[];
+    expect(calls[0][0].data.revokedBySaId).toBe(SA_ID);
+    expect(calls[0][0].data.revokedById).toBeUndefined();
+  });
+
+  it('revokes without a principal (both revoke actor columns stay unset)', async () => {
     accessGrant.findUnique.mockResolvedValue({ id: 'g1', revokedAt: null });
     accessGrant.update.mockResolvedValue({ id: 'g1' });
 
@@ -360,6 +369,7 @@ describe('AccessGrantsService', () => {
     const calls = accessGrant.update.mock.calls as UpdateCall[];
     expect(calls[0][0].data.revokedAt).toBeInstanceOf(Date);
     expect(calls[0][0].data.revokedById).toBeUndefined();
+    expect(calls[0][0].data.revokedBySaId).toBeUndefined();
   });
 
   it('rejects revoking an already-revoked grant with 409', async () => {
@@ -476,17 +486,28 @@ describe('AccessGrantsService', () => {
       });
     });
 
-    it('stamps the resolved actor as revokedById on each grant', async () => {
-      actor.resolve.mockReturnValue(VALID_ACTOR);
+    it('stamps a HUMAN principal as revokedById on each grant', async () => {
       accessGrant.findMany.mockResolvedValue([{ id: 'g1', revokedAt: null }]);
       accessGrant.update.mockResolvedValue({});
 
-      await service.batchRevoke(['g1'], null, ACTOR_USER as never);
+      await service.batchRevoke(['g1'], null, HUMAN_PRINCIPAL);
 
       const calls = accessGrant.update.mock.calls as UpdateCall[];
       expect(calls[0][0].data.revokedById).toBe(VALID_ACTOR);
+      expect(calls[0][0].data.revokedBySaId).toBeUndefined();
       // null notes → no notes key written (explicit clear is a no-op for revoke).
       expect('notes' in calls[0][0].data).toBe(false);
+    });
+
+    it('stamps a SERVICE-ACCOUNT principal as revokedBySaId on each grant — ADR-0048', async () => {
+      accessGrant.findMany.mockResolvedValue([{ id: 'g1', revokedAt: null }]);
+      accessGrant.update.mockResolvedValue({});
+
+      await service.batchRevoke(['g1'], null, SA_PRINCIPAL);
+
+      const calls = accessGrant.update.mock.calls as UpdateCall[];
+      expect(calls[0][0].data.revokedBySaId).toBe(SA_ID);
+      expect(calls[0][0].data.revokedById).toBeUndefined();
     });
 
     it('opens no transaction when nothing is revocable', async () => {
