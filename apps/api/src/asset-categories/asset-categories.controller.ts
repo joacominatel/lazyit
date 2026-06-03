@@ -21,6 +21,7 @@ import {
 } from '@lazyit/shared';
 import { AssetCategoriesService } from './asset-categories.service';
 import { Roles } from '../auth/roles.decorator';
+import { RequirePermission } from '../auth/require-permission.decorator';
 
 class AssetCategoryDto extends createZodDto(AssetCategorySchema) {}
 class CreateAssetCategoryDto extends createZodDto(CreateAssetCategorySchema) {}
@@ -32,6 +33,7 @@ export class AssetCategoriesController {
   constructor(private readonly categories: AssetCategoriesService) {}
 
   @Get()
+  @RequirePermission('category:read')
   @ApiOperation({ summary: 'List all asset categories (excludes soft-deleted)' })
   @ApiOkResponse({ type: [AssetCategoryDto] })
   findAll() {
@@ -39,6 +41,7 @@ export class AssetCategoriesController {
   }
 
   @Get(':id')
+  @RequirePermission('category:read')
   @ApiOperation({ summary: 'Get an asset category by id' })
   @ApiOkResponse({ type: AssetCategoryDto })
   findOne(@Param('id') id: string) {
