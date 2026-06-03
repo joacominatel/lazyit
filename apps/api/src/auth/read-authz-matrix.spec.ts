@@ -22,7 +22,6 @@ jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 import { RolesGuard } from './roles.guard';
 import { PermissionResolverService } from './permission-resolver.service';
 import { RequirePermission } from './require-permission.decorator';
-import { Roles } from './roles.decorator';
 import { Public } from './public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -97,9 +96,10 @@ class MatrixController {
     return { ok: true };
   }
 
-  // A write gate kept on @Roles (dual-mode) — proves the 63 @Roles sites still enforce.
+  // An ADMIN-only write gate via @RequirePermission (a coarse-verb permission only ADMIN holds) —
+  // proves the migrated write sites still reject MEMBER/VIEWER and admit ADMIN (ADR-0046 P4).
   @Get('admin-only')
-  @Roles('ADMIN')
+  @RequirePermission('user:manage')
   adminOnly() {
     return { ok: true };
   }
@@ -191,7 +191,7 @@ describe('Read-authz matrix (ADR-0046 P3)', () => {
       await get('users/me', 'VIEWER').expect(200);
     });
 
-    it('403 on the @Roles ADMIN-only write gate (dual-mode still enforces)', async () => {
+    it('403 on the ADMIN-only write gate (user:manage — VIEWER lacks it)', async () => {
       await get('admin-only', 'VIEWER').expect(403);
     });
   });
@@ -204,7 +204,7 @@ describe('Read-authz matrix (ADR-0046 P3)', () => {
       },
     );
 
-    it('403 on the @Roles ADMIN-only write gate', async () => {
+    it('403 on the ADMIN-only write gate (user:manage — MEMBER lacks it)', async () => {
       await get('admin-only', 'MEMBER').expect(403);
     });
   });
@@ -217,7 +217,7 @@ describe('Read-authz matrix (ADR-0046 P3)', () => {
       },
     );
 
-    it('200 on the @Roles ADMIN-only write gate', async () => {
+    it('200 on the ADMIN-only write gate (user:manage)', async () => {
       await get('admin-only', 'ADMIN').expect(200);
     });
   });
