@@ -137,8 +137,10 @@ export function UserFormDialog({
             toast.success("User updated");
             onOpenChange(false);
           },
-          onError: (error) =>
-            notifyError(error, "Couldn't update user"),
+          // The API's own message takes precedence (surfaced verbatim with the request id) — e.g. a
+          // duplicate email (409) or an identity-provider write-back failure (503). The fallback only
+          // applies if the response carried no message.
+          onError: (error) => notifyError(error, "Couldn't update user"),
         },
       );
     } else {
@@ -226,6 +228,12 @@ export function UserFormDialog({
                     placeholder="ada@lazyit.dev"
                     aria-invalid={fieldState.invalid || undefined}
                   />
+                  {isEdit && (
+                    <FieldDescription>
+                      The account-linking key for the identity provider. Must be
+                      unique; a change is mirrored to the IdP.
+                    </FieldDescription>
+                  )}
                   <FieldError errors={[fieldState.error]} />
                 </Field>
               )}
