@@ -901,6 +901,118 @@ describe('UsersService', () => {
       });
     });
 
+    it('best-effort convergence: a mid-sequence Management failure (name PUT ok, email POST fails) re-mirrors the reverted name to Zitadel and still 503s', async () => {
+      // Models the exact split-brain: a combined name+email edit where the profile name PUT commits but
+      // the email POST then fails. The local row reverts to OLD, but Zitadel already holds the NEW name —
+      // so the catch must issue a SECOND, best-effort updateUser pushing the reverted (OLD) name back to
+      // converge the two stores, while the request still surfaces the original 503.
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'Old',
+        lastName: 'Name',
+        email: 'old@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      user.update
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'New',
+          lastName: 'Name',
+          email: 'new@b.com',
+          role: 'MEMBER',
+          externalId: 'zitadel-user-9',
+        })
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'Old',
+          lastName: 'Name',
+          email: 'old@b.com',
+          role: 'MEMBER',
+          externalId: 'zitadel-user-9',
+        });
+      // First updateUser (the name PUT + email POST mirror) fails on the email POST; the SECOND call (the
+      // best-effort re-mirror of the reverted name) succeeds.
+      idp.updateUser
+        .mockRejectedValueOnce(
+          new ServiceUnavailableException('Zitadel email POST failed'),
+        )
+        .mockResolvedValueOnce(undefined);
+
+      await expect(
+        service.update(
+          'member-1',
+          { firstName: 'New', email: 'new@b.com' },
+          'actor-99',
+        ),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      // Two updateUser calls: (1) the original mirror, (2) the best-effort convergence re-mirror.
+      expect(idp.updateUser).toHaveBeenCalledTimes(2);
+      // The re-mirror pushes the reverted (current) name back to the SAME externalId — name only, no
+      // email (the account-linking email is committed last and never diverges).
+      expect(idp.updateUser).toHaveBeenLastCalledWith('zitadel-user-9', {
+        firstName: 'Old',
+        lastName: 'Name',
+      });
+      // The local row was still reverted to its prior truth despite the re-mirror.
+      const updateCalls = user.update.mock.calls as Array<
+        [{ where: { id: string }; data: Record<string, unknown> }]
+      >;
+      expect(updateCalls[1][0]).toEqual({
+        where: { id: 'member-1' },
+        data: { firstName: 'Old', lastName: 'Name', email: 'old@b.com' },
+      });
+    });
+
+    it('best-effort re-mirror failure is swallowed: the original 503 still wins, no second error thrown', async () => {
+      // Even when the convergence re-mirror ALSO fails, the caller must receive the ORIGINAL 503 — the
+      // log-only re-mirror never throws over it (at worst a transient cosmetic drift remains, fixed by
+      // the next edit; zero authZ impact since authorization is DB-first).
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'Old',
+        lastName: 'Name',
+        email: 'old@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      user.update
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'New',
+          lastName: 'Name',
+          email: 'new@b.com',
+          role: 'MEMBER',
+          externalId: 'zitadel-user-9',
+        })
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstName: 'Old',
+          lastName: 'Name',
+          email: 'old@b.com',
+          role: 'MEMBER',
+          externalId: 'zitadel-user-9',
+        });
+      // BOTH updateUser calls fail (the mirror and the best-effort re-mirror).
+      idp.updateUser.mockRejectedValue(
+        new ServiceUnavailableException('Zitadel management call failed'),
+      );
+
+      await expect(
+        service.update(
+          'member-1',
+          { firstName: 'New', email: 'new@b.com' },
+          'actor-99',
+        ),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      // The re-mirror was attempted (2 calls) but its failure did not surface a different error.
+      expect(idp.updateUser).toHaveBeenCalledTimes(2);
+    });
+
     it('offboarding a linked user deactivates it in the IdP inside the transaction', async () => {
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
