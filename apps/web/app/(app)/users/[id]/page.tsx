@@ -31,6 +31,7 @@ import {
 import { formatDate } from "@/lib/utils/format";
 import { ArticleStatusBadge } from "../../kb/_components/article-status-badge";
 import { UserFormDialog } from "../_components/user-form-dialog";
+import { UserPasswordResetButton } from "../_components/user-password-reset-button";
 import { UserRoleSelect } from "../_components/user-role-select";
 import { UserStatusBadge } from "../_components/user-status-badge";
 
@@ -138,6 +139,7 @@ export default function UserDetailPage() {
                 <PencilSquareIcon />
                 Edit
               </Button>
+              <UserPasswordResetButton user={user} />
               <Button
                 variant="ghost"
                 size="icon-sm"
