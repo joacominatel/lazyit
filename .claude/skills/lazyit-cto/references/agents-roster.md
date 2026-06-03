@@ -298,6 +298,17 @@ Examples:
 
 **Optional**: parallel where lanes truly don't overlap (Tier 2), or coordinated parallel under one issue (Tier 3 with CEO approval).
 
+### Validated pattern for high-stakes, multi-wave epics (RBAC v2 + Service Accounts, 2026-06-03)
+
+For a large, security-sensitive epic, this orchestration worked end-to-end and is the CTO's preferred shape:
+
+1. **Read-only design/audit workflow first** — a fan-out audit/design pass produces the contract + the fork list, touching no code.
+2. **CEO forks** — the CEO resolves the open design decisions; the CTO turns them into ordered tasks.
+3. **Serialized implementation waves** — dependency-ordered (e.g. shared catalog/schema → backend resolver/guard → frontend gating → security close-outs), contracts landing before their consumers.
+4. **An adversarial multi-agent review gates each wave before merge** — a correctness reviewer + `lazyit-sentinel`, **with verification**, run against the wave's diff; the wave merges only after both pass.
+
+This is the "fan-out read-only audit, then serialize the build by dependency" pattern (already noted in `decision-history`), now hardened with a per-wave adversarial review gate. **No agent scope changed** to enable it — it's purely an orchestration choice the CTO makes.
+
 ### When the CTO discovers a missing capability
 
 If a category of work doesn't fit any agent (e.g., end-to-end testing, performance benchmarking, design systems specialization), the CTO:
