@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { useUpdateUserRole } from "@/lib/api/hooks/use-user-mutations";
 import { useCurrentUser } from "@/lib/api/hooks/use-users";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 import { UserRoleBadge } from "./user-role-badge";
 
@@ -47,27 +48,27 @@ interface UserRoleSelectProps {
 }
 
 /**
- * RBAC role control (ADR-0040). Self-contained: it reads the caller via `GET /users/me`
- * ({@link useCurrentUser}) — the OIDC token does NOT carry the lazyit role — and decides what to
- * render:
- *   - caller is NOT an ADMIN → a read-only {@link UserRoleBadge} (role management is ADMIN-only);
+ * RBAC role control (ADR-0040 → ADR-0046). Self-contained: it reads the caller's identity via
+ * `GET /users/me` ({@link useCurrentUser}, for the self-check) and their effective permissions via
+ * {@link useCan} (`user:manage`), then decides what to render:
+ *   - caller LACKS `user:manage` → a read-only {@link UserRoleBadge} (role management is gated);
  *   - caller IS the target → a disabled badge (no self-escalation/demotion; the API 403s anyway);
- *   - caller is an ADMIN editing someone else → an editable Select with a confirmation step.
+ *   - caller HOLDS `user:manage` editing someone else → an editable Select with a confirmation step.
  *
  * The API is the real enforcement boundary: the last-admin (409) and self-role (403) guards are
  * surfaced verbatim via {@link notifyError} if the optimistic UI ever lets a blocked change through.
  */
 export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
   const { data: me } = useCurrentUser();
+  const canManage = useCan("user:manage");
   const updateRole = useUpdateUserRole();
   const [pendingRole, setPendingRole] = useState<Role | null>(null);
 
-  const isAdmin = me?.role === "ADMIN";
   const isSelf = me?.id === user.id;
 
-  // Non-admins see a static badge; an admin viewing their own row sees a disabled badge (the API
-  // forbids changing your own role — there must always be a second admin in the loop).
-  if (!isAdmin) {
+  // Without user:manage the caller sees a static badge; a manager viewing their own row sees a
+  // disabled badge (the API forbids changing your own role — there must always be a second admin).
+  if (!canManage) {
     return <UserRoleBadge role={user.role} />;
   }
   if (isSelf) {
