@@ -60,6 +60,30 @@ export interface IdentityProvider {
    * Mirror a lazyit role revocation onto the IdP. No-op for generic OIDC.
    */
   revokeRole(externalId: string, role: Role): Promise<void>;
+
+  /**
+   * Mirror an ADMIN profile edit (first/last name and/or email) onto the IdP user `externalId` — the
+   * write-back half of `PATCH /users/:id` (issue #149). Only the fields present in `input` are pushed.
+   *
+   * The `externalId` (the OIDC `sub`) is UNCHANGED: this updates the EXISTING IdP user, it never
+   * re-links. An email change updates the account-linking key (INV-2) and is set PRE-VERIFIED on the
+   * IdP (the trusted-IdP model, ADR-0037/0038 — same as createUser), so the change does NOT force the
+   * user through re-verification or break login. No-op for generic OIDC (BYOI). A Management failure
+   * throws (surfaced upstream as 503) so the caller can compensate and never split-brain (INV-5).
+   */
+  updateUser(externalId: string, input: UpdateIdentityUserInput): Promise<void>;
+
+  /**
+   * Trigger the IdP's OWN password-reset flow for the user `externalId`. lazyit never stores, sets or
+   * sends a password (ADR-0016/0037): for Zitadel this calls the Management API so ZITADEL emails the
+   * reset link via its own configured SMTP (lazyit has no SMTP).
+   *
+   * BYOI (generic OIDC) CANNOT do this portably (OIDC standardizes login, not user administration), so
+   * it throws {@link PasswordResetUnsupportedError} — the endpoint surfaces that honestly as a 501
+   * ("managed by your identity provider") rather than pretending a reset was sent (INV-4). A Zitadel
+   * Management failure throws a ServiceUnavailableException (503), like the other write-backs.
+   */
+  requestPasswordReset(externalId: string): Promise<void>;
 }
 
 /** An IdP identity reference resolved from a `sub`. Phase 1 carries just the external id. */
@@ -75,6 +99,32 @@ export interface CreateIdentityUserInput {
   lastName: string;
   /** The role lazyit assigned locally; mirrored to the IdP when management is supported. */
   role: Role;
+}
+
+/**
+ * Input for {@link IdentityProvider.updateUser} — the profile fields an admin may edit (issue #149).
+ * All optional: only the keys present are mirrored. `externalId` is NOT here on purpose — the target
+ * IdP user is identified by the `externalId` argument and never changes (no re-link; SEC-006).
+ */
+export interface UpdateIdentityUserInput {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+}
+
+/**
+ * Thrown by {@link IdentityProvider.requestPasswordReset} when the active provider cannot trigger a
+ * reset (BYOI / generic OIDC). The Users controller maps it to a 501 Not Implemented with an honest
+ * "managed by your identity provider" message — NEVER a 2xx that pretends a reset was sent (INV-4).
+ * A distinct error type (not a generic throw) lets the controller branch on capability cleanly.
+ */
+export class PasswordResetUnsupportedError extends Error {
+  constructor(
+    message = 'Password reset is managed by your identity provider; lazyit cannot trigger it.',
+  ) {
+    super(message);
+    this.name = 'PasswordResetUnsupportedError';
+  }
 }
 
 /**
