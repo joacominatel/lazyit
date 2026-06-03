@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import { BadRequestException, INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { ArticlesController } from './articles.controller';
 import { ArticlesService } from './articles.service';
@@ -66,5 +66,91 @@ describe('ArticlesController POST /articles/import (upload size limit, SEC-001)'
 
     expect(res.status).toBe(201);
     expect(importArticle).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The `linked` / `linkedTo` list filters are validated against a per-resource ALLOWLIST at the edge
+ * (ADR-0030 / ADR-0042): a recognized value is forwarded to the service; an unknown value is rejected
+ * with 400, never silently ignored. Tested as a unit (the method directly) — no guard/DB wiring.
+ */
+describe('ArticlesController GET /articles (linked filter allowlist)', () => {
+  const findPage = jest.fn().mockResolvedValue({ items: [], total: 0 });
+  const controller = new ArticlesController({
+    findPage,
+  } as unknown as ArticlesService);
+
+  beforeEach(() => findPage.mockClear());
+
+  it('forwards a valid linked=only to the service', () => {
+    void controller.findAll(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'only',
+    );
+    expect(findPage).toHaveBeenCalledTimes(1);
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ linked: 'only' }),
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('forwards a valid linkedTo=asset to the service', () => {
+    void controller.findAll(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'asset',
+    );
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ linkedTo: 'asset' }),
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('rejects an unknown linked value with 400 (never reaches the service)', () => {
+    expect(() =>
+      controller.findAll(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'yes',
+      ),
+    ).toThrow(BadRequestException);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown linkedTo value with 400 (never reaches the service)', () => {
+    expect(() =>
+      controller.findAll(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'database',
+      ),
+    ).toThrow(BadRequestException);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('omits the link filter when neither param is present', () => {
+    void controller.findAll(undefined);
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ linked: undefined, linkedTo: undefined }),
+      expect.anything(),
+      undefined,
+    );
   });
 });
