@@ -11,7 +11,6 @@ import {
   type UpdateServiceAccount,
   PERMISSIONS,
 } from '@lazyit/shared';
-import { Prisma } from '../../generated/prisma/client';
 import type {
   Prisma as PrismaTypes,
   ServiceAccount,
@@ -97,7 +96,7 @@ export class ServiceAccountsService {
           serviceAccountId: account.id,
           action: 'MINT',
           actorId,
-          detail: { permissions } as Prisma.InputJsonValue,
+          detail: { permissions },
         },
       });
       return { account, token: minted.token };
@@ -138,7 +137,8 @@ export class ServiceAccountsService {
     dto: UpdateServiceAccount,
     actorId: string | null,
   ): Promise<ServiceAccountWire> {
-    const existing = await this.getLiveOr404(id);
+    // 404 if missing or revoked (the read filter excludes soft-deleted rows).
+    await this.getLiveOr404(id);
 
     const data: PrismaTypes.ServiceAccountUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
@@ -191,7 +191,7 @@ export class ServiceAccountsService {
               detail: {
                 added: toGrant,
                 removed: toRevoke,
-              } as Prisma.InputJsonValue,
+              },
             },
           });
         }
@@ -238,7 +238,10 @@ export class ServiceAccountsService {
    * immediately (the guard rejects a soft-deleted account). Idempotent-ish: 404 if it was never live.
    * Audited as REVOKE.
    */
-  async revoke(id: string, actorId: string | null): Promise<ServiceAccountWire> {
+  async revoke(
+    id: string,
+    actorId: string | null,
+  ): Promise<ServiceAccountWire> {
     await this.getLiveOr404(id);
     const updated = await this.prisma.$transaction(async (tx) => {
       const account = await tx.serviceAccount.update({
@@ -264,10 +267,10 @@ export class ServiceAccountsService {
     id: string,
     actorId: string | null,
   ): Promise<ServiceAccountWire> {
-    const account = (await this.prisma.serviceAccount.findFirst({
+    const account = await this.prisma.serviceAccount.findFirst({
       where: { id },
       includeSoftDeleted: true,
-    } as PrismaTypes.ServiceAccountFindFirstArgs)) as ServiceAccount | null;
+    } as PrismaTypes.ServiceAccountFindFirstArgs);
     if (!account) {
       throw new NotFoundException(`Service account ${id} not found`);
     }
