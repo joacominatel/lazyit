@@ -2,6 +2,7 @@
 
 import {
   ChevronRightIcon,
+  KeyIcon,
   ServerStackIcon,
   TagIcon,
   UsersIcon,
@@ -20,8 +21,8 @@ interface SettingsSection {
 }
 
 /**
- * The Settings index — the discoverable home (previously missing) for the three admin surfaces:
- * taxonomy management, the role overview and instance config. Each card links into its sub-area.
+ * The Settings index — the discoverable home for the admin surfaces: taxonomy management, the role
+ * overview, service accounts and instance config. Each card links into its sub-area.
  */
 const SECTIONS: SettingsSection[] = [
   {
@@ -39,6 +40,13 @@ const SECTIONS: SettingsSection[] = [
     icon: UsersIcon,
   },
   {
+    href: "/settings/service-accounts",
+    title: "Service accounts",
+    description:
+      "Create and manage non-human API credentials for CI, scripts and integrations — scoped by permission and revocable.",
+    icon: KeyIcon,
+  },
+  {
     href: "/settings/instance",
     title: "Instance",
     description:
@@ -53,7 +61,7 @@ export default function SettingsPage() {
       <div className="space-y-6">
         <PageHeader
           title="Settings"
-          subtitle="Instance configuration, taxonomy management and roles — administrators only."
+          subtitle="Instance configuration, taxonomy management, roles and service accounts — administrators only."
         />
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

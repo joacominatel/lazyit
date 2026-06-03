@@ -16,9 +16,9 @@ deciders: [Joaquín Minatel]
 authenticated principal (a non-human service account) that reuses ADR-0046's frozen permission catalog
 but is authenticated by a lazyit-native token (not the IdP) and authorized by direct grants (not a
 role). It re-affirms the auth INVARIANTS ([[INVARIANTS]]) and adds the service-account ones
-(INV-SA-1…4). The backend is delivered in this wave; the **frontend admin UI is a separate follow-up**,
-and the **Zitadel machine-user mirror is deferred** to a future ADR (the IdP seam stays open; BYOI
-no-ops).
+(INV-SA-1…4). The backend is delivered in this wave; the **frontend admin UI is delivered as a
+fast-follow** (the `/settings/service-accounts` screen, gated on `settings:manage`), and the
+**Zitadel machine-user mirror is deferred** to a future ADR (the IdP seam stays open; BYOI no-ops).
 
 ## Context
 
@@ -149,7 +149,9 @@ Add a first-class **`ServiceAccount`** principal:
   - No forced expiry in v1 (optional `expiresAt` only) — operational hygiene (rotation cadence) is left
     to the operator for now.
 - **Follow-ups.**
-  - **Frontend admin UI** for `/service-accounts` (separate issue).
+  - ~~**Frontend admin UI** for `/service-accounts`~~ — **delivered** as `/settings/service-accounts`
+    (create/list/rotate/edit/revoke/restore; the token is shown once on create/rotate and is never
+    refetchable; gated on `settings:manage`).
   - **Optional Zitadel machine-user mirror** (a future ADR) — the `IdentityProvider` seam stays open;
     BYOI no-ops, so nothing here depends on it.
   - Possible later: scoped/expiring tokens with a rotation reminder, per-token rate limits.
