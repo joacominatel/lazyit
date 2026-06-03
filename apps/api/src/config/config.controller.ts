@@ -39,7 +39,8 @@ class SetupResultDto extends createZodDto(SetupResultSchema) {}
  *
  * `GET /config/status` and `GET /config/csrf` are `@Public()`: the `/setup` wizard polls them before
  * any login exists. `POST /config/setup` is ALSO `@Public()` — by definition no ADMIN (hence no
- * authenticated session) exists at first-run, so it cannot be `@Roles('ADMIN')`-gated; instead it is
+ * authenticated session) exists at first-run, so it cannot be permission-gated (e.g. `settings:manage`);
+ * instead it is
  * protected by Fork #7's three guards: (1) the idempotent any-ADMIN gate (409 once configured, in the
  * service), (2) a required CSRF token (the {@link SetupCsrfService}), and (3) the
  * {@link SetupRateLimitGuard}. Every admin creation is audited (in the service). This is the §6.3
