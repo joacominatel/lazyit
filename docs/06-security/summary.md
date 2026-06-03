@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-06-02
 ---
 
 # Security summary
@@ -22,6 +22,11 @@ Snapshot of the security review. Updated each sweep. Method:
 3. **2026-05-26 — Post-sweep remediation.** SEC-001, SEC-004, SEC-005, SEC-006, SEC-008 were
    fixed by the remediator and moved to `docs/06-security/closed/`. Remaining open: SEC-002,
    SEC-003, SEC-007.
+4. **2026-06-02 — Trust-boundary hardening (born-closed).** [[SEC-009-swagger-docs-public-anonymous-surface\|SEC-009]]
+   (Swagger no longer public — `NODE_ENV` gate + Caddy) and
+   [[SEC-010-setup-rate-limit-xff-spoof\|SEC-010]] (setup rate-limit + audit key on the verified
+   `req.ip` via Caddy `trusted_proxies` + Express `trust proxy`) were filed **and** fixed in one PR;
+   both went straight to `closed/`. DEF-003 (public Swagger) resolved by SEC-009.
 
 Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 
@@ -36,7 +41,8 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | Info | 0 |
 | **Total open** | **3** |
 
-Deferred (accepted ADR debt, not findings): **5** — see [[deferred]].
+Deferred (accepted ADR debt, not findings): **4** active (DEF-001 ✅ and DEF-003 ✅ now resolved) —
+see [[deferred]].
 
 ## Open findings
 
@@ -64,11 +70,12 @@ lazyit now **authenticates** every request (global `JwtAuthGuard`, OIDC JWT or `
 Access-grant writes, Users administration and destructive deletes are `ADMIN`-only, `VIEWER` is
 read-only. This closes the May review's #1 finding (the formerly open grant/revoke + user-delete
 surface). **Residual baseline:** reads (`GET`) — including the Access pillar's "who-can-access-what"
-([[0023-access-management-design]]) — are open to any authenticated user by design; public Swagger
-([[0018-api-documentation-swagger]]) and the forgeable, dev-only `X-User-Id` shim
-([[0022-draft-visibility-auth-shim]]) remain. **Aggregate risk:** much reduced now that mutations are
-gated, but the operational guardrail still holds: **do not expose `:3001` (or `:5432`) beyond
-localhost/trusted dev**, and never run production with `AUTH_MODE=shim`.
+([[0023-access-management-design]]) — are open to any authenticated user by design; the forgeable,
+dev-only `X-User-Id` shim ([[0022-draft-visibility-auth-shim]]) remains. The OpenAPI docs are no
+longer public ([[SEC-009-swagger-docs-public-anonymous-surface\|SEC-009]]: prod doesn't serve them,
+Caddy doesn't proxy `/api/docs*`; reachable only internally/in dev). **Aggregate risk:** much reduced
+now that mutations are gated, but the operational guardrail still holds: **do not expose `:3001` (or
+`:5432`) beyond localhost/trusted dev**, and never run production with `AUTH_MODE=shim`.
 
 ## Coverage & gaps (self-assessment)
 
