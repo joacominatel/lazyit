@@ -48,11 +48,16 @@ type StockUpdateCall = [
 // A sentinel object standing in for the Prisma FieldRef; we only assert identity.
 const MIN_STOCK_FIELD = { __fieldRef: 'minStock' };
 
-// A well-formed UUID used as the actor in tests.
+// A well-formed UUID used as the human actor, and a service-account id (ADR-0048).
 const ACTOR_ID = '11111111-1111-1111-1111-111111111111';
-// Minimal User shape for tests — the full Prisma User type, but only id matters here.
-type MinimalUser = { id: string };
-const ACTOR_USER: MinimalUser = { id: ACTOR_ID };
+const SA_ID = 'sa_abcdefghijklmnopqrstuvwx';
+// The unified principals — only the actor id drives attribution; cast through `never`.
+const HUMAN_PRINCIPAL = { kind: 'human', user: { id: ACTOR_ID } } as never;
+const SA_PRINCIPAL = {
+  kind: 'service',
+  serviceAccount: { id: SA_ID },
+  permissions: new Set(),
+} as never;
 
 describe('ConsumablesService', () => {
   let service: ConsumablesService;
@@ -64,7 +69,7 @@ describe('ConsumablesService', () => {
     consumableMovement: MovementModelMock;
     $transaction: jest.Mock;
   };
-  let actor: { resolve: jest.Mock };
+  let actor: ActorService;
 
   beforeEach(async () => {
     consumable = {
@@ -93,9 +98,9 @@ describe('ConsumablesService', () => {
           Array.isArray(arg) ? Promise.all(arg) : arg(tx),
       ),
     };
-    // ActorService is mocked; guard validation detail lives in jwt-auth.guard.spec.ts. Default: no actor.
-    // resolve() is now synchronous — mockReturnValue, not mockResolvedValue.
-    actor = { resolve: jest.fn().mockReturnValue(undefined) };
+    // ActorService is a pure resolver (the guard already validated the principal); the real instance is
+    // used so it produces the genuine ActorAttribution from the principal each test passes (ADR-0048).
+    actor = new ActorService();
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -412,21 +417,20 @@ describe('ConsumablesService', () => {
     expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
 
-  // --- createMovement: actor via the authenticated User -------------------
-  it('resolves the actor and stamps performedById on the movement', async () => {
-    actor.resolve.mockReturnValue(ACTOR_ID);
+  // --- createMovement: actor via the unified principal (ADR-0048) ---------
+  it('resolves a HUMAN principal and stamps performedById on the movement', async () => {
     tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 0 });
     tx.consumableMovement.create.mockResolvedValue({ id: 5 });
 
     await service.createMovement(
       'k1',
       { type: 'IN', quantity: 1, reason: 'restock', notes: 'box A' },
-      ACTOR_USER as never,
+      HUMAN_PRINCIPAL,
     );
 
-    expect(actor.resolve).toHaveBeenCalledWith(ACTOR_USER);
     const calls = tx.consumableMovement.create.mock
       .calls as CreateMovementCall[];
+    // A human → performedById, never serviceAccountId (behavior-preserving).
     expect(calls[0][0].data).toEqual({
       consumableId: 'k1',
       type: 'IN',
@@ -437,8 +441,28 @@ describe('ConsumablesService', () => {
     });
   });
 
-  it('leaves performedById absent when the actor resolves to undefined (no user)', async () => {
-    actor.resolve.mockReturnValue(undefined);
+  it('resolves a SERVICE-ACCOUNT principal and stamps serviceAccountId (performedById stays null) — ADR-0048', async () => {
+    tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 0 });
+    tx.consumableMovement.create.mockResolvedValue({ id: 7 });
+
+    await service.createMovement(
+      'k1',
+      { type: 'IN', quantity: 1 },
+      SA_PRINCIPAL,
+    );
+
+    const calls = tx.consumableMovement.create.mock
+      .calls as CreateMovementCall[];
+    expect(calls[0][0].data).toEqual({
+      consumableId: 'k1',
+      type: 'IN',
+      quantity: 1,
+      serviceAccountId: SA_ID,
+    });
+    expect(calls[0][0].data).not.toHaveProperty('performedById');
+  });
+
+  it('leaves both actor columns absent when there is no principal (anonymous/system)', async () => {
     tx.consumable.findFirst.mockResolvedValue({ id: 'k1', currentStock: 0 });
     tx.consumableMovement.create.mockResolvedValue({ id: 6 });
 
@@ -447,23 +471,9 @@ describe('ConsumablesService', () => {
     const calls = tx.consumableMovement.create.mock
       .calls as CreateMovementCall[];
     expect(calls[0][0].data).not.toHaveProperty('performedById');
+    expect(calls[0][0].data).not.toHaveProperty('serviceAccountId');
     expect(calls[0][0].data).not.toHaveProperty('reason');
     expect(calls[0][0].data).not.toHaveProperty('notes');
-  });
-
-  it('propagates a thrown error from the actor resolver and never opens the transaction', async () => {
-    actor.resolve.mockImplementation(() => {
-      throw new BadRequestException();
-    });
-
-    await expect(
-      service.createMovement(
-        'k1',
-        { type: 'IN', quantity: 1 },
-        ACTOR_USER as never,
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   // --- listMovements ------------------------------------------------------
