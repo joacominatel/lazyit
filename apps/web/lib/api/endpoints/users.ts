@@ -71,6 +71,21 @@ export function restoreUser(id: string): Promise<User> {
 }
 
 /**
+ * Trigger a password reset for a user (`POST /users/:id/reset-password`, `user:manage`). The IdP
+ * (Zitadel) emails the reset link via ITS SMTP — lazyit never sees or sets the password. Resolves on
+ * 204 (no body). The honest non-success cases come back as an {@link ApiError} the caller maps on its
+ * `.status`:
+ *   - **501** — managed by the identity provider: BYOI (generic-oidc) or a user with no IdP link
+ *     (`externalId == null`); lazyit cannot drive a reset for them.
+ *   - **422** — the user is inactive (offboarded), so a reset is meaningless.
+ *   - **404** — the user is missing or soft-deleted.
+ * Delivery still depends on the IdP's SMTP being configured.
+ */
+export function resetUserPassword(id: string): Promise<void> {
+  return apiFetch<void>(`${BASE}/${id}/reset-password`, { method: "POST" });
+}
+
+/**
  * The current authenticated user (`GET /users/me`). The OIDC token does NOT carry the lazyit RBAC
  * role (ADR-0040), so the frontend reads the caller's role here to decide which admin-only controls
  * to show (e.g. the role Select). Returns the caller only — never another user.
