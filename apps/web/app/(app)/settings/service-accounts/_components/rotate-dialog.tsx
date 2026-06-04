@@ -2,6 +2,7 @@
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import type { ServiceAccount } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -53,16 +54,18 @@ function RotateBody({
   account: ServiceAccount;
   onClose: () => void;
 }) {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
   const rotate = useRotateServiceAccount();
   const [token, setToken] = useState<string | null>(null);
 
   function handleRotate() {
     rotate.mutate(account.id, {
       onSuccess: (result) => {
-        toast.success("Token rotated");
+        toast.success(t("serviceAccounts.toast.rotated"));
         setToken(result.token);
       },
-      onError: (err) => notifyError(err, "Couldn't rotate token"),
+      onError: (err) => notifyError(err, t("serviceAccounts.toast.rotateError")),
     });
   }
 
@@ -70,9 +73,9 @@ function RotateBody({
     return (
       <>
         <DialogHeader>
-          <DialogTitle>Save the new token</DialogTitle>
+          <DialogTitle>{t("serviceAccounts.rotate.secretTitle")}</DialogTitle>
           <DialogDescription>
-            This is the only time the new token is shown.
+            {t("serviceAccounts.rotate.secretDescription")}
           </DialogDescription>
         </DialogHeader>
         <SecretReveal
@@ -88,12 +91,14 @@ function RotateBody({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Rotate token?</DialogTitle>
+        <DialogTitle>{t("serviceAccounts.rotate.confirmTitle")}</DialogTitle>
         <DialogDescription>
-          A new token is minted for{" "}
-          <span className="font-medium text-foreground">{account.name}</span>.
-          The current token stops working immediately — any system using it must
-          be updated. The new token is shown once.
+          {t.rich("serviceAccounts.rotate.confirmDescription", {
+            name: account.name,
+            b: (chunks) => (
+              <span className="font-medium text-foreground">{chunks}</span>
+            ),
+          })}
         </DialogDescription>
       </DialogHeader>
 
@@ -104,11 +109,11 @@ function RotateBody({
           onClick={onClose}
           disabled={rotate.isPending}
         >
-          Cancel
+          {tc("cancel")}
         </Button>
         <Button type="button" onClick={handleRotate} disabled={rotate.isPending}>
           {rotate.isPending && <ArrowPathIcon className="animate-spin" />}
-          Rotate token
+          {t("serviceAccounts.rotate.rotateButton")}
         </Button>
       </div>
     </>

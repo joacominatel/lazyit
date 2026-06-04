@@ -1,0 +1,80 @@
+{
+  "page": {
+    "title": "Reports",
+    "subtitle": "Every change across your estate — newest first.",
+    "accessDeniedTitle": "Reports are admin-only",
+    "accessDeniedDescription": "The estate-wide activity history needs the Reports permission. Ask an admin if you need access to this view.",
+    "accessDeniedAction": "Back to dashboard"
+  },
+  "tabs": {
+    "all": "All",
+    "assets": "Assets",
+    "access": "Access",
+    "stock": "Stock",
+    "users": "Users",
+    "me": "My history"
+  },
+  "filters": {
+    "searchLabel": "Search activity",
+    "searchPlaceholder": "Search summaries and people…",
+    "anyActor": "Any actor",
+    "you": "You",
+    "youTitle": "Showing your own activity",
+    "allActions": "All actions",
+    "range": {
+      "all": "All time",
+      "today": "Today",
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "custom": "Custom range"
+    },
+    "fromDate": "From date",
+    "toDate": "To date",
+    "selectedUser": "Selected user",
+    "chips": {
+      "search": "Search: “{query}”",
+      "scope": "Scope: {value}",
+      "actor": "Actor: {value}",
+      "action": "Action: {value}",
+      "rangePreset": "Range: {value}",
+      "rangeCustom": "Range: {from} → {to}"
+    }
+  },
+  "view": {
+    "timeline": "Timeline",
+    "table": "Table",
+    "viewTitle": "{label} view"
+  },
+  "table": {
+    "columns": {
+      "when": "When",
+      "action": "Action",
+      "entity": "Entity",
+      "actor": "Actor",
+      "summary": "Summary"
+    },
+    "system": "System",
+    "entityLabel": {
+      "asset": "Asset",
+      "application": "Application",
+      "consumable": "Consumable",
+      "user": "User"
+    },
+    "filteredEmpty": "No events match these filters."
+  },
+  "export": {
+    "exportVisible": "Export visible events",
+    "exportTitle": "Export the events currently visible (the filtered page)",
+    "print": "Print",
+    "printTitle": "Print the report"
+  },
+  "timeline": {
+    "loadMore": "Load more"
+  },
+  "empty": {
+    "errorTitle": "Couldn't load the activity history",
+    "title": "No events match these filters",
+    "descriptionFiltered": "Nothing across the whole history matches these filters. Try clearing one.",
+    "description": "Changes to assets, access, stock and people will show up here as your team works."
+  }
+}

@@ -2,9 +2,10 @@
 
 import { PencilSquareIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
 import { PageHeader } from "@/components/page-header";
@@ -34,6 +35,8 @@ import { LocationTypeBadge } from "../_components/location-type-badge";
  * page's panel/owner-avatar treatment so the two reads cross-link cleanly.
  */
 export default function LocationDetailPage() {
+  const t = useTranslations("locations");
+  const tc = useTranslations("common");
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
@@ -52,6 +55,37 @@ export default function LocationDetailPage() {
   });
   const deleteLocation = useDeleteLocation();
 
+  const assetColumns = useMemo<ResourceColumn[]>(
+    () => [
+      {
+        key: "name",
+        header: t("detail.assetColumns.name"),
+        skeleton: <Skeleton className="h-4 w-32" />,
+      },
+      {
+        key: "assetTag",
+        header: t("detail.assetColumns.assetTag"),
+        skeleton: <Skeleton className="h-4 w-20" />,
+      },
+      {
+        key: "category",
+        header: t("detail.assetColumns.category"),
+        skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
+      },
+      {
+        key: "status",
+        header: t("detail.assetColumns.status"),
+        skeleton: <Skeleton className="h-5 w-20 rounded-full" />,
+      },
+      {
+        key: "owners",
+        header: t("detail.assetColumns.owners"),
+        skeleton: <Skeleton className="size-6 rounded-full" />,
+      },
+    ],
+    [t],
+  );
+
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -67,8 +101,8 @@ export default function LocationDetailPage() {
     return (
       <div className="mx-auto max-w-4xl">
         <ErrorState
-          title="Location not found"
-          description="It may have been deleted, or the API is unreachable."
+          title={t("detail.notFoundTitle")}
+          description={t("detail.notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -84,7 +118,7 @@ export default function LocationDetailPage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Locations", href: "/locations" },
+              { label: t("detail.breadcrumb"), href: "/locations" },
               { label: location.name },
             ]}
           />
@@ -101,14 +135,14 @@ export default function LocationDetailPage() {
                   onClick={() => setEditOpen(true)}
                 >
                   <PencilSquareIcon />
-                  Edit
+                  {tc("edit")}
                 </Button>
               ) : null}
               {canDelete ? (
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Delete location"
+                  aria-label={t("detail.deleteAria")}
                   onClick={() => setDeleteOpen(true)}
                 >
                   <TrashIcon />
@@ -119,46 +153,56 @@ export default function LocationDetailPage() {
         }
       />
 
-      <DetailPanel title="Details">
+      <DetailPanel title={t("detail.detailsTitle")}>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <DetailField label="Type">
+          <DetailField label={t("detail.fields.type")}>
             <LocationTypeBadge type={location.type} />
           </DetailField>
-          <DetailField label="Floor">{location.floor ?? "—"}</DetailField>
-          <DetailField label="Address">{location.address ?? "—"}</DetailField>
-          <DetailField label="Last updated">
+          <DetailField label={t("detail.fields.floor")}>
+            {location.floor ?? "—"}
+          </DetailField>
+          <DetailField label={t("detail.fields.address")}>
+            {location.address ?? "—"}
+          </DetailField>
+          <DetailField label={t("detail.fields.lastUpdated")}>
             {formatDate(location.updatedAt)}
           </DetailField>
         </dl>
         {location.notes && (
           <div className="mt-4 space-y-1">
-            <dt className="text-xs font-medium text-muted-foreground">Notes</dt>
+            <dt className="text-xs font-medium text-muted-foreground">
+              {t("detail.fields.notes")}
+            </dt>
             <dd className="text-sm whitespace-pre-wrap">{location.notes}</dd>
           </div>
         )}
       </DetailPanel>
 
       <DetailPanel
-        title={`Assets here${assets.length > 0 ? ` (${assets.length})` : ""}`}
+        title={
+          assets.length > 0
+            ? t("detail.assetsTitleCount", { count: assets.length })
+            : t("detail.assetsTitle")
+        }
         actions={
           canCreateAsset ? (
             <Button size="sm" variant="outline" asChild>
               <Link href="/assets/new">
                 <PlusIcon />
-                New asset
+                {t("detail.newAsset")}
               </Link>
             </Button>
           ) : undefined
         }
       >
         {assetsLoading ? (
-          <ResourceTable columns={ASSET_COLUMNS} isLoading />
+          <ResourceTable columns={assetColumns} isLoading />
         ) : assets.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No assets are located here yet.
+            {t("detail.noAssets")}
           </p>
         ) : (
-          <ResourceTable columns={ASSET_COLUMNS}>
+          <ResourceTable columns={assetColumns}>
             {assets.map((asset) => (
               <TableRow key={asset.id}>
                 <TableCell className="font-medium">
@@ -207,27 +251,3 @@ export default function LocationDetailPage() {
     </div>
   );
 }
-
-const ASSET_COLUMNS: ResourceColumn[] = [
-  { key: "name", header: "Name", skeleton: <Skeleton className="h-4 w-32" /> },
-  {
-    key: "assetTag",
-    header: "Asset tag",
-    skeleton: <Skeleton className="h-4 w-20" />,
-  },
-  {
-    key: "category",
-    header: "Category",
-    skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
-  },
-  {
-    key: "status",
-    header: "Status",
-    skeleton: <Skeleton className="h-5 w-20 rounded-full" />,
-  },
-  {
-    key: "owners",
-    header: "Owners",
-    skeleton: <Skeleton className="size-6 rounded-full" />,
-  },
-];

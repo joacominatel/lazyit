@@ -1,0 +1,123 @@
+{
+  "table": {
+    "noMatchingResults": "No matching results.",
+    "selectAllRows": "Select all rows",
+    "openActions": "Open actions",
+    "edit": "Edit",
+    "clone": "Clone",
+    "delete": "Delete",
+    "restore": "Restore",
+    "bulkActions": "Bulk actions",
+    "clearSelection": "Clear selection",
+    "selectRow": "Select row",
+    "selectedCount": "{count, plural, =0 {No {noun} selected} one {# {noun} selected} other {# {noun} selected}}",
+    "noResults": "No results",
+    "showingRange": "Showing <b>{from}</b>–<b>{to}</b> of <b>{total}</b>",
+    "previous": "Previous",
+    "next": "Next",
+    "sortBy": "Sort by {label}",
+    "sortByColumn": "Sort by column"
+  },
+  "detail": {
+    "relatedArticlesTitle": "Related articles",
+    "loadingRunbooks": "Loading runbooks…",
+    "noLinkedArticles": "No knowledge-base articles are linked yet. Link a runbook from the article's page to surface it here.",
+    "view": "View"
+  },
+  "activity": {
+    "system": "System"
+  },
+  "empty": {},
+  "errors": {
+    "boundaryTitle": "Something went wrong",
+    "boundaryDescription": "An unexpected error occurred while loading this page.",
+    "stateDescription": "The API may be down or unreachable.",
+    "tryAgain": "Try again",
+    "retry": "Retry",
+    "requestId": "Request ID",
+    "copyRequestId": "Copy request ID",
+    "requestIdCopied": "Request ID copied",
+    "globalTitle": "Something went wrong",
+    "globalDescription": "The application hit an unexpected error and couldn't recover.",
+    "globalReference": "Reference: {digest}.",
+    "notFoundCaption": "404",
+    "notFoundTitle": "This page wandered off",
+    "notFoundDescription": "We couldn't find what you were looking for — it may have moved, been archived, or never existed. Let's get you back to the bench.",
+    "backToDashboard": "Back to dashboard"
+  },
+  "chrome": {
+    "skipToContent": "Skip to content",
+    "openUserMenu": "Open user menu",
+    "signOut": "Sign out",
+    "openNavigationMenu": "Open navigation menu",
+    "toggleTheme": "Toggle theme",
+    "devMode": "Dev Mode",
+    "production": "Production",
+    "dismissModeBanner": "Dismiss mode banner",
+    "breadcrumbLabel": "Breadcrumb",
+    "breadcrumb": {
+      "dashboard": "Dashboard",
+      "assets": "Assets",
+      "consumables": "Consumables",
+      "applications": "Applications",
+      "kb": "Knowledge Base",
+      "informes": "Informes",
+      "users": "Users",
+      "locations": "Locations",
+      "new": "New",
+      "edit": "Edit"
+    }
+  },
+  "dialog": {
+    "deleteTitle": "Delete {entity}?",
+    "deleteDescriptionPrefix": "will be archived — a soft delete that hides it from the list without erasing its history.",
+    "deleted": "{entity} deleted",
+    "deleteError": "Couldn't delete {entity}",
+    "cancel": "Cancel",
+    "delete": "Delete"
+  },
+  "copy": {
+    "copied": "Copied",
+    "copiedLabel": "{label} — copied",
+    "copyError": "Couldn't copy to clipboard"
+  },
+  "filters": {
+    "activeFilters": "Active filters",
+    "clearFilter": "Clear filter",
+    "clearFilterNamed": "Clear filter: {label}",
+    "clearAll": "Clear all",
+    "clearFilters": "Clear filters",
+    "showArchived": "Show archived"
+  },
+  "search": {
+    "trigger": "Search",
+    "placeholderShort": "Search…",
+    "placeholderEverything": "Search everything…",
+    "globalTitle": "Global search",
+    "globalDescription": "Search assets, articles, users, locations and applications.",
+    "all": "All",
+    "startTyping": "Start typing to search…",
+    "runError": "Couldn't run the search",
+    "runErrorDetail": "Couldn't run the search: {message}",
+    "searching": "Searching…",
+    "noResultsFor": "No results for “{query}”.",
+    "clearSearch": "Clear search",
+    "navigate": "navigate",
+    "open": "open",
+    "close": "close",
+    "entities": {
+      "assets": "Assets",
+      "articles": "Articles",
+      "users": "Users",
+      "locations": "Locations",
+      "applications": "Applications"
+    }
+  },
+  "field": {
+    "newEntity": "New {label}"
+  },
+  "editor": {
+    "markdownPlaceholder": "Write in Markdown…",
+    "previewHint": "Preview appears here as you type."
+  }
+}

@@ -2,6 +2,7 @@
 
 import { ArrowTopRightOnSquareIcon, BookOpenIcon } from "@heroicons/react/24/outline";
 import type { ArticleListItem } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { DetailPanel } from "@/components/detail-panel";
@@ -23,22 +24,20 @@ export function RelatedArticlesPanel(
     | { assetId: string; applicationId?: never }
     | { applicationId: string; assetId?: never },
 ) {
+  const t = useTranslations("shared");
   const assetQuery = useAssetArticles(props.assetId);
   const appQuery = useApplicationArticles(props.applicationId);
   const { data, isLoading } = props.assetId ? assetQuery : appQuery;
   const articles = data ?? [];
 
   return (
-    <DetailPanel title="Related articles">
+    <DetailPanel title={t("detail.relatedArticlesTitle")}>
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading runbooks…</p>
+        <p className="text-sm text-muted-foreground">{t("detail.loadingRunbooks")}</p>
       ) : articles.length === 0 ? (
         <div className="flex items-start gap-2 text-sm text-muted-foreground">
           <BookOpenIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
-          <p>
-            No knowledge-base articles are linked yet. Link a runbook from the
-            article&apos;s page to surface it here.
-          </p>
+          <p>{t("detail.noLinkedArticles")}</p>
         </div>
       ) : (
         <ul className="divide-y">
@@ -62,7 +61,7 @@ export function RelatedArticlesPanel(
               </div>
               <Button variant="ghost" size="sm" asChild>
                 <Link href={`/kb/${article.slug}`}>
-                  View
+                  {t("detail.view")}
                   <ArrowTopRightOnSquareIcon />
                 </Link>
               </Button>

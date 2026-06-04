@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { DetailSkeleton } from "@/components/detail-panel";
@@ -16,6 +17,8 @@ import { AssetForm } from "../../_components/asset-form";
  */
 export default function CloneAssetPage() {
   const params = useParams<{ id: string }>();
+  const t = useTranslations("assets.form");
+  const tList = useTranslations("assets.list");
   const { data: asset, isLoading, isError, error, refetch } = useAsset(
     params.id,
   );
@@ -32,8 +35,8 @@ export default function CloneAssetPage() {
     return (
       <div className="mx-auto max-w-3xl">
         <ErrorState
-          title="Asset not found"
-          description="It may have been deleted, or the API is unreachable."
+          title={t("notFoundTitle")}
+          description={t("notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -47,14 +50,14 @@ export default function CloneAssetPage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Assets", href: "/assets" },
+              { label: tList("title"), href: "/assets" },
               { label: asset.name, href: `/assets/${asset.id}` },
-              { label: "Clone" },
+              { label: t("breadcrumbClone") },
             ]}
           />
         }
-        title="Clone asset"
-        subtitle="A new asset pre-filled from this one. Serial and asset tag are cleared — give the copy its own."
+        title={t("cloneTitle")}
+        subtitle={t("cloneSubtitle")}
       />
       <AssetForm cloneSource={asset} />
     </div>

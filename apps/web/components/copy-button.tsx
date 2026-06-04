@@ -1,6 +1,7 @@
 "use client";
 
 import { ClipboardIcon } from "@heroicons/react/16/solid";
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DrawnCheck } from "@/components/drawn-check";
@@ -24,7 +25,7 @@ export function CopyButton({
   value,
   label,
   className,
-  toastMessage = "Copied",
+  toastMessage,
 }: {
   /** The string written to the clipboard. */
   value: string;
@@ -34,6 +35,7 @@ export function CopyButton({
   /** Override the success toast text (defaults to "Copied"). */
   toastMessage?: string;
 }) {
+  const t = useTranslations("shared");
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -49,11 +51,11 @@ export function CopyButton({
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      toast.success(toastMessage);
+      toast.success(toastMessage ?? t("copy.copied"));
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => setCopied(false), 1200);
     } catch {
-      toast.error("Couldn't copy to clipboard");
+      toast.error(t("copy.copyError"));
     }
   };
 
@@ -62,7 +64,7 @@ export function CopyButton({
       type="button"
       variant="ghost"
       size="icon-xs"
-      aria-label={copied ? `${label} — copied` : label}
+      aria-label={copied ? t("copy.copiedLabel", { label }) : label}
       title={label}
       onClick={handleCopy}
       className={cn("text-muted-foreground", className)}

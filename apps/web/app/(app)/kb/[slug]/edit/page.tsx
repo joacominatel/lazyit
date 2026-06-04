@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
 import { useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
@@ -11,6 +12,7 @@ import { useArticleBySlug } from "@/lib/api/hooks/use-articles";
 import { ArticleForm } from "../../_components/article-form";
 
 export default function EditArticlePage() {
+  const t = useTranslations("kb");
   const params = useParams<{ slug: string }>();
   const { data: article, isLoading, isError, error, refetch } =
     useArticleBySlug(params.slug);
@@ -28,8 +30,8 @@ export default function EditArticlePage() {
     return (
       <div className="mx-auto max-w-4xl">
         <ErrorState
-          title="Article not found"
-          description="It may be a draft you can't see, it was deleted, or the API is unreachable."
+          title={t("detail.notFoundTitle")}
+          description={t("detail.notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -42,8 +44,8 @@ export default function EditArticlePage() {
       <div className="mx-auto max-w-4xl">
         <EmptyState
           icon={LockClosedIcon}
-          title="Not signed in"
-          description="You must be signed in to edit articles."
+          title={t("form.notSignedInTitle")}
+          description={t("form.notSignedInDescription")}
         />
       </div>
     );
@@ -55,14 +57,14 @@ export default function EditArticlePage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Knowledge Base", href: "/kb" },
+              { label: t("breadcrumb"), href: "/kb" },
               { label: article.title, href: `/kb/${article.slug}` },
-              { label: "Edit" },
+              { label: t("form.editCrumb") },
             ]}
           />
         }
-        title="Edit article"
-        subtitle="Changes don't alter the published/draft state — use Publish on the article for that."
+        title={t("form.editTitle")}
+        subtitle={t("form.editSubtitle")}
       />
       <ArticleForm article={article} />
     </div>

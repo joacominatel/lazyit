@@ -5,6 +5,7 @@ import {
   ShieldCheckIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useCallback, useSyncExternalStore } from "react";
 import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ function getServerSnapshot(): boolean {
 }
 
 export function ModeBanner() {
+  const t = useTranslations("shared");
   const { data: status } = useConfigStatus();
   // useSyncExternalStore reads the per-session dismissal without a setState-in-effect — the idiomatic
   // React 19 pattern for subscribing to an external store (here, sessionStorage + a custom event).
@@ -79,14 +81,14 @@ export function ModeBanner() {
     >
       <Icon className="size-3.5 shrink-0" />
       <span className="hidden sm:inline">
-        {dev ? "Dev Mode" : "Production"}
+        {dev ? t("chrome.devMode") : t("chrome.production")}
       </span>
       <Button
         type="button"
         variant="ghost"
         size="icon-xs"
         onClick={dismiss}
-        aria-label="Dismiss mode banner"
+        aria-label={t("chrome.dismissModeBanner")}
         className={cn(
           "-mr-1 ml-0.5 size-4",
           dev ? "hover:bg-warning/20" : "hover:bg-info/20",

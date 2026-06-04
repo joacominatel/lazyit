@@ -3,6 +3,7 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateAssetAssignmentSchema } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -69,6 +70,8 @@ export function AssignUserDialog({
   assetId,
   excludeUserIds = [],
 }: AssignUserDialogProps) {
+  const t = useTranslations("assets.assign");
+  const tc = useTranslations("common");
   const { data: users } = useUsers();
   const assign = useAssignUser();
 
@@ -90,10 +93,10 @@ export function AssignUserDialog({
         { assetId, userId: values.userId, ...(trimmed ? { notes: trimmed } : {}) },
         {
           onSuccess: () => {
-            toast.success("User assigned");
+            toast.success(t("assignedToast"));
             onOpenChange(false);
           },
-          onError: (error) => notifyError(error, "Couldn't assign the user"),
+          onError: (error) => notifyError(error, t("assignError")),
         },
       );
     },
@@ -108,11 +111,8 @@ export function AssignUserDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Assign user</DialogTitle>
-          <DialogDescription>
-            Record a new owner for this asset. Releasing a previous owner is a
-            separate action.
-          </DialogDescription>
+          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
         {/* stopPropagation: a form inside a Radix Portal still bubbles its submit through the React
@@ -132,7 +132,7 @@ export function AssignUserDialog({
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
                   <FieldLabel htmlFor="assign-user" required>
-                    User
+                    {t("user")}
                   </FieldLabel>
                   <CreatableField
                     label="user"
@@ -153,8 +153,8 @@ export function AssignUserDialog({
                         <SelectValue
                           placeholder={
                             available.length > 0
-                              ? "Select a user"
-                              : "No assignable users"
+                              ? t("selectUser")
+                              : t("noAssignableUsers")
                           }
                         />
                       </SelectTrigger>
@@ -177,7 +177,7 @@ export function AssignUserDialog({
               name="notes"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="assign-notes">Notes</FieldLabel>
+                  <FieldLabel htmlFor="assign-notes">{t("notes")}</FieldLabel>
                   <Textarea
                     id="assign-notes"
                     name={field.name}
@@ -185,7 +185,7 @@ export function AssignUserDialog({
                     value={field.value ?? ""}
                     onBlur={field.onBlur}
                     onChange={(event) => field.onChange(event.target.value)}
-                    placeholder="Optional — e.g. primary work laptop"
+                    placeholder={t("notesPlaceholder")}
                     rows={2}
                     aria-invalid={fieldState.invalid || undefined}
                   />
@@ -203,11 +203,11 @@ export function AssignUserDialog({
             onClick={() => onOpenChange(false)}
             disabled={assign.isPending}
           >
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button type="submit" form={FORM_ID} disabled={assign.isPending}>
             {assign.isPending && <ArrowPathIcon className="animate-spin" />}
-            Assign
+            {t("assign")}
           </Button>
         </DialogFooter>
       </DialogContent>

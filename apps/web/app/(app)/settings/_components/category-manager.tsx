@@ -1,6 +1,7 @@
 "use client";
 
 import { PlusIcon, TagIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
@@ -22,38 +23,10 @@ import { formatDate } from "@/lib/utils/format";
 import { CategoryFormDialog } from "./category-form-dialog";
 import {
   type AnyCategory,
-  CATEGORY_KIND_LABEL,
   type CategoryKind,
   categoryOrder,
   kindHasOrder,
 } from "./taxonomy-types";
-
-const BASE_COLUMNS: ResourceColumn[] = [
-  { key: "name", header: "Name", skeleton: <Skeleton className="h-4 w-40" /> },
-  {
-    key: "description",
-    header: "Description",
-    skeleton: <Skeleton className="h-4 w-56" />,
-  },
-];
-
-const ORDER_COLUMN: ResourceColumn = {
-  key: "order",
-  header: "Order",
-  headClassName: "w-20",
-  skeleton: <Skeleton className="h-4 w-8" />,
-};
-
-const TAIL_COLUMNS: ResourceColumn[] = [
-  { key: "updated", header: "Updated", skeleton: <Skeleton className="h-4 w-20" /> },
-  {
-    key: "actions",
-    header: "Actions",
-    srOnlyHeader: true,
-    headClassName: "w-12 text-right",
-    skeleton: <Skeleton className="ml-auto size-7" />,
-  },
-];
 
 /**
  * CRUD table for one category kind, used inside the Taxonomies tabs. Reads the kind's list hook and
@@ -62,6 +35,8 @@ const TAIL_COLUMNS: ResourceColumn[] = [
  * lists; create/edit goes through {@link CategoryFormDialog}.
  */
 export function CategoryManager({ kind }: { kind: CategoryKind }) {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
   const assetQuery = useAssetCategories();
   const applicationQuery = useApplicationCategories();
   const consumableQuery = useConsumableCategories();
@@ -87,7 +62,7 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
 
   const { data, isLoading, isError, error, refetch } = query;
   const hasOrder = kindHasOrder(kind);
-  const label = CATEGORY_KIND_LABEL[kind];
+  const label = t(`taxonomies.kindLabel.${kind}`);
   // The category CRUD endpoints are gated on category:write / category:delete (a clone is a create →
   // category:write). The surface lives behind the settings:manage AdminGate; these finer gates match
   // the backend per-affordance and fail closed while the permission set loads.
@@ -99,10 +74,39 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
   const [cloning, setCloning] = useState<AnyCategory | undefined>(undefined);
   const [deleting, setDeleting] = useState<AnyCategory | undefined>(undefined);
 
-  const columns = [
-    ...BASE_COLUMNS,
-    ...(hasOrder ? [ORDER_COLUMN] : []),
-    ...TAIL_COLUMNS,
+  const columns: ResourceColumn[] = [
+    {
+      key: "name",
+      header: t("taxonomies.categories.columns.name"),
+      skeleton: <Skeleton className="h-4 w-40" />,
+    },
+    {
+      key: "description",
+      header: t("taxonomies.categories.columns.description"),
+      skeleton: <Skeleton className="h-4 w-56" />,
+    },
+    ...(hasOrder
+      ? [
+          {
+            key: "order",
+            header: t("taxonomies.categories.columns.order"),
+            headClassName: "w-20",
+            skeleton: <Skeleton className="h-4 w-8" />,
+          } satisfies ResourceColumn,
+        ]
+      : []),
+    {
+      key: "updated",
+      header: t("taxonomies.categories.columns.updated"),
+      skeleton: <Skeleton className="h-4 w-20" />,
+    },
+    {
+      key: "actions",
+      header: tc("actions"),
+      srOnlyHeader: true,
+      headClassName: "w-12 text-right",
+      skeleton: <Skeleton className="ml-auto size-7" />,
+    },
   ];
 
   function openCreate() {
@@ -132,7 +136,7 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
         <div className="flex items-center justify-end">
           <Button onClick={openCreate} size="sm">
             <PlusIcon />
-            New {label}
+            {t("taxonomies.categories.newButton", { label })}
           </Button>
         </div>
       ) : null}
@@ -141,7 +145,7 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
         <ResourceTable columns={columns} isLoading />
       ) : isError ? (
         <ErrorState
-          title={`Could not load ${label} list`}
+          title={t("taxonomies.categories.loadError", { label })}
           onRetry={() => refetch()}
           error={error}
         />
@@ -149,11 +153,14 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
         <EmptyState
           icon={TagIcon}
           pillar="manage"
-          title={`No ${label} entries yet`}
-          description="Add your first one to start classifying records — it becomes pickable wherever this kind is referenced."
+          title={t("taxonomies.categories.emptyTitle", { label })}
+          description={t("taxonomies.categories.emptyDescription")}
           action={
             canWrite
-              ? { label: "Create the first one", onClick: openCreate }
+              ? {
+                  label: t("taxonomies.categories.emptyAction"),
+                  onClick: openCreate,
+                }
               : undefined
           }
         />

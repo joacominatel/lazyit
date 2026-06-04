@@ -2,6 +2,7 @@
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { cloneCategoryDefaults } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -40,7 +41,6 @@ import {
 import { notifyError } from "@/lib/api/notify-error";
 import {
   type AnyCategory,
-  CATEGORY_KIND_LABEL,
   type CategoryKind,
   categoryOrder,
   kindHasOrder,
@@ -153,6 +153,8 @@ function CategoryForm({
   cloneSource?: AnyCategory;
   onClose: () => void;
 }) {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
   const isEdit = category != null;
 
   // All eight mutation hooks are instantiated unconditionally (Rules of Hooks); the active pair is
@@ -181,7 +183,7 @@ function CategoryForm({
 
   const isPending = create.isPending || update.isPending;
   const hasOrder = kindHasOrder(kind);
-  const label = CATEGORY_KIND_LABEL[kind];
+  const label = t(`taxonomies.kindLabel.${kind}`);
 
   const [values, setValues] = useState<FormState>(() =>
     toFormState(category, cloneSource),
@@ -194,7 +196,12 @@ function CategoryForm({
 
   function buildPayload(): BuildResult {
     const name = values.name.trim();
-    if (name.length === 0) return { ok: false, error: "Name is required." };
+    if (name.length === 0) {
+      return {
+        ok: false,
+        error: t("taxonomies.categories.form.errors.nameRequired"),
+      };
+    }
 
     const description = values.description.trim();
     const icon = values.icon.trim();
@@ -206,7 +213,10 @@ function CategoryForm({
     if (hasOrder && orderRaw.length > 0) {
       const parsed = Number(orderRaw);
       if (!Number.isInteger(parsed)) {
-        return { ok: false, error: "Order must be a whole number." };
+        return {
+          ok: false,
+          error: t("taxonomies.categories.form.errors.orderInteger"),
+        };
       }
       payload.order = parsed;
     }
@@ -229,19 +239,27 @@ function CategoryForm({
         { id: category.id, data: built.payload as never },
         {
           onSuccess: () => {
-            toast.success(`Updated ${label}`);
+            toast.success(t("taxonomies.categories.toast.updated", { label }));
             onClose();
           },
-          onError: (err) => notifyError(err, `Couldn't update ${label}`),
+          onError: (err) =>
+            notifyError(
+              err,
+              t("taxonomies.categories.toast.updateError", { label }),
+            ),
         },
       );
     } else {
       create.mutate(built.payload as never, {
         onSuccess: () => {
-          toast.success(`Created ${label}`);
+          toast.success(t("taxonomies.categories.toast.created", { label }));
           onClose();
         },
-        onError: (err) => notifyError(err, `Couldn't create ${label}`),
+        onError: (err) =>
+          notifyError(
+            err,
+            t("taxonomies.categories.toast.createError", { label }),
+          ),
       });
     }
   }
@@ -249,23 +267,29 @@ function CategoryForm({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{isEdit ? `Edit ${label}` : `New ${label}`}</DialogTitle>
+        <DialogTitle>
+          {isEdit
+            ? t("taxonomies.categories.form.editTitle", { label })
+            : t("taxonomies.categories.form.newTitle", { label })}
+        </DialogTitle>
         <DialogDescription>
           {isEdit
-            ? "Update the details of this category."
-            : "Categories classify records across the app. Name is required; the rest are optional."}
+            ? t("taxonomies.categories.form.editDescription")
+            : t("taxonomies.categories.form.newDescription")}
         </DialogDescription>
       </DialogHeader>
 
       <form id={FORM_ID} onSubmit={handleSubmit} noValidate>
         <FieldGroup>
           <Field data-invalid={error ? true : undefined}>
-            <FieldLabel htmlFor="category-name">Name</FieldLabel>
+            <FieldLabel htmlFor="category-name">
+              {t("taxonomies.categories.form.nameLabel")}
+            </FieldLabel>
             <Input
               id="category-name"
               value={values.name}
               onChange={(e) => set("name", e.target.value)}
-              placeholder="e.g. Laptops"
+              placeholder={t("taxonomies.categories.form.namePlaceholder")}
               maxLength={100}
               aria-invalid={error ? true : undefined}
               autoFocus
@@ -274,38 +298,46 @@ function CategoryForm({
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="category-description">Description</FieldLabel>
+            <FieldLabel htmlFor="category-description">
+              {t("taxonomies.categories.form.descriptionLabel")}
+            </FieldLabel>
             <Textarea
               id="category-description"
               value={values.description}
               onChange={(e) => set("description", e.target.value)}
-              placeholder="Optional — what belongs in this category."
+              placeholder={t(
+                "taxonomies.categories.form.descriptionPlaceholder",
+              )}
               rows={2}
               maxLength={1000}
             />
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="category-icon">Icon</FieldLabel>
+            <FieldLabel htmlFor="category-icon">
+              {t("taxonomies.categories.form.iconLabel")}
+            </FieldLabel>
             <Input
               id="category-icon"
               value={values.icon}
               onChange={(e) => set("icon", e.target.value)}
-              placeholder="Optional — a heroicon name, e.g. ServerStackIcon"
+              placeholder={t("taxonomies.categories.form.iconPlaceholder")}
               maxLength={100}
             />
           </Field>
 
           {hasOrder ? (
             <Field>
-              <FieldLabel htmlFor="category-order">Order</FieldLabel>
+              <FieldLabel htmlFor="category-order">
+                {t("taxonomies.categories.form.orderLabel")}
+              </FieldLabel>
               <Input
                 id="category-order"
                 type="number"
                 inputMode="numeric"
                 value={values.order}
                 onChange={(e) => set("order", e.target.value)}
-                placeholder="Optional — lower sorts first"
+                placeholder={t("taxonomies.categories.form.orderPlaceholder")}
               />
             </Field>
           ) : null}
@@ -319,11 +351,13 @@ function CategoryForm({
           onClick={onClose}
           disabled={isPending}
         >
-          Cancel
+          {tc("cancel")}
         </Button>
         <Button type="submit" form={FORM_ID} disabled={isPending}>
           {isPending && <ArrowPathIcon className="animate-spin" />}
-          {isEdit ? "Save changes" : `Create ${label}`}
+          {isEdit
+            ? t("taxonomies.categories.form.saveChanges")
+            : t("taxonomies.categories.form.createButton", { label })}
         </Button>
       </DialogFooter>
     </>

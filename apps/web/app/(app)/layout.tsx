@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/auth";
@@ -23,6 +24,8 @@ export default async function AppLayout({
     redirect("/login");
   }
 
+  const t = await getTranslations("shared");
+
   return (
     <div className="flex min-h-svh">
       {/* Skip link: first focusable element, jumps keyboard/AT users past the
@@ -31,7 +34,7 @@ export default async function AppLayout({
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
       >
-        Skip to content
+        {t("chrome.skipToContent")}
       </a>
       <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground md:flex">
         <div className="flex h-14 items-center border-b border-border px-4">

@@ -12,6 +12,7 @@ import {
   WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
 import type { AssetStatus, DashboardSummary } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import type { ComponentType, CSSProperties, ReactNode } from "react";
 import { useState } from "react";
@@ -46,6 +47,8 @@ import { RecentActivityPanel } from "./_components/recent-activity-panel";
  * callers get quick write actions. No writes happen on this page itself.
  */
 export default function DashboardPage() {
+  const t = useTranslations("dashboard");
+  const tc = useTranslations("common");
   const { data, isLoading, isError, error, refetch, isFetching } =
     useDashboardSummary();
   // The quick actions are cross-pillar shortcuts into create flows; each gates on its own
@@ -63,9 +66,21 @@ export default function DashboardPage() {
   const canSeeActivityFeed = useCan("logs:read");
   const quickActions = (
     [
-      { href: "/assets/new", label: "New asset", show: canCreateAsset },
-      { href: "/consumables/new", label: "Add stock", show: canAdjustStock },
-      { href: "/applications", label: "Grant access", show: canGrantAccess },
+      {
+        href: "/assets/new",
+        label: t("quickActions.newAsset"),
+        show: canCreateAsset,
+      },
+      {
+        href: "/consumables/new",
+        label: t("quickActions.addStock"),
+        show: canAdjustStock,
+      },
+      {
+        href: "/applications",
+        label: t("quickActions.grantAccess"),
+        show: canGrantAccess,
+      },
     ] as const
   )
     .filter((action) => action.show)
@@ -76,8 +91,8 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Dashboard"
-        subtitle="Your IT estate at a glance — Inventory, Access and Knowledge."
+        title={t("title")}
+        subtitle={t("subtitle")}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {data ? (
@@ -85,7 +100,9 @@ export default function DashboardPage() {
                 className="text-xs text-muted-foreground tabular-nums"
                 title={new Date(data.generatedAt).toLocaleString()}
               >
-                Updated {formatRelativeTime(data.generatedAt, now)}
+                {t("updated", {
+                  relative: formatRelativeTime(data.generatedAt, now),
+                })}
               </span>
             ) : null}
             <Button
@@ -95,7 +112,7 @@ export default function DashboardPage() {
               disabled={isFetching}
             >
               <ArrowPathIcon className={cn(isFetching && "animate-spin")} />
-              Refresh
+              {tc("refresh")}
             </Button>
           </div>
         }
@@ -105,7 +122,7 @@ export default function DashboardPage() {
         <DashboardSkeleton canSeeActivityFeed={canSeeActivityFeed} />
       ) : isError ? (
         <ErrorState
-          title="Could not load the dashboard"
+          title={t("errorTitle")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -143,6 +160,7 @@ function DashboardContent({
   /** Whether the caller holds `logs:read` and so may see the cross-pillar activity feed. */
   canSeeActivityFeed: boolean;
 }) {
+  const t = useTranslations("dashboard");
   const { assets, access, consumables, articles } = summary;
 
   return (
@@ -154,11 +172,11 @@ function DashboardContent({
           pillar="inventory"
           index={0}
           icon={ServerStackIcon}
-          title="Assets"
+          title={t("pillars.assets.title")}
           metric={assets.total}
-          metricLabel={assets.total === 1 ? "asset" : "assets"}
+          metricLabel={t("pillars.assets.metricLabel", { count: assets.total })}
           href="/assets"
-          cta="Browse assets"
+          cta={t("pillars.assets.cta")}
           breakdown={ASSET_STATUS_ORDER.filter(
             (status) => (assets.byStatus[status] ?? 0) > 0,
           ).map((status) => ({
@@ -170,7 +188,9 @@ function DashboardContent({
             <AssetHealthBar byStatus={assets.byStatus} total={assets.total} />
           }
           footer={{
-            label: `${assets.assigned} currently assigned`,
+            label: t("pillars.assets.assignedFooter", {
+              count: assets.assigned,
+            }),
             href: "/assets?ownership=HAS",
           }}
         />
@@ -178,19 +198,23 @@ function DashboardContent({
           pillar="access"
           index={1}
           icon={KeyIcon}
-          title="Access"
+          title={t("pillars.access.title")}
           metric={access.activeGrants}
-          metricLabel={access.activeGrants === 1 ? "active grant" : "active grants"}
+          metricLabel={t("pillars.access.metricLabel", {
+            count: access.activeGrants,
+          })}
           href="/applications"
-          cta="Manage access"
+          cta={t("pillars.access.cta")}
           breakdown={[
             {
-              label: "On critical apps",
+              label: t("pillars.access.onCriticalApps"),
               value: access.onCriticalApps,
               href: "/applications?criticality=CRITICAL",
             },
             {
-              label: `Expiring ≤ ${access.expiringWithinDays}d`,
+              label: t("pillars.access.expiring", {
+                days: access.expiringWithinDays,
+              }),
               value: access.expiringSoon,
               href: "/applications",
             },
@@ -200,32 +224,40 @@ function DashboardContent({
           pillar="knowledge"
           index={2}
           icon={BookOpenIcon}
-          title="Knowledge"
+          title={t("pillars.knowledge.title")}
           metric={articles.total}
-          metricLabel={articles.total === 1 ? "article" : "articles"}
+          metricLabel={t("pillars.knowledge.metricLabel", {
+            count: articles.total,
+          })}
           href="/kb"
-          cta="Open the knowledge base"
+          cta={t("pillars.knowledge.cta")}
           breakdown={[
             {
-              label: "Published",
+              label: t("pillars.knowledge.published"),
               value: articles.published,
               href: "/kb?status=PUBLISHED",
             },
-            { label: "Drafts", value: articles.draft, href: "/kb?status=DRAFT" },
+            {
+              label: t("pillars.knowledge.drafts"),
+              value: articles.draft,
+              href: "/kb?status=DRAFT",
+            },
           ]}
         />
         <PillarCard
           pillar="inventory"
           index={3}
           icon={CubeIcon}
-          title="Consumables"
+          title={t("pillars.consumables.title")}
           metric={consumables.total}
-          metricLabel={consumables.total === 1 ? "item" : "items"}
+          metricLabel={t("pillars.consumables.metricLabel", {
+            count: consumables.total,
+          })}
           href="/consumables"
-          cta="Browse consumables"
+          cta={t("pillars.consumables.cta")}
           breakdown={[
             {
-              label: "Low on stock",
+              label: t("pillars.consumables.lowOnStock"),
               value: consumables.lowStock,
               href: "/consumables?lowStock=true",
             },
@@ -321,6 +353,7 @@ function PillarCard({
   href: string;
   cta: string;
 }) {
+  const t = useTranslations("dashboard");
   return (
     <Card className={cn("h-full", lift)}>
       <CardHeader>
@@ -349,7 +382,7 @@ function PillarCard({
       <CardContent className="flex flex-1 flex-col gap-3">
         <dl className="space-y-0.5 text-sm">
           {breakdown.length === 0 ? (
-            <p className="text-muted-foreground">No data yet.</p>
+            <p className="text-muted-foreground">{t("noDataYet")}</p>
           ) : (
             breakdown.map((row) => (
               <Link
@@ -410,6 +443,7 @@ function AssetHealthBar({
   byStatus: Record<AssetStatus, number>;
   total: number;
 }) {
+  const t = useTranslations("dashboard");
   const operational = byStatus.OPERATIONAL ?? 0;
   const transitional = (byStatus.IN_MAINTENANCE ?? 0) + (byStatus.IN_STORAGE ?? 0);
   const inactive =
@@ -429,7 +463,7 @@ function AssetHealthBar({
   }[] = [
     {
       key: "operational",
-      label: "Operational",
+      label: t("healthBar.operational"),
       value: operational,
       bar: "bg-success",
       dot: "bg-success",
@@ -437,14 +471,14 @@ function AssetHealthBar({
     },
     {
       key: "transitional",
-      label: "In maintenance/storage",
+      label: t("healthBar.transitional"),
       value: transitional,
       bar: "bg-warning",
       dot: "bg-warning",
     },
     {
       key: "inactive",
-      label: "Out of service",
+      label: t("healthBar.inactive"),
       value: inactive,
       bar: "bg-muted-foreground",
       dot: "bg-muted-foreground",
@@ -456,7 +490,12 @@ function AssetHealthBar({
       <div
         className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted"
         role="img"
-        aria-label={`Asset health: ${operational} operational, ${transitional} in maintenance or storage, ${inactive} out of service of ${total} total.`}
+        aria-label={t("healthBar.ariaLabel", {
+          operational,
+          transitional,
+          inactive,
+          total,
+        })}
       >
         {segments.map((segment) =>
           // The bar is decorative (the legend carries the meaning); only the deep-linkable
@@ -536,7 +575,10 @@ interface AttentionItem {
  * "nothing needs attention". Pulled out as a pure builder so both the zone and the Pulse rail's
  * all-clear/quick-actions tile derive their attention count from ONE source (no drift).
  */
-function buildAttentionItems(summary: DashboardSummary): AttentionItem[] {
+function buildAttentionItems(
+  summary: DashboardSummary,
+  t: ReturnType<typeof useTranslations<"dashboard">>,
+): AttentionItem[] {
   const { assets, access, consumables } = summary;
   const inMaintenance = assets.byStatus.IN_MAINTENANCE ?? 0;
   const lost = assets.byStatus.LOST ?? 0;
@@ -546,7 +588,10 @@ function buildAttentionItems(summary: DashboardSummary): AttentionItem[] {
       {
         key: "expiring-grants",
         icon: KeyIcon,
-        label: `${access.expiringSoon} grant${access.expiringSoon === 1 ? "" : "s"} expiring within ${access.expiringWithinDays} days`,
+        label: t("needsAttention.expiringGrants", {
+          count: access.expiringSoon,
+          days: access.expiringWithinDays,
+        }),
         count: access.expiringSoon,
         tone: "warning",
         href: "/applications",
@@ -554,7 +599,9 @@ function buildAttentionItems(summary: DashboardSummary): AttentionItem[] {
       {
         key: "critical-grants",
         icon: KeyIcon,
-        label: `${access.onCriticalApps} active grant${access.onCriticalApps === 1 ? "" : "s"} on critical applications`,
+        label: t("needsAttention.criticalGrants", {
+          count: access.onCriticalApps,
+        }),
         count: access.onCriticalApps,
         tone: "warning",
         href: "/applications?criticality=CRITICAL",
@@ -562,7 +609,7 @@ function buildAttentionItems(summary: DashboardSummary): AttentionItem[] {
       {
         key: "low-stock",
         icon: CubeIcon,
-        label: `${consumables.lowStock} consumable${consumables.lowStock === 1 ? "" : "s"} at or below the reorder threshold`,
+        label: t("needsAttention.lowStock", { count: consumables.lowStock }),
         count: consumables.lowStock,
         tone: "warning",
         href: "/consumables?lowStock=true",
@@ -570,7 +617,7 @@ function buildAttentionItems(summary: DashboardSummary): AttentionItem[] {
       {
         key: "in-maintenance",
         icon: WrenchScrewdriverIcon,
-        label: `${inMaintenance} asset${inMaintenance === 1 ? "" : "s"} in maintenance`,
+        label: t("needsAttention.inMaintenance", { count: inMaintenance }),
         count: inMaintenance,
         tone: "warning",
         href: "/assets?status=IN_MAINTENANCE",
@@ -578,7 +625,7 @@ function buildAttentionItems(summary: DashboardSummary): AttentionItem[] {
       {
         key: "lost",
         icon: ExclamationTriangleIcon,
-        label: `${lost} asset${lost === 1 ? "" : "s"} marked lost`,
+        label: t("needsAttention.lost", { count: lost }),
         count: lost,
         tone: "danger",
         href: "/assets?status=LOST",
@@ -593,12 +640,13 @@ function buildAttentionItems(summary: DashboardSummary): AttentionItem[] {
  * params the lists read); if nothing needs attention, an all-clear note is shown instead.
  */
 function NeedsAttention({ summary }: { summary: DashboardSummary }) {
-  const items = buildAttentionItems(summary);
+  const t = useTranslations("dashboard");
+  const items = buildAttentionItems(summary, t);
 
   return (
     <section>
       <h2 className="mb-3 text-lg font-semibold tracking-tight">
-        Needs attention
+        {t("needsAttention.heading")}
       </h2>
       {items.length === 0 ? (
         <Card>
@@ -610,7 +658,7 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
               <CheckCircleIcon className="size-5" />
             </span>
             <span className="text-foreground">
-              All clear — no expiring grants, low stock or lost assets right now.
+              {t("needsAttention.allClear")}
             </span>
           </CardContent>
         </Card>

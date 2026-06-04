@@ -1,29 +1,32 @@
 "use client";
 
 import { ChevronRightIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Fragment, useMemo } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Human labels for known top-level route segments. Anything not listed falls
- * back to a title-cased version of the raw segment (and dynamic id/slug segments
- * are dropped — see `buildItems`). This is the one place the route→label map
- * lives, replacing the per-page "Back to X" ghost buttons.
+ * Known top-level route segments with a translated label under the
+ * `shared.chrome.breadcrumb` namespace. Anything not listed falls back to a
+ * title-cased version of the raw segment (and dynamic id/slug segments are
+ * dropped — see `buildItems`). This is the one place the route→label map lives,
+ * replacing the per-page "Back to X" ghost buttons.
  */
-const SEGMENT_LABELS: Record<string, string> = {
-  dashboard: "Dashboard",
-  assets: "Assets",
-  consumables: "Consumables",
-  applications: "Applications",
-  kb: "Knowledge Base",
-  informes: "Informes",
-  users: "Users",
-  locations: "Locations",
-  new: "New",
-  edit: "Edit",
-};
+const KNOWN_SEGMENTS = [
+  "dashboard",
+  "assets",
+  "consumables",
+  "applications",
+  "kb",
+  "informes",
+  "users",
+  "locations",
+  "new",
+  "edit",
+] as const;
+const KNOWN_SEGMENT_SET = new Set<string>(KNOWN_SEGMENTS);
 
 export interface BreadcrumbItem {
   label: string;
@@ -73,6 +76,7 @@ function looksDynamic(segment: string): boolean {
  * to its list crumb; pass explicit `items` to surface the record's real name.
  */
 export function Breadcrumb({ items, hideSegments, className }: BreadcrumbProps) {
+  const t = useTranslations("shared");
   const pathname = usePathname();
 
   const trail = useMemo<BreadcrumbItem[]>(() => {
@@ -88,7 +92,9 @@ export function Breadcrumb({ items, hideSegments, className }: BreadcrumbProps) 
       hrefAcc += `/${segment}`;
       if (shouldHide(segment, index, segments)) return;
       crumbs.push({
-        label: SEGMENT_LABELS[segment] ?? humanize(segment),
+        label: KNOWN_SEGMENT_SET.has(segment)
+          ? t(`chrome.breadcrumb.${segment}`)
+          : humanize(segment),
         href: hrefAcc,
       });
     });
@@ -98,13 +104,13 @@ export function Breadcrumb({ items, hideSegments, className }: BreadcrumbProps) 
       crumbs[crumbs.length - 1] = { label: crumbs[crumbs.length - 1].label };
     }
     return crumbs;
-  }, [items, pathname, hideSegments]);
+  }, [items, pathname, hideSegments, t]);
 
   // Nothing useful to show for a top-level page.
   if (trail.length < 2) return null;
 
   return (
-    <nav aria-label="Breadcrumb" className={className}>
+    <nav aria-label={t("chrome.breadcrumbLabel")} className={className}>
       <ol className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
         {trail.map((crumb, index) => {
           const isLast = index === trail.length - 1;

@@ -1,4 +1,5 @@
 import type { ArticleStatus } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { StatusDot } from "@/components/ui/status-badge";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,7 @@ export function ArticleStatusBadge({
   status: ArticleStatus;
   className?: string;
 }) {
+  const t = useTranslations("kb");
   const isDraft = status === "DRAFT";
   return (
     <Badge
@@ -22,7 +24,7 @@ export function ArticleStatusBadge({
       className={cn("gap-1.5", className)}
     >
       <StatusDot tone={isDraft ? "warning" : "success"} />
-      {isDraft ? "Draft" : "Published"}
+      {isDraft ? t("status.draft") : t("status.published")}
     </Badge>
   );
 }

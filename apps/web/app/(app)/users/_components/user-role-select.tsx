@@ -2,6 +2,7 @@
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { type Role, RoleSchema, type User } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -27,18 +28,8 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 import { UserRoleBadge } from "./user-role-badge";
 
-/** Human label + one-line meaning for each role, shown in the Select and the confirm prompt. */
-const ROLE_OPTIONS: { value: Role; label: string; hint: string }[] = [
-  { value: "ADMIN", label: "Admin", hint: "Full access, including user administration." },
-  { value: "MEMBER", label: "Member", hint: "Normal inventory, KB and asset operations." },
-  { value: "VIEWER", label: "Viewer", hint: "Read-only everywhere." },
-];
-
-const ROLE_LABEL: Record<Role, string> = {
-  ADMIN: "Admin",
-  MEMBER: "Member",
-  VIEWER: "Viewer",
-};
+/** The role values shown in the Select, in display order. Labels/hints are resolved via i18n. */
+const ROLE_VALUES: Role[] = ["ADMIN", "MEMBER", "VIEWER"];
 
 interface UserRoleSelectProps {
   /** The user whose role is being shown/edited. */
@@ -59,12 +50,15 @@ interface UserRoleSelectProps {
  * surfaced verbatim via {@link notifyError} if the optimistic UI ever lets a blocked change through.
  */
 export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
+  const t = useTranslations("users.role");
+  const tc = useTranslations("common");
   const { data: me } = useCurrentUser();
   const canManage = useCan("user:manage");
   const updateRole = useUpdateUserRole();
   const [pendingRole, setPendingRole] = useState<Role | null>(null);
 
   const isSelf = me?.id === user.id;
+  const roleLabel = (role: Role) => t(`labels.${role}`);
 
   // Without user:manage the caller sees a static badge; a manager viewing their own row sees a
   // disabled badge (the API forbids changing your own role — there must always be a second admin).
@@ -75,7 +69,9 @@ export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
     return (
       <span className="inline-flex items-center gap-2">
         <UserRoleBadge role={user.role} />
-        <span className="text-xs text-muted-foreground">(you)</span>
+        <span className="text-xs text-muted-foreground">
+          {t("selfSuffix")}
+        </span>
       </span>
     );
   }
@@ -88,14 +84,17 @@ export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
       {
         onSuccess: () => {
           toast.success(
-            `${user.firstName} ${user.lastName} is now ${ROLE_LABEL[role]}`,
+            t("toast.changed", {
+              name: `${user.firstName} ${user.lastName}`,
+              role: roleLabel(role),
+            }),
           );
           setPendingRole(null);
         },
         // Surfaces the API's friendly messages verbatim — the last-admin 409 ("Cannot remove the
         // last administrator…") and the self-role 403 ("You cannot change your own role").
         onError: (error) => {
-          notifyError(error, "Couldn't change role");
+          notifyError(error, t("toast.error"));
           setPendingRole(null);
         },
       },
@@ -115,14 +114,16 @@ export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
         <SelectTrigger
           size={size === "sm" ? "sm" : "default"}
           className={size === "sm" ? "h-8 w-[7.5rem]" : "w-44"}
-          aria-label={`Role for ${user.firstName} ${user.lastName}`}
+          aria-label={t("ariaLabel", {
+            name: `${user.firstName} ${user.lastName}`,
+          })}
         >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {ROLE_OPTIONS.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
+          {ROLE_VALUES.map((value) => (
+            <SelectItem key={value} value={value}>
+              {roleLabel(value)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -136,31 +137,28 @@ export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Change role?</AlertDialogTitle>
+            <AlertDialogTitle>{t("confirmTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              <span className="font-medium text-foreground">
-                {user.firstName} {user.lastName}
-              </span>{" "}
-              will become{" "}
-              <span className="font-medium text-foreground">
-                {pendingRole ? ROLE_LABEL[pendingRole] : ""}
-              </span>
-              .{" "}
-              {pendingRole
-                ? ROLE_OPTIONS.find((o) => o.value === pendingRole)?.hint
-                : ""}
+              {t.rich("confirmBody", {
+                name: `${user.firstName} ${user.lastName}`,
+                role: pendingRole ? roleLabel(pendingRole) : "",
+                strong: (chunks) => (
+                  <span className="font-medium text-foreground">{chunks}</span>
+                ),
+              })}{" "}
+              {pendingRole ? t(`hints.${pendingRole}`) : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={updateRole.isPending}>
-              Cancel
+              {tc("cancel")}
             </AlertDialogCancel>
             {/* Plain button (not AlertDialogAction) so we own the spinner and only close on success. */}
             <Button onClick={handleConfirm} disabled={updateRole.isPending}>
               {updateRole.isPending && (
                 <ArrowPathIcon className="animate-spin" />
               )}
-              Change role
+              {t("confirmAction")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

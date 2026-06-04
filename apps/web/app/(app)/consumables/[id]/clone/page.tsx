@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { DetailSkeleton } from "@/components/detail-panel";
@@ -15,6 +16,7 @@ import { ConsumableForm } from "../../_components/consumable-form";
  * unique `sku` cleared and a " (copy)" name. `currentStock` starts at 0 (ADR-0034) — never cloned.
  */
 export default function CloneConsumablePage() {
+  const t = useTranslations("consumables");
   const params = useParams<{ id: string }>();
   const { data: consumable, isLoading, isError, error, refetch } =
     useConsumable(params.id);
@@ -31,8 +33,8 @@ export default function CloneConsumablePage() {
     return (
       <div className="mx-auto max-w-3xl">
         <ErrorState
-          title="Consumable not found"
-          description="It may have been deleted, or the API is unreachable."
+          title={t("detail.notFoundTitle")}
+          description={t("detail.notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -46,17 +48,17 @@ export default function CloneConsumablePage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Consumables", href: "/consumables" },
+              { label: t("list.title"), href: "/consumables" },
               {
                 label: consumable.name,
                 href: `/consumables/${consumable.id}`,
               },
-              { label: "Clone" },
+              { label: t("form.breadcrumbClone") },
             ]}
           />
         }
-        title="Clone consumable"
-        subtitle="A new consumable pre-filled from this one. The SKU is cleared and stock starts at zero."
+        title={t("form.cloneTitle")}
+        subtitle={t("form.cloneSubtitle")}
       />
       <ConsumableForm cloneSource={consumable} />
     </div>

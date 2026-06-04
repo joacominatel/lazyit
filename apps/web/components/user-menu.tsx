@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { signOut } from "next-auth/react";
 import { useSession } from "next-auth/react";
 import { UserRoleBadge } from "@/app/(app)/users/_components/user-role-badge";
@@ -13,6 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 import { avatarColorFor } from "@/lib/avatar-color";
 import { usePermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
@@ -28,6 +30,7 @@ import { cn } from "@/lib/utils";
  * `UserRoleBadge` the Users module renders.
  */
 export function UserMenu() {
+  const t = useTranslations("shared");
   const { data: session } = useSession();
   const { role } = usePermissions();
 
@@ -53,7 +56,7 @@ export function UserMenu() {
           variant="ghost"
           size="icon"
           className="rounded-full"
-          aria-label="Open user menu"
+          aria-label={t("chrome.openUserMenu")}
         >
           <Avatar className="size-8">
             {/* Seed the current user's own chip from the same canonical palette so they read the
@@ -82,7 +85,12 @@ export function UserMenu() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleSignOut}>Sign out</DropdownMenuItem>
+        {/* Locale switcher (ADR-0051): a Globe sub-menu with EN / ES. */}
+        <LocaleSwitcher />
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={handleSignOut}>
+          {t("chrome.signOut")}
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

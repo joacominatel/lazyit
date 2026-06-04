@@ -1,6 +1,7 @@
 "use client";
 
 import { MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
@@ -49,12 +50,16 @@ export function SearchInput({
   onChange,
   debounceMs,
   onDebouncedChange,
-  label = "Search",
-  placeholder = "Search…",
+  label,
+  placeholder,
   className,
   id,
   ...inputProps
 }: SearchInputProps) {
+  const t = useTranslations("shared");
+  const tc = useTranslations("common");
+  const labelText = label ?? tc("search");
+  const placeholderText = placeholder ?? t("search.placeholderShort");
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -84,7 +89,7 @@ export function SearchInput({
   return (
     <div className={cn("relative", className)}>
       <label htmlFor={inputId} className="sr-only">
-        {label}
+        {labelText}
       </label>
       <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
@@ -93,7 +98,7 @@ export function SearchInput({
         type="search"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
+        placeholder={placeholderText}
         // pl-8 clears the leading icon; pr-8 clears the trailing clear button.
         className={cn("pl-8", hasValue && "pr-8")}
         {...inputProps}
@@ -102,7 +107,7 @@ export function SearchInput({
         <button
           type="button"
           onClick={handleClear}
-          aria-label="Clear search"
+          aria-label={t("search.clearSearch")}
           className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <XMarkIcon className="size-4" />

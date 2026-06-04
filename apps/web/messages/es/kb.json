@@ -1,0 +1,143 @@
+{
+  "breadcrumb": "Base de conocimiento",
+  "list": {
+    "title": "Base de conocimiento",
+    "subtitle": "Documentación interna para el equipo.",
+    "newArticle": "Nuevo artículo",
+    "searchLabel": "Buscar artículos",
+    "searchPlaceholder": "Buscar por título…",
+    "errorTitle": "No se pudieron cargar los artículos",
+    "noMatchFilters": "Ningún artículo coincide con tus filtros.",
+    "emptyTitle": "Aún no hay artículos",
+    "emptyDescription": "Documenta lo que sabe tu equipo: runbooks, guías paso a paso, notas de onboarding. Escribe tu primer artículo o importa uno desde un archivo.",
+    "emptyAction": "Escribe tu primer artículo",
+    "readingTime": "{minutes} min de lectura",
+    "unknownAuthor": "Autor desconocido",
+    "uncategorized": "Sin categoría",
+    "linkedCount": "{count} vinculados",
+    "linkedTooltip": "{count, plural, one {Vinculado a # elemento} other {Vinculado a # elementos}}"
+  },
+  "filters": {
+    "statusAll": "Todos los estados",
+    "statusDraftsOnly": "Solo borradores",
+    "statusPublishedOnly": "Solo publicados",
+    "categoryAll": "Todas las categorías",
+    "linkedOnly": "Solo vinculados",
+    "anyTarget": "Cualquier destino",
+    "targetAssets": "Activos",
+    "targetApplications": "Aplicaciones",
+    "chipSearch": "Búsqueda: “{query}”",
+    "chipStatus": "Estado: {value}",
+    "chipCategory": "Categoría: {value}",
+    "chipLinkedTo": "Vinculado a: {value}",
+    "statusLabel": {
+      "all": "Todos",
+      "drafts": "Borradores",
+      "published": "Publicados"
+    },
+    "linkedToLabel": {
+      "any": "Cualquier destino",
+      "assets": "Activos",
+      "applications": "Aplicaciones"
+    }
+  },
+  "form": {
+    "newTitle": "Nuevo artículo",
+    "newSubtitle": "Escribe un borrador en Markdown: publícalo desde el artículo cuando esté listo.",
+    "editTitle": "Editar artículo",
+    "editSubtitle": "Los cambios no alteran el estado de publicado/borrador: usa Publicar en el artículo para eso.",
+    "editCrumb": "Editar",
+    "newCrumb": "Nuevo",
+    "titleLabel": "Título",
+    "titlePlaceholder": "Cómo configurar la VPN de la oficina",
+    "categoryLabel": "Categoría",
+    "categorySelect": "Selecciona una categoría",
+    "categoryNone": "Aún no hay categorías",
+    "categoryHint": "Aún no hay categorías: usa el botón + para crear una.",
+    "excerptLabel": "Extracto",
+    "excerptPlaceholder": "Un resumen de una línea que se muestra en los listados (opcional)",
+    "contentLabel": "Contenido",
+    "createDraft": "Crear borrador",
+    "saveChanges": "Guardar cambios",
+    "notSignedInTitle": "Sesión no iniciada",
+    "notSignedInDescription": "Debes iniciar sesión para editar artículos.",
+    "toast": {
+      "signInRequired": "Debes iniciar sesión para redactar artículos",
+      "saved": "Artículo guardado",
+      "saveError": "No se pudo guardar el artículo",
+      "draftCreated": "Borrador creado",
+      "createError": "No se pudo crear el artículo"
+    }
+  },
+  "detail": {
+    "notFoundTitle": "Artículo no encontrado",
+    "notFoundDescription": "Puede ser un borrador que no puedes ver, fue eliminado o la API no está disponible.",
+    "unknownAuthor": "Autor desconocido",
+    "updated": "Actualizado {date}",
+    "published": "Publicado {date}",
+    "edit": "Editar",
+    "publish": "Publicar",
+    "unpublish": "Despublicar",
+    "deleteAriaLabel": "Eliminar artículo",
+    "deleteExtra": "Los artículos publicados son visibles para todo el equipo hasta entonces.",
+    "toast": {
+      "published": "Artículo publicado",
+      "publishError": "No se pudo publicar el artículo",
+      "movedToDraft": "Devuelto a borrador",
+      "unpublishError": "No se pudo despublicar el artículo"
+    }
+  },
+  "links": {
+    "panelTitle": "Vinculado a",
+    "addLink": "Vincular",
+    "loading": "Cargando vínculos…",
+    "empty": "Aún no está vinculado a nada. Vincula este artículo a un activo o una aplicación para mostrarlo como el runbook de ese registro.",
+    "removeAriaLabel": "Quitar vínculo",
+    "kindAsset": "activo",
+    "kindApplication": "aplicación",
+    "fallbackAsset": "Activo",
+    "fallbackApplication": "Aplicación",
+    "dialogTitle": "Vincular artículo",
+    "dialogDescription": "Vincula este artículo a un activo o una aplicación para que se muestre como el runbook de ese registro. Un vínculo apunta a exactamente un destino.",
+    "targetTypeLabel": "Tipo de destino",
+    "targetTypeAsset": "Activo",
+    "targetTypeApplication": "Aplicación",
+    "targetAssetLabel": "Activo",
+    "targetApplicationLabel": "Aplicación",
+    "selectAsset": "Selecciona un activo",
+    "selectApplication": "Selecciona una aplicación",
+    "noAssets": "Aún no hay activos",
+    "noApplications": "Aún no hay aplicaciones",
+    "chooseTargetError": "Elige un destino para vincular.",
+    "duplicateHint": "Los destinos ya vinculados son aceptados por la API una sola vez; un vínculo duplicado se rechaza.",
+    "submit": "Vincular artículo",
+    "toast": {
+      "removed": "Vínculo eliminado",
+      "removeError": "No se pudo quitar el vínculo",
+      "linked": "Artículo vinculado",
+      "linkError": "No se pudo vincular el artículo"
+    }
+  },
+  "status": {
+    "draft": "Borrador",
+    "published": "Publicado"
+  },
+  "import": {
+    "title": "Importar un artículo",
+    "description": "Sube un archivo Markdown, de texto plano o Word (.docx). Solo se importa el texto: el archivo original no se almacena.",
+    "fileLabel": "Archivo",
+    "fileHint": "Acepta .md, .txt y .docx.",
+    "categoryLabel": "Categoría",
+    "categorySelect": "Selecciona una categoría",
+    "categoryNone": "Aún no hay categorías",
+    "statusLabel": "Estado",
+    "submit": "Importar",
+    "toast": {
+      "signInRequired": "Debes iniciar sesión para importar artículos",
+      "chooseFile": "Elige un archivo para importar",
+      "chooseCategory": "Elige una categoría",
+      "imported": "Artículo importado",
+      "importError": "No se pudo importar el archivo"
+    }
+  }
+}

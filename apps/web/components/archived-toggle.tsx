@@ -1,6 +1,7 @@
 "use client";
 
 import { ArchiveBoxIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { Switch } from "@/components/ui/switch";
 
 /**
@@ -23,13 +24,14 @@ export function ArchivedToggle({
   /** Element id linking the label to the switch (unique per page if multiple). */
   id?: string;
 }) {
+  const t = useTranslations("shared");
   return (
     <label
       htmlFor={id}
       className="inline-flex cursor-pointer items-center gap-2 rounded-md text-sm font-medium text-muted-foreground select-none"
     >
       <ArchiveBoxIcon className="size-4" />
-      Show archived
+      {t("filters.showArchived")}
       <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
     </label>
   );

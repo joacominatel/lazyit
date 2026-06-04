@@ -1,0 +1,358 @@
+{
+  "gate": {
+    "title": "Solo administradores",
+    "description": "Configuración — configuración de la instancia, gestión de taxonomías y el resumen de roles — está disponible para administradores. Pídele a un administrador si necesitas un cambio aquí."
+  },
+  "hub": {
+    "title": "Configuración",
+    "subtitle": "Configuración de la instancia, gestión de taxonomías, roles y cuentas de servicio — solo administradores.",
+    "taxonomies": {
+      "title": "Taxonomías",
+      "description": "Gestiona las categorías que clasifican activos, aplicaciones, consumibles y artículos de la base de conocimiento — además de los modelos de activo."
+    },
+    "roles": {
+      "title": "Roles",
+      "description": "Mira quién tiene cada rol RBAC en el equipo. Los cambios de rol se hacen en la sección de Usuarios."
+    },
+    "serviceAccounts": {
+      "title": "Cuentas de servicio",
+      "description": "Crea y gestiona credenciales de API no humanas para CI, scripts e integraciones — acotadas por permiso y revocables."
+    },
+    "instance": {
+      "title": "Instancia",
+      "description": "Revisa cómo está configurada esta instancia de lazyit — proveedor de identidad, estado de configuración y postura de ejecución."
+    }
+  },
+  "instance": {
+    "title": "Instancia",
+    "subtitle": "Cómo está configurada esta instancia de lazyit. Solo lectura — los operadores definen la postura mediante variables de entorno.",
+    "cardTitle": "Configuración",
+    "loadError": "No se pudo cargar el estado de la instancia",
+    "loadErrorHint": "La API podría estar caída o ser inaccesible.",
+    "rows": {
+      "configured": "Configurada",
+      "identityProvider": "Proveedor de identidad",
+      "administrators": "Administradores",
+      "runtimePosture": "Postura de ejecución"
+    },
+    "configuredBadge": "Configurada",
+    "setupPending": "Configuración pendiente",
+    "posture": {
+      "development": "Desarrollo",
+      "production": "Producción"
+    },
+    "identityProvider": {
+      "zitadel": "Zitadel (incluido)",
+      "generic-oidc": "OIDC genérico (usa el tuyo)"
+    }
+  },
+  "roles": {
+    "title": "Roles",
+    "subtitle": "Quién tiene cada nivel de acceso y qué puede hacer cada rol. Cambia un rol desde la sección de Usuarios.",
+    "manageUsers": "Gestionar usuarios",
+    "emptyMembers": "No hay usuarios con este rol.",
+    "fullAccessLocked": "Acceso completo — no editable.",
+    "editPermissions": "Editar permisos",
+    "meta": {
+      "ADMIN": {
+        "label": "Administrador",
+        "hint": "Acceso completo, incluida la administración de usuarios y las eliminaciones destructivas."
+      },
+      "MEMBER": {
+        "label": "Miembro",
+        "hint": "Operaciones normales de inventario, base de conocimiento y activos."
+      },
+      "VIEWER": {
+        "label": "Observador",
+        "hint": "Solo lectura en toda la aplicación."
+      }
+    },
+    "permissions": {
+      "title": "Permisos del rol",
+      "subtitle": "Configura qué pueden hacer los Miembros y los Observadores. El Administrador siempre tiene acceso completo.",
+      "idpNote": "Estos permisos son exclusivos de lazyit — nunca aparecen en tu proveedor de identidad.",
+      "loadError": "No se pudieron cargar los permisos",
+      "startFromPreset": "Empezar desde un preajuste",
+      "resetToDefaults": "Restablecer a los valores predeterminados",
+      "capabilitiesHeading": "Capacidades",
+      "summary": {
+        "heading": "Qué puede hacer este rol",
+        "levels": {
+          "edit": "Ver y editar",
+          "view": "Solo ver",
+          "none": "Sin acceso"
+        },
+        "domains": {
+          "asset": "Activos",
+          "application": "Aplicaciones",
+          "accessGrant": "Concesiones de acceso",
+          "consumable": "Consumibles",
+          "article": "Base de conocimiento",
+          "location": "Ubicaciones",
+          "assetModel": "Modelos de activo",
+          "category": "Categorías",
+          "user": "Usuarios",
+          "dashboard": "Panel",
+          "search": "Búsqueda",
+          "settings": "Configuración",
+          "logs": "Registros de actividad"
+        }
+      },
+      "segmented": {
+        "ariaLabel": "Elige un rol para editar",
+        "adminTitle": "El Administrador tiene acceso completo y no se puede editar.",
+        "full": "Completo",
+        "admin": "Administrador",
+        "member": "Miembro",
+        "viewer": "Observador",
+        "unsavedChanges": "Cambios sin guardar"
+      },
+      "preset": {
+        "custom": "Personalizado",
+        "customEdited": "Personalizado (editaste)",
+        "customHint": "Un conjunto único que no coincide con ningún preajuste."
+      },
+      "capabilityGroup": {
+        "ariaLabel": "Capacidades de {label}",
+        "adminLevel": "Nivel administrador",
+        "partial": "Parcial"
+      },
+      "fineTune": {
+        "title": "Ajuste fino (avanzado)",
+        "subtitle": "Control exacto por permiso",
+        "description": "Cada interruptor aquí es un único permiso. Los cambios convierten el rol en un conjunto Personalizado y actualizan las capacidades de arriba.",
+        "adminLevel": "Nivel administrador"
+      },
+      "saveBar": {
+        "ariaLabel": "Cambios de permisos sin guardar",
+        "message": "Tienes cambios de permisos sin guardar.",
+        "discard": "Descartar",
+        "saveChanges": "Guardar cambios"
+      },
+      "confirm": {
+        "title": "Revisa este cambio antes de guardar",
+        "description": "Esta actualización tiene efectos que conviene confirmar. Revísalos y luego guarda.",
+        "grantsHeading": "Acceso de nivel administrador otorgado",
+        "removalsHeading": "Acceso eliminado",
+        "keepEditing": "Seguir editando",
+        "saveChanges": "Guardar cambios"
+      },
+      "toast": {
+        "invalid": "Algunos permisos no son válidos",
+        "invalidHint": "Actualiza la página e inténtalo de nuevo.",
+        "saved": "Permisos guardados",
+        "saveError": "No se pudieron guardar los permisos"
+      },
+      "consequence": {
+        "removedRead": "{who} ya no podrán {action}.",
+        "accessGrantGrant": "{who} podrán otorgar y revocar el acceso a aplicaciones para cualquiera — incluso a aplicaciones sensibles. Normalmente esta es una acción exclusiva de administradores.",
+        "userManage": "{who} podrán administrar usuarios: crear cuentas, cambiar roles (incluido otorgar ADMIN) y dar de baja a personas. Normalmente esta es una acción exclusiva de administradores.",
+        "settingsManage": "{who} podrán configurar la instancia y gestionar taxonomías — toda la superficie de configuración del administrador. Normalmente esta es una acción exclusiva de administradores.",
+        "deleteDefault": "{who} podrán {action} — una acción destructiva normalmente reservada a administradores.",
+        "who": {
+          "MEMBER": "Los Miembros",
+          "VIEWER": "Los Observadores"
+        }
+      }
+    }
+  },
+  "serviceAccounts": {
+    "title": "Cuentas de servicio",
+    "subtitle": "Credenciales de API no humanas para CI, scripts e integraciones — acotadas por permiso, nunca por un rol.",
+    "showRevoked": "Mostrar revocadas",
+    "showRevokedAria": "Mostrar cuentas de servicio revocadas",
+    "newAccount": "Nueva cuenta de servicio",
+    "loadError": "No se pudieron cargar las cuentas de servicio",
+    "columns": {
+      "name": "Nombre",
+      "token": "Token",
+      "permissions": "Permisos",
+      "lastUsed": "Último uso",
+      "status": "Estado"
+    },
+    "never": "Nunca",
+    "empty": {
+      "revokedTitle": "No hay cuentas de servicio revocadas",
+      "title": "Aún no hay cuentas de servicio",
+      "revokedDescription": "Las cuentas revocadas (eliminadas de forma reversible) aparecen aquí y pueden restaurarse.",
+      "description": "Dale a un ejecutor de CI, script o integración acceso acotado y no humano a la API — crea una y entrégale un token en lugar del inicio de sesión de una persona.",
+      "action": "Crear la primera"
+    },
+    "permissionsSummary": {
+      "none": "Ninguno",
+      "count": "{count, plural, one {# permiso} other {# permisos}}",
+      "extra": "{count, plural, other {+# más}}"
+    },
+    "status": {
+      "active": "Activa",
+      "inactive": "Inactiva",
+      "expired": "Vencida",
+      "revoked": "Revocada"
+    },
+    "rowActions": {
+      "rotateToken": "Rotar token",
+      "revoke": "Revocar",
+      "openActions": "Abrir acciones"
+    },
+    "revokeExplanation": "Su token deja de autenticar de inmediato. Puedes restaurarla desde la vista «Mostrar revocadas» (rota para generar un token nuevo).",
+    "toast": {
+      "restored": "Cuenta de servicio restaurada",
+      "restoreError": "No se pudo restaurar la cuenta de servicio",
+      "created": "Cuenta de servicio creada",
+      "createError": "No se pudo crear la cuenta de servicio",
+      "updated": "Cuenta de servicio actualizada",
+      "updateError": "No se pudo actualizar la cuenta de servicio",
+      "rotated": "Token rotado",
+      "rotateError": "No se pudo rotar el token",
+      "tokenCopied": "Token copiado"
+    },
+    "form": {
+      "entityLabel": "cuenta de servicio",
+      "editTitle": "Editar cuenta de servicio",
+      "newTitle": "Nueva cuenta de servicio",
+      "editDescription": "Actualiza el nombre, los permisos y el ciclo de vida de esta credencial no humana. El token no se cambia aquí — usa Rotar para eso.",
+      "newDescription": "Una credencial no humana (un ejecutor de CI, un script, una integración). Se autoriza por los permisos que otorgues — nunca por un rol. El token se muestra una sola vez después de crearla.",
+      "nameLabel": "Nombre",
+      "namePlaceholder": "p. ej. Ejecutor de despliegue de CI",
+      "descriptionLabel": "Descripción",
+      "descriptionPlaceholder": "Opcional — para qué se usa esta credencial.",
+      "expiresLabel": "Vence el",
+      "expiresHint": "Opcional. Después de este momento el token se rechaza. Déjalo vacío para que no venza.",
+      "activeLabel": "Activa",
+      "activeHint": "Una desactivación reversible. Cuando está apagada, el token deja de autenticar sin revocar la cuenta.",
+      "permissionsLabel": "Permisos",
+      "permissionsHint": "Las capacidades que esta cuenta puede usar. La autorización es por este conjunto — nunca hereda un rol. Las concesiones de eliminación y de nivel administrador están permitidas pero marcadas.",
+      "saveChanges": "Guardar cambios",
+      "createButton": "Crear",
+      "secretTitle": "Guarda tu token",
+      "secretDescription": "Esta es la única vez que se muestra el token.",
+      "errors": {
+        "nameRequired": "El nombre es obligatorio.",
+        "permissionRequired": "Otorga al menos un permiso.",
+        "invalidFields": "Algunos campos no son válidos. Revisa los valores e inténtalo de nuevo."
+      }
+    },
+    "rotate": {
+      "secretTitle": "Guarda el nuevo token",
+      "secretDescription": "Esta es la única vez que se muestra el nuevo token.",
+      "confirmTitle": "¿Rotar token?",
+      "confirmDescription": "Se genera un nuevo token para <b>{name}</b>. El token actual deja de funcionar de inmediato — cualquier sistema que lo use debe actualizarse. El nuevo token se muestra una sola vez.",
+      "rotateButton": "Rotar token"
+    },
+    "secretReveal": {
+      "createdMessage": "<b>{name}</b> se creó. Este es su token.",
+      "rotatedMessage": "<b>{name}</b> se rotó. Este es su token.",
+      "warning": "Cópialo ahora — no volverás a verlo. Solo almacenamos un hash del token, así que nunca podrá mostrarse ni recuperarse después. Si lo pierdes, rota la cuenta para generar uno nuevo.",
+      "copyTokenAria": "Copiar token",
+      "acknowledge": "He guardado este token en un lugar seguro.",
+      "done": "Listo"
+    },
+    "permissionPicker": {
+      "sectionAria": "Permisos de {label}",
+      "selectAllAria": "Seleccionar todos los permisos de {label}",
+      "all": "Todos",
+      "adminLevel": "Nivel administrador"
+    }
+  },
+  "taxonomies": {
+    "title": "Taxonomías",
+    "subtitle": "Gestiona las categorías que clasifican los registros, además de los modelos de activo que los activos referencian.",
+    "tablistAria": "Tipo de taxonomía",
+    "tabs": {
+      "asset": "Categorías de activo",
+      "application": "Categorías de aplicación",
+      "consumable": "Categorías de consumible",
+      "article": "Categorías de artículo",
+      "models": "Modelos de activo"
+    },
+    "kindLabel": {
+      "asset": "categoría de activo",
+      "application": "categoría de aplicación",
+      "consumable": "categoría de consumible",
+      "article": "categoría de artículo"
+    },
+    "categories": {
+      "newButton": "Nueva {label}",
+      "loadError": "No se pudo cargar la lista de {label}",
+      "emptyTitle": "Aún no hay entradas de {label}",
+      "emptyDescription": "Agrega la primera para empezar a clasificar registros — quedará disponible para elegir donde sea que se referencie este tipo.",
+      "emptyAction": "Crear la primera",
+      "columns": {
+        "name": "Nombre",
+        "description": "Descripción",
+        "order": "Orden",
+        "updated": "Actualizado"
+      },
+      "form": {
+        "editTitle": "Editar {label}",
+        "newTitle": "Nueva {label}",
+        "editDescription": "Actualiza los detalles de esta categoría.",
+        "newDescription": "Las categorías clasifican registros en toda la aplicación. El nombre es obligatorio; el resto es opcional.",
+        "nameLabel": "Nombre",
+        "namePlaceholder": "p. ej. Portátiles",
+        "descriptionLabel": "Descripción",
+        "descriptionPlaceholder": "Opcional — qué pertenece a esta categoría.",
+        "iconLabel": "Ícono",
+        "iconPlaceholder": "Opcional — un nombre de heroicon, p. ej. ServerStackIcon",
+        "orderLabel": "Orden",
+        "orderPlaceholder": "Opcional — el menor se ordena primero",
+        "saveChanges": "Guardar cambios",
+        "createButton": "Crear {label}",
+        "errors": {
+          "nameRequired": "El nombre es obligatorio.",
+          "orderInteger": "El orden debe ser un número entero."
+        }
+      },
+      "toast": {
+        "updated": "{label} actualizada",
+        "updateError": "No se pudo actualizar la {label}",
+        "created": "{label} creada",
+        "createError": "No se pudo crear la {label}"
+      }
+    },
+    "models": {
+      "newButton": "Nuevo modelo",
+      "loadError": "No se pudieron cargar los modelos de activo",
+      "emptyTitle": "Aún no hay modelos de activo",
+      "emptyDescription": "Agrega una marca y modelo — por ejemplo, una MacBook Pro 14 — para que cada activo que registres pueda referenciarlo en lugar de volver a escribir las especificaciones.",
+      "emptyAction": "Crear el primer modelo",
+      "entityLabel": "modelo de activo",
+      "columns": {
+        "name": "Nombre",
+        "manufacturer": "Fabricante",
+        "sku": "SKU",
+        "category": "Categoría",
+        "updated": "Actualizado"
+      },
+      "form": {
+        "editTitle": "Editar modelo de activo",
+        "newTitle": "Nuevo modelo de activo",
+        "editDescription": "Actualiza esta marca/modelo. Las especificaciones se gestionan mediante la API.",
+        "newDescription": "Una marca/modelo genérica de la que los activos son instancias, p. ej. «Dell Latitude 5520».",
+        "nameLabel": "Nombre",
+        "namePlaceholder": "Latitude 5520",
+        "manufacturerLabel": "Fabricante",
+        "manufacturerPlaceholder": "Dell",
+        "skuLabel": "SKU",
+        "skuPlaceholder": "Opcional — número de parte/SKU único",
+        "categoryLabel": "Categoría",
+        "categoryPlaceholder": "Opcional — elige una categoría",
+        "noCategory": "Sin categoría",
+        "descriptionLabel": "Descripción",
+        "descriptionPlaceholder": "Opcional",
+        "saveChanges": "Guardar cambios",
+        "createButton": "Crear modelo",
+        "errors": {
+          "nameRequired": "El nombre es obligatorio.",
+          "manufacturerRequired": "El fabricante es obligatorio."
+        }
+      },
+      "toast": {
+        "updated": "Modelo de activo actualizado",
+        "updateError": "No se pudo actualizar el modelo de activo",
+        "created": "Modelo de activo creado",
+        "createError": "No se pudo crear el modelo de activo"
+      }
+    }
+  }
+}

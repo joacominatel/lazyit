@@ -1,6 +1,7 @@
 "use client";
 
 import { XMarkIcon } from "@heroicons/react/16/solid";
+import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
@@ -33,11 +34,12 @@ export function ActiveFilters({
   onClearAll: () => void;
   className?: string;
 }) {
+  const t = useTranslations("shared");
   if (chips.length === 0) return null;
   return (
     <div
       className={cn("flex flex-wrap items-center gap-2", className)}
-      aria-label="Active filters"
+      aria-label={t("filters.activeFilters")}
     >
       {chips.map((chip) => (
         <span
@@ -50,8 +52,8 @@ export function ActiveFilters({
             onClick={chip.onClear}
             aria-label={
               typeof chip.label === "string"
-                ? `Clear filter: ${chip.label}`
-                : "Clear filter"
+                ? t("filters.clearFilterNamed", { label: chip.label })
+                : t("filters.clearFilter")
             }
             className="flex size-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
@@ -64,7 +66,7 @@ export function ActiveFilters({
         onClick={onClearAll}
         className="rounded text-xs font-medium text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
       >
-        Clear all
+        {t("filters.clearAll")}
       </button>
     </div>
   );
@@ -75,13 +77,14 @@ export function ActiveFilters({
  * `ResourceTable.filteredEmptyAction`). Wire `onClick` to `useListParams().clearFilters`.
  */
 export function ClearFiltersLink({ onClick }: { onClick: () => void }) {
+  const t = useTranslations("shared");
   return (
     <button
       type="button"
       onClick={onClick}
       className="rounded text-sm font-medium text-primary underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
     >
-      Clear filters
+      {t("filters.clearFilters")}
     </button>
   );
 }

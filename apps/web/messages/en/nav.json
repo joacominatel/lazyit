@@ -1,0 +1,16 @@
+{
+  "dashboard": "Dashboard",
+  "inventory": "Inventory",
+  "assets": "Assets",
+  "consumables": "Consumables",
+  "access": "Access",
+  "applications": "Applications",
+  "knowledge": "Knowledge",
+  "knowledgeBase": "Knowledge Base",
+  "reports": "Reports",
+  "informes": "Reports",
+  "manage": "Manage",
+  "users": "Users",
+  "locations": "Locations",
+  "settings": "Settings"
+}

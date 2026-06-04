@@ -1,6 +1,7 @@
 "use client";
 
 import { PlusIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -23,7 +24,9 @@ export function CreatableField({
   }) => ReactNode;
   children: ReactNode;
 }) {
+  const t = useTranslations("shared");
   const [open, setOpen] = useState(false);
+  const newLabel = t("field.newEntity", { label });
   return (
     <>
       <div className="flex items-center gap-2">
@@ -32,8 +35,8 @@ export function CreatableField({
           type="button"
           variant="outline"
           size="icon"
-          aria-label={`New ${label}`}
-          title={`New ${label}`}
+          aria-label={newLabel}
+          title={newLabel}
           onClick={() => setOpen(true)}
         >
           <PlusIcon />

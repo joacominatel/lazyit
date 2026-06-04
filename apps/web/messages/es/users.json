@@ -1,0 +1,231 @@
+{
+  "list": {
+    "title": "Usuarios",
+    "subtitle": "Las personas de tu organización.",
+    "newUser": "Nuevo usuario",
+    "searchLabel": "Buscar usuarios",
+    "searchPlaceholder": "Buscar por nombre o correo…",
+    "selectAllLabel": "Seleccionar todos los usuarios de esta página",
+    "selectLabel": "Seleccionar a {name}",
+    "offboardAction": "Dar de baja",
+    "restore": "Restaurar",
+    "filteredEmptyArchived": "No hay usuarios archivados.",
+    "filteredEmptyDefault": "Ningún usuario coincide con los filtros.",
+    "loadErrorTitle": "No se pudieron cargar los usuarios",
+    "chips": {
+      "search": "Búsqueda: “{query}”",
+      "status": "Estado: {status}"
+    },
+    "status": {
+      "all": "Todos los estados",
+      "active": "Activo",
+      "inactive": "Inactivo"
+    },
+    "statusFilterLabel": {
+      "ALL": "Todos",
+      "ACTIVE": "Activo",
+      "INACTIVE": "Inactivo"
+    },
+    "columns": {
+      "avatar": "Avatar",
+      "name": "Nombre",
+      "email": "Correo",
+      "role": "Rol",
+      "status": "Estado",
+      "updated": "Actualizado",
+      "actions": "Acciones"
+    },
+    "meta": {
+      "email": "Correo",
+      "role": "Rol",
+      "updated": "Actualizado"
+    },
+    "toast": {
+      "restored": "{name} restaurado",
+      "restoreError": "No se pudo restaurar el usuario",
+      "bulkRestoreError": "No se pudieron restaurar los usuarios seleccionados"
+    },
+    "byoi": {
+      "title": "Los usuarios y roles se gestionan localmente",
+      "description": "Estás iniciando sesión con tu propio proveedor de identidad, por lo que los cambios aquí no se sincronizan con él. Crea, deshabilita y asigna roles a las cuentas en tu proveedor de identidad; lazyit mantiene su propia copia para la autorización."
+    }
+  },
+  "empty": {
+    "title": "Aún no hay personas aquí",
+    "description": "Agrega a las personas de tu organización — una vez que estén aquí podrás asignarles activos y otorgarles acceso.",
+    "action": "Agregar tu primer usuario"
+  },
+  "detail": {
+    "notFoundTitle": "Usuario no encontrado",
+    "notFoundDescription": "Es posible que haya sido dado de baja, o que la API no esté disponible.",
+    "edit": "Editar",
+    "offboard": "Dar de baja",
+    "profile": "Perfil",
+    "fields": {
+      "email": "Correo",
+      "status": "Estado",
+      "role": "Rol",
+      "joined": "Ingreso",
+      "lastUpdated": "Última actualización"
+    },
+    "assets": {
+      "title": "Activos en posesión",
+      "empty": "No tiene activos en este momento.",
+      "assetFallback": "Activo",
+      "assignedOn": "Asignado {date}",
+      "view": "Ver"
+    },
+    "access": {
+      "title": "Acceso a aplicaciones",
+      "empty": "Sin acceso activo a aplicaciones.",
+      "applicationFallback": "Aplicación",
+      "expired": "Expirado",
+      "granted": "Otorgado {date}",
+      "expiresSuffix": " · expira {date}",
+      "noteSuffix": " · {note}",
+      "view": "Ver"
+    },
+    "articles": {
+      "title": "Artículos creados",
+      "empty": "No ha creado artículos en la base de conocimiento."
+    },
+    "ownershipHistory": {
+      "title": "Historial de posesión",
+      "assetFallback": "Activo"
+    },
+    "accessHistory": {
+      "title": "Historial de accesos",
+      "applicationFallback": "Aplicación"
+    }
+  },
+  "form": {
+    "editTitle": "Editar usuario",
+    "createTitle": "Nuevo usuario",
+    "editDescription": "Actualiza los datos de esta persona.",
+    "createDescription": "Agrega una persona a la organización. Los usuarios nuevos comienzan activos.",
+    "firstName": "Nombre",
+    "lastName": "Apellido",
+    "email": "Correo",
+    "emailHelp": "La clave de vinculación de la cuenta con el proveedor de identidad. Debe ser única; un cambio se refleja en el proveedor de identidad.",
+    "active": "Activo",
+    "activeHelp": "Los usuarios inactivos se conservan para el historial, pero se tratan como dados de baja — ya no pueden recibir activos asignados.",
+    "saveChanges": "Guardar cambios",
+    "createUser": "Crear usuario",
+    "toast": {
+      "updated": "Usuario actualizado",
+      "created": "Usuario creado",
+      "updateError": "No se pudo actualizar el usuario",
+      "createError": "No se pudo crear el usuario"
+    }
+  },
+  "role": {
+    "labels": {
+      "ADMIN": "Administrador",
+      "MEMBER": "Miembro",
+      "VIEWER": "Lector"
+    },
+    "hints": {
+      "ADMIN": "Acceso completo, incluida la administración de usuarios.",
+      "MEMBER": "Operaciones normales de inventario, base de conocimiento y activos.",
+      "VIEWER": "Solo lectura en todo."
+    },
+    "selfSuffix": "(tú)",
+    "ariaLabel": "Rol de {name}",
+    "confirmTitle": "¿Cambiar el rol?",
+    "confirmBody": "<strong>{name}</strong> pasará a ser <strong>{role}</strong>.",
+    "confirmAction": "Cambiar rol",
+    "toast": {
+      "changed": "{name} ahora es {role}",
+      "error": "No se pudo cambiar el rol"
+    }
+  },
+  "status": {
+    "active": "Activo",
+    "inactive": "Inactivo"
+  },
+  "passwordReset": {
+    "button": "Enviar restablecimiento de contraseña",
+    "disabledNoIdp": "Esta cuenta no tiene vínculo con un proveedor de identidad, por lo que el restablecimiento de contraseña lo gestiona tu proveedor de identidad.",
+    "disabledInactive": "Este usuario está inactivo — reactívalo antes de enviar un restablecimiento de contraseña.",
+    "confirmTitle": "¿Enviar un restablecimiento de contraseña?",
+    "confirmBody": "Tu proveedor de identidad enviará a <strong>{email}</strong> un enlace para restablecer su contraseña. lazyit nunca ve ni establece la contraseña; la entrega depende de que el SMTP del proveedor esté configurado.",
+    "send": "Enviar correo de restablecimiento",
+    "toast": {
+      "sentTitle": "Correo de restablecimiento de contraseña enviado a través del proveedor de identidad",
+      "sentDescription": "La entrega depende de que el SMTP de tu proveedor de identidad esté configurado.",
+      "managedTitle": "El restablecimiento de contraseña lo gestiona tu proveedor de identidad",
+      "managedDescription": "lazyit no puede ejecutar un restablecimiento para esta cuenta — gestiona la contraseña en tu proveedor de identidad.",
+      "inactiveTitle": "Este usuario está inactivo",
+      "inactiveDescription": "Reactívalo antes de enviar un restablecimiento de contraseña.",
+      "error": "No se pudo enviar el restablecimiento de contraseña"
+    }
+  },
+  "offboarding": {
+    "title": "Dar de baja a {name}",
+    "doneTitle": "{name} archivado",
+    "doneSubtitle": "Acceso revocado, activos liberados — el historial está a salvo.",
+    "impact": {
+      "releasesLabel": "Libera",
+      "assets": "{count, plural, =1 {activo} other {activos}}",
+      "revokesLabel": "Revoca",
+      "grants": "{count, plural, =1 {concesión de acceso} other {concesiones de acceso}}"
+    },
+    "assetFallback": "Activo",
+    "applicationFallback": "Aplicación",
+    "notInCatalog": "No está en el catálogo — verifica por id {id}",
+    "critical": "Crítica",
+    "expires": "Expira {date}",
+    "noExpiry": "Sin expiración",
+    "verifyByIdSuffix": " · verifica por id {id}",
+    "assetsToReturn": "Activos a devolver",
+    "nothingToReturn": "Nada que devolver.",
+    "accessToRevoke": "Accesos a revocar",
+    "noActiveAccess": "Sin acceso activo a aplicaciones.",
+    "emptyNote": "Esta persona no tiene activos en posesión ni accesos activos. El acta sigue siendo válida como registro de su baja.",
+    "handoverNote": "Nota de entrega",
+    "handoverPlaceholder": "Una nota breve que se imprime en el acta de devolución…",
+    "handoverHelp": "Guardada para la próxima vez — esta nota se completa por defecto en cada acta.",
+    "printedAct": "Acta impresa",
+    "companyName": "Nombre de la empresa",
+    "companyPlaceholder": "Se imprime en el membrete del acta",
+    "listAssets": "Listar activos a devolver",
+    "listAccess": "Listar accesos revocados",
+    "printedActHelp": "Esto aplica al acta impresa — este resumen siempre muestra el impacto completo.",
+    "signatures": "Firmas",
+    "signatureEmployee": "Empleado",
+    "signatureIt": "TI",
+    "signatureHelp": "Se firma en papel en la entrega — imprime el acta abajo.",
+    "printAct": "Imprimir acta",
+    "confirm": "Confirmar la baja",
+    "toast": {
+      "archived": "Usuario archivado — acceso revocado, el historial está a salvo.",
+      "error": "No se pudo dar de baja al usuario"
+    }
+  },
+  "act": {
+    "documentTitle": "Acta de devolución — {name}",
+    "loadError": "No se pudo cargar este usuario — es posible que haya sido eliminado, o que la API no esté disponible.",
+    "print": "Imprimir",
+    "titleEn": "Asset Return & Access Acknowledgment",
+    "titleEs": "Acta de baja y devolución de activos",
+    "nameLabel": "Nombre: ",
+    "emailLabel": "Correo: ",
+    "roleLabel": "Rol: ",
+    "assetsToReturn": "Activos a devolver",
+    "nothingToReturn": "Nada que devolver.",
+    "assetFallback": "Activo",
+    "notInCatalog": "No está en el catálogo — verifica por id {id}",
+    "accessRevoked": "Acceso revocado",
+    "noActiveAccess": "Sin acceso activo a aplicaciones.",
+    "applicationFallback": "Aplicación",
+    "critical": "Crítica",
+    "expires": "expira {date}",
+    "emptyNote": "Esta persona no tenía activos en posesión ni accesos activos. Esta acta queda como registro de su baja.",
+    "note": "Nota",
+    "signatureEmployee": "Empleado",
+    "signatureIt": "TI",
+    "signatureLine": "Firma de {who}",
+    "signatureDate": "Fecha",
+    "statusCaption": "Pendiente — a completar en la entrega."
+  }
+}

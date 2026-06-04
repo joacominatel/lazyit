@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckIcon, ClipboardIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ export function RequestIdNote({
   requestId?: string;
   className?: string;
 }) {
+  const t = useTranslations("shared");
   const [copied, setCopied] = useState(false);
 
   if (!requestId) return null;
@@ -26,7 +28,7 @@ export function RequestIdNote({
   const copy = () => {
     void navigator.clipboard?.writeText(requestId).then(() => {
       setCopied(true);
-      toast.success("Request ID copied");
+      toast.success(t("errors.requestIdCopied"));
       setTimeout(() => setCopied(false), 1500);
     });
   };
@@ -38,7 +40,7 @@ export function RequestIdNote({
         className,
       )}
     >
-      <span>Request ID</span>
+      <span>{t("errors.requestId")}</span>
       <code className="rounded bg-muted px-1.5 py-0.5 font-mono">
         {requestId}
       </code>
@@ -47,7 +49,7 @@ export function RequestIdNote({
         variant="ghost"
         size="icon-sm"
         onClick={copy}
-        aria-label="Copy request ID"
+        aria-label={t("errors.copyRequestId")}
       >
         {copied ? <CheckIcon /> : <ClipboardIcon />}
       </Button>

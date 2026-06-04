@@ -5,6 +5,7 @@ import {
   ClipboardIcon,
   ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -37,33 +38,40 @@ export function SecretReveal({
   onAcknowledge,
   action,
 }: SecretRevealProps) {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
   const [copied, setCopied] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
 
   const copy = () => {
     void navigator.clipboard?.writeText(token).then(() => {
       setCopied(true);
-      toast.success("Token copied");
+      toast.success(t("serviceAccounts.toast.tokenCopied"));
       setTimeout(() => setCopied(false), 1500);
     });
   };
+
+  const messageKey =
+    action === "created"
+      ? "serviceAccounts.secretReveal.createdMessage"
+      : "serviceAccounts.secretReveal.rotatedMessage";
 
   return (
     <div className="space-y-4">
       <div className="space-y-1">
         <p className="text-sm">
-          <span className="font-medium text-foreground">{name}</span> was{" "}
-          {action}. Here is its token.
+          {t.rich(messageKey, {
+            name,
+            b: (chunks) => (
+              <span className="font-medium text-foreground">{chunks}</span>
+            ),
+          })}
         </p>
       </div>
 
       <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
         <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0" />
-        <span>
-          Copy it now — you won&apos;t see it again. We only store a hash of the
-          token, so it can never be shown or recovered later. If you lose it,
-          rotate the account to mint a new one.
-        </span>
+        <span>{t("serviceAccounts.secretReveal.warning")}</span>
       </div>
 
       <div className="space-y-2">
@@ -77,10 +85,10 @@ export function SecretReveal({
             size="sm"
             onClick={copy}
             className="shrink-0"
-            aria-label="Copy token"
+            aria-label={t("serviceAccounts.secretReveal.copyTokenAria")}
           >
             {copied ? <CheckIcon /> : <ClipboardIcon />}
-            {copied ? "Copied" : "Copy"}
+            {copied ? tc("copied") : tc("copy")}
           </Button>
         </div>
       </div>
@@ -92,12 +100,12 @@ export function SecretReveal({
           onChange={(e) => setAcknowledged(e.target.checked)}
           className="mt-0.5 size-4 rounded border-input accent-primary"
         />
-        <span>I&apos;ve saved this token in a secure place.</span>
+        <span>{t("serviceAccounts.secretReveal.acknowledge")}</span>
       </label>
 
       <div className="flex justify-end">
         <Button type="button" onClick={onAcknowledge} disabled={!acknowledged}>
-          Done
+          {t("serviceAccounts.secretReveal.done")}
         </Button>
       </div>
     </div>

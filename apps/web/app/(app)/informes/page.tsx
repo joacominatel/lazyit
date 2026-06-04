@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +23,7 @@ import { InformesScreen } from "./_components/informes-screen";
  * `logs:read`-gated endpoint is DEBT-1.
  */
 export default function InformesPage() {
+  const t = useTranslations("informes");
   const { can, isLoading } = useMyPermissions();
   const allowed = can("logs:read");
 
@@ -30,9 +32,9 @@ export default function InformesPage() {
       {isLoading ? (
         <>
           <PageHeader
-            title="Informes"
+            title={t("page.title")}
             breadcrumb={<Breadcrumb />}
-            subtitle="Every change across your estate — newest first."
+            subtitle={t("page.subtitle")}
           />
           <div className="space-y-3" aria-hidden>
             <Skeleton className="h-9 w-full max-w-md" />
@@ -45,9 +47,9 @@ export default function InformesPage() {
       ) : (
         <>
           <PageHeader
-            title="Informes"
+            title={t("page.title")}
             breadcrumb={<Breadcrumb />}
-            subtitle="Every change across your estate — newest first."
+            subtitle={t("page.subtitle")}
           />
           <InformesAccessDenied />
         </>

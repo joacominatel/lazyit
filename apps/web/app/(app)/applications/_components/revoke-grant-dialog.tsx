@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -40,6 +41,8 @@ export function RevokeGrantDialog({
   accessLevel,
   onConfirm,
 }: RevokeGrantDialogProps) {
+  const t = useTranslations("applications");
+  const tc = useTranslations("common");
   const canGrant = useCan("accessGrant:grant");
   const [isPending, setIsPending] = useState(false);
 
@@ -47,10 +50,10 @@ export function RevokeGrantDialog({
     setIsPending(true);
     try {
       await onConfirm();
-      toast.success("Access revoked");
+      toast.success(t("access.revokedToast"));
       onOpenChange(false);
     } catch (error) {
-      notifyError(error, "Couldn't revoke access");
+      notifyError(error, t("access.revokeError"));
     } finally {
       setIsPending(false);
     }
@@ -65,23 +68,27 @@ export function RevokeGrantDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Revoke access?</AlertDialogTitle>
+          <AlertDialogTitle>{t("access.revokeTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            Revoke this grant for{" "}
+            {t("access.revokeDescriptionPrefix")}
             <span className="font-medium text-foreground">{userName}</span>
-            {accessLevel ? ` (${accessLevel})` : ""}. The grant is kept in
-            history — revoking ends it, it is not a deletion.
+            {accessLevel
+              ? t("access.revokeDescriptionLevel", { level: accessLevel })
+              : ""}
+            {t("access.revokeDescriptionSuffix")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={isPending}>
+            {tc("cancel")}
+          </AlertDialogCancel>
           <Button
             variant="destructive"
             onClick={handleRevoke}
             disabled={isPending}
           >
             {isPending && <ArrowPathIcon className="animate-spin" />}
-            Revoke
+            {t("access.revokeSubmit")}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

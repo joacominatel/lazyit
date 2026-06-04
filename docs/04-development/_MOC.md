@@ -15,6 +15,8 @@ Everything a developer needs to work on lazyit.
 - [[setup]] — get the repo running locally (Bun, Docker, Prisma).
 - [[workflows]] — day-to-day: dev servers, migrations, building, linting.
 - [[code-conventions]] — language, structure, testing, and the Bun-first boundary.
+- [[i18n]] — **how to translate a section** (next-intl, cookie-mode, en + es). The operating
+  manual for the per-section translation fan-out. Decision: [[0051-i18n-next-intl]].
 
 Domain/data conventions live separately in [[conventions]] (under
 [[02-domain/_MOC|Domain]]).

@@ -16,6 +16,7 @@ import {
   RECENT_ACTIVITY_ACTIONS,
   type RecentActivityItem,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
@@ -84,15 +85,14 @@ import { downloadCsv } from "./informes-csv";
  * to `entityType="user"` — the User lifecycle feed now that UserHistory backs it (DEBT-2, issue #185).
  */
 const TABS = [
-  { value: "all", label: "All", entityType: null },
-  { value: "assets", label: "Assets", entityType: "asset" },
-  { value: "access", label: "Access", entityType: "application" },
-  { value: "stock", label: "Stock", entityType: "consumable" },
-  { value: "users", label: "Users", entityType: "user" },
-  { value: "me", label: "My history", entityType: null },
+  { value: "all", entityType: null },
+  { value: "assets", entityType: "asset" },
+  { value: "access", entityType: "application" },
+  { value: "stock", entityType: "consumable" },
+  { value: "users", entityType: "user" },
+  { value: "me", entityType: null },
 ] as const satisfies readonly {
   value: string;
-  label: string;
   entityType: ActivityEntityType | null;
 }[];
 
@@ -115,10 +115,10 @@ const TAB_INDICATOR: Record<TabValue, string> = {
  * closed-open upper bound (start of the following day).
  */
 const RANGE_OPTIONS = [
-  { value: "all", label: "All time" },
-  { value: "today", label: "Today" },
-  { value: "7d", label: "Last 7 days" },
-  { value: "30d", label: "Last 30 days" },
+  { value: "all" },
+  { value: "today" },
+  { value: "7d" },
+  { value: "30d" },
 ] as const;
 
 type RangeValue = (typeof RANGE_OPTIONS)[number]["value"];
@@ -182,6 +182,7 @@ function toDateToIso(date: string): string | undefined {
 }
 
 export function InformesScreen() {
+  const t = useTranslations("informes");
   // Snapshot "now" once so relative times + the relative-range presets stay pure across renders.
   const [now] = useState(() => Date.now());
   const {
@@ -276,13 +277,19 @@ export function InformesScreen() {
 
   const chips = [
     ...(q
-      ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }]
+      ? [
+          {
+            key: "q",
+            label: t("filters.chips.search", { query: q }),
+            onClear: () => setQ(""),
+          },
+        ]
       : []),
     ...(tab !== "all"
       ? [
           {
             key: "tab",
-            label: `Scope: ${tabMeta.label}`,
+            label: t("filters.chips.scope", { value: t(`tabs.${tabMeta.value}`) }),
             onClear: () => setFilter("tab", FILTER_DEFAULTS.tab),
           },
         ]
@@ -291,11 +298,11 @@ export function InformesScreen() {
       ? [
           {
             key: "actor",
-            label: `Actor: ${
-              users?.find((u) => u.id === actorFilter)
+            label: t("filters.chips.actor", {
+              value: users?.find((u) => u.id === actorFilter)
                 ? `${users.find((u) => u.id === actorFilter)?.firstName} ${users.find((u) => u.id === actorFilter)?.lastName}`
-                : "Selected user"
-            }`,
+                : t("filters.selectedUser"),
+            }),
             onClear: () => setFilter("actor", FILTER_DEFAULTS.actor),
           },
         ]
@@ -304,7 +311,7 @@ export function InformesScreen() {
       ? [
           {
             key: "action",
-            label: `Action: ${actionLabel(actionFilter)}`,
+            label: t("filters.chips.action", { value: actionLabel(actionFilter) }),
             onClear: () => setFilter("action", FILTER_DEFAULTS.action),
           },
         ]
@@ -315,8 +322,13 @@ export function InformesScreen() {
             key: "range",
             label:
               rangePreset !== "custom" && rangePreset !== "all"
-                ? `Range: ${RANGE_OPTIONS.find((r) => r.value === rangePreset)?.label}`
-                : `Range: ${fromDate || "…"} → ${toDate || "…"}`,
+                ? t("filters.chips.rangePreset", {
+                    value: t(`filters.range.${rangePreset}`),
+                  })
+                : t("filters.chips.rangeCustom", {
+                    from: fromDate || "…",
+                    to: toDate || "…",
+                  }),
             onClear: () => {
               setFilter("from", FILTER_DEFAULTS.from);
               setFilter("to", FILTER_DEFAULTS.to);
@@ -328,9 +340,9 @@ export function InformesScreen() {
 
   const header = (
     <PageHeader
-      title="Informes"
+      title={t("page.title")}
       breadcrumb={<Breadcrumb />}
-      subtitle="Every change across your estate — newest first."
+      subtitle={t("page.subtitle")}
       actions={
         <div className="flex items-center gap-2" data-print-hide>
           <Button
@@ -338,19 +350,19 @@ export function InformesScreen() {
             size="sm"
             onClick={() => downloadCsv(items)}
             disabled={items.length === 0}
-            title="Export the events currently visible (the filtered page)"
+            title={t("export.exportTitle")}
           >
             <ArrowDownTrayIcon />
-            Export visible events
+            {t("export.exportVisible")}
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={() => window.print()}
-            title="Print the report"
+            title={t("export.printTitle")}
           >
             <PrinterIcon />
-            Print
+            {t("export.print")}
           </Button>
         </div>
       }
@@ -362,7 +374,7 @@ export function InformesScreen() {
       <div className="space-y-6">
         {header}
         <ErrorState
-          title="Couldn't load the activity history"
+          title={t("empty.errorTitle")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -379,24 +391,24 @@ export function InformesScreen() {
       <div data-print-hide>
         <Tabs value={tab} onValueChange={(value) => setFilter("tab", value)}>
           <TabsList>
-            {TABS.map((t) => (
+            {TABS.map((tabItem) => (
               <TabsTrigger
-                key={t.value}
-                value={t.value}
-                indicatorClassName={TAB_INDICATOR[t.value]}
+                key={tabItem.value}
+                value={tabItem.value}
+                indicatorClassName={TAB_INDICATOR[tabItem.value]}
               >
-                {t.value === "users" ? (
+                {tabItem.value === "users" ? (
                   <span className="inline-flex items-center gap-1.5">
                     <UsersIcon className="size-4" aria-hidden />
-                    {t.label}
+                    {t(`tabs.${tabItem.value}`)}
                   </span>
-                ) : t.value === "me" ? (
+                ) : tabItem.value === "me" ? (
                   <span className="inline-flex items-center gap-1.5">
                     <UserIcon className="size-4" aria-hidden />
-                    {t.label}
+                    {t(`tabs.${tabItem.value}`)}
                   </span>
                 ) : (
-                  t.label
+                  t(`tabs.${tabItem.value}`)
                 )}
               </TabsTrigger>
             ))}
@@ -416,8 +428,8 @@ export function InformesScreen() {
           onChange={setQ}
           debounceMs={250}
           onDebouncedChange={setQ}
-          label="Search activity"
-          placeholder="Search summaries and people…"
+          label={t("filters.searchLabel")}
+          placeholder={t("filters.searchPlaceholder")}
           className="lg:max-w-xs lg:flex-1"
         />
 
@@ -425,10 +437,10 @@ export function InformesScreen() {
         {isMyHistory ? (
           <span
             className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-input px-2.5 text-sm text-muted-foreground"
-            title="Showing your own activity"
+            title={t("filters.youTitle")}
           >
             <UserIcon className="size-4" aria-hidden />
-            You
+            {t("filters.you")}
           </span>
         ) : (
           <Select
@@ -436,10 +448,10 @@ export function InformesScreen() {
             onValueChange={(value) => setFilter("actor", value)}
           >
             <SelectTrigger className="lg:w-56">
-              <SelectValue placeholder="Any actor" />
+              <SelectValue placeholder={t("filters.anyActor")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="ALL">Any actor</SelectItem>
+              <SelectItem value="ALL">{t("filters.anyActor")}</SelectItem>
               {(users ?? []).map((user) => (
                 <SelectItem key={user.id} value={user.id}>
                   <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -462,10 +474,10 @@ export function InformesScreen() {
           onValueChange={(value) => setFilter("action", value)}
         >
           <SelectTrigger className="lg:w-48">
-            <SelectValue placeholder="All actions" />
+            <SelectValue placeholder={t("filters.allActions")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="ALL">All actions</SelectItem>
+            <SelectItem value="ALL">{t("filters.allActions")}</SelectItem>
             {RECENT_ACTIVITY_ACTIONS.map((action) => (
               <SelectItem key={action} value={action}>
                 {actionLabel(action)}
@@ -489,12 +501,12 @@ export function InformesScreen() {
           <SelectContent>
             {RANGE_OPTIONS.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {option.label}
+                {t(`filters.range.${option.value}`)}
               </SelectItem>
             ))}
             {rangePreset === "custom" ? (
               <SelectItem value="custom" disabled>
-                Custom range
+                {t("filters.range.custom")}
               </SelectItem>
             ) : null}
           </SelectContent>
@@ -505,7 +517,7 @@ export function InformesScreen() {
         <div className="inline-flex items-center gap-1.5 text-sm">
           <input
             type="date"
-            aria-label="From date"
+            aria-label={t("filters.fromDate")}
             value={fromDate}
             max={toDate || undefined}
             onChange={(e) => setFilter("from", e.target.value)}
@@ -514,7 +526,7 @@ export function InformesScreen() {
           <span className="text-muted-foreground">→</span>
           <input
             type="date"
-            aria-label="To date"
+            aria-label={t("filters.toDate")}
             value={toDate}
             min={fromDate || undefined}
             onChange={(e) => setFilter("to", e.target.value)}
@@ -528,13 +540,15 @@ export function InformesScreen() {
             active={view === "timeline"}
             onClick={() => setFilter("view", "timeline")}
             icon={Bars3BottomLeftIcon}
-            label="Timeline"
+            label={t("view.timeline")}
+            title={t("view.viewTitle", { label: t("view.timeline") })}
           />
           <ViewToggleButton
             active={view === "table"}
             onClick={() => setFilter("view", "table")}
             icon={TableCellsIcon}
-            label="Table"
+            label={t("view.table")}
+            title={t("view.viewTitle", { label: t("view.table") })}
           />
         </div>
       </div>
@@ -549,11 +563,11 @@ export function InformesScreen() {
         <EmptyState
           icon={ClockIcon}
           pillar="access"
-          title="No events match these filters"
+          title={t("empty.title")}
           description={
             filtersActive
-              ? "Nothing across the whole history matches these filters. Try clearing one."
-              : "Changes to assets, access, stock and people will show up here as your team works."
+              ? t("empty.descriptionFiltered")
+              : t("empty.description")
           }
         >
           {filtersActive ? (
@@ -589,18 +603,20 @@ function ViewToggleButton({
   onClick,
   icon: Icon,
   label,
+  title,
 }: {
   active: boolean;
   onClick: () => void;
   icon: typeof ClockIcon;
   label: string;
+  title: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      title={`${label} view`}
+      title={title}
       className={cn(
         "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active
@@ -628,6 +644,7 @@ function TimelineView({
   isFetchingNextPage: boolean;
   onLoadMore: () => void;
 }) {
+  const t = useTranslations("informes");
   const groups = useMemo(() => groupByDay(items, now), [items, now]);
   return (
     <div className="space-y-5">
@@ -658,7 +675,7 @@ function TimelineView({
           data-print-hide
         >
           {isFetchingNextPage ? <ArrowPathIcon className="animate-spin" /> : null}
-          Load more
+          {t("timeline.loadMore")}
         </Button>
       ) : null}
     </div>
@@ -714,26 +731,31 @@ function TableView({
   onOffsetChange: (offset: number) => void;
   onClearFilters: () => void;
 }) {
+  const t = useTranslations("informes");
   const columns: ResourceColumn[] = [
-    { key: "when", header: "When", skeleton: <Skeleton className="h-4 w-20" /> },
+    {
+      key: "when",
+      header: t("table.columns.when"),
+      skeleton: <Skeleton className="h-4 w-20" />,
+    },
     {
       key: "action",
-      header: "Action",
+      header: t("table.columns.action"),
       skeleton: <Skeleton className="h-5 w-20 rounded-full" />,
     },
     {
       key: "entity",
-      header: "Entity",
+      header: t("table.columns.entity"),
       skeleton: <Skeleton className="h-4 w-16" />,
     },
     {
       key: "actor",
-      header: "Actor",
+      header: t("table.columns.actor"),
       skeleton: <Skeleton className="h-4 w-24" />,
     },
     {
       key: "summary",
-      header: "Summary",
+      header: t("table.columns.summary"),
       skeleton: <Skeleton className="h-4 w-48" />,
     },
   ];
@@ -743,7 +765,7 @@ function TableView({
       <ResourceTable
         columns={columns}
         isFilteredEmpty={items.length === 0}
-        filteredEmptyMessage="No events match these filters."
+        filteredEmptyMessage={t("table.filteredEmpty")}
         filteredEmptyAction={<ClearFiltersLink onClick={onClearFilters} />}
         mobileChildren={items.map((item) => {
           const meta = ENTITY_META[item.entityType];
@@ -759,7 +781,7 @@ function TableView({
               }
               meta={
                 <>
-                  <ResourceCardMeta label="When">
+                  <ResourceCardMeta label={t("table.columns.when")}>
                     <span
                       className="tabular-nums"
                       title={new Date(item.occurredAt).toLocaleString()}
@@ -767,11 +789,11 @@ function TableView({
                       {formatRelativeTime(item.occurredAt, now)}
                     </span>
                   </ResourceCardMeta>
-                  <ResourceCardMeta label="Entity">
-                    <span className="capitalize">{item.entityType}</span>
+                  <ResourceCardMeta label={t("table.columns.entity")}>
+                    <span>{t(`table.entityLabel.${item.entityType}`)}</span>
                   </ResourceCardMeta>
-                  <ResourceCardMeta label="Actor">
-                    {item.actorName ?? "System"}
+                  <ResourceCardMeta label={t("table.columns.actor")}>
+                    {item.actorName ?? t("table.system")}
                   </ResourceCardMeta>
                 </>
               }
@@ -804,7 +826,7 @@ function TableView({
                     className="size-4 text-muted-foreground"
                     aria-hidden
                   />
-                  <span className="capitalize">{item.entityType}</span>
+                  <span>{t(`table.entityLabel.${item.entityType}`)}</span>
                 </span>
               </TableCell>
               <TableCell>
@@ -814,7 +836,9 @@ function TableView({
                     <span className="min-w-0 truncate">{item.actorName}</span>
                   </span>
                 ) : (
-                  <span className="text-muted-foreground">System</span>
+                  <span className="text-muted-foreground">
+                    {t("table.system")}
+                  </span>
                 )}
               </TableCell>
               <TableCell className="max-w-md">

@@ -1,3 +1,4 @@
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { StatusDot } from "@/components/ui/status-badge";
 
@@ -11,10 +12,11 @@ import { StatusDot } from "@/components/ui/status-badge";
  * hardcoded emerald.
  */
 export function UserStatusBadge({ isActive }: { isActive: boolean }) {
+  const t = useTranslations("users.status");
   return (
     <Badge variant={isActive ? "secondary" : "outline"} className="gap-1.5">
       <StatusDot tone={isActive ? "success" : "neutral"} />
-      {isActive ? "Active" : "Inactive"}
+      {isActive ? t("active") : t("inactive")}
     </Badge>
   );
 }

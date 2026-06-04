@@ -1,0 +1,80 @@
+{
+  "page": {
+    "title": "Informes",
+    "subtitle": "Cada cambio en tu parque — los más recientes primero.",
+    "accessDeniedTitle": "Los informes son solo para administradores",
+    "accessDeniedDescription": "El historial de actividad de todo el parque requiere el permiso de Informes. Pídele acceso a esta vista a un administrador si lo necesitas.",
+    "accessDeniedAction": "Volver al panel"
+  },
+  "tabs": {
+    "all": "Todo",
+    "assets": "Activos",
+    "access": "Acceso",
+    "stock": "Stock",
+    "users": "Usuarios",
+    "me": "Mi historial"
+  },
+  "filters": {
+    "searchLabel": "Buscar actividad",
+    "searchPlaceholder": "Buscar resúmenes y personas…",
+    "anyActor": "Cualquier responsable",
+    "you": "Tú",
+    "youTitle": "Mostrando tu propia actividad",
+    "allActions": "Todas las acciones",
+    "range": {
+      "all": "Todo el tiempo",
+      "today": "Hoy",
+      "7d": "Últimos 7 días",
+      "30d": "Últimos 30 días",
+      "custom": "Rango personalizado"
+    },
+    "fromDate": "Fecha desde",
+    "toDate": "Fecha hasta",
+    "selectedUser": "Usuario seleccionado",
+    "chips": {
+      "search": "Búsqueda: “{query}”",
+      "scope": "Alcance: {value}",
+      "actor": "Responsable: {value}",
+      "action": "Acción: {value}",
+      "rangePreset": "Rango: {value}",
+      "rangeCustom": "Rango: {from} → {to}"
+    }
+  },
+  "view": {
+    "timeline": "Cronología",
+    "table": "Tabla",
+    "viewTitle": "Vista {label}"
+  },
+  "table": {
+    "columns": {
+      "when": "Cuándo",
+      "action": "Acción",
+      "entity": "Entidad",
+      "actor": "Responsable",
+      "summary": "Resumen"
+    },
+    "system": "Sistema",
+    "entityLabel": {
+      "asset": "Activo",
+      "application": "Aplicación",
+      "consumable": "Consumible",
+      "user": "Usuario"
+    },
+    "filteredEmpty": "Ningún evento coincide con estos filtros."
+  },
+  "export": {
+    "exportVisible": "Exportar eventos visibles",
+    "exportTitle": "Exporta los eventos visibles actualmente (la página filtrada)",
+    "print": "Imprimir",
+    "printTitle": "Imprimir el informe"
+  },
+  "timeline": {
+    "loadMore": "Cargar más"
+  },
+  "empty": {
+    "errorTitle": "No se pudo cargar el historial de actividad",
+    "title": "Ningún evento coincide con estos filtros",
+    "descriptionFiltered": "Nada en todo el historial coincide con estos filtros. Intenta quitar uno.",
+    "description": "Los cambios en activos, accesos, stock y personas aparecerán aquí a medida que tu equipo trabaja."
+  }
+}

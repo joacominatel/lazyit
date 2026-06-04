@@ -1,6 +1,7 @@
 "use client";
 
 import { MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useQuickAdjustStock } from "@/lib/api/hooks/use-consumable-movement-mutations";
@@ -30,6 +31,7 @@ export function QuickAdjustButtons({
   unit,
   size = "icon-sm",
 }: QuickAdjustButtonsProps) {
+  const t = useTranslations("consumables");
   const quickAdjust = useQuickAdjustStock();
   const compact = size === "icon-sm";
 
@@ -41,11 +43,11 @@ export function QuickAdjustButtons({
           const next = currentStock + delta;
           toast.success(
             delta > 0
-              ? `Added 1 to ${name} — now ${next} ${unit}`
-              : `Removed 1 from ${name} — now ${next} ${unit}`,
+              ? t("stock.quickAdded", { name, count: next, unit })
+              : t("stock.quickRemoved", { name, count: next, unit }),
           );
         },
-        onError: (error) => notifyError(error, "Couldn't adjust stock"),
+        onError: (error) => notifyError(error, t("stock.quickAdjustError")),
       },
     );
   }
@@ -59,11 +61,11 @@ export function QuickAdjustButtons({
         type="button"
         variant="outline"
         size={size}
-        aria-label={`Remove one ${name}`}
+        aria-label={t("stock.quickRemoveAria", { name })}
         title={
           currentStock <= 0
-            ? "Out of stock"
-            : `Remove one ${name} (−1)`
+            ? t("stock.quickRemoveOutOfStock")
+            : t("stock.quickRemoveTitle", { name })
         }
         disabled={removeDisabled}
         onClick={() => adjust(-1)}
@@ -75,8 +77,8 @@ export function QuickAdjustButtons({
         type="button"
         variant="outline"
         size={size}
-        aria-label={`Add one ${name}`}
-        title={`Add one ${name} (+1)`}
+        aria-label={t("stock.quickAddAria", { name })}
+        title={t("stock.quickAddTitle", { name })}
         disabled={quickAdjust.isPending}
         onClick={() => adjust(1)}
       >

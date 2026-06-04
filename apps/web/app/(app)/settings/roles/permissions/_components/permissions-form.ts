@@ -110,31 +110,41 @@ export interface SaveDiff {
   isConsequential: boolean;
 }
 
-/** A friendly role word for consequence sentences. */
-function roleWord(role: EditableRole): string {
-  return role === "MEMBER" ? "Members" : "Viewers";
-}
+/**
+ * The minimal translator shape the consequence builders need: a `t(key, values?)` over the
+ * `settings` namespace (matches next-intl's `useTranslations("settings")`). The page passes its
+ * own `t`, so the human consequence sentences come from the catalog rather than being hardcoded.
+ */
+export type ConsequenceTranslator = (
+  key: string,
+  values?: Record<string, string>,
+) => string;
 
 /**
  * Compute the human consequences of replacing `before` with `after` for `role`. Drives whether the
  * save needs the confirm dialog and what it says. Only the two consequence classes the CEO flagged
- * are surfaced (removed reads; above-tier grants); pure within-tier add/remove is silent.
+ * are surfaced (removed reads; above-tier grants); pure within-tier add/remove is silent. The
+ * `t` translator (from the page) renders each consequence sentence from the catalog.
  */
 export function analyzeSaveDiff(
   role: EditableRole,
   before: readonly Permission[],
   after: readonly Permission[],
+  t: ConsequenceTranslator,
 ): SaveDiff {
   const beforeSet = new Set(before);
   const afterSet = new Set(after);
-  const who = roleWord(role);
+  const who = t(`roles.permissions.consequence.who.${role}`);
 
   const removedReads: SaveConsequence[] = [];
   for (const p of beforeSet) {
     if (!afterSet.has(p) && PERMISSION_META[p].tier === "view") {
       removedReads.push({
         permission: p,
-        message: `${who} will no longer be able to ${verbForRead(p)}.`,
+        message: t("roles.permissions.consequence.removedRead", {
+          who,
+          action: verbForRead(p),
+        }),
       });
     }
   }
@@ -144,7 +154,7 @@ export function analyzeSaveDiff(
     if (!beforeSet.has(p) && isAboveDefaultTier(p)) {
       aboveTierGrants.push({
         permission: p,
-        message: consequenceForAboveTier(role, p),
+        message: consequenceForAboveTier(p, who, t),
       });
     }
   }
@@ -166,21 +176,21 @@ function verbForRead(permission: Permission): string {
 
 /** The strongly-worded consequence sentence for granting an above-default-tier permission. */
 function consequenceForAboveTier(
-  role: EditableRole,
   permission: Permission,
+  who: string,
+  t: ConsequenceTranslator,
 ): string {
-  const who = roleWord(role);
   switch (permission) {
     case "accessGrant:grant":
-      return `${who} will be able to grant and revoke application access for anyone — including to sensitive applications. This is normally an admin-only action.`;
+      return t("roles.permissions.consequence.accessGrantGrant", { who });
     case "user:manage":
-      return `${who} will be able to administer users: create accounts, change roles (including granting ADMIN) and offboard people. This is normally an admin-only action.`;
+      return t("roles.permissions.consequence.userManage", { who });
     case "settings:manage":
-      return `${who} will be able to configure the instance and manage taxonomies — the full admin configuration surface. This is normally an admin-only action.`;
+      return t("roles.permissions.consequence.settingsManage", { who });
     default: {
       // Every other above-tier permission is a :delete.
-      const label = PERMISSION_META[permission].label.toLowerCase();
-      return `${who} will be able to ${label} — a destructive action normally reserved for admins.`;
+      const action = PERMISSION_META[permission].label.toLowerCase();
+      return t("roles.permissions.consequence.deleteDefault", { who, action });
     }
   }
 }

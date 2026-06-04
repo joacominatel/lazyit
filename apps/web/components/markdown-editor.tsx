@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownView } from "@/components/markdown-view";
 
@@ -20,16 +21,17 @@ export function MarkdownEditor({
   value,
   onChange,
   id,
-  placeholder = "Write in Markdown…",
+  placeholder,
   invalid,
 }: MarkdownEditorProps) {
+  const t = useTranslations("shared");
   return (
     <div className="grid gap-3 md:grid-cols-2">
       <Textarea
         id={id}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t("editor.markdownPlaceholder")}
         aria-invalid={invalid || undefined}
         spellCheck
         className="min-h-[420px] resize-y font-mono text-sm"
@@ -39,7 +41,7 @@ export function MarkdownEditor({
           <MarkdownView content={value} />
         ) : (
           <p className="text-sm text-muted-foreground">
-            Preview appears here as you type.
+            {t("editor.previewHint")}
           </p>
         )}
       </div>

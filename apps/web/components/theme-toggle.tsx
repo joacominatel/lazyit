@@ -1,6 +1,7 @@
 "use client";
 
 import { MoonIcon, SunIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 
@@ -13,13 +14,14 @@ import { Button } from "@/components/ui/button";
  * hydration flash and no need for a mounted guard.
  */
 export function ThemeToggle() {
+  const t = useTranslations("shared");
   const { resolvedTheme, setTheme } = useTheme();
 
   return (
     <Button
       variant="ghost"
       size="icon"
-      aria-label="Toggle theme"
+      aria-label={t("chrome.toggleTheme")}
       onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
     >
       <SunIcon className="size-5 dark:hidden" />

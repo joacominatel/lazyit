@@ -12,6 +12,7 @@ import {
   type UpdateServiceAccount,
   UpdateServiceAccountSchema,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -137,6 +138,8 @@ function ServiceAccountForm({
   account?: ServiceAccount;
   onClose: () => void;
 }) {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
   const isEdit = account != null;
   const create = useCreateServiceAccount();
   const update = useUpdateServiceAccount();
@@ -179,11 +182,11 @@ function ServiceAccountForm({
     event.preventDefault();
     const name = values.name.trim();
     if (name.length === 0) {
-      setError("Name is required.");
+      setError(t("serviceAccounts.form.errors.nameRequired"));
       return;
     }
     if (values.permissions.size === 0) {
-      setError("Grant at least one permission.");
+      setError(t("serviceAccounts.form.errors.permissionRequired"));
       return;
     }
     const expiresAt = localInputToIso(values.expiresAt);
@@ -200,17 +203,18 @@ function ServiceAccountForm({
       };
       const parsed = UpdateServiceAccountSchema.safeParse(body);
       if (!parsed.success) {
-        setError("Some fields are invalid. Check the values and try again.");
+        setError(t("serviceAccounts.form.errors.invalidFields"));
         return;
       }
       update.mutate(
         { id: account.id, data: parsed.data },
         {
           onSuccess: () => {
-            toast.success("Service account updated");
+            toast.success(t("serviceAccounts.toast.updated"));
             onClose();
           },
-          onError: (err) => notifyError(err, "Couldn't update service account"),
+          onError: (err) =>
+            notifyError(err, t("serviceAccounts.toast.updateError")),
         },
       );
       return;
@@ -226,16 +230,17 @@ function ServiceAccountForm({
     };
     const parsed = CreateServiceAccountSchema.safeParse(body);
     if (!parsed.success) {
-      setError("Some fields are invalid. Check the values and try again.");
+      setError(t("serviceAccounts.form.errors.invalidFields"));
       return;
     }
     create.mutate(parsed.data, {
       onSuccess: (result) => {
-        toast.success("Service account created");
+        toast.success(t("serviceAccounts.toast.created"));
         // Swap to the one-time reveal instead of closing — the token is only available now.
         setSecret({ name: result.name, token: result.token });
       },
-      onError: (err) => notifyError(err, "Couldn't create service account"),
+      onError: (err) =>
+        notifyError(err, t("serviceAccounts.toast.createError")),
     });
   }
 
@@ -244,9 +249,9 @@ function ServiceAccountForm({
     return (
       <>
         <DialogHeader>
-          <DialogTitle>Save your token</DialogTitle>
+          <DialogTitle>{t("serviceAccounts.form.secretTitle")}</DialogTitle>
           <DialogDescription>
-            This is the only time the token is shown.
+            {t("serviceAccounts.form.secretDescription")}
           </DialogDescription>
         </DialogHeader>
         <SecretReveal
@@ -263,24 +268,28 @@ function ServiceAccountForm({
     <>
       <DialogHeader>
         <DialogTitle>
-          {isEdit ? "Edit service account" : "New service account"}
+          {isEdit
+            ? t("serviceAccounts.form.editTitle")
+            : t("serviceAccounts.form.newTitle")}
         </DialogTitle>
         <DialogDescription>
           {isEdit
-            ? "Update the name, permissions and lifecycle of this non-human credential. The token is not changed here — use Rotate for that."
-            : "A non-human credential (a CI runner, a script, an integration). It is authorized by the permissions you grant — never a role. The token is shown once after you create it."}
+            ? t("serviceAccounts.form.editDescription")
+            : t("serviceAccounts.form.newDescription")}
         </DialogDescription>
       </DialogHeader>
 
       <form id={FORM_ID} onSubmit={handleSubmit} noValidate>
         <FieldGroup>
           <Field data-invalid={error ? true : undefined}>
-            <FieldLabel htmlFor="sa-name">Name</FieldLabel>
+            <FieldLabel htmlFor="sa-name">
+              {t("serviceAccounts.form.nameLabel")}
+            </FieldLabel>
             <Input
               id="sa-name"
               value={values.name}
               onChange={(e) => set("name", e.target.value)}
-              placeholder="e.g. CI deploy runner"
+              placeholder={t("serviceAccounts.form.namePlaceholder")}
               maxLength={120}
               aria-invalid={error ? true : undefined}
               autoFocus
@@ -288,19 +297,23 @@ function ServiceAccountForm({
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="sa-description">Description</FieldLabel>
+            <FieldLabel htmlFor="sa-description">
+              {t("serviceAccounts.form.descriptionLabel")}
+            </FieldLabel>
             <Textarea
               id="sa-description"
               value={values.description}
               onChange={(e) => set("description", e.target.value)}
-              placeholder="Optional — what this credential is used for."
+              placeholder={t("serviceAccounts.form.descriptionPlaceholder")}
               rows={2}
               maxLength={500}
             />
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="sa-expires">Expires at</FieldLabel>
+            <FieldLabel htmlFor="sa-expires">
+              {t("serviceAccounts.form.expiresLabel")}
+            </FieldLabel>
             <Input
               id="sa-expires"
               type="datetime-local"
@@ -308,18 +321,18 @@ function ServiceAccountForm({
               onChange={(e) => set("expiresAt", e.target.value)}
             />
             <FieldDescription>
-              Optional. After this time the token is rejected. Leave empty for no
-              expiry.
+              {t("serviceAccounts.form.expiresHint")}
             </FieldDescription>
           </Field>
 
           {isEdit ? (
             <Field orientation="horizontal">
               <div className="space-y-0.5">
-                <FieldLabel htmlFor="sa-active">Active</FieldLabel>
+                <FieldLabel htmlFor="sa-active">
+                  {t("serviceAccounts.form.activeLabel")}
+                </FieldLabel>
                 <FieldDescription>
-                  A soft disable. When off, the token stops authenticating
-                  without revoking the account.
+                  {t("serviceAccounts.form.activeHint")}
                 </FieldDescription>
               </div>
               <Switch
@@ -331,11 +344,9 @@ function ServiceAccountForm({
           ) : null}
 
           <Field>
-            <FieldLabel>Permissions</FieldLabel>
+            <FieldLabel>{t("serviceAccounts.form.permissionsLabel")}</FieldLabel>
             <FieldDescription>
-              The capabilities this account can use. Authorization is by this set
-              — it never inherits a role. Delete and admin-level grants are
-              allowed but flagged.
+              {t("serviceAccounts.form.permissionsHint")}
             </FieldDescription>
             <PermissionPicker
               value={values.permissions}
@@ -356,11 +367,13 @@ function ServiceAccountForm({
           onClick={onClose}
           disabled={isPending}
         >
-          Cancel
+          {tc("cancel")}
         </Button>
         <Button type="submit" form={FORM_ID} disabled={isPending}>
           {isPending && <ArrowPathIcon className="animate-spin" />}
-          {isEdit ? "Save changes" : "Create"}
+          {isEdit
+            ? t("serviceAccounts.form.saveChanges")
+            : t("serviceAccounts.form.createButton")}
         </Button>
       </div>
     </>

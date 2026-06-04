@@ -1,6 +1,7 @@
 "use client";
 
 import { Bars3Icon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -24,6 +25,7 @@ import {
  * between routes, so we watch the pathname and dismiss on change.
  */
 export function MobileNav() {
+  const t = useTranslations("shared");
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
@@ -39,7 +41,7 @@ export function MobileNav() {
           variant="ghost"
           size="icon"
           className="size-11 md:hidden"
-          aria-label="Open navigation menu"
+          aria-label={t("chrome.openNavigationMenu")}
         >
           <Bars3Icon className="size-6" />
         </Button>

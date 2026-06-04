@@ -6,6 +6,7 @@ import {
   CreateConsumableMovementSchema,
 } from "@lazyit/shared";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { Controller, type Resolver, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
@@ -31,29 +32,11 @@ import { useRecordMovement } from "@/lib/api/hooks/use-consumable-movement-mutat
 import { notifyError } from "@/lib/api/notify-error";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
-const COPY: Record<
-  ConsumableMovementType,
-  { title: string; quantityLabel: string; quantityHint: string; cta: string }
-> = {
-  IN: {
-    title: "Add stock",
-    quantityLabel: "Quantity to add",
-    quantityHint: "How many units are coming in.",
-    cta: "Add stock",
-  },
-  OUT: {
-    title: "Remove stock",
-    quantityLabel: "Quantity to remove",
-    quantityHint: "Cannot exceed what is on hand.",
-    cta: "Remove stock",
-  },
-  ADJUSTMENT: {
-    title: "Adjust stock",
-    quantityLabel: "New stock count",
-    quantityHint:
-      "Sets on-hand to this exact number (a physical recount). Use 1 or more.",
-    cta: "Set stock",
-  },
+/** Movement direction → its i18n subkey under `consumables.stock.dialog`. */
+const COPY_KEY: Record<ConsumableMovementType, "in" | "out" | "adjustment"> = {
+  IN: "in",
+  OUT: "out",
+  ADJUSTMENT: "adjustment",
 };
 
 /**
@@ -100,8 +83,10 @@ export function StockMovementDialog({
   currentStock,
   unit,
 }: StockMovementDialogProps) {
+  const t = useTranslations("consumables");
+  const tc = useTranslations("common");
   const record = useRecordMovement();
-  const copy = COPY[type];
+  const copyKey = COPY_KEY[type];
 
   const form = useForm<FormValues>({
     resolver: zodResolver(FormSchema) as Resolver<FormValues>,
@@ -134,10 +119,10 @@ export function StockMovementDialog({
         },
         {
           onSuccess: () => {
-            toast.success("Stock updated");
+            toast.success(t("stock.dialog.updatedToast"));
             onOpenChange(false);
           },
-          onError: (error) => notifyError(error, "Couldn't update stock"),
+          onError: (error) => notifyError(error, t("stock.dialog.updateError")),
         },
       );
     },
@@ -156,9 +141,9 @@ export function StockMovementDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{copy.title}</DialogTitle>
+          <DialogTitle>{t(`stock.dialog.${copyKey}.title`)}</DialogTitle>
           <DialogDescription>
-            On hand now: {currentStock} {unit}.
+            {t("stock.dialog.onHand", { count: currentStock, unit })}
           </DialogDescription>
         </DialogHeader>
 
@@ -179,7 +164,7 @@ export function StockMovementDialog({
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
                   <FieldLabel htmlFor="movement-qty" required>
-                    {copy.quantityLabel}
+                    {t(`stock.dialog.${copyKey}.quantityLabel`)}
                   </FieldLabel>
                   <Input
                     id="movement-qty"
@@ -200,10 +185,15 @@ export function StockMovementDialog({
                     aria-invalid={fieldState.invalid || undefined}
                     autoFocus
                   />
-                  <FieldDescription>{copy.quantityHint}</FieldDescription>
+                  <FieldDescription>
+                    {t(`stock.dialog.${copyKey}.quantityHint`)}
+                  </FieldDescription>
                   {outExceeds && (
                     <p className="text-sm text-destructive">
-                      Only {currentStock} {unit} on hand — this will be rejected.
+                      {t("stock.dialog.outExceeds", {
+                        count: currentStock,
+                        unit,
+                      })}
                     </p>
                   )}
                   <FieldError errors={[fieldState.error]} />
@@ -216,7 +206,9 @@ export function StockMovementDialog({
               name="reason"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="movement-reason">Reason</FieldLabel>
+                  <FieldLabel htmlFor="movement-reason">
+                    {t("stock.dialog.reasonLabel")}
+                  </FieldLabel>
                   <Input
                     id="movement-reason"
                     name={field.name}
@@ -224,7 +216,7 @@ export function StockMovementDialog({
                     value={field.value ?? ""}
                     onBlur={field.onBlur}
                     onChange={(event) => field.onChange(event.target.value)}
-                    placeholder="Optional — e.g. restock, issued to Ada"
+                    placeholder={t("stock.dialog.reasonPlaceholder")}
                     aria-invalid={fieldState.invalid || undefined}
                   />
                   <FieldError errors={[fieldState.error]} />
@@ -237,7 +229,9 @@ export function StockMovementDialog({
               name="notes"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="movement-notes">Notes</FieldLabel>
+                  <FieldLabel htmlFor="movement-notes">
+                    {t("stock.dialog.notesLabel")}
+                  </FieldLabel>
                   <Textarea
                     id="movement-notes"
                     name={field.name}
@@ -262,11 +256,11 @@ export function StockMovementDialog({
             onClick={() => onOpenChange(false)}
             disabled={record.isPending}
           >
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button type="submit" form={FORM_ID} disabled={record.isPending}>
             {record.isPending && <ArrowPathIcon className="animate-spin" />}
-            {copy.cta}
+            {t(`stock.dialog.${copyKey}.cta`)}
           </Button>
         </DialogFooter>
       </DialogContent>

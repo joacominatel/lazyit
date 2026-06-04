@@ -11,6 +11,7 @@ import {
   type LocationType,
   LocationTypeSchema,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -61,8 +62,8 @@ import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils/format";
 import { LocationFormDialog } from "./_components/location-form-dialog";
 import {
-  formatLocationType,
   LocationTypeBadge,
+  useLocationTypeLabel,
 } from "./_components/location-type-badge";
 
 /**
@@ -72,6 +73,8 @@ import {
 const FILTER_DEFAULTS = { type: "ALL", archived: "ALL" } as const;
 
 export default function LocationsPage() {
+  const t = useTranslations("locations");
+  const locationTypeLabel = useLocationTypeLabel();
   // `isAdmin` still gates the archived (`deleted=only`) slice (API keeps it ADMIN-only). Create/edit
   // are location:write; delete/restore are location:delete.
   const { isAdmin } = usePermissions();
@@ -132,8 +135,9 @@ export default function LocationsPage() {
 
   function handleRestoreRow(location: Location) {
     restoreLocationMutation.mutate(location.id, {
-      onSuccess: () => toast.success(`${location.name} restored`),
-      onError: (err) => notifyError(err, "Couldn't restore the location"),
+      onSuccess: () =>
+        toast.success(t("list.toast.restored", { name: location.name })),
+      onError: (err) => notifyError(err, t("list.toast.restoreError")),
     });
   }
 
@@ -149,7 +153,7 @@ export default function LocationsPage() {
       selection.clear();
       await refetch();
     } catch (err) {
-      notifyError(err, "Couldn't restore the selected locations");
+      notifyError(err, t("list.toast.restoreManyError"));
     } finally {
       setBulkRestoring(false);
     }
@@ -161,7 +165,7 @@ export default function LocationsPage() {
         key: "name",
         header: (
           <SortableHeader
-            label="Name"
+            label={t("list.columns.name")}
             active={sort === "name"}
             direction={dir}
             onToggle={() => toggleSort("name")}
@@ -173,7 +177,7 @@ export default function LocationsPage() {
         key: "type",
         header: (
           <SortableHeader
-            label="Type"
+            label={t("list.columns.type")}
             active={sort === "type"}
             direction={dir}
             onToggle={() => toggleSort("type")}
@@ -181,17 +185,21 @@ export default function LocationsPage() {
         ),
         skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
       },
-      { key: "floor", header: "Floor", skeleton: <Skeleton className="h-4 w-10" /> },
+      {
+        key: "floor",
+        header: t("list.columns.floor"),
+        skeleton: <Skeleton className="h-4 w-10" />,
+      },
       {
         key: "address",
-        header: "Address",
+        header: t("list.columns.address"),
         skeleton: <Skeleton className="h-4 w-48" />,
       },
       {
         key: "updated",
         header: (
           <SortableHeader
-            label="Updated"
+            label={t("list.columns.updated")}
             active={sort === "updatedAt"}
             direction={dir}
             onToggle={() => toggleSort("updatedAt")}
@@ -201,13 +209,13 @@ export default function LocationsPage() {
       },
       {
         key: "actions",
-        header: "Actions",
+        header: t("list.columns.actions"),
         srOnlyHeader: true,
         headClassName: "w-12 text-right",
         skeleton: <Skeleton className="ml-auto size-7" />,
       },
     ],
-    [sort, dir, toggleSort],
+    [sort, dir, toggleSort, t],
   );
 
   const total = page?.total ?? 0;
@@ -224,12 +232,20 @@ export default function LocationsPage() {
   }
 
   const chips = [
-    ...(q ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }] : []),
+    ...(q
+      ? [
+          {
+            key: "q",
+            label: t("list.chipSearch", { query: q }),
+            onClear: () => setQ(""),
+          },
+        ]
+      : []),
     ...(typeFilter !== "ALL"
       ? [
           {
             key: "type",
-            label: `Type: ${formatLocationType(typeFilter)}`,
+            label: t("list.chipType", { type: locationTypeLabel(typeFilter) }),
             onClear: () => setFilter("type", FILTER_DEFAULTS.type),
           },
         ]
@@ -239,10 +255,10 @@ export default function LocationsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Locations"
+        title={t("list.title")}
         pillar="manage"
         icon={MapPinIcon}
-        subtitle="Where your assets physically live."
+        subtitle={t("list.subtitle")}
         actions={
           <>
             {isAdmin ? (
@@ -257,7 +273,7 @@ export default function LocationsPage() {
             {canWrite ? (
               <Button onClick={openCreate}>
                 <PlusIcon />
-                New location
+                {t("list.newLocation")}
               </Button>
             ) : null}
           </>
@@ -268,7 +284,7 @@ export default function LocationsPage() {
         <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
       ) : isError ? (
         <ErrorState
-          title="Could not load locations"
+          title={t("list.loadError")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -276,11 +292,11 @@ export default function LocationsPage() {
         <EmptyState
           icon={MapPinIcon}
           pillar="manage"
-          title="No locations yet"
-          description="Add the offices, floors and storage rooms where assets live — then place each asset on the map of your estate."
+          title={t("empty.title")}
+          description={t("empty.description")}
           action={
             canWrite
-              ? { label: "Add your first location", onClick: openCreate }
+              ? { label: t("empty.action"), onClick: openCreate }
               : undefined
           }
         />
@@ -292,8 +308,8 @@ export default function LocationsPage() {
               onChange={setQ}
               debounceMs={300}
               onDebouncedChange={setQ}
-              label="Search locations"
-              placeholder="Search by name…"
+              label={t("list.searchLabel")}
+              placeholder={t("list.searchPlaceholder")}
               className="sm:max-w-xs sm:flex-1"
             />
             <Select
@@ -304,10 +320,10 @@ export default function LocationsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">All types</SelectItem>
+                <SelectItem value="ALL">{t("list.allTypes")}</SelectItem>
                 {LocationTypeSchema.options.map((type) => (
                   <SelectItem key={type} value={type}>
-                    {formatLocationType(type)}
+                    {locationTypeLabel(type)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -321,8 +337,8 @@ export default function LocationsPage() {
             isFilteredEmpty={rows.length === 0}
             filteredEmptyMessage={
               archived
-                ? "No archived locations."
-                : "No locations match your filters."
+                ? t("list.archivedEmpty")
+                : t("list.filteredEmpty")
             }
             filteredEmptyAction={
               <ClearFiltersLink onClick={clearFilters} />
@@ -334,7 +350,7 @@ export default function LocationsPage() {
                     allSelected: selection.allSelected,
                     someSelected: selection.someSelected,
                     onToggleAll: selection.toggleAll,
-                    selectAllLabel: "Select all locations on this page",
+                    selectAllLabel: t("list.selectAll"),
                   }
                 : undefined
             }
@@ -349,17 +365,20 @@ export default function LocationsPage() {
                 onSelectedChange={(on) =>
                   selection.setSelected(location.id, on)
                 }
-                selectLabel={`Select ${location.name}`}
+                selectLabel={t("list.selectRow", { name: location.name })}
                 meta={
                   <>
-                    <ResourceCardMeta label="Floor">
+                    <ResourceCardMeta label={t("list.meta.floor")}>
                       {location.floor ?? "—"}
                     </ResourceCardMeta>
-                    <ResourceCardMeta label="Updated">
+                    <ResourceCardMeta label={t("list.meta.updated")}>
                       {formatDate(location.updatedAt)}
                     </ResourceCardMeta>
                     {location.address ? (
-                      <ResourceCardMeta label="Address" className="col-span-2">
+                      <ResourceCardMeta
+                        label={t("list.meta.address")}
+                        className="col-span-2"
+                      >
                         {location.address}
                       </ResourceCardMeta>
                     ) : null}
@@ -401,7 +420,7 @@ export default function LocationsPage() {
                     onCheckedChange={(on) =>
                       selection.setSelected(location.id, on)
                     }
-                    label={`Select ${location.name}`}
+                    label={t("list.selectRow", { name: location.name })}
                   />
                 ) : null}
                 <TableCell className="font-medium">
@@ -464,7 +483,7 @@ export default function LocationsPage() {
                 disabled={bulkRestoring}
               >
                 <ArrowUturnLeftIcon />
-                Restore
+                {t("list.restore")}
               </Button>
             </BatchActionBar>
           ) : null}

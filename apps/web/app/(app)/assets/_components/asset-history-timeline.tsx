@@ -6,6 +6,7 @@ import type {
   AssetHistoryEventType,
   User,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,16 +17,17 @@ import { useUsers } from "@/lib/api/hooks/use-users";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/format";
 
-const EVENT_LABEL: Record<AssetHistoryEventType, string> = {
-  CREATED: "Created",
-  STATUS_CHANGED: "Status",
-  ASSIGNED: "Assigned",
-  RELEASED: "Released",
-  LOCATION_CHANGED: "Location",
-  MODEL_CHANGED: "Model",
-  SPECS_CHANGED: "Specs",
-  DELETED: "Deleted",
-  RESTORED: "Restored",
+/** Maps each event type to its label key under `assets.detail.timeline.events`. */
+const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
+  CREATED: "created",
+  STATUS_CHANGED: "statusChanged",
+  ASSIGNED: "assigned",
+  RELEASED: "released",
+  LOCATION_CHANGED: "locationChanged",
+  MODEL_CHANGED: "modelChanged",
+  SPECS_CHANGED: "specsChanged",
+  DELETED: "deleted",
+  RESTORED: "restored",
 };
 
 /**
@@ -59,8 +61,9 @@ const EVENT_BADGE: Record<AssetHistoryEventType, EventBadgeSpec> = {
 
 /** Renders the event label as either a solid status pill or a neutral pill with a hue dot. */
 function EventBadge({ eventType }: { eventType: AssetHistoryEventType }) {
+  const t = useTranslations("assets.detail.timeline.events");
   const badge = EVENT_BADGE[eventType];
-  const label = EVENT_LABEL[eventType];
+  const label = t(EVENT_LABEL_KEY[eventType]);
   if (badge.kind === "status") {
     return <StatusBadge tone={badge.tone}>{label}</StatusBadge>;
   }
@@ -95,6 +98,8 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
     isFetchingNextPage,
   } = useAssetHistory(assetId);
   const { data: users } = useUsers();
+  const t = useTranslations("assets.detail.timeline");
+  const tc = useTranslations("common");
   // Snapshot "now" once so relative times stay pure across renders (react-hooks/purity).
   const [now] = useState(() => Date.now());
 
@@ -105,9 +110,9 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
   const events = useMemo(() => (data?.pages ?? []).flat(), [data]);
 
   function userName(id: string | undefined): string {
-    if (!id) return "someone";
+    if (!id) return t("someone");
     const user = userById.get(id);
-    return user ? `${user.firstName} ${user.lastName}` : "a user";
+    return user ? `${user.firstName} ${user.lastName}` : t("aUser");
   }
 
   /** Contextual detail for an event (the type itself is shown as a badge). */
@@ -117,24 +122,24 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
       case "STATUS_CHANGED": {
         const from = asString(payload.from);
         const to = asString(payload.to);
-        return from && to ? `${from} → ${to}` : null;
+        return from && to ? t("statusChange", { from, to }) : null;
       }
       case "ASSIGNED":
-        return `to ${userName(asString(payload.userId))}`;
+        return t("assignedTo", { name: userName(asString(payload.userId)) });
       case "RELEASED":
-        return `from ${userName(asString(payload.userId))}`;
+        return t("releasedFrom", { name: userName(asString(payload.userId)) });
       case "CREATED":
-        return "Asset created";
+        return t("details.created");
       case "LOCATION_CHANGED":
-        return "Location updated";
+        return t("details.locationChanged");
       case "MODEL_CHANGED":
-        return "Model updated";
+        return t("details.modelChanged");
       case "SPECS_CHANGED":
-        return "Specs updated";
+        return t("details.specsChanged");
       case "DELETED":
-        return "Asset deleted";
+        return t("details.deleted");
       case "RESTORED":
-        return "Asset restored";
+        return t("details.restored");
       default:
         return null;
     }
@@ -159,12 +164,10 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
   if (isError) {
     return (
       <div className="flex flex-col items-start gap-2">
-        <p className="text-sm text-muted-foreground">
-          Couldn&apos;t load the activity log.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("loadError")}</p>
         <Button variant="outline" size="sm" onClick={() => refetch()}>
           <ArrowPathIcon />
-          Retry
+          {tc("retry")}
         </Button>
       </div>
     );
@@ -172,7 +175,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
 
   if (events.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">No activity recorded yet.</p>
+      <p className="text-sm text-muted-foreground">{t("empty")}</p>
     );
   }
 
@@ -222,7 +225,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
                       </span>
                     </>
                   ) : (
-                    <span>System</span>
+                    <span>{t("system")}</span>
                   )}
                 </div>
               </div>
@@ -239,7 +242,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
           disabled={isFetchingNextPage}
         >
           {isFetchingNextPage && <ArrowPathIcon className="animate-spin" />}
-          Load more
+          {t("loadMore")}
         </Button>
       )}
     </div>
