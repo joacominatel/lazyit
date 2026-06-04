@@ -63,6 +63,36 @@ export const updateUser = users.update;
 export const deleteUser = users.remove;
 
 /**
+ * What an offboarding reclaimed/revoked — the `POST /users/:id/offboard` (and `DELETE /users/:id`)
+ * response. Mirrors the API's `OffboardResult` (apps/api/src/users/users.service.ts).
+ *
+ * Defined here (not in `@lazyit/shared`) on purpose: it is a read-only response DTO with no
+ * validated request payload, and the shared package is the home for zod schemas / inferred types,
+ * not hand-written response interfaces. If a future endpoint needs to validate this shape, promote
+ * it to a shared zod schema then.
+ */
+export interface OffboardResult {
+  /** The soft-deleted user (deletedAt stamped). */
+  userId: string;
+  /** Asset assignments released (reclaimed assets), by id. */
+  releasedAssignments: { id: string; assetId: string }[];
+  /** Count of active access grants revoked. */
+  revokedGrants: number;
+}
+
+/**
+ * Offboard a user (`POST /users/:id/offboard`, `user:manage`). The intention-revealing alias of
+ * `DELETE /users/:id`: in one transaction it soft-deletes the user, revokes ALL their active access
+ * grants and releases ALL their active asset assignments (with RELEASED history). Returns the
+ * offboarding summary so the UI can confirm honestly what was reclaimed. History is preserved —
+ * a soft delete, never an erase. Re-onboarding ({@link restoreUser}) does NOT re-grant access or
+ * re-assign assets (ADR-0041); those are separate, intentional acts.
+ */
+export function offboardUser(id: string): Promise<OffboardResult> {
+  return apiFetch<OffboardResult>(`${BASE}/${id}/offboard`, { method: "POST" });
+}
+
+/**
  * Restore (re-onboard) a soft-deleted user (`POST /users/:id/restore`, ADMIN). Clears `deletedAt` so
  * the account exists and can log in again; does NOT re-grant prior access/assignments (ADR-0041).
  */
