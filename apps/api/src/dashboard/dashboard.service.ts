@@ -2,11 +2,12 @@ import { Injectable } from '@nestjs/common';
 import type {
   DashboardActivityItem,
   DashboardSummary,
-  PageQuery,
   Page,
   RecentActivityItem,
+  RecentActivityQuery,
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** AssetStatus enum values, in schema order — used to zero-fill the `byStatus` buckets. */
@@ -168,22 +169,34 @@ export class DashboardService {
   }
 
   /**
-   * Recent activity feed (CEO Round 2, ADR-0043) — the unified, cross-pillar stream the dashboard
-   * shows, newest first and offset-paginated (ADR-0030). Reads the `recent_activity` Postgres VIEW
-   * (a `UNION ALL` over AssetHistory, AssetAssignment, AccessGrant and ConsumableMovement; Prisma
-   * cannot express a UNION view, so it lives as raw SQL in a migration and is read here with a typed
-   * `$queryRaw`). The view already drops rows whose parent entity is soft-deleted.
+   * Recent activity feed (CEO Round 2, ADR-0043; filterable per issue #181 / DEBT-1) — the unified,
+   * cross-pillar stream, newest first and offset-paginated (ADR-0030). Reads the `recent_activity`
+   * Postgres VIEW (a `UNION ALL` over AssetHistory, AssetAssignment, AccessGrant and
+   * ConsumableMovement; Prisma cannot express a UNION view, so it lives as raw SQL in a migration and
+   * is read here with a typed `$queryRaw`). The view already drops rows whose parent entity is
+   * soft-deleted.
    *
    * The actor display name is resolved with a LEFT JOIN to `users` (lightly — just first/last name);
    * `actorId`/`actorName` are null for system/unknown actors or a deleted actor whose audit FK was
-   * set null. The page slice and the `count` over the same view run inside one `$transaction`, so the
-   * `total` cannot drift from the page under concurrent writes to any source.
+   * set null. The page slice and the `count` run over the SAME view + the SAME WHERE inside one
+   * `$transaction`, so the `total` reflects the FILTERED set and cannot drift from the page under
+   * concurrent writes to any source.
+   *
+   * Filters (issue #181) are OPTIONAL and additive — `entityType`, `entityId`, `actorId`, `action`,
+   * a closed-open `[from, to)` window over `occurredAt`, and a free-text `q` over `summary` + the
+   * resolved actor name. Each is a PARAMETERIZED `Prisma.sql` fragment (never string concatenation),
+   * so the values can never break out of their bind slot (injection guard). `actorId` is already
+   * resolved to a concrete uuid by the controller (`"me"` → the caller's subject); the service never
+   * sees `"me"`.
    */
-  async getActivity(page: PageQuery): Promise<Page<RecentActivityItem>> {
-    const { take, skip } = offsetOf(page);
+  async getActivity(
+    query: RecentActivityQuery,
+  ): Promise<Page<RecentActivityItem>> {
+    const { take, skip } = offsetOf(query);
+    const where = this.buildActivityWhere(query);
 
     const [rows, totalRows] = await this.prisma.$transaction([
-      this.prisma.$queryRaw<RecentActivityRow[]>`
+      this.prisma.$queryRaw<RecentActivityRow[]>(Prisma.sql`
         SELECT
           ra."occurredAt",
           ra."actorId",
@@ -195,12 +208,18 @@ export class DashboardService {
           ra."summary"
         FROM "recent_activity" ra
         LEFT JOIN "users" u ON u."id" = ra."actorId"
+        ${where}
         ORDER BY ra."occurredAt" DESC
         LIMIT ${take} OFFSET ${skip}
-      `,
-      this.prisma.$queryRaw<[{ count: bigint }]>`
-        SELECT COUNT(*)::bigint AS count FROM "recent_activity"
-      `,
+      `),
+      // The COUNT carries the SAME LEFT JOIN + WHERE so a `q` over the actor name counts identically
+      // to what the page returns — `total` is the FILTERED count, never the whole view.
+      this.prisma.$queryRaw<[{ count: bigint }]>(Prisma.sql`
+        SELECT COUNT(*)::bigint AS count
+        FROM "recent_activity" ra
+        LEFT JOIN "users" u ON u."id" = ra."actorId"
+        ${where}
+      `),
     ]);
 
     const total = Number(totalRows[0]?.count ?? 0);
@@ -214,7 +233,56 @@ export class DashboardService {
       summary: row.summary,
     }));
 
-    return pageOf(items, total, page);
+    return pageOf(items, total, query);
+  }
+
+  /**
+   * Compose the OPTIONAL activity filters (issue #181) into a single parameterized `WHERE` fragment
+   * shared by the page read and the count. Every value is bound via a `Prisma.sql` interpolation
+   * (`${value}`) — NEVER string-concatenated — so a hostile filter value can only ever be a bind
+   * parameter, not SQL (injection guard). No filter present → {@link Prisma.empty} (no WHERE clause),
+   * which keeps the unfiltered behaviour byte-identical to before.
+   *
+   * `q` is matched case-insensitively (`ILIKE`) against the row summary and the resolved actor display
+   * name; the wildcards wrap the bound value, so the user text stays a parameter (no LIKE-metachar
+   * injection into the query structure). The `[from, to)` window is closed-open on `occurredAt`.
+   */
+  private buildActivityWhere(query: RecentActivityQuery): Prisma.Sql {
+    const conditions: Prisma.Sql[] = [];
+
+    if (query.entityType !== undefined) {
+      conditions.push(Prisma.sql`ra."entityType" = ${query.entityType}`);
+    }
+    if (query.entityId !== undefined) {
+      conditions.push(Prisma.sql`ra."entityId" = ${query.entityId}`);
+    }
+    if (query.actorId !== undefined) {
+      // Cast the bound text to uuid so it matches the view's uuid `actorId` column.
+      conditions.push(Prisma.sql`ra."actorId" = ${query.actorId}::uuid`);
+    }
+    if (query.action !== undefined) {
+      conditions.push(Prisma.sql`ra."action" = ${query.action}`);
+    }
+    if (query.from !== undefined) {
+      conditions.push(
+        Prisma.sql`ra."occurredAt" >= ${new Date(query.from)}::timestamptz`,
+      );
+    }
+    if (query.to !== undefined) {
+      // Closed-open: `to` is exclusive, so an end-of-day boundary never double-counts.
+      conditions.push(
+        Prisma.sql`ra."occurredAt" < ${new Date(query.to)}::timestamptz`,
+      );
+    }
+    if (query.q !== undefined) {
+      const pattern = `%${query.q}%`;
+      conditions.push(
+        Prisma.sql`(ra."summary" ILIKE ${pattern} OR (u."firstName" || ' ' || u."lastName") ILIKE ${pattern})`,
+      );
+    }
+
+    if (conditions.length === 0) return Prisma.empty;
+    return Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
   }
 }
 
