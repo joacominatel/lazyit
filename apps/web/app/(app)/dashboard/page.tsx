@@ -405,9 +405,12 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
   );
 }
 
+// Semantic status tokens (ADR-0049): the warning/danger states drive off --warning /
+// --destructive, which carry dark-mode parity — so the hand-written amber/rose palette
+// values (and their missing dark variants) are gone.
 const TONE: Record<AttentionTone, { dot: string; ring: string }> = {
-  warning: { dot: "bg-amber-500", ring: "ring-amber-500/20" },
-  danger: { dot: "bg-rose-500", ring: "ring-rose-500/30" },
+  warning: { dot: "bg-warning", ring: "ring-warning/25" },
+  danger: { dot: "bg-destructive", ring: "ring-destructive/30" },
 };
 
 function AttentionRow({ item }: { item: AttentionItem }) {

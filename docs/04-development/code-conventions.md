@@ -94,6 +94,45 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
   Base) · **Manage** (Users, Locations), with Dashboard ungrouped on top. The user-facing noun
   is **Applications** (route stays `/applications`); **Access** is the pillar name, not a nav
   label. `mobile-nav.tsx` reuses `SidebarNav`, so it inherits the grouping.
+- **Design-system activation tokens & recipes** ([[0049-activated-restraint-ux-direction]],
+  extends [[0011-tailwind-styling]]). Compose these instead of hand-rolling colour/depth/motion:
+  - **Elevation:** `shadow-e1` (resting cards/panels) · `shadow-e2` (hover/focus) · `shadow-e3`
+    (dialogs/dropdowns/sticky). Warm-tinted, with dark parity baked into the token — use these,
+    not ad-hoc `shadow-md/lg`.
+  - **The `lift` recipe** (`lib/recipes.ts`) — the coordinated hover triad (`-translate-y-0.5`
+    + `shadow-e1`→`e2` + ring `/10`→`/15`). Apply at call sites: `<Card className={lift}>`.
+    Reduced-motion-safe (globals.css neutralizes the translate). Don't add it to static table
+    rows (vertical jitter hurts scanning).
+  - **Motion utilities:** `animate-rise-in` (component-level entrance settle, 12px rise + fade) ·
+    `animate-fade-in` (opacity-only sibling for the ROUTE-level settle — no transform, so it never
+    traps `position: sticky` descendants in a containing block) · `animate-pulse-soft` (the ONE
+    calm attention heartbeat — danger dots only) · `animate-shimmer` (skeleton sweep, composed
+    at call sites — never edit `ui/skeleton.tsx`) · `animate-check-draw` (success-check; the
+    only `--ease-spring` use). All collapse to instant under `prefers-reduced-motion` via the
+    single consolidated block in globals.css. Easing/duration tokens: `--ease-out-quad` /
+    `--ease-spring` / `--dur-fast|base|slow`. `app/(app)/template.tsx` gives every route a
+    free `fade-in` cross-route settle (opacity only — sticky-safe).
+  - **Pillar colour** (`bg-pillar-*` / `text-pillar-*`, registered like `--color-avatar-*` so
+    the JIT scanner keeps full class strings — **never** `bg-[var(--pillar)]/10`). LOCKED map:
+    **Inventory = teal · Access = indigo (the brand) · Knowledge = green · Manage = rose**;
+    **Consumables shares Inventory teal** (differentiate by icon, never a 5th hue).
+    `<PillarScope pillar>` (`components/pillar-scope.tsx`) sets an inherited `--pillar` var
+    (brand-indigo fallback when omitted) for chrome that wants the *route's* pillar; surfaces
+    that statically know their pillar use the `bg-pillar-*` utility directly.
+  - **The pillar-AA rule (HARD):** pillar hue is a **tint / border / dot / chip ONLY — never
+    small text on the bone canvas** (the chart hues can't clear 4.5:1 as body text on the
+    0.985 bone). A decorative ≥24px glyph in a `bg-pillar-*/10` chip is fine (glyphs are exempt
+    from text-AA); readable text always stays on `--foreground` / `--card-foreground` / a
+    token's AA-verified `*-foreground`. Status colour stays on the semantic tokens
+    (`--success`/`--warning`/`--info`/`--destructive`) via `StatusBadge`. **Raw Tailwind
+    palette colours** (`bg/text-{emerald,sky,violet,amber,rose,teal,indigo}-NNN`) are flagged
+    by an eslint guard in web feature code — use the tokens.
+  - **`<EmptyState>`** (`components/empty-state.tsx`) — the warm "nothing here yet" surface
+    (pillar-tinted icon chip + invitation + optional action, `rise-in` on mount). Compose it
+    instead of dashed-border boxes (rollout is in progress).
+  - **Type tokens:** `text-display` (hero metrics) · `text-section` (panel headings) ·
+    `text-label` (uppercase eyebrows) carry the size+line-height+tracking triple — use them
+    instead of pixel-guessing.
 
 ## The Bun-first boundary
 

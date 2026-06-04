@@ -9,6 +9,7 @@ import type {
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { UserAvatar } from "@/components/user-avatar";
 import { useAssetHistory } from "@/lib/api/hooks/use-asset-history";
 import { useUsers } from "@/lib/api/hooks/use-users";
@@ -27,17 +28,52 @@ const EVENT_LABEL: Record<AssetHistoryEventType, string> = {
   RESTORED: "Restored",
 };
 
-const EVENT_TONE: Record<AssetHistoryEventType, string> = {
-  CREATED: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  STATUS_CHANGED: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  ASSIGNED: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-  RELEASED: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  LOCATION_CHANGED: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
-  MODEL_CHANGED: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
-  SPECS_CHANGED: "bg-muted text-muted-foreground",
-  DELETED: "bg-destructive/10 text-destructive",
-  RESTORED: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+/**
+ * Event badge appearance (ADR-0049). These badges carry READABLE TEXT (the event label),
+ * so a chart/pillar hue as the text color would FAIL WCAG-AA on the bone canvas. Two safe
+ * shapes only:
+ *  - "status": a semantic event maps to a solid-fill StatusBadge tone, whose label sits on
+ *    the token's AA-verified *-foreground (light 4.69–8.58:1 · dark 7.16–10.99:1).
+ *  - "categorical": a non-status event gets a NEUTRAL pill (bg-secondary, AA-verified
+ *    foreground) with a small chart-hue dot — colour rides the decorative dot while the
+ *    label text stays on --secondary-foreground, so contrast holds in both themes.
+ * Full strings so the Tailwind scanner keeps the dot colours.
+ */
+type EventBadgeSpec =
+  | { kind: "status"; tone: StatusTone }
+  | { kind: "categorical"; dot: string };
+
+const EVENT_BADGE: Record<AssetHistoryEventType, EventBadgeSpec> = {
+  // Semantic — solid StatusBadge tone (label on the tone's AA-verified foreground).
+  CREATED: { kind: "status", tone: "success" },
+  RESTORED: { kind: "status", tone: "success" },
+  RELEASED: { kind: "status", tone: "warning" },
+  STATUS_CHANGED: { kind: "status", tone: "info" },
+  DELETED: { kind: "status", tone: "danger" },
+  // Categorical — neutral pill + a chart-hue dot (label stays on --foreground).
+  ASSIGNED: { kind: "categorical", dot: "bg-chart-1" },
+  LOCATION_CHANGED: { kind: "categorical", dot: "bg-chart-2" },
+  MODEL_CHANGED: { kind: "categorical", dot: "bg-chart-3" },
+  SPECS_CHANGED: { kind: "categorical", dot: "bg-muted-foreground" },
 };
+
+/** Renders the event label as either a solid status pill or a neutral pill with a hue dot. */
+function EventBadge({ eventType }: { eventType: AssetHistoryEventType }) {
+  const badge = EVENT_BADGE[eventType];
+  const label = EVENT_LABEL[eventType];
+  if (badge.kind === "status") {
+    return <StatusBadge tone={badge.tone}>{label}</StatusBadge>;
+  }
+  return (
+    <span className="inline-flex h-5 w-fit shrink-0 items-center gap-1.5 rounded-md bg-secondary px-2 py-0.5 text-xs font-medium whitespace-nowrap text-secondary-foreground">
+      <span
+        className={cn("size-1.5 shrink-0 rounded-full", badge.dot)}
+        aria-hidden
+      />
+      {label}
+    </span>
+  );
+}
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
@@ -163,14 +199,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
               />
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={cn(
-                      "inline-flex rounded-md px-1.5 py-0.5 text-xs font-medium",
-                      EVENT_TONE[event.eventType],
-                    )}
-                  >
-                    {EVENT_LABEL[event.eventType]}
-                  </span>
+                  <EventBadge eventType={event.eventType} />
                   {text && <span className="text-sm">{text}</span>}
                   <span
                     className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground"
