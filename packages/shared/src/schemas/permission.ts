@@ -38,6 +38,7 @@ export const PERMISSION_DOMAINS = [
   "user",
   "dashboard",
   "search",
+  "logs", // the estate-wide activity history (Reports/Informes); read is ADMIN-only by default
   "settings",
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
@@ -104,6 +105,8 @@ export const PERMISSIONS = [
   "dashboard:read",
   // search (read-only surface)
   "search:read",
+  // logs (read-only surface) — the activity history; the FIRST admin-only read (see ADMIN_ONLY_READS)
+  "logs:read",
   // settings (instance configuration) — `manage` is the coarse ADMIN capability
   "settings:read",
   "settings:manage",
@@ -162,15 +165,38 @@ export const VIEWER_DENIED_READS = [
 ] as const satisfies readonly Permission[];
 
 /**
+ * The reads that are ADMIN-ONLY by default — strictly MORE restrictive than {@link VIEWER_DENIED_READS}.
+ * Where the pre-tightened reads stay open to ADMIN + MEMBER (only VIEWER loses them), an admin-only read
+ * is excluded from BOTH MEMBER and VIEWER seed defaults; only ADMIN holds it (via the complete-catalog
+ * short-circuit). It is still **configurable** — an ADMIN may grant it to MEMBER/VIEWER from the role
+ * matrix (`PUT /config/permissions`) — but it is never seeded to them.
+ *
+ *   - `logs:read` — the estate-wide activity history (the future Reports/Informes section). Unlike a
+ *     per-domain list (which an operator can already see scoped), the cross-cutting activity log
+ *     aggregates who-did-what across every domain, so it is the most sensitive read in the catalog and
+ *     defaults to ADMIN-only. This is the FIRST admin-only read (ADR-0046 extension, issue #175).
+ *
+ * Catalog invariant: `ADMIN_ONLY_READS` and `VIEWER_DENIED_READS` are disjoint — a read is either
+ * pre-tightened (ADMIN + MEMBER) or admin-only (ADMIN), never both.
+ */
+export const ADMIN_ONLY_READS = [
+  "logs:read",
+] as const satisfies readonly Permission[];
+
+/**
  * The single SOURCE OF TRUTH for the seeded per-role permission matrix (ADR-0046, P1). The Prisma seed
  * writes EXACTLY this, and the golden Jest test asserts the seeded rows equal EXACTLY this — derive,
  * never hand-list, so the two can never drift. Built 1:1 from the ADR-0040 capability matrix with the
  * CEO's read pre-tightening:
  *   - ADMIN  = ALL permissions (the complete catalog) — immutable/full (never editable).
- *   - MEMBER = all `:read` + all `:write` (the MEMBER-tier capability-verb set is EMPTY: every coarse
- *     verb — accessGrant:grant, user:manage, settings:manage — and every `:delete` is ADMIN-only per
- *     ADR-0040).
- *   - VIEWER = all `:read` EXCEPT the two pre-tightened reads ({@link VIEWER_DENIED_READS}).
+ *   - MEMBER = all `:read` + all `:write`, MINUS the admin-only reads ({@link ADMIN_ONLY_READS}). The
+ *     MEMBER-tier capability-verb set is EMPTY: every coarse verb — accessGrant:grant, user:manage,
+ *     settings:manage — and every `:delete` is ADMIN-only per ADR-0040.
+ *   - VIEWER = all `:read` EXCEPT the pre-tightened reads ({@link VIEWER_DENIED_READS}) AND the
+ *     admin-only reads ({@link ADMIN_ONLY_READS}).
+ *
+ *   - {@link ADMIN_ONLY_READS} (`logs:read`) are excluded from BOTH MEMBER and VIEWER — strictly more
+ *     restrictive than the pre-tightening: only ADMIN holds them by default (still admin-grantable).
  *
  * Permissions are sorted by their catalog order for a stable, reviewable shape.
  */
@@ -179,14 +205,22 @@ export function buildDefaultRolePermissions(): RolePermissionMatrix {
   const sorted = (perms: readonly Permission[]): Permission[] =>
     [...new Set(perms)].sort((a, b) => order(a) - order(b));
 
+  const isAdminOnlyRead = (p: Permission): boolean =>
+    ADMIN_ONLY_READS.includes(p as (typeof ADMIN_ONLY_READS)[number]);
+  const isViewerDeniedRead = (p: Permission): boolean =>
+    VIEWER_DENIED_READS.includes(p as (typeof VIEWER_DENIED_READS)[number]);
+
+  // MEMBER gets every read+write EXCEPT the admin-only reads (the pre-tightened reads stay — they are
+  // ADMIN + MEMBER). VIEWER gets every read minus BOTH the pre-tightened and the admin-only reads.
+  const memberReads = READ_PERMISSIONS.filter((p) => !isAdminOnlyRead(p));
+  const viewerReads = READ_PERMISSIONS.filter(
+    (p) => !isViewerDeniedRead(p) && !isAdminOnlyRead(p),
+  );
+
   return {
     ADMIN: sorted(PERMISSIONS),
-    MEMBER: sorted([...READ_PERMISSIONS, ...WRITE_PERMISSIONS]),
-    VIEWER: sorted(
-      READ_PERMISSIONS.filter(
-        (p) => !VIEWER_DENIED_READS.includes(p as (typeof VIEWER_DENIED_READS)[number]),
-      ),
-    ),
+    MEMBER: sorted([...memberReads, ...WRITE_PERMISSIONS]),
+    VIEWER: sorted(viewerReads),
   };
 }
 
