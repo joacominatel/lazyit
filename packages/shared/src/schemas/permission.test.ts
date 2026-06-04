@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ADMIN_ONLY_READS,
   DEFAULT_ROLE_PERMISSIONS,
   EDITABLE_ROLES,
   MyPermissionsSchema,
@@ -109,21 +110,27 @@ describe("DEFAULT_ROLE_PERMISSIONS (the seed source of truth)", () => {
     expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toHaveLength(PERMISSIONS.length);
   });
 
-  test("MEMBER = all reads + all writes, and NOTHING else", () => {
-    expect(new Set(DEFAULT_ROLE_PERMISSIONS.MEMBER)).toEqual(
-      new Set([...READ_PERMISSIONS, ...WRITE_PERMISSIONS]),
-    );
+  test("MEMBER = all reads + all writes, EXCEPT the admin-only reads", () => {
+    const adminOnly = new Set<string>(ADMIN_ONLY_READS);
+    const expected = [
+      ...READ_PERMISSIONS.filter((p) => !adminOnly.has(p)),
+      ...WRITE_PERMISSIONS,
+    ];
+    expect(new Set(DEFAULT_ROLE_PERMISSIONS.MEMBER)).toEqual(new Set(expected));
     // No delete, no coarse capability verb leaks into MEMBER.
     for (const p of DEFAULT_ROLE_PERMISSIONS.MEMBER) {
       expect(p.endsWith(":delete")).toBe(false);
       expect(["accessGrant:grant", "user:manage", "settings:manage"]).not.toContain(p);
     }
+    // The admin-only reads (logs:read) are NOT seeded to MEMBER — strictly tighter than open-by-default.
+    for (const p of ADMIN_ONLY_READS) {
+      expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain(p);
+    }
   });
 
-  test("VIEWER = all reads EXCEPT the two pre-tightened reads", () => {
-    const expected = READ_PERMISSIONS.filter(
-      (p) => !VIEWER_DENIED_READS.includes(p as (typeof VIEWER_DENIED_READS)[number]),
-    );
+  test("VIEWER = all reads EXCEPT the pre-tightened AND the admin-only reads", () => {
+    const restricted = new Set<string>([...VIEWER_DENIED_READS, ...ADMIN_ONLY_READS]);
+    const expected = READ_PERMISSIONS.filter((p) => !restricted.has(p));
     expect(new Set(DEFAULT_ROLE_PERMISSIONS.VIEWER)).toEqual(new Set(expected));
     // VIEWER can mutate nothing.
     for (const p of DEFAULT_ROLE_PERMISSIONS.VIEWER) {
@@ -146,12 +153,35 @@ describe("DEFAULT_ROLE_PERMISSIONS (the seed source of truth)", () => {
   });
 
   test("every OTHER `:read` is granted to ALL THREE roles (default-open)", () => {
-    const tightened = new Set<string>(VIEWER_DENIED_READS);
+    // Default-open applies to every read that is neither pre-tightened (ADMIN+MEMBER) nor admin-only.
+    const restricted = new Set<string>([...VIEWER_DENIED_READS, ...ADMIN_ONLY_READS]);
     for (const p of READ_PERMISSIONS) {
-      if (tightened.has(p)) continue;
+      if (restricted.has(p)) continue;
       for (const role of ["ADMIN", "MEMBER", "VIEWER"] as const) {
         expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain(p);
       }
+    }
+  });
+
+  test("the admin-only reads are EXACTLY logs:read, and seeded to ADMIN only", () => {
+    // logs:read is the first admin-only read (issue #175): strictly more restrictive than the
+    // pre-tightening — excluded from BOTH MEMBER and VIEWER, held only by ADMIN's full catalog.
+    expect([...ADMIN_ONLY_READS]).toEqual(["logs:read"]);
+    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain("logs:read" as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain("logs:read" as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain("logs:read" as Permission);
+  });
+
+  test("ADMIN_ONLY_READS and VIEWER_DENIED_READS are disjoint", () => {
+    // A read is either pre-tightened (ADMIN+MEMBER) or admin-only (ADMIN), never both.
+    const pretightened = new Set<string>(VIEWER_DENIED_READS);
+    for (const p of ADMIN_ONLY_READS) {
+      expect(pretightened.has(p)).toBe(false);
+    }
+    // Every admin-only read is a real `:read` literal in the catalog.
+    for (const p of ADMIN_ONLY_READS) {
+      expect(p.endsWith(":read")).toBe(true);
+      expect(READ_PERMISSIONS).toContain(p);
     }
   });
 });
