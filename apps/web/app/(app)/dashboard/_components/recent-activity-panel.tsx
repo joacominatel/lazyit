@@ -126,11 +126,17 @@ const ENTITY_META: Record<
   consumable: { icon: CubeIcon, href: (id) => `/consumables/${id}` },
 };
 
-/** Tone classes for the leading icon chip, by pillar. Full strings so Tailwind keeps them. */
+/**
+ * Tone classes for the leading icon chip, by pillar (ADR-0049). These chips hold a
+ * DECORATIVE glyph (aria-hidden) — a ≥24px mark is exempt from text-AA — so the pillar hue
+ * can sit as both tint (`/10` background) and glyph color. Asset + consumable are Inventory
+ * (teal); application is Access (indigo). The pillar tokens carry dark parity, so the
+ * hand-written `dark:` variants are gone. Full strings so the Tailwind scanner keeps them.
+ */
 const ENTITY_TONE: Record<ActivityEntityType, string> = {
-  asset: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  application: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-  consumable: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  asset: "bg-pillar-inventory/10 text-pillar-inventory",
+  application: "bg-pillar-access/10 text-pillar-access",
+  consumable: "bg-pillar-inventory/10 text-pillar-inventory",
 };
 
 /** One timeline row: a pillar-tinted icon, the server `summary`, the actor, and a relative time. */
