@@ -106,6 +106,12 @@ text-AA), a 3px accent bar is fine, a tint *behind* `--foreground` text is fine 
 text always stays on `--foreground` / `--card-foreground` / a token's AA-verified
 `*-foreground`. This makes the whole colour program AA-safe by construction in both themes.
 
+**There is no `--pillar-foreground`.** White text on a `var(--pillar)` solid fill is *not*
+AA-safe — the pillar aliases a `--chart-*` hue that `.dark` redefines lighter, so white-on-fill
+lands at 1.82–3.63:1 in dark (only Access/indigo clears in light). For text-on-colour use a
+semantic `StatusBadge` solid fill or the avatar tokens (`--avatar-*` are pinned dark and *not*
+redefined in `.dark`, so they keep the white-on-hue AA contract; the pillars deliberately do not).
+
 ### 5. De-hardcode the three breaks (+ an anti-rot guard)
 
 - **dashboard `TONE`** → `bg-warning`/`bg-destructive` + `ring-warning/25`/`ring-destructive/30`
