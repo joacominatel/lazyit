@@ -2,6 +2,7 @@
 
 import { ArrowUturnLeftIcon, CubeIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { BatchResult } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -68,6 +69,7 @@ const FILTER_DEFAULTS = {
 } as const;
 
 export default function ConsumablesPage() {
+  const t = useTranslations("consumables");
   const router = useRouter();
   // `isAdmin` still gates the archived (`deleted=only`) slice (API keeps it ADMIN-only). Create/edit/
   // quick-adjust are consumable:write; delete/restore are consumable:delete.
@@ -139,8 +141,8 @@ export default function ConsumablesPage() {
 
   function handleRestoreRow(id: string, name: string) {
     restoreConsumableMutation.mutate(id, {
-      onSuccess: () => toast.success(`${name} restored`),
-      onError: (err) => notifyError(err, "Couldn't restore the consumable"),
+      onSuccess: () => toast.success(t("list.restored", { name })),
+      onError: (err) => notifyError(err, t("list.restoreRowError")),
     });
   }
 
@@ -158,7 +160,7 @@ export default function ConsumablesPage() {
       selection.clear();
       await refetch();
     } catch (err) {
-      notifyError(err, "Couldn't restore the selected consumables");
+      notifyError(err, t("list.restoreSelectedError"));
     } finally {
       setBulkRestoring(false);
     }
@@ -170,7 +172,7 @@ export default function ConsumablesPage() {
         key: "name",
         header: (
           <SortableHeader
-            label="Name"
+            label={t("list.columns.name")}
             active={sort === "name"}
             direction={dir}
             onToggle={() => toggleSort("name")}
@@ -180,14 +182,14 @@ export default function ConsumablesPage() {
       },
       {
         key: "category",
-        header: "Category",
+        header: t("list.columns.category"),
         skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
       },
       {
         key: "stock",
         header: (
           <SortableHeader
-            label="Stock"
+            label={t("list.columns.stock")}
             active={sort === "currentStock"}
             direction={dir}
             onToggle={() => toggleSort("currentStock")}
@@ -195,12 +197,16 @@ export default function ConsumablesPage() {
         ),
         skeleton: <Skeleton className="h-5 w-12 rounded-md" />,
       },
-      { key: "unit", header: "Unit", skeleton: <Skeleton className="h-4 w-14" /> },
+      {
+        key: "unit",
+        header: t("list.columns.unit"),
+        skeleton: <Skeleton className="h-4 w-14" />,
+      },
       {
         key: "sku",
         header: (
           <SortableHeader
-            label="SKU"
+            label={t("list.columns.sku")}
             active={sort === "sku"}
             direction={dir}
             onToggle={() => toggleSort("sku")}
@@ -212,7 +218,7 @@ export default function ConsumablesPage() {
         key: "updated",
         header: (
           <SortableHeader
-            label="Updated"
+            label={t("list.columns.updated")}
             active={sort === "updatedAt"}
             direction={dir}
             onToggle={() => toggleSort("updatedAt")}
@@ -222,20 +228,20 @@ export default function ConsumablesPage() {
       },
       {
         key: "quick-adjust",
-        header: "Quick adjust",
+        header: t("list.columns.quickAdjust"),
         srOnlyHeader: true,
         headClassName: "w-24",
         skeleton: <Skeleton className="ml-auto h-7 w-16" />,
       },
       {
         key: "actions",
-        header: "Actions",
+        header: t("list.columns.actions"),
         srOnlyHeader: true,
         headClassName: "w-12 text-right",
         skeleton: <Skeleton className="ml-auto size-7" />,
       },
     ],
-    [sort, dir, toggleSort],
+    [sort, dir, toggleSort, t],
   );
 
   const total = page?.total ?? 0;
@@ -250,12 +256,22 @@ export default function ConsumablesPage() {
   }
 
   const chips = [
-    ...(q ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }] : []),
+    ...(q
+      ? [
+          {
+            key: "q",
+            label: t("list.chips.search", { query: q }),
+            onClear: () => setQ(""),
+          },
+        ]
+      : []),
     ...(categoryFilter !== "ALL"
       ? [
           {
             key: "category",
-            label: `Category: ${categoryNameById.get(categoryFilter) ?? "—"}`,
+            label: t("list.chips.category", {
+              name: categoryNameById.get(categoryFilter) ?? "—",
+            }),
             onClear: () => setFilter("category", FILTER_DEFAULTS.category),
           },
         ]
@@ -264,7 +280,7 @@ export default function ConsumablesPage() {
       ? [
           {
             key: "lowStock",
-            label: "Low stock only",
+            label: t("list.chips.lowStock"),
             onClear: () => setFilter("lowStock", FILTER_DEFAULTS.lowStock),
           },
         ]
@@ -274,10 +290,10 @@ export default function ConsumablesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Consumables"
+        title={t("list.title")}
         pillar="inventory"
         icon={CubeIcon}
-        subtitle="Stock-counted supplies — cables, adapters, toner and the like."
+        subtitle={t("list.subtitle")}
         actions={
           <>
             {isAdmin ? (
@@ -293,7 +309,7 @@ export default function ConsumablesPage() {
               <Button asChild>
                 <Link href="/consumables/new">
                   <PlusIcon />
-                  New consumable
+                  {t("list.newConsumable")}
                 </Link>
               </Button>
             ) : null}
@@ -305,7 +321,7 @@ export default function ConsumablesPage() {
         <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
       ) : isError ? (
         <ErrorState
-          title="Could not load consumables"
+          title={t("list.loadError")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -313,11 +329,11 @@ export default function ConsumablesPage() {
         <EmptyState
           icon={CubeIcon}
           pillar="inventory"
-          title="No supplies stocked yet"
-          description="Add the cables, adapters and toner your team keeps on hand — set a reorder threshold and lazyit watches the count for you."
+          title={t("empty.title")}
+          description={t("empty.description")}
           action={
             canWrite
-              ? { label: "Add your first consumable", href: "/consumables/new" }
+              ? { label: t("empty.action"), href: "/consumables/new" }
               : undefined
           }
         />
@@ -329,8 +345,8 @@ export default function ConsumablesPage() {
               onChange={setQ}
               debounceMs={300}
               onDebouncedChange={setQ}
-              label="Search consumables"
-              placeholder="Search by name or SKU…"
+              label={t("list.searchLabel")}
+              placeholder={t("list.searchPlaceholder")}
               className="lg:max-w-xs lg:flex-1"
             />
             <Select
@@ -341,7 +357,7 @@ export default function ConsumablesPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">All categories</SelectItem>
+                <SelectItem value="ALL">{t("list.allCategories")}</SelectItem>
                 {(categories ?? []).map((category) => (
                   <SelectItem key={category.id} value={category.id}>
                     {category.name}
@@ -359,8 +375,8 @@ export default function ConsumablesPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">All stock</SelectItem>
-                <SelectItem value="LOW">Low stock only</SelectItem>
+                <SelectItem value="ALL">{t("list.allStock")}</SelectItem>
+                <SelectItem value="LOW">{t("list.lowStockOnly")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -371,9 +387,7 @@ export default function ConsumablesPage() {
             columns={columns}
             isFilteredEmpty={rows.length === 0}
             filteredEmptyMessage={
-              archived
-                ? "No archived consumables."
-                : "No consumables match your filters."
+              archived ? t("list.archivedEmpty") : t("list.filteredEmpty")
             }
             filteredEmptyAction={<ClearFiltersLink onClick={clearFilters} />}
             selection={
@@ -383,7 +397,7 @@ export default function ConsumablesPage() {
                     allSelected: selection.allSelected,
                     someSelected: selection.someSelected,
                     onToggleAll: selection.toggleAll,
-                    selectAllLabel: "Select all consumables on this page",
+                    selectAllLabel: t("list.selectAllLabel"),
                   }
                 : undefined
             }
@@ -403,19 +417,19 @@ export default function ConsumablesPage() {
                 onSelectedChange={(on) =>
                   selection.setSelected(consumable.id, on)
                 }
-                selectLabel={`Select ${consumable.name}`}
+                selectLabel={t("list.selectRow", { name: consumable.name })}
                 meta={
                   <>
-                    <ResourceCardMeta label="Category">
+                    <ResourceCardMeta label={t("list.meta.category")}>
                       {categoryBadge(consumable.categoryId)}
                     </ResourceCardMeta>
-                    <ResourceCardMeta label="Unit">
+                    <ResourceCardMeta label={t("list.meta.unit")}>
                       {consumable.unit}
                     </ResourceCardMeta>
-                    <ResourceCardMeta label="SKU">
+                    <ResourceCardMeta label={t("list.meta.sku")}>
                       <span className="font-mono">{consumable.sku ?? "—"}</span>
                     </ResourceCardMeta>
-                    <ResourceCardMeta label="Updated">
+                    <ResourceCardMeta label={t("list.meta.updated")}>
                       {formatDate(consumable.updatedAt)}
                     </ResourceCardMeta>
                   </>
@@ -488,7 +502,7 @@ export default function ConsumablesPage() {
                     onCheckedChange={(on) =>
                       selection.setSelected(consumable.id, on)
                     }
-                    label={`Select ${consumable.name}`}
+                    label={t("list.selectRow", { name: consumable.name })}
                   />
                 ) : null}
                 <TableCell className="font-medium">
@@ -585,7 +599,7 @@ export default function ConsumablesPage() {
                 disabled={bulkRestoring}
               >
                 <ArrowUturnLeftIcon />
-                Restore
+                {t("list.restore")}
               </Button>
             </BatchActionBar>
           ) : null}

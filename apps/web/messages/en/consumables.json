@@ -1,1 +1,148 @@
-{}
+{
+  "list": {
+    "title": "Consumables",
+    "subtitle": "Stock-counted supplies — cables, adapters, toner and the like.",
+    "newConsumable": "New consumable",
+    "searchLabel": "Search consumables",
+    "searchPlaceholder": "Search by name or SKU…",
+    "selectAllLabel": "Select all consumables on this page",
+    "selectRow": "Select {name}",
+    "allCategories": "All categories",
+    "allStock": "All stock",
+    "lowStockOnly": "Low stock only",
+    "loadError": "Could not load consumables",
+    "filteredEmpty": "No consumables match your filters.",
+    "archivedEmpty": "No archived consumables.",
+    "restore": "Restore",
+    "restored": "{name} restored",
+    "restoreRowError": "Couldn't restore the consumable",
+    "restoreSelectedError": "Couldn't restore the selected consumables",
+    "columns": {
+      "name": "Name",
+      "category": "Category",
+      "stock": "Stock",
+      "unit": "Unit",
+      "sku": "SKU",
+      "updated": "Updated",
+      "quickAdjust": "Quick adjust",
+      "actions": "Actions"
+    },
+    "meta": {
+      "category": "Category",
+      "unit": "Unit",
+      "sku": "SKU",
+      "updated": "Updated"
+    },
+    "chips": {
+      "search": "Search: “{query}”",
+      "category": "Category: {name}",
+      "lowStock": "Low stock only"
+    }
+  },
+  "empty": {
+    "title": "No supplies stocked yet",
+    "description": "Add the cables, adapters and toner your team keeps on hand — set a reorder threshold and lazyit watches the count for you.",
+    "action": "Add your first consumable"
+  },
+  "form": {
+    "newTitle": "New consumable",
+    "editTitle": "Edit consumable",
+    "cloneTitle": "Clone consumable",
+    "cloneSubtitle": "A new consumable pre-filled from this one. The SKU is cleared and stock starts at zero.",
+    "breadcrumbNew": "New",
+    "breadcrumbEdit": "Edit",
+    "breadcrumbClone": "Clone",
+    "nameLabel": "Name",
+    "namePlaceholder": "USB-C to HDMI adapter",
+    "skuLabel": "SKU",
+    "skuPlaceholder": "ADP-USBC-HDMI",
+    "categoryLabel": "Category",
+    "categoryPlaceholder": "Select a category",
+    "categoryNone": "— None —",
+    "reorderThresholdLabel": "Reorder threshold",
+    "reorderThresholdPlaceholder": "5",
+    "reorderThresholdHint": "Low-stock alert when on-hand ≤ this. Optional.",
+    "unitLabel": "Unit",
+    "unitPlaceholder": "units",
+    "unitHint": "Unit of measure — e.g. units, meters or boxes.",
+    "descriptionLabel": "Description",
+    "notesLabel": "Notes",
+    "submitCreate": "Create consumable",
+    "submitSave": "Save changes",
+    "createdToast": "Consumable created",
+    "savedToast": "Consumable saved",
+    "createError": "Couldn't create the consumable",
+    "saveError": "Couldn't save the consumable"
+  },
+  "detail": {
+    "notFoundTitle": "Consumable not found",
+    "notFoundDescription": "It may have been deleted, or the API is unreachable.",
+    "cloneAction": "Clone",
+    "deleteAction": "Delete consumable",
+    "stockSection": "Stock",
+    "statusInStock": "In stock",
+    "statusLowStock": "Low stock",
+    "statusOutOfStock": "Out of stock",
+    "reorderThreshold": "Reorder threshold: {value} {unit}",
+    "noReorderThreshold": "No reorder threshold set.",
+    "detailsSection": "Details",
+    "skuLabel": "SKU",
+    "categoryLabel": "Category",
+    "unitLabel": "Unit",
+    "descriptionLabel": "Description",
+    "notesLabel": "Notes",
+    "movementsSection": "Movements",
+    "movementsEmpty": "No movements yet. Add, remove or adjust stock to start the ledger.",
+    "movementColumns": {
+      "type": "Type",
+      "qty": "Qty",
+      "reason": "Reason",
+      "by": "By",
+      "date": "Date"
+    },
+    "system": "System"
+  },
+  "stock": {
+    "addCta": "Add…",
+    "removeCta": "Remove…",
+    "adjustCta": "Adjust…",
+    "quickRemoveAria": "Remove one {name}",
+    "quickRemoveTitle": "Remove one {name} (−1)",
+    "quickRemoveOutOfStock": "Out of stock",
+    "quickAddAria": "Add one {name}",
+    "quickAddTitle": "Add one {name} (+1)",
+    "quickAdded": "Added 1 to {name} — now {count} {unit}",
+    "quickRemoved": "Removed 1 from {name} — now {count} {unit}",
+    "quickAdjustError": "Couldn't adjust stock",
+    "movementTypeIn": "In",
+    "movementTypeOut": "Out",
+    "movementTypeAdjustment": "Adjust",
+    "dialog": {
+      "onHand": "On hand now: {count} {unit}.",
+      "reasonLabel": "Reason",
+      "reasonPlaceholder": "Optional — e.g. restock, issued to Ada",
+      "notesLabel": "Notes",
+      "outExceeds": "Only {count} {unit} on hand — this will be rejected.",
+      "updatedToast": "Stock updated",
+      "updateError": "Couldn't update stock",
+      "in": {
+        "title": "Add stock",
+        "quantityLabel": "Quantity to add",
+        "quantityHint": "How many units are coming in.",
+        "cta": "Add stock"
+      },
+      "out": {
+        "title": "Remove stock",
+        "quantityLabel": "Quantity to remove",
+        "quantityHint": "Cannot exceed what is on hand.",
+        "cta": "Remove stock"
+      },
+      "adjustment": {
+        "title": "Adjust stock",
+        "quantityLabel": "New stock count",
+        "quantityHint": "Sets on-hand to this exact number (a physical recount). Use 1 or more.",
+        "cta": "Set stock"
+      }
+    }
+  }
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { DetailSkeleton } from "@/components/detail-panel";
@@ -9,6 +10,7 @@ import { useConsumable } from "@/lib/api/hooks/use-consumables";
 import { ConsumableForm } from "../../_components/consumable-form";
 
 export default function EditConsumablePage() {
+  const t = useTranslations("consumables");
   const params = useParams<{ id: string }>();
   const { data: consumable, isLoading, isError, error, refetch } =
     useConsumable(params.id);
@@ -25,8 +27,8 @@ export default function EditConsumablePage() {
     return (
       <div className="mx-auto max-w-3xl">
         <ErrorState
-          title="Consumable not found"
-          description="It may have been deleted, or the API is unreachable."
+          title={t("detail.notFoundTitle")}
+          description={t("detail.notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -40,16 +42,16 @@ export default function EditConsumablePage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Consumables", href: "/consumables" },
+              { label: t("list.title"), href: "/consumables" },
               {
                 label: consumable.name,
                 href: `/consumables/${consumable.id}`,
               },
-              { label: "Edit" },
+              { label: t("form.breadcrumbEdit") },
             ]}
           />
         }
-        title="Edit consumable"
+        title={t("form.editTitle")}
       />
       <ConsumableForm consumable={consumable} />
     </div>

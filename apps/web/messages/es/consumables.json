@@ -1,1 +1,148 @@
-{}
+{
+  "list": {
+    "title": "Consumibles",
+    "subtitle": "Suministros con conteo de stock: cables, adaptadores, tóner y similares.",
+    "newConsumable": "Nuevo consumible",
+    "searchLabel": "Buscar consumibles",
+    "searchPlaceholder": "Buscar por nombre o SKU…",
+    "selectAllLabel": "Seleccionar todos los consumibles de esta página",
+    "selectRow": "Seleccionar {name}",
+    "allCategories": "Todas las categorías",
+    "allStock": "Todo el stock",
+    "lowStockOnly": "Solo stock bajo",
+    "loadError": "No se pudieron cargar los consumibles",
+    "filteredEmpty": "Ningún consumible coincide con tus filtros.",
+    "archivedEmpty": "No hay consumibles archivados.",
+    "restore": "Restaurar",
+    "restored": "{name} restaurado",
+    "restoreRowError": "No se pudo restaurar el consumible",
+    "restoreSelectedError": "No se pudieron restaurar los consumibles seleccionados",
+    "columns": {
+      "name": "Nombre",
+      "category": "Categoría",
+      "stock": "Stock",
+      "unit": "Unidad",
+      "sku": "SKU",
+      "updated": "Actualizado",
+      "quickAdjust": "Ajuste rápido",
+      "actions": "Acciones"
+    },
+    "meta": {
+      "category": "Categoría",
+      "unit": "Unidad",
+      "sku": "SKU",
+      "updated": "Actualizado"
+    },
+    "chips": {
+      "search": "Búsqueda: “{query}”",
+      "category": "Categoría: {name}",
+      "lowStock": "Solo stock bajo"
+    }
+  },
+  "empty": {
+    "title": "Aún no hay suministros en stock",
+    "description": "Agrega los cables, adaptadores y tóner que tu equipo tiene a mano: define un umbral de reposición y lazyit vigila el conteo por ti.",
+    "action": "Agregar tu primer consumible"
+  },
+  "form": {
+    "newTitle": "Nuevo consumible",
+    "editTitle": "Editar consumible",
+    "cloneTitle": "Clonar consumible",
+    "cloneSubtitle": "Un nuevo consumible precargado a partir de este. El SKU se borra y el stock empieza en cero.",
+    "breadcrumbNew": "Nuevo",
+    "breadcrumbEdit": "Editar",
+    "breadcrumbClone": "Clonar",
+    "nameLabel": "Nombre",
+    "namePlaceholder": "Adaptador USB-C a HDMI",
+    "skuLabel": "SKU",
+    "skuPlaceholder": "ADP-USBC-HDMI",
+    "categoryLabel": "Categoría",
+    "categoryPlaceholder": "Selecciona una categoría",
+    "categoryNone": "— Ninguna —",
+    "reorderThresholdLabel": "Umbral de reposición",
+    "reorderThresholdPlaceholder": "5",
+    "reorderThresholdHint": "Alerta de stock bajo cuando lo disponible ≤ este valor. Opcional.",
+    "unitLabel": "Unidad",
+    "unitPlaceholder": "unidades",
+    "unitHint": "Unidad de medida: por ejemplo, unidades, metros o cajas.",
+    "descriptionLabel": "Descripción",
+    "notesLabel": "Notas",
+    "submitCreate": "Crear consumible",
+    "submitSave": "Guardar cambios",
+    "createdToast": "Consumible creado",
+    "savedToast": "Consumible guardado",
+    "createError": "No se pudo crear el consumible",
+    "saveError": "No se pudo guardar el consumible"
+  },
+  "detail": {
+    "notFoundTitle": "Consumible no encontrado",
+    "notFoundDescription": "Es posible que se haya eliminado o que la API no esté disponible.",
+    "cloneAction": "Clonar",
+    "deleteAction": "Eliminar consumible",
+    "stockSection": "Stock",
+    "statusInStock": "En stock",
+    "statusLowStock": "Stock bajo",
+    "statusOutOfStock": "Sin stock",
+    "reorderThreshold": "Umbral de reposición: {value} {unit}",
+    "noReorderThreshold": "No se definió un umbral de reposición.",
+    "detailsSection": "Detalles",
+    "skuLabel": "SKU",
+    "categoryLabel": "Categoría",
+    "unitLabel": "Unidad",
+    "descriptionLabel": "Descripción",
+    "notesLabel": "Notas",
+    "movementsSection": "Movimientos",
+    "movementsEmpty": "Aún no hay movimientos. Agrega, quita o ajusta stock para iniciar el registro.",
+    "movementColumns": {
+      "type": "Tipo",
+      "qty": "Cant.",
+      "reason": "Motivo",
+      "by": "Por",
+      "date": "Fecha"
+    },
+    "system": "Sistema"
+  },
+  "stock": {
+    "addCta": "Agregar…",
+    "removeCta": "Quitar…",
+    "adjustCta": "Ajustar…",
+    "quickRemoveAria": "Quitar uno de {name}",
+    "quickRemoveTitle": "Quitar uno de {name} (−1)",
+    "quickRemoveOutOfStock": "Sin stock",
+    "quickAddAria": "Agregar uno de {name}",
+    "quickAddTitle": "Agregar uno de {name} (+1)",
+    "quickAdded": "Se agregó 1 a {name}: ahora {count} {unit}",
+    "quickRemoved": "Se quitó 1 de {name}: ahora {count} {unit}",
+    "quickAdjustError": "No se pudo ajustar el stock",
+    "movementTypeIn": "Entrada",
+    "movementTypeOut": "Salida",
+    "movementTypeAdjustment": "Ajuste",
+    "dialog": {
+      "onHand": "Disponible ahora: {count} {unit}.",
+      "reasonLabel": "Motivo",
+      "reasonPlaceholder": "Opcional: por ejemplo, reposición, entregado a Ada",
+      "notesLabel": "Notas",
+      "outExceeds": "Solo hay {count} {unit} disponibles: se rechazará.",
+      "updatedToast": "Stock actualizado",
+      "updateError": "No se pudo actualizar el stock",
+      "in": {
+        "title": "Agregar stock",
+        "quantityLabel": "Cantidad a agregar",
+        "quantityHint": "Cuántas unidades están ingresando.",
+        "cta": "Agregar stock"
+      },
+      "out": {
+        "title": "Quitar stock",
+        "quantityLabel": "Cantidad a quitar",
+        "quantityHint": "No puede superar lo disponible.",
+        "cta": "Quitar stock"
+      },
+      "adjustment": {
+        "title": "Ajustar stock",
+        "quantityLabel": "Nuevo conteo de stock",
+        "quantityHint": "Establece lo disponible en este número exacto (un reconteo físico). Usa 1 o más.",
+        "cta": "Establecer stock"
+      }
+    }
+  }
+}
