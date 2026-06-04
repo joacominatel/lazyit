@@ -147,6 +147,18 @@ The seeded matrix is derived from a **single source-of-truth constant** (`DEFAUL
 `@lazyit/shared`) that both the seed and a golden test consume, so the documented matrix and the
 seeded rows can never drift (a wrong seed fails CI).
 
+> **Note (issue #175, Wave 3c-1a) — a third read tier: ADMIN-only reads.** The read policy gains a
+> tier strictly tighter than the pre-tightening: `ADMIN_ONLY_READS` (today just **`logs:read`**) is
+> excluded from BOTH the MEMBER and VIEWER seed defaults, so only ADMIN holds it by default (via the
+> complete-catalog short-circuit). Where a pre-tightened read stays open to ADMIN + MEMBER, an
+> admin-only read is ADMIN alone. The two sets are disjoint. `logs:read` gates the future
+> Reports/Informes section over the **estate-wide activity log**, which aggregates who-did-what across
+> every domain and is therefore the most sensitive read in the catalog — hence the most restrictive
+> default. It remains **configurable** (an admin may grant it to MEMBER/VIEWER from the role matrix);
+> this wave only adds the catalog entry + the ADMIN-only default. **No endpoint is gated yet** (the
+> `logs` GET annotation is a later wave, 3c-1b), so this is purely additive: the only thing that
+> changes today is the seeded matrix. This extends §4 without a new ADR.
+
 ### 5. ADMIN is immutable/full; permissions never touch the IdP
 
 The ADMIN permission set is, by decision, the entire catalog and is **never editable** — the future
