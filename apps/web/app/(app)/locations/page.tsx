@@ -17,11 +17,12 @@ import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import {
   BatchActionBar,
-  EmptyState,
   ErrorState,
+  LinkableRow,
   Pagination,
   ResourceCard,
   ResourceCardMeta,
@@ -29,6 +30,7 @@ import {
   ResourceTable,
   RestoreRowAction,
   RowActions,
+  rowActionsReveal,
   SelectCell,
   SortableHeader,
 } from "@/components/resource-table";
@@ -42,7 +44,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TableCell, TableRow } from "@/components/ui/table";
+import { TableCell } from "@/components/ui/table";
 import { useLocationList } from "@/lib/api/hooks/use-locations";
 import {
   useDeleteLocation,
@@ -55,6 +57,7 @@ import { runPerIdBatch } from "@/lib/api/per-id-batch";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
+import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils/format";
 import { LocationFormDialog } from "./_components/location-form-dialog";
 import {
@@ -237,6 +240,8 @@ export default function LocationsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Locations"
+        pillar="manage"
+        icon={MapPinIcon}
         subtitle="Where your assets physically live."
         actions={
           <>
@@ -270,15 +275,13 @@ export default function LocationsPage() {
       ) : isEmpty && !filtersActive ? (
         <EmptyState
           icon={MapPinIcon}
+          pillar="manage"
           title="No locations yet"
-          description="Add your first location to start tracking where assets live."
+          description="Add the offices, floors and storage rooms where assets live — then place each asset on the map of your estate."
           action={
-            canWrite ? (
-              <Button onClick={openCreate}>
-                <PlusIcon />
-                Create your first location
-              </Button>
-            ) : undefined
+            canWrite
+              ? { label: "Add your first location", onClick: openCreate }
+              : undefined
           }
         />
       ) : (
@@ -383,8 +386,9 @@ export default function LocationsPage() {
             ))}
           >
             {rows.map((location) => (
-              <TableRow
+              <LinkableRow
                 key={location.id}
+                href={`/locations/${location.id}`}
                 data-state={
                   selectable && selection.isSelected(location.id)
                     ? "selected"
@@ -434,15 +438,17 @@ export default function LocationsPage() {
                       </div>
                     ) : null
                   ) : canWrite || canDelete ? (
-                    <RowActions
-                      onEdit={canWrite ? () => openEdit(location) : undefined}
-                      onDelete={
-                        canDelete ? () => setDeleting(location) : undefined
-                      }
-                    />
+                    <div className={cn("flex justify-end", rowActionsReveal)}>
+                      <RowActions
+                        onEdit={canWrite ? () => openEdit(location) : undefined}
+                        onDelete={
+                          canDelete ? () => setDeleting(location) : undefined
+                        }
+                      />
+                    </div>
                   ) : null}
                 </TableCell>
-              </TableRow>
+              </LinkableRow>
             ))}
           </ResourceTable>
 
