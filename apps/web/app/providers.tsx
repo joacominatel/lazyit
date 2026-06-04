@@ -5,6 +5,8 @@ import {
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query";
+import type { AbstractIntlMessages } from "next-intl";
+import { NextIntlClientProvider } from "next-intl";
 import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
@@ -30,22 +32,37 @@ function getQueryClient() {
   return browserQueryClient;
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({
+  children,
+  locale,
+  messages,
+}: {
+  children: React.ReactNode;
+  /** Active locale (cookie-mode, ADR-0051) — resolved server-side in the root layout. */
+  locale: string;
+  /** The full message catalog for `locale`, forwarded to Client Components. */
+  messages: AbstractIntlMessages;
+}) {
   const queryClient = getQueryClient();
 
   return (
-    <SessionProvider>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          {children}
-          <Toaster />
-        </ThemeProvider>
-      </QueryClientProvider>
-    </SessionProvider>
+    // NextIntlClientProvider wraps everything so any Client Component can call
+    // `useTranslations(...)`. Server Components use `getTranslations` directly and
+    // don't need this provider.
+    <NextIntlClientProvider locale={locale} messages={messages}>
+      <SessionProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            {children}
+            <Toaster />
+          </ThemeProvider>
+        </QueryClientProvider>
+      </SessionProvider>
+    </NextIntlClientProvider>
   );
 }
