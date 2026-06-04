@@ -1,4 +1,5 @@
 import { LockClosedIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { EmptyState } from "@/components/empty-state";
 
 /**
@@ -9,13 +10,14 @@ import { EmptyState } from "@/components/empty-state";
  * Reuses the warm EmptyState so the dead-end still feels cared-for.
  */
 export function InformesAccessDenied() {
+  const t = useTranslations("informes");
   return (
     <EmptyState
       icon={LockClosedIcon}
       pillar="manage"
-      title="Reports are admin-only"
-      description="The estate-wide activity history needs the Reports permission. Ask an admin if you need access to this view."
-      action={{ label: "Back to dashboard", href: "/dashboard" }}
+      title={t("page.accessDeniedTitle")}
+      description={t("page.accessDeniedDescription")}
+      action={{ label: t("page.accessDeniedAction"), href: "/dashboard" }}
     />
   );
 }
