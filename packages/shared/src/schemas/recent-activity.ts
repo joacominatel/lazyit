@@ -3,21 +3,23 @@ import { pageSchema, PageQuerySchema } from "./pagination";
 
 /**
  * RecentActivity — the unified, cross-pillar activity feed the dashboard exposes at
- * `GET /dashboard/activity` (CEO Round 2). It normalizes the four append-only activity sources into
+ * `GET /dashboard/activity` (CEO Round 2). It normalizes the FIVE append-only activity sources into
  * one chronologically-ordered stream so the dashboard can show "what happened across the IT estate"
- * without the web stitching four lists together. Single source of truth for `api` (response typing)
+ * without the web stitching five lists together. Single source of truth for `api` (response typing)
  * and `web` (the data layer). See docs/02-domain/entities/recent-activity.md.
  *
- * Backed by a Postgres VIEW (`recent_activity`) that `UNION ALL`s the four sources — Prisma cannot
+ * Backed by a Postgres VIEW (`recent_activity`) that `UNION ALL`s the five sources — Prisma cannot
  * express a UNION view in PSL, so the view lives as raw SQL in a migration and the API reads it with
- * a typed `$queryRaw` (ADR-0043). The view is a derived read model, NOT a persisted entity: there is
- * no schema change to any table and nothing writes to it.
+ * a typed `$queryRaw` (ADR-0043 / ADR-0050). The view is a derived read model, NOT a persisted entity:
+ * there is no schema change to any table and nothing writes to it.
  *
- * The four sources and how they map onto a row:
+ * The five sources and how they map onto a row:
  *   - AssetHistory       → entityType "asset"      · action = the lowercased event (created, …)
  *   - AssetAssignment    → entityType "asset"      · action "assigned" / "released"
  *   - AccessGrant        → entityType "application" · action "granted" / "revoked"
  *   - ConsumableMovement → entityType "consumable"  · action "stock_in" / "stock_out" / "stock_adjustment"
+ *   - UserHistory        → entityType "user"        · action "created" / "updated" / "role_changed" /
+ *                          "deleted" / "restored" / "password_reset_sent" (DEBT-2, issue #185)
  *
  * Date fields are ISO-8601 strings (wire shape). The list is newest-first and **offset-paginated**
  * per ADR-0030 (default page size 20).
@@ -28,13 +30,18 @@ export const ActivityEntityTypeSchema = z.enum([
   "asset",
   "application",
   "consumable",
+  // DEBT-2 (issue #185): the User entity now audits its lifecycle into the `recent_activity` view. NOTE
+  // for `web`: this widens the enum, so the ENTITY_META / ENTITY_TONE exhaustive maps must add a "user"
+  // case (a separate frontend change lands on the same branch).
+  "user",
 ]);
 
 /**
  * One normalized row of the unified activity feed. `actorId` / `actorName` are the user who caused
- * the event, resolved (lightly) from `users` — both null for system/unknown actors or a deleted user
- * whose audit FK was set null. `entityId` is the affected entity's id (a cuid for asset/application/
- * consumable). `summary` is a short, human-readable, server-built sentence for the feed line.
+ * the event, resolved (lightly) from `users` — both null for system/unknown actors, a service-account
+ * actor, or a deleted user whose audit FK was set null. `entityId` is the affected entity's id (a cuid
+ * for asset/application/consumable, a uuid for user). `summary` is a short, human-readable, server-built
+ * sentence for the feed line.
  */
 export const RecentActivityItemSchema = z.object({
   // ISO-8601 timestamp the event occurred at. The feed is ordered by this, newest first.
@@ -79,6 +86,9 @@ export type RecentActivityPage = z.infer<typeof RecentActivityPageSchema>;
  *   - AssetAssignment branch: assigned · released (already covered above)
  *   - AccessGrant: granted · revoked
  *   - ConsumableMovement: stock_in · stock_out · stock_adjustment
+ *   - UserHistory (lowercased `UserHistoryEventType`, DEBT-2 / issue #185): created · updated ·
+ *     role_changed · deleted · restored · password_reset_sent. `created` / `deleted` / `restored` are
+ *     already in the list (shared with AssetHistory); only the user-specific verbs are added below.
  * Keep this in sync with the view if a new source verb is added.
  */
 export const RECENT_ACTIVITY_ACTIONS = [
@@ -96,6 +106,10 @@ export const RECENT_ACTIVITY_ACTIONS = [
   "stock_in",
   "stock_out",
   "stock_adjustment",
+  // UserHistory-specific verbs (DEBT-2, issue #185). `created`/`deleted`/`restored` already appear above.
+  "updated",
+  "role_changed",
+  "password_reset_sent",
 ] as const;
 
 /** A single known activity verb. The `action` filter validates against this enum (→ 400 otherwise). */
