@@ -57,8 +57,13 @@ export default async function AppLayout({
         {/* Syncs Auth.js access token into the client-side store so apiFetch sends Bearer automatically. */}
         <SessionTokenSync />
         {/* Layout-level breadcrumb bar: route-driven, renders nothing on top-level
-            pages (e.g. /dashboard). Retires the per-page "Back to X" buttons. */}
-        <div className="border-b border-border px-4 py-2 empty:hidden md:px-6">
+            pages (e.g. /dashboard). Retires the per-page "Back to X" buttons.
+            `data-app-chrome` lets the print stylesheet strip it when a print-document
+            (e.g. the Reports/Informes table) owns the page. */}
+        <div
+          data-app-chrome
+          className="border-b border-border px-4 py-2 empty:hidden md:px-6"
+        >
           <Breadcrumb />
         </div>
         <main id="main-content" className="flex-1 p-4 md:p-6">
