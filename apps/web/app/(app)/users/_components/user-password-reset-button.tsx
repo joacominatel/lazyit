@@ -96,8 +96,11 @@ export function UserPasswordResetButton({ user }: UserPasswordResetButtonProps) 
         onClick={() => setConfirmOpen(true)}
         disabled={disabled}
         title={disabledReason ?? undefined}
+        className="border-warning/40 hover:border-warning/70 hover:bg-warning/5"
       >
-        <KeyIcon />
+        {/* Amber key cues a sensitive (but non-destructive) security action — distinct from the
+            red Offboard, and the label stays on --foreground so contrast holds. */}
+        <KeyIcon className="text-warning" />
         Send password reset
       </Button>
 
