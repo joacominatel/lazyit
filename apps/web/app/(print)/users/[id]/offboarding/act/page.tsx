@@ -10,8 +10,12 @@ import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import {
   DEFAULT_OFFBOARDING_MESSAGE,
   DEFAULT_ORG_NAME,
+  DEFAULT_SHOW_ACCESS,
+  DEFAULT_SHOW_ASSETS,
   OFFBOARDING_MESSAGE_KEY,
   ORG_NAME_KEY,
+  SHOW_ACCESS_KEY,
+  SHOW_ASSETS_KEY,
 } from "@/lib/offboarding/constants";
 import { useOffboardingData } from "@/lib/offboarding/use-offboarding-data";
 import { formatDate } from "@/lib/utils/format";
@@ -42,6 +46,9 @@ export default function OffboardingActPage() {
     OFFBOARDING_MESSAGE_KEY,
     DEFAULT_OFFBOARDING_MESSAGE,
   );
+  // The act lists these sections unless the operator opted out in the offboarding sheet.
+  const [showAssets] = useLocalStorage(SHOW_ASSETS_KEY, DEFAULT_SHOW_ASSETS);
+  const [showAccess] = useLocalStorage(SHOW_ACCESS_KEY, DEFAULT_SHOW_ACCESS);
   // Snapshot the issue date once so a re-render (or the print dialog) can't shift it.
   const [issuedAt] = useState(() => new Date().toISOString());
 
@@ -126,7 +133,8 @@ export default function OffboardingActPage() {
         )}
       </section>
 
-      {/* Return checklist */}
+      {/* Return checklist — listed on the act unless toggled off in the offboarding sheet. */}
+      {showAssets && (
       <section className="mt-7">
         <h2 className="text-label uppercase text-muted-foreground">
           Assets to return
@@ -181,8 +189,10 @@ export default function OffboardingActPage() {
           </ul>
         )}
       </section>
+      )}
 
-      {/* Access revoked */}
+      {/* Access revoked — listed on the act unless toggled off in the offboarding sheet. */}
+      {showAccess && (
       <section className="mt-7">
         <h2 className="text-label uppercase text-muted-foreground">
           Access revoked
@@ -218,6 +228,7 @@ export default function OffboardingActPage() {
           </ul>
         )}
       </section>
+      )}
 
       {isEmpty ? (
         <p className="mt-6 text-muted-foreground">
