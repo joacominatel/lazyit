@@ -95,10 +95,15 @@ requires widening the shared `ActivityEntityType` contract to include `"user"`.
 - **Positive:** the User entity now has the same durable, queryable, replayable audit trail as every
   other entity, and its lifecycle shows up in the unified feed. The per-user timeline (`(userId, id)`
   index) is ready for a future `GET /users/:id/history` with zero further schema work.
-- **BREAKING-for-web (expected, handled separately on this branch):** widening `ActivityEntityType`
-  makes the web's exhaustive `ENTITY_META` / `ENTITY_TONE` maps non-exhaustive — a deliberate,
-  contract-driven break a frontend change resolves on the same branch (it adds the `"user"` icon/tone
-  + a link target). The shared `recent-activity.test.ts` enum assertions were updated to match.
+- **BREAKING-for-web (expected, resolved on this branch):** widening `ActivityEntityType` made the
+  web's exhaustive `ENTITY_META` / `ENTITY_TONE` maps non-exhaustive — a deliberate, contract-driven
+  break the frontend change on this same branch resolves: it adds the `"user"` case (a `UsersIcon`
+  chip tinted with the **Manage** pillar — `bg-pillar-manage/10 text-pillar-manage`, rose — and a
+  `/users/:id` link target), wires the user lifecycle verbs (`updated` · `role_changed` ·
+  `password_reset_sent`, plus the shared `deleted`/`restored`) into the Reports action tones, and
+  enables the previously-disabled **Users** scope tab on Informes (it sends `entityType=user`, with a
+  Manage-tinted active underline). The shared `recent-activity.test.ts` enum assertions were updated to
+  match.
 - **A `DELETED` user-history row never appears in the feed** — the view filters soft-deleted subjects,
   so the offboarding still surfaces via the released/revoked asset+access branches, while the `DELETED`
   row stays on the per-user timeline. A `RESTORED` row *does* appear (the subject is live again).

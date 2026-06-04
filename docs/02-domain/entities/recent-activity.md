@@ -79,7 +79,9 @@ server-side as a **parameterized** `WHERE` clause over the view (never string-co
 injection guard), and the page `total` reflects the SAME filtered count (the page read and the count
 share one WHERE in a single `$transaction`, so they can't drift):
 
-- `entityType` — one pillar (`asset` | `application` | `consumable`).
+- `entityType` — one pillar (`asset` | `application` | `consumable` | `user`). The Reports/Informes
+  scope tabs map onto this 1:1: an **Assets / Access / Stock / Users** tab each sends one `entityType`
+  (the Users tab — DEBT-2, issue #185 — sends `user`), while "All" and "My history" send none.
 - `entityId` — one affected entity's id (exact match; pairs naturally with `entityType`).
 - `actorId` — a user uuid **or** the literal `"me"`. `"me"` is resolved to the caller's own id
   **server-side** (from the authenticated principal) — the client is never trusted for the actor; a
