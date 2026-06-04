@@ -1,1 +1,78 @@
-{}
+{
+  "title": "Dashboard",
+  "subtitle": "Your IT estate at a glance — Inventory, Access and Knowledge.",
+  "updated": "Updated {relative}",
+  "errorTitle": "Could not load the dashboard",
+  "noDataYet": "No data yet.",
+  "needsAttention": {
+    "heading": "Needs attention",
+    "allClear": "All clear — no expiring grants, low stock or lost assets right now.",
+    "expiringGrants": "{count, plural, one {# grant expiring within {days} days} other {# grants expiring within {days} days}}",
+    "criticalGrants": "{count, plural, one {# active grant on critical applications} other {# active grants on critical applications}}",
+    "lowStock": "{count, plural, one {# consumable at or below the reorder threshold} other {# consumables at or below the reorder threshold}}",
+    "inMaintenance": "{count, plural, one {# asset in maintenance} other {# assets in maintenance}}",
+    "lost": "{count, plural, one {# asset marked lost} other {# assets marked lost}}"
+  },
+  "pillars": {
+    "assets": {
+      "title": "Assets",
+      "metricLabel": "{count, plural, one {asset} other {assets}}",
+      "cta": "Browse assets",
+      "assignedFooter": "{count, plural, one {# currently assigned} other {# currently assigned}}"
+    },
+    "access": {
+      "title": "Access",
+      "metricLabel": "{count, plural, one {active grant} other {active grants}}",
+      "cta": "Manage access",
+      "onCriticalApps": "On critical apps",
+      "expiring": "Expiring ≤ {days}d"
+    },
+    "knowledge": {
+      "title": "Knowledge",
+      "metricLabel": "{count, plural, one {article} other {articles}}",
+      "cta": "Open the knowledge base",
+      "published": "Published",
+      "drafts": "Drafts"
+    },
+    "consumables": {
+      "title": "Consumables",
+      "metricLabel": "{count, plural, one {item} other {items}}",
+      "cta": "Browse consumables",
+      "lowOnStock": "Low on stock"
+    }
+  },
+  "healthBar": {
+    "operational": "Operational",
+    "transitional": "In maintenance/storage",
+    "inactive": "Out of service",
+    "ariaLabel": "Asset health: {operational} operational, {transitional} in maintenance or storage, {inactive} out of service of {total} total."
+  },
+  "quickActions": {
+    "title": "Quick actions",
+    "newAsset": "New asset",
+    "addStock": "Add stock",
+    "grantAccess": "Grant access"
+  },
+  "donut": {
+    "title": "Assets by status",
+    "empty": "No assets yet — add your first and the breakdown shows up here.",
+    "centerLabel": "{count, plural, one {asset} other {assets}}",
+    "ariaLabel": "Assets by status: {breakdown}, {total} total."
+  },
+  "accessHealth": {
+    "title": "Access health",
+    "expiring": "Expiring ≤ {days}d",
+    "allCurrent": "All current",
+    "onCriticalApps": "On critical apps",
+    "noneCritical": "None on critical apps"
+  },
+  "recentActivity": {
+    "heading": "Recent activity",
+    "cardTitle": "Across the estate",
+    "cardDescription": "The latest changes to assets, access and stock — newest first.",
+    "empty": "No activity recorded yet. Changes to assets, access and consumables will show up here.",
+    "loadMore": "Load more",
+    "errorTitle": "Couldn't load recent activity",
+    "errorBody": "The API may be down or unreachable."
+  }
+}
