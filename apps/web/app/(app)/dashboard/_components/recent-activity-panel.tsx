@@ -2,20 +2,11 @@
 
 import {
   ArrowPathIcon,
-  CubeIcon,
   ExclamationTriangleIcon,
-  KeyIcon,
-  ServerStackIcon,
 } from "@heroicons/react/24/outline";
-import type {
-  ActivityEntityType,
-  RecentActivityItem,
-} from "@lazyit/shared";
-import Link from "next/link";
-import type { ComponentType, CSSProperties } from "react";
 import { useMemo, useState } from "react";
+import { ActivityRow } from "@/components/activity-row";
 import { RequestIdNote } from "@/components/request-id-note";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,11 +16,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { groupByDay } from "@/lib/activity-grouping";
 import { ApiError } from "@/lib/api/client";
 import { useDashboardActivity } from "@/lib/api/hooks/use-dashboard";
-import { avatarColorFor } from "@/lib/avatar-color";
-import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/utils/format";
 
 /**
  * Recent activity — the unified, cross-pillar feed (CEO Round 2). Reads the paginated
@@ -126,162 +115,6 @@ export function RecentActivityPanel() {
         </CardContent>
       </Card>
     </section>
-  );
-}
-
-/**
- * Cap the staggered settle to the first page's worth of rows: beyond this, the rise-in delay
- * is clamped so a long feed (or "Load more"-appended pages) never grows a sluggish cascade —
- * the stagger is a first-mount reveal, not a per-row reflex. ~8 keeps the total under ~190ms.
- */
-const STAGGER_CAP = 8;
-
-/** A day bucket of activity rows, carrying each row's GLOBAL index for the capped stagger. */
-interface ActivityGroup {
-  label: string;
-  items: { item: RecentActivityItem; index: number }[];
-}
-
-/** Local Y-M-D key for a timestamp, so "same day" is judged in the viewer's local zone. */
-function dayKey(date: Date): string {
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-}
-
-/**
- * Bucket a newest-first activity stream into Today / Yesterday / Earlier, comparing each
- * row's local calendar day against the snapshotted `now`. Single pass (the stream is already
- * ordered), so the returned groups stay newest-first and carry each row's global index.
- */
-function groupByDay(items: RecentActivityItem[], now: number): ActivityGroup[] {
-  const today = dayKey(new Date(now));
-  const yesterday = dayKey(new Date(now - 24 * 60 * 60 * 1000));
-  const order = ["Today", "Yesterday", "Earlier"] as const;
-  const buckets = new Map<string, { item: RecentActivityItem; index: number }[]>();
-  items.forEach((item, index) => {
-    const key = dayKey(new Date(item.occurredAt));
-    const label =
-      key === today ? "Today" : key === yesterday ? "Yesterday" : "Earlier";
-    const bucket = buckets.get(label);
-    if (bucket) bucket.push({ item, index });
-    else buckets.set(label, [{ item, index }]);
-  });
-  return order
-    .filter((label) => buckets.has(label))
-    .map((label) => ({ label, items: buckets.get(label) ?? [] }));
-}
-
-/** Per-pillar icon + the area the entity links into. */
-const ENTITY_META: Record<
-  ActivityEntityType,
-  { icon: ComponentType<{ className?: string }>; href: (id: string) => string }
-> = {
-  asset: { icon: ServerStackIcon, href: (id) => `/assets/${id}` },
-  application: { icon: KeyIcon, href: (id) => `/applications/${id}` },
-  consumable: { icon: CubeIcon, href: (id) => `/consumables/${id}` },
-};
-
-/**
- * Tone classes for the leading icon chip, by pillar (ADR-0049). These chips hold a
- * DECORATIVE glyph (aria-hidden) — a ≥24px mark is exempt from text-AA — so the pillar hue
- * can sit as both tint (`/10` background) and glyph color. Asset + consumable are Inventory
- * (teal); application is Access (indigo). The pillar tokens carry dark parity, so the
- * hand-written `dark:` variants are gone. Full strings so the Tailwind scanner keeps them.
- */
-const ENTITY_TONE: Record<ActivityEntityType, string> = {
-  asset: "bg-pillar-inventory/10 text-pillar-inventory",
-  application: "bg-pillar-access/10 text-pillar-access",
-  consumable: "bg-pillar-inventory/10 text-pillar-inventory",
-};
-
-/**
- * One timeline row — densified for the narrow rail-adjacent column (Wave 3a): a pillar-tinted
- * icon chip with the timeline connector, a single-line (truncating) summary link, and a compact
- * meta line carrying the actor avatar + name, a dot separator and the relative time. Tighter
- * vertical rhythm than the old two-line layout, while keeping the staggered `rise-in` settle.
- */
-function ActivityRow({
-  item,
-  isLast,
-  index,
-  now,
-}: {
-  item: RecentActivityItem;
-  isLast: boolean;
-  /** Global 0-based position in the flattened stream, for the capped staggered settle. */
-  index: number;
-  now: number;
-}) {
-  const meta = ENTITY_META[item.entityType];
-  const Icon = meta.icon;
-  return (
-    <li
-      className="relative flex animate-rise-in gap-3 pb-3.5 [animation-delay:calc(var(--i)*24ms)] last:pb-0"
-      style={{ "--i": Math.min(index, STAGGER_CAP) } as CSSProperties}
-    >
-      {!isLast && (
-        <span
-          className="absolute top-7 left-[13px] h-[calc(100%-1.25rem)] w-px bg-border"
-          aria-hidden
-        />
-      )}
-      <span
-        className={cn(
-          "flex size-7 shrink-0 items-center justify-center rounded-lg ring-2 ring-background",
-          ENTITY_TONE[item.entityType],
-        )}
-        aria-hidden
-      >
-        <Icon className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <Link
-          href={meta.href(item.entityId)}
-          className="block truncate text-sm font-medium outline-none hover:underline focus-visible:underline"
-          title={item.summary}
-        >
-          {item.summary}
-        </Link>
-        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-          {item.actorName ? (
-            <>
-              <ActorAvatar name={item.actorName} seed={item.actorId} />
-              <span className="min-w-0 truncate">{item.actorName}</span>
-            </>
-          ) : (
-            <span>System</span>
-          )}
-          <span
-            className="ml-auto shrink-0 pl-1 tabular-nums"
-            title={new Date(item.occurredAt).toLocaleString()}
-          >
-            {formatRelativeTime(item.occurredAt, now)}
-          </span>
-        </div>
-      </div>
-    </li>
-  );
-}
-
-function actorInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const first = parts[0]?.[0] ?? "";
-  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
-  return `${first}${last}`.toUpperCase() || "?";
-}
-
-/**
- * Tiny actor avatar for the feed. The activity row carries only a display name + id (no email), so
- * initials come from the name and the color is seeded by the actor id (stable per person), falling
- * back to the name when the id is null. Uses the canonical {@link avatarColorFor} palette so the
- * same identity gets the same color here as on Users, asset owners and access grantees.
- */
-function ActorAvatar({ name, seed }: { name: string; seed: string | null }) {
-  return (
-    <Avatar size="sm" title={name}>
-      <AvatarFallback className={cn("font-medium", avatarColorFor(seed ?? name))}>
-        {actorInitials(name)}
-      </AvatarFallback>
-    </Avatar>
   );
 }
 
