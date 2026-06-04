@@ -12,6 +12,7 @@ import {
   UsersIcon,
 } from "@heroicons/react/24/outline";
 import type { Permission } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Pillar } from "@/components/pillar-scope";
@@ -19,7 +20,12 @@ import { useMyPermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
-  label: string;
+  /**
+   * Key into the `nav` namespace (ADR-0051) — resolved at render via
+   * `useTranslations('nav')`. The route/icon stay static; only the visible label is
+   * translated.
+   */
+  labelKey: string;
   href: string;
   icon: typeof Squares2X2Icon;
   /**
@@ -37,8 +43,11 @@ type NavItem = {
 };
 
 type NavSection = {
-  /** Section heading, or null for the ungrouped top item (Dashboard). */
-  heading: string | null;
+  /**
+   * Key into the `nav` namespace for the section heading (ADR-0051), or null for the
+   * ungrouped top item (Dashboard).
+   */
+  headingKey: string | null;
   /**
    * The pillar whose hue the section's ACTIVE item wears on its icon (ADR-0049). Omitted for
    * the ungrouped Dashboard, which falls back to the brand indigo (Access hue) — the calm
@@ -83,35 +92,37 @@ const ACTIVE_ICON_BY_PILLAR: Record<Pillar | "default", string> = {
  */
 const NAV: NavSection[] = [
   {
-    heading: null,
-    items: [{ label: "Dashboard", href: "/dashboard", icon: Squares2X2Icon }],
-  },
-  {
-    heading: "Inventory",
-    pillar: "inventory",
+    headingKey: null,
     items: [
-      { label: "Assets", href: "/assets", icon: ServerStackIcon },
-      { label: "Consumables", href: "/consumables", icon: CubeIcon },
+      { labelKey: "dashboard", href: "/dashboard", icon: Squares2X2Icon },
     ],
   },
   {
-    heading: "Access",
-    pillar: "access",
-    items: [{ label: "Applications", href: "/applications", icon: KeyIcon }],
+    headingKey: "inventory",
+    pillar: "inventory",
+    items: [
+      { labelKey: "assets", href: "/assets", icon: ServerStackIcon },
+      { labelKey: "consumables", href: "/consumables", icon: CubeIcon },
+    ],
   },
   {
-    heading: "Knowledge",
+    headingKey: "access",
+    pillar: "access",
+    items: [{ labelKey: "applications", href: "/applications", icon: KeyIcon }],
+  },
+  {
+    headingKey: "knowledge",
     pillar: "knowledge",
-    items: [{ label: "Knowledge Base", href: "/kb", icon: BookOpenIcon }],
+    items: [{ labelKey: "knowledgeBase", href: "/kb", icon: BookOpenIcon }],
   },
   {
     // Reports — the estate-wide activity history (issue #177). `pillar` is omitted so the active
     // item falls back to the brand indigo (no fifth pillar hue). Gated behind the ADMIN-only
     // `logs:read` permission, so the section is invisible to everyone else.
-    heading: "Reports",
+    headingKey: "reports",
     items: [
       {
-        label: "Informes",
+        labelKey: "informes",
         href: "/informes",
         icon: ClockIcon,
         permission: "logs:read",
@@ -119,18 +130,27 @@ const NAV: NavSection[] = [
     ],
   },
   {
-    heading: "Manage",
+    headingKey: "manage",
     pillar: "manage",
     items: [
-      { label: "Users", href: "/users", icon: UsersIcon },
-      { label: "Locations", href: "/locations", icon: MapPinIcon },
-      { label: "Settings", href: "/settings", icon: Cog6ToothIcon, adminOnly: true },
+      { labelKey: "users", href: "/users", icon: UsersIcon },
+      { labelKey: "locations", href: "/locations", icon: MapPinIcon },
+      {
+        labelKey: "settings",
+        href: "/settings",
+        icon: Cog6ToothIcon,
+        adminOnly: true,
+      },
     ],
   },
 ];
 
 export function SidebarNav() {
   const pathname = usePathname();
+  // Sidebar labels/headings live in the `nav` namespace (ADR-0051). This is the Phase-0
+  // worked example: one real section of the chrome wired through next-intl, proving the
+  // plumbing end-to-end before the per-section fan-out extracts the rest.
+  const t = useTranslations("nav");
   // Resolve the whole permission set ONCE (rules of hooks: no `useCan` inside the item loop). `can`
   // answers any fine-grained gate (`logs:read`, …); `adminOnly` keeps mapping to `settings:manage`.
   const { can } = useMyPermissions();
@@ -151,13 +171,13 @@ export function SidebarNav() {
         // The active item's icon wears this section's pillar hue (Dashboard → brand fallback).
         const activeIconClass = ACTIVE_ICON_BY_PILLAR[section.pillar ?? "default"];
         return (
-        <div key={section.heading ?? `section-${index}`} className="space-y-0.5">
-          {section.heading ? (
+        <div key={section.headingKey ?? `section-${index}`} className="space-y-0.5">
+          {section.headingKey ? (
             <p className="px-3 pt-1 pb-1 text-xs font-medium tracking-wide text-muted-foreground/70 uppercase">
-              {section.heading}
+              {t(section.headingKey)}
             </p>
           ) : null}
-          {items.map(({ label, href, icon: Icon }) => {
+          {items.map(({ labelKey, href, icon: Icon }) => {
             // Active for the exact route and any nested route (e.g. /assets/:id).
             const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
@@ -178,7 +198,7 @@ export function SidebarNav() {
                 )}
               >
                 <Icon className={cn("size-5", active && activeIconClass)} />
-                {label}
+                {t(labelKey)}
               </Link>
             );
           })}

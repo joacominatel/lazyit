@@ -13,6 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 import { avatarColorFor } from "@/lib/avatar-color";
 import { usePermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
@@ -81,6 +82,9 @@ export function UserMenu() {
             )}
           </div>
         </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {/* Locale switcher (ADR-0051): a Globe sub-menu with EN / ES. */}
+        <LocaleSwitcher />
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleSignOut}>Sign out</DropdownMenuItem>
       </DropdownMenuContent>
