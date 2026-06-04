@@ -4,6 +4,7 @@ import {
   int4,
   INT4_MAX,
   INT4_MIN,
+  optionalText,
   requireAtLeastOneKey,
 } from "./primitives";
 
@@ -47,6 +48,39 @@ describe("int4()", () => {
       unrepresentable: "any",
     }) as { properties: { n: { example?: number } } };
     expect(json.properties.n.example).toBe(5);
+  });
+});
+
+describe("optionalText() — empty optional free text is omitted, not rejected", () => {
+  const schema = optionalText(10);
+
+  test('coerces an empty string to undefined (the issue #165 bug)', () => {
+    const result = schema.safeParse("");
+    expect(result.success).toBe(true);
+    expect(result.data).toBeUndefined();
+  });
+
+  test("coerces a whitespace-only string to undefined", () => {
+    const result = schema.safeParse("   ");
+    expect(result.success).toBe(true);
+    expect(result.data).toBeUndefined();
+  });
+
+  test("still parses (and trims) a real value", () => {
+    const result = schema.safeParse("  x  ");
+    expect(result.success).toBe(true);
+    expect(result.data).toBe("x");
+  });
+
+  test("accepts an omitted (undefined) value", () => {
+    const result = z.object({ notes: schema }).safeParse({});
+    expect(result.success).toBe(true);
+    expect(result.data?.notes).toBeUndefined();
+  });
+
+  test("still enforces the max length on a real value", () => {
+    expect(schema.safeParse("12345678901").success).toBe(false); // 11 > max 10
+    expect(schema.safeParse("1234567890").success).toBe(true); // exactly 10
   });
 });
 
