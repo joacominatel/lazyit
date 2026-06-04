@@ -18,3 +18,7 @@ dist/
 
 docs/.obsidian/workspace.json
 docs/.obsidian/graph.json
+
+# not our skills
+.claude/skills/*
+!.claude/skills/lazyit*
