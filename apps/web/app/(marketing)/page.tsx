@@ -27,7 +27,7 @@ import { getConfigStatus } from "@/lib/api/endpoints/config";
  * icon, never a 5th hue). Tickets has no pillar token — it borrows the categorical amber
  * `--chart-4` (the one registered hue not yet claimed by a pillar; reusing brand indigo would
  * collide with Access and dilute indigo's action/selection role). AA RULE (globals.css): the hue
- * is a 10% tint + a decorative ≥20px aria-hidden glyph only; the card title always stays on
+ * is a 10% tint + a decorative ≥24px aria-hidden glyph only; the card title always stays on
  * --foreground, so both themes clear AA.
  */
 export const dynamic = "force-dynamic";
@@ -137,7 +137,7 @@ export default async function LandingPage() {
                 chip,
               )}
             >
-              <Icon className="size-5" aria-hidden="true" />
+              <Icon className="size-6" aria-hidden="true" />
             </div>
             <h2 className="mt-3 text-sm font-medium text-foreground">{title}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{description}</p>
