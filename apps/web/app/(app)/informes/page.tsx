@@ -17,8 +17,9 @@ import { InformesScreen } from "./_components/informes-screen";
  * permission set is loading we show a header + skeleton (no flash of either the screen or the
  * access-denied state — `useMyPermissions` fails closed). Once resolved, a caller without `logs:read`
  * gets the calm {@link InformesAccessDenied} state. v1 NOTE: this is a UI-level gate — the underlying
- * `GET /dashboard/activity` feed is still the shared `dashboard:read` stream (the same one the
- * dashboard panel shows for every role). A dedicated `logs:read`-gated endpoint is DEBT-1.
+ * `GET /dashboard/activity` feed is still the shared `dashboard:read` stream (the same feed; since
+ * Wave 3c-1c the dashboard panel is also `logs:read`-gated at the UI level). A dedicated
+ * `logs:read`-gated endpoint is DEBT-1.
  */
 export default function InformesPage() {
   const { can, isLoading } = useMyPermissions();
