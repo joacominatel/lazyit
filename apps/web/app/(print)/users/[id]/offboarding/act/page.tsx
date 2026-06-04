@@ -1,6 +1,7 @@
 "use client";
 
 import { PrinterIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ import { formatDate } from "@/lib/utils/format";
  * note (never a crash).
  */
 export default function OffboardingActPage() {
+  const t = useTranslations("users.act");
   const params = useParams<{ id: string }>();
   const id = params.id;
 
@@ -60,17 +62,18 @@ export default function OffboardingActPage() {
   useEffect(() => {
     if (!user) return;
     const previous = document.title;
-    document.title = `Return Act — ${user.firstName} ${user.lastName}`;
+    document.title = t("documentTitle", {
+      name: `${user.firstName} ${user.lastName}`,
+    });
     return () => {
       document.title = previous;
     };
-  }, [user]);
+  }, [user, t]);
 
   if (isError) {
     return (
       <main className="mx-auto max-w-2xl px-8 py-16 text-sm text-muted-foreground">
-        This user could not be loaded — they may have been removed, or the API is
-        unreachable.
+        {t("loadError")}
       </main>
     );
   }
@@ -84,7 +87,7 @@ export default function OffboardingActPage() {
       <div data-print-hide className="mb-6 flex justify-end">
         <Button size="sm" onClick={() => window.print()}>
           <PrinterIcon />
-          Print
+          {t("print")}
         </Button>
       </div>
 
@@ -101,11 +104,9 @@ export default function OffboardingActPage() {
       {/* Bilingual title */}
       <div className="mt-6">
         <h1 className="font-heading text-xl font-semibold tracking-tight">
-          Asset Return &amp; Access Acknowledgment
+          {t("titleEn")}
         </h1>
-        <p className="mt-0.5 text-muted-foreground">
-          Acta de baja y devolución de activos
-        </p>
+        <p className="mt-0.5 text-muted-foreground">{t("titleEs")}</p>
       </div>
 
       {/* Person block */}
@@ -118,15 +119,15 @@ export default function OffboardingActPage() {
         ) : (
           <>
             <p>
-              <span className="text-muted-foreground">Name: </span>
+              <span className="text-muted-foreground">{t("nameLabel")}</span>
               {user.firstName} {user.lastName}
             </p>
             <p>
-              <span className="text-muted-foreground">Email: </span>
+              <span className="text-muted-foreground">{t("emailLabel")}</span>
               {user.email}
             </p>
             <p>
-              <span className="text-muted-foreground">Role: </span>
+              <span className="text-muted-foreground">{t("roleLabel")}</span>
               {user.role}
             </p>
           </>
@@ -137,7 +138,7 @@ export default function OffboardingActPage() {
       {showAssets && (
       <section className="mt-7">
         <h2 className="text-label uppercase text-muted-foreground">
-          Assets to return
+          {t("assetsToReturn")}
         </h2>
         {isLoading ? (
           <div className="mt-2 space-y-2">
@@ -145,14 +146,14 @@ export default function OffboardingActPage() {
             <Skeleton className="h-5 w-full" />
           </div>
         ) : assets.length === 0 ? (
-          <p className="mt-2 text-muted-foreground">Nothing to return.</p>
+          <p className="mt-2 text-muted-foreground">{t("nothingToReturn")}</p>
         ) : (
           <ul className="mt-2 divide-y divide-foreground/10">
             {assets.map((asset) => {
               const title =
                 asset.assetTag ??
                 asset.name ??
-                (asset.resolved ? "Asset" : asset.assetId);
+                (asset.resolved ? t("assetFallback") : asset.assetId);
               const meta = [
                 asset.serial ? `SN ${asset.serial}` : null,
                 asset.model,
@@ -179,7 +180,7 @@ export default function OffboardingActPage() {
                       ) : null
                     ) : (
                       <p className="text-xs text-muted-foreground">
-                        Not in catalog — verify by id {asset.assetId}
+                        {t("notInCatalog", { id: asset.assetId })}
                       </p>
                     )}
                   </div>
@@ -195,24 +196,26 @@ export default function OffboardingActPage() {
       {showAccess && (
       <section className="mt-7">
         <h2 className="text-label uppercase text-muted-foreground">
-          Access revoked
+          {t("accessRevoked")}
         </h2>
         {isLoading ? (
           <div className="mt-2 space-y-2">
             <Skeleton className="h-5 w-3/4" />
           </div>
         ) : grants.length === 0 ? (
-          <p className="mt-2 text-muted-foreground">No active application access.</p>
+          <p className="mt-2 text-muted-foreground">{t("noActiveAccess")}</p>
         ) : (
           <ul className="mt-2 divide-y divide-foreground/10">
             {grants.map((grant) => {
               const title =
                 grant.appName ??
-                (grant.resolved ? "Application" : grant.applicationId);
+                (grant.resolved ? t("applicationFallback") : grant.applicationId);
               const meta = [
                 grant.accessLevel,
-                grant.isCritical ? "Critical" : null,
-                grant.expiresAt ? `expires ${formatDate(grant.expiresAt)}` : null,
+                grant.isCritical ? t("critical") : null,
+                grant.expiresAt
+                  ? t("expires", { date: formatDate(grant.expiresAt) })
+                  : null,
               ].filter(Boolean);
               return (
                 <li key={grant.grantId} className="py-2">
@@ -231,26 +234,25 @@ export default function OffboardingActPage() {
       )}
 
       {isEmpty ? (
-        <p className="mt-6 text-muted-foreground">
-          This person held no assets and had no active access. This act stands as a
-          record of their departure.
-        </p>
+        <p className="mt-6 text-muted-foreground">{t("emptyNote")}</p>
       ) : null}
 
       {/* Handover note */}
       <section className="mt-7">
-        <h2 className="text-label uppercase text-muted-foreground">Note</h2>
+        <h2 className="text-label uppercase text-muted-foreground">
+          {t("note")}
+        </h2>
         <p className="mt-2 whitespace-pre-wrap">{note}</p>
       </section>
 
       {/* Signatures */}
       <section className="mt-12 grid grid-cols-2 gap-10">
-        {["Employee", "IT"].map((who) => (
-          <div key={who}>
+        {(["signatureEmployee", "signatureIt"] as const).map((key) => (
+          <div key={key}>
             <div className="h-10 border-b border-foreground/40" />
             <div className="mt-1.5 flex items-baseline justify-between text-xs text-muted-foreground">
-              <span>{who} signature</span>
-              <span>Date</span>
+              <span>{t("signatureLine", { who: t(key) })}</span>
+              <span>{t("signatureDate")}</span>
             </div>
           </div>
         ))}
@@ -258,7 +260,7 @@ export default function OffboardingActPage() {
 
       {/* Status caption */}
       <footer className="mt-10 border-t border-foreground/20 pt-3 text-xs text-muted-foreground">
-        Pending — to be completed at handover.
+        {t("statusCaption")}
       </footer>
     </main>
   );

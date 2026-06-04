@@ -2,6 +2,7 @@
 
 import { ArrowPathIcon, KeyIcon } from "@heroicons/react/24/outline";
 import type { User } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -38,6 +39,8 @@ interface UserPasswordResetButtonProps {
  * Delivery still depends on the IdP's SMTP being configured.
  */
 export function UserPasswordResetButton({ user }: UserPasswordResetButtonProps) {
+  const t = useTranslations("users.passwordReset");
+  const tc = useTranslations("common");
   const canManage = useCan("user:manage");
   const resetPassword = useResetUserPassword();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -49,18 +52,17 @@ export function UserPasswordResetButton({ user }: UserPasswordResetButtonProps) 
   const hasNoIdpLink = user.externalId == null;
   const isInactive = !user.isActive;
   const disabledReason = hasNoIdpLink
-    ? "This account has no identity-provider link, so password reset is managed by your identity provider."
+    ? t("disabledNoIdp")
     : isInactive
-      ? "This user is inactive — reactivate them before sending a password reset."
+      ? t("disabledInactive")
       : null;
   const disabled = disabledReason != null;
 
   function handleConfirm() {
     resetPassword.mutate(user.id, {
       onSuccess: () => {
-        toast.success("Password reset email sent via the identity provider", {
-          description:
-            "Delivery depends on your identity provider's SMTP being configured.",
+        toast.success(t("toast.sentTitle"), {
+          description: t("toast.sentDescription"),
         });
         setConfirmOpen(false);
       },
@@ -68,21 +70,20 @@ export function UserPasswordResetButton({ user }: UserPasswordResetButtonProps) 
       // (which surfaces the API message + request id). We keep the dialog open so the operator sees why.
       onError: (error) => {
         if (error instanceof ApiError && error.status === 501) {
-          toast.info("Password reset is managed by your identity provider", {
-            description:
-              "lazyit can't drive a reset for this account — manage the password in your IdP.",
+          toast.info(t("toast.managedTitle"), {
+            description: t("toast.managedDescription"),
           });
           setConfirmOpen(false);
           return;
         }
         if (error instanceof ApiError && error.status === 422) {
-          toast.error("This user is inactive", {
-            description: "Reactivate them before sending a password reset.",
+          toast.error(t("toast.inactiveTitle"), {
+            description: t("toast.inactiveDescription"),
           });
           setConfirmOpen(false);
           return;
         }
-        notifyError(error, "Couldn't send the password reset");
+        notifyError(error, t("toast.error"));
         setConfirmOpen(false);
       },
     });
@@ -101,7 +102,7 @@ export function UserPasswordResetButton({ user }: UserPasswordResetButtonProps) 
         {/* Amber key cues a sensitive (but non-destructive) security action — distinct from the
             red Offboard, and the label stays on --foreground so contrast holds. */}
         <KeyIcon className="text-warning" />
-        Send password reset
+        {t("button")}
       </Button>
 
       <AlertDialog
@@ -112,18 +113,19 @@ export function UserPasswordResetButton({ user }: UserPasswordResetButtonProps) 
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Send a password reset?</AlertDialogTitle>
+            <AlertDialogTitle>{t("confirmTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              Your identity provider will email{" "}
-              <span className="font-medium text-foreground">{user.email}</span> a
-              link to reset their password. lazyit never sees or sets the
-              password; delivery depends on the provider&apos;s SMTP being
-              configured.
+              {t.rich("confirmBody", {
+                email: user.email,
+                strong: (chunks) => (
+                  <span className="font-medium text-foreground">{chunks}</span>
+                ),
+              })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={resetPassword.isPending}>
-              Cancel
+              {tc("cancel")}
             </AlertDialogCancel>
             {/* Plain button (not AlertDialogAction) so we own the spinner and only close on resolve. */}
             <Button
@@ -133,7 +135,7 @@ export function UserPasswordResetButton({ user }: UserPasswordResetButtonProps) 
               {resetPassword.isPending && (
                 <ArrowPathIcon className="animate-spin" />
               )}
-              Send reset email
+              {t("send")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

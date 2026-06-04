@@ -1,1 +1,231 @@
-{}
+{
+  "list": {
+    "title": "Users",
+    "subtitle": "The people in your organization.",
+    "newUser": "New user",
+    "searchLabel": "Search users",
+    "searchPlaceholder": "Search by name or email…",
+    "selectAllLabel": "Select all users on this page",
+    "selectLabel": "Select {name}",
+    "offboardAction": "Offboard",
+    "restore": "Restore",
+    "filteredEmptyArchived": "No archived users.",
+    "filteredEmptyDefault": "No users match your filters.",
+    "loadErrorTitle": "Could not load users",
+    "chips": {
+      "search": "Search: “{query}”",
+      "status": "Status: {status}"
+    },
+    "status": {
+      "all": "All statuses",
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "statusFilterLabel": {
+      "ALL": "All",
+      "ACTIVE": "Active",
+      "INACTIVE": "Inactive"
+    },
+    "columns": {
+      "avatar": "Avatar",
+      "name": "Name",
+      "email": "Email",
+      "role": "Role",
+      "status": "Status",
+      "updated": "Updated",
+      "actions": "Actions"
+    },
+    "meta": {
+      "email": "Email",
+      "role": "Role",
+      "updated": "Updated"
+    },
+    "toast": {
+      "restored": "{name} restored",
+      "restoreError": "Couldn't restore the user",
+      "bulkRestoreError": "Couldn't restore the selected users"
+    },
+    "byoi": {
+      "title": "Users and roles are managed locally",
+      "description": "You're signing in with your own identity provider, so changes here are not synced to it. Create, disable and assign roles to accounts in your IdP; lazyit keeps its own copy for authorization."
+    }
+  },
+  "empty": {
+    "title": "No people here yet",
+    "description": "Add the people in your organization — once they're here you can assign assets and grant them access.",
+    "action": "Add your first user"
+  },
+  "detail": {
+    "notFoundTitle": "User not found",
+    "notFoundDescription": "They may have been offboarded, or the API is unreachable.",
+    "edit": "Edit",
+    "offboard": "Offboard",
+    "profile": "Profile",
+    "fields": {
+      "email": "Email",
+      "status": "Status",
+      "role": "Role",
+      "joined": "Joined",
+      "lastUpdated": "Last updated"
+    },
+    "assets": {
+      "title": "Assets held",
+      "empty": "Holds no assets right now.",
+      "assetFallback": "Asset",
+      "assignedOn": "Assigned {date}",
+      "view": "View"
+    },
+    "access": {
+      "title": "Application access",
+      "empty": "No active application access.",
+      "applicationFallback": "Application",
+      "expired": "Expired",
+      "granted": "Granted {date}",
+      "expiresSuffix": " · expires {date}",
+      "noteSuffix": " · {note}",
+      "view": "View"
+    },
+    "articles": {
+      "title": "Authored articles",
+      "empty": "Has not authored any knowledge base articles."
+    },
+    "ownershipHistory": {
+      "title": "Ownership history",
+      "assetFallback": "Asset"
+    },
+    "accessHistory": {
+      "title": "Access history",
+      "applicationFallback": "Application"
+    }
+  },
+  "form": {
+    "editTitle": "Edit user",
+    "createTitle": "New user",
+    "editDescription": "Update this person's details.",
+    "createDescription": "Add a person to the organization. New users start active.",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "email": "Email",
+    "emailHelp": "The account-linking key for the identity provider. Must be unique; a change is mirrored to the IdP.",
+    "active": "Active",
+    "activeHelp": "Inactive users are kept for history but treated as offboarded — they can no longer be assigned assets.",
+    "saveChanges": "Save changes",
+    "createUser": "Create user",
+    "toast": {
+      "updated": "User updated",
+      "created": "User created",
+      "updateError": "Couldn't update user",
+      "createError": "Couldn't create user"
+    }
+  },
+  "role": {
+    "labels": {
+      "ADMIN": "Admin",
+      "MEMBER": "Member",
+      "VIEWER": "Viewer"
+    },
+    "hints": {
+      "ADMIN": "Full access, including user administration.",
+      "MEMBER": "Normal inventory, KB and asset operations.",
+      "VIEWER": "Read-only everywhere."
+    },
+    "selfSuffix": "(you)",
+    "ariaLabel": "Role for {name}",
+    "confirmTitle": "Change role?",
+    "confirmBody": "<strong>{name}</strong> will become <strong>{role}</strong>.",
+    "confirmAction": "Change role",
+    "toast": {
+      "changed": "{name} is now {role}",
+      "error": "Couldn't change role"
+    }
+  },
+  "status": {
+    "active": "Active",
+    "inactive": "Inactive"
+  },
+  "passwordReset": {
+    "button": "Send password reset",
+    "disabledNoIdp": "This account has no identity-provider link, so password reset is managed by your identity provider.",
+    "disabledInactive": "This user is inactive — reactivate them before sending a password reset.",
+    "confirmTitle": "Send a password reset?",
+    "confirmBody": "Your identity provider will email <strong>{email}</strong> a link to reset their password. lazyit never sees or sets the password; delivery depends on the provider's SMTP being configured.",
+    "send": "Send reset email",
+    "toast": {
+      "sentTitle": "Password reset email sent via the identity provider",
+      "sentDescription": "Delivery depends on your identity provider's SMTP being configured.",
+      "managedTitle": "Password reset is managed by your identity provider",
+      "managedDescription": "lazyit can't drive a reset for this account — manage the password in your IdP.",
+      "inactiveTitle": "This user is inactive",
+      "inactiveDescription": "Reactivate them before sending a password reset.",
+      "error": "Couldn't send the password reset"
+    }
+  },
+  "offboarding": {
+    "title": "Offboard {name}",
+    "doneTitle": "{name} archived",
+    "doneSubtitle": "Access revoked, assets released — history is safe.",
+    "impact": {
+      "releasesLabel": "Releases",
+      "assets": "{count, plural, =1 {asset} other {assets}}",
+      "revokesLabel": "Revokes",
+      "grants": "{count, plural, =1 {access grant} other {access grants}}"
+    },
+    "assetFallback": "Asset",
+    "applicationFallback": "Application",
+    "notInCatalog": "Not in the catalog — verify by id {id}",
+    "critical": "Critical",
+    "expires": "Expires {date}",
+    "noExpiry": "No expiry",
+    "verifyByIdSuffix": " · verify by id {id}",
+    "assetsToReturn": "Assets to return",
+    "nothingToReturn": "Nothing to return.",
+    "accessToRevoke": "Access to revoke",
+    "noActiveAccess": "No active application access.",
+    "emptyNote": "This person holds no assets and has no active access. The act is still valid as a record of their departure.",
+    "handoverNote": "Handover note",
+    "handoverPlaceholder": "A short note printed on the return act…",
+    "handoverHelp": "Saved for next time — this note pre-fills every act.",
+    "printedAct": "Printed act",
+    "companyName": "Company name",
+    "companyPlaceholder": "Printed on the act letterhead",
+    "listAssets": "List assets to return",
+    "listAccess": "List access revoked",
+    "printedActHelp": "These apply to the printed act — this summary always shows the full impact.",
+    "signatures": "Signatures",
+    "signatureEmployee": "Employee",
+    "signatureIt": "IT",
+    "signatureHelp": "Signed on paper at handover — print the act below.",
+    "printAct": "Print act",
+    "confirm": "Confirm offboarding",
+    "toast": {
+      "archived": "User archived — access revoked, history is safe.",
+      "error": "Couldn't offboard user"
+    }
+  },
+  "act": {
+    "documentTitle": "Return Act — {name}",
+    "loadError": "This user could not be loaded — they may have been removed, or the API is unreachable.",
+    "print": "Print",
+    "titleEn": "Asset Return & Access Acknowledgment",
+    "titleEs": "Acta de baja y devolución de activos",
+    "nameLabel": "Name: ",
+    "emailLabel": "Email: ",
+    "roleLabel": "Role: ",
+    "assetsToReturn": "Assets to return",
+    "nothingToReturn": "Nothing to return.",
+    "assetFallback": "Asset",
+    "notInCatalog": "Not in catalog — verify by id {id}",
+    "accessRevoked": "Access revoked",
+    "noActiveAccess": "No active application access.",
+    "applicationFallback": "Application",
+    "critical": "Critical",
+    "expires": "expires {date}",
+    "emptyNote": "This person held no assets and had no active access. This act stands as a record of their departure.",
+    "note": "Note",
+    "signatureEmployee": "Employee",
+    "signatureIt": "IT",
+    "signatureLine": "{who} signature",
+    "signatureDate": "Date",
+    "statusCaption": "Pending — to be completed at handover."
+  }
+}

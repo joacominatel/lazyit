@@ -6,6 +6,7 @@ import {
   KeyIcon,
   PrinterIcon,
 } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -97,8 +98,11 @@ function PillarChip({
 
 /** One asset row in the "to return" list. Unresolved assets show the raw id, never a crash. */
 function AssetLine({ asset }: { asset: OffboardAssetRow }) {
+  const t = useTranslations("users.offboarding");
   const title =
-    asset.assetTag ?? asset.name ?? (asset.resolved ? "Asset" : asset.assetId);
+    asset.assetTag ??
+    asset.name ??
+    (asset.resolved ? t("assetFallback") : asset.assetId);
   const meta = [
     asset.serial ? `SN ${asset.serial}` : null,
     asset.model,
@@ -119,7 +123,7 @@ function AssetLine({ asset }: { asset: OffboardAssetRow }) {
           ) : null
         ) : (
           <p className="truncate text-xs text-muted-foreground">
-            Not in the catalog — verify by id {asset.assetId}
+            {t("notInCatalog", { id: asset.assetId })}
           </p>
         )}
       </div>
@@ -129,7 +133,10 @@ function AssetLine({ asset }: { asset: OffboardAssetRow }) {
 
 /** One access row in the "to revoke" list. */
 function GrantLine({ grant }: { grant: OffboardGrantRow }) {
-  const title = grant.appName ?? (grant.resolved ? "Application" : grant.applicationId);
+  const t = useTranslations("users.offboarding");
+  const title =
+    grant.appName ??
+    (grant.resolved ? t("applicationFallback") : grant.applicationId);
   return (
     <li className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
       <PillarChip pillar="access">
@@ -142,14 +149,16 @@ function GrantLine({ grant }: { grant: OffboardGrantRow }) {
             <Badge variant="secondary">{grant.accessLevel}</Badge>
           ) : null}
           {grant.isCritical ? (
-            <StatusBadge tone="warning">Critical</StatusBadge>
+            <StatusBadge tone="warning">{t("critical")}</StatusBadge>
           ) : null}
         </div>
         <p className="truncate text-xs text-muted-foreground">
           {grant.expiresAt
-            ? `Expires ${formatDate(grant.expiresAt)}`
-            : "No expiry"}
-          {!grant.resolved ? ` · verify by id ${grant.applicationId}` : ""}
+            ? t("expires", { date: formatDate(grant.expiresAt) })
+            : t("noExpiry")}
+          {!grant.resolved
+            ? t("verifyByIdSuffix", { id: grant.applicationId })
+            : ""}
         </p>
       </div>
     </li>
@@ -175,6 +184,7 @@ function ListSkeleton() {
 
 /** The sober success confirmation — a drawn check, no confetti. Respectful, not whimsical. */
 function DoneState({ name }: { name: string }) {
+  const t = useTranslations("users.offboarding");
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-12 text-center">
       <span className="flex size-14 items-center justify-center rounded-full bg-success/10 text-success">
@@ -193,10 +203,10 @@ function DoneState({ name }: { name: string }) {
       </span>
       <div className="space-y-1">
         <p className="font-heading text-base font-medium text-foreground">
-          {name} archived
+          {t("doneTitle", { name })}
         </p>
         <p className="mx-auto max-w-xs text-sm text-muted-foreground">
-          Access revoked, assets released — history is safe.
+          {t("doneSubtitle")}
         </p>
       </div>
     </div>
@@ -208,6 +218,8 @@ export function OffboardingSheet({
   onOpenChange,
   user,
 }: OffboardingSheetProps) {
+  const t = useTranslations("users.offboarding");
+  const tc = useTranslations("common");
   const router = useRouter();
   const offboard = useOffboardUser();
   const { assets, grants, isLoading, isEmpty } = useOffboardingData(
@@ -247,7 +259,7 @@ export function OffboardingSheet({
   async function confirm() {
     try {
       await offboard.mutateAsync(user.id);
-      toast.success("User archived — access revoked, history is safe.");
+      toast.success(t("toast.archived"));
       // Hold the sheet open briefly to show the sober "done" before navigating away.
       setDone(true);
       window.setTimeout(() => {
@@ -255,7 +267,7 @@ export function OffboardingSheet({
         router.push("/users");
       }, 1100);
     } catch (error) {
-      notifyError(error, "Couldn't offboard user");
+      notifyError(error, t("toast.error"));
     }
   }
 
@@ -283,7 +295,9 @@ export function OffboardingSheet({
                   email={user.email}
                 />
                 <div className="min-w-0">
-                  <SheetTitle className="truncate">Offboard {fullName}</SheetTitle>
+                  <SheetTitle className="truncate">
+                    {t("title", { name: fullName })}
+                  </SheetTitle>
                   <SheetDescription className="truncate">
                     {user.email}
                   </SheetDescription>
@@ -297,18 +311,18 @@ export function OffboardingSheet({
                   <>
                     <span className="inline-flex items-center gap-1.5">
                       <span className="size-2 rounded-full bg-pillar-inventory" aria-hidden />
-                      Releases{" "}
+                      {t("impact.releasesLabel")}{" "}
                       <span className="font-medium tabular-nums">{assets.length}</span>{" "}
-                      {assets.length === 1 ? "asset" : "assets"}
+                      {t("impact.assets", { count: assets.length })}
                     </span>
                     <span className="text-muted-foreground" aria-hidden>
                       ·
                     </span>
                     <span className="inline-flex items-center gap-1.5">
                       <span className="size-2 rounded-full bg-pillar-access" aria-hidden />
-                      Revokes{" "}
+                      {t("impact.revokesLabel")}{" "}
                       <span className="font-medium tabular-nums">{grants.length}</span>{" "}
-                      {grants.length === 1 ? "access grant" : "access grants"}
+                      {t("impact.grants", { count: grants.length })}
                     </span>
                   </>
                 )}
@@ -319,13 +333,13 @@ export function OffboardingSheet({
               {/* Assets to return */}
               <section className="space-y-2">
                 <h3 className="text-label uppercase text-muted-foreground">
-                  Assets to return
+                  {t("assetsToReturn")}
                 </h3>
                 {isLoading ? (
                   <ListSkeleton />
                 ) : assets.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    Nothing to return.
+                    {t("nothingToReturn")}
                   </p>
                 ) : (
                   <ul className="divide-y">
@@ -339,13 +353,13 @@ export function OffboardingSheet({
               {/* Access to revoke */}
               <section className="space-y-2">
                 <h3 className="text-label uppercase text-muted-foreground">
-                  Access to revoke
+                  {t("accessToRevoke")}
                 </h3>
                 {isLoading ? (
                   <ListSkeleton />
                 ) : grants.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    No active application access.
+                    {t("noActiveAccess")}
                   </p>
                 ) : (
                   <ul className="divide-y">
@@ -358,8 +372,7 @@ export function OffboardingSheet({
 
               {isEmpty ? (
                 <p className="text-sm text-muted-foreground">
-                  This person holds no assets and has no active access. The act is
-                  still valid as a record of their departure.
+                  {t("emptyNote")}
                 </p>
               ) : null}
 
@@ -369,7 +382,7 @@ export function OffboardingSheet({
                   htmlFor="offboarding-message"
                   className="text-label uppercase text-muted-foreground"
                 >
-                  Handover note
+                  {t("handoverNote")}
                 </label>
                 <Textarea
                   id="offboarding-message"
@@ -377,25 +390,25 @@ export function OffboardingSheet({
                   onChange={(e) => setMessage(e.target.value)}
                   rows={3}
                   className="text-sm"
-                  placeholder="A short note printed on the return act…"
+                  placeholder={t("handoverPlaceholder")}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Saved for next time — this note pre-fills every act.
+                  {t("handoverHelp")}
                 </p>
               </section>
 
               {/* What the printed act includes — letterhead + per-section toggles (localStorage v1). */}
               <section className="space-y-3">
                 <h3 className="text-label uppercase text-muted-foreground">
-                  Printed act
+                  {t("printedAct")}
                 </h3>
                 <div className="space-y-1.5">
-                  <Label htmlFor="offboarding-org">Company name</Label>
+                  <Label htmlFor="offboarding-org">{t("companyName")}</Label>
                   <Input
                     id="offboarding-org"
                     value={orgMounted ? orgName : DEFAULT_ORG_NAME}
                     onChange={(e) => setOrgName(e.target.value)}
-                    placeholder="Printed on the act letterhead"
+                    placeholder={t("companyPlaceholder")}
                   />
                 </div>
                 <div className="flex items-center justify-between gap-3">
@@ -403,7 +416,7 @@ export function OffboardingSheet({
                     htmlFor="offboarding-show-assets"
                     className="font-normal text-foreground"
                   >
-                    List assets to return
+                    {t("listAssets")}
                   </Label>
                   <Switch
                     id="offboarding-show-assets"
@@ -416,7 +429,7 @@ export function OffboardingSheet({
                     htmlFor="offboarding-show-access"
                     className="font-normal text-foreground"
                   >
-                    List access revoked
+                    {t("listAccess")}
                   </Label>
                   <Switch
                     id="offboarding-show-access"
@@ -425,28 +438,30 @@ export function OffboardingSheet({
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  These apply to the printed act — this summary always shows the full impact.
+                  {t("printedActHelp")}
                 </p>
               </section>
 
               {/* Signature placeholders — the real signatures happen on the printed act. */}
               <section className="space-y-2">
                 <h3 className="text-label uppercase text-muted-foreground">
-                  Signatures
+                  {t("signatures")}
                 </h3>
                 <div className="grid grid-cols-2 gap-3">
-                  {["Employee", "IT"].map((who) => (
+                  {(["signatureEmployee", "signatureIt"] as const).map((key) => (
                     <div
-                      key={who}
+                      key={key}
                       className="rounded-lg border border-dashed border-border px-3 py-4"
                     >
                       <div className="h-6 border-b border-border" />
-                      <p className="mt-1.5 text-xs text-muted-foreground">{who}</p>
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        {t(key)}
+                      </p>
                     </div>
                   ))}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Signed on paper at handover — print the act below.
+                  {t("signatureHelp")}
                 </p>
               </section>
             </div>
@@ -457,7 +472,7 @@ export function OffboardingSheet({
                 onClick={() => handleOpenChange(false)}
                 disabled={pending}
               >
-                Cancel
+                {tc("cancel")}
               </Button>
               <Button
                 variant="outline"
@@ -465,7 +480,7 @@ export function OffboardingSheet({
                 disabled={pending}
               >
                 <PrinterIcon />
-                Print act
+                {t("printAct")}
               </Button>
               <Button
                 variant="destructive"
@@ -475,7 +490,7 @@ export function OffboardingSheet({
                 {offboard.isPending ? (
                   <ArrowPathIcon className="animate-spin" />
                 ) : null}
-                Confirm offboarding
+                {t("confirm")}
               </Button>
             </SheetFooter>
           </>
