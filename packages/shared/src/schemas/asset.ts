@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireAtLeastOneKey } from "./primitives";
+import { optionalText, requireAtLeastOneKey } from "./primitives";
 
 /**
  * Asset — the first-class citizen: a single tracked thing, a concrete instance of an AssetModel
@@ -52,7 +52,7 @@ export const CreateAssetSchema = z.strictObject({
   assetTag: z.string().trim().min(1).max(200).optional(),
   status: AssetStatusSchema,
   specs: AssetSpecsSchema.optional(),
-  notes: z.string().trim().min(1).max(2000).optional(),
+  notes: optionalText(2000),
   purchaseDate: z.iso.datetime().optional(),
   warrantyEnd: z.iso.datetime().optional(),
   modelId: z.cuid().optional(),
