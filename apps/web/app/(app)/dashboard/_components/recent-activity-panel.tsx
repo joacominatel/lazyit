@@ -92,7 +92,7 @@ export function RecentActivityPanel() {
             <div className="space-y-4">
               {groups.map((group) => (
                 <div key={group.label}>
-                  <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground/70 uppercase">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">
                     {group.label}
                   </p>
                   <ol>
