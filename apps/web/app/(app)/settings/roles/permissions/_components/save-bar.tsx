@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 
 interface SaveBarProps {
@@ -21,23 +22,24 @@ interface SaveBarProps {
  * just changed.
  */
 export function SaveBar({ dirty, isSaving, onDiscard, onSave }: SaveBarProps) {
+  const t = useTranslations("settings");
   if (!dirty) return null;
   return (
     <div
       className="sticky bottom-4 z-20 mx-auto flex w-full max-w-2xl flex-col gap-3 rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:flex-row sm:items-center sm:justify-between"
       role="region"
-      aria-label="Unsaved permission changes"
+      aria-label={t("roles.permissions.saveBar.ariaLabel")}
     >
       <span className="text-sm font-medium" aria-live="polite">
-        You have unsaved permission changes.
+        {t("roles.permissions.saveBar.message")}
       </span>
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="ghost" onClick={onDiscard} disabled={isSaving}>
-          Discard
+          {t("roles.permissions.saveBar.discard")}
         </Button>
         <Button onClick={onSave} disabled={isSaving}>
           {isSaving && <ArrowPathIcon className="animate-spin" />}
-          Save changes
+          {t("roles.permissions.saveBar.saveChanges")}
         </Button>
       </div>
     </div>

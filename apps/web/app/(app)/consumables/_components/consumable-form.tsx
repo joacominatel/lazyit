@@ -8,6 +8,7 @@ import {
   CreateConsumableSchema,
   UpdateConsumableSchema,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -102,6 +103,8 @@ export function ConsumableForm({
   /** When set (and `consumable` is not), pre-fill a CREATE form from this record — see issue #125. */
   cloneSource?: Consumable;
 }) {
+  const t = useTranslations("consumables");
+  const tc = useTranslations("common");
   const isEdit = consumable != null;
   const router = useRouter();
   const { data: categories } = useConsumableCategories();
@@ -132,21 +135,21 @@ export function ConsumableForm({
         { id: consumable.id, data: payload },
         {
           onSuccess: (updated) => {
-            toast.success("Consumable saved");
+            toast.success(t("form.savedToast"));
             router.push(`/consumables/${updated.id}`);
           },
           onError: (error) =>
-            notifyError(error, "Couldn't save the consumable"),
+            notifyError(error, t("form.saveError")),
         },
       );
     } else {
       createConsumable.mutate(payload, {
         onSuccess: (created) => {
-          toast.success("Consumable created");
+          toast.success(t("form.createdToast"));
           router.push(`/consumables/${created.id}`);
         },
         onError: (error) =>
-          notifyError(error, "Couldn't create the consumable"),
+          notifyError(error, t("form.createError")),
       });
     }
   });
@@ -159,12 +162,12 @@ export function ConsumableForm({
           name="name"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="name">Name</FieldLabel>
+              <FieldLabel htmlFor="name">{t("form.nameLabel")}</FieldLabel>
               <Input
                 {...field}
                 id="name"
                 value={field.value ?? ""}
-                placeholder="USB-C to HDMI adapter"
+                placeholder={t("form.namePlaceholder")}
                 aria-invalid={fieldState.invalid || undefined}
                 autoFocus
               />
@@ -179,7 +182,7 @@ export function ConsumableForm({
             name="sku"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="sku">SKU</FieldLabel>
+                <FieldLabel htmlFor="sku">{t("form.skuLabel")}</FieldLabel>
                 <Input
                   id="sku"
                   name={field.name}
@@ -189,7 +192,7 @@ export function ConsumableForm({
                   onChange={(event) =>
                     field.onChange(event.target.value || undefined)
                   }
-                  placeholder="ADP-USBC-HDMI"
+                  placeholder={t("form.skuPlaceholder")}
                   className="font-mono"
                   aria-invalid={fieldState.invalid || undefined}
                 />
@@ -203,7 +206,9 @@ export function ConsumableForm({
             name="categoryId"
             render={({ field }) => (
               <Field>
-                <FieldLabel htmlFor="categoryId">Category</FieldLabel>
+                <FieldLabel htmlFor="categoryId">
+                  {t("form.categoryLabel")}
+                </FieldLabel>
                 <CreatableField
                   label="category"
                   renderDialog={(dialog) => (
@@ -222,10 +227,12 @@ export function ConsumableForm({
                     }
                   >
                     <SelectTrigger id="categoryId" className="w-full">
-                      <SelectValue placeholder="Select a category" />
+                      <SelectValue placeholder={t("form.categoryPlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={NONE}>— None —</SelectItem>
+                      <SelectItem value={NONE}>
+                        {t("form.categoryNone")}
+                      </SelectItem>
                       {(categories ?? []).map((category) => (
                         <SelectItem key={category.id} value={category.id}>
                           {category.name}
@@ -243,7 +250,9 @@ export function ConsumableForm({
             name="minStock"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="minStock">Reorder threshold</FieldLabel>
+                <FieldLabel htmlFor="minStock">
+                  {t("form.reorderThresholdLabel")}
+                </FieldLabel>
                 <Input
                   id="minStock"
                   type="number"
@@ -259,11 +268,11 @@ export function ConsumableForm({
                         : event.target.valueAsNumber,
                     )
                   }
-                  placeholder="5"
+                  placeholder={t("form.reorderThresholdPlaceholder")}
                   aria-invalid={fieldState.invalid || undefined}
                 />
                 <FieldDescription>
-                  Low-stock alert when on-hand ≤ this. Optional.
+                  {t("form.reorderThresholdHint")}
                 </FieldDescription>
                 <FieldError errors={[fieldState.error]} />
               </Field>
@@ -275,17 +284,15 @@ export function ConsumableForm({
             name="unit"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="unit">Unit</FieldLabel>
+                <FieldLabel htmlFor="unit">{t("form.unitLabel")}</FieldLabel>
                 <Input
                   {...field}
                   id="unit"
                   value={field.value ?? ""}
-                  placeholder="units"
+                  placeholder={t("form.unitPlaceholder")}
                   aria-invalid={fieldState.invalid || undefined}
                 />
-                <FieldDescription>
-                  Unit of measure — e.g. units, meters or boxes.
-                </FieldDescription>
+                <FieldDescription>{t("form.unitHint")}</FieldDescription>
                 <FieldError errors={[fieldState.error]} />
               </Field>
             )}
@@ -297,7 +304,9 @@ export function ConsumableForm({
           name="description"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="description">Description</FieldLabel>
+              <FieldLabel htmlFor="description">
+                {t("form.descriptionLabel")}
+              </FieldLabel>
               <Textarea
                 id="description"
                 name={field.name}
@@ -320,7 +329,7 @@ export function ConsumableForm({
           name="notes"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="notes">Notes</FieldLabel>
+              <FieldLabel htmlFor="notes">{t("form.notesLabel")}</FieldLabel>
               <Textarea
                 id="notes"
                 name={field.name}
@@ -350,11 +359,11 @@ export function ConsumableForm({
             )
           }
         >
-          Cancel
+          {tc("cancel")}
         </Button>
         <Button type="submit" form={FORM_ID} disabled={isPending}>
           {isPending && <ArrowPathIcon className="animate-spin" />}
-          {isEdit ? "Save changes" : "Create consumable"}
+          {isEdit ? t("form.submitSave") : t("form.submitCreate")}
         </Button>
       </div>
     </form>

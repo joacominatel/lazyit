@@ -8,6 +8,7 @@ import {
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
 import type { AssetAssignmentWithUser } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -39,6 +40,9 @@ function ownerName(assignment: AssetAssignmentWithUser): string {
 export default function AssetDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const t = useTranslations("assets.detail");
+  const tList = useTranslations("assets.list");
+  const tc = useTranslations("common");
   const id = params.id;
   // Edit/Clone + asset-assignment create/release are asset:write; deletion is asset:delete.
   const canWrite = useCan("asset:write");
@@ -66,8 +70,8 @@ export default function AssetDetailPage() {
     return (
       <div className="mx-auto max-w-4xl">
         <ErrorState
-          title="Asset not found"
-          description="It may have been deleted, or the API is unreachable."
+          title={t("notFoundTitle")}
+          description={t("notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -85,11 +89,11 @@ export default function AssetDetailPage() {
       { id: assignmentId },
       {
         onSuccess: () => {
-          toast.success("Owner released");
+          toast.success(t("ownerReleasedToast"));
           setReleasingId(null);
         },
         onError: (error) => {
-          notifyError(error, "Couldn't release the owner");
+          notifyError(error, t("releaseError"));
           setReleasingId(null);
         },
       },
@@ -102,7 +106,7 @@ export default function AssetDetailPage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Assets", href: "/assets" },
+              { label: tList("title"), href: "/assets" },
               { label: asset.name },
             ]}
           />
@@ -114,7 +118,7 @@ export default function AssetDetailPage() {
               <span className="font-mono">{asset.assetTag}</span>
               <CopyButton
                 value={asset.assetTag}
-                label="Copy asset tag"
+                label={t("copyAssetTag")}
                 className="-my-1"
               />
             </span>
@@ -129,13 +133,13 @@ export default function AssetDetailPage() {
                   <Button variant="outline" size="sm" asChild>
                     <Link href={`/assets/${asset.id}/edit`}>
                       <PencilSquareIcon />
-                      Edit
+                      {tc("edit")}
                     </Link>
                   </Button>
                   <Button variant="outline" size="sm" asChild>
                     <Link href={`/assets/${asset.id}/clone`}>
                       <DocumentDuplicateIcon />
-                      Clone
+                      {t("clone")}
                     </Link>
                   </Button>
                 </>
@@ -144,7 +148,7 @@ export default function AssetDetailPage() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Delete asset"
+                  aria-label={t("deleteAssetLabel")}
                   onClick={() => setDeleteOpen(true)}
                 >
                   <TrashIcon />
@@ -155,9 +159,9 @@ export default function AssetDetailPage() {
         }
       />
 
-      <DetailPanel title="Details">
+      <DetailPanel title={t("detailsTitle")}>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <DetailField label="Model">
+          <DetailField label={t("model")}>
             {asset.model ? (
               // No server `model` filter on the asset list — deep-link the model to its category
               // (the closest filter that exists), falling back to plain text when uncategorized.
@@ -175,7 +179,7 @@ export default function AssetDetailPage() {
               "—"
             )}
           </DetailField>
-          <DetailField label="Category">
+          <DetailField label={t("category")}>
             {asset.model?.category ? (
               <Link
                 href={`/assets?category=${asset.model.category.id}`}
@@ -189,7 +193,7 @@ export default function AssetDetailPage() {
               "—"
             )}
           </DetailField>
-          <DetailField label="Location">
+          <DetailField label={t("location")}>
             {asset.location ? (
               <Link
                 href={`/locations/${asset.location.id}`}
@@ -201,13 +205,13 @@ export default function AssetDetailPage() {
               "—"
             )}
           </DetailField>
-          <DetailField label="Serial">
+          <DetailField label={t("serial")}>
             {asset.serial ? (
               <span className="inline-flex items-center gap-1">
                 <span className="font-mono">{asset.serial}</span>
                 <CopyButton
                   value={asset.serial}
-                  label="Copy serial"
+                  label={t("copySerial")}
                   className="-my-1"
                 />
               </span>
@@ -215,13 +219,13 @@ export default function AssetDetailPage() {
               <span className="font-mono">—</span>
             )}
           </DetailField>
-          <DetailField label="Asset tag">
+          <DetailField label={t("assetTag")}>
             {asset.assetTag ? (
               <span className="inline-flex items-center gap-1">
                 <span className="font-mono">{asset.assetTag}</span>
                 <CopyButton
                   value={asset.assetTag}
-                  label="Copy asset tag"
+                  label={t("copyAssetTag")}
                   className="-my-1"
                 />
               </span>
@@ -229,25 +233,27 @@ export default function AssetDetailPage() {
               <span className="font-mono">—</span>
             )}
           </DetailField>
-          <DetailField label="Purchase date">
+          <DetailField label={t("purchaseDate")}>
             {asset.purchaseDate ? formatDate(asset.purchaseDate) : "—"}
           </DetailField>
-          <DetailField label="Warranty end">
+          <DetailField label={t("warrantyEnd")}>
             {asset.warrantyEnd ? formatDate(asset.warrantyEnd) : "—"}
           </DetailField>
         </dl>
         {asset.notes && (
           <div className="mt-4 space-y-1">
-            <dt className="text-xs font-medium text-muted-foreground">Notes</dt>
+            <dt className="text-xs font-medium text-muted-foreground">
+              {t("notes")}
+            </dt>
             <dd className="text-sm whitespace-pre-wrap">{asset.notes}</dd>
           </div>
         )}
       </DetailPanel>
 
-      <DetailPanel title="Custom fields">
+      <DetailPanel title={t("customFieldsTitle")}>
         {specsEntries.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No custom fields recorded.
+            {t("noCustomFields")}
           </p>
         ) : (
           <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
@@ -264,7 +270,7 @@ export default function AssetDetailPage() {
       </DetailPanel>
 
       <DetailPanel
-        title="Owners"
+        title={t("ownersTitle")}
         actions={
           canWrite ? (
             <Button
@@ -273,14 +279,14 @@ export default function AssetDetailPage() {
               onClick={() => setAssignOpen(true)}
             >
               <UserPlusIcon />
-              Assign user
+              {t("assignUser")}
             </Button>
           ) : undefined
         }
       >
         {active.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No active owners. Assign someone to track who holds this asset.
+            {t("noOwners")}
           </p>
         ) : (
           <ul className="divide-y">
@@ -308,14 +314,16 @@ export default function AssetDetailPage() {
                         </Link>
                         {gone && (
                           <Badge variant="outline" className="text-muted-foreground">
-                            Deactivated
+                            {t("deactivated")}
                           </Badge>
                         )}
                       </div>
                       <p className="truncate text-sm text-muted-foreground">
                         {assignment.notes
                           ? assignment.notes
-                          : `Assigned ${formatDate(assignment.assignedAt)}`}
+                          : t("assignedOn", {
+                              date: formatDate(assignment.assignedAt),
+                            })}
                       </p>
                     </div>
                   </div>
@@ -329,7 +337,7 @@ export default function AssetDetailPage() {
                       {releasingId === assignment.id && (
                         <ArrowPathIcon className="animate-spin" />
                       )}
-                      Release
+                      {t("release")}
                     </Button>
                   )}
                 </li>
@@ -341,12 +349,12 @@ export default function AssetDetailPage() {
 
       <RelatedArticlesPanel assetId={asset.id} />
 
-      <DetailPanel title="Activity">
+      <DetailPanel title={t("activityTitle")}>
         <AssetHistoryTimeline assetId={asset.id} />
       </DetailPanel>
 
       {history.length > 0 && (
-        <DetailPanel title="Ownership history">
+        <DetailPanel title={t("ownershipHistoryTitle")}>
           <ul className="divide-y text-sm">
             {history.map((assignment) => (
               <li

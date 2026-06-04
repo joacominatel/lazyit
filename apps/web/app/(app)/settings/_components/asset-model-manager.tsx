@@ -2,6 +2,7 @@
 
 import { CubeIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { AssetModel } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
@@ -23,42 +24,52 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { formatDate } from "@/lib/utils/format";
 import { AssetModelFormDialog } from "./asset-model-form-dialog";
 
-const COLUMNS: ResourceColumn[] = [
-  { key: "name", header: "Name", skeleton: <Skeleton className="h-4 w-40" /> },
-  {
-    key: "manufacturer",
-    header: "Manufacturer",
-    skeleton: <Skeleton className="h-4 w-24" />,
-  },
-  { key: "sku", header: "SKU", skeleton: <Skeleton className="h-4 w-20" /> },
-  {
-    key: "category",
-    header: "Category",
-    skeleton: <Skeleton className="h-4 w-24" />,
-  },
-  {
-    key: "updated",
-    header: "Updated",
-    skeleton: <Skeleton className="h-4 w-20" />,
-  },
-  {
-    key: "actions",
-    header: "Actions",
-    srOnlyHeader: true,
-    headClassName: "w-12 text-right",
-    skeleton: <Skeleton className="ml-auto size-7" />,
-  },
-];
-
 /**
  * CRUD table for Asset models in the Taxonomies tabs. Reuses the shared `ResourceTable` /
  * `RowActions` / `DeleteConfirmDialog`; create/edit goes through {@link AssetModelFormDialog}. The
  * asset-categories list is loaded to resolve each model's `categoryId` to a readable name.
  */
 export function AssetModelManager() {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
   const { data, isLoading, isError, error, refetch } = useAssetModels();
   const { data: categories } = useAssetCategories();
   const remove = useDeleteAssetModel();
+
+  const columns: ResourceColumn[] = [
+    {
+      key: "name",
+      header: t("taxonomies.models.columns.name"),
+      skeleton: <Skeleton className="h-4 w-40" />,
+    },
+    {
+      key: "manufacturer",
+      header: t("taxonomies.models.columns.manufacturer"),
+      skeleton: <Skeleton className="h-4 w-24" />,
+    },
+    {
+      key: "sku",
+      header: t("taxonomies.models.columns.sku"),
+      skeleton: <Skeleton className="h-4 w-20" />,
+    },
+    {
+      key: "category",
+      header: t("taxonomies.models.columns.category"),
+      skeleton: <Skeleton className="h-4 w-24" />,
+    },
+    {
+      key: "updated",
+      header: t("taxonomies.models.columns.updated"),
+      skeleton: <Skeleton className="h-4 w-20" />,
+    },
+    {
+      key: "actions",
+      header: tc("actions"),
+      srOnlyHeader: true,
+      headClassName: "w-12 text-right",
+      skeleton: <Skeleton className="ml-auto size-7" />,
+    },
+  ];
   // Asset-model CRUD is gated on assetModel:write / assetModel:delete (a clone is a create →
   // assetModel:write). The surface lives behind the settings:manage AdminGate; these finer gates
   // match the backend per-affordance and fail closed while the permission set loads.
@@ -103,16 +114,16 @@ export function AssetModelManager() {
         <div className="flex items-center justify-end">
           <Button onClick={openCreate} size="sm">
             <PlusIcon />
-            New model
+            {t("taxonomies.models.newButton")}
           </Button>
         </div>
       ) : null}
 
       {isLoading ? (
-        <ResourceTable columns={COLUMNS} isLoading />
+        <ResourceTable columns={columns} isLoading />
       ) : isError ? (
         <ErrorState
-          title="Could not load asset models"
+          title={t("taxonomies.models.loadError")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -120,16 +131,19 @@ export function AssetModelManager() {
         <EmptyState
           icon={CubeIcon}
           pillar="inventory"
-          title="No asset models yet"
-          description="Add a make and model — say, a MacBook Pro 14 — so every asset you register can reference it instead of retyping the specs."
+          title={t("taxonomies.models.emptyTitle")}
+          description={t("taxonomies.models.emptyDescription")}
           action={
             canWrite
-              ? { label: "Create the first model", onClick: openCreate }
+              ? {
+                  label: t("taxonomies.models.emptyAction"),
+                  onClick: openCreate,
+                }
               : undefined
           }
         />
       ) : (
-        <ResourceTable columns={COLUMNS}>
+        <ResourceTable columns={columns}>
           {models.map((model) => (
             <TableRow key={model.id}>
               <TableCell className="font-medium">{model.name}</TableCell>
@@ -173,7 +187,7 @@ export function AssetModelManager() {
           onOpenChange={(open) => {
             if (!open) setDeleting(undefined);
           }}
-          entityLabel="asset model"
+          entityLabel={t("taxonomies.models.entityLabel")}
           name={deleting.name}
           onConfirm={() => remove.mutateAsync(deleting.id)}
         />

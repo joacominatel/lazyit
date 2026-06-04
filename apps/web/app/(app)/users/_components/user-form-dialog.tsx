@@ -8,6 +8,7 @@ import {
   type User,
   UpdateUserSchema,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -102,6 +103,8 @@ export function UserFormDialog({
   cloneSource,
   onCreated,
 }: UserFormDialogProps) {
+  const t = useTranslations("users.form");
+  const tc = useTranslations("common");
   const isEdit = user != null;
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
@@ -134,13 +137,13 @@ export function UserFormDialog({
         },
         {
           onSuccess: () => {
-            toast.success("User updated");
+            toast.success(t("toast.updated"));
             onOpenChange(false);
           },
           // The API's own message takes precedence (surfaced verbatim with the request id) — e.g. a
           // duplicate email (409) or an identity-provider write-back failure (503). The fallback only
           // applies if the response carried no message.
-          onError: (error) => notifyError(error, "Couldn't update user"),
+          onError: (error) => notifyError(error, t("toast.updateError")),
         },
       );
     } else {
@@ -153,11 +156,11 @@ export function UserFormDialog({
         {
           onSuccess: (created) => {
             onCreated?.(created);
-            toast.success("User created");
+            toast.success(t("toast.created"));
             onOpenChange(false);
           },
           onError: (error) =>
-            notifyError(error, "Couldn't create user"),
+            notifyError(error, t("toast.createError")),
         },
       );
     }
@@ -167,11 +170,11 @@ export function UserFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit user" : "New user"}</DialogTitle>
+          <DialogTitle>
+            {isEdit ? t("editTitle") : t("createTitle")}
+          </DialogTitle>
           <DialogDescription>
-            {isEdit
-              ? "Update this person's details."
-              : "Add a person to the organization. New users start active."}
+            {isEdit ? t("editDescription") : t("createDescription")}
           </DialogDescription>
         </DialogHeader>
 
@@ -193,7 +196,7 @@ export function UserFormDialog({
               name="firstName"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="firstName">First name</FieldLabel>
+                  <FieldLabel htmlFor="firstName">{t("firstName")}</FieldLabel>
                   <Input
                     {...field}
                     id="firstName"
@@ -212,7 +215,7 @@ export function UserFormDialog({
               name="lastName"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="lastName">Last name</FieldLabel>
+                  <FieldLabel htmlFor="lastName">{t("lastName")}</FieldLabel>
                   <Input
                     {...field}
                     id="lastName"
@@ -230,7 +233,7 @@ export function UserFormDialog({
               name="email"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="email">Email</FieldLabel>
+                  <FieldLabel htmlFor="email">{t("email")}</FieldLabel>
                   <Input
                     {...field}
                     id="email"
@@ -240,10 +243,7 @@ export function UserFormDialog({
                     aria-invalid={fieldState.invalid || undefined}
                   />
                   {isEdit && (
-                    <FieldDescription>
-                      The account-linking key for the identity provider. Must be
-                      unique; a change is mirrored to the IdP.
-                    </FieldDescription>
+                    <FieldDescription>{t("emailHelp")}</FieldDescription>
                   )}
                   <FieldError errors={[fieldState.error]} />
                 </Field>
@@ -257,11 +257,8 @@ export function UserFormDialog({
                 render={({ field }) => (
                   <Field orientation="horizontal">
                     <FieldContent>
-                      <FieldLabel htmlFor="isActive">Active</FieldLabel>
-                      <FieldDescription>
-                        Inactive users are kept for history but treated as
-                        offboarded — they can no longer be assigned assets.
-                      </FieldDescription>
+                      <FieldLabel htmlFor="isActive">{t("active")}</FieldLabel>
+                      <FieldDescription>{t("activeHelp")}</FieldDescription>
                     </FieldContent>
                     <Switch
                       id="isActive"
@@ -282,11 +279,11 @@ export function UserFormDialog({
             onClick={() => onOpenChange(false)}
             disabled={isPending}
           >
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button type="submit" form={FORM_ID} disabled={isPending}>
             {isPending && <ArrowPathIcon className="animate-spin" />}
-            {isEdit ? "Save changes" : "Create user"}
+            {isEdit ? t("saveChanges") : t("createUser")}
           </Button>
         </DialogFooter>
       </DialogContent>

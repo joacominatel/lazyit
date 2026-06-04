@@ -16,6 +16,7 @@ import {
   type RolePermissionMatrix,
   UpdateRolePermissionsSchema,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -65,6 +66,7 @@ function stagedFromMatrix(matrix: RolePermissionMatrix): StagedMatrix {
 }
 
 function PermissionsEditor() {
+  const t = useTranslations("settings");
   const router = useRouter();
   const searchParams = useSearchParams();
   const editingRole = roleFromParam(searchParams.get("role"));
@@ -169,28 +171,28 @@ function PermissionsEditor() {
     // literal client-side; the backend re-validates and is the real gate).
     const parsed = UpdateRolePermissionsSchema.safeParse(body);
     if (!parsed.success) {
-      toast.error("Some permissions are invalid", {
-        description: "Refresh and try again.",
+      toast.error(t("roles.permissions.toast.invalid"), {
+        description: t("roles.permissions.toast.invalidHint"),
       });
       return;
     }
     try {
       await updateMutation.mutateAsync(parsed.data);
-      toast.success("Permissions saved");
+      toast.success(t("roles.permissions.toast.saved"));
       setConfirmOpen(false);
       setPendingDiff(null);
     } catch (error) {
       // The mutation surfaces the API error (400/403) via the shared error toast.
-      notifyError(error, "Couldn't save permissions");
+      notifyError(error, t("roles.permissions.toast.saveError"));
     }
-  }, [staged, updateMutation]);
+  }, [staged, updateMutation, t]);
 
   const handleSaveClick = () => {
     if (!staged || !serverMatrix) return;
     // Tiered confirm: only when the diff REMOVES a read or GRANTS an above-tier capability, on EITHER
     // edited role. Combine both roles' diffs so a save that touches the non-active role still warns.
     const diffs = EDITABLE_ROLES.map((role) =>
-      analyzeSaveDiff(role, serverMatrix[role] ?? [], staged[role]),
+      analyzeSaveDiff(role, serverMatrix[role] ?? [], staged[role], t),
     );
     const combined: SaveDiff = {
       removedReads: diffs.flatMap((d) => d.removedReads),
@@ -212,7 +214,7 @@ function PermissionsEditor() {
   if (matrixQuery.isError) {
     return (
       <ErrorState
-        title="Couldn't load permissions"
+        title={t("roles.permissions.loadError")}
         onRetry={() => void matrixQuery.refetch()}
         error={matrixQuery.error}
       />
@@ -222,15 +224,14 @@ function PermissionsEditor() {
   return (
     <div className="space-y-6 pb-8">
       <PageHeader
-        title="Role permissions"
-        subtitle="Configure what Members and Viewers can do. Admin always has full access."
+        title={t("roles.permissions.title")}
+        subtitle={t("roles.permissions.subtitle")}
         breadcrumb={<Breadcrumb />}
       />
 
       <p className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
         <InformationCircleIcon className="mt-0.5 size-4 shrink-0" />
-        These permissions are lazyit-only — they never appear in your identity
-        provider.
+        {t("roles.permissions.idpNote")}
       </p>
 
       <RoleSegmented
@@ -245,14 +246,16 @@ function PermissionsEditor() {
           <Card>
             <CardContent className="space-y-4 pt-5">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold">Start from a preset</h2>
+                <h2 className="text-sm font-semibold">
+                  {t("roles.permissions.startFromPreset")}
+                </h2>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={handleResetDefaults}
                 >
                   <ArrowUturnLeftIcon className="size-4" />
-                  Reset to defaults
+                  {t("roles.permissions.resetToDefaults")}
                 </Button>
               </div>
               <PresetRow active={activePreset} onApply={handleApplyPreset} />
@@ -261,7 +264,9 @@ function PermissionsEditor() {
 
           <Card>
             <CardContent className="space-y-6 pt-5">
-              <h2 className="text-sm font-semibold">Capabilities</h2>
+              <h2 className="text-sm font-semibold">
+                {t("roles.permissions.capabilitiesHeading")}
+              </h2>
               {PILLAR_ORDER.map((pillar) => (
                 <CapabilityGroup
                   key={pillar}

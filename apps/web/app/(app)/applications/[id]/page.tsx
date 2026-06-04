@@ -9,6 +9,7 @@ import {
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
 import { type AccessGrant, isSafeApplicationUrl, type User } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -43,6 +44,7 @@ function toHref(url: string): string {
 }
 
 export default function ApplicationDetailPage() {
+  const t = useTranslations("applications");
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
@@ -83,8 +85,8 @@ export default function ApplicationDetailPage() {
     return (
       <div className="mx-auto max-w-4xl">
         <ErrorState
-          title="Application not found"
-          description="It may have been deleted, or the API is unreachable."
+          title={t("detail.notFoundTitle")}
+          description={t("detail.notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -100,7 +102,7 @@ export default function ApplicationDetailPage() {
 
   function userName(userId: string): string {
     const user = userById.get(userId);
-    return user ? `${user.firstName} ${user.lastName}` : "Unknown user";
+    return user ? `${user.firstName} ${user.lastName}` : t("detail.unknownUser");
   }
 
   /** Render a user's name as a link to their detail when the user is known, else plain text. */
@@ -120,7 +122,7 @@ export default function ApplicationDetailPage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Access", href: "/applications" },
+              { label: t("list.title"), href: "/applications" },
               { label: application.name },
             ]}
           />
@@ -129,7 +131,7 @@ export default function ApplicationDetailPage() {
         subtitle={application.vendor ?? undefined}
         badge={
           application.isCritical ? (
-            <Badge variant="destructive">Critical</Badge>
+            <Badge variant="destructive">{t("detail.criticalBadge")}</Badge>
           ) : undefined
         }
         actions={
@@ -140,13 +142,13 @@ export default function ApplicationDetailPage() {
                   <Button variant="outline" size="sm" asChild>
                     <Link href={`/applications/${application.id}/edit`}>
                       <PencilSquareIcon />
-                      Edit
+                      {t("detail.edit")}
                     </Link>
                   </Button>
                   <Button variant="outline" size="sm" asChild>
                     <Link href={`/applications/${application.id}/clone`}>
                       <DocumentDuplicateIcon />
-                      Clone
+                      {t("detail.clone")}
                     </Link>
                   </Button>
                 </>
@@ -155,7 +157,7 @@ export default function ApplicationDetailPage() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Delete application"
+                  aria-label={t("detail.deleteAriaLabel")}
                   onClick={() => setDeleteOpen(true)}
                 >
                   <TrashIcon />
@@ -166,13 +168,15 @@ export default function ApplicationDetailPage() {
         }
       />
 
-      <DetailPanel title="Details">
+      <DetailPanel title={t("detail.detailsTitle")}>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <DetailField label="Vendor">{application.vendor ?? "—"}</DetailField>
-          <DetailField label="Category">
+          <DetailField label={t("detail.vendorLabel")}>
+            {application.vendor ?? "—"}
+          </DetailField>
+          <DetailField label={t("detail.categoryLabel")}>
             {categoryName ? <Badge variant="outline">{categoryName}</Badge> : "—"}
           </DetailField>
-          <DetailField label="URL">
+          <DetailField label={t("detail.urlLabel")}>
             {application.url ? (
               isSafeApplicationUrl(application.url) ? (
                 <a
@@ -195,7 +199,7 @@ export default function ApplicationDetailPage() {
         {application.description && (
           <div className="mt-4 space-y-1">
             <dt className="text-xs font-medium text-muted-foreground">
-              Description
+              {t("detail.descriptionLabel")}
             </dt>
             <dd className="text-sm whitespace-pre-wrap">
               {application.description}
@@ -204,14 +208,16 @@ export default function ApplicationDetailPage() {
         )}
         {application.notes && (
           <div className="mt-4 space-y-1">
-            <dt className="text-xs font-medium text-muted-foreground">Notes</dt>
+            <dt className="text-xs font-medium text-muted-foreground">
+              {t("detail.notesLabel")}
+            </dt>
             <dd className="text-sm whitespace-pre-wrap">{application.notes}</dd>
           </div>
         )}
       </DetailPanel>
 
       <DetailPanel
-        title="Active access"
+        title={t("detail.activeAccessTitle")}
         actions={
           canGrant ? (
             <Button
@@ -220,15 +226,14 @@ export default function ApplicationDetailPage() {
               onClick={() => setGrantOpen(true)}
             >
               <UserPlusIcon />
-              Grant access
+              {t("detail.grantAccess")}
             </Button>
           ) : undefined
         }
       >
         {active.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No active grants. Grant access to record who can reach this
-            application.
+            {t("detail.noActiveGrants")}
           </p>
         ) : (
           <ul className="divide-y">
@@ -274,20 +279,32 @@ export default function ApplicationDetailPage() {
                             variant="outline"
                             className="text-muted-foreground"
                           >
-                            Deactivated
+                            {t("detail.deactivatedBadge")}
                           </Badge>
                         )}
-                        {expired && <StatusBadge tone="warning">Expired</StatusBadge>}
+                        {expired && (
+                          <StatusBadge tone="warning">
+                            {t("detail.expiredBadge")}
+                          </StatusBadge>
+                        )}
                       </div>
                       <p className="truncate text-sm text-muted-foreground">
-                        Granted {formatDate(grant.grantedAt)}
+                        {t("detail.grantedLine", {
+                          date: formatDate(grant.grantedAt),
+                        })}
                         {grant.grantedById
-                          ? ` by ${userName(grant.grantedById)}`
+                          ? t("detail.grantedByPart", {
+                              name: userName(grant.grantedById),
+                            })
                           : ""}
                         {grant.expiresAt
-                          ? ` · expires ${formatDate(grant.expiresAt)}`
+                          ? t("detail.expiresPart", {
+                              date: formatDate(grant.expiresAt),
+                            })
                           : ""}
-                        {grant.notes ? ` · ${grant.notes}` : ""}
+                        {grant.notes
+                          ? t("detail.notesPart", { notes: grant.notes })
+                          : ""}
                       </p>
                     </div>
                   </div>
@@ -296,7 +313,7 @@ export default function ApplicationDetailPage() {
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        aria-label="Edit grant"
+                        aria-label={t("detail.editGrantAriaLabel")}
                         onClick={() => setEditing(grant)}
                       >
                         <PencilIcon />
@@ -306,7 +323,7 @@ export default function ApplicationDetailPage() {
                         size="sm"
                         onClick={() => setRevoking(grant)}
                       >
-                        Revoke
+                        {t("detail.revoke")}
                       </Button>
                     </div>
                   )}
@@ -320,7 +337,7 @@ export default function ApplicationDetailPage() {
       <RelatedArticlesPanel applicationId={application.id} />
 
       {history.length > 0 && (
-        <DetailPanel title="History">
+        <DetailPanel title={t("detail.historyTitle")}>
           <ul className="divide-y text-sm">
             {history.map((grant) => (
               <li
@@ -337,7 +354,9 @@ export default function ApplicationDetailPage() {
                   {formatDate(grant.grantedAt)} →{" "}
                   {grant.revokedAt ? formatDate(grant.revokedAt) : "—"}
                   {grant.revokedById
-                    ? ` · by ${userName(grant.revokedById)}`
+                    ? t("detail.historyRevokedByPart", {
+                        name: userName(grant.revokedById),
+                      })
                     : ""}
                 </span>
               </li>
@@ -372,7 +391,7 @@ export default function ApplicationDetailPage() {
       <DeleteConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        entityLabel="application"
+        entityLabel={t("detail.entityLabel")}
         name={application.name}
         onConfirm={() => deleteApplication.mutateAsync(application.id)}
         onDeleted={() => router.push("/applications")}

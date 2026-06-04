@@ -1,4 +1,7 @@
+"use client";
+
 import type { AssetListItem } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
 import { UserAvatar } from "@/components/user-avatar";
 
@@ -26,6 +29,7 @@ export function StackedOwnerAvatars({
 }: {
   assignments: OwnerAssignment[];
 }) {
+  const t = useTranslations("assets.list");
   if (assignments.length === 0) {
     return <span className="text-sm text-muted-foreground">—</span>;
   }
@@ -44,7 +48,7 @@ export function StackedOwnerAvatars({
             firstName={user.firstName}
             lastName={user.lastName}
             email={user.email}
-            title={`${user.firstName} ${user.lastName}${gone ? " · deactivated" : ""}`}
+            title={`${user.firstName} ${user.lastName}${gone ? ` · ${t("deactivatedSuffix")}` : ""}`}
             className={gone ? "opacity-50 grayscale" : undefined}
           />
         );

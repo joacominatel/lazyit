@@ -1,4 +1,5 @@
 import type { User } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import {
   Avatar,
   AvatarFallback,
@@ -36,6 +37,7 @@ export function StackedUserAvatars({
   users: AvatarUser[];
   deactivatedCount?: number;
 }) {
+  const t = useTranslations("applications");
   if (users.length === 0 && deactivatedCount === 0) {
     return <span className="text-sm text-muted-foreground">—</span>;
   }
@@ -54,7 +56,9 @@ export function StackedUserAvatars({
             firstName={user.firstName}
             lastName={user.lastName}
             email={user.email}
-            title={`${user.firstName} ${user.lastName}${gone ? " · deactivated" : ""}`}
+            title={`${user.firstName} ${user.lastName}${
+              gone ? t("avatars.deactivatedSuffix") : ""
+            }`}
             className={gone ? "opacity-50 grayscale" : undefined}
           />
         );
@@ -64,9 +68,7 @@ export function StackedUserAvatars({
         <Avatar
           size="sm"
           className="opacity-50 grayscale"
-          title={`${deactivatedCount} deactivated ${
-            deactivatedCount === 1 ? "grantee" : "grantees"
-          }`}
+          title={t("avatars.deactivatedTooltip", { count: deactivatedCount })}
         >
           <AvatarFallback>⊘{deactivatedCount}</AvatarFallback>
         </Avatar>

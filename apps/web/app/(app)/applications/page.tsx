@@ -2,6 +2,7 @@
 
 import { KeyIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { MAX_PAGE_LIMIT, type User } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -52,13 +53,8 @@ type CriticalityFilter = "ALL" | "CRITICAL" | "NORMAL";
  */
 const FILTER_DEFAULTS = { category: "ALL", criticality: "ALL" } as const;
 
-const CRITICALITY_LABEL: Record<CriticalityFilter, string> = {
-  ALL: "Any",
-  CRITICAL: "Critical only",
-  NORMAL: "Non-critical",
-};
-
 export default function ApplicationsPage() {
+  const t = useTranslations("applications");
   const router = useRouter();
   const canWrite = useCan("application:write");
   const canDelete = useCan("application:delete");
@@ -83,6 +79,12 @@ export default function ApplicationsPage() {
 
   const categoryFilter = filters.category;
   const criticality = filters.criticality as CriticalityFilter;
+
+  const criticalityLabel: Record<CriticalityFilter, string> = {
+    ALL: t("list.criticalityAny"),
+    CRITICAL: t("list.criticalOnly"),
+    NORMAL: t("list.nonCritical"),
+  };
 
   const { data: page, isLoading, isFetching, isError, error, refetch } =
     useApplicationList({
@@ -150,7 +152,7 @@ export default function ApplicationsPage() {
         key: "name",
         header: (
           <SortableHeader
-            label="Name"
+            label={t("list.columns.name")}
             active={sort === "name"}
             direction={dir}
             onToggle={() => toggleSort("name")}
@@ -162,7 +164,7 @@ export default function ApplicationsPage() {
         key: "vendor",
         header: (
           <SortableHeader
-            label="Vendor"
+            label={t("list.columns.vendor")}
             active={sort === "vendor"}
             direction={dir}
             onToggle={() => toggleSort("vendor")}
@@ -172,14 +174,14 @@ export default function ApplicationsPage() {
       },
       {
         key: "category",
-        header: "Category",
+        header: t("list.columns.category"),
         skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
       },
       {
         key: "critical",
         header: (
           <SortableHeader
-            label="Critical"
+            label={t("list.columns.critical")}
             active={sort === "isCritical"}
             direction={dir}
             onToggle={() => toggleSort("isCritical")}
@@ -189,14 +191,14 @@ export default function ApplicationsPage() {
       },
       {
         key: "grants",
-        header: "Active access",
+        header: t("list.columns.activeAccess"),
         skeleton: <Skeleton className="size-6 rounded-full" />,
       },
       {
         key: "updated",
         header: (
           <SortableHeader
-            label="Updated"
+            label={t("list.columns.updated")}
             active={sort === "updatedAt"}
             direction={dir}
             onToggle={() => toggleSort("updatedAt")}
@@ -206,13 +208,13 @@ export default function ApplicationsPage() {
       },
       {
         key: "actions",
-        header: "Actions",
+        header: t("list.columns.actions"),
         srOnlyHeader: true,
         headClassName: "w-12 text-right",
         skeleton: <Skeleton className="ml-auto size-7" />,
       },
     ],
-    [sort, dir, toggleSort],
+    [sort, dir, toggleSort, t],
   );
 
   const total = page?.total ?? 0;
@@ -243,12 +245,16 @@ export default function ApplicationsPage() {
   }
 
   const chips = [
-    ...(q ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }] : []),
+    ...(q
+      ? [{ key: "q", label: t("list.chips.search", { q }), onClear: () => setQ("") }]
+      : []),
     ...(categoryFilter !== "ALL"
       ? [
           {
             key: "category",
-            label: `Category: ${categoryNameById.get(categoryFilter) ?? "—"}`,
+            label: t("list.chips.category", {
+              name: categoryNameById.get(categoryFilter) ?? "—",
+            }),
             onClear: () => setFilter("category", FILTER_DEFAULTS.category),
           },
         ]
@@ -257,7 +263,9 @@ export default function ApplicationsPage() {
       ? [
           {
             key: "criticality",
-            label: `Criticality: ${CRITICALITY_LABEL[criticality]}`,
+            label: t("list.chips.criticality", {
+              value: criticalityLabel[criticality],
+            }),
             onClear: () => setFilter("criticality", FILTER_DEFAULTS.criticality),
           },
         ]
@@ -267,16 +275,16 @@ export default function ApplicationsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Access"
+        title={t("list.title")}
         pillar="access"
         icon={KeyIcon}
-        subtitle="Applications your team grants access to — who can reach what."
+        subtitle={t("list.subtitle")}
         actions={
           canWrite ? (
             <Button asChild>
               <Link href="/applications/new">
                 <PlusIcon />
-                New application
+                {t("list.newApplication")}
               </Link>
             </Button>
           ) : null
@@ -287,7 +295,7 @@ export default function ApplicationsPage() {
         <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
       ) : isError ? (
         <ErrorState
-          title="Could not load applications"
+          title={t("list.errorTitle")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -295,11 +303,11 @@ export default function ApplicationsPage() {
         <EmptyState
           icon={KeyIcon}
           pillar="access"
-          title="No applications yet"
-          description="Add the SaaS products, systems and services your team grants access to — then track who can reach each one."
+          title={t("empty.title")}
+          description={t("empty.description")}
           action={
             canWrite
-              ? { label: "Add your first application", href: "/applications/new" }
+              ? { label: t("empty.action"), href: "/applications/new" }
               : undefined
           }
         />
@@ -311,8 +319,8 @@ export default function ApplicationsPage() {
               onChange={setQ}
               debounceMs={300}
               onDebouncedChange={setQ}
-              label="Search applications"
-              placeholder="Search by name or vendor…"
+              label={t("list.searchLabel")}
+              placeholder={t("list.searchPlaceholder")}
               className="lg:max-w-xs lg:flex-1"
             />
             <Select
@@ -323,7 +331,7 @@ export default function ApplicationsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">All categories</SelectItem>
+                <SelectItem value="ALL">{t("list.allCategories")}</SelectItem>
                 {(categories ?? []).map((category) => (
                   <SelectItem key={category.id} value={category.id}>
                     {category.name}
@@ -339,9 +347,9 @@ export default function ApplicationsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">Any criticality</SelectItem>
-                <SelectItem value="CRITICAL">Critical only</SelectItem>
-                <SelectItem value="NORMAL">Non-critical</SelectItem>
+                <SelectItem value="ALL">{t("list.anyCriticality")}</SelectItem>
+                <SelectItem value="CRITICAL">{t("list.criticalOnly")}</SelectItem>
+                <SelectItem value="NORMAL">{t("list.nonCritical")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -351,7 +359,7 @@ export default function ApplicationsPage() {
           <ResourceTable
             columns={columns}
             isFilteredEmpty={rows.length === 0}
-            filteredEmptyMessage="No applications match your filters."
+            filteredEmptyMessage={t("list.filteredEmpty")}
             filteredEmptyAction={<ClearFiltersLink onClick={clearFilters} />}
             mobileChildren={rows.map((application) => {
               const { count, granteeUsers, deactivatedGrantees } = accessFor(
@@ -364,18 +372,20 @@ export default function ApplicationsPage() {
                   title={application.name}
                   badge={
                     application.isCritical ? (
-                      <Badge variant="destructive">Critical</Badge>
+                      <Badge variant="destructive">
+                        {t("list.criticalBadge")}
+                      </Badge>
                     ) : undefined
                   }
                   meta={
                     <>
-                      <ResourceCardMeta label="Vendor">
+                      <ResourceCardMeta label={t("list.columns.vendor")}>
                         {application.vendor ?? "—"}
                       </ResourceCardMeta>
-                      <ResourceCardMeta label="Category">
+                      <ResourceCardMeta label={t("list.columns.category")}>
                         {categoryBadge(application.categoryId)}
                       </ResourceCardMeta>
-                      <ResourceCardMeta label="Active access">
+                      <ResourceCardMeta label={t("list.columns.activeAccess")}>
                         {count === 0 ? (
                           "—"
                         ) : (
@@ -390,7 +400,7 @@ export default function ApplicationsPage() {
                           </span>
                         )}
                       </ResourceCardMeta>
-                      <ResourceCardMeta label="Updated">
+                      <ResourceCardMeta label={t("list.columns.updated")}>
                         {formatDate(application.updatedAt)}
                       </ResourceCardMeta>
                     </>
@@ -453,7 +463,9 @@ export default function ApplicationsPage() {
                   <TableCell>{categoryBadge(application.categoryId)}</TableCell>
                   <TableCell>
                     {application.isCritical ? (
-                      <Badge variant="destructive">Critical</Badge>
+                      <Badge variant="destructive">
+                        {t("list.criticalBadge")}
+                      </Badge>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
@@ -531,7 +543,7 @@ export default function ApplicationsPage() {
           onOpenChange={(open) => {
             if (!open) setDeleting(null);
           }}
-          entityLabel="application"
+          entityLabel={t("list.entityLabel")}
           name={deleting.name}
           onConfirm={() => deleteApplication.mutateAsync(deleting.id)}
         />

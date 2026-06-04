@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
@@ -8,16 +9,17 @@ import { AdminGate } from "../_components/admin-gate";
 import { AssetModelManager } from "../_components/asset-model-manager";
 import { CategoryManager } from "../_components/category-manager";
 
-/** The five taxonomy surfaces — the four category kinds plus asset models. */
-const TABS = [
-  { key: "asset", label: "Asset categories" },
-  { key: "application", label: "Application categories" },
-  { key: "consumable", label: "Consumable categories" },
-  { key: "article", label: "Article categories" },
-  { key: "models", label: "Asset models" },
+/** The five taxonomy surfaces — the four category kinds plus asset models. The visible label is
+ * translated at render via `settings.taxonomies.tabs.<key>`. */
+const TAB_KEYS = [
+  "asset",
+  "application",
+  "consumable",
+  "article",
+  "models",
 ] as const;
 
-type TabKey = (typeof TABS)[number]["key"];
+type TabKey = (typeof TAB_KEYS)[number];
 
 /**
  * Settings → Taxonomies. A single screen with a tab bar over the four category kinds and asset
@@ -25,24 +27,25 @@ type TabKey = (typeof TABS)[number]["key"];
  * this consistent with the rest of the app's chrome.
  */
 export default function TaxonomiesPage() {
+  const t = useTranslations("settings");
   const [tab, setTab] = useState<TabKey>("asset");
 
   return (
     <AdminGate>
       <div className="space-y-6">
         <PageHeader
-          title="Taxonomies"
-          subtitle="Manage the categories that classify records, plus the asset models assets reference."
+          title={t("taxonomies.title")}
+          subtitle={t("taxonomies.subtitle")}
           breadcrumb={<Breadcrumb />}
         />
 
         <div className="border-b">
           <div
             role="tablist"
-            aria-label="Taxonomy kind"
+            aria-label={t("taxonomies.tablistAria")}
             className="-mb-px flex flex-wrap gap-1"
           >
-            {TABS.map(({ key, label }) => {
+            {TAB_KEYS.map((key) => {
               const active = tab === key;
               return (
                 <button
@@ -58,7 +61,7 @@ export default function TaxonomiesPage() {
                       : "border-transparent text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {label}
+                  {t(`taxonomies.tabs.${key}`)}
                 </button>
               );
             })}

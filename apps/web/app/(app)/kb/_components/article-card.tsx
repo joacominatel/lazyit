@@ -1,5 +1,6 @@
 import { ClockIcon, LinkIcon } from "@heroicons/react/16/solid";
 import type { ArticleListItem, User } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { UserAvatar } from "@/components/user-avatar";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +28,7 @@ export function ArticleCard({
   /** The resolved owner/author (from `authorId`), or `undefined` when unknown. */
   author: User | undefined;
 }) {
+  const t = useTranslations("kb");
   const isLinked = article.linkCount > 0;
 
   return (
@@ -60,12 +62,10 @@ export function ArticleCard({
           <Badge
             variant="secondary"
             className="gap-1"
-            title={`Linked to ${article.linkCount} ${
-              article.linkCount === 1 ? "item" : "items"
-            }`}
+            title={t("list.linkedTooltip", { count: article.linkCount })}
           >
             <LinkIcon className="size-3" />
-            {article.linkCount} linked
+            {t("list.linkedCount", { count: article.linkCount })}
           </Badge>
         ) : null}
       </div>
@@ -85,12 +85,12 @@ export function ArticleCard({
           <span className="truncate text-xs text-muted-foreground">
             {author
               ? `${author.firstName} ${author.lastName}`
-              : "Unknown author"}
+              : t("list.unknownAuthor")}
           </span>
         </div>
         <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums">
           <ClockIcon className="size-3.5" />
-          {article.readingMinutes} min read
+          {t("list.readingTime", { minutes: article.readingMinutes })}
         </span>
       </div>
     </Link>

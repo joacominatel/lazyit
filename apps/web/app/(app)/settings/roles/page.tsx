@@ -6,6 +6,7 @@ import {
   LockClosedIcon,
 } from "@heroicons/react/24/outline";
 import type { Role } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
@@ -20,26 +21,12 @@ import {
 } from "@/lib/hooks/use-users-by-role";
 import { AdminGate } from "../_components/admin-gate";
 
-/** Display copy + tone for each RBAC role (ADR-0040). ADMIN is emphasized with the `info` tone. */
-const ROLE_META: Record<
-  Role,
-  { label: string; tone: StatusTone; hint: string }
-> = {
-  ADMIN: {
-    label: "Admin",
-    tone: "info",
-    hint: "Full access, including user administration and destructive deletes.",
-  },
-  MEMBER: {
-    label: "Member",
-    tone: "neutral",
-    hint: "Normal inventory, KB and asset operations.",
-  },
-  VIEWER: {
-    label: "Viewer",
-    tone: "neutral",
-    hint: "Read-only across the app.",
-  },
+/** Tone for each RBAC role (ADR-0040). ADMIN is emphasized with the `info` tone. The label/hint
+ * display copy is translated at render via `settings.roles.meta.<role>`. */
+const ROLE_TONE: Record<Role, StatusTone> = {
+  ADMIN: "info",
+  MEMBER: "neutral",
+  VIEWER: "neutral",
 };
 
 /**
@@ -51,21 +38,22 @@ const ROLE_META: Record<
  * server-side).
  */
 export default function RolesPage() {
+  const t = useTranslations("settings");
   const { byRole, isLoading } = useUsersByRole();
 
   return (
     <AdminGate>
       <div className="space-y-6">
         <PageHeader
-          title="Roles"
-          subtitle="Who holds which access level, and what each role can do. Change a role from the Users section."
+          title={t("roles.title")}
+          subtitle={t("roles.subtitle")}
           breadcrumb={<Breadcrumb />}
           actions={
             <Link
               href="/users"
               className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
             >
-              Manage users
+              {t("roles.manageUsers")}
               <ArrowTopRightOnSquareIcon className="size-4" />
             </Link>
           }
@@ -73,7 +61,6 @@ export default function RolesPage() {
 
         <div className="grid gap-4 lg:grid-cols-3">
           {ROLE_ORDER.map((role) => {
-            const meta = ROLE_META[role];
             const members = byRole[role];
             const isAdminRole = role === "ADMIN";
             return (
@@ -81,7 +68,9 @@ export default function RolesPage() {
                 <CardHeader>
                   <div className="flex items-center justify-between gap-2">
                     <CardTitle className="flex items-center gap-2">
-                      <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>
+                      <StatusBadge tone={ROLE_TONE[role]}>
+                        {t(`roles.meta.${role}.label`)}
+                      </StatusBadge>
                     </CardTitle>
                     <span className="text-sm text-muted-foreground tabular-nums">
                       {isLoading ? (
@@ -91,7 +80,9 @@ export default function RolesPage() {
                       )}
                     </span>
                   </div>
-                  <p className="text-sm text-muted-foreground">{meta.hint}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {t(`roles.meta.${role}.hint`)}
+                  </p>
                 </CardHeader>
                 <CardContent className="flex flex-1 flex-col">
                   {isLoading ? (
@@ -101,7 +92,7 @@ export default function RolesPage() {
                     </div>
                   ) : members.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      No users with this role.
+                      {t("roles.emptyMembers")}
                     </p>
                   ) : (
                     <ul className="space-y-1">
@@ -136,7 +127,7 @@ export default function RolesPage() {
                     {isAdminRole ? (
                       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <LockClosedIcon className="size-3.5" />
-                        Full access — not editable.
+                        {t("roles.fullAccessLocked")}
                       </p>
                     ) : (
                       <Link
@@ -144,7 +135,7 @@ export default function RolesPage() {
                         className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
                       >
                         <AdjustmentsHorizontalIcon className="size-4" />
-                        Edit permissions
+                        {t("roles.editPermissions")}
                       </Link>
                     )}
                   </div>

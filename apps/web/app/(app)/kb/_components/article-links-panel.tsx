@@ -9,6 +9,7 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { type ArticleLink, MAX_PAGE_LIMIT } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -65,6 +66,7 @@ export function ArticleLinksPanel({
   articleId: string;
   canWrite: boolean;
 }) {
+  const t = useTranslations("kb");
   const { data: links, isLoading } = useArticleLinks(articleId);
   // Catalogs to resolve a link's FK to a display name + to populate the picker.
   const { data: assetsPage } = useAssets({ limit: MAX_PAGE_LIMIT });
@@ -91,13 +93,13 @@ export function ArticleLinksPanel({
     if (link.assetId) {
       return {
         kind: "asset",
-        name: assetById.get(link.assetId) ?? "Asset",
+        name: assetById.get(link.assetId) ?? t("links.fallbackAsset"),
         href: `/assets/${link.assetId}`,
       };
     }
     return {
       kind: "application",
-      name: appById.get(link.applicationId ?? "") ?? "Application",
+      name: appById.get(link.applicationId ?? "") ?? t("links.fallbackApplication"),
       href: `/applications/${link.applicationId}`,
     };
   }
@@ -108,11 +110,11 @@ export function ArticleLinksPanel({
       { articleId, linkId: link.id },
       {
         onSuccess: () => {
-          toast.success("Link removed");
+          toast.success(t("links.toast.removed"));
           setRemovingId(null);
         },
         onError: (error) => {
-          notifyError(error, "Couldn't remove the link");
+          notifyError(error, t("links.toast.removeError"));
           setRemovingId(null);
         },
       },
@@ -123,25 +125,22 @@ export function ArticleLinksPanel({
 
   return (
     <DetailPanel
-      title="Linked to"
+      title={t("links.panelTitle")}
       actions={
         canWrite ? (
           <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
             <PlusIcon />
-            Link
+            {t("links.addLink")}
           </Button>
         ) : undefined
       }
     >
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading links…</p>
+        <p className="text-sm text-muted-foreground">{t("links.loading")}</p>
       ) : rows.length === 0 ? (
         <div className="flex items-start gap-2 text-sm text-muted-foreground">
           <LinkIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
-          <p>
-            Not linked to anything yet. Link this article to an asset or
-            application to surface it as that record&apos;s runbook.
-          </p>
+          <p>{t("links.empty")}</p>
         </div>
       ) : (
         <ul className="divide-y">
@@ -163,7 +162,9 @@ export function ArticleLinksPanel({
                   />
                   <span className="truncate">{target.name}</span>
                   <span className="text-xs font-normal text-muted-foreground capitalize">
-                    {target.kind}
+                    {target.kind === "asset"
+                      ? t("links.kindAsset")
+                      : t("links.kindApplication")}
                   </span>
                   <ArrowTopRightOnSquareIcon className="size-3.5 shrink-0 text-muted-foreground" />
                 </Link>
@@ -171,7 +172,7 @@ export function ArticleLinksPanel({
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label="Remove link"
+                    aria-label={t("links.removeAriaLabel")}
                     onClick={() => handleRemove(link)}
                     disabled={removeLink.isPending}
                   >
@@ -221,6 +222,8 @@ function AddArticleLinkDialog({
   assets: { id: string; name: string }[];
   applications: { id: string; name: string }[];
 }) {
+  const t = useTranslations("kb");
+  const tc = useTranslations("common");
   const create = useCreateArticleLink();
   const [target, setTarget] = useState<Target>("asset");
   const [targetId, setTargetId] = useState("");
@@ -237,7 +240,7 @@ function AddArticleLinkDialog({
 
   function handleCreate() {
     if (!targetId) {
-      setError("Choose a target to link.");
+      setError(t("links.chooseTargetError"));
       return;
     }
     setError(null);
@@ -249,10 +252,10 @@ function AddArticleLinkDialog({
       { articleId, data },
       {
         onSuccess: () => {
-          toast.success("Article linked");
+          toast.success(t("links.toast.linked"));
           handleOpenChange(false);
         },
-        onError: (err) => notifyError(err, "Couldn't link the article"),
+        onError: (err) => notifyError(err, t("links.toast.linkError")),
       },
     );
   }
@@ -263,16 +266,15 @@ function AddArticleLinkDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Link article</DialogTitle>
-          <DialogDescription>
-            Link this article to an asset or an application so it shows as that
-            record&apos;s runbook. A link points to exactly one target.
-          </DialogDescription>
+          <DialogTitle>{t("links.dialogTitle")}</DialogTitle>
+          <DialogDescription>{t("links.dialogDescription")}</DialogDescription>
         </DialogHeader>
 
         <FieldGroup>
           <Field>
-            <FieldLabel htmlFor="link-target-kind">Target type</FieldLabel>
+            <FieldLabel htmlFor="link-target-kind">
+              {t("links.targetTypeLabel")}
+            </FieldLabel>
             <Select
               value={target}
               onValueChange={(value) => {
@@ -285,15 +287,21 @@ function AddArticleLinkDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="asset">Asset</SelectItem>
-                <SelectItem value="application">Application</SelectItem>
+                <SelectItem value="asset">
+                  {t("links.targetTypeAsset")}
+                </SelectItem>
+                <SelectItem value="application">
+                  {t("links.targetTypeApplication")}
+                </SelectItem>
               </SelectContent>
             </Select>
           </Field>
 
           <Field data-invalid={error ? true : undefined}>
             <FieldLabel htmlFor="link-target">
-              {target === "asset" ? "Asset" : "Application"}
+              {target === "asset"
+                ? t("links.targetAssetLabel")
+                : t("links.targetApplicationLabel")}
             </FieldLabel>
             <Select
               value={targetId}
@@ -310,8 +318,12 @@ function AddArticleLinkDialog({
                 <SelectValue
                   placeholder={
                     options.length > 0
-                      ? `Select an ${target === "asset" ? "asset" : "application"}`
-                      : `No ${target === "asset" ? "assets" : "applications"} yet`
+                      ? target === "asset"
+                        ? t("links.selectAsset")
+                        : t("links.selectApplication")
+                      : target === "asset"
+                        ? t("links.noAssets")
+                        : t("links.noApplications")
                   }
                 />
               </SelectTrigger>
@@ -324,10 +336,7 @@ function AddArticleLinkDialog({
               </SelectContent>
             </Select>
             <FieldError>{error}</FieldError>
-            <FieldDescription>
-              Already-linked targets are accepted by the API only once; a
-              duplicate link is rejected.
-            </FieldDescription>
+            <FieldDescription>{t("links.duplicateHint")}</FieldDescription>
           </Field>
         </FieldGroup>
 
@@ -338,11 +347,11 @@ function AddArticleLinkDialog({
             onClick={() => handleOpenChange(false)}
             disabled={create.isPending}
           >
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button type="button" onClick={handleCreate} disabled={create.isPending}>
             {create.isPending && <ArrowPathIcon className="animate-spin" />}
-            Link article
+            {t("links.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>

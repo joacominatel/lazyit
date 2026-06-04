@@ -6,6 +6,7 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -42,6 +43,7 @@ import { UserStatusBadge } from "../_components/user-status-badge";
  * (FK ids only), so asset and application labels are resolved client-side from the catalog reads.
  */
 export default function UserDetailPage() {
+  const t = useTranslations("users");
   const params = useParams<{ id: string }>();
   const id = params.id;
   // Edit and Offboard are both the coarse user:manage capability (so is the role control below).
@@ -86,8 +88,8 @@ export default function UserDetailPage() {
     return (
       <div className="mx-auto max-w-4xl">
         <ErrorState
-          title="User not found"
-          description="They may have been offboarded, or the API is unreachable."
+          title={t("detail.notFoundTitle")}
+          description={t("detail.notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -111,7 +113,7 @@ export default function UserDetailPage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Users", href: "/users" },
+              { label: t("list.title"), href: "/users" },
               { label: `${user.firstName} ${user.lastName}` },
             ]}
           />
@@ -134,7 +136,7 @@ export default function UserDetailPage() {
             <>
               <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
                 <PencilSquareIcon />
-                Edit
+                {t("detail.edit")}
               </Button>
               <UserPasswordResetButton user={user} />
               <Button
@@ -143,33 +145,37 @@ export default function UserDetailPage() {
                 onClick={() => setOffboardOpen(true)}
               >
                 <TrashIcon />
-                Offboard
+                {t("detail.offboard")}
               </Button>
             </>
           ) : undefined
         }
       />
 
-      <DetailPanel title="Profile">
+      <DetailPanel title={t("detail.profile")}>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <DetailField label="Email">{user.email}</DetailField>
-          <DetailField label="Status">
+          <DetailField label={t("detail.fields.email")}>
+            {user.email}
+          </DetailField>
+          <DetailField label={t("detail.fields.status")}>
             <UserStatusBadge isActive={user.isActive} />
           </DetailField>
-          <DetailField label="Role">
+          <DetailField label={t("detail.fields.role")}>
             <UserRoleSelect user={user} />
           </DetailField>
-          <DetailField label="Joined">{formatDate(user.createdAt)}</DetailField>
-          <DetailField label="Last updated">
+          <DetailField label={t("detail.fields.joined")}>
+            {formatDate(user.createdAt)}
+          </DetailField>
+          <DetailField label={t("detail.fields.lastUpdated")}>
             {formatDate(user.updatedAt)}
           </DetailField>
         </dl>
       </DetailPanel>
 
-      <DetailPanel title="Assets held">
+      <DetailPanel title={t("detail.assets.title")}>
         {activeAssignments.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Holds no assets right now.
+            {t("detail.assets.empty")}
           </p>
         ) : (
           <ul className="divide-y">
@@ -183,17 +189,20 @@ export default function UserDetailPage() {
                     href={`/assets/${assignment.assetId}`}
                     className="truncate font-medium hover:underline"
                   >
-                    {assetNameById.get(assignment.assetId) ?? "Asset"}
+                    {assetNameById.get(assignment.assetId) ??
+                      t("detail.assets.assetFallback")}
                   </Link>
                   <p className="truncate text-sm text-muted-foreground">
                     {assignment.notes
                       ? assignment.notes
-                      : `Assigned ${formatDate(assignment.assignedAt)}`}
+                      : t("detail.assets.assignedOn", {
+                          date: formatDate(assignment.assignedAt),
+                        })}
                   </p>
                 </div>
                 <Button variant="ghost" size="sm" asChild>
                   <Link href={`/assets/${assignment.assetId}`}>
-                    View
+                    {t("detail.assets.view")}
                     <ArrowTopRightOnSquareIcon />
                   </Link>
                 </Button>
@@ -203,10 +212,10 @@ export default function UserDetailPage() {
         )}
       </DetailPanel>
 
-      <DetailPanel title="Application access">
+      <DetailPanel title={t("detail.access.title")}>
         {activeGrants.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No active application access.
+            {t("detail.access.empty")}
           </p>
         ) : (
           <ul className="divide-y">
@@ -225,24 +234,35 @@ export default function UserDetailPage() {
                         href={`/applications/${grant.applicationId}`}
                         className="truncate font-medium hover:underline"
                       >
-                        {appNameById.get(grant.applicationId) ?? "Application"}
+                        {appNameById.get(grant.applicationId) ??
+                          t("detail.access.applicationFallback")}
                       </Link>
                       {grant.accessLevel && (
                         <Badge variant="secondary">{grant.accessLevel}</Badge>
                       )}
-                      {expired && <StatusBadge tone="warning">Expired</StatusBadge>}
+                      {expired && (
+                        <StatusBadge tone="warning">
+                          {t("detail.access.expired")}
+                        </StatusBadge>
+                      )}
                     </div>
                     <p className="truncate text-sm text-muted-foreground">
-                      Granted {formatDate(grant.grantedAt)}
+                      {t("detail.access.granted", {
+                        date: formatDate(grant.grantedAt),
+                      })}
                       {grant.expiresAt
-                        ? ` · expires ${formatDate(grant.expiresAt)}`
+                        ? t("detail.access.expiresSuffix", {
+                            date: formatDate(grant.expiresAt),
+                          })
                         : ""}
-                      {grant.notes ? ` · ${grant.notes}` : ""}
+                      {grant.notes
+                        ? t("detail.access.noteSuffix", { note: grant.notes })
+                        : ""}
                     </p>
                   </div>
                   <Button variant="ghost" size="sm" asChild>
                     <Link href={`/applications/${grant.applicationId}`}>
-                      View
+                      {t("detail.access.view")}
                       <ArrowTopRightOnSquareIcon />
                     </Link>
                   </Button>
@@ -253,10 +273,10 @@ export default function UserDetailPage() {
         )}
       </DetailPanel>
 
-      <DetailPanel title="Authored articles">
+      <DetailPanel title={t("detail.articles.title")}>
         {articles.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Has not authored any knowledge base articles.
+            {t("detail.articles.empty")}
           </p>
         ) : (
           <ul className="divide-y">
@@ -286,7 +306,7 @@ export default function UserDetailPage() {
       </DetailPanel>
 
       {assignmentHistory.length > 0 && (
-        <DetailPanel title="Ownership history">
+        <DetailPanel title={t("detail.ownershipHistory.title")}>
           <ul className="divide-y text-sm">
             {assignmentHistory.map((assignment) => (
               <li
@@ -297,7 +317,8 @@ export default function UserDetailPage() {
                   href={`/assets/${assignment.assetId}`}
                   className="font-medium hover:underline"
                 >
-                  {assetNameById.get(assignment.assetId) ?? "Asset"}
+                  {assetNameById.get(assignment.assetId) ??
+                    t("detail.ownershipHistory.assetFallback")}
                 </Link>
                 <span className="tabular-nums text-muted-foreground">
                   {formatDate(assignment.assignedAt)} →{" "}
@@ -312,7 +333,7 @@ export default function UserDetailPage() {
       )}
 
       {grantHistory.length > 0 && (
-        <DetailPanel title="Access history">
+        <DetailPanel title={t("detail.accessHistory.title")}>
           <ul className="divide-y text-sm">
             {grantHistory.map((grant) => (
               <li
@@ -324,7 +345,8 @@ export default function UserDetailPage() {
                     href={`/applications/${grant.applicationId}`}
                     className="hover:underline"
                   >
-                    {appNameById.get(grant.applicationId) ?? "Application"}
+                    {appNameById.get(grant.applicationId) ??
+                      t("detail.accessHistory.applicationFallback")}
                   </Link>
                   {grant.accessLevel && (
                     <Badge variant="outline">{grant.accessLevel}</Badge>

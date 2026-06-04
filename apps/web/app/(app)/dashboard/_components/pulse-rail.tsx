@@ -7,6 +7,7 @@ import {
   ShieldExclamationIcon,
 } from "@heroicons/react/24/outline";
 import type { AssetStatus, DashboardSummary } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import {
   Card,
@@ -128,6 +129,7 @@ function AssetStatusDonut({
   /** In the grid layout, stretch to a common height so the trio's cards align (see PulseRail). */
   fill?: boolean;
 }) {
+  const t = useTranslations("dashboard");
   const segments = DONUT_STATUS_ORDER.map((status) => ({
     status,
     value: byStatus[status] ?? 0,
@@ -137,12 +139,12 @@ function AssetStatusDonut({
   return (
     <Card className={cn(fill && "h-full")}>
       <CardHeader>
-        <CardTitle className="text-base">Assets by status</CardTitle>
+        <CardTitle className="text-base">{t("donut.title")}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col items-center gap-5">
         {total === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">
-            No assets yet — add your first and the breakdown shows up here.
+            {t("donut.empty")}
           </p>
         ) : (
           <>
@@ -189,6 +191,7 @@ function DonutRing({
   segments: { status: AssetStatus; value: number; fill: string; dot: string }[];
   total: number;
 }) {
+  const t = useTranslations("dashboard");
   // Build the conic-gradient stops purely (no running-mutable cursor — React Compiler bans
   // reassignment after render): each segment's start angle is the proportional sum of all
   // preceding segment values, its end angle that plus its own. Hard stops keep wedges crisp.
@@ -203,9 +206,15 @@ function DonutRing({
     })
     .join(", ");
 
-  const ariaLabel = `Assets by status: ${segments
-    .map((segment) => `${segment.value} ${formatAssetStatus(segment.status).toLowerCase()}`)
-    .join(", ")}, ${total} total.`;
+  const ariaLabel = t("donut.ariaLabel", {
+    breakdown: segments
+      .map(
+        (segment) =>
+          `${segment.value} ${formatAssetStatus(segment.status).toLowerCase()}`,
+      )
+      .join(", "),
+    total,
+  });
 
   return (
     <div
@@ -220,7 +229,7 @@ function DonutRing({
           {total}
         </span>
         <span className="mt-1 text-xs text-muted-foreground">
-          {total === 1 ? "asset" : "assets"}
+          {t("donut.centerLabel", { count: total })}
         </span>
       </div>
     </div>
@@ -247,23 +256,24 @@ function AccessHealthPanel({
   /** In the grid layout, stretch to a common height so the trio's cards align (see PulseRail). */
   fill?: boolean;
 }) {
+  const t = useTranslations("dashboard");
   const rows: AccessRow[] = [
     {
       key: "expiring",
       icon: ClockIcon,
       tint: "bg-warning/15 text-warning",
-      label: `Expiring ≤ ${access.expiringWithinDays}d`,
+      label: t("accessHealth.expiring", { days: access.expiringWithinDays }),
       count: access.expiringSoon,
-      empty: "All current",
+      empty: t("accessHealth.allCurrent"),
       href: "/applications",
     },
     {
       key: "critical",
       icon: ShieldExclamationIcon,
       tint: "bg-info/15 text-info",
-      label: "On critical apps",
+      label: t("accessHealth.onCriticalApps"),
       count: access.onCriticalApps,
-      empty: "None on critical apps",
+      empty: t("accessHealth.noneCritical"),
       href: "/applications?criticality=CRITICAL",
     },
   ];
@@ -271,7 +281,7 @@ function AccessHealthPanel({
   return (
     <Card className={cn(fill && "h-full")}>
       <CardHeader>
-        <CardTitle className="text-base">Access health</CardTitle>
+        <CardTitle className="text-base">{t("accessHealth.title")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-1">
         {rows.map((row) => (
@@ -347,12 +357,13 @@ function PulseActionTile({
   /** In the grid layout, stretch to a common height so the trio's cards align (see PulseRail). */
   fill?: boolean;
 }) {
+  const t = useTranslations("dashboard");
   if (quickActions.length === 0) return null;
 
   return (
     <Card className={cn(fill && "h-full")}>
       <CardHeader>
-        <CardTitle className="text-base">Quick actions</CardTitle>
+        <CardTitle className="text-base">{t("quickActions.title")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-1">
         {quickActions.map((action) => (

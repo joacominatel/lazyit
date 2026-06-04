@@ -11,6 +11,7 @@ import {
   AssetStatusSchema,
   type BatchResult,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -66,7 +67,7 @@ import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils/format";
 import {
   AssetStatusBadge,
-  formatAssetStatus,
+  useAssetStatusLabel,
 } from "./_components/asset-status-badge";
 import { StackedOwnerAvatars } from "./_components/stacked-owner-avatars";
 
@@ -85,14 +86,19 @@ const FILTER_DEFAULTS = {
   archived: "ALL",
 } as const;
 
-const OWNERSHIP_LABEL: Record<OwnershipFilter, string> = {
-  ALL: "Any",
-  HAS: "Has owners",
-  NONE: "No owners",
+/** Maps each ownership filter to its label key under `assets.list.ownership`. */
+const OWNERSHIP_LABEL_KEY: Record<OwnershipFilter, "any" | "has" | "none"> = {
+  ALL: "any",
+  HAS: "has",
+  NONE: "none",
 };
 
 export default function AssetsPage() {
   const router = useRouter();
+  const t = useTranslations("assets.list");
+  const tEmpty = useTranslations("assets.empty");
+  const tc = useTranslations("common");
+  const statusLabel = useAssetStatusLabel();
   // `isAdmin` still gates the archived (`deleted=only`) slice: the API's `assertCanListDeleted` keeps
   // that view ADMIN-only (it was NOT migrated to a permission), so a MEMBER with asset:delete still
   // can't list archived rows. Write/delete affordances use the fine-grained permissions.
@@ -183,8 +189,8 @@ export default function AssetsPage() {
 
   function handleRestoreRow(id: string, name: string) {
     restoreAsset.mutate(id, {
-      onSuccess: () => toast.success(`${name} restored`),
-      onError: (err) => notifyError(err, "Couldn't restore the asset"),
+      onSuccess: () => toast.success(t("restoredToast", { name })),
+      onError: (err) => notifyError(err, t("restoreError")),
     });
   }
 
@@ -194,7 +200,7 @@ export default function AssetsPage() {
         key: "name",
         header: (
           <SortableHeader
-            label="Name"
+            label={t("columns.name")}
             active={sort === "name"}
             direction={dir}
             onToggle={() => toggleSort("name")}
@@ -206,7 +212,7 @@ export default function AssetsPage() {
         key: "assetTag",
         header: (
           <SortableHeader
-            label="Asset tag"
+            label={t("columns.assetTag")}
             active={sort === "assetTag"}
             direction={dir}
             onToggle={() => toggleSort("assetTag")}
@@ -214,22 +220,26 @@ export default function AssetsPage() {
         ),
         skeleton: <Skeleton className="h-4 w-20" />,
       },
-      { key: "model", header: "Model", skeleton: <Skeleton className="h-4 w-28" /> },
+      {
+        key: "model",
+        header: t("columns.model"),
+        skeleton: <Skeleton className="h-4 w-28" />,
+      },
       {
         key: "category",
-        header: "Category",
+        header: t("columns.category"),
         skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
       },
       {
         key: "location",
-        header: "Location",
+        header: t("columns.location"),
         skeleton: <Skeleton className="h-4 w-24" />,
       },
       {
         key: "status",
         header: (
           <SortableHeader
-            label="Status"
+            label={t("columns.status")}
             active={sort === "status"}
             direction={dir}
             onToggle={() => toggleSort("status")}
@@ -239,14 +249,14 @@ export default function AssetsPage() {
       },
       {
         key: "owners",
-        header: "Owners",
+        header: t("columns.owners"),
         skeleton: <Skeleton className="size-6 rounded-full" />,
       },
       {
         key: "updated",
         header: (
           <SortableHeader
-            label="Updated"
+            label={t("columns.updated")}
             active={sort === "updatedAt"}
             direction={dir}
             onToggle={() => toggleSort("updatedAt")}
@@ -256,25 +266,33 @@ export default function AssetsPage() {
       },
       {
         key: "actions",
-        header: "Actions",
+        header: t("columns.actions"),
         srOnlyHeader: true,
         headClassName: "w-12 text-right",
         skeleton: <Skeleton className="ml-auto size-7" />,
       },
     ],
-    [sort, dir, toggleSort],
+    [sort, dir, toggleSort, t],
   );
 
   const total = page?.total ?? 0;
   const isEmpty = total === 0;
 
   const chips = [
-    ...(q ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }] : []),
+    ...(q
+      ? [
+          {
+            key: "q",
+            label: t("chips.search", { query: q }),
+            onClear: () => setQ(""),
+          },
+        ]
+      : []),
     ...(statusFilter !== "ALL"
       ? [
           {
             key: "status",
-            label: `Status: ${formatAssetStatus(statusFilter)}`,
+            label: t("chips.status", { value: statusLabel(statusFilter) }),
             onClear: () => setFilter("status", FILTER_DEFAULTS.status),
           },
         ]
@@ -283,9 +301,10 @@ export default function AssetsPage() {
       ? [
           {
             key: "category",
-            label: `Category: ${
-              categories?.find((c) => c.id === categoryFilter)?.name ?? "—"
-            }`,
+            label: t("chips.category", {
+              value:
+                categories?.find((c) => c.id === categoryFilter)?.name ?? "—",
+            }),
             onClear: () => setFilter("category", FILTER_DEFAULTS.category),
           },
         ]
@@ -294,9 +313,10 @@ export default function AssetsPage() {
       ? [
           {
             key: "location",
-            label: `Location: ${
-              locations?.find((l) => l.id === locationFilter)?.name ?? "—"
-            }`,
+            label: t("chips.location", {
+              value:
+                locations?.find((l) => l.id === locationFilter)?.name ?? "—",
+            }),
             onClear: () => setFilter("location", FILTER_DEFAULTS.location),
           },
         ]
@@ -305,7 +325,9 @@ export default function AssetsPage() {
       ? [
           {
             key: "ownership",
-            label: `Owners: ${OWNERSHIP_LABEL[ownershipFilter]}`,
+            label: t("chips.owners", {
+              value: t(`ownership.${OWNERSHIP_LABEL_KEY[ownershipFilter]}`),
+            }),
             onClear: () => setFilter("ownership", FILTER_DEFAULTS.ownership),
           },
         ]
@@ -315,10 +337,10 @@ export default function AssetsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Assets"
+        title={t("title")}
         pillar="inventory"
         icon={ServerStackIcon}
-        subtitle="Everything your team tracks and owns."
+        subtitle={t("subtitle")}
         actions={
           <>
             {isAdmin ? (
@@ -334,7 +356,7 @@ export default function AssetsPage() {
               <Button asChild>
                 <Link href="/assets/new">
                   <PlusIcon />
-                  New asset
+                  {t("newAsset")}
                 </Link>
               </Button>
             ) : null}
@@ -346,7 +368,7 @@ export default function AssetsPage() {
         <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
       ) : isError ? (
         <ErrorState
-          title="Could not load assets"
+          title={t("errorTitle")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -354,11 +376,11 @@ export default function AssetsPage() {
         <EmptyState
           icon={ServerStackIcon}
           pillar="inventory"
-          title="Nothing tracked yet"
-          description="Register your first asset — laptops, monitors, phones — and it shows up here, ready to assign and follow."
+          title={tEmpty("title")}
+          description={tEmpty("description")}
           action={
             canWrite
-              ? { label: "Register your first asset", href: "/assets/new" }
+              ? { label: tEmpty("action"), href: "/assets/new" }
               : undefined
           }
         />
@@ -370,8 +392,8 @@ export default function AssetsPage() {
               onChange={setQ}
               debounceMs={300}
               onDebouncedChange={setQ}
-              label="Search assets"
-              placeholder="Search by name, serial, tag…"
+              label={t("searchLabel")}
+              placeholder={t("searchPlaceholder")}
               className="lg:max-w-xs lg:flex-1"
             />
             <Select
@@ -382,10 +404,10 @@ export default function AssetsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">All statuses</SelectItem>
+                <SelectItem value="ALL">{t("filters.allStatuses")}</SelectItem>
                 {AssetStatusSchema.options.map((status) => (
                   <SelectItem key={status} value={status}>
-                    {formatAssetStatus(status)}
+                    {statusLabel(status)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -398,7 +420,7 @@ export default function AssetsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">All categories</SelectItem>
+                <SelectItem value="ALL">{t("filters.allCategories")}</SelectItem>
                 {(categories ?? []).map((category) => (
                   <SelectItem key={category.id} value={category.id}>
                     {category.name}
@@ -414,7 +436,7 @@ export default function AssetsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">All locations</SelectItem>
+                <SelectItem value="ALL">{t("filters.allLocations")}</SelectItem>
                 {(locations ?? []).map((location) => (
                   <SelectItem key={location.id} value={location.id}>
                     {location.name}
@@ -430,9 +452,9 @@ export default function AssetsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">Any ownership</SelectItem>
-                <SelectItem value="HAS">Has owners</SelectItem>
-                <SelectItem value="NONE">No owners</SelectItem>
+                <SelectItem value="ALL">{t("filters.anyOwnership")}</SelectItem>
+                <SelectItem value="HAS">{t("filters.hasOwners")}</SelectItem>
+                <SelectItem value="NONE">{t("filters.noOwners")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -443,9 +465,7 @@ export default function AssetsPage() {
             columns={columns}
             isFilteredEmpty={rows.length === 0}
             filteredEmptyMessage={
-              archived
-                ? "No archived assets."
-                : "No assets match your filters."
+              archived ? t("filteredEmptyArchived") : t("filteredEmpty")
             }
             filteredEmptyAction={<ClearFiltersLink onClick={clearFilters} />}
             selection={
@@ -455,7 +475,7 @@ export default function AssetsPage() {
                     allSelected: selection.allSelected,
                     someSelected: selection.someSelected,
                     onToggleAll: selection.toggleAll,
-                    selectAllLabel: "Select all assets on this page",
+                    selectAllLabel: t("selectAllLabel"),
                   }
                 : undefined
             }
@@ -468,16 +488,16 @@ export default function AssetsPage() {
                 selectable={selectable}
                 selected={selection.isSelected(asset.id)}
                 onSelectedChange={(on) => selection.setSelected(asset.id, on)}
-                selectLabel={`Select ${asset.name}`}
+                selectLabel={t("selectRowLabel", { name: asset.name })}
                 meta={
                   <>
-                    <ResourceCardMeta label="Asset tag">
+                    <ResourceCardMeta label={t("columns.assetTag")}>
                       <span className="font-mono">{asset.assetTag ?? "—"}</span>
                     </ResourceCardMeta>
-                    <ResourceCardMeta label="Model">
+                    <ResourceCardMeta label={t("columns.model")}>
                       {asset.model?.name ?? "—"}
                     </ResourceCardMeta>
-                    <ResourceCardMeta label="Category">
+                    <ResourceCardMeta label={t("columns.category")}>
                       {asset.model?.category ? (
                         <Badge variant="outline">
                           {asset.model.category.name}
@@ -486,15 +506,15 @@ export default function AssetsPage() {
                         "—"
                       )}
                     </ResourceCardMeta>
-                    <ResourceCardMeta label="Location">
+                    <ResourceCardMeta label={t("columns.location")}>
                       {asset.location?.name ?? "—"}
                     </ResourceCardMeta>
-                    <ResourceCardMeta label="Owners">
+                    <ResourceCardMeta label={t("columns.owners")}>
                       <StackedOwnerAvatars
                         assignments={asset.activeAssignments}
                       />
                     </ResourceCardMeta>
-                    <ResourceCardMeta label="Updated">
+                    <ResourceCardMeta label={t("columns.updated")}>
                       {formatDate(asset.updatedAt)}
                     </ResourceCardMeta>
                   </>
@@ -548,7 +568,7 @@ export default function AssetsPage() {
                     onCheckedChange={(on) =>
                       selection.setSelected(asset.id, on)
                     }
-                    label={`Select ${asset.name}`}
+                    label={t("selectRowLabel", { name: asset.name })}
                   />
                 ) : null}
                 <TableCell className="font-medium">
@@ -631,13 +651,13 @@ export default function AssetsPage() {
                   runBatch(
                     () => batchRestore.mutateAsync(selection.selectedIds),
                     { noun: "asset", verb: "restored" },
-                    "Couldn't restore the selected assets",
+                    t("batchRestoreError"),
                   )
                 }
                 disabled={batchRestore.isPending}
               >
                 <ArrowUturnLeftIcon />
-                Restore
+                {t("restore")}
               </Button>
             ) : (
               <>
@@ -650,17 +670,17 @@ export default function AssetsPage() {
                           status: value as AssetStatus,
                         }),
                       { noun: "asset", verb: "updated" },
-                      "Couldn't update the selected assets",
+                      t("batchStatusError"),
                     )
                   }
                 >
                   <SelectTrigger size="sm" className="w-40">
-                    <SelectValue placeholder="Set status…" />
+                    <SelectValue placeholder={t("setStatusPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
                     {AssetStatusSchema.options.map((status) => (
                       <SelectItem key={status} value={status}>
-                        {formatAssetStatus(status)}
+                        {statusLabel(status)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -672,13 +692,13 @@ export default function AssetsPage() {
                     runBatch(
                       () => batchDelete.mutateAsync(selection.selectedIds),
                       { noun: "asset", verb: "deleted" },
-                      "Couldn't delete the selected assets",
+                      t("batchDeleteError"),
                     )
                   }
                   disabled={batchDelete.isPending}
                 >
                   <TrashIcon />
-                  Delete
+                  {tc("delete")}
                 </Button>
               </>
             )}

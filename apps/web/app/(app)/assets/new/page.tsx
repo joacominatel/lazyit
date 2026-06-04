@@ -1,18 +1,23 @@
+import { getTranslations } from "next-intl/server";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { AssetForm } from "../_components/asset-form";
 
-export default function NewAssetPage() {
+export default async function NewAssetPage() {
+  const t = await getTranslations("assets");
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
         breadcrumb={
           <Breadcrumb
-            items={[{ label: "Assets", href: "/assets" }, { label: "New" }]}
+            items={[
+              { label: t("list.title"), href: "/assets" },
+              { label: t("form.breadcrumbNew") },
+            ]}
           />
         }
-        title="New asset"
-        subtitle="Register a tracked thing. You can assign owners once it exists."
+        title={t("form.newTitle")}
+        subtitle={t("form.newSubtitle")}
       />
       <AssetForm />
     </div>

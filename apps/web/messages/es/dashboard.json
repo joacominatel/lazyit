@@ -1,0 +1,78 @@
+{
+  "title": "Panel",
+  "subtitle": "Tu entorno de TI de un vistazo: Inventario, Acceso y Conocimiento.",
+  "updated": "Actualizado {relative}",
+  "errorTitle": "No se pudo cargar el panel",
+  "noDataYet": "Aún no hay datos.",
+  "needsAttention": {
+    "heading": "Requiere atención",
+    "allClear": "Todo en orden: no hay concesiones por vencer, stock bajo ni activos perdidos por ahora.",
+    "expiringGrants": "{count, plural, one {# concesión por vencer en {days} días} other {# concesiones por vencer en {days} días}}",
+    "criticalGrants": "{count, plural, one {# concesión activa en aplicaciones críticas} other {# concesiones activas en aplicaciones críticas}}",
+    "lowStock": "{count, plural, one {# consumible en o por debajo del umbral de reposición} other {# consumibles en o por debajo del umbral de reposición}}",
+    "inMaintenance": "{count, plural, one {# activo en mantenimiento} other {# activos en mantenimiento}}",
+    "lost": "{count, plural, one {# activo marcado como perdido} other {# activos marcados como perdidos}}"
+  },
+  "pillars": {
+    "assets": {
+      "title": "Activos",
+      "metricLabel": "{count, plural, one {activo} other {activos}}",
+      "cta": "Explorar activos",
+      "assignedFooter": "{count, plural, one {# asignado actualmente} other {# asignados actualmente}}"
+    },
+    "access": {
+      "title": "Acceso",
+      "metricLabel": "{count, plural, one {concesión activa} other {concesiones activas}}",
+      "cta": "Gestionar acceso",
+      "onCriticalApps": "En aplicaciones críticas",
+      "expiring": "Por vencer ≤ {days}d"
+    },
+    "knowledge": {
+      "title": "Conocimiento",
+      "metricLabel": "{count, plural, one {artículo} other {artículos}}",
+      "cta": "Abrir la base de conocimiento",
+      "published": "Publicados",
+      "drafts": "Borradores"
+    },
+    "consumables": {
+      "title": "Consumibles",
+      "metricLabel": "{count, plural, one {ítem} other {ítems}}",
+      "cta": "Explorar consumibles",
+      "lowOnStock": "Stock bajo"
+    }
+  },
+  "healthBar": {
+    "operational": "Operativo",
+    "transitional": "En mantenimiento/depósito",
+    "inactive": "Fuera de servicio",
+    "ariaLabel": "Estado de los activos: {operational} operativos, {transitional} en mantenimiento o depósito, {inactive} fuera de servicio de {total} en total."
+  },
+  "quickActions": {
+    "title": "Acciones rápidas",
+    "newAsset": "Nuevo activo",
+    "addStock": "Agregar stock",
+    "grantAccess": "Otorgar acceso"
+  },
+  "donut": {
+    "title": "Activos por estado",
+    "empty": "Aún no hay activos: agrega el primero y el desglose aparecerá aquí.",
+    "centerLabel": "{count, plural, one {activo} other {activos}}",
+    "ariaLabel": "Activos por estado: {breakdown}, {total} en total."
+  },
+  "accessHealth": {
+    "title": "Estado del acceso",
+    "expiring": "Por vencer ≤ {days}d",
+    "allCurrent": "Todo al día",
+    "onCriticalApps": "En aplicaciones críticas",
+    "noneCritical": "Ninguna en aplicaciones críticas"
+  },
+  "recentActivity": {
+    "heading": "Actividad reciente",
+    "cardTitle": "En todo el entorno",
+    "cardDescription": "Los últimos cambios en activos, accesos y stock: lo más reciente primero.",
+    "empty": "Aún no se registró actividad. Los cambios en activos, accesos y consumibles aparecerán aquí.",
+    "loadMore": "Cargar más",
+    "errorTitle": "No se pudo cargar la actividad reciente",
+    "errorBody": "La API puede estar caída o no disponible."
+  }
+}

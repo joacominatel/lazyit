@@ -9,6 +9,7 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import type { ConsumableMovementType, User } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -42,10 +43,11 @@ import { QuickAdjustButtons } from "../_components/quick-adjust-buttons";
 import { stockTone } from "../_components/stock-badge";
 import { StockMovementDialog } from "../_components/stock-movement-dialog";
 
-const STATUS_LABEL = {
-  ok: "In stock",
-  low: "Low stock",
-  out: "Out of stock",
+/** Stock tone → its i18n key under `consumables.detail` for the display label. */
+const STATUS_LABEL_KEY = {
+  ok: "statusInStock",
+  low: "statusLowStock",
+  out: "statusOutOfStock",
 } as const;
 
 const STATUS_CLASS = {
@@ -62,6 +64,8 @@ function quantityLabel(type: ConsumableMovementType, quantity: number): string {
 }
 
 export default function ConsumableDetailPage() {
+  const t = useTranslations("consumables");
+  const tc = useTranslations("common");
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
@@ -97,8 +101,8 @@ export default function ConsumableDetailPage() {
     return (
       <div className="mx-auto max-w-4xl">
         <ErrorState
-          title="Consumable not found"
-          description="It may have been deleted, or the API is unreachable."
+          title={t("detail.notFoundTitle")}
+          description={t("detail.notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -117,7 +121,7 @@ export default function ConsumableDetailPage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Consumables", href: "/consumables" },
+              { label: t("list.title"), href: "/consumables" },
               { label: consumable.name },
             ]}
           />
@@ -136,13 +140,13 @@ export default function ConsumableDetailPage() {
                   <Button variant="outline" size="sm" asChild>
                     <Link href={`/consumables/${consumable.id}/edit`}>
                       <PencilSquareIcon />
-                      Edit
+                      {tc("edit")}
                     </Link>
                   </Button>
                   <Button variant="outline" size="sm" asChild>
                     <Link href={`/consumables/${consumable.id}/clone`}>
                       <DocumentDuplicateIcon />
-                      Clone
+                      {t("detail.cloneAction")}
                     </Link>
                   </Button>
                 </>
@@ -151,7 +155,7 @@ export default function ConsumableDetailPage() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Delete consumable"
+                  aria-label={t("detail.deleteAction")}
                   onClick={() => setDeleteOpen(true)}
                 >
                   <TrashIcon />
@@ -163,7 +167,7 @@ export default function ConsumableDetailPage() {
       />
 
       <DetailPanel
-        title="Stock"
+        title={t("detail.stockSection")}
         actions={
           canWrite ? (
             <QuickAdjustButtons
@@ -182,13 +186,16 @@ export default function ConsumableDetailPage() {
           </span>
           <span className="text-lg text-muted-foreground">{consumable.unit}</span>
           <span className={`text-sm font-medium ${STATUS_CLASS[tone]}`}>
-            · {STATUS_LABEL[tone]}
+            · {t(`detail.${STATUS_LABEL_KEY[tone]}`)}
           </span>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {consumable.minStock != null
-            ? `Reorder threshold: ${consumable.minStock} ${consumable.unit}`
-            : "No reorder threshold set."}
+            ? t("detail.reorderThreshold", {
+                value: consumable.minStock,
+                unit: consumable.unit,
+              })
+            : t("detail.noReorderThreshold")}
         </p>
         {/* Quick adjust (±1) above covers the common case; these open the detailed form
             for a specific quantity / reason, or an absolute recount. */}
@@ -200,7 +207,7 @@ export default function ConsumableDetailPage() {
               onClick={() => setMovementType("IN")}
             >
               <ArrowDownTrayIcon />
-              Add…
+              {t("stock.addCta")}
             </Button>
             <Button
               size="sm"
@@ -208,7 +215,7 @@ export default function ConsumableDetailPage() {
               onClick={() => setMovementType("OUT")}
             >
               <ArrowUpTrayIcon />
-              Remove…
+              {t("stock.removeCta")}
             </Button>
             <Button
               size="sm"
@@ -216,26 +223,28 @@ export default function ConsumableDetailPage() {
               onClick={() => setMovementType("ADJUSTMENT")}
             >
               <ScaleIcon />
-              Adjust…
+              {t("stock.adjustCta")}
             </Button>
           </div>
         )}
       </DetailPanel>
 
-      <DetailPanel title="Details">
+      <DetailPanel title={t("detail.detailsSection")}>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <DetailField label="SKU">
+          <DetailField label={t("detail.skuLabel")}>
             <span className="font-mono">{consumable.sku ?? "—"}</span>
           </DetailField>
-          <DetailField label="Category">
+          <DetailField label={t("detail.categoryLabel")}>
             {categoryName ? <Badge variant="outline">{categoryName}</Badge> : "—"}
           </DetailField>
-          <DetailField label="Unit">{consumable.unit}</DetailField>
+          <DetailField label={t("detail.unitLabel")}>
+            {consumable.unit}
+          </DetailField>
         </dl>
         {consumable.description && (
           <div className="mt-4 space-y-1">
             <dt className="text-xs font-medium text-muted-foreground">
-              Description
+              {t("detail.descriptionLabel")}
             </dt>
             <dd className="text-sm whitespace-pre-wrap">
               {consumable.description}
@@ -244,27 +253,35 @@ export default function ConsumableDetailPage() {
         )}
         {consumable.notes && (
           <div className="mt-4 space-y-1">
-            <dt className="text-xs font-medium text-muted-foreground">Notes</dt>
+            <dt className="text-xs font-medium text-muted-foreground">
+              {t("detail.notesLabel")}
+            </dt>
             <dd className="text-sm whitespace-pre-wrap">{consumable.notes}</dd>
           </div>
         )}
       </DetailPanel>
 
-      <DetailPanel title="Movements">
+      <DetailPanel title={t("detail.movementsSection")}>
         {(movements?.length ?? 0) === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No movements yet. Add, remove or adjust stock to start the ledger.
+            {t("detail.movementsEmpty")}
           </p>
         ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-20">Type</TableHead>
-                  <TableHead className="w-20 text-right">Qty</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead>By</TableHead>
-                  <TableHead className="text-right">Date</TableHead>
+                  <TableHead className="w-20">
+                    {t("detail.movementColumns.type")}
+                  </TableHead>
+                  <TableHead className="w-20 text-right">
+                    {t("detail.movementColumns.qty")}
+                  </TableHead>
+                  <TableHead>{t("detail.movementColumns.reason")}</TableHead>
+                  <TableHead>{t("detail.movementColumns.by")}</TableHead>
+                  <TableHead className="text-right">
+                    {t("detail.movementColumns.date")}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -300,7 +317,9 @@ export default function ConsumableDetailPage() {
                             </span>
                           </Link>
                         ) : (
-                          <span className="text-muted-foreground">System</span>
+                          <span className="text-muted-foreground">
+                            {t("detail.system")}
+                          </span>
                         )}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">

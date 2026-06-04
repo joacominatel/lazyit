@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useEffect, useMemo } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
@@ -83,6 +84,8 @@ export function GrantAccessDialog({
   onOpenChange,
   applicationId,
 }: GrantAccessDialogProps) {
+  const t = useTranslations("applications");
+  const tc = useTranslations("common");
   const { data: users } = useUsers();
   // The app's current active grants — to show the grantee's existing context (no duplicate by mistake).
   const { data: activeGrants } = useApplicationGrants(applicationId, {
@@ -125,10 +128,10 @@ export function GrantAccessDialog({
         },
         {
           onSuccess: () => {
-            toast.success("Access granted");
+            toast.success(t("access.grantedToast"));
             onOpenChange(false);
           },
-          onError: (error) => notifyError(error, "Couldn't grant access"),
+          onError: (error) => notifyError(error, t("access.grantError")),
         },
       );
     },
@@ -141,11 +144,8 @@ export function GrantAccessDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Grant access</DialogTitle>
-          <DialogDescription>
-            Give a user access to this application. A user may hold several grants
-            at different access levels.
-          </DialogDescription>
+          <DialogTitle>{t("access.grantTitle")}</DialogTitle>
+          <DialogDescription>{t("access.grantDescription")}</DialogDescription>
         </DialogHeader>
 
         {/* stopPropagation: a form inside a Radix Portal still bubbles its submit through the React
@@ -162,11 +162,11 @@ export function GrantAccessDialog({
             <Controller
               control={form.control}
               name="userId"
-              rules={{ required: "Select a user" }}
+              rules={{ required: t("access.selectUserError") }}
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
                   <FieldLabel htmlFor="grant-user" required>
-                    User
+                    {t("access.userLabel")}
                   </FieldLabel>
                   <CreatableField
                     label="user"
@@ -187,8 +187,8 @@ export function GrantAccessDialog({
                         <SelectValue
                           placeholder={
                             available.length > 0
-                              ? "Select a user"
-                              : "No active users"
+                              ? t("access.selectUser")
+                              : t("access.noActiveUsers")
                           }
                         />
                       </SelectTrigger>
@@ -203,10 +203,10 @@ export function GrantAccessDialog({
                   </CreatableField>
                   {field.value && existingForUser.length > 0 && (
                     <FieldDescription className="flex flex-wrap items-center gap-1.5">
-                      <span>Already has access:</span>
+                      <span>{t("access.alreadyHasAccess")}</span>
                       {existingForUser.map((g) => (
                         <Badge key={g.id} variant="secondary">
-                          {g.accessLevel ?? "access"}
+                          {g.accessLevel ?? t("access.accessFallback")}
                         </Badge>
                       ))}
                     </FieldDescription>
@@ -221,15 +221,16 @@ export function GrantAccessDialog({
               name="accessLevel"
               render={({ field }) => (
                 <Field>
-                  <FieldLabel htmlFor="grant-level">Access level</FieldLabel>
+                  <FieldLabel htmlFor="grant-level">
+                    {t("access.accessLevelLabel")}
+                  </FieldLabel>
                   <AccessLevelCombobox
                     id="grant-level"
                     value={field.value ?? ""}
                     onChange={field.onChange}
                   />
                   <FieldDescription>
-                    Optional, free-form — pick a common value or type whatever
-                    this application calls its roles.
+                    {t("access.accessLevelDescription")}
                   </FieldDescription>
                 </Field>
               )}
@@ -240,7 +241,9 @@ export function GrantAccessDialog({
               name="expiresAt"
               render={({ field }) => (
                 <Field>
-                  <FieldLabel htmlFor="grant-expires">Expires</FieldLabel>
+                  <FieldLabel htmlFor="grant-expires">
+                    {t("access.expiresLabel")}
+                  </FieldLabel>
                   <Input
                     id="grant-expires"
                     type="date"
@@ -251,8 +254,7 @@ export function GrantAccessDialog({
                     onChange={(event) => field.onChange(event.target.value)}
                   />
                   <FieldDescription>
-                    Optional and informative — access is not auto-revoked at
-                    expiry.
+                    {t("access.expiresDescription")}
                   </FieldDescription>
                 </Field>
               )}
@@ -263,7 +265,9 @@ export function GrantAccessDialog({
               name="notes"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="grant-notes">Notes</FieldLabel>
+                  <FieldLabel htmlFor="grant-notes">
+                    {t("access.notesLabel")}
+                  </FieldLabel>
                   <Textarea
                     id="grant-notes"
                     name={field.name}
@@ -271,7 +275,7 @@ export function GrantAccessDialog({
                     value={field.value ?? ""}
                     onBlur={field.onBlur}
                     onChange={(event) => field.onChange(event.target.value)}
-                    placeholder="Optional — e.g. requested for the Q3 migration"
+                    placeholder={t("access.notesPlaceholder")}
                     rows={2}
                     aria-invalid={fieldState.invalid || undefined}
                   />
@@ -289,11 +293,11 @@ export function GrantAccessDialog({
             onClick={() => onOpenChange(false)}
             disabled={grant.isPending}
           >
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button type="submit" form={FORM_ID} disabled={grant.isPending}>
             {grant.isPending && <ArrowPathIcon className="animate-spin" />}
-            Grant access
+            {t("access.grantSubmit")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -10,6 +10,7 @@ import {
   PERMISSION_PILLARS,
   PILLAR_META,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -60,6 +61,7 @@ export function PermissionPicker({
   disabled = false,
   idPrefix = "sa-perm",
 }: PermissionPickerProps) {
+  const t = useTranslations("settings");
   const pillars = useMemo(() => PERMISSION_PILLARS, []);
 
   return (
@@ -75,7 +77,9 @@ export function PermissionPicker({
           <section
             key={pillar}
             className="space-y-2 rounded-lg border p-3"
-            aria-label={`${meta.label} permissions`}
+            aria-label={t("serviceAccounts.permissionPicker.sectionAria", {
+              label: meta.label,
+            })}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -89,9 +93,12 @@ export function PermissionPicker({
                   checked={allOn ? true : someOn ? "indeterminate" : false}
                   onCheckedChange={(v) => onTogglePillar(pillar, v === true)}
                   disabled={disabled}
-                  aria-label={`Select all ${meta.label} permissions`}
+                  aria-label={t(
+                    "serviceAccounts.permissionPicker.selectAllAria",
+                    { label: meta.label },
+                  )}
                 />
-                All
+                {t("serviceAccounts.permissionPicker.all")}
               </label>
             </div>
 
@@ -118,7 +125,7 @@ export function PermissionPicker({
                       {aboveTier ? (
                         <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-500">
                           <ExclamationTriangleIcon className="size-3" />
-                          Admin-level
+                          {t("serviceAccounts.permissionPicker.adminLevel")}
                         </span>
                       ) : null}
                     </label>

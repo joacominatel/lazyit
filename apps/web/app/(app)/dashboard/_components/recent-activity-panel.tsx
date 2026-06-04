@@ -4,6 +4,7 @@ import {
   ArrowPathIcon,
   ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { ActivityRow } from "@/components/activity-row";
 import { RequestIdNote } from "@/components/request-id-note";
@@ -32,6 +33,7 @@ import { useDashboardActivity } from "@/lib/api/hooks/use-dashboard";
  * an empty state, and the timeline + "Load more".
  */
 export function RecentActivityPanel() {
+  const t = useTranslations("dashboard");
   const {
     data,
     isLoading,
@@ -58,13 +60,15 @@ export function RecentActivityPanel() {
   return (
     <section>
       <h2 className="mb-3 text-lg font-semibold tracking-tight">
-        Recent activity
+        {t("recentActivity.heading")}
       </h2>
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Across the estate</CardTitle>
+          <CardTitle className="text-base">
+            {t("recentActivity.cardTitle")}
+          </CardTitle>
           <CardDescription>
-            The latest changes to assets, access and stock — newest first.
+            {t("recentActivity.cardDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -74,8 +78,7 @@ export function RecentActivityPanel() {
             <ActivityError error={error} onRetry={() => refetch()} />
           ) : items.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No activity recorded yet. Changes to assets, access and consumables
-              will show up here.
+              {t("recentActivity.empty")}
             </p>
           ) : (
             <div className="space-y-4">
@@ -107,7 +110,7 @@ export function RecentActivityPanel() {
                   {isFetchingNextPage && (
                     <ArrowPathIcon className="animate-spin" />
                   )}
-                  Load more
+                  {t("recentActivity.loadMore")}
                 </Button>
               )}
             </div>
@@ -149,20 +152,22 @@ function ActivityError({
   error: unknown;
   onRetry: () => void;
 }) {
+  const t = useTranslations("dashboard");
+  const tc = useTranslations("common");
   const requestId = error instanceof ApiError ? error.requestId : undefined;
   return (
     <div className="flex flex-col items-start gap-3 py-2">
       <div className="flex items-center gap-2 text-sm">
         <ExclamationTriangleIcon className="size-5 text-muted-foreground" />
-        <span className="font-medium">Couldn&apos;t load recent activity</span>
+        <span className="font-medium">{t("recentActivity.errorTitle")}</span>
       </div>
       <p className="text-sm text-muted-foreground">
-        The API may be down or unreachable.
+        {t("recentActivity.errorBody")}
       </p>
       <RequestIdNote requestId={requestId} />
       <Button variant="outline" size="sm" onClick={onRetry}>
         <ArrowPathIcon />
-        Retry
+        {tc("retry")}
       </Button>
     </div>
   );

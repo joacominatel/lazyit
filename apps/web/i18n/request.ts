@@ -8,9 +8,13 @@ import { defaultLocale, isLocale, LOCALE_COOKIE } from "./config";
  * cookie is absent or holds an unsupported value. This file is referenced by the
  * `createNextIntlPlugin` wrap in `next.config.ts`.
  *
- * The whole `messages/<locale>.json` catalog is loaded here and handed to Server
- * Components (via `getTranslations`) and to Client Components (via the messages we
- * pass into `NextIntlClientProvider` in `app/providers.tsx`).
+ * The catalog is split one file per top-level namespace under
+ * `messages/<locale>/<area>.json` and composed by the per-locale barrel
+ * `messages/<locale>/_all.ts` (so the section-translation fan-out can edit
+ * disjoint files without collisions — see `docs/04-development/i18n.md`). The
+ * assembled catalog is handed to Server Components (via `getTranslations`) and
+ * to Client Components (via the messages passed into `NextIntlClientProvider` in
+ * `app/providers.tsx`).
  */
 export default getRequestConfig(async () => {
   const store = await cookies();
@@ -19,6 +23,6 @@ export default getRequestConfig(async () => {
 
   return {
     locale,
-    messages: (await import(`../messages/${locale}.json`)).default,
+    messages: (await import(`../messages/${locale}/_all`)).default,
   };
 });

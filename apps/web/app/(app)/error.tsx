@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowPathIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { RequestIdNote } from "@/components/request-id-note";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ export default function AppError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useTranslations("shared");
   const requestId = error instanceof ApiError ? error.requestId : undefined;
 
   useEffect(() => {
@@ -34,15 +36,15 @@ export default function AppError({
         <ExclamationTriangleIcon className="size-6 text-destructive" />
       </div>
       <div className="space-y-1">
-        <p className="text-sm font-medium">Something went wrong</p>
+        <p className="text-sm font-medium">{t("errors.boundaryTitle")}</p>
         <p className="max-w-md text-sm text-muted-foreground">
-          {error.message || "An unexpected error occurred while loading this page."}
+          {error.message || t("errors.boundaryDescription")}
         </p>
       </div>
       <RequestIdNote requestId={requestId} />
       <Button variant="outline" onClick={reset}>
         <ArrowPathIcon />
-        Try again
+        {t("errors.tryAgain")}
       </Button>
     </div>
   );

@@ -7,6 +7,7 @@ import {
   UsersIcon,
 } from "@heroicons/react/24/outline";
 import type { BatchResult, User } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -66,13 +67,8 @@ type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
  */
 const FILTER_DEFAULTS = { status: "ALL", archived: "ALL" } as const;
 
-const STATUS_LABEL: Record<StatusFilter, string> = {
-  ALL: "All",
-  ACTIVE: "Active",
-  INACTIVE: "Inactive",
-};
-
 export default function UsersPage() {
+  const t = useTranslations("users");
   // User administration (create / edit / clone / role-change / offboard / restore) is the single
   // coarse `user:manage` capability on the backend. `isAdmin` still gates the archived (`deleted=only`)
   // slice, which the API keeps ADMIN-only.
@@ -135,8 +131,8 @@ export default function UsersPage() {
   function handleRestoreRow(user: User) {
     const name = `${user.firstName} ${user.lastName}`;
     restoreUserMutation.mutate(user.id, {
-      onSuccess: () => toast.success(`${name} restored`),
-      onError: (err) => notifyError(err, "Couldn't restore the user"),
+      onSuccess: () => toast.success(t("list.toast.restored", { name })),
+      onError: (err) => notifyError(err, t("list.toast.restoreError")),
     });
   }
 
@@ -152,7 +148,7 @@ export default function UsersPage() {
       selection.clear();
       await refetch();
     } catch (err) {
-      notifyError(err, "Couldn't restore the selected users");
+      notifyError(err, t("list.toast.bulkRestoreError"));
     } finally {
       setBulkRestoring(false);
     }
@@ -162,7 +158,7 @@ export default function UsersPage() {
     () => [
       {
         key: "avatar",
-        header: "Avatar",
+        header: t("list.columns.avatar"),
         srOnlyHeader: true,
         headClassName: "w-12",
         skeleton: <Skeleton className="size-8 rounded-full" />,
@@ -171,7 +167,7 @@ export default function UsersPage() {
         key: "name",
         header: (
           <SortableHeader
-            label="Name"
+            label={t("list.columns.name")}
             active={sort === "firstName"}
             direction={dir}
             onToggle={() => toggleSort("firstName")}
@@ -183,7 +179,7 @@ export default function UsersPage() {
         key: "email",
         header: (
           <SortableHeader
-            label="Email"
+            label={t("list.columns.email")}
             active={sort === "email"}
             direction={dir}
             onToggle={() => toggleSort("email")}
@@ -195,7 +191,7 @@ export default function UsersPage() {
         key: "role",
         header: (
           <SortableHeader
-            label="Role"
+            label={t("list.columns.role")}
             active={sort === "role"}
             direction={dir}
             onToggle={() => toggleSort("role")}
@@ -205,23 +201,23 @@ export default function UsersPage() {
       },
       {
         key: "status",
-        header: "Status",
+        header: t("list.columns.status"),
         skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
       },
       {
         key: "updated",
-        header: "Updated",
+        header: t("list.columns.updated"),
         skeleton: <Skeleton className="h-4 w-20" />,
       },
       {
         key: "actions",
-        header: "Actions",
+        header: t("list.columns.actions"),
         srOnlyHeader: true,
         headClassName: "w-12 text-right",
         skeleton: <Skeleton className="ml-auto size-7" />,
       },
     ],
-    [sort, dir, toggleSort],
+    [sort, dir, toggleSort, t],
   );
 
   const total = page?.total ?? 0;
@@ -246,12 +242,22 @@ export default function UsersPage() {
   }
 
   const chips = [
-    ...(q ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }] : []),
+    ...(q
+      ? [
+          {
+            key: "q",
+            label: t("list.chips.search", { query: q }),
+            onClear: () => setQ(""),
+          },
+        ]
+      : []),
     ...(statusFilter !== "ALL"
       ? [
           {
             key: "status",
-            label: `Status: ${STATUS_LABEL[statusFilter]}`,
+            label: t("list.chips.status", {
+              status: t(`list.statusFilterLabel.${statusFilter}`),
+            }),
             onClear: () => setFilter("status", FILTER_DEFAULTS.status),
           },
         ]
@@ -261,10 +267,10 @@ export default function UsersPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Users"
+        title={t("list.title")}
         pillar="manage"
         icon={UsersIcon}
-        subtitle="The people in your organization."
+        subtitle={t("list.subtitle")}
         actions={
           <>
             {isAdmin ? (
@@ -279,7 +285,7 @@ export default function UsersPage() {
             {canManage ? (
               <Button onClick={openCreate}>
                 <PlusIcon />
-                New user
+                {t("list.newUser")}
               </Button>
             ) : null}
           </>
@@ -292,7 +298,7 @@ export default function UsersPage() {
         <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
       ) : isError ? (
         <ErrorState
-          title="Could not load users"
+          title={t("list.loadErrorTitle")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -300,11 +306,11 @@ export default function UsersPage() {
         <EmptyState
           icon={UserPlusIcon}
           pillar="manage"
-          title="No people here yet"
-          description="Add the people in your organization — once they're here you can assign assets and grant them access."
+          title={t("empty.title")}
+          description={t("empty.description")}
           action={
             canManage
-              ? { label: "Add your first user", onClick: openCreate }
+              ? { label: t("empty.action"), onClick: openCreate }
               : undefined
           }
         />
@@ -316,8 +322,8 @@ export default function UsersPage() {
               onChange={setQ}
               debounceMs={300}
               onDebouncedChange={setQ}
-              label="Search users"
-              placeholder="Search by name or email…"
+              label={t("list.searchLabel")}
+              placeholder={t("list.searchPlaceholder")}
               className="sm:max-w-xs sm:flex-1"
             />
             <Select
@@ -328,9 +334,11 @@ export default function UsersPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">All statuses</SelectItem>
-                <SelectItem value="ACTIVE">Active</SelectItem>
-                <SelectItem value="INACTIVE">Inactive</SelectItem>
+                <SelectItem value="ALL">{t("list.status.all")}</SelectItem>
+                <SelectItem value="ACTIVE">{t("list.status.active")}</SelectItem>
+                <SelectItem value="INACTIVE">
+                  {t("list.status.inactive")}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -341,7 +349,9 @@ export default function UsersPage() {
             columns={columns}
             isFilteredEmpty={rows.length === 0}
             filteredEmptyMessage={
-              archived ? "No archived users." : "No users match your filters."
+              archived
+                ? t("list.filteredEmptyArchived")
+                : t("list.filteredEmptyDefault")
             }
             filteredEmptyAction={<ClearFiltersLink onClick={clearFilters} />}
             selection={
@@ -351,7 +361,7 @@ export default function UsersPage() {
                     allSelected: selection.allSelected,
                     someSelected: selection.someSelected,
                     onToggleAll: selection.toggleAll,
-                    selectAllLabel: "Select all users on this page",
+                    selectAllLabel: t("list.selectAllLabel"),
                   }
                 : undefined
             }
@@ -362,7 +372,9 @@ export default function UsersPage() {
                 selectable={selectable}
                 selected={selection.isSelected(user.id)}
                 onSelectedChange={(on) => selection.setSelected(user.id, on)}
-                selectLabel={`Select ${user.firstName} ${user.lastName}`}
+                selectLabel={t("list.selectLabel", {
+                  name: `${user.firstName} ${user.lastName}`,
+                })}
                 title={
                   <span className="inline-flex items-center gap-2">
                     <UserAvatar
@@ -377,13 +389,16 @@ export default function UsersPage() {
                 badge={<UserStatusBadge isActive={user.isActive} />}
                 meta={
                   <>
-                    <ResourceCardMeta label="Email" className="col-span-2">
+                    <ResourceCardMeta
+                      label={t("list.meta.email")}
+                      className="col-span-2"
+                    >
                       <span className="break-all">{user.email}</span>
                     </ResourceCardMeta>
-                    <ResourceCardMeta label="Role">
+                    <ResourceCardMeta label={t("list.meta.role")}>
                       <UserRoleSelect user={user} size="sm" />
                     </ResourceCardMeta>
-                    <ResourceCardMeta label="Updated">
+                    <ResourceCardMeta label={t("list.meta.updated")}>
                       {formatDate(user.updatedAt)}
                     </ResourceCardMeta>
                   </>
@@ -401,7 +416,7 @@ export default function UsersPage() {
                       onEdit={() => openEdit(user)}
                       onClone={() => openClone(user)}
                       onDelete={() => setDeleting(user)}
-                      deleteLabel="Offboard"
+                      deleteLabel={t("list.offboardAction")}
                     />
                   ) : undefined
                 }
@@ -422,7 +437,9 @@ export default function UsersPage() {
                   <SelectCell
                     checked={selection.isSelected(user.id)}
                     onCheckedChange={(on) => selection.setSelected(user.id, on)}
-                    label={`Select ${user.firstName} ${user.lastName}`}
+                    label={t("list.selectLabel", {
+                      name: `${user.firstName} ${user.lastName}`,
+                    })}
                   />
                 ) : null}
                 <TableCell>
@@ -465,7 +482,7 @@ export default function UsersPage() {
                         onEdit={() => openEdit(user)}
                         onClone={() => openClone(user)}
                         onDelete={() => setDeleting(user)}
-                        deleteLabel="Offboard"
+                        deleteLabel={t("list.offboardAction")}
                       />
                     </div>
                   ) : null}
@@ -486,7 +503,7 @@ export default function UsersPage() {
                 disabled={bulkRestoring}
               >
                 <ArrowUturnLeftIcon />
-                Restore
+                {t("list.restore")}
               </Button>
             </BatchActionBar>
           ) : null}

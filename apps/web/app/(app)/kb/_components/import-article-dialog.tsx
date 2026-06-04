@@ -2,6 +2,7 @@
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { ArticleStatusSchema, type ArticleStatus } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -52,6 +53,8 @@ export function ImportArticleDialog({
   open,
   onOpenChange,
 }: ImportArticleDialogProps) {
+  const t = useTranslations("kb");
+  const tc = useTranslations("common");
   const router = useRouter();
   const { data: categories } = useArticleCategories();
   const { data: session } = useSession();
@@ -74,27 +77,27 @@ export function ImportArticleDialog({
 
   function handleImport() {
     if (!session) {
-      toast.error("You must be signed in to import articles");
+      toast.error(t("import.toast.signInRequired"));
       return;
     }
     if (!file) {
-      toast.error("Choose a file to import");
+      toast.error(t("import.toast.chooseFile"));
       return;
     }
     if (!categoryId) {
-      toast.error("Choose a category");
+      toast.error(t("import.toast.chooseCategory"));
       return;
     }
     importArticle.mutate(
       { file, fields: { categoryId, status } },
       {
         onSuccess: (article) => {
-          toast.success("Article imported");
+          toast.success(t("import.toast.imported"));
           handleOpenChange(false);
           router.push(`/kb/${article.slug}`);
         },
         onError: (error) =>
-          notifyError(error, "Couldn't import the file"),
+          notifyError(error, t("import.toast.importError")),
       },
     );
   }
@@ -109,32 +112,33 @@ export function ImportArticleDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Import an article</DialogTitle>
-          <DialogDescription>
-            Upload a Markdown, plain-text or Word (.docx) file. Only the text is
-            imported — the original file is not stored.
-          </DialogDescription>
+          <DialogTitle>{t("import.title")}</DialogTitle>
+          <DialogDescription>{t("import.description")}</DialogDescription>
         </DialogHeader>
 
         <FieldGroup>
           <Field>
-            <FieldLabel htmlFor="import-file">File</FieldLabel>
+            <FieldLabel htmlFor="import-file">{t("import.fileLabel")}</FieldLabel>
             <Input
               id="import-file"
               type="file"
               accept={ACCEPT}
               onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             />
-            <FieldDescription>Accepts .md, .txt and .docx.</FieldDescription>
+            <FieldDescription>{t("import.fileHint")}</FieldDescription>
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="import-category">Category</FieldLabel>
+            <FieldLabel htmlFor="import-category">
+              {t("import.categoryLabel")}
+            </FieldLabel>
             <Select value={categoryId} onValueChange={setCategoryId}>
               <SelectTrigger id="import-category" className="w-full">
                 <SelectValue
                   placeholder={
-                    hasCategories ? "Select a category" : "No categories yet"
+                    hasCategories
+                      ? t("import.categorySelect")
+                      : t("import.categoryNone")
                   }
                 />
               </SelectTrigger>
@@ -149,7 +153,9 @@ export function ImportArticleDialog({
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="import-status">Status</FieldLabel>
+            <FieldLabel htmlFor="import-status">
+              {t("import.statusLabel")}
+            </FieldLabel>
             <Select
               value={status}
               onValueChange={(value) => setStatus(value as ArticleStatus)}
@@ -160,7 +166,9 @@ export function ImportArticleDialog({
               <SelectContent>
                 {ArticleStatusSchema.options.map((option) => (
                   <SelectItem key={option} value={option}>
-                    {option === "DRAFT" ? "Draft" : "Published"}
+                    {option === "DRAFT"
+                      ? t("status.draft")
+                      : t("status.published")}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -175,7 +183,7 @@ export function ImportArticleDialog({
             onClick={() => handleOpenChange(false)}
             disabled={importArticle.isPending}
           >
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button
             type="button"
@@ -185,7 +193,7 @@ export function ImportArticleDialog({
             {importArticle.isPending && (
               <ArrowPathIcon className="animate-spin" />
             )}
-            Import
+            {t("import.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>

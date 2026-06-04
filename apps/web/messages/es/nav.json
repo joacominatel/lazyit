@@ -1,0 +1,16 @@
+{
+  "dashboard": "Panel",
+  "inventory": "Inventario",
+  "assets": "Activos",
+  "consumables": "Consumibles",
+  "access": "Acceso",
+  "applications": "Aplicaciones",
+  "knowledge": "Conocimiento",
+  "knowledgeBase": "Base de conocimiento",
+  "reports": "Informes",
+  "informes": "Informes",
+  "manage": "Gestión",
+  "users": "Usuarios",
+  "locations": "Ubicaciones",
+  "settings": "Configuración"
+}

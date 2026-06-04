@@ -8,6 +8,7 @@ import {
   CreateApplicationSchema,
   UpdateApplicationSchema,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -106,6 +107,8 @@ export function ApplicationForm({
   /** When set (and `application` is not), pre-fill a CREATE form from this record — see issue #125. */
   cloneSource?: Application;
 }) {
+  const t = useTranslations("applications");
+  const tc = useTranslations("common");
   const isEdit = application != null;
   const router = useRouter();
   const { data: categories } = useApplicationCategories();
@@ -143,11 +146,11 @@ export function ApplicationForm({
         { id: application.id, data: payload },
         {
           onSuccess: (updated) => {
-            toast.success("Application saved");
+            toast.success(t("form.savedToast"));
             router.push(`/applications/${updated.id}`);
           },
           onError: (error) =>
-            notifyError(error, "Couldn't save the application"),
+            notifyError(error, t("form.saveError")),
         },
       );
     } else {
@@ -157,11 +160,11 @@ export function ApplicationForm({
         : payload;
       createApplication.mutate(createPayload, {
         onSuccess: (created) => {
-          toast.success("Application created");
+          toast.success(t("form.createdToast"));
           router.push(`/applications/${created.id}`);
         },
         onError: (error) =>
-          notifyError(error, "Couldn't create the application"),
+          notifyError(error, t("form.createError")),
       });
     }
   });
@@ -174,12 +177,12 @@ export function ApplicationForm({
           name="name"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="name">Name</FieldLabel>
+              <FieldLabel htmlFor="name">{t("form.nameLabel")}</FieldLabel>
               <Input
                 {...field}
                 id="name"
                 value={field.value ?? ""}
-                placeholder="GitHub"
+                placeholder={t("form.namePlaceholder")}
                 aria-invalid={fieldState.invalid || undefined}
                 autoFocus
               />
@@ -194,7 +197,7 @@ export function ApplicationForm({
             name="vendor"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="vendor">Vendor</FieldLabel>
+                <FieldLabel htmlFor="vendor">{t("form.vendorLabel")}</FieldLabel>
                 <Input
                   id="vendor"
                   name={field.name}
@@ -204,7 +207,7 @@ export function ApplicationForm({
                   onChange={(event) =>
                     field.onChange(event.target.value || undefined)
                   }
-                  placeholder="Atlassian, Microsoft, AWS…"
+                  placeholder={t("form.vendorPlaceholder")}
                   aria-invalid={fieldState.invalid || undefined}
                 />
                 <FieldError errors={[fieldState.error]} />
@@ -217,7 +220,9 @@ export function ApplicationForm({
             name="categoryId"
             render={({ field }) => (
               <Field>
-                <FieldLabel htmlFor="categoryId">Category</FieldLabel>
+                <FieldLabel htmlFor="categoryId">
+                  {t("form.categoryLabel")}
+                </FieldLabel>
                 <CreatableField
                   label="category"
                   renderDialog={(dialog) => (
@@ -236,10 +241,10 @@ export function ApplicationForm({
                     }
                   >
                     <SelectTrigger id="categoryId" className="w-full">
-                      <SelectValue placeholder="Select a category" />
+                      <SelectValue placeholder={t("form.categoryPlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={NONE}>— None —</SelectItem>
+                      <SelectItem value={NONE}>{t("form.categoryNone")}</SelectItem>
                       {(categories ?? []).map((category) => (
                         <SelectItem key={category.id} value={category.id}>
                           {category.name}
@@ -258,7 +263,7 @@ export function ApplicationForm({
           name="url"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="url">URL</FieldLabel>
+              <FieldLabel htmlFor="url">{t("form.urlLabel")}</FieldLabel>
               <Input
                 id="url"
                 name={field.name}
@@ -268,12 +273,10 @@ export function ApplicationForm({
                 onChange={(event) =>
                   field.onChange(event.target.value || undefined)
                 }
-                placeholder="https://github.com or vpn.corp.local"
+                placeholder={t("form.urlPlaceholder")}
                 aria-invalid={fieldState.invalid || undefined}
               />
-              <FieldDescription>
-                Scheme-less hosts and http(s) only; other schemes are rejected.
-              </FieldDescription>
+              <FieldDescription>{t("form.urlDescription")}</FieldDescription>
               <FieldError errors={[fieldState.error]} />
             </Field>
           )}
@@ -284,7 +287,9 @@ export function ApplicationForm({
           name="description"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="description">Description</FieldLabel>
+              <FieldLabel htmlFor="description">
+                {t("form.descriptionLabel")}
+              </FieldLabel>
               <Textarea
                 id="description"
                 name={field.name}
@@ -308,10 +313,11 @@ export function ApplicationForm({
           render={({ field }) => (
             <Field orientation="horizontal">
               <FieldContent>
-                <FieldLabel htmlFor="isCritical">Critical</FieldLabel>
+                <FieldLabel htmlFor="isCritical">
+                  {t("form.criticalLabel")}
+                </FieldLabel>
                 <FieldDescription>
-                  Access here is especially sensitive (production infra,
-                  finance) and is highlighted in listings.
+                  {t("form.criticalDescription")}
                 </FieldDescription>
               </FieldContent>
               <Switch
@@ -328,7 +334,7 @@ export function ApplicationForm({
           name="notes"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="notes">Notes</FieldLabel>
+              <FieldLabel htmlFor="notes">{t("form.notesLabel")}</FieldLabel>
               <Textarea
                 id="notes"
                 name={field.name}
@@ -358,11 +364,11 @@ export function ApplicationForm({
             )
           }
         >
-          Cancel
+          {tc("cancel")}
         </Button>
         <Button type="submit" form={FORM_ID} disabled={isPending}>
           {isPending && <ArrowPathIcon className="animate-spin" />}
-          {isEdit ? "Save changes" : "Create application"}
+          {isEdit ? t("form.saveSubmit") : t("form.createSubmit")}
         </Button>
       </div>
     </form>

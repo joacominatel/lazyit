@@ -9,6 +9,7 @@ import {
   type ArticleLinkedTo,
   type ArticleStatus,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
@@ -51,19 +52,22 @@ const FILTER_DEFAULTS = {
   linkedTo: "ALL",
 } as const;
 
-const STATUS_LABEL: Record<StatusFilter, string> = {
-  ALL: "All",
-  DRAFT: "Drafts",
-  PUBLISHED: "Published",
+/** Maps a status/linked-target filter value to its translation subkey (keeps the maps exhaustive). */
+const STATUS_LABEL_KEY: Record<StatusFilter, string> = {
+  ALL: "all",
+  DRAFT: "drafts",
+  PUBLISHED: "published",
 };
 
-const LINKED_TO_LABEL: Record<LinkedToFilter, string> = {
-  ALL: "Any target",
-  asset: "Assets",
-  application: "Applications",
+const LINKED_TO_LABEL_KEY: Record<LinkedToFilter, string> = {
+  ALL: "any",
+  asset: "assets",
+  application: "applications",
 };
 
 export default function KnowledgeBasePage() {
+  const t = useTranslations("kb");
+  const tc = useTranslations("common");
   // New article + Import both create an article, so they gate on article:write.
   const canWrite = useCan("article:write");
   const {
@@ -103,7 +107,8 @@ export default function KnowledgeBasePage() {
   const articles = page?.items;
 
   const categoryName = (id: string) =>
-    categories?.find((category) => category.id === id)?.name ?? "Uncategorized";
+    categories?.find((category) => category.id === id)?.name ??
+    t("list.uncategorized");
   const authorOf = (id: string) =>
     users?.find((candidate) => candidate.id === id);
 
@@ -117,12 +122,22 @@ export default function KnowledgeBasePage() {
   };
 
   const chips = [
-    ...(q ? [{ key: "q", label: `Search: “${q}”`, onClear: () => setQ("") }] : []),
+    ...(q
+      ? [
+          {
+            key: "q",
+            label: t("filters.chipSearch", { query: q }),
+            onClear: () => setQ(""),
+          },
+        ]
+      : []),
     ...(statusFilter !== "ALL"
       ? [
           {
             key: "status",
-            label: `Status: ${STATUS_LABEL[statusFilter]}`,
+            label: t("filters.chipStatus", {
+              value: t(`filters.statusLabel.${STATUS_LABEL_KEY[statusFilter]}`),
+            }),
             onClear: () => setFilter("status", FILTER_DEFAULTS.status),
           },
         ]
@@ -131,7 +146,9 @@ export default function KnowledgeBasePage() {
       ? [
           {
             key: "categoryId",
-            label: `Category: ${categoryName(categoryFilter)}`,
+            label: t("filters.chipCategory", {
+              value: categoryName(categoryFilter),
+            }),
             onClear: () => setFilter("categoryId", FILTER_DEFAULTS.categoryId),
           },
         ]
@@ -142,8 +159,12 @@ export default function KnowledgeBasePage() {
             key: "linked",
             label:
               linkedToFilter !== "ALL"
-                ? `Linked to: ${LINKED_TO_LABEL[linkedToFilter]}`
-                : "Linked only",
+                ? t("filters.chipLinkedTo", {
+                    value: t(
+                      `filters.linkedToLabel.${LINKED_TO_LABEL_KEY[linkedToFilter]}`,
+                    ),
+                  })
+                : t("filters.linkedOnly"),
             onClear: () => setLinkedOnly(false),
           },
         ]
@@ -153,21 +174,21 @@ export default function KnowledgeBasePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Knowledge Base"
+        title={t("list.title")}
         pillar="knowledge"
         icon={BookOpenIcon}
-        subtitle="Internal documentation for the team."
+        subtitle={t("list.subtitle")}
         actions={
           canWrite ? (
             <>
               <Button variant="outline" onClick={() => setImportOpen(true)}>
                 <ArrowUpTrayIcon />
-                Import
+                {tc("import")}
               </Button>
               <Button asChild>
                 <Link href="/kb/new">
                   <PlusIcon />
-                  New article
+                  {t("list.newArticle")}
                 </Link>
               </Button>
             </>
@@ -181,8 +202,8 @@ export default function KnowledgeBasePage() {
           onChange={setQ}
           debounceMs={300}
           onDebouncedChange={setQ}
-          label="Search articles"
-          placeholder="Search by title…"
+          label={t("list.searchLabel")}
+          placeholder={t("list.searchPlaceholder")}
           className="sm:max-w-xs sm:flex-1"
         />
         <Select
@@ -193,9 +214,11 @@ export default function KnowledgeBasePage() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="ALL">All statuses</SelectItem>
-            <SelectItem value="DRAFT">Drafts only</SelectItem>
-            <SelectItem value="PUBLISHED">Published only</SelectItem>
+            <SelectItem value="ALL">{t("filters.statusAll")}</SelectItem>
+            <SelectItem value="DRAFT">{t("filters.statusDraftsOnly")}</SelectItem>
+            <SelectItem value="PUBLISHED">
+              {t("filters.statusPublishedOnly")}
+            </SelectItem>
           </SelectContent>
         </Select>
         <Select
@@ -206,7 +229,7 @@ export default function KnowledgeBasePage() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="ALL">All categories</SelectItem>
+            <SelectItem value="ALL">{t("filters.categoryAll")}</SelectItem>
             {(categories ?? []).map((category) => (
               <SelectItem key={category.id} value={category.id}>
                 {category.name}
@@ -226,7 +249,7 @@ export default function KnowledgeBasePage() {
               checked={linkedOnly}
               onCheckedChange={setLinkedOnly}
             />
-            Linked only
+            {t("filters.linkedOnly")}
           </Label>
           {linkedOnly ? (
             <Select
@@ -237,9 +260,11 @@ export default function KnowledgeBasePage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">Any target</SelectItem>
-                <SelectItem value="asset">Assets</SelectItem>
-                <SelectItem value="application">Applications</SelectItem>
+                <SelectItem value="ALL">{t("filters.anyTarget")}</SelectItem>
+                <SelectItem value="asset">{t("filters.targetAssets")}</SelectItem>
+                <SelectItem value="application">
+                  {t("filters.targetApplications")}
+                </SelectItem>
               </SelectContent>
             </Select>
           ) : null}
@@ -252,25 +277,25 @@ export default function KnowledgeBasePage() {
         <SkeletonCards />
       ) : isError ? (
         <ErrorState
-          title="Could not load articles"
+          title={t("list.errorTitle")}
           onRetry={() => refetch()}
           error={error}
         />
       ) : isEmpty ? (
         filtersActive ? (
           <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
-            <span>No articles match your filters.</span>
+            <span>{t("list.noMatchFilters")}</span>
             <ClearFiltersLink onClick={clearFilters} />
           </div>
         ) : (
           <EmptyState
             icon={BookOpenIcon}
             pillar="knowledge"
-            title="No articles yet"
-            description="Capture what your team knows — runbooks, how-tos, onboarding notes. Write your first article or import one from a file."
+            title={t("list.emptyTitle")}
+            description={t("list.emptyDescription")}
             action={
               canWrite
-                ? { label: "Write your first article", href: "/kb/new" }
+                ? { label: t("list.emptyAction"), href: "/kb/new" }
                 : undefined
             }
           />

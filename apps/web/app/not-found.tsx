@@ -1,4 +1,5 @@
 import { MapIcon } from "@heroicons/react/24/outline";
+import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -10,7 +11,8 @@ import { Button } from "@/components/ui/button";
  * (reduced-motion-safe via the global guard). The "404" stays a quiet mono caption; colour lives
  * only in the decorative ≥24px chip glyph, never in readable text.
  */
-export default function NotFound() {
+export default async function NotFound() {
+  const t = await getTranslations("shared");
   return (
     <main
       id="main-content"
@@ -25,19 +27,17 @@ export default function NotFound() {
         </span>
         <div className="space-y-2">
           <p className="font-mono text-sm font-medium text-muted-foreground">
-            404
+            {t("errors.notFoundCaption")}
           </p>
           <h1 className="text-2xl font-semibold tracking-tight">
-            This page wandered off
+            {t("errors.notFoundTitle")}
           </h1>
           <p className="max-w-md text-sm text-muted-foreground">
-            We couldn&apos;t find what you were looking for — it may have moved,
-            been archived, or never existed. Let&apos;s get you back to the
-            bench.
+            {t("errors.notFoundDescription")}
           </p>
         </div>
         <Button asChild>
-          <Link href="/dashboard">Back to dashboard</Link>
+          <Link href="/dashboard">{t("errors.backToDashboard")}</Link>
         </Button>
       </div>
     </main>

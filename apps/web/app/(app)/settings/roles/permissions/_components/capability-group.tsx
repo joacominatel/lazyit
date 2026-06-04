@@ -8,6 +8,7 @@ import {
   type PermissionPillar,
   PILLAR_META,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import {
@@ -37,11 +38,17 @@ export function CapabilityGroup({
   staged,
   onToggle,
 }: CapabilityGroupProps) {
+  const t = useTranslations("settings");
   const meta = PILLAR_META[pillar];
   const capabilities = capabilitiesForPillar(pillar);
 
   return (
-    <section className="space-y-3" aria-label={`${meta.label} capabilities`}>
+    <section
+      className="space-y-3"
+      aria-label={t("roles.permissions.capabilityGroup.ariaLabel", {
+        label: meta.label,
+      })}
+    >
       <div>
         <h3 className="text-sm font-semibold">{meta.label}</h3>
         <p className="text-xs text-muted-foreground">{meta.description}</p>
@@ -63,12 +70,12 @@ export function CapabilityGroup({
                   {aboveTier && (
                     <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-500">
                       <ExclamationTriangleIcon className="size-3" />
-                      Admin-level
+                      {t("roles.permissions.capabilityGroup.adminLevel")}
                     </span>
                   )}
                   {partiallyOn && (
                     <span className="rounded-full border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Partial
+                      {t("roles.permissions.capabilityGroup.partial")}
                     </span>
                   )}
                 </div>

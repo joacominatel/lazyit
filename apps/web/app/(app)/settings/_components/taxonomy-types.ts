@@ -28,14 +28,6 @@ export function kindHasOrder(kind: CategoryKind): boolean {
   return kind !== "asset";
 }
 
-/** Human, singular label for a kind — drives dialog titles, toasts and the delete prompt. */
-export const CATEGORY_KIND_LABEL: Record<CategoryKind, string> = {
-  asset: "asset category",
-  application: "application category",
-  consumable: "consumable category",
-  article: "article category",
-};
-
 /** Read the optional `order` off any category (asset categories never carry one). */
 export function categoryOrder(category: AnyCategory): number | null {
   return "order" in category ? (category.order ?? null) : null;
