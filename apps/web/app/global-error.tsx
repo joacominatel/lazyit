@@ -1,5 +1,6 @@
 "use client";
 
+import { ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import { useEffect } from "react";
 import "./globals.css";
 
@@ -24,14 +25,23 @@ export default function GlobalError({
     <html lang="en">
       <body className="min-h-svh antialiased">
         <main className="flex min-h-svh flex-col items-center justify-center gap-6 bg-background px-6 text-center text-foreground">
-          <div className="space-y-2">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Something went wrong
-            </h1>
-            <p className="max-w-md text-sm text-muted-foreground">
-              The application hit an unexpected error and couldn&apos;t recover.
-              {error.digest ? ` Reference: ${error.digest}.` : ""}
-            </p>
+          <div className="animate-rise-in flex flex-col items-center gap-6">
+            <span
+              className="flex size-14 items-center justify-center rounded-full bg-destructive/10 text-destructive"
+              aria-hidden
+            >
+              <ExclamationTriangleIcon className="size-7" />
+            </span>
+            <div className="space-y-2">
+              <h1 className="text-2xl font-semibold tracking-tight">
+                Something went wrong
+              </h1>
+              <p className="max-w-md text-sm text-muted-foreground">
+                The application hit an unexpected error and couldn&apos;t
+                recover.
+                {error.digest ? ` Reference: ${error.digest}.` : ""}
+              </p>
+            </div>
           </div>
           <button
             type="button"
