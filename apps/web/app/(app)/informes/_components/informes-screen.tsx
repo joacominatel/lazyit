@@ -8,6 +8,7 @@ import {
   PrinterIcon,
   TableCellsIcon,
   UserIcon,
+  UsersIcon,
 } from "@heroicons/react/24/outline";
 import {
   ACTIVITY_ACTOR_ME,
@@ -78,15 +79,16 @@ import { downloadCsv } from "./informes-csv";
  */
 
 /**
- * The view/scope tabs. The first four map to an entity pillar (or none for "All") → the `entityType`
- * filter. `me` is the self-history view → `actorId="me"` (no entity scope). The `users` tab stays
- * disabled (DEBT-2: per-user history needs UserHistory coverage, out of scope here).
+ * The view/scope tabs. The entity tabs map to a pillar (or none for "All") → the `entityType`
+ * filter. `me` is the self-history view → `actorId="me"` (no entity scope). The `users` tab scopes
+ * to `entityType="user"` — the User lifecycle feed now that UserHistory backs it (DEBT-2, issue #185).
  */
 const TABS = [
   { value: "all", label: "All", entityType: null },
   { value: "assets", label: "Assets", entityType: "asset" },
   { value: "access", label: "Access", entityType: "application" },
   { value: "stock", label: "Stock", entityType: "consumable" },
+  { value: "users", label: "Users", entityType: "user" },
   { value: "me", label: "My history", entityType: null },
 ] as const satisfies readonly {
   value: string;
@@ -102,6 +104,7 @@ const TAB_INDICATOR: Record<TabValue, string> = {
   assets: "data-[state=active]:border-pillar-inventory",
   access: "data-[state=active]:border-pillar-access",
   stock: "data-[state=active]:border-pillar-inventory",
+  users: "data-[state=active]:border-pillar-manage",
   me: "data-[state=active]:border-primary",
 };
 
@@ -371,9 +374,8 @@ export function InformesScreen() {
     <div className="space-y-6" data-print-document>
       {header}
 
-      {/* Scope tabs. The first four scope by entity pillar (server-side); "My history" filters to the
-          caller (actorId="me"). "Users" stays disabled with a native-title tooltip until per-user
-          history (DEBT-2) lands. */}
+      {/* Scope tabs. The entity tabs scope by pillar (server-side); "Users" scopes the User lifecycle
+          feed (entityType="user", DEBT-2); "My history" filters to the caller (actorId="me"). */}
       <div data-print-hide>
         <Tabs value={tab} onValueChange={(value) => setFilter("tab", value)}>
           <TabsList>
@@ -383,7 +385,12 @@ export function InformesScreen() {
                 value={t.value}
                 indicatorClassName={TAB_INDICATOR[t.value]}
               >
-                {t.value === "me" ? (
+                {t.value === "users" ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <UsersIcon className="size-4" aria-hidden />
+                    {t.label}
+                  </span>
+                ) : t.value === "me" ? (
                   <span className="inline-flex items-center gap-1.5">
                     <UserIcon className="size-4" aria-hidden />
                     {t.label}
@@ -393,16 +400,6 @@ export function InformesScreen() {
                 )}
               </TabsTrigger>
             ))}
-            {/* DEBT-2: per-actor (other than self) history. Disabled, not hidden, so the roadmap is
-                visible; the native title carries the "why". Inert (no `value` route). */}
-            <span
-              className="-mb-px inline-flex h-9 shrink-0 cursor-not-allowed items-center gap-1.5 border-b-2 border-transparent px-3 text-sm font-medium text-muted-foreground/50"
-              title="Available once per-user history coverage lands"
-              aria-disabled="true"
-            >
-              <UserIcon className="size-4" aria-hidden />
-              Users
-            </span>
           </TabsList>
         </Tabs>
       </div>
@@ -556,7 +553,7 @@ export function InformesScreen() {
           description={
             filtersActive
               ? "Nothing across the whole history matches these filters. Try clearing one."
-              : "Changes to assets, access and stock will show up here as your team works."
+              : "Changes to assets, access, stock and people will show up here as your team works."
           }
         >
           {filtersActive ? (
