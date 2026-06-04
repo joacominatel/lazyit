@@ -1,1 +1,143 @@
-{}
+{
+  "breadcrumb": "Knowledge Base",
+  "list": {
+    "title": "Knowledge Base",
+    "subtitle": "Internal documentation for the team.",
+    "newArticle": "New article",
+    "searchLabel": "Search articles",
+    "searchPlaceholder": "Search by title…",
+    "errorTitle": "Could not load articles",
+    "noMatchFilters": "No articles match your filters.",
+    "emptyTitle": "No articles yet",
+    "emptyDescription": "Capture what your team knows — runbooks, how-tos, onboarding notes. Write your first article or import one from a file.",
+    "emptyAction": "Write your first article",
+    "readingTime": "{minutes} min read",
+    "unknownAuthor": "Unknown author",
+    "uncategorized": "Uncategorized",
+    "linkedCount": "{count} linked",
+    "linkedTooltip": "{count, plural, one {Linked to # item} other {Linked to # items}}"
+  },
+  "filters": {
+    "statusAll": "All statuses",
+    "statusDraftsOnly": "Drafts only",
+    "statusPublishedOnly": "Published only",
+    "categoryAll": "All categories",
+    "linkedOnly": "Linked only",
+    "anyTarget": "Any target",
+    "targetAssets": "Assets",
+    "targetApplications": "Applications",
+    "chipSearch": "Search: “{query}”",
+    "chipStatus": "Status: {value}",
+    "chipCategory": "Category: {value}",
+    "chipLinkedTo": "Linked to: {value}",
+    "statusLabel": {
+      "all": "All",
+      "drafts": "Drafts",
+      "published": "Published"
+    },
+    "linkedToLabel": {
+      "any": "Any target",
+      "assets": "Assets",
+      "applications": "Applications"
+    }
+  },
+  "form": {
+    "newTitle": "New article",
+    "newSubtitle": "Write a draft in Markdown — publish it from the article once it's ready.",
+    "editTitle": "Edit article",
+    "editSubtitle": "Changes don't alter the published/draft state — use Publish on the article for that.",
+    "editCrumb": "Edit",
+    "newCrumb": "New",
+    "titleLabel": "Title",
+    "titlePlaceholder": "How to set up the office VPN",
+    "categoryLabel": "Category",
+    "categorySelect": "Select a category",
+    "categoryNone": "No categories yet",
+    "categoryHint": "No categories yet — use the + button to create one.",
+    "excerptLabel": "Excerpt",
+    "excerptPlaceholder": "A one-line summary shown in listings (optional)",
+    "contentLabel": "Content",
+    "createDraft": "Create draft",
+    "saveChanges": "Save changes",
+    "notSignedInTitle": "Not signed in",
+    "notSignedInDescription": "You must be signed in to edit articles.",
+    "toast": {
+      "signInRequired": "You must be signed in to author articles",
+      "saved": "Article saved",
+      "saveError": "Couldn't save the article",
+      "draftCreated": "Draft created",
+      "createError": "Couldn't create the article"
+    }
+  },
+  "detail": {
+    "notFoundTitle": "Article not found",
+    "notFoundDescription": "It may be a draft you can't see, it was deleted, or the API is unreachable.",
+    "unknownAuthor": "Unknown author",
+    "updated": "Updated {date}",
+    "published": "Published {date}",
+    "edit": "Edit",
+    "publish": "Publish",
+    "unpublish": "Unpublish",
+    "deleteAriaLabel": "Delete article",
+    "deleteExtra": "Published articles are visible to the whole team until then.",
+    "toast": {
+      "published": "Article published",
+      "publishError": "Couldn't publish the article",
+      "movedToDraft": "Moved back to draft",
+      "unpublishError": "Couldn't unpublish the article"
+    }
+  },
+  "links": {
+    "panelTitle": "Linked to",
+    "addLink": "Link",
+    "loading": "Loading links…",
+    "empty": "Not linked to anything yet. Link this article to an asset or application to surface it as that record's runbook.",
+    "removeAriaLabel": "Remove link",
+    "kindAsset": "asset",
+    "kindApplication": "application",
+    "fallbackAsset": "Asset",
+    "fallbackApplication": "Application",
+    "dialogTitle": "Link article",
+    "dialogDescription": "Link this article to an asset or an application so it shows as that record's runbook. A link points to exactly one target.",
+    "targetTypeLabel": "Target type",
+    "targetTypeAsset": "Asset",
+    "targetTypeApplication": "Application",
+    "targetAssetLabel": "Asset",
+    "targetApplicationLabel": "Application",
+    "selectAsset": "Select an asset",
+    "selectApplication": "Select an application",
+    "noAssets": "No assets yet",
+    "noApplications": "No applications yet",
+    "chooseTargetError": "Choose a target to link.",
+    "duplicateHint": "Already-linked targets are accepted by the API only once; a duplicate link is rejected.",
+    "submit": "Link article",
+    "toast": {
+      "removed": "Link removed",
+      "removeError": "Couldn't remove the link",
+      "linked": "Article linked",
+      "linkError": "Couldn't link the article"
+    }
+  },
+  "status": {
+    "draft": "Draft",
+    "published": "Published"
+  },
+  "import": {
+    "title": "Import an article",
+    "description": "Upload a Markdown, plain-text or Word (.docx) file. Only the text is imported — the original file is not stored.",
+    "fileLabel": "File",
+    "fileHint": "Accepts .md, .txt and .docx.",
+    "categoryLabel": "Category",
+    "categorySelect": "Select a category",
+    "categoryNone": "No categories yet",
+    "statusLabel": "Status",
+    "submit": "Import",
+    "toast": {
+      "signInRequired": "You must be signed in to import articles",
+      "chooseFile": "Choose a file to import",
+      "chooseCategory": "Choose a category",
+      "imported": "Article imported",
+      "importError": "Couldn't import the file"
+    }
+  }
+}

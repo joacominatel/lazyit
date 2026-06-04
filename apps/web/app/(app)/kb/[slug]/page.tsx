@@ -7,6 +7,7 @@ import {
   PencilSquareIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -34,6 +35,7 @@ import { ArticleLinksPanel } from "../_components/article-links-panel";
 import { ArticleStatusBadge } from "../_components/article-status-badge";
 
 export default function ArticleDetailPage() {
+  const t = useTranslations("kb");
   const params = useParams<{ slug: string }>();
   const router = useRouter();
   const slug = params.slug;
@@ -65,8 +67,8 @@ export default function ArticleDetailPage() {
     return (
       <div className="mx-auto max-w-3xl">
         <ErrorState
-          title="Article not found"
-          description="It may be a draft you can't see, it was deleted, or the API is unreachable."
+          title={t("detail.notFoundTitle")}
+          description={t("detail.notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -81,16 +83,18 @@ export default function ArticleDetailPage() {
   function handlePublish() {
     if (!article) return;
     publishArticle.mutate(article.id, {
-      onSuccess: () => toast.success("Article published"),
-      onError: (error) => notifyError(error, "Couldn't publish the article"),
+      onSuccess: () => toast.success(t("detail.toast.published")),
+      onError: (error) =>
+        notifyError(error, t("detail.toast.publishError")),
     });
   }
 
   function handleUnpublish() {
     if (!article) return;
     unpublishArticle.mutate(article.id, {
-      onSuccess: () => toast.success("Moved back to draft"),
-      onError: (error) => notifyError(error, "Couldn't unpublish the article"),
+      onSuccess: () => toast.success(t("detail.toast.movedToDraft")),
+      onError: (error) =>
+        notifyError(error, t("detail.toast.unpublishError")),
     });
   }
 
@@ -100,7 +104,7 @@ export default function ArticleDetailPage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Knowledge Base", href: "/kb" },
+              { label: t("breadcrumb"), href: "/kb" },
               { label: article.title },
             ]}
           />
@@ -113,17 +117,19 @@ export default function ArticleDetailPage() {
             <span>
               {author
                 ? `${author.firstName} ${author.lastName}`
-                : "Unknown author"}
+                : t("detail.unknownAuthor")}
             </span>
             <span aria-hidden>·</span>
             <span className="tabular-nums">
-              Updated {formatDate(article.updatedAt)}
+              {t("detail.updated", { date: formatDate(article.updatedAt) })}
             </span>
             {article.publishedAt && (
               <>
                 <span aria-hidden>·</span>
                 <span className="tabular-nums">
-                  Published {formatDate(article.publishedAt)}
+                  {t("detail.published", {
+                    date: formatDate(article.publishedAt),
+                  })}
                 </span>
               </>
             )}
@@ -137,7 +143,7 @@ export default function ArticleDetailPage() {
                   <Button variant="outline" size="sm" asChild>
                     <Link href={`/kb/${article.slug}/edit`}>
                       <PencilSquareIcon />
-                      Edit
+                      {t("detail.edit")}
                     </Link>
                   </Button>
                   {isDraft ? (
@@ -151,7 +157,7 @@ export default function ArticleDetailPage() {
                       ) : (
                         <ArrowUpCircleIcon />
                       )}
-                      Publish
+                      {t("detail.publish")}
                     </Button>
                   ) : (
                     <Button
@@ -165,7 +171,7 @@ export default function ArticleDetailPage() {
                       ) : (
                         <ArrowDownCircleIcon />
                       )}
-                      Unpublish
+                      {t("detail.unpublish")}
                     </Button>
                   )}
                 </>
@@ -174,7 +180,7 @@ export default function ArticleDetailPage() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Delete article"
+                  aria-label={t("detail.deleteAriaLabel")}
                   onClick={() => setDeleteOpen(true)}
                 >
                   <TrashIcon />
@@ -203,7 +209,7 @@ export default function ArticleDetailPage() {
         onConfirm={() => deleteArticle.mutateAsync(article.id)}
         onDeleted={() => router.push("/kb")}
       >
-        Published articles are visible to the whole team until then.
+        {t("detail.deleteExtra")}
       </DeleteConfirmDialog>
     </div>
   );

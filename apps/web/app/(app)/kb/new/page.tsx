@@ -1,21 +1,23 @@
+import { getTranslations } from "next-intl/server";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { ArticleForm } from "../_components/article-form";
 
-export default function NewArticlePage() {
+export default async function NewArticlePage() {
+  const t = await getTranslations("kb");
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <PageHeader
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Knowledge Base", href: "/kb" },
-              { label: "New" },
+              { label: t("breadcrumb"), href: "/kb" },
+              { label: t("form.newCrumb") },
             ]}
           />
         }
-        title="New article"
-        subtitle="Write a draft in Markdown — publish it from the article once it's ready."
+        title={t("form.newTitle")}
+        subtitle={t("form.newSubtitle")}
       />
       <ArticleForm />
     </div>

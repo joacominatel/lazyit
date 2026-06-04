@@ -7,6 +7,7 @@ import {
   CreateArticleSchema,
   UpdateArticleSchema,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Controller, type Resolver, useForm } from "react-hook-form";
@@ -69,6 +70,8 @@ function toFormValues(article?: Article): ArticleFormValues {
  * Authorship is enforced server-side via the OIDC Bearer token (ADR-0038/0039).
  */
 export function ArticleForm({ article }: { article?: Article }) {
+  const t = useTranslations("kb");
+  const tc = useTranslations("common");
   const isEdit = article != null;
   const router = useRouter();
   const { data: session } = useSession();
@@ -87,7 +90,7 @@ export function ArticleForm({ article }: { article?: Article }) {
 
   const onSubmit = form.handleSubmit((values) => {
     if (!isAuthenticated) {
-      toast.error("You must be signed in to author articles");
+      toast.error(t("form.toast.signInRequired"));
       return;
     }
     if (article) {
@@ -103,11 +106,11 @@ export function ArticleForm({ article }: { article?: Article }) {
         },
         {
           onSuccess: (updated) => {
-            toast.success("Article saved");
+            toast.success(t("form.toast.saved"));
             router.push(`/kb/${updated.slug}`);
           },
           onError: (error) =>
-            notifyError(error, "Couldn't save the article"),
+            notifyError(error, t("form.toast.saveError")),
         },
       );
     } else {
@@ -121,11 +124,11 @@ export function ArticleForm({ article }: { article?: Article }) {
         },
         {
           onSuccess: (created) => {
-            toast.success("Draft created");
+            toast.success(t("form.toast.draftCreated"));
             router.push(`/kb/${created.slug}`);
           },
           onError: (error) =>
-            notifyError(error, "Couldn't create the article"),
+            notifyError(error, t("form.toast.createError")),
         },
       );
     }
@@ -141,12 +144,12 @@ export function ArticleForm({ article }: { article?: Article }) {
           name="title"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="title">Title</FieldLabel>
+              <FieldLabel htmlFor="title">{t("form.titleLabel")}</FieldLabel>
               <Input
                 {...field}
                 id="title"
                 value={field.value ?? ""}
-                placeholder="How to set up the office VPN"
+                placeholder={t("form.titlePlaceholder")}
                 aria-invalid={fieldState.invalid || undefined}
                 autoFocus
               />
@@ -160,7 +163,9 @@ export function ArticleForm({ article }: { article?: Article }) {
           name="categoryId"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="categoryId">Category</FieldLabel>
+              <FieldLabel htmlFor="categoryId">
+                {t("form.categoryLabel")}
+              </FieldLabel>
               <CreatableField
                 label="category"
                 renderDialog={(dialog) => (
@@ -180,7 +185,9 @@ export function ArticleForm({ article }: { article?: Article }) {
                   >
                     <SelectValue
                       placeholder={
-                        hasCategories ? "Select a category" : "No categories yet"
+                        hasCategories
+                          ? t("form.categorySelect")
+                          : t("form.categoryNone")
                       }
                     />
                   </SelectTrigger>
@@ -194,9 +201,7 @@ export function ArticleForm({ article }: { article?: Article }) {
                 </Select>
               </CreatableField>
               {!hasCategories && (
-                <FieldDescription>
-                  No categories yet — use the + button to create one.
-                </FieldDescription>
+                <FieldDescription>{t("form.categoryHint")}</FieldDescription>
               )}
               <FieldError errors={[fieldState.error]} />
             </Field>
@@ -208,7 +213,7 @@ export function ArticleForm({ article }: { article?: Article }) {
           name="excerpt"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="excerpt">Excerpt</FieldLabel>
+              <FieldLabel htmlFor="excerpt">{t("form.excerptLabel")}</FieldLabel>
               <Input
                 id="excerpt"
                 name={field.name}
@@ -218,7 +223,7 @@ export function ArticleForm({ article }: { article?: Article }) {
                 onChange={(event) =>
                   field.onChange(event.target.value || undefined)
                 }
-                placeholder="A one-line summary shown in listings (optional)"
+                placeholder={t("form.excerptPlaceholder")}
                 aria-invalid={fieldState.invalid || undefined}
               />
               <FieldError errors={[fieldState.error]} />
@@ -231,7 +236,7 @@ export function ArticleForm({ article }: { article?: Article }) {
           name="content"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="content">Content</FieldLabel>
+              <FieldLabel htmlFor="content">{t("form.contentLabel")}</FieldLabel>
               <MarkdownEditor
                 id="content"
                 value={field.value ?? ""}
@@ -253,7 +258,7 @@ export function ArticleForm({ article }: { article?: Article }) {
             router.push(article ? `/kb/${article.slug}` : "/kb")
           }
         >
-          Cancel
+          {tc("cancel")}
         </Button>
         <Button
           type="submit"
@@ -261,7 +266,7 @@ export function ArticleForm({ article }: { article?: Article }) {
           disabled={isPending || !isAuthenticated}
         >
           {isPending && <ArrowPathIcon className="animate-spin" />}
-          {isEdit ? "Save changes" : "Create draft"}
+          {isEdit ? t("form.saveChanges") : t("form.createDraft")}
         </Button>
       </div>
     </form>
