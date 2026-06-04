@@ -1,8 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CreateUser, Role, UpdateUser } from "@lazyit/shared";
+import { applicationKeys } from "./use-applications";
+import { assetKeys } from "./use-assets";
 import {
   createUser,
   deleteUser,
+  offboardUser,
   resetUserPassword,
   restoreUser,
   updateUser,
@@ -61,6 +64,29 @@ export function useDeleteUser() {
   return useMutation({
     mutationFn: (id: string) => deleteUser(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: userKeys.all }),
+  });
+}
+
+/**
+ * Offboard a user (`POST /users/:id/offboard`, `user:manage`) — the intention-revealing alias of
+ * DELETE that backs the Offboarding flow (Wave 3b). Soft-deletes the user and, in one transaction,
+ * revokes ALL their active grants and releases ALL their active assignments; resolves to the
+ * {@link OffboardResult} summary so the caller can show an honest "released N / revoked M" confirmation.
+ *
+ * Invalidates more than the plain delete: besides the users cache (so the directory + per-person
+ * panels refetch), it invalidates the assets and applications caches because the reclaimed assets
+ * are now unassigned and the revoked grants are now closed — those screens must reflect it. Toasts,
+ * the success animation and navigation stay with the calling component.
+ */
+export function useOffboardUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => offboardUser(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: userKeys.all });
+      queryClient.invalidateQueries({ queryKey: assetKeys.all });
+      queryClient.invalidateQueries({ queryKey: applicationKeys.all });
+    },
   });
 }
 

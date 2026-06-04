@@ -388,3 +388,46 @@
     transform: none !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Print (Wave 3b — offboarding Return Act). ADDITIVE block: it only governs the
+   printed page and defines no new design tokens. The printable act lives in the
+   chrome-less `(print)` route group, so there is no app sidebar/header to strip;
+   this only sets the page box, forces a clean white sheet, and hides any
+   on-screen-only control marked `[data-print-hide]` (e.g. the "Print" button).
+   --------------------------------------------------------------------------- */
+@media print {
+  /* Single-sheet defaults: a modest, printer-safe margin on A4. */
+  @page {
+    margin: 0.5in;
+    size: A4;
+  }
+
+  /* A true white sheet with black ink — the warm bone canvas is for the screen. */
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  /* On-screen-only affordances never reach paper. */
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  /* Let the document use the full printable width and avoid awkward row splits. */
+  [data-print-document] {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  [data-print-document] li,
+  [data-print-document] section {
+    break-inside: avoid;
+  }
+
+  /* De-emphasized meta prints as near-ink, not mid-gray — `muted-foreground` washes out on a
+     B&W laser. Screen tone is unchanged; this only applies inside the printed document. */
+  [data-print-document] .text-muted-foreground {
+    color: oklch(0.4 0.008 75) !important;
+  }
+}
