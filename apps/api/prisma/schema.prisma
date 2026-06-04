@@ -62,6 +62,14 @@ model User {
   // Asset events this user caused (AssetHistory.performedById). SetNull keeps the log on deletion.
   assetHistoryActed AssetHistory[] @relation("AssetHistoryActor")
 
+  // This user's own append-only lifecycle log (UserHistory.userId — DEBT-2, issue #185). The user is
+  // the SUBJECT here. Required FK with Restrict on the subject side preserves a user's history (soft
+  // delete UPDATEs deletedAt and bypasses it), mirroring AssetHistory's subject relation to Asset.
+  history          UserHistory[] @relation("UserHistorySubject")
+  // User lifecycle events this user CAUSED (UserHistory.performedById — the actor side). SetNull keeps
+  // the append-only row when the actor is deleted, mirroring assetHistoryActed.
+  userHistoryActed UserHistory[] @relation("UserHistoryActor")
+
   // Consumable stock movements this user performed (ConsumableMovement.performedById). SetNull.
   consumableMovements ConsumableMovement[] @relation("ConsumableMovementActor")
 
@@ -196,6 +204,7 @@ model ServiceAccount {
   // tables. SetNull keeps the log row when the account is hard-deleted (which never happens — soft
   // delete only). Mirrors the human-actor back-relations on User.
   assetHistoryActed   AssetHistory[]       @relation("AssetHistorySaActor")
+  userHistoryActed    UserHistory[]        @relation("UserHistorySaActor")
   consumableMovements ConsumableMovement[] @relation("ConsumableMovementSaActor")
   assignmentsMade     AssetAssignment[]    @relation("AssignmentAssignedBySa")
   assignmentsReleased AssetAssignment[]    @relation("AssignmentReleasedBySa")
@@ -472,6 +481,55 @@ enum AssetHistoryEventType {
   SPECS_CHANGED
   DELETED
   RESTORED
+}
+
+/// An append-only log of discrete lifecycle events for a User (DEBT-2, issue #185). The User entity's
+/// own audit trail — the counterpart of AssetHistory for the asset, closing the gap where Users had no
+/// queryable history (only fire-and-forget IdP write-back log lines). Append-only (ADR-0006): rows are
+/// only ever INSERTed, never updated or deleted; `createdAt` only — no updatedAt / deletedAt. Emitted
+/// transactionally with the write it records (ADR-0033 pattern). Feeds the `recent_activity` view's
+/// fourth source (entityType "user"). See docs/02-domain/entities/user.md + ADR-0050.
+model UserHistory {
+  // autoincrement: a log/history table, never exposed externally (ADR-0005).
+  id            Int                  @id @default(autoincrement())
+  // Required FK with Restrict: a user with history cannot be hard-deleted (history is preserved),
+  // mirroring AssetHistory.assetId. Soft delete (UPDATE deletedAt) bypasses it. @db.Uuid to match User.id.
+  userId        String               @db.Uuid
+  user          User                 @relation("UserHistorySubject", fields: [userId], references: [id], onDelete: Restrict)
+  eventType     UserHistoryEventType
+  // Contextual data (e.g. { from, to } on ROLE_CHANGED, { fields } on UPDATED). Unvalidated jsonb.
+  payload       Json?
+  // Who caused the change — the authenticated human actor (ADR-0022). SetNull: losing the actor never
+  // blocks deleting them and the log row survives. null = system/unknown. @db.Uuid to match User.id.
+  // NOTE: on a self-action (e.g. a JIT-provisioned user, or an admin editing themselves) performedById
+  // may equal userId — that is fine; subject and actor are distinct relations to the same User.
+  performedById String?              @db.Uuid
+  performedBy   User?                @relation("UserHistoryActor", fields: [performedById], references: [id], onDelete: SetNull)
+  // Service-account actor (ADR-0048): set instead of performedById when a SERVICE ACCOUNT caused the
+  // change. A DB CHECK enforces at-most-one of (performedById, serviceAccountId) — never both. SetNull
+  // so the log survives a (never-issued) hard delete of the account. Plain String (cuid → text).
+  serviceAccountId String?
+  serviceAccount   ServiceAccount?   @relation("UserHistorySaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  createdAt     DateTime             @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). (userId, id) serves the per-user timeline query
+  // (filter by user, order by id desc). A second index on createdAt powers the recent_activity view.
+  @@index([userId, id])
+  @@index([createdAt])
+  @@map("user_history")
+}
+
+/// The discrete user-lifecycle events recorded in UserHistory (DEBT-2, issue #185). CREATED on
+/// provisioning, UPDATED on a name/email edit, ROLE_CHANGED on an RBAC role change (payload { from,
+/// to }), DELETED on offboard (soft delete), RESTORED on re-onboard, PASSWORD_RESET_SENT when an
+/// IdP reset link is requested. Mirrors AssetHistoryEventType's CREATED/UPDATED/DELETED/RESTORED set.
+enum UserHistoryEventType {
+  CREATED
+  UPDATED
+  ROLE_CHANGED
+  DELETED
+  RESTORED
+  PASSWORD_RESET_SENT
 }
 
 /// User-managed grouping for knowledge-base Articles (Networking, Servers, Procedures, …). Like
@@ -826,13 +884,16 @@ enum ConsumableMovementType {
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // VIEW: recent_activity (ADR-0043) — NOT a Prisma model.
 //
-// A read-only Postgres VIEW that UNION ALLs the four append-only activity sources (AssetHistory,
+// A read-only Postgres VIEW that UNION ALLs the FIVE append-only activity sources (AssetHistory,
 // AssetAssignment assigned/released, AccessGrant granted/revoked, ConsumableMovement stock in/out/
-// adjustment) into one normalized, newest-first stream for the dashboard's recent-activity feed.
+// adjustment, and — DEBT-2 / issue #185 — UserHistory user lifecycle) into one normalized, newest-
+// first stream for the dashboard's recent-activity feed.
 // Columns: { occurredAt timestamptz, actorId uuid?, entityType text, entityId text, action text,
-// summary text }. Prisma cannot express a UNION view in PSL, so it lives ONLY as raw SQL in
-// prisma/migrations/20260601163936_recent_activity_view/migration.sql (the same "SQL Prisma can't
-// represent" pattern as the partial unique indexes — see docs/05-runbooks/prisma-migrations.md §3).
+// summary text }. Prisma cannot express a UNION view in PSL, so it lives ONLY as raw SQL — created in
+// prisma/migrations/20260601163936_recent_activity_view/migration.sql and REPLACED (CREATE OR REPLACE)
+// to add the UserHistory branch in prisma/migrations/<ts>_recent_activity_view_user/migration.sql (the
+// same "SQL Prisma can't represent" pattern as the partial unique indexes — see
+// docs/05-runbooks/prisma-migrations.md §3).
 // Prisma neither emits nor flags it as drift; it is read with a typed $queryRaw in DashboardService.
 // The contract lives in @lazyit/shared (schemas/recent-activity.ts). Documented here so the view is
 // discoverable from the schema. See docs/02-domain/entities/recent-activity.md.
