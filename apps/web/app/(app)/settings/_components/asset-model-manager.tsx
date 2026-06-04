@@ -4,8 +4,8 @@ import { CubeIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { AssetModel } from "@lazyit/shared";
 import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { EmptyState } from "@/components/empty-state";
 import {
-  EmptyState,
   ErrorState,
   type ResourceColumn,
   ResourceTable,
@@ -119,15 +119,13 @@ export function AssetModelManager() {
       ) : !hasData ? (
         <EmptyState
           icon={CubeIcon}
+          pillar="inventory"
           title="No asset models yet"
-          description="Create a make/model so assets can reference it."
+          description="Add a make and model — say, a MacBook Pro 14 — so every asset you register can reference it instead of retyping the specs."
           action={
-            canWrite ? (
-              <Button onClick={openCreate}>
-                <PlusIcon />
-                Create the first model
-              </Button>
-            ) : undefined
+            canWrite
+              ? { label: "Create the first model", onClick: openCreate }
+              : undefined
           }
         />
       ) : (
