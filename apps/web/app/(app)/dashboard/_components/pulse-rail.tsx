@@ -2,7 +2,6 @@
 
 import {
   ArrowRightIcon,
-  CheckCircleIcon,
   ClockIcon,
   PlusIcon,
   ShieldExclamationIcon,
@@ -36,12 +35,9 @@ import { formatAssetStatus } from "../../assets/_components/asset-status-badge";
  */
 export function PulseRail({
   summary,
-  attentionCount,
   quickActions,
 }: {
   summary: DashboardSummary;
-  /** How many "Needs attention" items are live — drives the all-clear vs quick-actions tile. */
-  attentionCount: number;
   /** The cross-pillar quick actions the caller is permitted to see (already permission-gated). */
   quickActions: QuickAction[];
 }) {
@@ -53,7 +49,7 @@ export function PulseRail({
     <div className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
       <AssetStatusDonut byStatus={summary.assets.byStatus} total={summary.assets.total} />
       <AccessHealthPanel access={summary.access} />
-      <PulseActionTile attentionCount={attentionCount} quickActions={quickActions} />
+      <PulseActionTile quickActions={quickActions} />
     </div>
   );
 }
@@ -306,40 +302,17 @@ export interface QuickAction {
 }
 
 /**
- * The closing tile: a single surface that flips on whether the estate needs attention.
- *
- * - Nothing needs attention ⇒ a warm ALL-CLEAR moment (a success-tinted check, a short
- *   reassurance). Delight saved for the moment it's earned, never sprayed.
- * - Something needs attention ⇒ the relocated cross-pillar QUICK ACTIONS (already
- *   permission-gated by the caller). If the caller has no actions AND there's attention, the
- *   tile renders nothing rather than an empty shell.
+ * The closing tile: the relocated cross-pillar QUICK ACTIONS, already permission-gated by the
+ * caller. Quick actions stay available whatever the estate's state — a calm estate is exactly
+ * when you reach for "new asset". The "all clear" reassurance is owned by the full-width
+ * Needs-attention zone above, so the rail never repeats it; with no permitted actions the tile
+ * renders nothing rather than an empty shell.
  */
 function PulseActionTile({
-  attentionCount,
   quickActions,
 }: {
-  attentionCount: number;
   quickActions: QuickAction[];
 }) {
-  if (attentionCount === 0) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center gap-2 py-7 text-center">
-          <span
-            className="flex size-12 items-center justify-center rounded-full bg-success/10 text-success"
-            aria-hidden
-          >
-            <CheckCircleIcon className="size-7" />
-          </span>
-          <p className="text-sm font-medium text-foreground">All clear</p>
-          <p className="max-w-[15rem] text-sm text-muted-foreground">
-            Nothing needs your attention right now — the estate is in good shape.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   if (quickActions.length === 0) return null;
 
   return (
