@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireAtLeastOneKey } from "./primitives";
+import { optionalText, requireAtLeastOneKey } from "./primitives";
 
 /**
  * Application — something a User can be granted access to: a SaaS product (Jira, GitHub, AWS), an
@@ -80,7 +80,7 @@ export const CreateApplicationSchema = z.strictObject({
   categoryId: z.cuid().optional(),
   isCritical: z.boolean().default(false),
   metadata: ApplicationMetadataSchema.optional(),
-  notes: z.string().trim().min(1).max(2000).optional(),
+  notes: optionalText(2000),
 });
 
 /** Partial update; any subset of the editable fields (an empty body is rejected). */

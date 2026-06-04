@@ -100,7 +100,17 @@ export function CreateCategoryDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form id={FORM_ID} onSubmit={onSubmit} noValidate>
+        {/* stopPropagation: this dialog renders in a Radix Portal, but React events bubble through
+            the React tree (not the DOM), so without this the inner submit reaches the parent form's
+            onSubmit and submits it too (issue #164). */}
+        <form
+          id={FORM_ID}
+          onSubmit={(e) => {
+            e.stopPropagation();
+            onSubmit(e);
+          }}
+          noValidate
+        >
           <Controller
             control={form.control}
             name="name"

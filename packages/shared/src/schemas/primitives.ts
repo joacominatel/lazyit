@@ -30,6 +30,32 @@ export function int4(opts: { min?: number; max?: number; example?: number } = {}
 }
 
 /**
+ * An optional free-text field that treats an empty/whitespace-only string as "absent".
+ *
+ * The naive `z.string().trim().min(1).max(N).optional()` accepts `undefined` but rejects `""` — yet
+ * web forms send `""` for an untouched optional textarea/input, so an empty optional note/reason
+ * fails with "Too small: expected string to have >=1 characters" (issue #165). This coerces `""`
+ * (and any whitespace-only string) to `undefined`, so a blank optional field is simply omitted; a
+ * non-empty value is still trimmed and bounded to `[1, max]`.
+ *
+ * Both the input and output (inferred) type stay `string | undefined`, so react-hook-form forms
+ * that bind `useForm<z.infer<...>>` keep working — unlike `z.preprocess`, which would widen the
+ * input type to `unknown` and break the resolver. The leading `.string().trim().max(max)` rejects
+ * an over-long value before the empty-string coercion; the trailing `.min(1)` only sees non-empty
+ * input. Use for optional notes/reason and similar free text; do NOT use for fields that
+ * intentionally accept `null` (the dedicated "clear note" endpoints use `.nullable()`).
+ */
+export function optionalText(max: number) {
+  return z
+    .string()
+    .trim()
+    .max(max)
+    .optional()
+    .transform((value) => (value === undefined || value === "" ? undefined : value))
+    .pipe(z.string().trim().min(1).max(max).optional());
+}
+
+/**
  * Reject an empty PATCH body. Wraps a partial Update*Schema so that `{}` (no fields to change) is a
  * 400 instead of a silent no-op update. A PATCH with nothing to change is almost always a client
  * bug (a misspelled / dropped field name on a strictObject would be stripped to {} and "succeed"

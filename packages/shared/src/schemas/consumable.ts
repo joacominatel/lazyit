@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { int4, requireAtLeastOneKey } from "./primitives";
+import { int4, optionalText, requireAtLeastOneKey } from "./primitives";
 
 /**
  * Consumable — a stock-counted supply item (cables, adapters, toner, …). Distinct from Asset, which
@@ -41,7 +41,7 @@ export const CreateConsumableSchema = z.strictObject({
   description: z.string().trim().min(1).max(1000).optional(),
   minStock: int4({ min: 0, example: 5 }).optional(),
   unit: z.string().trim().min(1).max(50).default("units"),
-  notes: z.string().trim().min(1).max(2000).optional(),
+  notes: optionalText(2000),
 });
 
 /**
