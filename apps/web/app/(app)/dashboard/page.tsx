@@ -469,7 +469,7 @@ const TONE: Record<AttentionTone, { dot: string; ring: string; pulse: boolean }>
 // the row's TONE ring (warning/danger), not the generic foreground/10 — so we borrow the
 // motion half of the `lift` recipe and keep the tone ring as the colour identity.
 const ATTENTION_LIFT =
-  "shadow-e1 transition-[transform,box-shadow] duration-[var(--dur-base)] ease-[var(--ease-out-quad)] hover:-translate-y-0.5 hover:shadow-e2 motion-reduce:transition-none";
+  "shadow-e1 transition-[transform,box-shadow,background-color] duration-[var(--dur-base)] ease-[var(--ease-out-quad)] hover:-translate-y-0.5 hover:shadow-e2 motion-reduce:transition-none";
 
 function AttentionRow({ item }: { item: AttentionItem }) {
   const { icon: Icon, label, count, tone, href } = item;
