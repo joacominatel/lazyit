@@ -2,7 +2,7 @@
 
 import { PrinterIcon } from "@heroicons/react/24/outline";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUser } from "@/lib/api/hooks/use-users";
@@ -48,6 +48,16 @@ export default function OffboardingActPage() {
   const isLoading = userLoading || dataLoading;
   const org = orgMounted ? orgName : DEFAULT_ORG_NAME;
   const note = msgMounted ? message : DEFAULT_OFFBOARDING_MESSAGE;
+
+  // Name the printed/saved PDF after the person rather than the route path.
+  useEffect(() => {
+    if (!user) return;
+    const previous = document.title;
+    document.title = `Return Act — ${user.firstName} ${user.lastName}`;
+    return () => {
+      document.title = previous;
+    };
+  }, [user]);
 
   if (isError) {
     return (
@@ -145,10 +155,12 @@ export default function OffboardingActPage() {
                   key={asset.assignmentId}
                   className="flex items-start gap-3 py-2"
                 >
-                  {/* A real, unicode checkbox for IT to tick on receipt. */}
-                  <span aria-hidden className="mt-px text-lg leading-none">
-                    ☐
-                  </span>
+                  {/* A drawn checkbox for IT to tick on receipt — a bordered span renders
+                      consistently across print drivers where the unicode ☐ glyph does not. */}
+                  <span
+                    aria-hidden
+                    className="mt-0.5 inline-block size-3.5 shrink-0 rounded-[2px] border border-foreground/50"
+                  />
                   <div className="min-w-0">
                     <p className="font-medium">{title}</p>
                     {asset.resolved ? (
