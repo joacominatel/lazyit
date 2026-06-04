@@ -12,6 +12,7 @@ import {
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { Pillar } from "@/components/pillar-scope";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 
@@ -29,7 +30,28 @@ type NavItem = {
 type NavSection = {
   /** Section heading, or null for the ungrouped top item (Dashboard). */
   heading: string | null;
+  /**
+   * The pillar whose hue the section's ACTIVE item wears on its icon (ADR-0049). Omitted for
+   * the ungrouped Dashboard, which falls back to the brand indigo (Access hue) — the calm
+   * "you're home" tone. The pillar hue only ever colours the (decorative, label-paired) icon;
+   * the readable label stays on `--sidebar-accent-foreground`.
+   */
+  pillar?: Pillar;
   items: NavItem[];
+};
+
+/**
+ * Static, scanner-safe pillar-icon classes for the ACTIVE nav item. The active icon wears its
+ * pillar hue; the brand-indigo `text-primary` is the Dashboard/fallback tone. Active state is
+ * never colour alone — it is also a `--muted` bg-tint + a font-weight bump, so the hue is a
+ * reinforcement, not the sole signifier. Full strings so the Tailwind v4 scanner keeps them.
+ */
+const ACTIVE_ICON_BY_PILLAR: Record<Pillar | "default", string> = {
+  inventory: "text-pillar-inventory",
+  access: "text-pillar-access",
+  knowledge: "text-pillar-knowledge",
+  manage: "text-pillar-manage",
+  default: "text-primary",
 };
 
 /**
@@ -57,6 +79,7 @@ const NAV: NavSection[] = [
   },
   {
     heading: "Inventory",
+    pillar: "inventory",
     items: [
       { label: "Assets", href: "/assets", icon: ServerStackIcon },
       { label: "Consumables", href: "/consumables", icon: CubeIcon },
@@ -64,14 +87,17 @@ const NAV: NavSection[] = [
   },
   {
     heading: "Access",
+    pillar: "access",
     items: [{ label: "Applications", href: "/applications", icon: KeyIcon }],
   },
   {
     heading: "Knowledge",
+    pillar: "knowledge",
     items: [{ label: "Knowledge Base", href: "/kb", icon: BookOpenIcon }],
   },
   {
     heading: "Manage",
+    pillar: "manage",
     items: [
       { label: "Users", href: "/users", icon: UsersIcon },
       { label: "Locations", href: "/locations", icon: MapPinIcon },
@@ -92,6 +118,8 @@ export function SidebarNav() {
           (item) => !item.adminOnly || canManageSettings,
         );
         if (items.length === 0) return null;
+        // The active item's icon wears this section's pillar hue (Dashboard → brand fallback).
+        const activeIconClass = ACTIVE_ICON_BY_PILLAR[section.pillar ?? "default"];
         return (
         <div key={section.heading ?? `section-${index}`} className="space-y-0.5">
           {section.heading ? (
@@ -112,11 +140,14 @@ export function SidebarNav() {
                   // restores desktop density on the always-visible rail.
                   "flex min-h-11 items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors md:min-h-9",
                   active
-                    ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                    ? // Active reads as tint + weight + a pillar-toned icon — three reinforcing
+                      // cues, never colour alone. The readable label stays on the AA-cleared
+                      // accent-foreground; only the (label-paired) icon takes the pillar hue.
+                      "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
                     : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 )}
               >
-                <Icon className="size-5" />
+                <Icon className={cn("size-5", active && activeIconClass)} />
                 {label}
               </Link>
             );
