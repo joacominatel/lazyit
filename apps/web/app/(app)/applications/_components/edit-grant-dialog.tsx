@@ -2,6 +2,7 @@
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import type { AccessGrant } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,8 @@ export function EditGrantDialog({
   onOpenChange,
   userName,
 }: EditGrantDialogProps) {
+  const t = useTranslations("applications");
+  const tc = useTranslations("common");
   const canGrant = useCan("accessGrant:grant");
   const updateExpiry = useUpdateGrantExpiry();
   const updateNotes = useUpdateGrantNotes();
@@ -101,10 +104,10 @@ export function EditGrantDialog({
           data: { notes: nextNotes },
         });
       }
-      toast.success("Grant updated");
+      toast.success(t("access.updatedToast"));
       onOpenChange(false);
     } catch (error) {
-      notifyError(error, "Couldn't update the grant");
+      notifyError(error, t("access.updateError"));
     }
   }
 
@@ -117,19 +120,22 @@ export function EditGrantDialog({
     <Dialog open={grant != null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit grant</DialogTitle>
+          <DialogTitle>{t("access.editTitle")}</DialogTitle>
           <DialogDescription>
-            Update the expiry and notes for{" "}
+            {t("access.editDescriptionPrefix")}
             <span className="font-medium text-foreground">{userName}</span>
-            {grant?.accessLevel ? ` (${grant.accessLevel})` : ""}. The grant
-            itself is unchanged — to change the access level, revoke and grant
-            again.
+            {grant?.accessLevel
+              ? t("access.editDescriptionLevel", { level: grant.accessLevel })
+              : ""}
+            {t("access.editDescriptionSuffix")}
           </DialogDescription>
         </DialogHeader>
 
         <FieldGroup>
           <Field>
-            <FieldLabel htmlFor="edit-grant-expires">Expires</FieldLabel>
+            <FieldLabel htmlFor="edit-grant-expires">
+              {t("access.expiresLabel")}
+            </FieldLabel>
             <Input
               id="edit-grant-expires"
               type="date"
@@ -137,21 +143,24 @@ export function EditGrantDialog({
               onChange={(event) => setExpiresAt(event.target.value)}
             />
             <FieldDescription>
-              Optional and informative — access is not auto-revoked at expiry.
-              Clear it to make the grant permanent.
+              {t("access.editExpiresDescription")}
             </FieldDescription>
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="edit-grant-notes">Notes</FieldLabel>
+            <FieldLabel htmlFor="edit-grant-notes">
+              {t("access.notesLabel")}
+            </FieldLabel>
             <Textarea
               id="edit-grant-notes"
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              placeholder="Optional — e.g. requested for the Q3 migration"
+              placeholder={t("access.notesPlaceholder")}
               rows={2}
             />
-            <FieldDescription>Leave empty to clear the note.</FieldDescription>
+            <FieldDescription>
+              {t("access.editNotesDescription")}
+            </FieldDescription>
           </Field>
         </FieldGroup>
 
@@ -162,11 +171,11 @@ export function EditGrantDialog({
             onClick={() => onOpenChange(false)}
             disabled={isPending}
           >
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button type="button" onClick={handleSave} disabled={isPending}>
             {isPending && <ArrowPathIcon className="animate-spin" />}
-            Save changes
+            {t("access.editSubmit")}
           </Button>
         </DialogFooter>
       </DialogContent>

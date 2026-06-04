@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { DetailSkeleton } from "@/components/detail-panel";
@@ -16,6 +17,7 @@ import { ApplicationForm } from "../../_components/application-form";
  * the deep-copied `metadata` rides along into the create body.
  */
 export default function CloneApplicationPage() {
+  const t = useTranslations("applications");
   const params = useParams<{ id: string }>();
   const { data: application, isLoading, isError, error, refetch } =
     useApplication(params.id);
@@ -32,8 +34,8 @@ export default function CloneApplicationPage() {
     return (
       <div className="mx-auto max-w-3xl">
         <ErrorState
-          title="Application not found"
-          description="It may have been deleted, or the API is unreachable."
+          title={t("detail.notFoundTitle")}
+          description={t("detail.notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -47,17 +49,17 @@ export default function CloneApplicationPage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Access", href: "/applications" },
+              { label: t("list.title"), href: "/applications" },
               {
                 label: application.name,
                 href: `/applications/${application.id}`,
               },
-              { label: "Clone" },
+              { label: t("form.breadcrumbClone") },
             ]}
           />
         }
-        title="Clone application"
-        subtitle="A new application pre-filled from this one. Review it, then grant access separately."
+        title={t("form.cloneTitle")}
+        subtitle={t("form.cloneSubtitle")}
       />
       <ApplicationForm cloneSource={application} />
     </div>

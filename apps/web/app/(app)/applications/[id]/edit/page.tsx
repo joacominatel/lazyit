@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { DetailSkeleton } from "@/components/detail-panel";
@@ -9,6 +10,7 @@ import { useApplication } from "@/lib/api/hooks/use-applications";
 import { ApplicationForm } from "../../_components/application-form";
 
 export default function EditApplicationPage() {
+  const t = useTranslations("applications");
   const params = useParams<{ id: string }>();
   const { data: application, isLoading, isError, error, refetch } =
     useApplication(params.id);
@@ -25,8 +27,8 @@ export default function EditApplicationPage() {
     return (
       <div className="mx-auto max-w-3xl">
         <ErrorState
-          title="Application not found"
-          description="It may have been deleted, or the API is unreachable."
+          title={t("detail.notFoundTitle")}
+          description={t("detail.notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -40,16 +42,16 @@ export default function EditApplicationPage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Access", href: "/applications" },
+              { label: t("list.title"), href: "/applications" },
               {
                 label: application.name,
                 href: `/applications/${application.id}`,
               },
-              { label: "Edit" },
+              { label: t("form.breadcrumbEdit") },
             ]}
           />
         }
-        title="Edit application"
+        title={t("form.editTitle")}
       />
       <ApplicationForm application={application} />
     </div>
