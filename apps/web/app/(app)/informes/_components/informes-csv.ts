@@ -1,10 +1,10 @@
 import type { RecentActivityItem } from "@lazyit/shared";
 
 /**
- * Build a CSV string for the currently-visible (client-filtered) Reports rows, and trigger a
- * download. Honest scope: this exports exactly what's on screen — the filtered window — never the
- * whole server-side history (the filters run client-side over the loaded page in v1). Columns match
- * the table: occurredAt, action, entityType, entityId, actorName, summary.
+ * Build a CSV string for the currently-visible Reports rows, and trigger a download. Honest scope:
+ * this exports exactly what's on screen — the rows of the current (server-filtered) page/window —
+ * never the whole filtered history in one file. Columns match the table: occurredAt, action,
+ * entityType, entityId, actorName, summary.
  *
  * Pure-ish: {@link toCsv} is a pure function (unit-testable); {@link downloadCsv} wraps it with the
  * Blob + anchor side-effect. No new dependency — a small, escaped CSV writer is enough here.
