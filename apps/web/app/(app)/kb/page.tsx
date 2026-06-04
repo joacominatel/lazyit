@@ -12,8 +12,9 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
+import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
-import { EmptyState, ErrorState, Pagination } from "@/components/resource-table";
+import { ErrorState, Pagination } from "@/components/resource-table";
 import { SearchInput } from "@/components/search-input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -153,6 +154,8 @@ export default function KnowledgeBasePage() {
     <div className="space-y-6">
       <PageHeader
         title="Knowledge Base"
+        pillar="knowledge"
+        icon={BookOpenIcon}
         subtitle="Internal documentation for the team."
         actions={
           canWrite ? (
@@ -262,17 +265,13 @@ export default function KnowledgeBasePage() {
         ) : (
           <EmptyState
             icon={BookOpenIcon}
+            pillar="knowledge"
             title="No articles yet"
-            description="Write your first article or import one from a file."
+            description="Capture what your team knows — runbooks, how-tos, onboarding notes. Write your first article or import one from a file."
             action={
-              canWrite ? (
-                <Button asChild>
-                  <Link href="/kb/new">
-                    <PlusIcon />
-                    Write your first article
-                  </Link>
-                </Button>
-              ) : undefined
+              canWrite
+                ? { label: "Write your first article", href: "/kb/new" }
+                : undefined
             }
           />
         )

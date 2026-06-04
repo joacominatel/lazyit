@@ -13,7 +13,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { avatarColorFor } from "@/lib/avatar-color";
 import { usePermissions } from "@/lib/hooks/use-permissions";
+import { cn } from "@/lib/utils";
 
 /**
  * Topbar user menu — shows real session identity from Auth.js v5 (ADR-0039) plus the caller's RBAC
@@ -54,7 +56,14 @@ export function UserMenu() {
           aria-label="Open user menu"
         >
           <Avatar className="size-8">
-            <AvatarFallback>{initials || "?"}</AvatarFallback>
+            {/* Seed the current user's own chip from the same canonical palette so they read the
+                identity colour here that they wear on Users, asset owners and grants. Falls back to
+                the bare muted chip only when the session carries no email to seed from. */}
+            <AvatarFallback
+              className={cn("font-medium", email && avatarColorFor(email))}
+            >
+              {initials || "?"}
+            </AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>

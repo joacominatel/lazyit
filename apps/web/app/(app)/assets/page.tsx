@@ -18,11 +18,12 @@ import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import {
   BatchActionBar,
-  EmptyState,
   ErrorState,
+  LinkableRow,
   Pagination,
   ResourceCard,
   ResourceCardMeta,
@@ -30,6 +31,7 @@ import {
   ResourceTable,
   RestoreRowAction,
   RowActions,
+  rowActionsReveal,
   SelectCell,
   SortableHeader,
 } from "@/components/resource-table";
@@ -44,7 +46,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TableCell, TableRow } from "@/components/ui/table";
+import { TableCell } from "@/components/ui/table";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useAssets } from "@/lib/api/hooks/use-assets";
 import {
@@ -60,6 +62,7 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
+import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils/format";
 import {
   AssetStatusBadge,
@@ -313,6 +316,8 @@ export default function AssetsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Assets"
+        pillar="inventory"
+        icon={ServerStackIcon}
         subtitle="Everything your team tracks and owns."
         actions={
           <>
@@ -348,17 +353,13 @@ export default function AssetsPage() {
       ) : isEmpty && !filtersActive ? (
         <EmptyState
           icon={ServerStackIcon}
-          title="No assets yet"
-          description="Register your first asset to start tracking it."
+          pillar="inventory"
+          title="Nothing tracked yet"
+          description="Register your first asset — laptops, monitors, phones — and it shows up here, ready to assign and follow."
           action={
-            canWrite ? (
-              <Button asChild>
-                <Link href="/assets/new">
-                  <PlusIcon />
-                  Create your first asset
-                </Link>
-              </Button>
-            ) : undefined
+            canWrite
+              ? { label: "Register your first asset", href: "/assets/new" }
+              : undefined
           }
         />
       ) : (
@@ -532,8 +533,9 @@ export default function AssetsPage() {
             ))}
           >
             {rows.map((asset) => (
-              <TableRow
+              <LinkableRow
                 key={asset.id}
+                href={`/assets/${asset.id}`}
                 data-state={
                   selectable && selection.isSelected(asset.id)
                     ? "selected"
@@ -592,26 +594,28 @@ export default function AssetsPage() {
                       </div>
                     ) : null
                   ) : canWrite || canDelete ? (
-                    <RowActions
-                      onEdit={
-                        canWrite
-                          ? () => router.push(`/assets/${asset.id}/edit`)
-                          : undefined
-                      }
-                      onClone={
-                        canWrite
-                          ? () => router.push(`/assets/${asset.id}/clone`)
-                          : undefined
-                      }
-                      onDelete={
-                        canDelete
-                          ? () => setDeleting({ id: asset.id, name: asset.name })
-                          : undefined
-                      }
-                    />
+                    <div className={cn("flex justify-end", rowActionsReveal)}>
+                      <RowActions
+                        onEdit={
+                          canWrite
+                            ? () => router.push(`/assets/${asset.id}/edit`)
+                            : undefined
+                        }
+                        onClone={
+                          canWrite
+                            ? () => router.push(`/assets/${asset.id}/clone`)
+                            : undefined
+                        }
+                        onDelete={
+                          canDelete
+                            ? () => setDeleting({ id: asset.id, name: asset.name })
+                            : undefined
+                        }
+                      />
+                    </div>
                   ) : null}
                 </TableCell>
-              </TableRow>
+              </LinkableRow>
             ))}
           </ResourceTable>
 

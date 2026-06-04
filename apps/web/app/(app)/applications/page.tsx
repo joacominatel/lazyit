@@ -7,16 +7,18 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import {
-  EmptyState,
   ErrorState,
+  LinkableRow,
   Pagination,
   ResourceCard,
   ResourceCardMeta,
   type ResourceColumn,
   ResourceTable,
   RowActions,
+  rowActionsReveal,
   SortableHeader,
 } from "@/components/resource-table";
 import { SearchInput } from "@/components/search-input";
@@ -30,7 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TableCell, TableRow } from "@/components/ui/table";
+import { TableCell } from "@/components/ui/table";
 import { useAccessGrants } from "@/lib/api/hooks/use-access-grants";
 import { useApplicationCategories } from "@/lib/api/hooks/use-application-categories";
 import { useApplicationList } from "@/lib/api/hooks/use-applications";
@@ -38,6 +40,7 @@ import { useDeleteApplication } from "@/lib/api/hooks/use-application-mutations"
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
+import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils/format";
 import { StackedUserAvatars } from "./_components/stacked-user-avatars";
 
@@ -265,6 +268,8 @@ export default function ApplicationsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Access"
+        pillar="access"
+        icon={KeyIcon}
         subtitle="Applications your team grants access to — who can reach what."
         actions={
           canWrite ? (
@@ -289,17 +294,13 @@ export default function ApplicationsPage() {
       ) : isEmpty && !filtersActive ? (
         <EmptyState
           icon={KeyIcon}
+          pillar="access"
           title="No applications yet"
-          description="Add the SaaS products, systems and services your team grants access to."
+          description="Add the SaaS products, systems and services your team grants access to — then track who can reach each one."
           action={
-            canWrite ? (
-              <Button asChild>
-                <Link href="/applications/new">
-                  <PlusIcon />
-                  Create your first application
-                </Link>
-              </Button>
-            ) : undefined
+            canWrite
+              ? { label: "Add your first application", href: "/applications/new" }
+              : undefined
           }
         />
       ) : (
@@ -434,7 +435,10 @@ export default function ApplicationsPage() {
                 application.id,
               );
               return (
-                <TableRow key={application.id}>
+                <LinkableRow
+                  key={application.id}
+                  href={`/applications/${application.id}`}
+                >
                   <TableCell className="font-medium">
                     <Link
                       href={`/applications/${application.id}`}
@@ -474,36 +478,38 @@ export default function ApplicationsPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     {canWrite || canDelete ? (
-                      <RowActions
-                        onEdit={
-                          canWrite
-                            ? () =>
-                                router.push(
-                                  `/applications/${application.id}/edit`,
-                                )
-                            : undefined
-                        }
-                        onClone={
-                          canWrite
-                            ? () =>
-                                router.push(
-                                  `/applications/${application.id}/clone`,
-                                )
-                            : undefined
-                        }
-                        onDelete={
-                          canDelete
-                            ? () =>
-                                setDeleting({
-                                  id: application.id,
-                                  name: application.name,
-                                })
-                            : undefined
-                        }
-                      />
+                      <div className={cn("flex justify-end", rowActionsReveal)}>
+                        <RowActions
+                          onEdit={
+                            canWrite
+                              ? () =>
+                                  router.push(
+                                    `/applications/${application.id}/edit`,
+                                  )
+                              : undefined
+                          }
+                          onClone={
+                            canWrite
+                              ? () =>
+                                  router.push(
+                                    `/applications/${application.id}/clone`,
+                                  )
+                              : undefined
+                          }
+                          onDelete={
+                            canDelete
+                              ? () =>
+                                  setDeleting({
+                                    id: application.id,
+                                    name: application.name,
+                                  })
+                              : undefined
+                          }
+                        />
+                      </div>
                     ) : null}
                   </TableCell>
-                </TableRow>
+                </LinkableRow>
               );
             })}
           </ResourceTable>

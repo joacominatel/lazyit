@@ -14,7 +14,7 @@ import {
 } from "@heroicons/react/24/outline";
 import type { AssetStatus, DashboardSummary } from "@lazyit/shared";
 import Link from "next/link";
-import type { ComponentType, CSSProperties } from "react";
+import type { ComponentType, CSSProperties, ReactNode } from "react";
 import { useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import type { Pillar } from "@/components/pillar-scope";
@@ -166,6 +166,9 @@ function DashboardContent({ summary }: { summary: DashboardSummary }) {
             value: assets.byStatus[status] ?? 0,
             href: `/assets?status=${status}`,
           }))}
+          extra={
+            <AssetHealthBar byStatus={assets.byStatus} total={assets.total} />
+          }
           footer={{
             label: `${assets.assigned} currently assigned`,
             href: "/assets?ownership=HAS",
@@ -276,6 +279,7 @@ function PillarCard({
   metric,
   metricLabel,
   breakdown,
+  extra,
   footer,
   href,
   cta,
@@ -289,6 +293,8 @@ function PillarCard({
   metric: number;
   metricLabel: string;
   breakdown: BreakdownRow[];
+  /** Optional viz rendered between the breakdown and the footer (e.g. the asset-health bar). */
+  extra?: ReactNode;
   footer?: { label: string; href: string };
   href: string;
   cta: string;
@@ -335,6 +341,7 @@ function PillarCard({
             ))
           )}
         </dl>
+        {extra}
         {footer ? (
           <Link
             href={footer.href}
@@ -352,6 +359,140 @@ function PillarCard({
         </Link>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * A slim, deep-linked operational-health bar for the Assets card — three proportional segments of
+ * `assets.byStatus`, so the headline count gains a glanceable "how healthy is the estate?" read
+ * without any new backend (the summary already zero-fills every status).
+ *
+ * Buckets: Operational → `--success`; In maintenance + In storage → `--warning` (at rest, not yet
+ * out of service); Lost + Retired + Unknown → `--muted-foreground` (out of service / unaccounted).
+ *
+ * Only the single-status Operational segment deep-links (to `?status=OPERATIONAL`). The other two
+ * are COMPOSITE buckets (two/three statuses each), and the assets list only filters by ONE status —
+ * a deep-link would always under-deliver versus the legend count, so those rows stay non-interactive
+ * (count shown, no link) rather than lie about where they go.
+ *
+ * AA / a11y: the segments are SOLID semantic-token fills used decoratively (no text sits on them),
+ * so there is no text-contrast concern — `--success`/`--warning`/`--muted-foreground` are the
+ * AA-paired status tokens and carry dark-mode parity. Meaning is never colour-alone: a visible
+ * legend below names each bucket with its tabular count, and the bar carries an `aria-label`
+ * summarising the split for screen readers. Plain divs + a flex track, no chart lib.
+ */
+function AssetHealthBar({
+  byStatus,
+  total,
+}: {
+  byStatus: Record<AssetStatus, number>;
+  total: number;
+}) {
+  const operational = byStatus.OPERATIONAL ?? 0;
+  const transitional = (byStatus.IN_MAINTENANCE ?? 0) + (byStatus.IN_STORAGE ?? 0);
+  const inactive =
+    (byStatus.LOST ?? 0) + (byStatus.RETIRED ?? 0) + (byStatus.UNKNOWN ?? 0);
+
+  // Nothing to show until there's at least one asset — the card already reads "0 assets".
+  if (total === 0) return null;
+
+  const segments: {
+    key: string;
+    label: string;
+    value: number;
+    bar: string;
+    dot: string;
+    /** Single-status segments deep-link; composite buckets (no single `?status=`) omit it. */
+    href?: string;
+  }[] = [
+    {
+      key: "operational",
+      label: "Operational",
+      value: operational,
+      bar: "bg-success",
+      dot: "bg-success",
+      href: "/assets?status=OPERATIONAL",
+    },
+    {
+      key: "transitional",
+      label: "In maintenance/storage",
+      value: transitional,
+      bar: "bg-warning",
+      dot: "bg-warning",
+    },
+    {
+      key: "inactive",
+      label: "Out of service",
+      value: inactive,
+      bar: "bg-muted-foreground",
+      dot: "bg-muted-foreground",
+    },
+  ].filter((segment) => segment.value > 0);
+
+  return (
+    <div className="space-y-1.5">
+      <div
+        className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted"
+        role="img"
+        aria-label={`Asset health: ${operational} operational, ${transitional} in maintenance or storage, ${inactive} out of service of ${total} total.`}
+      >
+        {segments.map((segment) =>
+          // The bar is decorative (the legend carries the meaning); only the deep-linkable
+          // Operational segment is a real link, the composite buckets are plain fills.
+          segment.href ? (
+            <Link
+              key={segment.key}
+              href={segment.href}
+              tabIndex={-1}
+              aria-hidden
+              className={cn("h-full outline-none", segment.bar)}
+              style={{ width: `${(segment.value / total) * 100}%` }}
+            />
+          ) : (
+            <span
+              key={segment.key}
+              aria-hidden
+              className={cn("h-full", segment.bar)}
+              style={{ width: `${(segment.value / total) * 100}%` }}
+            />
+          ),
+        )}
+      </div>
+      <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {segments.map((segment) => {
+          const content = (
+            <>
+              <span
+                className={cn("size-2 rounded-full", segment.dot)}
+                aria-hidden
+              />
+              <span>{segment.label}</span>
+              <span className="font-medium tabular-nums text-foreground">
+                {segment.value}
+              </span>
+            </>
+          );
+          return (
+            <li key={segment.key}>
+              {segment.href ? (
+                <Link
+                  href={segment.href}
+                  className="-mx-1 inline-flex items-center gap-1.5 rounded px-1 py-0.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {content}
+                </Link>
+              ) : (
+                // Composite bucket: no honest single-status destination, so show the count
+                // without a link rather than under-deliver on a click.
+                <span className="-mx-1 inline-flex items-center gap-1.5 px-1 py-0.5">
+                  {content}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

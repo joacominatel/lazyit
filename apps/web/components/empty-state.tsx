@@ -13,8 +13,9 @@ import type { Pillar } from "@/components/pillar-scope";
  * Mounts with `rise-in`. Each pillar wears its own colour so an empty Assets list reads
  * teal, an empty Applications list reads indigo, etc.
  *
- * Scaffold only — the cross-screen rollout (Assets / KB / Applications / Consumables /
- * Users / Locations) is Wave 2. Heroicons only (ADR-0045); pass a 24/outline icon.
+ * Used across the list pages (Assets / KB / Applications / Consumables / Users / Locations)
+ * and the settings managers for the warm "nothing here yet" surface. Heroicons only
+ * (ADR-0045); pass a 24/outline icon.
  *
  * AA: the chip is a decorative ≥24px glyph (exempt from text-AA), so pillar hue is safe as
  * both the tint and the glyph colour; the title/description text stays on --foreground.

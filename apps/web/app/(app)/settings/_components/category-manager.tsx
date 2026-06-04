@@ -3,8 +3,8 @@
 import { PlusIcon, TagIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { EmptyState } from "@/components/empty-state";
 import {
-  EmptyState,
   ErrorState,
   type ResourceColumn,
   ResourceTable,
@@ -148,15 +148,13 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
       ) : !hasData ? (
         <EmptyState
           icon={TagIcon}
+          pillar="manage"
           title={`No ${label} entries yet`}
-          description="Create one to start classifying records."
+          description="Add your first one to start classifying records — it becomes pickable wherever this kind is referenced."
           action={
-            canWrite ? (
-              <Button onClick={openCreate}>
-                <PlusIcon />
-                Create the first one
-              </Button>
-            ) : undefined
+            canWrite
+              ? { label: "Create the first one", onClick: openCreate }
+              : undefined
           }
         />
       ) : (

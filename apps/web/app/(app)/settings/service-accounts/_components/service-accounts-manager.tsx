@@ -16,8 +16,8 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { EmptyState } from "@/components/empty-state";
 import {
-  EmptyState,
   ErrorState,
   type ResourceColumn,
   ResourceTable,
@@ -175,6 +175,7 @@ export function ServiceAccountsManager() {
       ) : !hasData ? (
         <EmptyState
           icon={KeyIcon}
+          pillar="access"
           title={
             showRevoked
               ? "No revoked service accounts"
@@ -183,15 +184,12 @@ export function ServiceAccountsManager() {
           description={
             showRevoked
               ? "Revoked (soft-deleted) accounts appear here and can be restored."
-              : "Create one to give a CI runner, script or integration scoped, non-human access to the API."
+              : "Give a CI runner, script or integration scoped, non-human access to the API — create one and hand it a token instead of a person's login."
           }
           action={
-            canManage && !showRevoked ? (
-              <Button onClick={openCreate}>
-                <PlusIcon />
-                Create the first one
-              </Button>
-            ) : undefined
+            canManage && !showRevoked
+              ? { label: "Create the first one", onClick: openCreate }
+              : undefined
           }
         />
       ) : (
