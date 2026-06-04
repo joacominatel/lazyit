@@ -1,4 +1,5 @@
 import {
+  ADMIN_ONLY_READS,
   type Permission,
   PERMISSIONS,
   buildDefaultRolePermissions,
@@ -202,6 +203,7 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
   },
   "dashboard:read": { label: "View the dashboard", pillar: "manage", tier: "view" },
   "search:read": { label: "Use global search", pillar: "manage", tier: "view" },
+  "logs:read": { label: "View activity logs", pillar: "manage", tier: "view" },
   "settings:read": { label: "View instance settings", pillar: "manage", tier: "view" },
   "settings:manage": {
     label: "Configure the instance",
@@ -253,6 +255,7 @@ export const CAPABILITY_IDS = [
   "user.manage",
   "user.delete",
   "dashboardSearch.view",
+  "logs.view",
   "settings.view",
   "settings.manage",
 ] as const;
@@ -411,6 +414,13 @@ export const CAPABILITIES: readonly Capability[] = [
     permissions: ["dashboard:read", "search:read"],
   },
   {
+    id: "logs.view",
+    label: "View activity logs",
+    description: "See the estate-wide activity history (Reports/Informes).",
+    pillar: "manage",
+    permissions: ["logs:read"],
+  },
+  {
     id: "settings.view",
     label: "View instance settings",
     description: "See the settings area (instance configuration, taxonomies).",
@@ -490,8 +500,14 @@ export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
     description:
       "Read and edit Inventory; view-only on Access, Knowledge and Manage.",
     permissions: [
-      // every read EXCEPT the two pre-tightened sensitive reads (match the read-only baseline)
-      ...READS.filter((p) => p !== "accessGrant:read" && p !== "user:read"),
+      // every read EXCEPT the pre-tightened sensitive reads AND the admin-only reads (logs:read) —
+      // matches the read-only / VIEWER baseline so the inventory operator never leaks an admin-only read.
+      ...READS.filter(
+        (p) =>
+          p !== "accessGrant:read" &&
+          p !== "user:read" &&
+          !ADMIN_ONLY_READS.includes(p as (typeof ADMIN_ONLY_READS)[number]),
+      ),
       ...INVENTORY_WRITES,
     ],
   },
