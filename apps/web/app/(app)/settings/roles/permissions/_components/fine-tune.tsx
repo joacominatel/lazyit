@@ -10,6 +10,7 @@ import {
   PERMISSION_META,
   PERMISSIONS,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -46,6 +47,7 @@ const PERMISSIONS_BY_DOMAIN: { domain: string; permissions: Permission[] }[] =
  * capability view.
  */
 export function FineTune({ staged, onToggle }: FineTuneProps) {
+  const t = useTranslations("settings");
   const [open, setOpen] = useState(false);
 
   return (
@@ -59,17 +61,16 @@ export function FineTune({ staged, onToggle }: FineTuneProps) {
         <ChevronRightIcon
           className={cn("size-4 transition-transform", open && "rotate-90")}
         />
-        Fine-tune (advanced)
+        {t("roles.permissions.fineTune.title")}
         <span className="text-xs font-normal text-muted-foreground">
-          Exact per-permission control
+          {t("roles.permissions.fineTune.subtitle")}
         </span>
       </button>
 
       {open && (
         <div className="space-y-4 border-t px-3 py-3">
           <p className="text-xs text-muted-foreground">
-            Each switch here is a single permission. Changes flip the role to a
-            Custom set and update the capability toggles above.
+            {t("roles.permissions.fineTune.description")}
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             {PERMISSIONS_BY_DOMAIN.map(({ domain, permissions }) => (
@@ -98,7 +99,9 @@ export function FineTune({ staged, onToggle }: FineTuneProps) {
                           {aboveTier && (
                             <ExclamationTriangleIcon
                               className="size-3.5 text-amber-600 dark:text-amber-500"
-                              aria-label="Admin-level"
+                              aria-label={t(
+                                "roles.permissions.fineTune.adminLevel",
+                              )}
                             />
                           )}
                         </label>

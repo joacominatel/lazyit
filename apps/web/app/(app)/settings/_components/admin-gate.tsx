@@ -1,6 +1,7 @@
 "use client";
 
 import { LockClosedIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMyPermissions } from "@/lib/hooks/use-permissions";
@@ -19,6 +20,7 @@ import { useMyPermissions } from "@/lib/hooks/use-permissions";
  *   - holds `settings:manage` → the children.
  */
 export function AdminGate({ children }: { children: ReactNode }) {
+  const t = useTranslations("settings");
   const { can, isLoading } = useMyPermissions();
   const canManageSettings = can("settings:manage");
 
@@ -44,11 +46,9 @@ export function AdminGate({ children }: { children: ReactNode }) {
           <LockClosedIcon className="size-6 text-muted-foreground" />
         </div>
         <div className="space-y-1">
-          <p className="text-sm font-medium">Admins only</p>
+          <p className="text-sm font-medium">{t("gate.title")}</p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            Settings — instance configuration, taxonomy management and the role
-            overview — is available to administrators. Ask an admin if you need
-            a change here.
+            {t("gate.description")}
           </p>
         </div>
       </div>

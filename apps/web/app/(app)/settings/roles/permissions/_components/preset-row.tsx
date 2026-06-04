@@ -2,6 +2,7 @@
 
 import { CheckIcon } from "@heroicons/react/24/outline";
 import { PERMISSION_PRESETS, type PresetId } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
 interface PresetRowProps {
@@ -19,6 +20,7 @@ interface PresetRowProps {
  * admin always knows whether they're on a named baseline or a one-off.
  */
 export function PresetRow({ active, onApply }: PresetRowProps) {
+  const t = useTranslations("settings");
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
@@ -58,10 +60,12 @@ export function PresetRow({ active, onApply }: PresetRowProps) {
           )}
         >
           <span className="text-sm font-medium">
-            {active === "custom" ? "Custom (you edited)" : "Custom"}
+            {active === "custom"
+              ? t("roles.permissions.preset.customEdited")
+              : t("roles.permissions.preset.custom")}
           </span>
           <span className="text-xs text-muted-foreground">
-            A one-off set that matches no preset.
+            {t("roles.permissions.preset.customHint")}
           </span>
         </div>
       </div>

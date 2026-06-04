@@ -12,6 +12,7 @@ import {
   PERMISSION_META,
   type PermissionDomain,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 
 interface RoleSummaryProps {
   /** The edited role's staged permission set. */
@@ -20,23 +21,6 @@ interface RoleSummaryProps {
 
 /** A domain's effective capability level, derived from the staged set. */
 type DomainLevel = "edit" | "view" | "none";
-
-/** Friendly domain labels for the summary (the noun, human-cased). */
-const DOMAIN_LABELS: Record<PermissionDomain, string> = {
-  asset: "Assets",
-  application: "Applications",
-  accessGrant: "Access grants",
-  consumable: "Consumables",
-  article: "Knowledge Base",
-  location: "Locations",
-  assetModel: "Asset models",
-  category: "Categories",
-  user: "Users",
-  dashboard: "Dashboard",
-  search: "Search",
-  settings: "Settings",
-  logs: "Activity logs",
-};
 
 /** Derive a domain's level: can it edit (any write/coarse), only view (a read), or nothing? */
 function levelFor(
@@ -56,22 +40,21 @@ function levelFor(
   return "none";
 }
 
+/** Icon + tint per level; the visible label is translated at render via
+ * `settings.roles.permissions.summary.levels.<level>`. */
 const LEVEL_META: Record<
   DomainLevel,
-  { label: string; icon: typeof EyeIcon; className: string }
+  { icon: typeof EyeIcon; className: string }
 > = {
   edit: {
-    label: "View & edit",
     icon: PencilSquareIcon,
     className: "text-emerald-700 dark:text-emerald-500",
   },
   view: {
-    label: "View only",
     icon: EyeIcon,
     className: "text-foreground/80",
   },
   none: {
-    label: "Cannot access",
     icon: MinusCircleIcon,
     className: "text-muted-foreground",
   },
@@ -85,11 +68,12 @@ const LEVEL_META: Record<
  * will persist.
  */
 export function RoleSummary({ staged }: RoleSummaryProps) {
+  const t = useTranslations("settings");
   return (
     <div className="space-y-2">
       <h3 className="flex items-center gap-1.5 text-sm font-semibold">
         <CheckCircleIcon className="size-4 text-muted-foreground" />
-        What this role can do
+        {t("roles.permissions.summary.heading")}
       </h3>
       <ul className="divide-y rounded-lg border text-sm">
         {PERMISSION_DOMAINS.map((domain) => {
@@ -101,12 +85,12 @@ export function RoleSummary({ staged }: RoleSummaryProps) {
               key={domain}
               className="flex items-center justify-between gap-3 px-3 py-1.5"
             >
-              <span>{DOMAIN_LABELS[domain]}</span>
+              <span>{t(`roles.permissions.summary.domains.${domain}`)}</span>
               <span
                 className={`inline-flex items-center gap-1.5 text-xs font-medium ${lm.className}`}
               >
                 <Icon className="size-3.5" />
-                {lm.label}
+                {t(`roles.permissions.summary.levels.${level}`)}
               </span>
             </li>
           );

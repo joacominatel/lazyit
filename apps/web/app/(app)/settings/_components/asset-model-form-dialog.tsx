@@ -2,6 +2,7 @@
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { type AssetModel, cloneAssetModelDefaults } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -136,6 +137,8 @@ function AssetModelForm({
   cloneSource?: AssetModel;
   onClose: () => void;
 }) {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
   const isEdit = model != null;
   const create = useCreateAssetModel();
   const update = useUpdateAssetModel();
@@ -159,9 +162,17 @@ function AssetModelForm({
   function buildPayload(): BuildResult {
     const name = values.name.trim();
     const manufacturer = values.manufacturer.trim();
-    if (name.length === 0) return { ok: false, error: "Name is required." };
+    if (name.length === 0) {
+      return {
+        ok: false,
+        error: t("taxonomies.models.form.errors.nameRequired"),
+      };
+    }
     if (manufacturer.length === 0) {
-      return { ok: false, error: "Manufacturer is required." };
+      return {
+        ok: false,
+        error: t("taxonomies.models.form.errors.manufacturerRequired"),
+      };
     }
 
     const sku = values.sku.trim();
@@ -190,19 +201,21 @@ function AssetModelForm({
         { id: model.id, data: built.payload as never },
         {
           onSuccess: () => {
-            toast.success("Asset model updated");
+            toast.success(t("taxonomies.models.toast.updated"));
             onClose();
           },
-          onError: (err) => notifyError(err, "Couldn't update asset model"),
+          onError: (err) =>
+            notifyError(err, t("taxonomies.models.toast.updateError")),
         },
       );
     } else {
       create.mutate(built.payload as never, {
         onSuccess: () => {
-          toast.success("Asset model created");
+          toast.success(t("taxonomies.models.toast.created"));
           onClose();
         },
-        onError: (err) => notifyError(err, "Couldn't create asset model"),
+        onError: (err) =>
+          notifyError(err, t("taxonomies.models.toast.createError")),
       });
     }
   }
@@ -211,24 +224,28 @@ function AssetModelForm({
     <>
       <DialogHeader>
         <DialogTitle>
-          {isEdit ? "Edit asset model" : "New asset model"}
+          {isEdit
+            ? t("taxonomies.models.form.editTitle")
+            : t("taxonomies.models.form.newTitle")}
         </DialogTitle>
         <DialogDescription>
           {isEdit
-            ? "Update this make/model. Specs are managed via the API."
-            : "A generic make/model that assets are instances of, e.g. “Dell Latitude 5520”."}
+            ? t("taxonomies.models.form.editDescription")
+            : t("taxonomies.models.form.newDescription")}
         </DialogDescription>
       </DialogHeader>
 
       <form id={FORM_ID} onSubmit={handleSubmit} noValidate>
         <FieldGroup>
           <Field data-invalid={error ? true : undefined}>
-            <FieldLabel htmlFor="model-name">Name</FieldLabel>
+            <FieldLabel htmlFor="model-name">
+              {t("taxonomies.models.form.nameLabel")}
+            </FieldLabel>
             <Input
               id="model-name"
               value={values.name}
               onChange={(e) => set("name", e.target.value)}
-              placeholder="Latitude 5520"
+              placeholder={t("taxonomies.models.form.namePlaceholder")}
               maxLength={200}
               aria-invalid={error ? true : undefined}
               autoFocus
@@ -236,12 +253,14 @@ function AssetModelForm({
           </Field>
 
           <Field data-invalid={error ? true : undefined}>
-            <FieldLabel htmlFor="model-manufacturer">Manufacturer</FieldLabel>
+            <FieldLabel htmlFor="model-manufacturer">
+              {t("taxonomies.models.form.manufacturerLabel")}
+            </FieldLabel>
             <Input
               id="model-manufacturer"
               value={values.manufacturer}
               onChange={(e) => set("manufacturer", e.target.value)}
-              placeholder="Dell"
+              placeholder={t("taxonomies.models.form.manufacturerPlaceholder")}
               maxLength={200}
               aria-invalid={error ? true : undefined}
             />
@@ -249,18 +268,22 @@ function AssetModelForm({
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="model-sku">SKU</FieldLabel>
+            <FieldLabel htmlFor="model-sku">
+              {t("taxonomies.models.form.skuLabel")}
+            </FieldLabel>
             <Input
               id="model-sku"
               value={values.sku}
               onChange={(e) => set("sku", e.target.value)}
-              placeholder="Optional — unique part/SKU"
+              placeholder={t("taxonomies.models.form.skuPlaceholder")}
               maxLength={100}
             />
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="model-category">Category</FieldLabel>
+            <FieldLabel htmlFor="model-category">
+              {t("taxonomies.models.form.categoryLabel")}
+            </FieldLabel>
             <Select
               value={values.categoryId || NO_CATEGORY}
               onValueChange={(value) =>
@@ -268,10 +291,14 @@ function AssetModelForm({
               }
             >
               <SelectTrigger id="model-category" className="w-full">
-                <SelectValue placeholder="Optional — pick a category" />
+                <SelectValue
+                  placeholder={t("taxonomies.models.form.categoryPlaceholder")}
+                />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={NO_CATEGORY}>No category</SelectItem>
+                <SelectItem value={NO_CATEGORY}>
+                  {t("taxonomies.models.form.noCategory")}
+                </SelectItem>
                 {(categories ?? []).map((category) => (
                   <SelectItem key={category.id} value={category.id}>
                     {category.name}
@@ -282,12 +309,14 @@ function AssetModelForm({
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="model-description">Description</FieldLabel>
+            <FieldLabel htmlFor="model-description">
+              {t("taxonomies.models.form.descriptionLabel")}
+            </FieldLabel>
             <Textarea
               id="model-description"
               value={values.description}
               onChange={(e) => set("description", e.target.value)}
-              placeholder="Optional"
+              placeholder={t("taxonomies.models.form.descriptionPlaceholder")}
               rows={2}
               maxLength={2000}
             />
@@ -302,11 +331,13 @@ function AssetModelForm({
           onClick={onClose}
           disabled={isPending}
         >
-          Cancel
+          {tc("cancel")}
         </Button>
         <Button type="submit" form={FORM_ID} disabled={isPending}>
           {isPending && <ArrowPathIcon className="animate-spin" />}
-          {isEdit ? "Save changes" : "Create model"}
+          {isEdit
+            ? t("taxonomies.models.form.saveChanges")
+            : t("taxonomies.models.form.createButton")}
         </Button>
       </DialogFooter>
     </>

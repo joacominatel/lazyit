@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { AdminGate } from "../_components/admin-gate";
@@ -12,12 +13,13 @@ import { ServiceAccountsManager } from "./_components/service-accounts-manager";
  * real boundary), and the manager re-checks `can('settings:manage')` for the write affordances.
  */
 export default function ServiceAccountsPage() {
+  const t = useTranslations("settings");
   return (
     <AdminGate>
       <div className="space-y-6">
         <PageHeader
-          title="Service accounts"
-          subtitle="Non-human API credentials for CI, scripts and integrations — scoped by permission, never a role."
+          title={t("serviceAccounts.title")}
+          subtitle={t("serviceAccounts.subtitle")}
           breadcrumb={<Breadcrumb />}
         />
         <ServiceAccountsManager />

@@ -2,6 +2,7 @@
 
 import { LockClosedIcon } from "@heroicons/react/24/outline";
 import { type EditableRole, type Role } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
 interface RoleSegmentedProps {
@@ -15,10 +16,8 @@ interface RoleSegmentedProps {
   isDirty: (role: EditableRole) => boolean;
 }
 
-const SEGMENTS: { role: EditableRole; label: string }[] = [
-  { role: "MEMBER", label: "Member" },
-  { role: "VIEWER", label: "Viewer" },
-];
+/** The editable role keys; the visible label is translated at render. */
+const SEGMENT_ROLES: EditableRole[] = ["MEMBER", "VIEWER"];
 
 /**
  * The role picker (segmented control). ADMIN is shown FIRST but LOCKED ("Full" + a lock) — it is
@@ -33,29 +32,30 @@ export function RoleSegmented({
   counts,
   isDirty,
 }: RoleSegmentedProps) {
+  const t = useTranslations("settings");
   return (
     <div
       className="inline-flex flex-wrap items-center gap-1 rounded-lg border bg-muted/40 p-1"
       role="group"
-      aria-label="Choose a role to edit"
+      aria-label={t("roles.permissions.segmented.ariaLabel")}
     >
       {/* ADMIN — locked, not a button. */}
       <span
         className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground"
         aria-disabled="true"
-        title="Admin has full access and cannot be edited."
+        title={t("roles.permissions.segmented.adminTitle")}
       >
         <LockClosedIcon className="size-3.5" />
-        Admin
+        {t("roles.permissions.segmented.admin")}
         <span className="text-xs tabular-nums opacity-70">
           {counts ? counts.ADMIN : "—"}
         </span>
         <span className="text-xs uppercase tracking-wide text-muted-foreground/80">
-          Full
+          {t("roles.permissions.segmented.full")}
         </span>
       </span>
 
-      {SEGMENTS.map(({ role, label }) => {
+      {SEGMENT_ROLES.map((role) => {
         const active = value === role;
         const dirty = isDirty(role);
         return (
@@ -71,14 +71,14 @@ export function RoleSegmented({
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {label}
+            {t(`roles.permissions.segmented.${role === "MEMBER" ? "member" : "viewer"}`)}
             <span className="text-xs tabular-nums opacity-70">
               {counts ? counts[role] : "—"}
             </span>
             {dirty && (
               <span
                 className="size-1.5 rounded-full bg-amber-500"
-                aria-label="Unsaved changes"
+                aria-label={t("roles.permissions.segmented.unsavedChanges")}
               />
             )}
           </button>

@@ -13,6 +13,7 @@ import {
   type Permission,
   type ServiceAccount,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
@@ -47,55 +48,10 @@ import { RotateDialog } from "./rotate-dialog";
 import { ServiceAccountFormDialog } from "./service-account-form-dialog";
 import {
   serviceAccountStatus,
-  STATUS_META,
+  STATUS_TONE,
 } from "./service-account-status";
 
-const COLUMNS: ResourceColumn[] = [
-  { key: "name", header: "Name", skeleton: <Skeleton className="h-4 w-40" /> },
-  {
-    key: "token",
-    header: "Token",
-    skeleton: <Skeleton className="h-4 w-28" />,
-  },
-  {
-    key: "permissions",
-    header: "Permissions",
-    skeleton: <Skeleton className="h-4 w-44" />,
-  },
-  {
-    key: "lastUsed",
-    header: "Last used",
-    headClassName: "w-28",
-    skeleton: <Skeleton className="h-4 w-16" />,
-  },
-  {
-    key: "status",
-    header: "Status",
-    headClassName: "w-24",
-    skeleton: <Skeleton className="h-5 w-16 rounded-4xl" />,
-  },
-  {
-    key: "actions",
-    header: "Actions",
-    srOnlyHeader: true,
-    headClassName: "w-12 text-right",
-    skeleton: <Skeleton className="ml-auto size-7" />,
-  },
-];
-
 const MAX_PERMISSION_LABELS = 2;
-
-/** A short "3 permissions · View assets, Add & edit assets +1" summary for the table cell. */
-function permissionsSummary(permissions: Permission[]): string {
-  if (permissions.length === 0) return "None";
-  const labels = permissions
-    .slice(0, MAX_PERMISSION_LABELS)
-    .map((p) => PERMISSION_META[p]?.label ?? p);
-  const extra = permissions.length - labels.length;
-  const count = `${permissions.length} permission${permissions.length === 1 ? "" : "s"}`;
-  const tail = extra > 0 ? `, +${extra} more` : "";
-  return `${count} · ${labels.join(", ")}${tail}`;
-}
 
 /**
  * The Service Accounts admin list (ADR-0048). A ResourceTable of the instance's non-human credentials
@@ -105,6 +61,8 @@ function permissionsSummary(permissions: Permission[]): string {
  * AdminGate and re-checks `can('settings:manage')` here so a non-holder sees a read-only list.
  */
 export function ServiceAccountsManager() {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
   // A render-stable "now" so the relative-time and expiry derivations stay pure (react-hooks/purity).
   const [now] = useState(() => Date.now());
   const [showRevoked, setShowRevoked] = useState(false);
@@ -112,6 +70,60 @@ export function ServiceAccountsManager() {
     useServiceAccounts(showRevoked);
 
   const canManage = useCan("settings:manage");
+
+  const columns: ResourceColumn[] = [
+    {
+      key: "name",
+      header: t("serviceAccounts.columns.name"),
+      skeleton: <Skeleton className="h-4 w-40" />,
+    },
+    {
+      key: "token",
+      header: t("serviceAccounts.columns.token"),
+      skeleton: <Skeleton className="h-4 w-28" />,
+    },
+    {
+      key: "permissions",
+      header: t("serviceAccounts.columns.permissions"),
+      skeleton: <Skeleton className="h-4 w-44" />,
+    },
+    {
+      key: "lastUsed",
+      header: t("serviceAccounts.columns.lastUsed"),
+      headClassName: "w-28",
+      skeleton: <Skeleton className="h-4 w-16" />,
+    },
+    {
+      key: "status",
+      header: t("serviceAccounts.columns.status"),
+      headClassName: "w-24",
+      skeleton: <Skeleton className="h-5 w-16 rounded-4xl" />,
+    },
+    {
+      key: "actions",
+      header: tc("actions"),
+      srOnlyHeader: true,
+      headClassName: "w-12 text-right",
+      skeleton: <Skeleton className="ml-auto size-7" />,
+    },
+  ];
+
+  /** A short "3 permissions · View assets, Add & edit assets, +1 more" summary for the table cell. */
+  function permissionsSummary(permissions: Permission[]): string {
+    if (permissions.length === 0) return t("serviceAccounts.permissionsSummary.none");
+    const labels = permissions
+      .slice(0, MAX_PERMISSION_LABELS)
+      .map((p) => PERMISSION_META[p]?.label ?? p);
+    const extra = permissions.length - labels.length;
+    const count = t("serviceAccounts.permissionsSummary.count", {
+      count: permissions.length,
+    });
+    const tail =
+      extra > 0
+        ? `, ${t("serviceAccounts.permissionsSummary.extra", { count: extra })}`
+        : "";
+    return `${count} · ${labels.join(", ")}${tail}`;
+  }
 
   const revoke = useRevokeServiceAccount();
   const restore = useRestoreServiceAccount();
@@ -140,8 +152,9 @@ export function ServiceAccountsManager() {
 
   function handleRestore(account: ServiceAccount) {
     restore.mutate(account.id, {
-      onSuccess: () => toast.success("Service account restored"),
-      onError: (err) => notifyError(err, "Couldn't restore service account"),
+      onSuccess: () => toast.success(t("serviceAccounts.toast.restored")),
+      onError: (err) =>
+        notifyError(err, t("serviceAccounts.toast.restoreError")),
     });
   }
 
@@ -152,23 +165,23 @@ export function ServiceAccountsManager() {
           <Switch
             checked={showRevoked}
             onCheckedChange={setShowRevoked}
-            aria-label="Show revoked service accounts"
+            aria-label={t("serviceAccounts.showRevokedAria")}
           />
-          Show revoked
+          {t("serviceAccounts.showRevoked")}
         </label>
         {canManage && !showRevoked ? (
           <Button onClick={openCreate} size="sm">
             <PlusIcon />
-            New service account
+            {t("serviceAccounts.newAccount")}
           </Button>
         ) : null}
       </div>
 
       {isLoading ? (
-        <ResourceTable columns={COLUMNS} isLoading />
+        <ResourceTable columns={columns} isLoading />
       ) : isError ? (
         <ErrorState
-          title="Could not load service accounts"
+          title={t("serviceAccounts.loadError")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -178,25 +191,27 @@ export function ServiceAccountsManager() {
           pillar="access"
           title={
             showRevoked
-              ? "No revoked service accounts"
-              : "No service accounts yet"
+              ? t("serviceAccounts.empty.revokedTitle")
+              : t("serviceAccounts.empty.title")
           }
           description={
             showRevoked
-              ? "Revoked (soft-deleted) accounts appear here and can be restored."
-              : "Give a CI runner, script or integration scoped, non-human access to the API — create one and hand it a token instead of a person's login."
+              ? t("serviceAccounts.empty.revokedDescription")
+              : t("serviceAccounts.empty.description")
           }
           action={
             canManage && !showRevoked
-              ? { label: "Create the first one", onClick: openCreate }
+              ? {
+                  label: t("serviceAccounts.empty.action"),
+                  onClick: openCreate,
+                }
               : undefined
           }
         />
       ) : (
-        <ResourceTable columns={COLUMNS}>
+        <ResourceTable columns={columns}>
           {accounts.map((account) => {
             const status = serviceAccountStatus(account, now);
-            const statusMeta = STATUS_META[status];
             const isRevoked = status === "revoked";
             return (
               <TableRow key={account.id}>
@@ -222,11 +237,11 @@ export function ServiceAccountsManager() {
                 <TableCell className="text-muted-foreground tabular-nums">
                   {account.lastUsedAt
                     ? formatRelativeTime(account.lastUsedAt, now)
-                    : "Never"}
+                    : t("serviceAccounts.never")}
                 </TableCell>
                 <TableCell>
-                  <StatusBadge tone={statusMeta.tone}>
-                    {statusMeta.label}
+                  <StatusBadge tone={STATUS_TONE[status]}>
+                    {t(`serviceAccounts.status.${status}`)}
                   </StatusBadge>
                 </TableCell>
                 <TableCell className="text-right">
@@ -242,6 +257,10 @@ export function ServiceAccountsManager() {
                       onEdit={() => openEdit(account)}
                       onRotate={() => setRotating(account)}
                       onRevoke={() => setRevoking(account)}
+                      editLabel={tc("edit")}
+                      rotateLabel={t("serviceAccounts.rowActions.rotateToken")}
+                      revokeLabel={t("serviceAccounts.rowActions.revoke")}
+                      openActionsLabel={t("serviceAccounts.rowActions.openActions")}
                     />
                   )}
                 </TableCell>
@@ -273,12 +292,11 @@ export function ServiceAccountsManager() {
           onOpenChange={(open) => {
             if (!open) setRevoking(undefined);
           }}
-          entityLabel="service account"
+          entityLabel={t("serviceAccounts.form.entityLabel")}
           name={revoking.name}
           onConfirm={() => revoke.mutateAsync(revoking.id)}
         >
-          Its token stops authenticating immediately. You can restore it from the
-          &ldquo;Show revoked&rdquo; view (rotate to mint a fresh token).
+          {t("serviceAccounts.revokeExplanation")}
         </DeleteConfirmDialog>
       ) : null}
     </div>
@@ -295,15 +313,23 @@ function ServiceAccountRowActions({
   onEdit,
   onRotate,
   onRevoke,
+  editLabel,
+  rotateLabel,
+  revokeLabel,
+  openActionsLabel,
 }: {
   onEdit: () => void;
   onRotate: () => void;
   onRevoke: () => void;
+  editLabel: string;
+  rotateLabel: string;
+  revokeLabel: string;
+  openActionsLabel: string;
 }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label="Open actions">
+        <Button variant="ghost" size="icon-sm" aria-label={openActionsLabel}>
           <EllipsisVerticalIcon />
         </Button>
       </DropdownMenuTrigger>
@@ -311,16 +337,16 @@ function ServiceAccountRowActions({
       <DropdownMenuContent align="end" className="w-44">
         <DropdownMenuItem onSelect={onEdit}>
           <PencilSquareIcon />
-          Edit
+          {editLabel}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={onRotate}>
           <ArrowPathIcon />
-          Rotate token
+          {rotateLabel}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onSelect={onRevoke}>
           <TrashIcon />
-          Revoke
+          {revokeLabel}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

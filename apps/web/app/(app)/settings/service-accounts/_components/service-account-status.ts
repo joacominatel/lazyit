@@ -24,13 +24,11 @@ export function serviceAccountStatus(
   return "active";
 }
 
-/** The StatusBadge tone + label for each status (token-driven colors via StatusBadge). */
-export const STATUS_META: Record<
-  ServiceAccountStatus,
-  { label: string; tone: StatusTone }
-> = {
-  active: { label: "Active", tone: "success" },
-  inactive: { label: "Inactive", tone: "neutral" },
-  expired: { label: "Expired", tone: "warning" },
-  revoked: { label: "Revoked", tone: "danger" },
+/** The StatusBadge tone for each status (token-driven colors via StatusBadge). The visible label is
+ * translated at render via `settings.serviceAccounts.status.<status>`. */
+export const STATUS_TONE: Record<ServiceAccountStatus, StatusTone> = {
+  active: "success",
+  inactive: "neutral",
+  expired: "warning",
+  revoked: "danger",
 };

@@ -8,6 +8,7 @@ import {
   UsersIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import type { ComponentType } from "react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,8 +16,8 @@ import { AdminGate } from "./_components/admin-gate";
 
 interface SettingsSection {
   href: string;
-  title: string;
-  description: string;
+  /** The `hub` subkey holding this section's `title` / `description`. */
+  key: "taxonomies" | "roles" | "serviceAccounts" | "instance";
   icon: ComponentType<{ className?: string }>;
 }
 
@@ -25,47 +26,28 @@ interface SettingsSection {
  * overview, service accounts and instance config. Each card links into its sub-area.
  */
 const SECTIONS: SettingsSection[] = [
-  {
-    href: "/settings/taxonomies",
-    title: "Taxonomies",
-    description:
-      "Manage the categories that classify assets, applications, consumables and knowledge-base articles — plus asset models.",
-    icon: TagIcon,
-  },
-  {
-    href: "/settings/roles",
-    title: "Roles",
-    description:
-      "See who has which RBAC role across the team. Role changes happen in the Users section.",
-    icon: UsersIcon,
-  },
+  { href: "/settings/taxonomies", key: "taxonomies", icon: TagIcon },
+  { href: "/settings/roles", key: "roles", icon: UsersIcon },
   {
     href: "/settings/service-accounts",
-    title: "Service accounts",
-    description:
-      "Create and manage non-human API credentials for CI, scripts and integrations — scoped by permission and revocable.",
+    key: "serviceAccounts",
     icon: KeyIcon,
   },
-  {
-    href: "/settings/instance",
-    title: "Instance",
-    description:
-      "Review how this lazyit instance is configured — identity provider, setup state and runtime posture.",
-    icon: ServerStackIcon,
-  },
+  { href: "/settings/instance", key: "instance", icon: ServerStackIcon },
 ];
 
 export default function SettingsPage() {
+  const t = useTranslations("settings");
   return (
     <AdminGate>
       <div className="space-y-6">
         <PageHeader
-          title="Settings"
-          subtitle="Instance configuration, taxonomy management, roles and service accounts — administrators only."
+          title={t("hub.title")}
+          subtitle={t("hub.subtitle")}
         />
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {SECTIONS.map(({ href, title, description, icon: Icon }) => (
+          {SECTIONS.map(({ href, key, icon: Icon }) => (
             <Link
               key={href}
               href={href}
@@ -80,9 +62,9 @@ export default function SettingsPage() {
                     <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
                   </div>
                   <div className="space-y-1">
-                    <p className="font-medium">{title}</p>
+                    <p className="font-medium">{t(`hub.${key}.title`)}</p>
                     <p className="text-sm text-muted-foreground">
-                      {description}
+                      {t(`hub.${key}.description`)}
                     </p>
                   </div>
                 </CardContent>

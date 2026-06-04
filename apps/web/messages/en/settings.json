@@ -1,1 +1,358 @@
-{}
+{
+  "gate": {
+    "title": "Admins only",
+    "description": "Settings — instance configuration, taxonomy management and the role overview — is available to administrators. Ask an admin if you need a change here."
+  },
+  "hub": {
+    "title": "Settings",
+    "subtitle": "Instance configuration, taxonomy management, roles and service accounts — administrators only.",
+    "taxonomies": {
+      "title": "Taxonomies",
+      "description": "Manage the categories that classify assets, applications, consumables and knowledge-base articles — plus asset models."
+    },
+    "roles": {
+      "title": "Roles",
+      "description": "See who has which RBAC role across the team. Role changes happen in the Users section."
+    },
+    "serviceAccounts": {
+      "title": "Service accounts",
+      "description": "Create and manage non-human API credentials for CI, scripts and integrations — scoped by permission and revocable."
+    },
+    "instance": {
+      "title": "Instance",
+      "description": "Review how this lazyit instance is configured — identity provider, setup state and runtime posture."
+    }
+  },
+  "instance": {
+    "title": "Instance",
+    "subtitle": "How this lazyit instance is configured. Read-only — operators set posture via environment.",
+    "cardTitle": "Configuration",
+    "loadError": "Could not load instance status",
+    "loadErrorHint": "The API may be down or unreachable.",
+    "rows": {
+      "configured": "Configured",
+      "identityProvider": "Identity provider",
+      "administrators": "Administrators",
+      "runtimePosture": "Runtime posture"
+    },
+    "configuredBadge": "Configured",
+    "setupPending": "Setup pending",
+    "posture": {
+      "development": "Development",
+      "production": "Production"
+    },
+    "identityProvider": {
+      "zitadel": "Zitadel (bundled)",
+      "generic-oidc": "Generic OIDC (bring your own)"
+    }
+  },
+  "roles": {
+    "title": "Roles",
+    "subtitle": "Who holds which access level, and what each role can do. Change a role from the Users section.",
+    "manageUsers": "Manage users",
+    "emptyMembers": "No users with this role.",
+    "fullAccessLocked": "Full access — not editable.",
+    "editPermissions": "Edit permissions",
+    "meta": {
+      "ADMIN": {
+        "label": "Admin",
+        "hint": "Full access, including user administration and destructive deletes."
+      },
+      "MEMBER": {
+        "label": "Member",
+        "hint": "Normal inventory, KB and asset operations."
+      },
+      "VIEWER": {
+        "label": "Viewer",
+        "hint": "Read-only across the app."
+      }
+    },
+    "permissions": {
+      "title": "Role permissions",
+      "subtitle": "Configure what Members and Viewers can do. Admin always has full access.",
+      "idpNote": "These permissions are lazyit-only — they never appear in your identity provider.",
+      "loadError": "Couldn't load permissions",
+      "startFromPreset": "Start from a preset",
+      "resetToDefaults": "Reset to defaults",
+      "capabilitiesHeading": "Capabilities",
+      "summary": {
+        "heading": "What this role can do",
+        "levels": {
+          "edit": "View & edit",
+          "view": "View only",
+          "none": "Cannot access"
+        },
+        "domains": {
+          "asset": "Assets",
+          "application": "Applications",
+          "accessGrant": "Access grants",
+          "consumable": "Consumables",
+          "article": "Knowledge Base",
+          "location": "Locations",
+          "assetModel": "Asset models",
+          "category": "Categories",
+          "user": "Users",
+          "dashboard": "Dashboard",
+          "search": "Search",
+          "settings": "Settings",
+          "logs": "Activity logs"
+        }
+      },
+      "segmented": {
+        "ariaLabel": "Choose a role to edit",
+        "adminTitle": "Admin has full access and cannot be edited.",
+        "full": "Full",
+        "admin": "Admin",
+        "member": "Member",
+        "viewer": "Viewer",
+        "unsavedChanges": "Unsaved changes"
+      },
+      "preset": {
+        "custom": "Custom",
+        "customEdited": "Custom (you edited)",
+        "customHint": "A one-off set that matches no preset."
+      },
+      "capabilityGroup": {
+        "ariaLabel": "{label} capabilities",
+        "adminLevel": "Admin-level",
+        "partial": "Partial"
+      },
+      "fineTune": {
+        "title": "Fine-tune (advanced)",
+        "subtitle": "Exact per-permission control",
+        "description": "Each switch here is a single permission. Changes flip the role to a Custom set and update the capability toggles above.",
+        "adminLevel": "Admin-level"
+      },
+      "saveBar": {
+        "ariaLabel": "Unsaved permission changes",
+        "message": "You have unsaved permission changes.",
+        "discard": "Discard",
+        "saveChanges": "Save changes"
+      },
+      "confirm": {
+        "title": "Review this change before saving",
+        "description": "This update has effects worth confirming. Review them, then save.",
+        "grantsHeading": "Admin-level access granted",
+        "removalsHeading": "Access removed",
+        "keepEditing": "Keep editing",
+        "saveChanges": "Save changes"
+      },
+      "toast": {
+        "invalid": "Some permissions are invalid",
+        "invalidHint": "Refresh and try again.",
+        "saved": "Permissions saved",
+        "saveError": "Couldn't save permissions"
+      },
+      "consequence": {
+        "removedRead": "{who} will no longer be able to {action}.",
+        "accessGrantGrant": "{who} will be able to grant and revoke application access for anyone — including to sensitive applications. This is normally an admin-only action.",
+        "userManage": "{who} will be able to administer users: create accounts, change roles (including granting ADMIN) and offboard people. This is normally an admin-only action.",
+        "settingsManage": "{who} will be able to configure the instance and manage taxonomies — the full admin configuration surface. This is normally an admin-only action.",
+        "deleteDefault": "{who} will be able to {action} — a destructive action normally reserved for admins.",
+        "who": {
+          "MEMBER": "Members",
+          "VIEWER": "Viewers"
+        }
+      }
+    }
+  },
+  "serviceAccounts": {
+    "title": "Service accounts",
+    "subtitle": "Non-human API credentials for CI, scripts and integrations — scoped by permission, never a role.",
+    "showRevoked": "Show revoked",
+    "showRevokedAria": "Show revoked service accounts",
+    "newAccount": "New service account",
+    "loadError": "Could not load service accounts",
+    "columns": {
+      "name": "Name",
+      "token": "Token",
+      "permissions": "Permissions",
+      "lastUsed": "Last used",
+      "status": "Status"
+    },
+    "never": "Never",
+    "empty": {
+      "revokedTitle": "No revoked service accounts",
+      "title": "No service accounts yet",
+      "revokedDescription": "Revoked (soft-deleted) accounts appear here and can be restored.",
+      "description": "Give a CI runner, script or integration scoped, non-human access to the API — create one and hand it a token instead of a person's login.",
+      "action": "Create the first one"
+    },
+    "permissionsSummary": {
+      "none": "None",
+      "count": "{count, plural, one {# permission} other {# permissions}}",
+      "extra": "{count, plural, other {+# more}}"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "expired": "Expired",
+      "revoked": "Revoked"
+    },
+    "rowActions": {
+      "rotateToken": "Rotate token",
+      "revoke": "Revoke",
+      "openActions": "Open actions"
+    },
+    "revokeExplanation": "Its token stops authenticating immediately. You can restore it from the “Show revoked” view (rotate to mint a fresh token).",
+    "toast": {
+      "restored": "Service account restored",
+      "restoreError": "Couldn't restore service account",
+      "created": "Service account created",
+      "createError": "Couldn't create service account",
+      "updated": "Service account updated",
+      "updateError": "Couldn't update service account",
+      "rotated": "Token rotated",
+      "rotateError": "Couldn't rotate token",
+      "tokenCopied": "Token copied"
+    },
+    "form": {
+      "entityLabel": "service account",
+      "editTitle": "Edit service account",
+      "newTitle": "New service account",
+      "editDescription": "Update the name, permissions and lifecycle of this non-human credential. The token is not changed here — use Rotate for that.",
+      "newDescription": "A non-human credential (a CI runner, a script, an integration). It is authorized by the permissions you grant — never a role. The token is shown once after you create it.",
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. CI deploy runner",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "Optional — what this credential is used for.",
+      "expiresLabel": "Expires at",
+      "expiresHint": "Optional. After this time the token is rejected. Leave empty for no expiry.",
+      "activeLabel": "Active",
+      "activeHint": "A soft disable. When off, the token stops authenticating without revoking the account.",
+      "permissionsLabel": "Permissions",
+      "permissionsHint": "The capabilities this account can use. Authorization is by this set — it never inherits a role. Delete and admin-level grants are allowed but flagged.",
+      "saveChanges": "Save changes",
+      "createButton": "Create",
+      "secretTitle": "Save your token",
+      "secretDescription": "This is the only time the token is shown.",
+      "errors": {
+        "nameRequired": "Name is required.",
+        "permissionRequired": "Grant at least one permission.",
+        "invalidFields": "Some fields are invalid. Check the values and try again."
+      }
+    },
+    "rotate": {
+      "secretTitle": "Save the new token",
+      "secretDescription": "This is the only time the new token is shown.",
+      "confirmTitle": "Rotate token?",
+      "confirmDescription": "A new token is minted for <b>{name}</b>. The current token stops working immediately — any system using it must be updated. The new token is shown once.",
+      "rotateButton": "Rotate token"
+    },
+    "secretReveal": {
+      "createdMessage": "<b>{name}</b> was created. Here is its token.",
+      "rotatedMessage": "<b>{name}</b> was rotated. Here is its token.",
+      "warning": "Copy it now — you won't see it again. We only store a hash of the token, so it can never be shown or recovered later. If you lose it, rotate the account to mint a new one.",
+      "copyTokenAria": "Copy token",
+      "acknowledge": "I've saved this token in a secure place.",
+      "done": "Done"
+    },
+    "permissionPicker": {
+      "sectionAria": "{label} permissions",
+      "selectAllAria": "Select all {label} permissions",
+      "all": "All",
+      "adminLevel": "Admin-level"
+    }
+  },
+  "taxonomies": {
+    "title": "Taxonomies",
+    "subtitle": "Manage the categories that classify records, plus the asset models assets reference.",
+    "tablistAria": "Taxonomy kind",
+    "tabs": {
+      "asset": "Asset categories",
+      "application": "Application categories",
+      "consumable": "Consumable categories",
+      "article": "Article categories",
+      "models": "Asset models"
+    },
+    "kindLabel": {
+      "asset": "asset category",
+      "application": "application category",
+      "consumable": "consumable category",
+      "article": "article category"
+    },
+    "categories": {
+      "newButton": "New {label}",
+      "loadError": "Could not load {label} list",
+      "emptyTitle": "No {label} entries yet",
+      "emptyDescription": "Add your first one to start classifying records — it becomes pickable wherever this kind is referenced.",
+      "emptyAction": "Create the first one",
+      "columns": {
+        "name": "Name",
+        "description": "Description",
+        "order": "Order",
+        "updated": "Updated"
+      },
+      "form": {
+        "editTitle": "Edit {label}",
+        "newTitle": "New {label}",
+        "editDescription": "Update the details of this category.",
+        "newDescription": "Categories classify records across the app. Name is required; the rest are optional.",
+        "nameLabel": "Name",
+        "namePlaceholder": "e.g. Laptops",
+        "descriptionLabel": "Description",
+        "descriptionPlaceholder": "Optional — what belongs in this category.",
+        "iconLabel": "Icon",
+        "iconPlaceholder": "Optional — a heroicon name, e.g. ServerStackIcon",
+        "orderLabel": "Order",
+        "orderPlaceholder": "Optional — lower sorts first",
+        "saveChanges": "Save changes",
+        "createButton": "Create {label}",
+        "errors": {
+          "nameRequired": "Name is required.",
+          "orderInteger": "Order must be a whole number."
+        }
+      },
+      "toast": {
+        "updated": "Updated {label}",
+        "updateError": "Couldn't update {label}",
+        "created": "Created {label}",
+        "createError": "Couldn't create {label}"
+      }
+    },
+    "models": {
+      "newButton": "New model",
+      "loadError": "Could not load asset models",
+      "emptyTitle": "No asset models yet",
+      "emptyDescription": "Add a make and model — say, a MacBook Pro 14 — so every asset you register can reference it instead of retyping the specs.",
+      "emptyAction": "Create the first model",
+      "entityLabel": "asset model",
+      "columns": {
+        "name": "Name",
+        "manufacturer": "Manufacturer",
+        "sku": "SKU",
+        "category": "Category",
+        "updated": "Updated"
+      },
+      "form": {
+        "editTitle": "Edit asset model",
+        "newTitle": "New asset model",
+        "editDescription": "Update this make/model. Specs are managed via the API.",
+        "newDescription": "A generic make/model that assets are instances of, e.g. “Dell Latitude 5520”.",
+        "nameLabel": "Name",
+        "namePlaceholder": "Latitude 5520",
+        "manufacturerLabel": "Manufacturer",
+        "manufacturerPlaceholder": "Dell",
+        "skuLabel": "SKU",
+        "skuPlaceholder": "Optional — unique part/SKU",
+        "categoryLabel": "Category",
+        "categoryPlaceholder": "Optional — pick a category",
+        "noCategory": "No category",
+        "descriptionLabel": "Description",
+        "descriptionPlaceholder": "Optional",
+        "saveChanges": "Save changes",
+        "createButton": "Create model",
+        "errors": {
+          "nameRequired": "Name is required.",
+          "manufacturerRequired": "Manufacturer is required."
+        }
+      },
+      "toast": {
+        "updated": "Asset model updated",
+        "updateError": "Couldn't update asset model",
+        "created": "Asset model created",
+        "createError": "Couldn't create asset model"
+      }
+    }
+  }
+}

@@ -5,6 +5,7 @@ import {
   ExclamationTriangleIcon,
   EyeSlashIcon,
 } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -47,6 +48,7 @@ export function ConsequentialConfirmDialog({
   onConfirm,
   isPending,
 }: ConsequentialConfirmDialogProps) {
+  const t = useTranslations("settings");
   const hasGrants = diff.aboveTierGrants.length > 0;
   const hasRemovals = diff.removedReads.length > 0;
 
@@ -54,9 +56,11 @@ export function ConsequentialConfirmDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Review this change before saving</AlertDialogTitle>
+          <AlertDialogTitle>
+            {t("roles.permissions.confirm.title")}
+          </AlertDialogTitle>
           <AlertDialogDescription>
-            This update has effects worth confirming. Review them, then save.
+            {t("roles.permissions.confirm.description")}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -65,7 +69,7 @@ export function ConsequentialConfirmDialog({
             <section className="space-y-2">
               <h3 className="flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-500">
                 <ExclamationTriangleIcon className="size-4" />
-                Admin-level access granted
+                {t("roles.permissions.confirm.grantsHeading")}
               </h3>
               <ul className="space-y-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
                 {diff.aboveTierGrants.map((c) => (
@@ -84,7 +88,7 @@ export function ConsequentialConfirmDialog({
             <section className="space-y-2">
               <h3 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
                 <EyeSlashIcon className="size-4" />
-                Access removed
+                {t("roles.permissions.confirm.removalsHeading")}
               </h3>
               <ul className="space-y-1.5 rounded-md border bg-muted/40 p-3">
                 {diff.removedReads.map((c) => (
@@ -102,13 +106,13 @@ export function ConsequentialConfirmDialog({
 
         <AlertDialogFooter>
           <AlertDialogCancel disabled={isPending}>
-            Keep editing
+            {t("roles.permissions.confirm.keepEditing")}
           </AlertDialogCancel>
           {/* Plain (non-destructive) button: this is a deliberate, allowed change — we warn, never
               block. We control the spinner and only close on success (the caller does that). */}
           <Button onClick={() => void onConfirm()} disabled={isPending}>
             {isPending && <ArrowPathIcon className="animate-spin" />}
-            Save changes
+            {t("roles.permissions.confirm.saveChanges")}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
