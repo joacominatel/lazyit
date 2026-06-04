@@ -4,6 +4,7 @@ import {
   ArrowPathIcon,
   ArrowRightIcon,
   BookOpenIcon,
+  CheckCircleIcon,
   CubeIcon,
   ExclamationTriangleIcon,
   KeyIcon,
@@ -13,9 +14,10 @@ import {
 } from "@heroicons/react/24/outline";
 import type { AssetStatus, DashboardSummary } from "@lazyit/shared";
 import Link from "next/link";
-import type { ComponentType } from "react";
+import type { ComponentType, CSSProperties } from "react";
 import { useState } from "react";
 import { PageHeader } from "@/components/page-header";
+import type { Pillar } from "@/components/pillar-scope";
 import { ErrorState } from "@/components/resource-table";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +30,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDashboardSummary } from "@/lib/api/hooks/use-dashboard";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { lift } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/format";
 import { formatAssetStatus } from "../assets/_components/asset-status-badge";
@@ -148,6 +151,8 @@ function DashboardContent({ summary }: { summary: DashboardSummary }) {
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <PillarCard
+          pillar="inventory"
+          index={0}
           icon={ServerStackIcon}
           title="Assets"
           metric={assets.total}
@@ -167,6 +172,8 @@ function DashboardContent({ summary }: { summary: DashboardSummary }) {
           }}
         />
         <PillarCard
+          pillar="access"
+          index={1}
           icon={KeyIcon}
           title="Access"
           metric={access.activeGrants}
@@ -187,6 +194,8 @@ function DashboardContent({ summary }: { summary: DashboardSummary }) {
           ]}
         />
         <PillarCard
+          pillar="knowledge"
+          index={2}
           icon={BookOpenIcon}
           title="Knowledge"
           metric={articles.total}
@@ -203,6 +212,8 @@ function DashboardContent({ summary }: { summary: DashboardSummary }) {
           ]}
         />
         <PillarCard
+          pillar="inventory"
+          index={3}
           icon={CubeIcon}
           title="Consumables"
           metric={consumables.total}
@@ -241,8 +252,25 @@ interface BreakdownRow {
   href: string;
 }
 
+/**
+ * Static, scanner-safe tinted-chip classes per pillar (ADR-0049). The chip holds a
+ * DECORATIVE glyph (aria-hidden, ≥24px-equivalent) so the pillar hue is safe as both the
+ * `/10` tint and the glyph colour — readable text stays on `--foreground`. Each card wears
+ * its pillar's identity so the five-hue system is visible on the landing screen: Assets &
+ * Consumables = Inventory teal (differentiated by icon), Access = indigo, Knowledge = green.
+ * Full strings so the Tailwind v4 scanner keeps them.
+ */
+const PILLAR_CHIP: Record<Pillar, string> = {
+  inventory: "bg-pillar-inventory/10 text-pillar-inventory",
+  access: "bg-pillar-access/10 text-pillar-access",
+  knowledge: "bg-pillar-knowledge/10 text-pillar-knowledge",
+  manage: "bg-pillar-manage/10 text-pillar-manage",
+};
+
 /** One pillar's health card: a headline count, a deep-linked breakdown, and a link into the area. */
 function PillarCard({
+  pillar,
+  index,
   icon: Icon,
   title,
   metric,
@@ -252,6 +280,10 @@ function PillarCard({
   href,
   cta,
 }: {
+  /** The pillar whose colour identity this card wears (tinted icon chip). */
+  pillar: Pillar;
+  /** 0-based mount index, drives the subtle staggered metric rise-in (capped at 4 cards). */
+  index: number;
   icon: ComponentType<{ className?: string }>;
   title: string;
   metric: number;
@@ -262,14 +294,25 @@ function PillarCard({
   cta: string;
 }) {
   return (
-    <Card className="h-full">
+    <Card className={cn("h-full", lift)}>
       <CardHeader>
-        <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <div
+          className={cn(
+            "flex size-9 items-center justify-center rounded-lg",
+            PILLAR_CHIP[pillar],
+          )}
+          aria-hidden
+        >
           <Icon className="size-5" />
         </div>
         <CardTitle className="pt-2">{title}</CardTitle>
         <CardDescription>
-          <span className="text-2xl font-semibold tabular-nums text-foreground">
+          {/* Metric settles in on first mount with a subtle, capped stagger (initial-mount
+              only; reduced-motion collapses it to instant via the globals.css guard). */}
+          <span
+            className="inline-block animate-rise-in text-2xl font-semibold tabular-nums text-foreground [animation-delay:calc(var(--i)*60ms)]"
+            style={{ "--i": index } as CSSProperties}
+          >
             {metric}
           </span>{" "}
           {metricLabel}
@@ -387,9 +430,16 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
       </h2>
       {items.length === 0 ? (
         <Card>
-          <CardContent className="py-6 text-sm text-muted-foreground">
-            Nothing needs attention right now — no expiring grants, low stock or
-            lost assets.
+          <CardContent className="flex items-center gap-3 py-6 text-sm">
+            <span
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success"
+              aria-hidden
+            >
+              <CheckCircleIcon className="size-5" />
+            </span>
+            <span className="text-foreground">
+              All clear — no expiring grants, low stock or lost assets right now.
+            </span>
           </CardContent>
         </Card>
       ) : (
@@ -407,11 +457,19 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
 
 // Semantic status tokens (ADR-0049): the warning/danger states drive off --warning /
 // --destructive, which carry dark-mode parity — so the hand-written amber/rose palette
-// values (and their missing dark variants) are gone.
-const TONE: Record<AttentionTone, { dot: string; ring: string }> = {
-  warning: { dot: "bg-warning", ring: "ring-warning/25" },
-  danger: { dot: "bg-destructive", ring: "ring-destructive/30" },
-};
+// values (and their missing dark variants) are gone. `pulse` marks the one tone (danger)
+// whose dot gets the calm `pulse-soft` heartbeat — urgency felt, not alarmed.
+const TONE: Record<AttentionTone, { dot: string; ring: string; pulse: boolean }> =
+  {
+    warning: { dot: "bg-warning", ring: "ring-warning/25", pulse: false },
+    danger: { dot: "bg-destructive", ring: "ring-destructive/30", pulse: true },
+  };
+
+// Tone-aware lift: the signature hover triad (rise + e1→e2 shadow), but the resting ring is
+// the row's TONE ring (warning/danger), not the generic foreground/10 — so we borrow the
+// motion half of the `lift` recipe and keep the tone ring as the colour identity.
+const ATTENTION_LIFT =
+  "shadow-e1 transition-[transform,box-shadow] duration-[var(--dur-base)] ease-[var(--ease-out-quad)] hover:-translate-y-0.5 hover:shadow-e2 motion-reduce:transition-none";
 
 function AttentionRow({ item }: { item: AttentionItem }) {
   const { icon: Icon, label, count, tone, href } = item;
@@ -420,8 +478,9 @@ function AttentionRow({ item }: { item: AttentionItem }) {
     <Link
       href={href}
       className={cn(
-        "flex items-center gap-3 rounded-lg border p-3 text-sm outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring",
+        "flex items-center gap-3 rounded-lg border p-3 text-sm outline-none ring-1 hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring",
         meta.ring,
+        ATTENTION_LIFT,
       )}
     >
       <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
@@ -430,6 +489,7 @@ function AttentionRow({ item }: { item: AttentionItem }) {
           className={cn(
             "absolute -top-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-card",
             meta.dot,
+            meta.pulse && "animate-pulse-soft",
           )}
         />
       </span>
@@ -443,15 +503,19 @@ function AttentionRow({ item }: { item: AttentionItem }) {
 const SKELETON_PILLAR_KEYS = ["a", "b", "c", "d"] as const;
 const SKELETON_ATTENTION_KEYS = ["a", "b"] as const;
 
-/** Loading placeholder mirroring the needs-attention zone + the four pillar cards. */
+/**
+ * Loading placeholder mirroring the needs-attention zone + the four pillar cards. The
+ * `animate-shimmer` sweep is composed over each Skeleton's muted fill at the call site (the
+ * vendored Skeleton primitive stays untouched); reduced-motion stills the sweep globally.
+ */
 function DashboardSkeleton() {
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-6 w-40 animate-shimmer" />
         <div className="grid gap-3 sm:grid-cols-2">
           {SKELETON_ATTENTION_KEYS.map((key) => (
-            <Skeleton key={key} className="h-14 w-full rounded-lg" />
+            <Skeleton key={key} className="h-14 w-full rounded-lg animate-shimmer" />
           ))}
         </div>
       </div>
@@ -459,14 +523,14 @@ function DashboardSkeleton() {
         {SKELETON_PILLAR_KEYS.map((key) => (
           <Card key={key} className="h-full">
             <CardHeader>
-              <Skeleton className="size-9 rounded-lg" />
-              <Skeleton className="mt-2 h-5 w-24" />
-              <Skeleton className="h-7 w-20" />
+              <Skeleton className="size-9 rounded-lg animate-shimmer" />
+              <Skeleton className="mt-2 h-5 w-24 animate-shimmer" />
+              <Skeleton className="h-7 w-20 animate-shimmer" />
             </CardHeader>
             <CardContent className="space-y-2">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="mt-2 h-4 w-28" />
+              <Skeleton className="h-4 w-full animate-shimmer" />
+              <Skeleton className="h-4 w-3/4 animate-shimmer" />
+              <Skeleton className="mt-2 h-4 w-28 animate-shimmer" />
             </CardContent>
           </Card>
         ))}
