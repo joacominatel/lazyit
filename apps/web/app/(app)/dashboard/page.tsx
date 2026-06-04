@@ -8,7 +8,6 @@ import {
   CubeIcon,
   ExclamationTriangleIcon,
   KeyIcon,
-  PlusIcon,
   ServerStackIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
@@ -34,6 +33,7 @@ import { lift } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/format";
 import { formatAssetStatus } from "../assets/_components/asset-status-badge";
+import { PulseRail, type QuickAction } from "./_components/pulse-rail";
 import { RecentActivityPanel } from "./_components/recent-activity-panel";
 
 /**
@@ -48,11 +48,21 @@ import { RecentActivityPanel } from "./_components/recent-activity-panel";
 export default function DashboardPage() {
   const { data, isLoading, isError, error, refetch, isFetching } =
     useDashboardSummary();
-  // The quick actions are cross-pillar shortcuts into create flows; each gates on its own permission.
+  // The quick actions are cross-pillar shortcuts into create flows; each gates on its own
+  // permission. They now live in the Pulse rail's action tile (Wave 3a), so the page resolves
+  // the permitted set here and hands it down rather than rendering its own action row.
   const canCreateAsset = useCan("asset:write");
   const canAdjustStock = useCan("consumable:write");
   const canGrantAccess = useCan("accessGrant:grant");
-  const showQuickActions = canCreateAsset || canAdjustStock || canGrantAccess;
+  const quickActions = (
+    [
+      { href: "/assets/new", label: "New asset", show: canCreateAsset },
+      { href: "/consumables/new", label: "Add stock", show: canAdjustStock },
+      { href: "/applications", label: "Grant access", show: canGrantAccess },
+    ] as const
+  )
+    .filter((action) => action.show)
+    .map(({ href, label }) => ({ href, label }));
   // Snapshot "now" once so the "Updated <relative>" stamp stays pure across renders.
   const [now] = useState(() => Date.now());
 
@@ -84,14 +94,6 @@ export default function DashboardPage() {
         }
       />
 
-      {showQuickActions ? (
-        <QuickActions
-          canCreateAsset={canCreateAsset}
-          canAdjustStock={canAdjustStock}
-          canGrantAccess={canGrantAccess}
-        />
-      ) : null}
-
       {isLoading ? (
         <DashboardSkeleton />
       ) : isError ? (
@@ -101,48 +103,26 @@ export default function DashboardPage() {
           error={error}
         />
       ) : data ? (
-        <DashboardContent summary={data} />
+        <DashboardContent summary={data} quickActions={quickActions} />
       ) : null}
     </div>
   );
 }
 
 /**
- * Quick write actions — the most common "start something" jumps off the dashboard. Each is shown only
- * when the caller holds the matching permission, so the row honestly reflects what they can do.
+ * The loaded dashboard (Wave 3a — two-column command surface). The "at-a-glance" layer leads
+ * full-width — Needs Attention, then the four pillar cards. Below, a two-column grid pairs the
+ * Recent Activity feed (~3/5) with a sticky Pulse rail (~2/5); under `lg` the rail reflows below
+ * the feed. The rail consumes the SAME summary snapshot (zero extra fetch) and the resolved
+ * quick-actions set; the all-clear reassurance is owned by the Needs-attention zone above.
  */
-function QuickActions({
-  canCreateAsset,
-  canAdjustStock,
-  canGrantAccess,
+function DashboardContent({
+  summary,
+  quickActions,
 }: {
-  canCreateAsset: boolean;
-  canAdjustStock: boolean;
-  canGrantAccess: boolean;
+  summary: DashboardSummary;
+  quickActions: QuickAction[];
 }) {
-  const actions = (
-    [
-      { href: "/assets/new", label: "New asset", show: canCreateAsset },
-      { href: "/consumables/new", label: "Add stock", show: canAdjustStock },
-      { href: "/applications", label: "Grant access", show: canGrantAccess },
-    ] as const
-  ).filter((action) => action.show);
-  return (
-    <div className="flex flex-wrap gap-2">
-      {actions.map((action) => (
-        <Button key={action.href} variant="outline" size="sm" asChild>
-          <Link href={action.href}>
-            <PlusIcon />
-            {action.label}
-          </Link>
-        </Button>
-      ))}
-    </div>
-  );
-}
-
-/** The loaded dashboard: the needs-attention zone leads, then pillar cards, then the activity feed. */
-function DashboardContent({ summary }: { summary: DashboardSummary }) {
   const { assets, access, consumables, articles } = summary;
 
   return (
@@ -233,7 +213,18 @@ function DashboardContent({ summary }: { summary: DashboardSummary }) {
         />
       </section>
 
-      <RecentActivityPanel />
+      {/* The command surface: the feed takes the wider 3/5 column, the sticky Pulse rail the
+          narrower 2/5. Below `lg` the grid collapses to one column and the rail reflows under
+          the feed (an acceptance criterion). `items-start` lets the rail's `lg:sticky` travel
+          instead of being stretched to the feed's height. */}
+      <div className="grid gap-6 lg:grid-cols-5 lg:items-start">
+        <div className="lg:col-span-3">
+          <RecentActivityPanel />
+        </div>
+        <div className="lg:col-span-2">
+          <PulseRail summary={summary} quickActions={quickActions} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -508,18 +499,18 @@ interface AttentionItem {
 }
 
 /**
- * "Needs attention" zone — the operationally noteworthy subset of the summary: in-maintenance and
- * lost assets, low-stock consumables, soon-to-expire grants and grants on critical apps. Each row
- * deep-links into the PRE-FILTERED list it describes (same URL filter params the lists read). Items
- * with a zero count are dropped; if nothing needs attention, an all-clear note is shown instead.
+ * The operationally noteworthy subset of the summary, as the deep-linked rows the "Needs
+ * attention" zone renders: in-maintenance and lost assets, low-stock consumables, soon-to-expire
+ * grants and grants on critical apps. Zero-count items are dropped, so an empty array means
+ * "nothing needs attention". Pulled out as a pure builder so both the zone and the Pulse rail's
+ * all-clear/quick-actions tile derive their attention count from ONE source (no drift).
  */
-function NeedsAttention({ summary }: { summary: DashboardSummary }) {
+function buildAttentionItems(summary: DashboardSummary): AttentionItem[] {
   const { assets, access, consumables } = summary;
-
   const inMaintenance = assets.byStatus.IN_MAINTENANCE ?? 0;
   const lost = assets.byStatus.LOST ?? 0;
 
-  const items: AttentionItem[] = (
+  return (
     [
       {
         key: "expiring-grants",
@@ -563,6 +554,15 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
       },
     ] satisfies AttentionItem[]
   ).filter((item) => item.count > 0);
+}
+
+/**
+ * "Needs attention" zone — the operationally noteworthy subset of the summary, rendered as
+ * deep-linked rows. Each row links into the PRE-FILTERED list it describes (same URL filter
+ * params the lists read); if nothing needs attention, an all-clear note is shown instead.
+ */
+function NeedsAttention({ summary }: { summary: DashboardSummary }) {
+  const items = buildAttentionItems(summary);
 
   return (
     <section>
@@ -643,11 +643,14 @@ function AttentionRow({ item }: { item: AttentionItem }) {
 
 const SKELETON_PILLAR_KEYS = ["a", "b", "c", "d"] as const;
 const SKELETON_ATTENTION_KEYS = ["a", "b"] as const;
+const SKELETON_FEED_KEYS = ["a", "b", "c", "d"] as const;
+const SKELETON_RAIL_KEYS = ["a", "b", "c"] as const;
 
 /**
- * Loading placeholder mirroring the needs-attention zone + the four pillar cards. The
- * `animate-shimmer` sweep is composed over each Skeleton's muted fill at the call site (the
- * vendored Skeleton primitive stays untouched); reduced-motion stills the sweep globally.
+ * Loading placeholder mirroring the loaded layout (Wave 3a): the needs-attention zone, the four
+ * pillar cards, then the two-column feed + Pulse-rail surface — so the page doesn't reflow when
+ * data lands. The `animate-shimmer` sweep is composed over each Skeleton's muted fill at the call
+ * site (the vendored Skeleton primitive stays untouched); reduced-motion stills the sweep globally.
  */
 function DashboardSkeleton() {
   return (
@@ -675,6 +678,35 @@ function DashboardSkeleton() {
             </CardContent>
           </Card>
         ))}
+      </div>
+      <div className="grid gap-6 lg:grid-cols-5 lg:items-start">
+        <div className="lg:col-span-3">
+          <Skeleton className="mb-3 h-6 w-32 animate-shimmer" />
+          <Card>
+            <CardContent className="space-y-4 pt-6">
+              {SKELETON_FEED_KEYS.map((key) => (
+                <div key={key} className="flex gap-3">
+                  <Skeleton className="size-8 shrink-0 rounded-lg animate-shimmer" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-2/3 animate-shimmer" />
+                    <Skeleton className="h-3 w-1/4 animate-shimmer" />
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+        <div className="flex flex-col gap-4 lg:col-span-2">
+          {SKELETON_RAIL_KEYS.map((key) => (
+            <Card key={key}>
+              <CardContent className="space-y-3 pt-6">
+                <Skeleton className="h-5 w-28 animate-shimmer" />
+                <Skeleton className="h-4 w-full animate-shimmer" />
+                <Skeleton className="h-4 w-3/4 animate-shimmer" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
     </div>
   );

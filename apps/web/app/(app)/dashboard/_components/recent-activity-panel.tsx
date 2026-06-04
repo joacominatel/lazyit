@@ -193,7 +193,12 @@ const ENTITY_TONE: Record<ActivityEntityType, string> = {
   consumable: "bg-pillar-inventory/10 text-pillar-inventory",
 };
 
-/** One timeline row: a pillar-tinted icon, the server `summary`, the actor, and a relative time. */
+/**
+ * One timeline row — densified for the narrow rail-adjacent column (Wave 3a): a pillar-tinted
+ * icon chip with the timeline connector, a single-line (truncating) summary link, and a compact
+ * meta line carrying the actor avatar + name, a dot separator and the relative time. Tighter
+ * vertical rhythm than the old two-line layout, while keeping the staggered `rise-in` settle.
+ */
 function ActivityRow({
   item,
   isLast,
@@ -210,48 +215,47 @@ function ActivityRow({
   const Icon = meta.icon;
   return (
     <li
-      className="relative flex animate-rise-in gap-3 pb-5 [animation-delay:calc(var(--i)*24ms)] last:pb-0"
+      className="relative flex animate-rise-in gap-3 pb-3.5 [animation-delay:calc(var(--i)*24ms)] last:pb-0"
       style={{ "--i": Math.min(index, STAGGER_CAP) } as CSSProperties}
     >
       {!isLast && (
         <span
-          className="absolute top-8 left-[15px] h-[calc(100%-1.5rem)] w-px bg-border"
+          className="absolute top-7 left-[13px] h-[calc(100%-1.25rem)] w-px bg-border"
           aria-hidden
         />
       )}
       <span
         className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-lg ring-2 ring-background",
+          "flex size-7 shrink-0 items-center justify-center rounded-lg ring-2 ring-background",
           ENTITY_TONE[item.entityType],
         )}
         aria-hidden
       >
         <Icon className="size-4" />
       </span>
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <Link
-            href={meta.href(item.entityId)}
-            className="text-sm font-medium outline-none hover:underline focus-visible:underline"
-          >
-            {item.summary}
-          </Link>
-          <span
-            className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground"
-            title={new Date(item.occurredAt).toLocaleString()}
-          >
-            {formatRelativeTime(item.occurredAt, now)}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div className="min-w-0 flex-1">
+        <Link
+          href={meta.href(item.entityId)}
+          className="block truncate text-sm font-medium outline-none hover:underline focus-visible:underline"
+          title={item.summary}
+        >
+          {item.summary}
+        </Link>
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           {item.actorName ? (
             <>
               <ActorAvatar name={item.actorName} seed={item.actorId} />
-              <span>{item.actorName}</span>
+              <span className="min-w-0 truncate">{item.actorName}</span>
             </>
           ) : (
             <span>System</span>
           )}
+          <span
+            className="ml-auto shrink-0 pl-1 tabular-nums"
+            title={new Date(item.occurredAt).toLocaleString()}
+          >
+            {formatRelativeTime(item.occurredAt, now)}
+          </span>
         </div>
       </div>
     </li>
