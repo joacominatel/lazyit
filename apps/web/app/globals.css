@@ -131,6 +131,15 @@
   --sidebar-accent-foreground: oklch(0.27 0.006 75);
   --sidebar-border: oklch(0.9 0.005 95);
   --sidebar-ring: var(--brand);
+  /* Motion vocabulary (ADR-0049 «Activated Restraint»). One shared dialect so every
+     surface eases and settles the same way. `--ease-out-quad` is the workhorse (settles,
+     never bounces); `--ease-spring` overshoots ONCE and is RESERVED for the success
+     checkmark only — do not borrow it for general motion. Durations stay ≤220ms. */
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 220ms;
 }
 
 .dark {
@@ -195,5 +204,109 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Motion utilities (ADR-0049 «Activated Restraint»).
+
+   tw-animate-css ships only enter/exit/accordion/collapsible/caret keyframes, so
+   the surface-level vocabulary is authored here as small utility classes (the
+   redesign composes them at call sites). Every animation degrades to instant under
+   `prefers-reduced-motion: reduce` via the consolidated block at the bottom.
+
+   - .animate-rise-in  : section/card/row settle (12px rise + fade).
+   - .animate-pulse-soft : ONE calm attention heartbeat — danger dots only.
+   - .animate-shimmer  : skeleton sweep (composed onto Skeleton at call sites).
+   - .animate-check-draw : success-check stroke draw (the single --ease-spring use).
+--------------------------------------------------------------------------- */
+@layer utilities {
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes pulse-soft {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+
+  @keyframes shimmer {
+    from {
+      background-position: -150% 0;
+    }
+    to {
+      background-position: 150% 0;
+    }
+  }
+
+  @keyframes check-draw {
+    from {
+      stroke-dashoffset: 100;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  .animate-rise-in {
+    animation: rise-in var(--dur-slow) var(--ease-out-quad) both;
+  }
+
+  .animate-pulse-soft {
+    animation: pulse-soft 2.4s ease-in-out infinite;
+  }
+
+  /* A moving highlight band over the muted skeleton fill. Compose alongside the
+     vendored Skeleton's bg-muted at the call site (the primitive stays untouched). */
+  .animate-shimmer {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      oklch(1 0 0 / 0.06) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+
+  .animate-check-draw {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+    animation: check-draw var(--dur-slow) var(--ease-spring) forwards;
+  }
+}
+
+/* The single source of truth for reduced-motion. Lands FIRST in the Wave-0 series so
+   everything that animates afterwards is opt-out-safe by construction: animations and
+   transitions collapse to ~instant and hover translate is neutralized, while the
+   elevation/tone changes still apply (only the movement is removed). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Neutralize the hover lift so reduced-motion users still get the elevation/ring
+     change without any positional movement. */
+  .lift:hover,
+  .hover\:-translate-y-0\.5:hover {
+    transform: none !important;
   }
 }
