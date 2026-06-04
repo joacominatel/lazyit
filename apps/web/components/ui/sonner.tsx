@@ -2,8 +2,9 @@
 
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { CheckCircleIcon, InformationCircleIcon, ExclamationTriangleIcon, XCircleIcon } from "@heroicons/react/16/solid"
+import { InformationCircleIcon, ExclamationTriangleIcon, XCircleIcon } from "@heroicons/react/16/solid"
 import { ArrowPathIcon } from "@heroicons/react/24/outline"
+import { DrawnCheck } from "@/components/drawn-check"
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme()
@@ -13,8 +14,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
       icons={{
+        // The one success flourish: the check draws once on mount (animate-check-draw,
+        // the reserved --ease-spring), reduced-motion-safe. text-success keeps the tone on
+        // the glyph, never small coloured text. Tasteful, not noisy.
         success: (
-          <CheckCircleIcon className="size-4" />
+          <DrawnCheck className="size-4 text-success" />
         ),
         info: (
           <InformationCircleIcon className="size-4" />

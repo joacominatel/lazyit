@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { CopyButton } from "@/components/copy-button";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
 import { PageHeader } from "@/components/page-header";
@@ -109,7 +110,14 @@ export default function AssetDetailPage() {
         title={asset.name}
         subtitle={
           asset.assetTag ? (
-            <span className="font-mono">{asset.assetTag}</span>
+            <span className="inline-flex items-center gap-1">
+              <span className="font-mono">{asset.assetTag}</span>
+              <CopyButton
+                value={asset.assetTag}
+                label="Copy asset tag"
+                className="-my-1"
+              />
+            </span>
           ) : undefined
         }
         badge={<AssetStatusBadge status={asset.status} />}
@@ -194,10 +202,32 @@ export default function AssetDetailPage() {
             )}
           </DetailField>
           <DetailField label="Serial">
-            <span className="font-mono">{asset.serial ?? "—"}</span>
+            {asset.serial ? (
+              <span className="inline-flex items-center gap-1">
+                <span className="font-mono">{asset.serial}</span>
+                <CopyButton
+                  value={asset.serial}
+                  label="Copy serial"
+                  className="-my-1"
+                />
+              </span>
+            ) : (
+              <span className="font-mono">—</span>
+            )}
           </DetailField>
           <DetailField label="Asset tag">
-            <span className="font-mono">{asset.assetTag ?? "—"}</span>
+            {asset.assetTag ? (
+              <span className="inline-flex items-center gap-1">
+                <span className="font-mono">{asset.assetTag}</span>
+                <CopyButton
+                  value={asset.assetTag}
+                  label="Copy asset tag"
+                  className="-my-1"
+                />
+              </span>
+            ) : (
+              <span className="font-mono">—</span>
+            )}
           </DetailField>
           <DetailField label="Purchase date">
             {asset.purchaseDate ? formatDate(asset.purchaseDate) : "—"}

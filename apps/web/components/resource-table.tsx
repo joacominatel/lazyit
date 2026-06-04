@@ -616,7 +616,7 @@ export function EmptyState({
 }) {
   return (
     <div
-      className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed py-16 text-center"
+      className="animate-rise-in flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed py-16 text-center"
       aria-live="polite"
     >
       <div className="flex size-12 items-center justify-center rounded-full bg-muted">
@@ -647,7 +647,7 @@ export function ErrorState({
   const requestId = error instanceof ApiError ? error.requestId : undefined;
   return (
     <div
-      className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
+      className="animate-rise-in flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
       role="status"
       aria-live="polite"
     >

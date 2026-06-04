@@ -29,7 +29,7 @@ export default function AppError({
   }, [error]);
 
   return (
-    <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed py-16 text-center">
+    <div className="animate-rise-in flex flex-col items-center justify-center gap-4 rounded-xl border bg-card py-16 text-center shadow-e1">
       <div className="flex size-12 items-center justify-center rounded-full bg-destructive/10">
         <ExclamationTriangleIcon className="size-6 text-destructive" />
       </div>
