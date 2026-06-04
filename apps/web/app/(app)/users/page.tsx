@@ -12,7 +12,6 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
-import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import {
@@ -43,10 +42,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
 import { useUserList } from "@/lib/api/hooks/use-users";
-import {
-  useDeleteUser,
-  useRestoreUser,
-} from "@/lib/api/hooks/use-user-mutations";
+import { useRestoreUser } from "@/lib/api/hooks/use-user-mutations";
 import { restoreUser } from "@/lib/api/endpoints/users";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
@@ -57,6 +53,7 @@ import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils/format";
 import { ByoiBanner } from "./_components/byoi-banner";
+import { OffboardingSheet } from "./_components/offboarding-sheet";
 import { UserFormDialog } from "./_components/user-form-dialog";
 import { UserRoleSelect } from "./_components/user-role-select";
 import { UserStatusBadge } from "./_components/user-status-badge";
@@ -114,7 +111,6 @@ export default function UsersPage() {
       offset,
       deleted: archived ? "only" : undefined,
     });
-  const deleteUser = useDeleteUser();
   const restoreUserMutation = useRestoreUser();
 
   const [formOpen, setFormOpen] = useState(false);
@@ -405,6 +401,7 @@ export default function UsersPage() {
                       onEdit={() => openEdit(user)}
                       onClone={() => openClone(user)}
                       onDelete={() => setDeleting(user)}
+                      deleteLabel="Offboard"
                     />
                   ) : undefined
                 }
@@ -468,6 +465,7 @@ export default function UsersPage() {
                         onEdit={() => openEdit(user)}
                         onClone={() => openClone(user)}
                         onDelete={() => setDeleting(user)}
+                        deleteLabel="Offboard"
                       />
                     </div>
                   ) : null}
@@ -518,17 +516,13 @@ export default function UsersPage() {
         cloneSource={cloning}
       />
       {deleting ? (
-        <DeleteConfirmDialog
+        <OffboardingSheet
           open
           onOpenChange={(open) => {
             if (!open) setDeleting(undefined);
           }}
-          entityLabel="user"
-          name={`${deleting.firstName} ${deleting.lastName}`}
-          onConfirm={() => deleteUser.mutateAsync(deleting.id)}
-        >
-          To keep a person on record but disable them, set them inactive instead.
-        </DeleteConfirmDialog>
+          user={deleting}
+        />
       ) : null}
     </div>
   );
