@@ -35,6 +35,7 @@ const DOMAIN_LABELS: Record<PermissionDomain, string> = {
   dashboard: "Dashboard",
   search: "Search",
   settings: "Settings",
+  logs: "Activity logs",
 };
 
 /** Derive a domain's level: can it edit (any write/coarse), only view (a read), or nothing? */
