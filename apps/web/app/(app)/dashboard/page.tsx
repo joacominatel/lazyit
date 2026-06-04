@@ -54,6 +54,13 @@ export default function DashboardPage() {
   const canCreateAsset = useCan("asset:write");
   const canAdjustStock = useCan("consumable:write");
   const canGrantAccess = useCan("accessGrant:grant");
+  // The cross-pillar Recent Activity feed is the "who-did-what" stream — sensitive, so it is
+  // ADMIN-only via `logs:read` (issue #179), the SAME gate as the Reports/Informes screen.
+  // Fail-closed (`useCan` returns false while the permission set is loading / on error), so the
+  // feed never flashes for a non-admin. v1 NOTE: this is a UI-LEVEL gate only — the underlying
+  // `GET /dashboard/activity` endpoint still authorises on `dashboard:read` (visible to every
+  // role), so an admin-only `logs:read` endpoint is DEBT-1, tracked with the Informes screen.
+  const canSeeActivityFeed = useCan("logs:read");
   const quickActions = (
     [
       { href: "/assets/new", label: "New asset", show: canCreateAsset },
@@ -95,7 +102,7 @@ export default function DashboardPage() {
       />
 
       {isLoading ? (
-        <DashboardSkeleton />
+        <DashboardSkeleton canSeeActivityFeed={canSeeActivityFeed} />
       ) : isError ? (
         <ErrorState
           title="Could not load the dashboard"
@@ -103,7 +110,11 @@ export default function DashboardPage() {
           error={error}
         />
       ) : data ? (
-        <DashboardContent summary={data} quickActions={quickActions} />
+        <DashboardContent
+          summary={data}
+          quickActions={quickActions}
+          canSeeActivityFeed={canSeeActivityFeed}
+        />
       ) : null}
     </div>
   );
@@ -111,17 +122,26 @@ export default function DashboardPage() {
 
 /**
  * The loaded dashboard (Wave 3a — two-column command surface). The "at-a-glance" layer leads
- * full-width — Needs Attention, then the four pillar cards. Below, a two-column grid pairs the
- * Recent Activity feed (~3/5) with a sticky Pulse rail (~2/5); under `lg` the rail reflows below
- * the feed. The rail consumes the SAME summary snapshot (zero extra fetch) and the resolved
- * quick-actions set; the all-clear reassurance is owned by the Needs-attention zone above.
+ * full-width — Needs Attention, then the four pillar cards. Below the command surface adapts to
+ * the caller's `logs:read` (issue #179):
+ *   - ADMIN (`canSeeActivityFeed`): the original two-column grid — the Recent Activity feed (~3/5)
+ *     beside a sticky Pulse rail (~2/5), the rail reflowing under the feed below `lg`.
+ *   - non-admin (no `logs:read`): the sensitive who-did-what feed is hidden, so instead of a lone
+ *     2/5 column the SAME three Pulse widgets reflow into a full-width horizontal band (donut ·
+ *     access-health · quick-actions), stacking on mobile — an intentional surface, not a stub.
+ * Both paths consume the SAME summary snapshot (zero extra fetch — `/dashboard/summary` stays
+ * `dashboard:read`, visible to every role) and the resolved quick-actions set; only the feed is
+ * gated, and the all-clear reassurance stays owned by the Needs-attention zone above.
  */
 function DashboardContent({
   summary,
   quickActions,
+  canSeeActivityFeed,
 }: {
   summary: DashboardSummary;
   quickActions: QuickAction[];
+  /** Whether the caller holds `logs:read` and so may see the cross-pillar activity feed. */
+  canSeeActivityFeed: boolean;
 }) {
   const { assets, access, consumables, articles } = summary;
 
@@ -213,18 +233,29 @@ function DashboardContent({
         />
       </section>
 
-      {/* The command surface: the feed takes the wider 3/5 column, the sticky Pulse rail the
-          narrower 2/5. Below `lg` the grid collapses to one column and the rail reflows under
-          the feed (an acceptance criterion). `items-start` lets the rail's `lg:sticky` travel
-          instead of being stretched to the feed's height. */}
-      <div className="grid gap-6 lg:grid-cols-5 lg:items-start">
-        <div className="lg:col-span-3">
-          <RecentActivityPanel />
+      {canSeeActivityFeed ? (
+        // ADMIN command surface: the feed takes the wider 3/5 column, the sticky Pulse rail the
+        // narrower 2/5. Below `lg` the grid collapses to one column and the rail reflows under
+        // the feed (an acceptance criterion). `items-start` lets the rail's `lg:sticky` travel
+        // instead of being stretched to the feed's height.
+        <div className="grid gap-6 lg:grid-cols-5 lg:items-start">
+          <div className="lg:col-span-3">
+            <RecentActivityPanel />
+          </div>
+          <div className="lg:col-span-2">
+            <PulseRail summary={summary} quickActions={quickActions} />
+          </div>
         </div>
-        <div className="lg:col-span-2">
-          <PulseRail summary={summary} quickActions={quickActions} />
-        </div>
-      </div>
+      ) : (
+        // non-admin command surface (no `logs:read`): the sensitive activity feed is hidden, so
+        // the same three Pulse widgets reflow into a full-width horizontal band instead of a lone
+        // narrow column — a deliberate, balanced close to the page.
+        <PulseRail
+          summary={summary}
+          quickActions={quickActions}
+          layout="grid"
+        />
+      )}
     </div>
   );
 }
@@ -648,11 +679,18 @@ const SKELETON_RAIL_KEYS = ["a", "b", "c"] as const;
 
 /**
  * Loading placeholder mirroring the loaded layout (Wave 3a): the needs-attention zone, the four
- * pillar cards, then the two-column feed + Pulse-rail surface — so the page doesn't reflow when
- * data lands. The `animate-shimmer` sweep is composed over each Skeleton's muted fill at the call
- * site (the vendored Skeleton primitive stays untouched); reduced-motion stills the sweep globally.
+ * pillar cards, then the command surface — so the page doesn't reflow when data lands. The command
+ * surface tracks the same `logs:read` gate as the loaded view (issue #179): admins get the
+ * two-column feed + Pulse-rail shimmer; non-admins get the three-up horizontal band (no feed
+ * placeholder, so the skeleton never promises a feed they won't get). The `animate-shimmer` sweep
+ * is composed over each Skeleton's muted fill at the call site (the vendored Skeleton primitive
+ * stays untouched); reduced-motion stills the sweep globally.
  */
-function DashboardSkeleton() {
+function DashboardSkeleton({
+  canSeeActivityFeed,
+}: {
+  canSeeActivityFeed: boolean;
+}) {
   return (
     <div className="space-y-6">
       <div className="space-y-3">
@@ -679,26 +717,41 @@ function DashboardSkeleton() {
           </Card>
         ))}
       </div>
-      <div className="grid gap-6 lg:grid-cols-5 lg:items-start">
-        <div className="lg:col-span-3">
-          <Skeleton className="mb-3 h-6 w-32 animate-shimmer" />
-          <Card>
-            <CardContent className="space-y-4 pt-6">
-              {SKELETON_FEED_KEYS.map((key) => (
-                <div key={key} className="flex gap-3">
-                  <Skeleton className="size-8 shrink-0 rounded-lg animate-shimmer" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-2/3 animate-shimmer" />
-                    <Skeleton className="h-3 w-1/4 animate-shimmer" />
+      {canSeeActivityFeed ? (
+        <div className="grid gap-6 lg:grid-cols-5 lg:items-start">
+          <div className="lg:col-span-3">
+            <Skeleton className="mb-3 h-6 w-32 animate-shimmer" />
+            <Card>
+              <CardContent className="space-y-4 pt-6">
+                {SKELETON_FEED_KEYS.map((key) => (
+                  <div key={key} className="flex gap-3">
+                    <Skeleton className="size-8 shrink-0 rounded-lg animate-shimmer" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-4 w-2/3 animate-shimmer" />
+                      <Skeleton className="h-3 w-1/4 animate-shimmer" />
+                    </div>
                   </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
+          <div className="flex flex-col gap-4 lg:col-span-2">
+            {SKELETON_RAIL_KEYS.map((key) => (
+              <Card key={key}>
+                <CardContent className="space-y-3 pt-6">
+                  <Skeleton className="h-5 w-28 animate-shimmer" />
+                  <Skeleton className="h-4 w-full animate-shimmer" />
+                  <Skeleton className="h-4 w-3/4 animate-shimmer" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-col gap-4 lg:col-span-2">
+      ) : (
+        // non-admin: mirror the three-up horizontal band (no feed placeholder).
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {SKELETON_RAIL_KEYS.map((key) => (
-            <Card key={key}>
+            <Card key={key} className="h-full">
               <CardContent className="space-y-3 pt-6">
                 <Skeleton className="h-5 w-28 animate-shimmer" />
                 <Skeleton className="h-4 w-full animate-shimmer" />
@@ -707,7 +760,7 @@ function DashboardSkeleton() {
             </Card>
           ))}
         </div>
-      </div>
+      )}
     </div>
   );
 }
