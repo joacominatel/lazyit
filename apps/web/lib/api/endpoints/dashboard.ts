@@ -1,4 +1,10 @@
-import type { DashboardSummary, RecentActivityPage } from "@lazyit/shared";
+import type {
+  ActivityEntityType,
+  DashboardSummary,
+  RecentActivityActorFilter,
+  RecentActivityAction,
+  RecentActivityPage,
+} from "@lazyit/shared";
 import { apiFetch } from "../client";
 
 /**
@@ -12,6 +18,12 @@ import { apiFetch } from "../client";
  * newest first and **offset-paginated** (ADR-0030). It is backed by the `recent_activity` Postgres
  * view, which merges AssetHistory, AssetAssignment, AccessGrant and ConsumableMovement into one
  * stream. Returns a `Page<RecentActivityItem>` envelope. See `@lazyit/shared` `schemas/recent-activity.ts`.
+ *
+ * Since issue #181 (DEBT-1) the feed is **server-side filterable** (and gated on `logs:read`): the
+ * optional `entityType` / `entityId` / `actorId` / `action` / `from` / `to` / `q` query params narrow
+ * the stream, and the returned `total` reflects the SAME filtered count. With no filter the feed
+ * behaves exactly as before. The shared `RecentActivityQuerySchema` is the contract; this data layer
+ * just serializes the optional filters next to `limit`/`offset`.
  */
 
 const BASE = "/dashboard";
@@ -30,8 +42,35 @@ export function getDashboardSummary(
   return apiFetch<DashboardSummary>(`${BASE}/summary${qs}`);
 }
 
-/** Window for the recent-activity feed (ADR-0030). Omit for the server defaults. */
-export interface DashboardActivityParams {
+/**
+ * The OPTIONAL server-side filters for the recent-activity feed (issue #181 / DEBT-1) as the data
+ * layer consumes them — the `RecentActivityFiltersSchema` shape, less the parts the pagination
+ * window already owns. Every field is optional; an empty object asks for the unfiltered feed. `from`
+ * / `to` are ISO-8601 datetimes (a closed-open `[from, to)` window over `occurredAt`). `actorId`
+ * accepts either a concrete user uuid or the literal `"me"` (the API resolves `"me"` to the caller).
+ */
+export interface DashboardActivityFilters {
+  /** Restrict to one pillar (asset | application | consumable). */
+  entityType?: ActivityEntityType;
+  /** Restrict to one affected entity's id (exact match; pairs with `entityType`). */
+  entityId?: string;
+  /** A concrete user uuid, or the literal `"me"` (resolved to the caller server-side). */
+  actorId?: RecentActivityActorFilter;
+  /** One known activity verb (validated against the closed allowlist server-side). */
+  action?: RecentActivityAction;
+  /** Inclusive lower bound (ISO-8601) of the `occurredAt` window. */
+  from?: string;
+  /** Exclusive upper bound (ISO-8601) of the `occurredAt` window. */
+  to?: string;
+  /** Free text matched against `summary` + the resolved actor name. */
+  q?: string;
+}
+
+/**
+ * Window + optional filters for the recent-activity feed (ADR-0030 paging + issue #181 filters).
+ * Omit everything for the server defaults / unfiltered feed.
+ */
+export interface DashboardActivityParams extends DashboardActivityFilters {
   /** Page size (1-200). Omit for the server default (50). */
   limit?: number;
   /** Zero-based window offset. Omit for the first page. */
@@ -41,14 +80,33 @@ export interface DashboardActivityParams {
 /**
  * Fetch one page of the unified recent-activity feed (`GET /dashboard/activity`), newest first.
  * Returns the whole `Page<RecentActivityItem>` envelope (`items` + `total`/`limit`/`offset`) so the
- * caller can compute "has more".
+ * caller can compute "has more". Any provided filter is serialized as its own query param next to
+ * `limit`/`offset`; an omitted filter is left off entirely, so the no-filter call is byte-for-byte
+ * the historical request.
  */
 export function getDashboardActivity(
-  { limit, offset }: DashboardActivityParams = {},
+  {
+    limit,
+    offset,
+    entityType,
+    entityId,
+    actorId,
+    action,
+    from,
+    to,
+    q,
+  }: DashboardActivityParams = {},
 ): Promise<RecentActivityPage> {
   const params = new URLSearchParams();
   if (limit !== undefined) params.set("limit", String(limit));
   if (offset !== undefined) params.set("offset", String(offset));
+  if (entityType) params.set("entityType", entityType);
+  if (entityId) params.set("entityId", entityId);
+  if (actorId) params.set("actorId", actorId);
+  if (action) params.set("action", action);
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  if (q) params.set("q", q);
   const qs = params.toString();
   return apiFetch<RecentActivityPage>(
     qs ? `${BASE}/activity?${qs}` : `${BASE}/activity`,
