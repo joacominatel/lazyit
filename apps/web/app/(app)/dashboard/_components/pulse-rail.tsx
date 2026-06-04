@@ -32,24 +32,49 @@ import { formatAssetStatus } from "../../assets/_components/asset-status-badge";
  * Colour discipline (ADR-0049): a status hue only ever appears as a donut SEGMENT or a
  * legend DOT — every readable number/label sits on `--foreground` / `--card-foreground`.
  * No pillar/chart/status hue is used as readable text.
+ *
+ * Two `layout`s for the same trio (issue #179, the activity-feed admin gate):
+ *   - `"rail"` (default) — the sticky right-hand column beside the Recent Activity feed, for
+ *     callers who hold `logs:read` and so see the feed. Byte-equivalent to the original.
+ *   - `"grid"` — a full-width horizontal grid (donut · access-health · quick-actions, side by
+ *     side, stacking on mobile) for callers WITHOUT `logs:read`: the feed is hidden, so the rail
+ *     can't be a column beside it. The same three widgets, reflowed so the page never reads cojo.
  */
 export function PulseRail({
   summary,
   quickActions,
+  layout = "rail",
 }: {
   summary: DashboardSummary;
   /** The cross-pillar quick actions the caller is permitted to see (already permission-gated). */
   quickActions: QuickAction[];
+  /** `"rail"` = sticky column beside the feed (default); `"grid"` = full-width horizontal trio. */
+  layout?: "rail" | "grid";
 }) {
+  // Each card knows its own layout (the grid variant needs `h-full` so its three cards align to
+  // a common height); the wrapper switches between the sticky vertical column and the row grid.
+  const inGrid = layout === "grid";
   return (
-    // `self-start` keeps the rail from stretching to the feed's height (so `sticky` has room
-    // to travel); `lg:sticky lg:top-6` pins it once the two-column layout engages. Below `lg`
-    // it is a normal block that reflows under the feed. The (app) route template animates with
-    // OPACITY ONLY (no transform), so no ancestor traps this sticky.
-    <div className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
-      <AssetStatusDonut byStatus={summary.assets.byStatus} total={summary.assets.total} />
-      <AccessHealthPanel access={summary.access} />
-      <PulseActionTile quickActions={quickActions} />
+    // RAIL: `self-start` keeps the rail from stretching to the feed's height (so `sticky` has room
+    // to travel); `lg:sticky lg:top-6` pins it once the two-column layout engages. Below `lg` it is
+    // a normal block that reflows under the feed. The (app) route template animates with OPACITY
+    // ONLY (no transform), so no ancestor traps this sticky.
+    // GRID: a full-width responsive grid — one column on mobile, two on `sm`, three on `lg` — so the
+    // trio reads as one intentional band below the pillar cards, never a lone column.
+    <div
+      className={cn(
+        inGrid
+          ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+          : "flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start",
+      )}
+    >
+      <AssetStatusDonut
+        byStatus={summary.assets.byStatus}
+        total={summary.assets.total}
+        fill={inGrid}
+      />
+      <AccessHealthPanel access={summary.access} fill={inGrid} />
+      <PulseActionTile quickActions={quickActions} fill={inGrid} />
     </div>
   );
 }
@@ -96,9 +121,12 @@ const DONUT_STATUS_ORDER: AssetStatus[] = [
 function AssetStatusDonut({
   byStatus,
   total,
+  fill = false,
 }: {
   byStatus: Record<AssetStatus, number>;
   total: number;
+  /** In the grid layout, stretch to a common height so the trio's cards align (see PulseRail). */
+  fill?: boolean;
 }) {
   const segments = DONUT_STATUS_ORDER.map((status) => ({
     status,
@@ -107,7 +135,7 @@ function AssetStatusDonut({
   })).filter((segment) => segment.value > 0);
 
   return (
-    <Card>
+    <Card className={cn(fill && "h-full")}>
       <CardHeader>
         <CardTitle className="text-base">Assets by status</CardTitle>
       </CardHeader>
@@ -213,8 +241,11 @@ function DonutRing({
  */
 function AccessHealthPanel({
   access,
+  fill = false,
 }: {
   access: DashboardSummary["access"];
+  /** In the grid layout, stretch to a common height so the trio's cards align (see PulseRail). */
+  fill?: boolean;
 }) {
   const rows: AccessRow[] = [
     {
@@ -238,7 +269,7 @@ function AccessHealthPanel({
   ];
 
   return (
-    <Card>
+    <Card className={cn(fill && "h-full")}>
       <CardHeader>
         <CardTitle className="text-base">Access health</CardTitle>
       </CardHeader>
@@ -310,13 +341,16 @@ export interface QuickAction {
  */
 function PulseActionTile({
   quickActions,
+  fill = false,
 }: {
   quickActions: QuickAction[];
+  /** In the grid layout, stretch to a common height so the trio's cards align (see PulseRail). */
+  fill?: boolean;
 }) {
   if (quickActions.length === 0) return null;
 
   return (
-    <Card>
+    <Card className={cn(fill && "h-full")}>
       <CardHeader>
         <CardTitle className="text-base">Quick actions</CardTitle>
       </CardHeader>
