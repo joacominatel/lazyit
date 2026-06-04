@@ -2,6 +2,7 @@ import {
   ExclamationTriangleIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
+import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -43,30 +44,16 @@ import { getConfigStatus } from "@/lib/api/endpoints/config";
  */
 
 /**
- * Human-readable copy for the Auth.js sign-in error codes (the codes Auth.js passes back to a custom
- * sign-in page). Anything unrecognized falls through to the `Default` message.
+ * Maps each Auth.js sign-in error code (the codes Auth.js passes back to a custom sign-in page) to its
+ * translation-key base under the `auth.errors` namespace. The codes themselves are data sent by
+ * Auth.js — only the key base and the resolved copy are localized. Anything unrecognized falls through
+ * to the `default` message.
  */
-const ERROR_COPY: Record<string, { title: string; detail: string }> = {
-  Configuration: {
-    title: "Sign-in is not configured",
-    detail:
-      "lazyit could not reach its identity provider. Check the OIDC environment variables (issuer, client id and secret) and that the provider is running, then try again.",
-  },
-  AccessDenied: {
-    title: "Access denied",
-    detail:
-      "Your identity provider declined the sign-in. Your account may not be permitted to access this lazyit instance — contact your administrator.",
-  },
-  Verification: {
-    title: "Sign-in link expired",
-    detail:
-      "The sign-in request could not be verified or has expired. Start the sign-in again.",
-  },
-  Default: {
-    title: "Couldn't complete sign-in",
-    detail:
-      "Something went wrong while signing you in. Please try again; if it keeps happening, contact your administrator.",
-  },
+const ERROR_KEY_BASE: Record<string, string> = {
+  Configuration: "configuration",
+  AccessDenied: "accessDenied",
+  Verification: "verification",
+  Default: "default",
 };
 
 /** Resolve whether this instance still needs first-run setup; fail safe (no link) if the API is down. */
@@ -92,20 +79,20 @@ export default async function LoginPage({
     redirect(destination);
   }
 
+  const t = await getTranslations("auth");
   const unconfigured = await instanceIsUnconfigured();
-  const errorCopy = error ? (ERROR_COPY[error] ?? ERROR_COPY.Default) : null;
+  const errorKeyBase = error
+    ? (ERROR_KEY_BASE[error] ?? ERROR_KEY_BASE.Default)
+    : null;
 
   return (
     <Card className="w-full animate-rise-in shadow-e2">
       <CardHeader>
-        <CardTitle>Sign in to lazyit</CardTitle>
-        <CardDescription>
-          You will be redirected to your organization&apos;s identity provider to
-          authenticate.
-        </CardDescription>
+        <CardTitle>{t("login.title")}</CardTitle>
+        <CardDescription>{t("login.subtitle")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {errorCopy && (
+        {errorKeyBase && (
           <div
             role="alert"
             className="flex gap-3 rounded-lg border border-destructive/30 bg-destructive/8 p-3 text-sm"
@@ -115,8 +102,12 @@ export default async function LoginPage({
               aria-hidden="true"
             />
             <div className="space-y-0.5">
-              <p className="font-medium text-foreground">{errorCopy.title}</p>
-              <p className="text-muted-foreground">{errorCopy.detail}</p>
+              <p className="font-medium text-foreground">
+                {t(`errors.${errorKeyBase}Title`)}
+              </p>
+              <p className="text-muted-foreground">
+                {t(`errors.${errorKeyBase}Detail`)}
+              </p>
             </div>
           </div>
         )}
@@ -129,25 +120,23 @@ export default async function LoginPage({
             />
             <div className="space-y-0.5">
               <p className="font-medium text-foreground">
-                This instance isn&apos;t set up yet
+                {t("login.unconfiguredTitle")}
               </p>
               <p className="text-muted-foreground">
-                No administrator exists, so there is no one to sign in. Run the
-                one-time setup to create the first administrator.
+                {t("login.unconfiguredDetail")}
               </p>
             </div>
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            lazyit uses your organization&apos;s single sign-on (SSO). No
-            separate password is needed.
+            {t("login.ssoHelper")}
           </p>
         )}
       </CardContent>
       <CardFooter className="flex-col gap-2">
         {unconfigured ? (
           <Button asChild className="w-full">
-            <Link href="/setup">Set up lazyit</Link>
+            <Link href="/setup">{t("login.setupButton")}</Link>
           </Button>
         ) : (
           <form
@@ -158,7 +147,7 @@ export default async function LoginPage({
             className="w-full"
           >
             <Button type="submit" className="w-full">
-              Sign in with your organization
+              {t("login.signInButton")}
             </Button>
           </form>
         )}
