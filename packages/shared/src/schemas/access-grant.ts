@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { optionalText } from "./primitives";
 
 /**
  * AccessGrant — the timestamped join recording that a User has access to an Application, over time
@@ -49,7 +50,7 @@ export const CreateAccessGrantSchema = z
     accessLevel: z.string().trim().min(1).max(100).optional(),
     expiresAt: z.iso.datetime().optional(),
     grantedAt: z.iso.datetime().optional(),
-    notes: z.string().trim().min(1).max(2000).optional(),
+    notes: optionalText(2000),
   })
   // Cross-field: a grant can't expire before it starts. Only checked when BOTH are supplied — an
   // omitted grantedAt defaults to now() in the DB, so there's nothing to compare against here.
@@ -70,7 +71,7 @@ export const CreateAccessGrantSchema = z
  * Only `notes` is accepted; the actor (`revokedById`) comes from the `X-User-Id` header ([[0023]]).
  */
 export const RevokeAccessGrantSchema = z.strictObject({
-  notes: z.string().trim().min(1).max(2000).optional(),
+  notes: optionalText(2000),
 });
 
 /**
