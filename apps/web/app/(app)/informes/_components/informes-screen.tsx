@@ -4,15 +4,16 @@ import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
   Bars3BottomLeftIcon,
-  CalendarDaysIcon,
   ClockIcon,
   PrinterIcon,
   TableCellsIcon,
   UserIcon,
 } from "@heroicons/react/24/outline";
-import type {
-  ActivityEntityType,
-  RecentActivityItem,
+import {
+  ACTIVITY_ACTOR_ME,
+  type ActivityEntityType,
+  RECENT_ACTIVITY_ACTIONS,
+  type RecentActivityItem,
 } from "@lazyit/shared";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -49,10 +50,13 @@ import { TableCell } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { groupByDay } from "@/lib/activity-grouping";
 import { actionLabel, actionTone } from "@/lib/activity-tones";
+import type { DashboardActivityFilters } from "@/lib/api/endpoints/dashboard";
 import {
   REPORTS_ACTIVITY_PAGE_SIZE,
   useDashboardActivity,
+  useReportsActivityPage,
 } from "@/lib/api/hooks/use-dashboard";
+import { useUsers } from "@/lib/api/hooks/use-users";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/format";
@@ -61,33 +65,52 @@ import { downloadCsv } from "./informes-csv";
 /**
  * The Reports/Informes screen body (rendered only once `logs:read` is confirmed — see `page.tsx`).
  *
- * It reuses the unified `GET /dashboard/activity` feed at a WIDER page size (50) and filters the
- * loaded window CLIENT-SIDE (v1 caveat): tabs scope by entity pillar, the search/action/range
- * filters narrow further, and a "Filtering the N loaded events" hint is shown whenever a client
- * filter is active so the partial-window nature is honest. Two views share the filtered rows: a
- * Timeline (the reused activity row, day-grouped, "Load more") and a Table (`ResourceTable`,
- * client-paginated). CSV + Print export exactly the visible rows.
+ * Since issue #183 (DEBT-1 frontend) every filter is **server-side**: the unified `GET
+ * /dashboard/activity` feed now narrows by `entityType` (scope tabs), `actorId` (an Actor select, or
+ * `"me"` for the My-history tab), `action`, `from`/`to` (a relative OR an exact date range) and free
+ * text `q`. `useListParams` keeps the whole filter set in the URL (shareable / Back-navigable), and
+ * the returned values map straight onto the request — there is no more client-side `.filter()` over a
+ * partial window, so the `total` and the table pagination are the server's real filtered figures.
+ *
+ * Two views share the filtered feed: a Timeline (the reused activity row, day-grouped, "Load more"
+ * over the infinite query) and a Table (`ResourceTable` with true server-side prev/next paging). CSV
+ * + Print export exactly the rows currently visible.
  */
 
-/** The view/scope tabs. The enabled three map to an entity pillar; the two debt tabs are disabled. */
+/**
+ * The view/scope tabs. The first four map to an entity pillar (or none for "All") → the `entityType`
+ * filter. `me` is the self-history view → `actorId="me"` (no entity scope). The `users` tab stays
+ * disabled (DEBT-2: per-user history needs UserHistory coverage, out of scope here).
+ */
 const TABS = [
   { value: "all", label: "All", entityType: null },
   { value: "assets", label: "Assets", entityType: "asset" },
   { value: "access", label: "Access", entityType: "application" },
   { value: "stock", label: "Stock", entityType: "consumable" },
-] as const;
+  { value: "me", label: "My history", entityType: null },
+] as const satisfies readonly {
+  value: string;
+  label: string;
+  entityType: ActivityEntityType | null;
+}[];
 
 type TabValue = (typeof TABS)[number]["value"];
 
-/** Active-tab underline tint per tab (token-backed pillar hue; brand indigo for "All"). */
+/** Active-tab underline tint per tab (token-backed pillar hue; brand indigo for "All" / "My history"). */
 const TAB_INDICATOR: Record<TabValue, string> = {
   all: "data-[state=active]:border-primary",
   assets: "data-[state=active]:border-pillar-inventory",
   access: "data-[state=active]:border-pillar-access",
   stock: "data-[state=active]:border-pillar-inventory",
+  me: "data-[state=active]:border-primary",
 };
 
-/** Relative-range options, applied client-side over `occurredAt`. */
+/**
+ * Relative-range presets. Each resolves to a concrete `[from, to]` **date pair** (`YYYY-MM-DD`) so it
+ * shares the single source of truth with the exact-range inputs — there is no separate "range mode".
+ * `null` means that bound is open. `to` is the LAST included day; the request converts it to the
+ * closed-open upper bound (start of the following day).
+ */
 const RANGE_OPTIONS = [
   { value: "all", label: "All time" },
   { value: "today", label: "Today" },
@@ -97,34 +120,66 @@ const RANGE_OPTIONS = [
 
 type RangeValue = (typeof RANGE_OPTIONS)[number]["value"];
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 const FILTER_DEFAULTS = {
   tab: "all",
   action: "ALL",
-  range: "all",
+  actor: "ALL",
+  // `from` / `to` are date-only (`YYYY-MM-DD`) URL filters; empty means that bound is open.
+  from: "",
+  to: "",
   view: "timeline",
 } as const;
 
-/** Window start (epoch ms) for a relative range, or null for "all time". */
-function rangeStart(range: RangeValue, now: number): number | null {
-  switch (range) {
-    case "today": {
-      const d = new Date(now);
-      d.setHours(0, 0, 0, 0);
-      return d.getTime();
-    }
-    case "7d":
-      return now - 7 * DAY_MS;
-    case "30d":
-      return now - 30 * DAY_MS;
-    default:
-      return null;
+/** Local `YYYY-MM-DD` for an epoch ms (the value an `<input type="date">` round-trips). */
+function toDateInput(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** The `[from, to]` date-input pair (last-included `to`) for a relative preset, against `now`. */
+function presetRange(range: RangeValue, now: number): { from: string; to: string } {
+  if (range === "all") return { from: "", to: "" };
+  const today = toDateInput(now);
+  if (range === "today") return { from: today, to: today };
+  const days = range === "7d" ? 7 : 30;
+  // Inclusive window: the last `days` days ending today → from = today - (days - 1).
+  const from = toDateInput(now - (days - 1) * 24 * 60 * 60 * 1000);
+  return { from, to: today };
+}
+
+/** Which relative preset (if any) the current `from`/`to` pair matches — else "custom". */
+function matchPreset(from: string, to: string, now: number): RangeValue | "custom" {
+  for (const opt of RANGE_OPTIONS) {
+    const r = presetRange(opt.value, now);
+    if (r.from === from && r.to === to) return opt.value;
   }
+  return "custom";
+}
+
+/** Start-of-day local ISO for a `YYYY-MM-DD` (the `from` lower bound), or undefined when empty. */
+function fromDateToIso(date: string): string | undefined {
+  if (!date) return undefined;
+  const d = new Date(`${date}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+/**
+ * Exclusive upper-bound ISO for a `YYYY-MM-DD`: start of the FOLLOWING day, so a `to` of "Jun 4"
+ * includes everything that happened on Jun 4 (the API window is closed-open `[from, to)`).
+ */
+function toDateToIso(date: string): string | undefined {
+  if (!date) return undefined;
+  const d = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return undefined;
+  d.setDate(d.getDate() + 1);
+  return d.toISOString();
 }
 
 export function InformesScreen() {
-  // Snapshot "now" once so relative times + the range filter stay pure across renders.
+  // Snapshot "now" once so relative times + the relative-range presets stay pure across renders.
   const [now] = useState(() => Date.now());
   const {
     q,
@@ -138,68 +193,83 @@ export function InformesScreen() {
     filtersActive,
   } = useListParams({
     filters: FILTER_DEFAULTS,
-    // The table view is client-paginated over the filtered rows; a roomy page keeps it scannable.
+    // Server-paginated table window; a roomy page keeps it scannable.
     defaultLimit: 25,
   });
 
   const tab = (filters.tab as TabValue) ?? "all";
   const actionFilter = filters.action;
-  const range = (filters.range as RangeValue) ?? "all";
+  const actorFilter = filters.actor;
+  const fromDate = filters.from;
+  const toDate = filters.to;
   const view = filters.view === "table" ? "table" : "timeline";
 
+  const tabMeta = useMemo(() => TABS.find((t) => t.value === tab) ?? TABS[0], [tab]);
+  const isMyHistory = tab === "me";
+  const rangePreset = matchPreset(fromDate, toDate, now);
+
+  // The user directory for the Actor select (small org; whole directory is one page).
+  const { data: users } = useUsers();
+
+  // Map the URL filter state → the server-side request filters (issue #183). The My-history tab
+  // forces `actorId="me"` and ignores the Actor select; otherwise a concrete actor uuid is sent.
+  const serverFilters = useMemo<DashboardActivityFilters>(() => {
+    const out: DashboardActivityFilters = {};
+    if (tabMeta.entityType) out.entityType = tabMeta.entityType;
+    if (isMyHistory) {
+      out.actorId = ACTIVITY_ACTOR_ME;
+    } else if (actorFilter !== "ALL") {
+      out.actorId = actorFilter;
+    }
+    if (
+      actionFilter !== "ALL" &&
+      (RECENT_ACTIVITY_ACTIONS as readonly string[]).includes(actionFilter)
+    ) {
+      out.action = actionFilter as (typeof RECENT_ACTIVITY_ACTIONS)[number];
+    }
+    const fromIso = fromDateToIso(fromDate);
+    const toIso = toDateToIso(toDate);
+    if (fromIso) out.from = fromIso;
+    if (toIso) out.to = toIso;
+    const needle = q.trim();
+    if (needle) out.q = needle;
+    return out;
+  }, [tabMeta.entityType, isMyHistory, actorFilter, actionFilter, fromDate, toDate, q]);
+
+  // Timeline: the infinite "Load more" feed, keyed (and filtered) by the server filters.
   const {
-    data,
-    isLoading,
-    isError,
-    error,
-    refetch,
+    data: timelineData,
+    isLoading: timelineLoading,
+    isError: timelineError,
+    error: timelineErr,
+    refetch: timelineRefetch,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useDashboardActivity(REPORTS_ACTIVITY_PAGE_SIZE);
+  } = useDashboardActivity(REPORTS_ACTIVITY_PAGE_SIZE, serverFilters);
 
-  // The full loaded window (every page fetched so far), newest-first.
-  const loaded = useMemo(
-    () => (data?.pages ?? []).flatMap((page) => page.items),
-    [data],
-  );
-  const total = data?.pages[0]?.total ?? 0;
+  // Table: a single server-side page (true prev/next) over the same filtered feed.
+  const {
+    data: pageData,
+    isLoading: pageLoading,
+    isError: pageError,
+    error: pageErr,
+    refetch: pageRefetch,
+  } = useReportsActivityPage(limit, offset, serverFilters);
 
-  // Distinct action verbs present in the loaded window → the action filter's options (so we never
-  // offer a verb that isn't here). Sorted by their human label for a stable, readable menu.
-  const actionOptions = useMemo(() => {
-    const seen = new Set(loaded.map((item) => item.action));
-    return [...seen].sort((a, b) => actionLabel(a).localeCompare(actionLabel(b)));
-  }, [loaded]);
-
-  const tabEntityType = useMemo<ActivityEntityType | null>(
-    () => TABS.find((t) => t.value === tab)?.entityType ?? null,
-    [tab],
+  const timelineItems = useMemo(
+    () => (timelineData?.pages ?? []).flatMap((page) => page.items),
+    [timelineData],
   );
 
-  // Client-side filtering over the loaded window (v1): tab → entity pillar, search → summary+actor,
-  // action → verb, range → occurredAt window.
-  const filtered = useMemo(() => {
-    const windowStart = rangeStart(range, now);
-    const needle = q.trim().toLowerCase();
-    return loaded.filter((item) => {
-      if (tabEntityType && item.entityType !== tabEntityType) return false;
-      if (actionFilter !== "ALL" && item.action !== actionFilter) return false;
-      if (windowStart != null && new Date(item.occurredAt).getTime() < windowStart) {
-        return false;
-      }
-      if (needle) {
-        const haystack = `${item.summary} ${item.actorName ?? ""}`.toLowerCase();
-        if (!haystack.includes(needle)) return false;
-      }
-      return true;
-    });
-  }, [loaded, tabEntityType, actionFilter, range, now, q]);
-
-  // A client filter is "narrowing" when it actually drops rows from the loaded window — that's when
-  // the partial-window caveat matters, so the hint is shown then.
-  const clientFilterActive =
-    tab !== "all" || actionFilter !== "ALL" || range !== "all" || q.trim() !== "";
+  // The active view's rows, loading/error, and the server's filtered total.
+  const isTable = view === "table";
+  const items = isTable ? (pageData?.items ?? []) : timelineItems;
+  const total = isTable ? (pageData?.total ?? 0) : (timelineData?.pages[0]?.total ?? 0);
+  const isLoading = isTable ? pageLoading : timelineLoading;
+  const isError = isTable ? pageError : timelineError;
+  const error = isTable ? pageErr : timelineErr;
+  const refetch = isTable ? pageRefetch : timelineRefetch;
 
   const chips = [
     ...(q
@@ -209,8 +279,21 @@ export function InformesScreen() {
       ? [
           {
             key: "tab",
-            label: `Scope: ${TABS.find((t) => t.value === tab)?.label ?? tab}`,
+            label: `Scope: ${tabMeta.label}`,
             onClear: () => setFilter("tab", FILTER_DEFAULTS.tab),
+          },
+        ]
+      : []),
+    ...(!isMyHistory && actorFilter !== "ALL"
+      ? [
+          {
+            key: "actor",
+            label: `Actor: ${
+              users?.find((u) => u.id === actorFilter)
+                ? `${users.find((u) => u.id === actorFilter)?.firstName} ${users.find((u) => u.id === actorFilter)?.lastName}`
+                : "Selected user"
+            }`,
+            onClear: () => setFilter("actor", FILTER_DEFAULTS.actor),
           },
         ]
       : []),
@@ -223,12 +306,18 @@ export function InformesScreen() {
           },
         ]
       : []),
-    ...(range !== "all"
+    ...(fromDate || toDate
       ? [
           {
             key: "range",
-            label: `Range: ${RANGE_OPTIONS.find((r) => r.value === range)?.label ?? range}`,
-            onClear: () => setFilter("range", FILTER_DEFAULTS.range),
+            label:
+              rangePreset !== "custom" && rangePreset !== "all"
+                ? `Range: ${RANGE_OPTIONS.find((r) => r.value === rangePreset)?.label}`
+                : `Range: ${fromDate || "…"} → ${toDate || "…"}`,
+            onClear: () => {
+              setFilter("from", FILTER_DEFAULTS.from);
+              setFilter("to", FILTER_DEFAULTS.to);
+            },
           },
         ]
       : []),
@@ -244,9 +333,9 @@ export function InformesScreen() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => downloadCsv(filtered)}
-            disabled={filtered.length === 0}
-            title="Export the events currently visible (the filtered window)"
+            onClick={() => downloadCsv(items)}
+            disabled={items.length === 0}
+            title="Export the events currently visible (the filtered page)"
           >
             <ArrowDownTrayIcon />
             Export visible events
@@ -282,8 +371,9 @@ export function InformesScreen() {
     <div className="space-y-6" data-print-document>
       {header}
 
-      {/* Scope tabs. The three enabled tabs filter client-side by entity pillar; Users and My history
-          are disabled with a native-title tooltip until history coverage lands. */}
+      {/* Scope tabs. The first four scope by entity pillar (server-side); "My history" filters to the
+          caller (actorId="me"). "Users" stays disabled with a native-title tooltip until per-user
+          history (DEBT-2) lands. */}
       <div data-print-hide>
         <Tabs value={tab} onValueChange={(value) => setFilter("tab", value)}>
           <TabsList>
@@ -293,32 +383,33 @@ export function InformesScreen() {
                 value={t.value}
                 indicatorClassName={TAB_INDICATOR[t.value]}
               >
-                {t.label}
+                {t.value === "me" ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <UserIcon className="size-4" aria-hidden />
+                    {t.label}
+                  </span>
+                ) : (
+                  t.label
+                )}
               </TabsTrigger>
             ))}
-            {/* DEBT-1: needs per-actor / self history coverage. Disabled, not hidden, so the roadmap
-                is visible; the native title carries the "why". These are inert (no `value` route). */}
+            {/* DEBT-2: per-actor (other than self) history. Disabled, not hidden, so the roadmap is
+                visible; the native title carries the "why". Inert (no `value` route). */}
             <span
               className="-mb-px inline-flex h-9 shrink-0 cursor-not-allowed items-center gap-1.5 border-b-2 border-transparent px-3 text-sm font-medium text-muted-foreground/50"
-              title="Available once history coverage lands"
+              title="Available once per-user history coverage lands"
               aria-disabled="true"
             >
               <UserIcon className="size-4" aria-hidden />
               Users
             </span>
-            <span
-              className="-mb-px inline-flex h-9 shrink-0 cursor-not-allowed items-center gap-1.5 border-b-2 border-transparent px-3 text-sm font-medium text-muted-foreground/50"
-              title="Available once history coverage lands"
-              aria-disabled="true"
-            >
-              My history
-            </span>
           </TabsList>
         </Tabs>
       </div>
 
-      {/* Filter bar. Search / Action / Range are live (client-side); Actor and an exact date range are
-          DEBT-1, rendered disabled-with-tooltip so the surface is honest about what's coming. */}
+      {/* Filter bar — every control is server-side now (issue #183): Search, Actor, Action, and the
+          range (a relative preset OR an exact from/to). On the My-history tab the Actor select is
+          replaced by an inert "You" chip, since the actor is pinned to the caller. */}
       <div
         className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center"
         data-print-hide
@@ -332,6 +423,43 @@ export function InformesScreen() {
           placeholder="Search summaries and people…"
           className="lg:max-w-xs lg:flex-1"
         />
+
+        {/* Actor filter → actorId. Pinned to "You" on the My-history tab. */}
+        {isMyHistory ? (
+          <span
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-input px-2.5 text-sm text-muted-foreground"
+            title="Showing your own activity"
+          >
+            <UserIcon className="size-4" aria-hidden />
+            You
+          </span>
+        ) : (
+          <Select
+            value={actorFilter}
+            onValueChange={(value) => setFilter("actor", value)}
+          >
+            <SelectTrigger className="lg:w-56">
+              <SelectValue placeholder="Any actor" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">Any actor</SelectItem>
+              {(users ?? []).map((user) => (
+                <SelectItem key={user.id} value={user.id}>
+                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                    <ActorAvatar
+                      name={`${user.firstName} ${user.lastName}`}
+                      seed={user.id}
+                    />
+                    <span className="min-w-0 truncate">
+                      {user.firstName} {user.lastName}
+                    </span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
         <Select
           value={actionFilter}
           onValueChange={(value) => setFilter("action", value)}
@@ -341,16 +469,22 @@ export function InformesScreen() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">All actions</SelectItem>
-            {actionOptions.map((action) => (
+            {RECENT_ACTIVITY_ACTIONS.map((action) => (
               <SelectItem key={action} value={action}>
                 {actionLabel(action)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+
+        {/* Relative-range preset: a convenience that writes concrete `from`/`to` dates. */}
         <Select
-          value={range}
-          onValueChange={(value) => setFilter("range", value)}
+          value={rangePreset === "custom" ? "all" : rangePreset}
+          onValueChange={(value) => {
+            const r = presetRange(value as RangeValue, now);
+            setFilter("from", r.from);
+            setFilter("to", r.to);
+          }}
         >
           <SelectTrigger className="lg:w-44">
             <SelectValue />
@@ -361,23 +495,35 @@ export function InformesScreen() {
                 {option.label}
               </SelectItem>
             ))}
+            {rangePreset === "custom" ? (
+              <SelectItem value="custom" disabled>
+                Custom range
+              </SelectItem>
+            ) : null}
           </SelectContent>
         </Select>
 
-        {/* DEBT-1: actor filter + exact date range. Disabled-with-tooltip until the feed carries the
-            data to drive them server-side. */}
-        <span title="Coming soon — filter by who made the change">
-          <Button variant="outline" size="sm" disabled className="gap-1.5">
-            <UserIcon />
-            Actor
-          </Button>
-        </span>
-        <span title="Coming soon — pick an exact date range">
-          <Button variant="outline" size="sm" disabled className="gap-1.5">
-            <CalendarDaysIcon />
-            Exact range
-          </Button>
-        </span>
+        {/* Exact range → from/to. Native date inputs (no dep); each writes its `from`/`to` filter,
+            which the request converts to a closed-open `[from, to)` ISO window. */}
+        <div className="inline-flex items-center gap-1.5 text-sm">
+          <input
+            type="date"
+            aria-label="From date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={(e) => setFilter("from", e.target.value)}
+            className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+          <span className="text-muted-foreground">→</span>
+          <input
+            type="date"
+            aria-label="To date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={(e) => setFilter("to", e.target.value)}
+            className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+        </div>
 
         {/* View toggle: Timeline (comfortable) ↔ Table (dense). */}
         <div className="ml-auto inline-flex items-center gap-1 rounded-lg border p-0.5">
@@ -400,29 +546,16 @@ export function InformesScreen() {
         <ActiveFilters chips={chips} onClearAll={clearFilters} />
       </div>
 
-      {/* Honest v1 caveat: the filters run over the loaded window, not the whole history. */}
-      {clientFilterActive && !isLoading ? (
-        <p
-          className="text-xs text-muted-foreground tabular-nums"
-          aria-live="polite"
-          data-print-hide
-        >
-          Filtering the {loaded.length} loaded event
-          {loaded.length === 1 ? "" : "s"}
-          {hasNextPage ? " — load more to widen the search" : ""}.
-        </p>
-      ) : null}
-
       {isLoading ? (
         <TimelineSkeleton />
-      ) : filtered.length === 0 ? (
+      ) : items.length === 0 ? (
         <EmptyState
           icon={ClockIcon}
           pillar="access"
           title="No events match these filters"
           description={
             filtersActive
-              ? "Nothing in the loaded window matches. Clear a filter, or load more events to widen the search."
+              ? "Nothing across the whole history matches these filters. Try clearing one."
               : "Changes to assets, access and stock will show up here as your team works."
           }
         >
@@ -432,7 +565,7 @@ export function InformesScreen() {
         </EmptyState>
       ) : view === "timeline" ? (
         <TimelineView
-          items={filtered}
+          items={items}
           now={now}
           hasNextPage={!!hasNextPage}
           isFetchingNextPage={isFetchingNextPage}
@@ -440,24 +573,15 @@ export function InformesScreen() {
         />
       ) : (
         <TableView
-          items={filtered}
+          items={items}
           now={now}
           offset={offset}
           limit={limit}
+          total={total}
           onOffsetChange={setOffset}
           onClearFilters={clearFilters}
-          hasNextPage={!!hasNextPage}
-          isFetchingNextPage={isFetchingNextPage}
-          onLoadMore={() => fetchNextPage()}
         />
       )}
-
-      {/* Honest total context for the loaded window (also useful on the printed sheet). */}
-      <p className="text-xs text-muted-foreground tabular-nums">
-        Showing {filtered.length} of {loaded.length} loaded event
-        {loaded.length === 1 ? "" : "s"}
-        {total > loaded.length ? ` (${total} total in history)` : ""}.
-      </p>
     </div>
   );
 }
@@ -572,33 +696,27 @@ function ActivityRowWithBadge({
   );
 }
 
-/** The dense table view, client-paginated over the filtered rows (filtering is client-side in v1). */
+/**
+ * The dense table view, paginated SERVER-SIDE (issue #183): `items` is one server page and `total` is
+ * the server's filtered count, so the {@link Pagination} prev/next math is real (not a client slice).
+ */
 function TableView({
   items,
   now,
   offset,
   limit,
+  total,
   onOffsetChange,
   onClearFilters,
-  hasNextPage,
-  isFetchingNextPage,
-  onLoadMore,
 }: {
   items: RecentActivityItem[];
   now: number;
   offset: number;
   limit: number;
+  total: number;
   onOffsetChange: (offset: number) => void;
   onClearFilters: () => void;
-  hasNextPage: boolean;
-  isFetchingNextPage: boolean;
-  onLoadMore: () => void;
 }) {
-  // Client-page the filtered rows. Clamp the offset so a filter that shrinks the set never strands
-  // the view past the end.
-  const safeOffset = offset < items.length ? offset : 0;
-  const pageRows = items.slice(safeOffset, safeOffset + limit);
-
   const columns: ResourceColumn[] = [
     { key: "when", header: "When", skeleton: <Skeleton className="h-4 w-20" /> },
     {
@@ -627,10 +745,10 @@ function TableView({
     <>
       <ResourceTable
         columns={columns}
-        isFilteredEmpty={pageRows.length === 0}
+        isFilteredEmpty={items.length === 0}
         filteredEmptyMessage="No events match these filters."
         filteredEmptyAction={<ClearFiltersLink onClick={onClearFilters} />}
-        mobileChildren={pageRows.map((item) => {
+        mobileChildren={items.map((item) => {
           const meta = ENTITY_META[item.entityType];
           return (
             <ResourceCard
@@ -664,7 +782,7 @@ function TableView({
           );
         })}
       >
-        {pageRows.map((item) => {
+        {items.map((item) => {
           const meta = ENTITY_META[item.entityType];
           const EntityIcon = meta.icon;
           return (
@@ -717,28 +835,12 @@ function TableView({
       </ResourceTable>
 
       <Pagination
-        total={items.length}
+        total={total}
         limit={limit}
-        offset={safeOffset}
-        itemCount={pageRows.length}
+        offset={offset}
+        itemCount={items.length}
         onOffsetChange={onOffsetChange}
       />
-
-      {hasNextPage ? (
-        <div data-print-hide>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onLoadMore}
-            disabled={isFetchingNextPage}
-          >
-            {isFetchingNextPage ? (
-              <ArrowPathIcon className="animate-spin" />
-            ) : null}
-            Load more events
-          </Button>
-        </div>
-      ) : null}
     </>
   );
 }
