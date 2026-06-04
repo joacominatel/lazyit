@@ -424,4 +424,10 @@
   [data-print-document] section {
     break-inside: avoid;
   }
+
+  /* De-emphasized meta prints as near-ink, not mid-gray — `muted-foreground` washes out on a
+     B&W laser. Screen tone is unchanged; this only applies inside the printed document. */
+  [data-print-document] .text-muted-foreground {
+    color: oklch(0.4 0.008 75) !important;
+  }
 }
