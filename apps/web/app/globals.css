@@ -62,6 +62,12 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* Warm elevation scale (ADR-0049) registered as real utilities, so `shadow-e1`,
+     `shadow-e2`, `shadow-e3` map to the elevation tokens (which carry light/dark
+     parity). Use these at composition sites instead of ad-hoc shadow-md/lg. */
+  --shadow-e1: var(--elevation-1);
+  --shadow-e2: var(--elevation-2);
+  --shadow-e3: var(--elevation-3);
 }
 
 :root {
@@ -140,6 +146,16 @@
   --dur-fast: 120ms;
   --dur-base: 180ms;
   --dur-slow: 220ms;
+  /* Warm elevation scale (ADR-0049). The codebase had no depth language; these three
+     steps are tinted with the foreground hue (oklch ~0.21 0.006 75) so shadows sit in
+     the bone system — "paper on a warm desk", not a gray sticker. Exposed as
+     shadow-e1/e2/e3 utilities via @theme inline below.
+       e1 — resting cards / panels   e2 — hover/focus   e3 — dialogs/dropdowns/sticky */
+  --elevation-1: 0 1px 2px oklch(0.21 0.006 75 / 0.06),
+    0 1px 1px oklch(0.21 0.006 75 / 0.04);
+  --elevation-2: 0 4px 12px -2px oklch(0.21 0.006 75 / 0.1),
+    0 2px 4px -2px oklch(0.21 0.006 75 / 0.06);
+  --elevation-3: 0 12px 28px -6px oklch(0.21 0.006 75 / 0.14);
 }
 
 .dark {
@@ -193,6 +209,16 @@
   --sidebar-accent-foreground: oklch(0.96 0.004 95);
   --sidebar-border: oklch(0.97 0.004 95 / 10%);
   --sidebar-ring: var(--brand);
+  /* Dark elevation (ADR-0049): warm shadows vanish on near-black, so each step uses the
+     SAME shapes at ~2x alpha PLUS a 1px inset top-highlight (a faint bone line) so a
+     raised surface catches light against the dark canvas — depth via highlight, not just
+     shadow. Tokens keep the e1/e2/e3 names; only the values change here. */
+  --elevation-1: inset 0 1px 0 oklch(0.97 0.004 95 / 0.04),
+    0 1px 2px oklch(0.21 0.006 75 / 0.12), 0 1px 1px oklch(0.21 0.006 75 / 0.08);
+  --elevation-2: inset 0 1px 0 oklch(0.97 0.004 95 / 0.04),
+    0 4px 12px -2px oklch(0.21 0.006 75 / 0.2), 0 2px 4px -2px oklch(0.21 0.006 75 / 0.12);
+  --elevation-3: inset 0 1px 0 oklch(0.97 0.004 95 / 0.04),
+    0 12px 28px -6px oklch(0.21 0.006 75 / 0.28);
 }
 
 @layer base {
