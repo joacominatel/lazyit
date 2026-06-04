@@ -14,9 +14,10 @@ updated: 2026-06-04
 
 A **derived, read-only** unified activity feed for the dashboard — one chronological "what happened
 across the IT estate?" stream, newest first. Not a table: it is a **Postgres VIEW**
-(`recent_activity`) that `UNION ALL`s the four append-only activity sources. Nothing writes to it; it
-has no id, no timestamps of its own, no soft delete. Requested by the CEO directly ("podemos hacerlo
-con una view"). See [[0044-recent-activity-view]].
+(`recent_activity`) that `UNION ALL`s the **five** append-only activity sources. Nothing writes to it;
+it has no id, no timestamps of its own, no soft delete. Requested by the CEO directly ("podemos hacerlo
+con una view"). See [[0044-recent-activity-view]] and [[0050-user-history-and-activity-user-entity]]
+(the fifth source).
 
 ## Sources merged
 
@@ -26,6 +27,7 @@ con una view"). See [[0044-recent-activity-view]].
 | [[asset-assignment]] | open / close | `asset` | `assigned` (`assignedAt`) · `released` (`releasedAt`) |
 | [[access-grant]] | open / close | `application` | `granted` (`grantedAt`) · `revoked` (`revokedAt`) |
 | [[consumable-movement]] | each movement | `consumable` | `stock_in` / `stock_out` / `stock_adjustment` |
+| [[user-history]] (DEBT-2, #185) | the event row | `user` | the lowercased `eventType`: `created` · `updated` · `role_changed` · `deleted` · `restored` · `password_reset_sent` |
 
 The full closed verb set is the single source of truth for the `action` filter's allowlist
 (`RECENT_ACTIVITY_ACTIONS` in `@lazyit/shared`). An unknown verb on the filter is a 400, never a
@@ -38,8 +40,9 @@ silent no-match. Keep it in sync with the view if a new source verb is added.
   actor whose audit FK was set null.
 - `actorName` — the actor's display name (`firstName || ' ' || lastName`), resolved with a `LEFT JOIN`
   to `users` in the API read (lightly); `null` when there is no resolvable actor.
-- `entityType` — `asset` · `application` · `consumable` (the pillar the affected entity belongs to).
-- `entityId` — the affected entity's id (a cuid).
+- `entityType` — `asset` · `application` · `consumable` · `user` (the pillar the affected entity
+  belongs to; `user` added by DEBT-2 — [[0050-user-history-and-activity-user-entity]]).
+- `entityId` — the affected entity's id (a cuid for asset/application/consumable; a uuid for `user`).
 - `action` — a stable machine verb (see the table above).
 - `summary` — a terse, server-built English sentence for the feed line.
 
@@ -50,11 +53,14 @@ query is `RecentActivityQuerySchema` (the optional filters intersected with the 
 ## Business rules
 
 - **Soft delete:** the view filters out rows whose **parent** entity (asset / application /
-  consumable) is soft-deleted — it joins each branch to its parent on `deletedAt IS NULL`, since the
-  Prisma soft-delete extension ([[0032-soft-delete-middleware]]) does not touch raw SQL. The four
-  log/join tables are themselves append-only (no `deletedAt`).
+  consumable / **user**) is soft-deleted — it joins each branch to its parent on `deletedAt IS NULL`,
+  since the Prisma soft-delete extension ([[0032-soft-delete-middleware]]) does not touch raw SQL. The
+  five log/join tables are themselves append-only (no `deletedAt`). **Consequence for `user`:** a
+  `deleted` (offboard) row never appears in the feed (its subject is now soft-deleted) — the offboarding
+  still surfaces via the released/revoked asset+access branches; a `restored` row *does* appear (the
+  subject is live again). The full `deleted` event stays on the per-user [[user-history]] timeline.
 - **Read-only & derived:** there is no persisted RecentActivity entity; the figures come straight
-  from the four sources. New sources extend the feed by adding a `UNION ALL` branch to the view.
+  from the five sources. New sources extend the feed by adding a `UNION ALL` branch to the view.
 - **Headline, not full detail:** `summary` is a one-line headline; richer per-event detail (e.g. a
   status `from → to`) is NOT carried here — the per-asset [[asset-history]] timeline still owns that.
 
