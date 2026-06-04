@@ -1,6 +1,7 @@
 "use client";
 
 import { PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -60,26 +61,33 @@ export function specsToRows(specs: Record<string, unknown> | null | undefined): 
 }
 
 /**
+ * A stable error code for a custom-field row, translated at the render site (the codes
+ * map to keys under `assets.form.customFields`). `validateRows` is a pure helper called
+ * outside React render, so it can't translate — it returns codes instead of copy.
+ */
+export type CustomFieldError = "nameRequired" | "duplicateName";
+
+/**
  * Per-row validation problems for the custom-fields editor, keyed by row `id`:
  * a missing key on a row that has a value, or a key that duplicates an earlier row.
  * A row that is entirely empty (no key, no value) is ignored — it's just a blank
- * slot the user hasn't filled in.
+ * slot the user hasn't filled in. Values are stable error codes (see {@link CustomFieldError}).
  */
 export function validateRows(rows: CustomFieldRow[]): {
-  errors: Record<string, string>;
+  errors: Record<string, CustomFieldError>;
   ok: boolean;
 } {
-  const errors: Record<string, string> = {};
+  const errors: Record<string, CustomFieldError> = {};
   const seen = new Set<string>();
   for (const row of rows) {
     const key = row.key.trim();
     const hasValue = row.value.trim() !== "";
     if (key === "") {
-      if (hasValue) errors[row.id] = "Name is required.";
+      if (hasValue) errors[row.id] = "nameRequired";
       continue;
     }
     if (seen.has(key)) {
-      errors[row.id] = "Duplicate field name.";
+      errors[row.id] = "duplicateName";
       continue;
     }
     seen.add(key);
@@ -125,9 +133,11 @@ export function CustomFieldsEditor({
   onChange,
 }: {
   rows: CustomFieldRow[];
-  errors: Record<string, string>;
+  errors: Record<string, CustomFieldError>;
   onChange: (rows: CustomFieldRow[]) => void;
 }) {
+  const t = useTranslations("assets.form.customFields");
+
   function updateRow(id: string, patch: Partial<CustomFieldRow>) {
     onChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   }
@@ -140,16 +150,11 @@ export function CustomFieldsEditor({
 
   return (
     <Field>
-      <FieldLabel>Custom fields</FieldLabel>
-      <FieldDescription>
-        Free-form attributes stored on the asset (e.g. CPU, RAM, IP address).
-        Per-category schemas are a future improvement (ADR-0007).
-      </FieldDescription>
+      <FieldLabel>{t("label")}</FieldLabel>
+      <FieldDescription>{t("description")}</FieldDescription>
 
       {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No custom fields yet.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("empty")}</p>
       ) : (
         <ul className="space-y-2">
           {rows.map((row, index) => {
@@ -158,30 +163,30 @@ export function CustomFieldsEditor({
               <li key={row.id} className="space-y-1">
                 <div className="flex items-start gap-2">
                   <Input
-                    aria-label={`Field ${index + 1} name`}
+                    aria-label={t("fieldNameLabel", { index: index + 1 })}
                     aria-invalid={error ? true : undefined}
                     value={row.key}
                     onChange={(event) =>
                       updateRow(row.id, { key: event.target.value })
                     }
-                    placeholder="Name (e.g. ram)"
+                    placeholder={t("namePlaceholder")}
                     className="flex-1"
                   />
                   <Input
-                    aria-label={`Field ${index + 1} value`}
+                    aria-label={t("fieldValueLabel", { index: index + 1 })}
                     value={row.value}
                     onChange={(event) =>
                       updateRow(row.id, { value: event.target.value })
                     }
-                    placeholder="Value (e.g. 16GB)"
+                    placeholder={t("valuePlaceholder")}
                     className="flex-1"
                   />
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    aria-label={`Remove field ${index + 1}`}
-                    title="Remove field"
+                    aria-label={t("removeFieldLabel", { index: index + 1 })}
+                    title={t("removeFieldTitle")}
                     onClick={() => removeRow(row.id)}
                   >
                     <TrashIcon />
@@ -189,7 +194,7 @@ export function CustomFieldsEditor({
                 </div>
                 {error && (
                   <p role="alert" className="text-sm text-destructive">
-                    {error}
+                    {t(error)}
                   </p>
                 )}
               </li>
@@ -206,7 +211,7 @@ export function CustomFieldsEditor({
           onClick={addRow}
         >
           <PlusIcon />
-          Add field
+          {t("addField")}
         </Button>
       </div>
     </Field>

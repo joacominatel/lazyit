@@ -11,6 +11,7 @@ import {
   UpdateAssetSchema,
 } from "@lazyit/shared";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -37,8 +38,9 @@ import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useLocations } from "@/lib/api/hooks/use-locations";
 import { notifyError } from "@/lib/api/notify-error";
-import { formatAssetStatus } from "./asset-status-badge";
+import { useAssetStatusLabel } from "./asset-status-badge";
 import {
+  type CustomFieldError,
   type CustomFieldRow,
   CustomFieldsEditor,
   rowsToSpecs,
@@ -129,6 +131,9 @@ export function AssetForm({
 }) {
   const isEdit = asset != null;
   const router = useRouter();
+  const t = useTranslations("assets.form");
+  const tc = useTranslations("common");
+  const statusLabel = useAssetStatusLabel();
   const { data: models } = useAssetModels();
   const { data: locations } = useLocations();
   const createAsset = useCreateAsset();
@@ -142,7 +147,9 @@ export function AssetForm({
     specsToRows(specsSource),
   );
   const [specRows, setSpecRows] = useState<CustomFieldRow[]>(initialRows);
-  const [specErrors, setSpecErrors] = useState<Record<string, string>>({});
+  const [specErrors, setSpecErrors] = useState<
+    Record<string, CustomFieldError>
+  >({});
   // Did the asset arrive with any specs? Used to clear them on edit (see onSubmit).
   const hadSpecs = asset?.specs != null && Object.keys(asset.specs).length > 0;
 
@@ -183,21 +190,21 @@ export function AssetForm({
         { id: asset.id, data: payload },
         {
           onSuccess: (updated) => {
-            toast.success("Asset saved");
+            toast.success(t("savedToast"));
             router.push(`/assets/${updated.id}`);
           },
           onError: (error) =>
-            notifyError(error, "Couldn't save the asset"),
+            notifyError(error, t("saveError")),
         },
       );
     } else {
       createAsset.mutate(payload, {
         onSuccess: (created) => {
-          toast.success("Asset created");
+          toast.success(t("createdToast"));
           router.push(`/assets/${created.id}`);
         },
         onError: (error) =>
-          notifyError(error, "Couldn't create the asset"),
+          notifyError(error, t("createError")),
       });
     }
   });
@@ -210,12 +217,12 @@ export function AssetForm({
           name="name"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="name">Name</FieldLabel>
+              <FieldLabel htmlFor="name">{t("name")}</FieldLabel>
               <Input
                 {...field}
                 id="name"
                 value={field.value ?? ""}
-                placeholder="Ada's laptop"
+                placeholder={t("namePlaceholder")}
                 aria-invalid={fieldState.invalid || undefined}
                 autoFocus
               />
@@ -230,7 +237,7 @@ export function AssetForm({
             name="status"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="status">Status</FieldLabel>
+                <FieldLabel htmlFor="status">{t("status")}</FieldLabel>
                 <Select value={field.value} onValueChange={field.onChange}>
                   <SelectTrigger id="status" className="w-full">
                     <SelectValue />
@@ -238,7 +245,7 @@ export function AssetForm({
                   <SelectContent>
                     {AssetStatusSchema.options.map((status) => (
                       <SelectItem key={status} value={status}>
-                        {formatAssetStatus(status)}
+                        {statusLabel(status)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -253,7 +260,7 @@ export function AssetForm({
             name="modelId"
             render={({ field }) => (
               <Field>
-                <FieldLabel htmlFor="modelId">Model</FieldLabel>
+                <FieldLabel htmlFor="modelId">{t("model")}</FieldLabel>
                 <CreatableField
                   label="model"
                   renderDialog={(dialog) => (
@@ -271,10 +278,10 @@ export function AssetForm({
                     }
                   >
                     <SelectTrigger id="modelId" className="w-full">
-                      <SelectValue placeholder="Select a model" />
+                      <SelectValue placeholder={t("modelPlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={NONE}>— None —</SelectItem>
+                      <SelectItem value={NONE}>{t("noneOption")}</SelectItem>
                       {(models ?? []).map((model) => (
                         <SelectItem key={model.id} value={model.id}>
                           {model.manufacturer} {model.name}
@@ -292,7 +299,7 @@ export function AssetForm({
             name="locationId"
             render={({ field }) => (
               <Field>
-                <FieldLabel htmlFor="locationId">Location</FieldLabel>
+                <FieldLabel htmlFor="locationId">{t("location")}</FieldLabel>
                 <CreatableField
                   label="location"
                   renderDialog={(dialog) => (
@@ -310,10 +317,10 @@ export function AssetForm({
                     }
                   >
                     <SelectTrigger id="locationId" className="w-full">
-                      <SelectValue placeholder="Select a location" />
+                      <SelectValue placeholder={t("locationPlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={NONE}>— None —</SelectItem>
+                      <SelectItem value={NONE}>{t("noneOption")}</SelectItem>
                       {(locations ?? []).map((location) => (
                         <SelectItem key={location.id} value={location.id}>
                           {location.name}
@@ -331,7 +338,7 @@ export function AssetForm({
             name="serial"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="serial">Serial</FieldLabel>
+                <FieldLabel htmlFor="serial">{t("serial")}</FieldLabel>
                 <Input
                   id="serial"
                   name={field.name}
@@ -341,7 +348,7 @@ export function AssetForm({
                   onChange={(event) =>
                     field.onChange(event.target.value || undefined)
                   }
-                  placeholder="SN-12345"
+                  placeholder={t("serialPlaceholder")}
                   aria-invalid={fieldState.invalid || undefined}
                 />
                 <FieldError errors={[fieldState.error]} />
@@ -354,7 +361,7 @@ export function AssetForm({
             name="assetTag"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="assetTag">Asset tag</FieldLabel>
+                <FieldLabel htmlFor="assetTag">{t("assetTag")}</FieldLabel>
                 <Input
                   id="assetTag"
                   name={field.name}
@@ -364,7 +371,7 @@ export function AssetForm({
                   onChange={(event) =>
                     field.onChange(event.target.value || undefined)
                   }
-                  placeholder="LZ-0001"
+                  placeholder={t("assetTagPlaceholder")}
                   className="font-mono"
                   aria-invalid={fieldState.invalid || undefined}
                 />
@@ -378,7 +385,7 @@ export function AssetForm({
             name="purchaseDate"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="purchaseDate">Purchase date</FieldLabel>
+                <FieldLabel htmlFor="purchaseDate">{t("purchaseDate")}</FieldLabel>
                 <Input
                   id="purchaseDate"
                   type="date"
@@ -401,7 +408,7 @@ export function AssetForm({
             name="warrantyEnd"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="warrantyEnd">Warranty end</FieldLabel>
+                <FieldLabel htmlFor="warrantyEnd">{t("warrantyEnd")}</FieldLabel>
                 <Input
                   id="warrantyEnd"
                   type="date"
@@ -425,7 +432,7 @@ export function AssetForm({
           name="notes"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="notes">Notes</FieldLabel>
+              <FieldLabel htmlFor="notes">{t("notes")}</FieldLabel>
               <Textarea
                 id="notes"
                 name={field.name}
@@ -460,11 +467,11 @@ export function AssetForm({
           disabled={isPending}
           onClick={() => router.push(asset ? `/assets/${asset.id}` : "/assets")}
         >
-          Cancel
+          {tc("cancel")}
         </Button>
         <Button type="submit" form={FORM_ID} disabled={isPending}>
           {isPending && <ArrowPathIcon className="animate-spin" />}
-          {isEdit ? "Save changes" : "Create asset"}
+          {isEdit ? t("saveChanges") : t("createAsset")}
         </Button>
       </div>
     </form>

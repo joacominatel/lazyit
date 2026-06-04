@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { DetailSkeleton } from "@/components/detail-panel";
@@ -10,6 +11,8 @@ import { AssetForm } from "../../_components/asset-form";
 
 export default function EditAssetPage() {
   const params = useParams<{ id: string }>();
+  const t = useTranslations("assets.form");
+  const tList = useTranslations("assets.list");
   const { data: asset, isLoading, isError, error, refetch } = useAsset(
     params.id,
   );
@@ -26,8 +29,8 @@ export default function EditAssetPage() {
     return (
       <div className="mx-auto max-w-3xl">
         <ErrorState
-          title="Asset not found"
-          description="It may have been deleted, or the API is unreachable."
+          title={t("notFoundTitle")}
+          description={t("notFoundDescription")}
           onRetry={() => refetch()}
           error={error}
         />
@@ -41,13 +44,13 @@ export default function EditAssetPage() {
         breadcrumb={
           <Breadcrumb
             items={[
-              { label: "Assets", href: "/assets" },
+              { label: tList("title"), href: "/assets" },
               { label: asset.name, href: `/assets/${asset.id}` },
-              { label: "Edit" },
+              { label: t("breadcrumbEdit") },
             ]}
           />
         }
-        title="Edit asset"
+        title={t("editTitle")}
       />
       <AssetForm asset={asset} />
     </div>
