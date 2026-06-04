@@ -103,13 +103,15 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
     + `shadow-e1`→`e2` + ring `/10`→`/15`). Apply at call sites: `<Card className={lift}>`.
     Reduced-motion-safe (globals.css neutralizes the translate). Don't add it to static table
     rows (vertical jitter hurts scanning).
-  - **Motion utilities:** `animate-rise-in` (entrance settle) · `animate-pulse-soft` (the ONE
+  - **Motion utilities:** `animate-rise-in` (component-level entrance settle, 12px rise + fade) ·
+    `animate-fade-in` (opacity-only sibling for the ROUTE-level settle — no transform, so it never
+    traps `position: sticky` descendants in a containing block) · `animate-pulse-soft` (the ONE
     calm attention heartbeat — danger dots only) · `animate-shimmer` (skeleton sweep, composed
     at call sites — never edit `ui/skeleton.tsx`) · `animate-check-draw` (success-check; the
     only `--ease-spring` use). All collapse to instant under `prefers-reduced-motion` via the
     single consolidated block in globals.css. Easing/duration tokens: `--ease-out-quad` /
     `--ease-spring` / `--dur-fast|base|slow`. `app/(app)/template.tsx` gives every route a
-    free `rise-in` cross-route settle.
+    free `fade-in` cross-route settle (opacity only — sticky-safe).
   - **Pillar colour** (`bg-pillar-*` / `text-pillar-*`, registered like `--color-avatar-*` so
     the JIT scanner keeps full class strings — **never** `bg-[var(--pillar)]/10`). LOCKED map:
     **Inventory = teal · Access = indigo (the brand) · Knowledge = green · Manage = rose**;
