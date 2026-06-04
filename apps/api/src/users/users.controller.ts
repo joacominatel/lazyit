@@ -353,7 +353,12 @@ export class UsersController {
       're-assign the assets that offboarding revoked/released — those are separate, intentional acts.',
   })
   @ApiOkResponse({ type: UserDto })
-  restore(@Param('id', ParseUUIDPipe) id: string) {
-    return this.users.restore(id);
+  restore(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    // Resolve the principal so the RESTORED history row (DEBT-2, issue #185) names the right actor —
+    // a human → performedById, an SA holding user:manage → serviceAccountId (CHECK-safe; ADR-0048).
+    return this.users.restore(id, this.actor.resolveActor(principal));
   }
 }
