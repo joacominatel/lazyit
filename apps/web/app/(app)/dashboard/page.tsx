@@ -114,7 +114,7 @@ export default function DashboardPage() {
  * full-width — Needs Attention, then the four pillar cards. Below, a two-column grid pairs the
  * Recent Activity feed (~3/5) with a sticky Pulse rail (~2/5); under `lg` the rail reflows below
  * the feed. The rail consumes the SAME summary snapshot (zero extra fetch) and the resolved
- * quick-actions set, and flips to a cheerful all-clear when nothing needs attention.
+ * quick-actions set; the all-clear reassurance is owned by the Needs-attention zone above.
  */
 function DashboardContent({
   summary,
@@ -124,7 +124,6 @@ function DashboardContent({
   quickActions: QuickAction[];
 }) {
   const { assets, access, consumables, articles } = summary;
-  const attentionCount = countAttentionItems(summary);
 
   return (
     <div className="space-y-6">
@@ -223,11 +222,7 @@ function DashboardContent({
           <RecentActivityPanel />
         </div>
         <div className="lg:col-span-2">
-          <PulseRail
-            summary={summary}
-            attentionCount={attentionCount}
-            quickActions={quickActions}
-          />
+          <PulseRail summary={summary} quickActions={quickActions} />
         </div>
       </div>
     </div>
@@ -559,11 +554,6 @@ function buildAttentionItems(summary: DashboardSummary): AttentionItem[] {
       },
     ] satisfies AttentionItem[]
   ).filter((item) => item.count > 0);
-}
-
-/** How many items currently need attention — drives the Pulse rail's all-clear vs quick-actions tile. */
-function countAttentionItems(summary: DashboardSummary): number {
-  return buildAttentionItems(summary).length;
 }
 
 /**
