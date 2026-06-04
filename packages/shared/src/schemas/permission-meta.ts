@@ -491,7 +491,8 @@ export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
     id: "readOnly",
     label: "Read-only",
     description: "View access across the app (no edits).",
-    // === VIEWER seed default: all reads except the two pre-tightened sensitive reads.
+    // === VIEWER seed default: all reads except the two pre-tightened sensitive reads
+    // and the admin-only reads (logs:read).
     permissions: buildDefaultRolePermissions().VIEWER,
   },
   {
