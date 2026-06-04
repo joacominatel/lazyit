@@ -25,7 +25,7 @@ interface PageHeaderProps {
   title: ReactNode;
   /**
    * Optional pillar identity. When set together with {@link icon}, a tinted icon chip
-   * (`bg-pillar-*/10` + the ≥24px glyph) renders to the left of the title, carrying the
+   * (a pillar `/10` tint + the ≥24px glyph) renders to the left of the title, carrying the
    * route's pillar colour from the dashboard card to the list page. Decorative only — the
    * chip is `aria-hidden` and the title text stays on `--foreground` (ADR-0049 §4 AA rule).
    */
