@@ -272,7 +272,9 @@
    redesign composes them at call sites). Every animation degrades to instant under
    `prefers-reduced-motion: reduce` via the consolidated block at the bottom.
 
-   - .animate-rise-in  : section/card/row settle (12px rise + fade).
+   - .animate-rise-in  : section/card/row settle (12px rise + fade) — component-level only.
+   - .animate-fade-in  : route-level cross-route settle (opacity only, no transform, so it
+                         never traps sticky descendants in a transform containing block).
    - .animate-pulse-soft : ONE calm attention heartbeat — danger dots only.
    - .animate-shimmer  : skeleton sweep (composed onto Skeleton at call sites).
    - .animate-check-draw : success-check stroke draw (the single --ease-spring use).
@@ -286,6 +288,19 @@
     to {
       opacity: 1;
       transform: none;
+    }
+  }
+
+  /* Opacity-only sibling of rise-in, for the route-level cross-route settle. It carries NO
+     transform, so it never establishes a containing block — a `position: sticky` descendant
+     keeps sticking to the viewport during the ~220ms settle. Use rise-in for component-level
+     surfaces (cards/lists) where there is no sticky ancestor; use fade-in at the route root. */
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
     }
   }
 
@@ -319,6 +334,10 @@
 
   .animate-rise-in {
     animation: rise-in var(--dur-slow) var(--ease-out-quad) both;
+  }
+
+  .animate-fade-in {
+    animation: fade-in var(--dur-slow) var(--ease-out-quad) both;
   }
 
   .animate-pulse-soft {
@@ -360,9 +379,11 @@
     scroll-behavior: auto !important;
   }
 
-  /* Neutralize the hover lift so reduced-motion users still get the elevation/ring
-     change without any positional movement. */
-  .lift:hover,
+  /* Neutralize the hover lift so reduced-motion users still get the elevation/ring change
+     without any positional movement. `lift` (lib/recipes.ts) is a className recipe that
+     EXPANDS to utility classes — there is no literal `lift` element — so the guard targets
+     the real translate utility the recipe emits (`hover:-translate-y-0.5`), not the recipe
+     name. Add any further translate utilities the recipe gains to this list. */
   .hover\:-translate-y-0\.5:hover {
     transform: none !important;
   }
