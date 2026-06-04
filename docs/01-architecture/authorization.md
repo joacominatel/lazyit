@@ -96,11 +96,13 @@ three roles **except** two tighter tiers:
   (it gets 403); `GET /search` additionally drops the `users` facet for a caller without `user:read`.
 - the **admin-only reads** — `ADMIN_ONLY_READS`, today just `logs:read` — seeded to **ADMIN only**
   (excluded from BOTH MEMBER and VIEWER, strictly tighter than the pre-tightening; the two sets are
-  disjoint). `logs:read` is the **first admin-only read** (issue #175): it will gate the future
-  Reports/Informes section over the estate-wide activity log. It is **seeded but not yet enforced** —
-  no `logs` endpoint exists yet, so this wave only adds the catalog entry + the ADMIN-only default; the
-  GET annotation lands in a later wave. Like every non-ADMIN row it stays admin-grantable from the role
-  matrix.
+  disjoint). `logs:read` is the **first admin-only read** (issue #175): it gates the estate-wide
+  activity log behind the Reports/Informes section. **Now enforced (issue #181):** `GET /dashboard/activity`
+  — the unified [[recent-activity]] feed that both the dashboard panel and the Informes screen consume —
+  is annotated `@RequirePermission('logs:read')`, replacing its earlier `dashboard:read` gate and
+  closing the v1 gap where the sensitive who-did-what data was reachable on a read every role held. The
+  same endpoint also gained optional server-side filters (entityType/entityId/actorId/action/from/to/q).
+  Like every non-ADMIN row, `logs:read` stays admin-grantable from the role matrix.
 
 `GET /users/me` stays open (the self-read the web gates its UI off). This closed the long-standing
 read-authz gap (the old DEF-001 residual / "reads open to any authenticated user"). The seed is derived
