@@ -1,1 +1,102 @@
-{}
+{
+  "type": {
+    "OFFICE": "Office",
+    "DATACENTER": "Datacenter",
+    "RACK": "Rack",
+    "REMOTE": "Remote",
+    "STORAGE": "Storage",
+    "OTHER": "Other"
+  },
+  "list": {
+    "title": "Locations",
+    "subtitle": "Where your assets physically live.",
+    "newLocation": "New location",
+    "searchLabel": "Search locations",
+    "searchPlaceholder": "Search by name…",
+    "allTypes": "All types",
+    "selectAll": "Select all locations on this page",
+    "selectRow": "Select {name}",
+    "restore": "Restore",
+    "loadError": "Could not load locations",
+    "filteredEmpty": "No locations match your filters.",
+    "archivedEmpty": "No archived locations.",
+    "chipSearch": "Search: “{query}”",
+    "chipType": "Type: {type}",
+    "columns": {
+      "name": "Name",
+      "type": "Type",
+      "floor": "Floor",
+      "address": "Address",
+      "updated": "Updated",
+      "actions": "Actions"
+    },
+    "meta": {
+      "floor": "Floor",
+      "updated": "Updated",
+      "address": "Address"
+    },
+    "toast": {
+      "restored": "{name} restored",
+      "restoreError": "Couldn't restore the location",
+      "restoreManyError": "Couldn't restore the selected locations"
+    }
+  },
+  "empty": {
+    "title": "No locations yet",
+    "description": "Add the offices, floors and storage rooms where assets live — then place each asset on the map of your estate.",
+    "action": "Add your first location"
+  },
+  "form": {
+    "createTitle": "New location",
+    "editTitle": "Edit location",
+    "createDescription": "A place where assets live — an office, datacenter, rack, and so on.",
+    "editDescription": "Update the details of this location.",
+    "createSubmit": "Create location",
+    "editSubmit": "Save changes",
+    "fields": {
+      "name": "Name",
+      "type": "Type",
+      "address": "Address",
+      "floor": "Floor",
+      "description": "Description",
+      "notes": "Notes"
+    },
+    "placeholders": {
+      "name": "HQ — 3rd floor",
+      "type": "Select a type",
+      "address": "221B Baker Street",
+      "floor": "PB, Mezzanine, Subsuelo 1…"
+    },
+    "toast": {
+      "created": "Location created",
+      "createError": "Couldn't create location",
+      "updated": "Location updated",
+      "updateError": "Couldn't update location"
+    }
+  },
+  "detail": {
+    "breadcrumb": "Locations",
+    "deleteAria": "Delete location",
+    "notFoundTitle": "Location not found",
+    "notFoundDescription": "It may have been deleted, or the API is unreachable.",
+    "detailsTitle": "Details",
+    "fields": {
+      "type": "Type",
+      "floor": "Floor",
+      "address": "Address",
+      "lastUpdated": "Last updated",
+      "notes": "Notes"
+    },
+    "assetsTitle": "Assets here",
+    "assetsTitleCount": "Assets here ({count})",
+    "newAsset": "New asset",
+    "noAssets": "No assets are located here yet.",
+    "assetColumns": {
+      "name": "Name",
+      "assetTag": "Asset tag",
+      "category": "Category",
+      "status": "Status",
+      "owners": "Owners"
+    }
+  }
+}

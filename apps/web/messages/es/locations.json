@@ -1,1 +1,102 @@
-{}
+{
+  "type": {
+    "OFFICE": "Oficina",
+    "DATACENTER": "Centro de datos",
+    "RACK": "Rack",
+    "REMOTE": "Remoto",
+    "STORAGE": "Depósito",
+    "OTHER": "Otro"
+  },
+  "list": {
+    "title": "Ubicaciones",
+    "subtitle": "Dónde residen físicamente tus activos.",
+    "newLocation": "Nueva ubicación",
+    "searchLabel": "Buscar ubicaciones",
+    "searchPlaceholder": "Buscar por nombre…",
+    "allTypes": "Todos los tipos",
+    "selectAll": "Seleccionar todas las ubicaciones de esta página",
+    "selectRow": "Seleccionar {name}",
+    "restore": "Restaurar",
+    "loadError": "No se pudieron cargar las ubicaciones",
+    "filteredEmpty": "Ninguna ubicación coincide con tus filtros.",
+    "archivedEmpty": "No hay ubicaciones archivadas.",
+    "chipSearch": "Búsqueda: “{query}”",
+    "chipType": "Tipo: {type}",
+    "columns": {
+      "name": "Nombre",
+      "type": "Tipo",
+      "floor": "Piso",
+      "address": "Dirección",
+      "updated": "Actualizado",
+      "actions": "Acciones"
+    },
+    "meta": {
+      "floor": "Piso",
+      "updated": "Actualizado",
+      "address": "Dirección"
+    },
+    "toast": {
+      "restored": "{name} restaurada",
+      "restoreError": "No se pudo restaurar la ubicación",
+      "restoreManyError": "No se pudieron restaurar las ubicaciones seleccionadas"
+    }
+  },
+  "empty": {
+    "title": "Aún no hay ubicaciones",
+    "description": "Agrega las oficinas, pisos y depósitos donde residen los activos, y luego ubica cada activo en el mapa de tu organización.",
+    "action": "Agregar tu primera ubicación"
+  },
+  "form": {
+    "createTitle": "Nueva ubicación",
+    "editTitle": "Editar ubicación",
+    "createDescription": "Un lugar donde residen los activos: una oficina, un centro de datos, un rack, etc.",
+    "editDescription": "Actualiza los detalles de esta ubicación.",
+    "createSubmit": "Crear ubicación",
+    "editSubmit": "Guardar cambios",
+    "fields": {
+      "name": "Nombre",
+      "type": "Tipo",
+      "address": "Dirección",
+      "floor": "Piso",
+      "description": "Descripción",
+      "notes": "Notas"
+    },
+    "placeholders": {
+      "name": "Casa central — 3.er piso",
+      "type": "Selecciona un tipo",
+      "address": "Av. Siempre Viva 742",
+      "floor": "PB, Entrepiso, Subsuelo 1…"
+    },
+    "toast": {
+      "created": "Ubicación creada",
+      "createError": "No se pudo crear la ubicación",
+      "updated": "Ubicación actualizada",
+      "updateError": "No se pudo actualizar la ubicación"
+    }
+  },
+  "detail": {
+    "breadcrumb": "Ubicaciones",
+    "deleteAria": "Eliminar ubicación",
+    "notFoundTitle": "Ubicación no encontrada",
+    "notFoundDescription": "Es posible que se haya eliminado, o que la API no esté disponible.",
+    "detailsTitle": "Detalles",
+    "fields": {
+      "type": "Tipo",
+      "floor": "Piso",
+      "address": "Dirección",
+      "lastUpdated": "Última actualización",
+      "notes": "Notas"
+    },
+    "assetsTitle": "Activos aquí",
+    "assetsTitleCount": "Activos aquí ({count})",
+    "newAsset": "Nuevo activo",
+    "noAssets": "Aún no hay activos ubicados aquí.",
+    "assetColumns": {
+      "name": "Nombre",
+      "assetTag": "Etiqueta",
+      "category": "Categoría",
+      "status": "Estado",
+      "owners": "Responsables"
+    }
+  }
+}

@@ -1,12 +1,21 @@
+"use client";
+
 import type { LocationType } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 
-/** "DATACENTER" → "Datacenter". The LocationType enum values are single words. */
-export function formatLocationType(type: LocationType): string {
-  return type.charAt(0) + type.slice(1).toLowerCase();
+/**
+ * Resolves a {@link LocationType} enum value to its localized display label
+ * (e.g. "DATACENTER" → "Datacenter" / "Centro de datos"). The enum value itself
+ * is data and never translated — only its display label is.
+ */
+export function useLocationTypeLabel(): (type: LocationType) => string {
+  const t = useTranslations("locations");
+  return (type: LocationType) => t(`type.${type}`);
 }
 
 /** Small, neutral badge for a location's classification. */
 export function LocationTypeBadge({ type }: { type: LocationType }) {
-  return <Badge variant="secondary">{formatLocationType(type)}</Badge>;
+  const label = useLocationTypeLabel();
+  return <Badge variant="secondary">{label(type)}</Badge>;
 }

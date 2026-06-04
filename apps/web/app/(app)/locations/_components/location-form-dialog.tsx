@@ -8,6 +8,7 @@ import {
   type Location,
   LocationTypeSchema,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -40,7 +41,7 @@ import {
   useUpdateLocation,
 } from "@/lib/api/hooks/use-location-mutations";
 import { notifyError } from "@/lib/api/notify-error";
-import { formatLocationType } from "./location-type-badge";
+import { useLocationTypeLabel } from "./location-type-badge";
 
 const FORM_ID = "location-form";
 
@@ -80,6 +81,9 @@ export function LocationFormDialog({
   location,
   onCreated,
 }: LocationFormDialogProps) {
+  const t = useTranslations("locations");
+  const tc = useTranslations("common");
+  const locationTypeLabel = useLocationTypeLabel();
   const isEdit = location != null;
   const createLocation = useCreateLocation();
   const updateLocation = useUpdateLocation();
@@ -102,22 +106,22 @@ export function LocationFormDialog({
         { id: location.id, data: values },
         {
           onSuccess: () => {
-            toast.success("Location updated");
+            toast.success(t("form.toast.updated"));
             onOpenChange(false);
           },
           onError: (error) =>
-            notifyError(error, "Couldn't update location"),
+            notifyError(error, t("form.toast.updateError")),
         },
       );
     } else {
       createLocation.mutate(values, {
         onSuccess: (created) => {
           onCreated?.(created);
-          toast.success("Location created");
+          toast.success(t("form.toast.created"));
           onOpenChange(false);
         },
         onError: (error) =>
-          notifyError(error, "Couldn't create location"),
+          notifyError(error, t("form.toast.createError")),
       });
     }
   });
@@ -126,11 +130,13 @@ export function LocationFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit location" : "New location"}</DialogTitle>
+          <DialogTitle>
+            {isEdit ? t("form.editTitle") : t("form.createTitle")}
+          </DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Update the details of this location."
-              : "A place where assets live — an office, datacenter, rack, and so on."}
+              ? t("form.editDescription")
+              : t("form.createDescription")}
           </DialogDescription>
         </DialogHeader>
 
@@ -152,12 +158,12 @@ export function LocationFormDialog({
               name="name"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="name">Name</FieldLabel>
+                  <FieldLabel htmlFor="name">{t("form.fields.name")}</FieldLabel>
                   <Input
                     {...field}
                     id="name"
                     value={field.value ?? ""}
-                    placeholder="HQ — 3rd floor"
+                    placeholder={t("form.placeholders.name")}
                     aria-invalid={fieldState.invalid || undefined}
                     autoFocus
                   />
@@ -171,19 +177,19 @@ export function LocationFormDialog({
               name="type"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="type">Type</FieldLabel>
+                  <FieldLabel htmlFor="type">{t("form.fields.type")}</FieldLabel>
                   <Select value={field.value} onValueChange={field.onChange}>
                     <SelectTrigger
                       id="type"
                       className="w-full"
                       aria-invalid={fieldState.invalid || undefined}
                     >
-                      <SelectValue placeholder="Select a type" />
+                      <SelectValue placeholder={t("form.placeholders.type")} />
                     </SelectTrigger>
                     <SelectContent>
                       {LocationTypeSchema.options.map((value) => (
                         <SelectItem key={value} value={value}>
-                          {formatLocationType(value)}
+                          {locationTypeLabel(value)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -198,7 +204,7 @@ export function LocationFormDialog({
               name="address"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="address">Address</FieldLabel>
+                  <FieldLabel htmlFor="address">{t("form.fields.address")}</FieldLabel>
                   <Input
                     id="address"
                     name={field.name}
@@ -208,7 +214,7 @@ export function LocationFormDialog({
                     onChange={(e) =>
                       field.onChange(e.target.value || undefined)
                     }
-                    placeholder="221B Baker Street"
+                    placeholder={t("form.placeholders.address")}
                     aria-invalid={fieldState.invalid || undefined}
                   />
                   <FieldError errors={[fieldState.error]} />
@@ -221,7 +227,7 @@ export function LocationFormDialog({
               name="floor"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="floor">Floor</FieldLabel>
+                  <FieldLabel htmlFor="floor">{t("form.fields.floor")}</FieldLabel>
                   <Input
                     id="floor"
                     name={field.name}
@@ -231,7 +237,7 @@ export function LocationFormDialog({
                     onChange={(e) =>
                       field.onChange(e.target.value || undefined)
                     }
-                    placeholder="PB, Mezzanine, Subsuelo 1…"
+                    placeholder={t("form.placeholders.floor")}
                     aria-invalid={fieldState.invalid || undefined}
                   />
                   <FieldError errors={[fieldState.error]} />
@@ -244,7 +250,7 @@ export function LocationFormDialog({
               name="description"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="description">Description</FieldLabel>
+                  <FieldLabel htmlFor="description">{t("form.fields.description")}</FieldLabel>
                   <Textarea
                     id="description"
                     name={field.name}
@@ -267,7 +273,7 @@ export function LocationFormDialog({
               name="notes"
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
-                  <FieldLabel htmlFor="notes">Notes</FieldLabel>
+                  <FieldLabel htmlFor="notes">{t("form.fields.notes")}</FieldLabel>
                   <Textarea
                     id="notes"
                     name={field.name}
@@ -294,11 +300,11 @@ export function LocationFormDialog({
             onClick={() => onOpenChange(false)}
             disabled={isPending}
           >
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button type="submit" form={FORM_ID} disabled={isPending}>
             {isPending && <ArrowPathIcon className="animate-spin" />}
-            {isEdit ? "Save changes" : "Create location"}
+            {isEdit ? t("form.editSubmit") : t("form.createSubmit")}
           </Button>
         </DialogFooter>
       </DialogContent>
