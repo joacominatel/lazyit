@@ -367,9 +367,13 @@ function PillarCard({
  * `assets.byStatus`, so the headline count gains a glanceable "how healthy is the estate?" read
  * without any new backend (the summary already zero-fills every status).
  *
- * Buckets: Operational → `--success`; In maintenance + In storage → `--warning` (in-flight, not at
- * rest); Lost + Retired + Unknown → `--muted-foreground` (out of service / unaccounted). Each
- * segment links into the matching pre-filtered list, mirroring the breakdown rows above.
+ * Buckets: Operational → `--success`; In maintenance + In storage → `--warning` (at rest, not yet
+ * out of service); Lost + Retired + Unknown → `--muted-foreground` (out of service / unaccounted).
+ *
+ * Only the single-status Operational segment deep-links (to `?status=OPERATIONAL`). The other two
+ * are COMPOSITE buckets (two/three statuses each), and the assets list only filters by ONE status —
+ * a deep-link would always under-deliver versus the legend count, so those rows stay non-interactive
+ * (count shown, no link) rather than lie about where they go.
  *
  * AA / a11y: the segments are SOLID semantic-token fills used decoratively (no text sits on them),
  * so there is no text-contrast concern — `--success`/`--warning`/`--muted-foreground` are the
@@ -392,7 +396,15 @@ function AssetHealthBar({
   // Nothing to show until there's at least one asset — the card already reads "0 assets".
   if (total === 0) return null;
 
-  const segments = [
+  const segments: {
+    key: string;
+    label: string;
+    value: number;
+    bar: string;
+    dot: string;
+    /** Single-status segments deep-link; composite buckets (no single `?status=`) omit it. */
+    href?: string;
+  }[] = [
     {
       key: "operational",
       label: "Operational",
@@ -403,11 +415,10 @@ function AssetHealthBar({
     },
     {
       key: "transitional",
-      label: "In transit",
+      label: "In maintenance/storage",
       value: transitional,
       bar: "bg-warning",
       dot: "bg-warning",
-      href: "/assets?status=IN_MAINTENANCE",
     },
     {
       key: "inactive",
@@ -415,7 +426,6 @@ function AssetHealthBar({
       value: inactive,
       bar: "bg-muted-foreground",
       dot: "bg-muted-foreground",
-      href: "/assets?status=LOST",
     },
   ].filter((segment) => segment.value > 0);
 
@@ -424,26 +434,34 @@ function AssetHealthBar({
       <div
         className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted"
         role="img"
-        aria-label={`Asset health: ${operational} operational, ${transitional} in transit, ${inactive} out of service of ${total} total.`}
+        aria-label={`Asset health: ${operational} operational, ${transitional} in maintenance or storage, ${inactive} out of service of ${total} total.`}
       >
-        {segments.map((segment) => (
-          <Link
-            key={segment.key}
-            href={segment.href}
-            tabIndex={-1}
-            aria-hidden
-            className={cn("h-full outline-none", segment.bar)}
-            style={{ width: `${(segment.value / total) * 100}%` }}
-          />
-        ))}
+        {segments.map((segment) =>
+          // The bar is decorative (the legend carries the meaning); only the deep-linkable
+          // Operational segment is a real link, the composite buckets are plain fills.
+          segment.href ? (
+            <Link
+              key={segment.key}
+              href={segment.href}
+              tabIndex={-1}
+              aria-hidden
+              className={cn("h-full outline-none", segment.bar)}
+              style={{ width: `${(segment.value / total) * 100}%` }}
+            />
+          ) : (
+            <span
+              key={segment.key}
+              aria-hidden
+              className={cn("h-full", segment.bar)}
+              style={{ width: `${(segment.value / total) * 100}%` }}
+            />
+          ),
+        )}
       </div>
       <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        {segments.map((segment) => (
-          <li key={segment.key}>
-            <Link
-              href={segment.href}
-              className="-mx-1 inline-flex items-center gap-1.5 rounded px-1 py-0.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            >
+        {segments.map((segment) => {
+          const content = (
+            <>
               <span
                 className={cn("size-2 rounded-full", segment.dot)}
                 aria-hidden
@@ -452,9 +470,27 @@ function AssetHealthBar({
               <span className="font-medium tabular-nums text-foreground">
                 {segment.value}
               </span>
-            </Link>
-          </li>
-        ))}
+            </>
+          );
+          return (
+            <li key={segment.key}>
+              {segment.href ? (
+                <Link
+                  href={segment.href}
+                  className="-mx-1 inline-flex items-center gap-1.5 rounded px-1 py-0.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {content}
+                </Link>
+              ) : (
+                // Composite bucket: no honest single-status destination, so show the count
+                // without a link rather than under-deliver on a click.
+                <span className="-mx-1 inline-flex items-center gap-1.5 px-1 py-0.5">
+                  {content}
+                </span>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
