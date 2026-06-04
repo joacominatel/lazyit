@@ -28,7 +28,7 @@ import {
 } from "@/lib/api/hooks/use-users";
 import { formatDate } from "@/lib/utils/format";
 import { ArticleStatusBadge } from "../../kb/_components/article-status-badge";
-import { OffboardingSheet } from "./_components/offboarding-sheet";
+import { OffboardingSheet } from "../_components/offboarding-sheet";
 import { UserFormDialog } from "../_components/user-form-dialog";
 import { UserPasswordResetButton } from "../_components/user-password-reset-button";
 import { UserRoleSelect } from "../_components/user-role-select";
@@ -138,12 +138,12 @@ export default function UserDetailPage() {
               </Button>
               <UserPasswordResetButton user={user} />
               <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Offboard user"
+                variant="destructive"
+                size="sm"
                 onClick={() => setOffboardOpen(true)}
               >
                 <TrashIcon />
+                Offboard
               </Button>
             </>
           ) : undefined
