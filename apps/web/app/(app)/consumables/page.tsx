@@ -9,11 +9,12 @@ import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import {
   BatchActionBar,
-  EmptyState,
   ErrorState,
+  LinkableRow,
   Pagination,
   ResourceCard,
   ResourceCardMeta,
@@ -21,6 +22,7 @@ import {
   ResourceTable,
   RestoreRowAction,
   RowActions,
+  rowActionsReveal,
   SelectCell,
   SortableHeader,
 } from "@/components/resource-table";
@@ -35,7 +37,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TableCell, TableRow } from "@/components/ui/table";
+import { TableCell } from "@/components/ui/table";
 import { useConsumableCategories } from "@/lib/api/hooks/use-consumable-categories";
 import { useConsumables } from "@/lib/api/hooks/use-consumables";
 import {
@@ -49,6 +51,7 @@ import { runPerIdBatch } from "@/lib/api/per-id-batch";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
+import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils/format";
 import { QuickAdjustButtons } from "./_components/quick-adjust-buttons";
 import { StockBadge } from "./_components/stock-badge";
@@ -272,6 +275,8 @@ export default function ConsumablesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Consumables"
+        pillar="inventory"
+        icon={CubeIcon}
         subtitle="Stock-counted supplies — cables, adapters, toner and the like."
         actions={
           <>
@@ -307,17 +312,13 @@ export default function ConsumablesPage() {
       ) : isEmpty && !filtersActive ? (
         <EmptyState
           icon={CubeIcon}
-          title="No consumables yet"
-          description="Add the supplies your team keeps in stock to start tracking quantities."
+          pillar="inventory"
+          title="No supplies stocked yet"
+          description="Add the cables, adapters and toner your team keeps on hand — set a reorder threshold and lazyit watches the count for you."
           action={
-            canWrite ? (
-              <Button asChild>
-                <Link href="/consumables/new">
-                  <PlusIcon />
-                  Create your first consumable
-                </Link>
-              </Button>
-            ) : undefined
+            canWrite
+              ? { label: "Add your first consumable", href: "/consumables/new" }
+              : undefined
           }
         />
       ) : (
@@ -472,8 +473,9 @@ export default function ConsumablesPage() {
             ))}
           >
             {rows.map((consumable) => (
-              <TableRow
+              <LinkableRow
                 key={consumable.id}
+                href={`/consumables/${consumable.id}`}
                 data-state={
                   selectable && selection.isSelected(consumable.id)
                     ? "selected"
@@ -538,32 +540,36 @@ export default function ConsumablesPage() {
                       </div>
                     ) : null
                   ) : canWrite || canDelete ? (
-                    <RowActions
-                      onEdit={
-                        canWrite
-                          ? () =>
-                              router.push(`/consumables/${consumable.id}/edit`)
-                          : undefined
-                      }
-                      onClone={
-                        canWrite
-                          ? () =>
-                              router.push(`/consumables/${consumable.id}/clone`)
-                          : undefined
-                      }
-                      onDelete={
-                        canDelete
-                          ? () =>
-                              setDeleting({
-                                id: consumable.id,
-                                name: consumable.name,
-                              })
-                          : undefined
-                      }
-                    />
+                    <div className={cn("flex justify-end", rowActionsReveal)}>
+                      <RowActions
+                        onEdit={
+                          canWrite
+                            ? () =>
+                                router.push(`/consumables/${consumable.id}/edit`)
+                            : undefined
+                        }
+                        onClone={
+                          canWrite
+                            ? () =>
+                                router.push(
+                                  `/consumables/${consumable.id}/clone`,
+                                )
+                            : undefined
+                        }
+                        onDelete={
+                          canDelete
+                            ? () =>
+                                setDeleting({
+                                  id: consumable.id,
+                                  name: consumable.name,
+                                })
+                            : undefined
+                        }
+                      />
+                    </div>
                   ) : null}
                 </TableCell>
-              </TableRow>
+              </LinkableRow>
             ))}
           </ResourceTable>
 
