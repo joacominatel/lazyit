@@ -51,6 +51,17 @@ PROD_PROJECT="lazyit-prod"        # the prod compose project name (volumes are l
 MIN_RAM_MB=4096
 MIN_DISK_MB=20480
 
+# Zitadel FirstInstance default org when ZITADEL_FIRSTINSTANCE_ORG_NAME is unset (upstream default).
+# Console loginname = {ZITADEL_ADMIN_USERNAME}@{org_slug}.{ZITADEL_EXTERNALDOMAIN}.
+ZITADEL_DEFAULT_ORG_SLUG=zitadel
+
+# ---------- helpers ----------------------------------------------------------
+# Full Zitadel console loginname (username@org.{external domain}) for operator messaging.
+zitadel_console_login() {
+  _user="${1:?}"; _extdomain="${2:?}"
+  printf '%s@%s.%s' "$_user" "$ZITADEL_DEFAULT_ORG_SLUG" "$_extdomain"
+}
+
 # ---------- flags ------------------------------------------------------------
 ASSUME_YES=0
 DRY_RUN=0
@@ -61,7 +72,8 @@ DOMAIN="localhost"                # FQDN or localhost
 SITE_ADDRESS="localhost"          # Caddy site address (LAZYIT_SITE_ADDRESS)
 WEB_ORIGIN_VAL="https://localhost:8443"
 AUTH_SUBDOMAIN="auth.localhost"   # ZITADEL_EXTERNALDOMAIN
-ISSUER_URL="https://auth.localhost"
+ISSUER_URL="https://auth.localhost:8443"
+ZITADEL_ADMIN_USERNAME="admin"
 TLS_EMAIL=""                      # set only for a real domain with Let's Encrypt
 HTTP_PORT="8080"
 HTTPS_PORT="8443"
@@ -505,24 +517,28 @@ print_post_up_guidance() {
 EOF
 
   if [ "$DEPLOY_MODE" = "local" ]; then
-    cat >&2 <<'EOF'
+    cat >&2 <<EOF
 
   LOCAL prod-like notes:
    - Caddy uses its INTERNAL CA -> your browser warns until you trust it.
-   - The OIDC login redirects through auth.localhost. Most resolvers map
+   - OIDC / Zitadel console URL: ${ISSUER_URL} (host port ${HTTPS_PORT}, not :443).
+   - The OIDC login redirects through auth.localhost:${HTTPS_PORT}. Most resolvers map
      *.localhost to 127.0.0.1 automatically; if yours does not, add:
          echo "127.0.0.1 auth.localhost" | sudo tee -a /etc/hosts
 EOF
   fi
 
   if [ -n "$ZITADEL_ADMIN_PASSWORD" ] && [ "$IDP_MODE" = "bundled" ]; then
+    _zitadel_login="$(zitadel_console_login "$ZITADEL_ADMIN_USERNAME" "$AUTH_SUBDOMAIN")"
     cat >&2 <<EOF
 
   Zitadel console admin (shown ONCE — store it in your password manager now):
-      username: admin
+      login:    ${_zitadel_login}
       password: $ZITADEL_ADMIN_PASSWORD
-  (You normally never need this — the zitadel-bootstrap sidecar wires OIDC
-   automatically. It is only for emergency IdP administration.)
+      console:  ${ISSUER_URL}/ui/console
+  (Zitadel asks for username@domain — use the full login above, not just "${ZITADEL_ADMIN_USERNAME}".
+   You normally never need this — the zitadel-bootstrap sidecar wires OIDC automatically.
+   It is only for emergency IdP administration.)
 EOF
   fi
 
@@ -562,7 +578,6 @@ ask_questions() {
     AUTH_SUBDOMAIN="auth.localhost"
     HTTP_PORT="8080"
     HTTPS_PORT="8443"
-    ISSUER_URL="https://auth.localhost"
     info "local prod-like: HTTPS via Caddy's internal CA, high ports ${HTTP_PORT}/${HTTPS_PORT}."
   else
     # --- Q2. public FQDN (validated: hostname charset only) ---
@@ -597,7 +612,7 @@ ask_questions() {
   # Derive the browser-facing origins from the final host + https port.
   if [ "$DEPLOY_MODE" = "local" ]; then
     WEB_ORIGIN_VAL="https://localhost:${HTTPS_PORT}"
-    ISSUER_URL="https://auth.localhost"
+    ISSUER_URL="https://${AUTH_SUBDOMAIN}:${HTTPS_PORT}"
   else
     if [ "$HTTPS_PORT" = "443" ]; then
       WEB_ORIGIN_VAL="https://${DOMAIN}"
