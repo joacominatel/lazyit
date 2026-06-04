@@ -33,6 +33,21 @@
   --color-avatar-4: var(--avatar-4);
   --color-avatar-5: var(--avatar-5);
   --color-avatar-foreground: var(--avatar-foreground);
+  /* Pillar identity palette (ADR-0049). Registered exactly like --color-avatar-* /
+     --color-chart-* so Tailwind emits scanner-safe `bg-pillar-*` / `text-pillar-*`
+     utilities — NOT bg-[var(--pillar)]/10 (the JIT scanner needs full, non-interpolated
+     class strings; see lib/avatar-color.ts). Each pillar aliases one chart hue, which
+     already carries light/dark parity, so the utilities are theme-correct for free.
+     LOCKED map: Inventory=teal · Access=indigo (the brand hue) · Knowledge=green ·
+     Manage=rose. Consumables shares Inventory teal (it IS inventory — differentiate by
+     icon, never invent a 5th hue).
+       AA RULE: pillar hue is a tint/border/dot/chip ONLY — never small text on bone
+       (teal 0.62L / rose can't clear 4.5:1 as body text). Decorative ≥24px glyphs are
+       exempt; readable text always stays on --foreground/--card-foreground. */
+  --color-pillar-inventory: var(--chart-2);
+  --color-pillar-access: var(--chart-1);
+  --color-pillar-knowledge: var(--chart-3);
+  --color-pillar-manage: var(--chart-5);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -68,6 +83,22 @@
   --shadow-e1: var(--elevation-1);
   --shadow-e2: var(--elevation-2);
   --shadow-e3: var(--elevation-3);
+  /* Named type tokens (ADR-0049). Tailwind v4 emits `text-display` / `text-section` /
+     `text-label` carrying the size + line-height + tracking triple, so "big metric" vs
+     "small eyebrow" is intentional, not pixel-guessed. No font change — Geist stays; AA
+     is untouched (these only size foreground-on-card text).
+       display — dashboard hero metrics (mono tabular pairs well here)
+       section — "Needs attention" / "Recent activity" headings
+       label   — uppercase eyebrows / nav section headings */
+  --text-display: 1.875rem;
+  --text-display--line-height: 2.25rem;
+  --text-display--letter-spacing: -0.02em;
+  --text-section: 1.125rem;
+  --text-section--line-height: 1.5rem;
+  --text-section--letter-spacing: -0.01em;
+  --text-label: 0.75rem;
+  --text-label--line-height: 1rem;
+  --text-label--letter-spacing: 0.04em;
 }
 
 :root {
