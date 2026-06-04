@@ -60,6 +60,14 @@ read with a typed `$queryRaw` in `DashboardService.getActivity`. The web renders
 dashboard's "Recent activity" panel via the data layer ([[0020-frontend-data-layer]]):
 `useDashboardActivity` (infinite query) → `RecentActivityPanel`.
 
+> [!warning] Access: the dashboard panel is ADMIN-only at the UI level (issue #179)
+> The feed is the cross-pillar "who-did-what" stream, so it is treated as sensitive. The web only
+> renders `RecentActivityPanel` (on the dashboard and on the Reports/Informes screen) when the
+> caller holds `logs:read` ([[0046-roles-permissions-v2]]), which is ADMIN-only — fail-closed, so a
+> non-admin never sees it. **This is a v1 UI-LEVEL gate only:** the endpoint itself still authorises
+> on `dashboard:read` (visible to every role), so a non-admin can still reach the data directly. A
+> dedicated `logs:read`-gated endpoint is tracked debt (DEBT-1), shared with the Informes screen.
+
 > [!note] Supersedes the old AssetHistory-only slice
 > The earlier `DashboardSummary.recentActivity` field (AssetHistory only, never rendered) is
 > superseded by this unified feed. It is kept on the summary contract for backward compatibility but
