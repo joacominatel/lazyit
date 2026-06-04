@@ -4,8 +4,9 @@ import { EmptyState } from "@/components/empty-state";
 /**
  * The amiable "you don't have access" surface for Reports/Informes. The screen is gated on the
  * ADMIN-only `logs:read` permission (issue #177); a caller without it sees this calm state rather
- * than a crash or a blank page. The API also enforces the gate server-side, so this is purely the
- * UI affordance. Reuses the warm EmptyState so the dead-end still feels cared-for.
+ * than a crash or a blank page. v1 NOTE: this is a UI-level gate — the underlying activity feed is
+ * still the shared `dashboard:read` stream; a dedicated `logs:read`-gated endpoint is DEBT-1.
+ * Reuses the warm EmptyState so the dead-end still feels cared-for.
  */
 export function InformesAccessDenied() {
   return (
