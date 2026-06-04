@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -54,17 +55,18 @@ export function DeleteConfirmDialog({
   children,
   onDeleted,
 }: DeleteConfirmDialogProps) {
+  const t = useTranslations("shared");
   const [isPending, setIsPending] = useState(false);
 
   async function handleDelete() {
     setIsPending(true);
     try {
       await onConfirm();
-      toast.success(`${capitalize(entityLabel)} deleted`);
+      toast.success(t("dialog.deleted", { entity: capitalize(entityLabel) }));
       onOpenChange(false);
       onDeleted?.();
     } catch (error) {
-      notifyError(error, `Couldn't delete ${entityLabel}`);
+      notifyError(error, t("dialog.deleteError", { entity: entityLabel }));
     } finally {
       setIsPending(false);
     }
@@ -74,15 +76,19 @@ export function DeleteConfirmDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete {entityLabel}?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {t("dialog.deleteTitle", { entity: entityLabel })}
+          </AlertDialogTitle>
           <AlertDialogDescription>
-            <span className="font-medium text-foreground">{name}</span> will be
-            archived — a soft delete that hides it from the list without erasing
-            its history.{children ? <> {children}</> : null}
+            <span className="font-medium text-foreground">{name}</span>{" "}
+            {t("dialog.deleteDescriptionPrefix")}
+            {children ? <> {children}</> : null}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={isPending}>
+            {t("dialog.cancel")}
+          </AlertDialogCancel>
           {/* Plain destructive button (not AlertDialogAction) so we control the
               pending spinner and only close on success. */}
           <Button
@@ -91,7 +97,7 @@ export function DeleteConfirmDialog({
             disabled={isPending}
           >
             {isPending && <ArrowPathIcon className="animate-spin" />}
-            Delete
+            {t("dialog.delete")}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

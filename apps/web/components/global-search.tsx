@@ -9,6 +9,7 @@ import {
   UsersIcon,
 } from "@heroicons/react/24/outline";
 import { SEARCH_ENTITIES, type SearchEntity } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState } from "react";
 import {
@@ -31,16 +32,15 @@ import { cn } from "@/lib/utils";
 
 type EntityFilter = SearchEntity | "all";
 
-/** Per-entity label + icon. The five searchable entities (ADR-0035) render in this order. */
-const ENTITY_META: Record<
-  SearchEntity,
-  { label: string; icon: typeof ServerStackIcon }
-> = {
-  assets: { label: "Assets", icon: ServerStackIcon },
-  articles: { label: "Articles", icon: BookOpenIcon },
-  users: { label: "Users", icon: UsersIcon },
-  locations: { label: "Locations", icon: MapPinIcon },
-  applications: { label: "Applications", icon: KeyIcon },
+/** Per-entity icon. The five searchable entities (ADR-0035) render in this order; the visible
+ * label is resolved per render from the `shared.search.entities` namespace (the map key is the
+ * entity value, kept as-is for the API). */
+const ENTITY_ICON: Record<SearchEntity, typeof ServerStackIcon> = {
+  assets: ServerStackIcon,
+  articles: BookOpenIcon,
+  users: UsersIcon,
+  locations: MapPinIcon,
+  applications: KeyIcon,
 };
 
 /**
@@ -56,6 +56,7 @@ const ENTITY_META: Record<
  * lands with the Access screen, sub-issue 2).
  */
 export function GlobalSearch() {
+  const t = useTranslations("shared");
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -112,11 +113,13 @@ export function GlobalSearch() {
         // Below sm the trigger collapses to an icon-only square so the topbar
         // stays uncluttered on phones; from sm up it expands to the labelled
         // search affordance. aria-label keeps it named in the collapsed state.
-        aria-label="Search"
+        aria-label={t("search.trigger")}
         className="inline-flex size-9 shrink-0 items-center justify-center gap-2 rounded-md border border-input bg-background text-sm text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground sm:size-auto sm:h-9 sm:w-full sm:max-w-xs sm:justify-start sm:px-3"
       >
         <MagnifyingGlassIcon className="size-4 shrink-0" />
-        <span className="hidden flex-1 text-left sm:inline">Search…</span>
+        <span className="hidden flex-1 text-left sm:inline">
+          {t("search.placeholderShort")}
+        </span>
         <kbd className="pointer-events-none hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium sm:inline-flex">
           ⌘K
         </kbd>
@@ -128,9 +131,9 @@ export function GlobalSearch() {
           className="overflow-hidden p-0 sm:max-w-xl"
         >
           <DialogHeader className="sr-only">
-            <DialogTitle>Global search</DialogTitle>
+            <DialogTitle>{t("search.globalTitle")}</DialogTitle>
             <DialogDescription>
-              Search assets, articles, users, locations and applications.
+              {t("search.globalDescription")}
             </DialogDescription>
           </DialogHeader>
 
@@ -141,12 +144,12 @@ export function GlobalSearch() {
             <CommandInput
               value={query}
               onValueChange={setQuery}
-              placeholder="Search everything…"
+              placeholder={t("search.placeholderEverything")}
             />
 
             <div className="flex flex-wrap gap-1 border-b px-3 py-2">
               <FilterChip active={entity === "all"} onSelect={() => setEntity("all")}>
-                All
+                {t("search.all")}
               </FilterChip>
               {SEARCH_ENTITIES.map((key) => (
                 <FilterChip
@@ -154,7 +157,7 @@ export function GlobalSearch() {
                   active={entity === key}
                   onSelect={() => setEntity(key)}
                 >
-                  {ENTITY_META[key].label}
+                  {t(`search.entities.${key}`)}
                 </FilterChip>
               ))}
             </div>
@@ -163,13 +166,12 @@ export function GlobalSearch() {
                 to assistive tech as the debounced query resolves (WCAG 4.1.3). */}
             <CommandList aria-live="polite">
               {!hasQuery ? (
-                <StatusRow>Start typing to search…</StatusRow>
+                <StatusRow>{t("search.startTyping")}</StatusRow>
               ) : isError ? (
                 <StatusRow tone="error">
-                  Couldn&apos;t run the search
                   {error instanceof Error && error.message
-                    ? `: ${error.message}`
-                    : "."}
+                    ? t("search.runErrorDetail", { message: error.message })
+                    : `${t("search.runError")}.`}
                 </StatusRow>
               ) : (
                 <>
@@ -220,9 +222,11 @@ export function GlobalSearch() {
                   />
                   {totalHits === 0 &&
                     (isFetching ? (
-                      <StatusRow>Searching…</StatusRow>
+                      <StatusRow>{t("search.searching")}</StatusRow>
                     ) : (
-                      <StatusRow>No results for “{debouncedQuery}”.</StatusRow>
+                      <StatusRow>
+                        {t("search.noResultsFor", { query: debouncedQuery })}
+                      </StatusRow>
                     ))}
                 </>
               )}
@@ -231,13 +235,13 @@ export function GlobalSearch() {
             <div className="flex items-center justify-end gap-3 border-t px-3 py-2 text-[11px] text-muted-foreground">
               <span>
                 <Kbd>↑</Kbd>
-                <Kbd>↓</Kbd> navigate
+                <Kbd>↓</Kbd> {t("search.navigate")}
               </span>
               <span>
-                <Kbd>↵</Kbd> open
+                <Kbd>↵</Kbd> {t("search.open")}
               </span>
               <span>
-                <Kbd>esc</Kbd> close
+                <Kbd>esc</Kbd> {t("search.close")}
               </span>
             </div>
           </Command>
@@ -319,8 +323,10 @@ function ResultGroup<H extends { id: string }>({
   render: (hit: H) => { primary: string; secondary?: string };
   onSelect: (hit: H) => void;
 }) {
+  const t = useTranslations("shared");
   if (!block || block.hits.length === 0) return null;
-  const { label, icon: Icon } = ENTITY_META[entity];
+  const label = t(`search.entities.${entity}`);
+  const Icon = ENTITY_ICON[entity];
   const more = block.total > block.hits.length ? ` · ${block.total}` : "";
 
   return (

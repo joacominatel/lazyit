@@ -1,1 +1,123 @@
-{}
+{
+  "table": {
+    "noMatchingResults": "No hay resultados que coincidan.",
+    "selectAllRows": "Seleccionar todas las filas",
+    "openActions": "Abrir acciones",
+    "edit": "Editar",
+    "clone": "Clonar",
+    "delete": "Eliminar",
+    "restore": "Restaurar",
+    "bulkActions": "Acciones masivas",
+    "clearSelection": "Limpiar selección",
+    "selectRow": "Seleccionar fila",
+    "selectedCount": "{count, plural, =0 {Ningún {noun} seleccionado} one {# {noun} seleccionado} other {# {noun} seleccionados}}",
+    "noResults": "Sin resultados",
+    "showingRange": "Mostrando <b>{from}</b>–<b>{to}</b> de <b>{total}</b>",
+    "previous": "Anterior",
+    "next": "Siguiente",
+    "sortBy": "Ordenar por {label}",
+    "sortByColumn": "Ordenar por columna"
+  },
+  "detail": {
+    "relatedArticlesTitle": "Artículos relacionados",
+    "loadingRunbooks": "Cargando runbooks…",
+    "noLinkedArticles": "Aún no hay artículos de la base de conocimiento vinculados. Vincula un runbook desde la página del artículo para que aparezca aquí.",
+    "view": "Ver"
+  },
+  "activity": {
+    "system": "Sistema"
+  },
+  "empty": {},
+  "errors": {
+    "boundaryTitle": "Algo salió mal",
+    "boundaryDescription": "Ocurrió un error inesperado al cargar esta página.",
+    "stateDescription": "Es posible que la API esté caída o inaccesible.",
+    "tryAgain": "Reintentar",
+    "retry": "Reintentar",
+    "requestId": "ID de solicitud",
+    "copyRequestId": "Copiar ID de solicitud",
+    "requestIdCopied": "ID de solicitud copiado",
+    "globalTitle": "Algo salió mal",
+    "globalDescription": "La aplicación encontró un error inesperado y no pudo recuperarse.",
+    "globalReference": "Referencia: {digest}.",
+    "notFoundCaption": "404",
+    "notFoundTitle": "Esta página se perdió",
+    "notFoundDescription": "No pudimos encontrar lo que buscabas — puede que se haya movido, archivado o que nunca haya existido. Volvamos al taller.",
+    "backToDashboard": "Volver al panel"
+  },
+  "chrome": {
+    "skipToContent": "Saltar al contenido",
+    "openUserMenu": "Abrir menú de usuario",
+    "signOut": "Cerrar sesión",
+    "openNavigationMenu": "Abrir menú de navegación",
+    "toggleTheme": "Cambiar tema",
+    "devMode": "Modo desarrollo",
+    "production": "Producción",
+    "dismissModeBanner": "Descartar aviso de modo",
+    "breadcrumbLabel": "Ruta de navegación",
+    "breadcrumb": {
+      "dashboard": "Panel",
+      "assets": "Activos",
+      "consumables": "Consumibles",
+      "applications": "Aplicaciones",
+      "kb": "Base de conocimiento",
+      "informes": "Informes",
+      "users": "Usuarios",
+      "locations": "Ubicaciones",
+      "new": "Nuevo",
+      "edit": "Editar"
+    }
+  },
+  "dialog": {
+    "deleteTitle": "¿Eliminar {entity}?",
+    "deleteDescriptionPrefix": "se archivará — una eliminación lógica que lo oculta de la lista sin borrar su historial.",
+    "deleted": "{entity} eliminado",
+    "deleteError": "No se pudo eliminar {entity}",
+    "cancel": "Cancelar",
+    "delete": "Eliminar"
+  },
+  "copy": {
+    "copied": "Copiado",
+    "copiedLabel": "{label} — copiado",
+    "copyError": "No se pudo copiar al portapapeles"
+  },
+  "filters": {
+    "activeFilters": "Filtros activos",
+    "clearFilter": "Quitar filtro",
+    "clearFilterNamed": "Quitar filtro: {label}",
+    "clearAll": "Limpiar todo",
+    "clearFilters": "Limpiar filtros",
+    "showArchived": "Mostrar archivados"
+  },
+  "search": {
+    "trigger": "Buscar",
+    "placeholderShort": "Buscar…",
+    "placeholderEverything": "Buscar en todo…",
+    "globalTitle": "Búsqueda global",
+    "globalDescription": "Busca activos, artículos, usuarios, ubicaciones y aplicaciones.",
+    "all": "Todos",
+    "startTyping": "Empieza a escribir para buscar…",
+    "runError": "No se pudo ejecutar la búsqueda",
+    "runErrorDetail": "No se pudo ejecutar la búsqueda: {message}",
+    "searching": "Buscando…",
+    "noResultsFor": "Sin resultados para “{query}”.",
+    "clearSearch": "Limpiar búsqueda",
+    "navigate": "navegar",
+    "open": "abrir",
+    "close": "cerrar",
+    "entities": {
+      "assets": "Activos",
+      "articles": "Artículos",
+      "users": "Usuarios",
+      "locations": "Ubicaciones",
+      "applications": "Aplicaciones"
+    }
+  },
+  "field": {
+    "newEntity": "Nuevo {label}"
+  },
+  "editor": {
+    "markdownPlaceholder": "Escribe en Markdown…",
+    "previewHint": "La vista previa aparece aquí mientras escribes."
+  }
+}

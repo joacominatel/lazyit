@@ -10,6 +10,7 @@ import type {
   ActivityEntityType,
   RecentActivityItem,
 } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import type { ComponentType, CSSProperties } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -76,6 +77,7 @@ export function ActivityRow({
   index: number;
   now: number;
 }) {
+  const t = useTranslations("shared");
   const meta = ENTITY_META[item.entityType];
   const Icon = meta.icon;
   return (
@@ -113,7 +115,7 @@ export function ActivityRow({
               <span className="min-w-0 truncate">{item.actorName}</span>
             </>
           ) : (
-            <span>System</span>
+            <span>{t("activity.system")}</span>
           )}
           <span
             className="ml-auto shrink-0 pl-1 tabular-nums"

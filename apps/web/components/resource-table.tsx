@@ -12,6 +12,7 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { ChevronDownIcon, ChevronUpIcon, XMarkIcon } from "@heroicons/react/16/solid";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ComponentProps, ComponentType, MouseEvent, ReactNode } from "react";
@@ -128,12 +129,14 @@ export function ResourceTable({
   isLoading = false,
   skeletonRows = DEFAULT_SKELETON_ROWS,
   isFilteredEmpty = false,
-  filteredEmptyMessage = "No matching results.",
+  filteredEmptyMessage,
   filteredEmptyAction,
   children,
   mobileChildren,
   selection,
 }: ResourceTableProps) {
+  const t = useTranslations("shared");
+  const emptyMessage = filteredEmptyMessage ?? t("table.noMatchingResults");
   const hasMobile = mobileChildren !== undefined;
   const selectable = selection?.enabled ?? false;
   // The leading checkbox column adds one cell — fold it into skeleton rows and the empty colSpan.
@@ -157,7 +160,7 @@ export function ResourceTable({
                     onCheckedChange={(value) =>
                       selection?.onToggleAll(value === true)
                     }
-                    aria-label={selection?.selectAllLabel ?? "Select all rows"}
+                    aria-label={selection?.selectAllLabel ?? t("table.selectAllRows")}
                   />
                 </TableHead>
               ) : null}
@@ -196,7 +199,7 @@ export function ResourceTable({
                   aria-live="polite"
                 >
                   <FilteredEmpty
-                    message={filteredEmptyMessage}
+                    message={emptyMessage}
                     action={filteredEmptyAction}
                   />
                 </TableCell>
@@ -226,7 +229,7 @@ export function ResourceTable({
               aria-live="polite"
             >
               <FilteredEmpty
-                message={filteredEmptyMessage}
+                message={emptyMessage}
                 action={filteredEmptyAction}
               />
             </div>
@@ -367,7 +370,7 @@ export function ResourceCard({
   selectable = false,
   selected = false,
   onSelectedChange,
-  selectLabel = "Select row",
+  selectLabel,
 }: {
   /** Detail route the card body links to. Omit for a non-navigable card. */
   href?: string;
@@ -392,6 +395,7 @@ export function ResourceCard({
   /** Accessible label for the card's checkbox (e.g. `Select ${asset.name}`). */
   selectLabel?: string;
 }) {
+  const t = useTranslations("shared");
   const header = (
     <div className="flex items-start justify-between gap-2">
       <span className="min-w-0 font-medium break-words">{title}</span>
@@ -411,7 +415,7 @@ export function ResourceCard({
           <Checkbox
             checked={selected}
             onCheckedChange={(value) => onSelectedChange?.(value === true)}
-            aria-label={selectLabel}
+            aria-label={selectLabel ?? t("table.selectRow")}
             className="mt-0.5 shrink-0"
           />
         ) : null}
@@ -473,9 +477,9 @@ export function RowActions({
   onEdit,
   onClone,
   onDelete,
-  editLabel = "Edit",
-  cloneLabel = "Clone",
-  deleteLabel = "Delete",
+  editLabel,
+  cloneLabel,
+  deleteLabel,
 }: {
   /** When set, render an "Edit" item (gate on `can('<domain>:write')`). */
   onEdit?: () => void;
@@ -487,12 +491,13 @@ export function RowActions({
   cloneLabel?: string;
   deleteLabel?: string;
 }) {
+  const t = useTranslations("shared");
   // Separate the non-destructive group (Edit/Clone) from Delete only when both groups are present.
   const hasWriteItems = onEdit != null || onClone != null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label="Open actions">
+        <Button variant="ghost" size="icon-sm" aria-label={t("table.openActions")}>
           <EllipsisVerticalIcon />
         </Button>
       </DropdownMenuTrigger>
@@ -502,13 +507,13 @@ export function RowActions({
         {onEdit ? (
           <DropdownMenuItem onSelect={onEdit}>
             <PencilSquareIcon />
-            {editLabel}
+            {editLabel ?? t("table.edit")}
           </DropdownMenuItem>
         ) : null}
         {onClone ? (
           <DropdownMenuItem onSelect={onClone}>
             <DocumentDuplicateIcon />
-            {cloneLabel}
+            {cloneLabel ?? t("table.clone")}
           </DropdownMenuItem>
         ) : null}
         {onDelete ? (
@@ -516,7 +521,7 @@ export function RowActions({
             {hasWriteItems ? <DropdownMenuSeparator /> : null}
             <DropdownMenuItem variant="destructive" onSelect={onDelete}>
               <TrashIcon />
-              {deleteLabel}
+              {deleteLabel ?? t("table.delete")}
             </DropdownMenuItem>
           </>
         ) : null}
@@ -533,12 +538,13 @@ export function RowActions({
 export function RestoreRowAction({
   onRestore,
   disabled = false,
-  label = "Restore",
+  label,
 }: {
   onRestore: () => void;
   disabled?: boolean;
   label?: string;
 }) {
+  const t = useTranslations("shared");
   return (
     <Button
       variant="outline"
@@ -547,7 +553,7 @@ export function RestoreRowAction({
       disabled={disabled}
     >
       <ArrowUturnLeftIcon />
-      {label}
+      {label ?? t("table.restore")}
     </Button>
   );
 }
@@ -572,29 +578,30 @@ export function BatchActionBar({
   onClear: () => void;
   /** The bulk action buttons for this list. */
   children: ReactNode;
-  /** Singular noun for the count label (e.g. "asset"); pluralized with a trailing "s". */
+  /** Singular noun for the count label (e.g. "asset"); pluralized via the ICU template. */
   noun?: string;
 }) {
+  const t = useTranslations("shared");
+  const tc = useTranslations("common");
   if (count === 0) return null;
   return (
     <div
       className="sticky bottom-4 z-20 mx-auto flex w-full max-w-2xl flex-col gap-3 rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:flex-row sm:items-center sm:justify-between"
       role="region"
-      aria-label="Bulk actions"
+      aria-label={t("table.bulkActions")}
     >
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium tabular-nums" aria-live="polite">
-          {count} {noun}
-          {count === 1 ? "" : "s"} selected
+          {t("table.selectedCount", { count, noun })}
         </span>
         <Button
           variant="ghost"
           size="sm"
           onClick={onClear}
-          aria-label="Clear selection"
+          aria-label={t("table.clearSelection")}
         >
           <XMarkIcon className="size-4" />
-          Clear
+          {tc("clear")}
         </Button>
       </div>
       <div className="flex flex-wrap items-center gap-2">{children}</div>
@@ -634,7 +641,7 @@ export function EmptyState({
 /** Full-bleed error state with a retry action shown in place of the table. */
 export function ErrorState({
   title,
-  description = "The API may be down or unreachable.",
+  description,
   onRetry,
   error,
 }: {
@@ -644,6 +651,7 @@ export function ErrorState({
   /** The failed query's error — its API request id (if any) is surfaced for reporting. */
   error?: unknown;
 }) {
+  const t = useTranslations("shared");
   const requestId = error instanceof ApiError ? error.requestId : undefined;
   return (
     <div
@@ -652,11 +660,13 @@ export function ErrorState({
       aria-live="polite"
     >
       <p className="text-sm font-medium">{title}</p>
-      <p className="text-sm text-muted-foreground">{description}</p>
+      <p className="text-sm text-muted-foreground">
+        {description ?? t("errors.stateDescription")}
+      </p>
       <RequestIdNote requestId={requestId} />
       <Button variant="outline" onClick={onRetry}>
         <ArrowPathIcon />
-        Retry
+        {t("errors.retry")}
       </Button>
     </div>
   );
@@ -690,6 +700,7 @@ export function Pagination({
   /** True while a page change is in flight — dims the controls. */
   isFetching?: boolean;
 }) {
+  const t = useTranslations("shared");
   // A single page that fits everything needs no control.
   if (total <= limit && offset === 0) return null;
 
@@ -706,15 +717,16 @@ export function Pagination({
       )}
     >
       <p className="text-sm text-muted-foreground tabular-nums" aria-live="polite">
-        {total === 0 ? (
-          "No results"
-        ) : (
-          <>
-            Showing <span className="font-medium text-foreground">{from}</span>–
-            <span className="font-medium text-foreground">{to}</span> of{" "}
-            <span className="font-medium text-foreground">{total}</span>
-          </>
-        )}
+        {total === 0
+          ? t("table.noResults")
+          : t.rich("table.showingRange", {
+              from,
+              to,
+              total,
+              b: (chunks) => (
+                <span className="font-medium text-foreground">{chunks}</span>
+              ),
+            })}
       </p>
       <div className="flex items-center gap-2">
         <Button
@@ -724,7 +736,7 @@ export function Pagination({
           onClick={() => onOffsetChange(Math.max(0, offset - limit))}
         >
           <ChevronLeftIcon />
-          Previous
+          {t("table.previous")}
         </Button>
         <Button
           variant="outline"
@@ -732,7 +744,7 @@ export function Pagination({
           disabled={!hasNext}
           onClick={() => onOffsetChange(offset + limit)}
         >
-          Next
+          {t("table.next")}
           <ChevronRightIcon />
         </Button>
       </div>
@@ -765,6 +777,7 @@ export function SortableHeader({
   onToggle: () => void;
   className?: string;
 }) {
+  const t = useTranslations("shared");
   return (
     <button
       type="button"
@@ -774,7 +787,11 @@ export function SortableHeader({
         active ? "text-foreground" : "text-muted-foreground",
         className,
       )}
-      aria-label={`Sort by ${typeof label === "string" ? label : "column"}`}
+      aria-label={
+        typeof label === "string"
+          ? t("table.sortBy", { label })
+          : t("table.sortByColumn")
+      }
     >
       {label}
       {active ? (
