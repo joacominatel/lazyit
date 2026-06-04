@@ -11,6 +11,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
@@ -21,6 +23,7 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { UserAvatar } from "@/components/user-avatar";
 import { useOffboardUser } from "@/lib/api/hooks/use-user-mutations";
@@ -28,7 +31,13 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import {
   DEFAULT_OFFBOARDING_MESSAGE,
+  DEFAULT_ORG_NAME,
+  DEFAULT_SHOW_ACCESS,
+  DEFAULT_SHOW_ASSETS,
   OFFBOARDING_MESSAGE_KEY,
+  ORG_NAME_KEY,
+  SHOW_ACCESS_KEY,
+  SHOW_ASSETS_KEY,
 } from "@/lib/offboarding/constants";
 import {
   type OffboardAssetRow,
@@ -210,6 +219,19 @@ export function OffboardingSheet({
     OFFBOARDING_MESSAGE_KEY,
     DEFAULT_OFFBOARDING_MESSAGE,
   );
+  // App-level act letterhead + which sections the printed act includes (localStorage v1, CEO-ratified).
+  const [orgName, setOrgName, orgMounted] = useLocalStorage(
+    ORG_NAME_KEY,
+    DEFAULT_ORG_NAME,
+  );
+  const [showAssets, setShowAssets] = useLocalStorage(
+    SHOW_ASSETS_KEY,
+    DEFAULT_SHOW_ASSETS,
+  );
+  const [showAccess, setShowAccess] = useLocalStorage(
+    SHOW_ACCESS_KEY,
+    DEFAULT_SHOW_ACCESS,
+  );
   const [done, setDone] = useState(false);
 
   const fullName = `${user.firstName} ${user.lastName}`;
@@ -359,6 +381,51 @@ export function OffboardingSheet({
                 />
                 <p className="text-xs text-muted-foreground">
                   Saved for next time — this note pre-fills every act.
+                </p>
+              </section>
+
+              {/* What the printed act includes — letterhead + per-section toggles (localStorage v1). */}
+              <section className="space-y-3">
+                <h3 className="text-label uppercase text-muted-foreground">
+                  Printed act
+                </h3>
+                <div className="space-y-1.5">
+                  <Label htmlFor="offboarding-org">Company name</Label>
+                  <Input
+                    id="offboarding-org"
+                    value={orgMounted ? orgName : DEFAULT_ORG_NAME}
+                    onChange={(e) => setOrgName(e.target.value)}
+                    placeholder="Printed on the act letterhead"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <Label
+                    htmlFor="offboarding-show-assets"
+                    className="font-normal text-foreground"
+                  >
+                    List assets to return
+                  </Label>
+                  <Switch
+                    id="offboarding-show-assets"
+                    checked={showAssets}
+                    onCheckedChange={setShowAssets}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <Label
+                    htmlFor="offboarding-show-access"
+                    className="font-normal text-foreground"
+                  >
+                    List access revoked
+                  </Label>
+                  <Switch
+                    id="offboarding-show-access"
+                    checked={showAccess}
+                    onCheckedChange={setShowAccess}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  These apply to the printed act — this summary always shows the full impact.
                 </p>
               </section>
 
