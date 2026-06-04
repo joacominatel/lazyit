@@ -34,6 +34,14 @@ const VIEWER_DENIED_READS_EXPECTED: Permission[] = [
   'user:read',
 ];
 
+/**
+ * The ADMIN-ONLY reads (ADR-0046 extension, issue #175): strictly tighter than the pre-tightening —
+ * excluded from BOTH MEMBER and VIEWER, held only by ADMIN's full catalog. Still admin-grantable from
+ * the role matrix, but never seeded to MEMBER/VIEWER. Hand-listed here ON PURPOSE — this is the golden
+ * expectation, independently stated, not derived from the thing under test.
+ */
+const ADMIN_ONLY_READS_EXPECTED: Permission[] = ['logs:read'];
+
 /** Build the documented matrix per the ADR-0040 tiers, sorted to the catalog order. */
 function documentedMatrix(): RolePermissionMatrix {
   const order = (p: Permission) => PERMISSIONS.indexOf(p);
@@ -43,12 +51,20 @@ function documentedMatrix(): RolePermissionMatrix {
   // ADMIN — the COMPLETE catalog (immutable/full, ADR-0046).
   const admin = sorted([...PERMISSIONS]);
 
-  // MEMBER — all reads + all writes. No `:delete`, no coarse verb (all ADMIN-only per ADR-0040).
-  const member = sorted([...readPerms, ...writePerms]);
+  // MEMBER — all reads + all writes, MINUS the admin-only reads. No `:delete`, no coarse verb (all
+  // ADMIN-only per ADR-0040).
+  const member = sorted([
+    ...readPerms.filter((p) => !ADMIN_ONLY_READS_EXPECTED.includes(p)),
+    ...writePerms,
+  ]);
 
-  // VIEWER — all reads except the two pre-tightened reads; mutates nothing.
+  // VIEWER — all reads except the pre-tightened AND the admin-only reads; mutates nothing.
   const viewer = sorted(
-    readPerms.filter((p) => !VIEWER_DENIED_READS_EXPECTED.includes(p)),
+    readPerms.filter(
+      (p) =>
+        !VIEWER_DENIED_READS_EXPECTED.includes(p) &&
+        !ADMIN_ONLY_READS_EXPECTED.includes(p),
+    ),
   );
 
   return { ADMIN: admin, MEMBER: member, VIEWER: viewer };
@@ -80,29 +96,43 @@ describe('RolePermission golden matrix (ADR-0046)', () => {
     expect(new Set(DEFAULT_ROLE_PERMISSIONS.ADMIN)).toEqual(new Set(PERMISSIONS));
   });
 
-  it('VIEWER is read-only and is missing EXACTLY the two pre-tightened reads', () => {
+  it('VIEWER is read-only and is missing the pre-tightened AND the admin-only reads', () => {
     for (const p of DEFAULT_ROLE_PERMISSIONS.VIEWER) {
       expect(p.endsWith(':read')).toBe(true);
     }
-    for (const denied of VIEWER_DENIED_READS_EXPECTED) {
+    for (const denied of [
+      ...VIEWER_DENIED_READS_EXPECTED,
+      ...ADMIN_ONLY_READS_EXPECTED,
+    ]) {
       expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain(denied);
     }
-    // VIEWER read count == total reads minus the two tightened ones.
+    // VIEWER read count == total reads minus the pre-tightened minus the admin-only ones.
     expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).toHaveLength(
-      readPerms.length - VIEWER_DENIED_READS_EXPECTED.length,
+      readPerms.length -
+        VIEWER_DENIED_READS_EXPECTED.length -
+        ADMIN_ONLY_READS_EXPECTED.length,
     );
   });
 
-  it('accessGrant:read + user:read are ADMIN+MEMBER ONLY; every other :read is all three roles', () => {
+  it('each :read has the right holders: admin-only → ADMIN; pre-tightened → ADMIN+MEMBER; else all three', () => {
     const tightened = new Set<string>(VIEWER_DENIED_READS_EXPECTED);
+    const adminOnly = new Set<string>(ADMIN_ONLY_READS_EXPECTED);
     for (const p of readPerms) {
       const holders = ROLES.filter((r) => DEFAULT_ROLE_PERMISSIONS[r].includes(p));
-      if (tightened.has(p)) {
+      if (adminOnly.has(p)) {
+        expect(new Set(holders)).toEqual(new Set(['ADMIN']));
+      } else if (tightened.has(p)) {
         expect(new Set(holders)).toEqual(new Set(['ADMIN', 'MEMBER']));
       } else {
         expect(new Set(holders)).toEqual(new Set(ROLES));
       }
     }
+  });
+
+  it('logs:read is the admin-only read — ADMIN holds it, MEMBER and VIEWER do not', () => {
+    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain('logs:read' as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain('logs:read' as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('logs:read' as Permission);
   });
 
   it('MEMBER never holds a :delete or a coarse capability verb', () => {
