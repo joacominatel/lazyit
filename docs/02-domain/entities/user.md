@@ -22,12 +22,22 @@ the reverse.
 - **holds** N [[access-grant]]s to [[application]]s.
 - **raises** N [[access-request]]s.
 - **is referenced by** N [[ticket]]s (requester, affected user, or assignee).
+- **has** an append-only [[user-history]] — its own lifecycle log (create / update / role change /
+  offboard / restore / password-reset), the User counterpart of [[asset-history]] (DEBT-2, #185 —
+  [[0050-user-history-and-activity-user-entity]]). A User is also the **actor** on history rows it
+  caused (`performedById`).
 
 ## Business rules
 
 - Atomic entity — implemented first, alongside [[location]].
 - Offboarding a user must not erase history: assignments and grants are *released*, not
   deleted (soft delete + lifecycle timestamps).
+- **Auditable lifecycle (DEBT-2, #185):** every User write emits an append-only [[user-history]] row
+  **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit,
+  `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `DELETED` on offboard, `RESTORED` on
+  re-onboard, `PASSWORD_RESET_SENT` when a reset link is requested. This supersedes the fire-and-forget
+  IdP write-back log lines for *durability*: those structured logs remain, but the queryable trail now
+  lives in the DB and surfaces in the [[recent-activity]] feed (`entityType = 'user'`).
 - **Identity / auth:** the local User is the source of truth for the domain. Authentication is
   handled by an external IdP (OIDC) whose `sub` maps to `externalId`; the global guard JIT-provisions
   a User on first login ([[0038-jit-user-provisioning]]) — we do **not** implement our own auth.

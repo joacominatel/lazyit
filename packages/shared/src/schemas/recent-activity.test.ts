@@ -67,11 +67,13 @@ describe("RecentActivityItemSchema", () => {
 });
 
 describe("ActivityEntityTypeSchema", () => {
-  test("enumerates exactly the three activity pillars", () => {
+  test("enumerates exactly the four activity pillars", () => {
+    // DEBT-2 (issue #185) widened the enum with "user" (the UserHistory source).
     expect(ActivityEntityTypeSchema.options).toEqual([
       "asset",
       "application",
       "consumable",
+      "user",
     ]);
   });
 });
@@ -115,6 +117,10 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       "stock_in",
       "stock_out",
       "stock_adjustment",
+      // UserHistory-specific verbs (DEBT-2, issue #185). created/deleted/restored are shared above.
+      "updated",
+      "role_changed",
+      "password_reset_sent",
     ]);
   });
 

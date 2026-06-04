@@ -4,6 +4,7 @@ import {
   CubeIcon,
   KeyIcon,
   ServerStackIcon,
+  UsersIcon,
 } from "@heroicons/react/24/outline";
 import type {
   ActivityEntityType,
@@ -38,19 +39,23 @@ export const ENTITY_META: Record<
   asset: { icon: ServerStackIcon, href: (id) => `/assets/${id}` },
   application: { icon: KeyIcon, href: (id) => `/applications/${id}` },
   consumable: { icon: CubeIcon, href: (id) => `/consumables/${id}` },
+  // DEBT-2 (issue #185): the User entity now audits its lifecycle into the feed; the row links to the
+  // person's detail page, same `/<area>/:id` pattern as the others.
+  user: { icon: UsersIcon, href: (id) => `/users/${id}` },
 };
 
 /**
  * Tone classes for the leading icon chip, by pillar (ADR-0049). These chips hold a DECORATIVE
  * glyph (aria-hidden) — a ≥24px mark is exempt from text-AA — so the pillar hue can sit as both
  * tint (`/10` background) and glyph color. Asset + consumable are Inventory (teal); application is
- * Access (indigo). The pillar tokens carry dark parity, so the hand-written `dark:` variants are
- * gone. Full strings so the Tailwind scanner keeps them.
+ * Access (indigo); user is Manage (rose, DEBT-2). The pillar tokens carry dark parity, so the
+ * hand-written `dark:` variants are gone. Full strings so the Tailwind scanner keeps them.
  */
 export const ENTITY_TONE: Record<ActivityEntityType, string> = {
   asset: "bg-pillar-inventory/10 text-pillar-inventory",
   application: "bg-pillar-access/10 text-pillar-access",
   consumable: "bg-pillar-inventory/10 text-pillar-inventory",
+  user: "bg-pillar-manage/10 text-pillar-manage",
 };
 
 /**

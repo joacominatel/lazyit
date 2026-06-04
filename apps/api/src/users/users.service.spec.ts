@@ -12,6 +12,7 @@ import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
+import { UserHistoryService } from '../user-history/user-history.service';
 import {
   IDENTITY_PROVIDER,
   PasswordResetUnsupportedError,
@@ -55,9 +56,12 @@ type IdpMock = {
 };
 
 // The transaction client the offboarding writes go through; $transaction runs the callback with it.
+// `userHistory.create` is present so the structural UserHistoryWriter type is satisfied when the real
+// service threads the tx client; the emission itself is asserted via the mocked UserHistoryService.
 type TxMock = {
   user: { update: jest.Mock };
   accessGrant: { updateMany: jest.Mock };
+  userHistory: { create: jest.Mock };
 };
 
 type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
@@ -69,6 +73,9 @@ describe('UsersService', () => {
   let tx: TxMock;
   let assignments: { releaseAllForUser: jest.Mock };
   let idp: IdpMock;
+  // DEBT-2 (issue #185): the append-only UserHistory emitter. Mocked so each write-path assertion can
+  // check WHICH event was recorded (and with which payload/actor) without a DB.
+  let history: { record: jest.Mock; list: jest.Mock };
 
   beforeEach(async () => {
     user = {
@@ -82,13 +89,21 @@ describe('UsersService', () => {
       count: jest.fn().mockResolvedValue(1),
     };
     tx = {
-      user: { update: jest.fn() },
+      // A real jest.Mock so offboard assertions (`tx.user.update.mockResolvedValue`, `.toHaveBeenCalled`)
+      // keep working — but it DELEGATES to the base `user.update` by default, so the linked-create,
+      // update and restore paths (which now run user.update through the tx client) return whatever a
+      // test configured on `user.update`. Offboard tests override this with their own mockResolvedValue.
+      user: { update: jest.fn((args: unknown) => user.update(args) as unknown) },
       accessGrant: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      userHistory: { create: jest.fn() },
     };
     const prisma = {
       user,
-      // Handles BOTH forms: callback (offboard) with the tx client, and array (findPage's
-      // [findMany, count]) which resolves each promise in the array.
+      // Base-client userHistory.create — present for the non-transactional emission paths (BYOI create,
+      // password reset). The emission is asserted via the mocked UserHistoryService below.
+      userHistory: { create: jest.fn() },
+      // Handles BOTH forms: callback (offboard / linked-create / update / restore) with the tx client,
+      // and array (findPage's [findMany, count]) which resolves each promise in the array.
       $transaction: jest.fn(
         (arg: ((client: TxMock) => unknown) | Promise<unknown>[]) =>
           Array.isArray(arg) ? Promise.all(arg) : arg(tx),
@@ -122,12 +137,16 @@ describe('UsersService', () => {
       error: jest.fn(),
     } as unknown as PinoLogger;
 
+    // UserHistoryService mock (DEBT-2). record() resolves; assertions inspect its call args per path.
+    history = { record: jest.fn().mockResolvedValue(undefined), list: jest.fn() };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         UsersService,
         { provide: PrismaService, useValue: prisma },
         { provide: SearchService, useValue: search },
         { provide: AssetAssignmentsService, useValue: assignments },
+        { provide: UserHistoryService, useValue: history },
         { provide: IDENTITY_PROVIDER, useValue: idp as IdentityProvider },
         { provide: getLoggerToken(UsersService.name), useValue: logger },
       ],
@@ -176,6 +195,15 @@ describe('UsersService', () => {
       email: 'a@b.com',
     });
     expect(search.remove).not.toHaveBeenCalled();
+
+    // DEBT-2 (issue #185): a CREATED UserHistory row is emitted on the SUCCESS path (after the IdP
+    // mirror), in the same tx as the externalId link, with no actor (anonymous create → {} attribution).
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(tx, {
+      userId: 'uuid-1',
+      eventType: 'CREATED',
+      actor: {},
+    });
   });
 
   it('defaults an omitted role to VIEWER (ADR-0043 — uniform least-privilege default)', async () => {
@@ -249,6 +277,14 @@ describe('UsersService', () => {
       lastName: 'Oi',
       email: 'b@b.com',
     });
+
+    // DEBT-2 (issue #185): the BYOI / no-management path still emits CREATED — via the BASE prisma
+    // client (no externalId-link tx) once the (no-op) mirror has returned, so the durable user is logged.
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ userId: 'uuid-b', eventType: 'CREATED' }),
+    );
   });
 
   it('no-split-brain: an IdP createUser failure rolls back the local user and surfaces 503', async () => {
@@ -272,6 +308,10 @@ describe('UsersService', () => {
     // No externalId link, and the user is not left indexed for search.
     expect(user.update).not.toHaveBeenCalled();
     expect(search.upsert).not.toHaveBeenCalled();
+    // DEBT-2 (issue #185): history is emitted only on the SUCCESS path, so a compensated (hard-deleted)
+    // create logs NOTHING — critically, the UserHistory.userId Restrict FK would otherwise block the
+    // rollback delete. No CREATED row.
+    expect(history.record).not.toHaveBeenCalled();
   });
 
   // SEC-006: externalId is no longer a client-settable create field (it is server-owned, ADR-0016).
@@ -351,6 +391,15 @@ describe('UsersService', () => {
       userId: 'uuid-1',
       releasedAssignments: [{ id: 'assign-1', assetId: 'asset-1' }],
       revokedGrants: 2,
+    });
+
+    // DEBT-2 (issue #185): a DELETED UserHistory row is appended inside the SAME transaction, with the
+    // full actor attribution (human → { userId }) on the SUBJECT being offboarded.
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(tx, {
+      userId: 'uuid-1',
+      eventType: 'DELETED',
+      actor: { userId: 'actor-99' },
     });
   });
 
@@ -441,6 +490,16 @@ describe('UsersService', () => {
         where: { id: 'admin-1' },
         data: { role: 'MEMBER' },
       });
+
+      // DEBT-2 (issue #185): a role change appends a ROLE_CHANGED UserHistory row carrying { from, to }
+      // and the human actor, on the SUBJECT whose role changed. (No profile change → no UPDATED row.)
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'admin-1',
+        eventType: 'ROLE_CHANGED',
+        payload: { from: 'ADMIN', to: 'MEMBER' },
+        actor: { userId: 'actor-99' },
+      });
     });
 
     it('allows promoting a member to admin without touching the last-admin guard', async () => {
@@ -481,6 +540,16 @@ describe('UsersService', () => {
       await service.update('admin-1', { firstName: 'New' }, 'admin-1');
       expect(user.count).not.toHaveBeenCalled();
       expect(user.update).toHaveBeenCalled();
+
+      // DEBT-2 (issue #185): a name edit appends an UPDATED UserHistory row recording WHICH fields
+      // changed (names only, never the values), attributed to the actor (here a self-edit: actor === id).
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'admin-1',
+        eventType: 'UPDATED',
+        payload: { fields: ['name'] },
+        actor: { userId: 'admin-1' },
+      });
     });
 
     it('refuses to offboard the LAST remaining ADMIN (409)', async () => {
@@ -1093,6 +1162,15 @@ describe('UsersService', () => {
       });
       expect(restored.deletedAt).toBeNull();
       expect(search.upsert).toHaveBeenCalledWith('users', expect.anything());
+
+      // DEBT-2 (issue #185): a RESTORED UserHistory row is appended in the SAME tx as clearing
+      // deletedAt. Called without a principal here → {} attribution (system/unknown actor).
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'uuid-1',
+        eventType: 'RESTORED',
+        actor: {},
+      });
     });
 
     it('is idempotent (no update) when the user is already live', async () => {
@@ -1101,6 +1179,8 @@ describe('UsersService', () => {
       await service.restore('uuid-1');
 
       expect(user.update).not.toHaveBeenCalled();
+      // DEBT-2: no state change → no RESTORED history row.
+      expect(history.record).not.toHaveBeenCalled();
     });
 
     it('404s when the user never existed', async () => {
@@ -1134,6 +1214,17 @@ describe('UsersService', () => {
       await service.requestPasswordReset('user-1', 'actor-1');
 
       expect(idp.requestPasswordReset).toHaveBeenCalledWith('zitadel-user-9');
+      // DEBT-2 (issue #185): a PASSWORD_RESET_SENT history row is appended AFTER the IdP call succeeds,
+      // attributed to the human actor, on the SUBJECT user.
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          userId: 'user-1',
+          eventType: 'PASSWORD_RESET_SENT',
+          actor: { userId: 'actor-1' },
+        }),
+      );
     });
 
     it('404s when the user is missing or soft-deleted (findOne filters)', async () => {
@@ -1143,6 +1234,8 @@ describe('UsersService', () => {
         service.requestPasswordReset('missing', 'actor-1'),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(idp.requestPasswordReset).not.toHaveBeenCalled();
+      // No reset went out → no PASSWORD_RESET_SENT row.
+      expect(history.record).not.toHaveBeenCalled();
     });
 
     it('422s an inactive user and never calls the IdP', async () => {

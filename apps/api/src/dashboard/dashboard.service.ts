@@ -169,12 +169,12 @@ export class DashboardService {
   }
 
   /**
-   * Recent activity feed (CEO Round 2, ADR-0043; filterable per issue #181 / DEBT-1) — the unified,
-   * cross-pillar stream, newest first and offset-paginated (ADR-0030). Reads the `recent_activity`
-   * Postgres VIEW (a `UNION ALL` over AssetHistory, AssetAssignment, AccessGrant and
-   * ConsumableMovement; Prisma cannot express a UNION view, so it lives as raw SQL in a migration and
-   * is read here with a typed `$queryRaw`). The view already drops rows whose parent entity is
-   * soft-deleted.
+   * Recent activity feed (CEO Round 2, ADR-0043; filterable per issue #181 / DEBT-1; user source added
+   * by DEBT-2 / ADR-0050) — the unified, cross-pillar stream, newest first and offset-paginated
+   * (ADR-0030). Reads the `recent_activity` Postgres VIEW (a `UNION ALL` over AssetHistory,
+   * AssetAssignment, AccessGrant, ConsumableMovement and UserHistory; Prisma cannot express a UNION
+   * view, so it lives as raw SQL in a migration and is read here with a typed `$queryRaw`). The view
+   * already drops rows whose parent entity is soft-deleted.
    *
    * The actor display name is resolved with a LEFT JOIN to `users` (lightly — just first/last name);
    * `actorId`/`actorName` are null for system/unknown actors or a deleted actor whose audit FK was

@@ -17,6 +17,7 @@ import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import type { ActorAttribution } from '../common/actor.service';
+import { UserHistoryService } from '../user-history/user-history.service';
 import {
   IDENTITY_PROVIDER,
   PasswordResetUnsupportedError,
@@ -57,6 +58,10 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly search: SearchService,
     private readonly assignments: AssetAssignmentsService,
+    // Append-only User lifecycle log (DEBT-2, issue #185). Each write-path emits a UserHistory row
+    // transactionally with the change it records (ADR-0033 pattern), so the audit trail can never
+    // diverge from the data. Feeds the recent_activity view's user branch.
+    private readonly history: UserHistoryService,
     // IdP write-back seam (ADR-0043). Zitadel mirrors lazyit's user/role decisions; generic-oidc
     // (BYOI) no-ops every management call. Authorization stays DB-first regardless (decision #1).
     @Inject(IDENTITY_PROVIDER)
@@ -152,10 +157,18 @@ export class UsersService {
       });
       // Zitadel returns the real user id; persist it as externalId so future grants/deactivate target
       // the managed user. BYOI returns an empty ref (no IdP user) — leave externalId null in that case.
+      // The externalId update and the CREATED history row commit in ONE transaction so the user's first
+      // audited state and its log row land atomically (ADR-0033). History is emitted only on the SUCCESS
+      // path — never before the IdP mirror could still fail and trigger the hard-delete compensation
+      // (the UserHistory.userId Restrict FK would otherwise block that rollback).
       if (this.idp.supportsManagement && ref.externalId) {
-        const linked = await this.prisma.user.update({
-          where: { id: user.id },
-          data: { externalId: ref.externalId },
+        const linked = await this.prisma.$transaction(async (tx) => {
+          const updated = await tx.user.update({
+            where: { id: user.id },
+            data: { externalId: ref.externalId },
+          });
+          await this.recordHistory(tx, user.id, 'CREATED', actorId);
+          return updated;
         });
         this.search.upsert('users', projectUser(linked));
         return linked;
@@ -170,6 +183,9 @@ export class UsersService {
       throw err;
     }
 
+    // BYOI / no-management path: the IdP mirror has already succeeded (or no-opped), so the user row is
+    // durable and will NOT be compensated — emit the CREATED history row now (the Restrict FK is safe).
+    await this.recordHistory(this.prisma, user.id, 'CREATED', actorId);
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search.upsert('users', projectUser(user));
     return user;
@@ -203,6 +219,31 @@ export class UsersService {
       { op: operation, actor: actorId ?? 'system', subjectUserId, fields },
       `IdP write-back: ${operation}`,
     );
+  }
+
+  /**
+   * Append one UserHistory row (DEBT-2, issue #185) using the given client — pass the `$transaction`
+   * client to keep the log atomic with the write it records (ADR-0033). The create/update/role-change/
+   * password-reset routes attribute a HUMAN actor (`@CurrentUser` → `actorId`), so this overload takes
+   * the human id and maps it to `{ userId }`; `undefined` → a system/unknown actor (both FKs null). The
+   * offboard/restore paths attribute the full principal (human XOR service account) and call the
+   * UserHistoryService directly with the resolved {@link ActorAttribution}.
+   */
+  private recordHistory(
+    client: Parameters<UserHistoryService['record']>[0],
+    userId: string,
+    eventType: Parameters<UserHistoryService['record']>[1]['eventType'],
+    actorId: string | undefined,
+    payload?: Prisma.InputJsonValue,
+  ): Promise<unknown> {
+    return this.history.record(client, {
+      userId,
+      eventType,
+      ...(payload !== undefined ? { payload } : {}),
+      // A human actor → { userId }; system/unknown → {} (both FKs null). A service account never reaches
+      // these human-only routes (@CurrentUser), so the human-id mapping is complete here.
+      actor: actorId != null ? { userId: actorId } : {},
+    });
   }
 
   async update(id: string, data: UpdateUser, actorId?: string) {
@@ -323,6 +364,31 @@ export class UsersService {
       }
     }
 
+    // Emit UserHistory (DEBT-2, issue #185) only on the SUCCESS path — after any IdP mirror has
+    // committed, so a reverted update never produces a misleading log row. A role change and a profile
+    // edit can both happen in one PATCH, so emit BOTH (a ROLE_CHANGED carries { from, to }; an UPDATED
+    // carries which fields changed). Atomic in one transaction with the durable final state (ADR-0033).
+    if (roleChanged || profileChanged) {
+      await this.prisma.$transaction(async (tx) => {
+        if (roleChanged) {
+          await this.recordHistory(tx, id, 'ROLE_CHANGED', actorId, {
+            from: current.role,
+            to: data.role!,
+          });
+        }
+        if (profileChanged) {
+          await this.recordHistory(tx, id, 'UPDATED', actorId, {
+            // WHICH fields changed (never the old/new values — the email is not a secret, but keep the
+            // log shape consistent with the IdP write-back audit line: field names only).
+            fields: [
+              ...(nameChanged ? (['name'] as const) : []),
+              ...(emailChanged ? (['email'] as const) : []),
+            ],
+          });
+        }
+      });
+    }
+
     this.search.upsert('users', projectUser(user));
     return user;
   }
@@ -339,7 +405,9 @@ export class UsersService {
    * BYOI (generic OIDC) cannot trigger a reset on a foreign IdP: the provider throws
    * PasswordResetUnsupportedError, which the controller maps to a 501 "managed by your identity
    * provider" (INV-4). A Zitadel Management failure surfaces as 503 (consistent with the other writes).
-   * Audited via a structured log line (no DB audit table yet — ADR-0043 §3).
+   * Audited via a structured log line AND, since DEBT-2 (issue #185), an append-only UserHistory row
+   * (PASSWORD_RESET_SENT) emitted only after the IdP call SUCCEEDS — so a 422/501/503 never logs a
+   * reset that did not go out.
    */
   async requestPasswordReset(id: string, actorId?: string): Promise<void> {
     const user = await this.findOne(id); // 404 if missing or already soft-deleted
@@ -360,6 +428,14 @@ export class UsersService {
     this.auditWriteBack('requestPasswordReset', actorId, id, {
       externalId: user.externalId,
     });
+    // Append the PASSWORD_RESET_SENT history row (DEBT-2, issue #185) AFTER the IdP call succeeded —
+    // a failed/unsupported reset above already threw, so this only ever records a reset that went out.
+    await this.recordHistory(
+      this.prisma,
+      id,
+      'PASSWORD_RESET_SENT',
+      actorId,
+    );
   }
 
   /**
@@ -450,6 +526,19 @@ export class UsersService {
       // 3. Soft-delete the user.
       await tx.user.update({ where: { id }, data: { deletedAt: now } });
 
+      // 4. Append the DELETED history row (DEBT-2, issue #185) inside the SAME transaction, atomic with
+      // the soft-delete (ADR-0033). Unlike create/update/reset (human-only @CurrentUser), offboarding
+      // attributes the FULL principal — a service account holding user:manage stamps serviceAccountId
+      // (CHECK-safe; ADR-0048). The Restrict FK on userId is satisfied: the row references the still-
+      // existing (soft-deleted) user. NOTE: the recent_activity view filters soft-deleted subjects, so
+      // this DELETED row does not appear in the feed — the offboarding still shows via the released/
+      // revoked asset+access branches; the DELETED row remains queryable on the per-user timeline.
+      await this.history.record(tx, {
+        userId: id,
+        eventType: 'DELETED',
+        actor,
+      });
+
       return { userId: id, releasedAssignments, revokedGrants };
     });
 
@@ -467,8 +556,12 @@ export class UsersService {
    * idempotent if already live. The partial unique index frees `email` on delete, so a restore can
    * 409 if the (case-insensitive) email was reused by another live user in the meantime (mapped by
    * the global PrismaExceptionFilter). Re-indexes for search on success.
+   *
+   * `actor` (DEBT-2, issue #185) is the principal performing the restore (from @CurrentPrincipal). A
+   * RESTORED history row is emitted atomically with clearing `deletedAt`; the idempotent already-live
+   * path emits NOTHING (no state change happened).
    */
-  async restore(id: string) {
+  async restore(id: string, actor: ActorAttribution = {}) {
     const user = await this.prisma.user.findFirst({
       where: { id },
       includeSoftDeleted: true,
@@ -477,11 +570,18 @@ export class UsersService {
       throw new NotFoundException(`User ${id} not found`);
     }
     if (user.deletedAt === null) {
-      return user; // already live — idempotent
+      return user; // already live — idempotent (no state change → no history row)
     }
-    const restored = await this.prisma.user.update({
-      where: { id },
-      data: { deletedAt: null },
+    // Clear deletedAt and append the RESTORED history row in ONE transaction (ADR-0033). The subject
+    // becomes LIVE again, so this row IS visible in the recent_activity feed (the view keeps live
+    // subjects). Attributes the full principal (human → performedById, SA → serviceAccountId).
+    const restored = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id },
+        data: { deletedAt: null },
+      });
+      await this.history.record(tx, { userId: id, eventType: 'RESTORED', actor });
+      return updated;
     });
     // Re-index the restored user (ADR-0035).
     this.search.upsert('users', projectUser(restored));
