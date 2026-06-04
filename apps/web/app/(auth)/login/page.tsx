@@ -96,7 +96,7 @@ export default async function LoginPage({
   const errorCopy = error ? (ERROR_COPY[error] ?? ERROR_COPY.Default) : null;
 
   return (
-    <Card className="w-full">
+    <Card className="w-full animate-rise-in shadow-e2">
       <CardHeader>
         <CardTitle>Sign in to lazyit</CardTitle>
         <CardDescription>
@@ -108,9 +108,12 @@ export default async function LoginPage({
         {errorCopy && (
           <div
             role="alert"
-            className="flex gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm"
+            className="flex gap-3 rounded-lg border border-destructive/30 bg-destructive/8 p-3 text-sm"
           >
-            <ExclamationTriangleIcon className="size-5 shrink-0 text-destructive" />
+            <ExclamationTriangleIcon
+              className="size-5 shrink-0 text-destructive"
+              aria-hidden="true"
+            />
             <div className="space-y-0.5">
               <p className="font-medium text-foreground">{errorCopy.title}</p>
               <p className="text-muted-foreground">{errorCopy.detail}</p>
@@ -119,8 +122,11 @@ export default async function LoginPage({
         )}
 
         {unconfigured ? (
-          <div className="flex gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm">
-            <WrenchScrewdriverIcon className="size-5 shrink-0 text-primary" />
+          <div className="flex gap-3 rounded-lg border border-info/30 bg-info/8 p-3 text-sm">
+            <WrenchScrewdriverIcon
+              className="size-5 shrink-0 text-info"
+              aria-hidden="true"
+            />
             <div className="space-y-0.5">
               <p className="font-medium text-foreground">
                 This instance isn&apos;t set up yet
