@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { optionalText } from "./primitives";
 
 /**
  * AssetAssignment — the timestamped join recording who owns an asset over time
@@ -45,7 +46,7 @@ export const CreateAssetAssignmentSchema = z.strictObject({
   assetId: z.cuid(),
   userId: z.uuid(),
   assignedAt: z.iso.datetime().optional(),
-  notes: z.string().trim().min(1).max(2000).optional(),
+  notes: optionalText(2000),
 });
 
 /**
@@ -54,7 +55,7 @@ export const CreateAssetAssignmentSchema = z.strictObject({
  * (`releasedById`) is NOT in the body — it comes from the `X-User-Id` shim.
  */
 export const ReleaseAssetAssignmentSchema = z.strictObject({
-  notes: z.string().trim().min(1).max(2000).optional(),
+  notes: optionalText(2000),
 });
 
 /**
