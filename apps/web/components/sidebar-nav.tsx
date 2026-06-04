@@ -2,6 +2,7 @@
 
 import {
   BookOpenIcon,
+  ClockIcon,
   Cog6ToothIcon,
   CubeIcon,
   KeyIcon,
@@ -10,10 +11,11 @@ import {
   Squares2X2Icon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
+import type { Permission } from "@lazyit/shared";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Pillar } from "@/components/pillar-scope";
-import { useCan } from "@/lib/hooks/use-permissions";
+import { useMyPermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -25,6 +27,13 @@ type NavItem = {
    * still gates the routes server-side; this just hides the link from those who can't use it.
    */
   adminOnly?: boolean;
+  /**
+   * Render only for callers who hold this fine-grained permission (RBAC v2). The API's
+   * `@RequirePermission` guard is still the real gate — this just hides a link the caller can't use
+   * (e.g. Reports → `logs:read`, ADMIN-only). Independent of {@link adminOnly}; an item may carry
+   * either, both, or neither. Fails closed: while the permission set is loading the item is hidden.
+   */
+  permission?: Permission;
 };
 
 type NavSection = {
@@ -96,6 +105,20 @@ const NAV: NavSection[] = [
     items: [{ label: "Knowledge Base", href: "/kb", icon: BookOpenIcon }],
   },
   {
+    // Reports — the estate-wide activity history (issue #177). `pillar` is omitted so the active
+    // item falls back to the brand indigo (no fifth pillar hue). Gated behind the ADMIN-only
+    // `logs:read` permission, so the section is invisible to everyone else.
+    heading: "Reports",
+    items: [
+      {
+        label: "Informes",
+        href: "/informes",
+        icon: ClockIcon,
+        permission: "logs:read",
+      },
+    ],
+  },
+  {
     heading: "Manage",
     pillar: "manage",
     items: [
@@ -108,14 +131,21 @@ const NAV: NavSection[] = [
 
 export function SidebarNav() {
   const pathname = usePathname();
-  const canManageSettings = useCan("settings:manage");
+  // Resolve the whole permission set ONCE (rules of hooks: no `useCan` inside the item loop). `can`
+  // answers any fine-grained gate (`logs:read`, …); `adminOnly` keeps mapping to `settings:manage`.
+  const { can } = useMyPermissions();
 
   return (
     <nav className="flex-1 space-y-4 p-2">
       {NAV.map((section, index) => {
-        // Hide the settings-only items from those without settings:manage; drop an empty section.
+        // Hide items the caller can't use, then drop a section that empties out:
+        //  - `adminOnly`  → needs `settings:manage` (the Settings shell).
+        //  - `permission` → needs that fine-grained permission (e.g. Reports → `logs:read`).
+        // Fails closed: while the set is loading `can()` is false, so a gated item stays hidden.
         const items = section.items.filter(
-          (item) => !item.adminOnly || canManageSettings,
+          (item) =>
+            (!item.adminOnly || can("settings:manage")) &&
+            (!item.permission || can(item.permission)),
         );
         if (items.length === 0) return null;
         // The active item's icon wears this section's pillar hue (Dashboard → brand fallback).

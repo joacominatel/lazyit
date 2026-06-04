@@ -431,3 +431,27 @@
     color: oklch(0.4 0.008 75) !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Print — Reports/Informes (issue #177). ADDITIVE block: defines no new tokens.
+   The Reports screen lives INSIDE the `(app)` shell (sidebar + topbar + breadcrumb
+   bar), unlike the chrome-less offboarding `(print)` route group above. So when a
+   print-document is on a chromed page, strip the app frame and let the report sheet
+   own the page. Scoped via `:has(...)` so it only fires when an Informes document is
+   present — every other print path (and the whole screen view) is untouched.
+   --------------------------------------------------------------------------- */
+@media print {
+  /* Hide the persistent app chrome around the printed report: the desktop rail, the
+     topbar, the breadcrumb bar (the bar wrapping the route-driven Breadcrumb), and the
+     mobile-nav sheet trigger. The breadcrumb bar is targeted by its layout marker. */
+  body:has([data-print-document]) aside,
+  body:has([data-print-document]) header,
+  body:has([data-print-document]) [data-app-chrome] {
+    display: none !important;
+  }
+
+  /* With the chrome gone, let the main content use the full sheet width. */
+  body:has([data-print-document]) main {
+    padding: 0 !important;
+  }
+}
