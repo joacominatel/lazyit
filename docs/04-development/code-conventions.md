@@ -133,6 +133,18 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
   - **Type tokens:** `text-display` (hero metrics) · `text-section` (panel headings) ·
     `text-label` (uppercase eyebrows) carry the size+line-height+tracking triple — use them
     instead of pixel-guessing.
+- **Design context — use the `impeccable` skill for any UI/UX work.** For any design,
+  redesign, critique, audit, or polish task, run `/impeccable <command>`. The strategic
+  context (register, users, brand personality, anti-references, design principles) lives in
+  the **root `PRODUCT.md`**; the visual system (tokens, colour roles, typography, elevation,
+  components, do's/don'ts — extracted byte-for-byte from `globals.css`) lives in the **root
+  `DESIGN.md`** with a machine-readable sidecar at `.impeccable/design.json`. The
+  reconciliations baked into `DESIGN.md`'s Do's and Don'ts are **binding**: pillar identity is
+  a tint/chip/dot only (no colored `border-left/right` > 1px; ≤2px active-nav rule is the only
+  exception); motion is CSS + tw-animate-css only (**no** framer-motion/gsap/anime/lenis); the
+  warm `--bone` canvas is a committed ADR-0011 decision, not an "AI cream default"; and no
+  hollow hero-metric template, gradient text, glassmorphism, per-section eyebrows, or nested
+  cards.
 
 ## The Bun-first boundary
 
