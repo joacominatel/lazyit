@@ -62,7 +62,9 @@ chmod 600 infra/env/.env.prod
 #    ZITADEL_MASTERKEY must be EXACTLY 32 bytes (a wrong length is a real first-boot failure):
 #        openssl rand -hex 16    # 16 bytes -> 32 hex chars (exactly 32)
 #    For local prod-like, set LAZYIT_DOMAIN=localhost (so the auth subdomain is auth.localhost),
-#    and leave LAZYIT_SITE_ADDRESS=localhost and WEB_ORIGIN=https://localhost:8443.
+#    ZITADEL_EXTERNALDOMAIN=auth.localhost, WEB_ORIGIN=https://localhost:8443, and
+#    OIDC_ISSUER / AUTH_ISSUER=https://auth.localhost:8443 (include the host port — Caddy listens
+#    on 8443, not 443). `./infra/start.sh` sets these automatically.
 
 # 2. Build images and start everything. Set a DC alias once for the long prod invocation.
 #    Boot order (by health): db -> migrate; zitadel-secrets-init -> zitadel -> zitadel-bootstrap
@@ -106,6 +108,12 @@ the web UI; the first login routes you to the in-app **`/setup` wizard** to crea
 > Internal server-to-server calls (api/web → Zitadel for JWKS/token) do **not** need this — they reach
 > the `zitadel` container over Docker DNS at `http://zitadel:8080` (`OIDC_JWKS_URI`). Only the
 > *browser* leg needs `auth.localhost` to resolve.
+
+> [!warning] Local prod-like: OIDC issuer URL must include `:8443`
+> If sign-in redirects to `https://auth.localhost/oauth/...` (no port), OIDC discovery used the wrong
+> issuer. Set `OIDC_ISSUER` and `AUTH_ISSUER` to `https://auth.localhost:8443` in `infra/env/.env.prod`
+> (explicit env wins over `oidc-client.json`), then `docker compose … restart web api`. Zitadel console
+> login is `admin@zitadel.auth.localhost` (not bare `admin`).
 
 > [!info] Migrations & seed run automatically
 > The one-shot `migrate` service runs `prisma migrate deploy` then the idempotent seed

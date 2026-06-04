@@ -7,11 +7,64 @@ import { DashboardService } from './dashboard.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
-// the client only for types (erased at runtime); PrismaService is injected as a plain mock below.
-jest.mock('../../generated/prisma/client', () => ({
-  PrismaClient: class {},
-  Prisma: {},
-}));
+// the client only for types (erased at runtime) EXCEPT `Prisma.sql` / `Prisma.join` / `Prisma.empty`,
+// which it calls at runtime to compose the parameterized activity WHERE (issue #181). We provide a
+// faithful-enough tiny SQL builder: each fragment captures its bound `values`, so a test can assert
+// the filters are PARAMETERIZED (the injection guard) — never string-concatenated.
+jest.mock('../../generated/prisma/client', () => {
+  // A minimal Sql node mirroring Prisma's: `strings` (the static template chunks) + `values` (binds).
+  class FakeSql {
+    constructor(
+      readonly strings: readonly string[],
+      readonly values: readonly unknown[],
+    ) {}
+    // A flat text view (binds rendered as `?`) — handy for asserting structure without exposing values.
+    get text(): string {
+      return this.strings.join('?');
+    }
+  }
+  const EMPTY = new FakeSql([''], []);
+  const sql = (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ): FakeSql => {
+    // Flatten nested FakeSql values (Prisma does this so `${Prisma.sql\`...\`}` composes).
+    const flatStrings: string[] = [strings[0] ?? ''];
+    const flatValues: unknown[] = [];
+    values.forEach((value, i) => {
+      if (value instanceof FakeSql) {
+        flatStrings[flatStrings.length - 1] += value.strings[0] ?? '';
+        for (let k = 0; k < value.values.length; k++) {
+          flatValues.push(value.values[k]);
+          flatStrings.push(value.strings[k + 1] ?? '');
+        }
+        flatStrings[flatStrings.length - 1] += strings[i + 1] ?? '';
+      } else {
+        flatValues.push(value);
+        flatStrings.push(strings[i + 1] ?? '');
+      }
+    });
+    return new FakeSql(flatStrings, flatValues);
+  };
+  const join = (parts: FakeSql[], separator: string): FakeSql => {
+    if (parts.length === 0) return EMPTY;
+    const strings: string[] = [''];
+    const valuesOut: unknown[] = [];
+    parts.forEach((part, i) => {
+      strings[strings.length - 1] += part.strings[0] ?? '';
+      for (let k = 0; k < part.values.length; k++) {
+        valuesOut.push(part.values[k]);
+        strings.push(part.strings[k + 1] ?? '');
+      }
+      if (i < parts.length - 1) strings[strings.length - 1] += separator;
+    });
+    return new FakeSql(strings, valuesOut);
+  };
+  return {
+    PrismaClient: class {},
+    Prisma: { sql, join, empty: EMPTY, Sql: FakeSql },
+  };
+});
 
 /**
  * Unit spec for the read-only dashboard aggregation. PrismaService is fully mocked: each model's
@@ -319,6 +372,117 @@ describe('DashboardService', () => {
       expect(page.total).toBe(42);
       expect(typeof page.total).toBe('number');
       expect(page.offset).toBe(10);
+    });
+
+    /**
+     * Filtering (issue #181 / DEBT-1). The Prisma mock builds a faithful `FakeSql` node per query, so
+     * we read back the SQL the service composed (`$queryRaw.mock.calls[i][0]`): `.text` shows the
+     * structure (binds rendered as `?`), `.values` shows the bound parameters — proving the filters
+     * are PARAMETERIZED, never concatenated, and that the page + count share the same WHERE.
+     */
+    const pageSql = () => prisma.$queryRaw.mock.calls[0][0] as {
+      text: string;
+      values: unknown[];
+    };
+    const countSql = () => prisma.$queryRaw.mock.calls[1][0] as {
+      text: string;
+      values: unknown[];
+    };
+
+    it('emits NO WHERE clause when no filter is supplied (backward-compatible)', async () => {
+      await service.getActivity({ limit: 20, offset: 0, deleted: 'active' });
+      expect(pageSql().text).not.toContain('WHERE');
+      expect(countSql().text).not.toContain('WHERE');
+    });
+
+    it('applies entityType / entityId / action as bound parameters (no concatenation)', async () => {
+      await service.getActivity({
+        limit: 20,
+        offset: 0,
+        deleted: 'active',
+        entityType: 'asset',
+        entityId: 'casset0000000000000000001',
+        action: 'created',
+      });
+      const page = pageSql();
+      expect(page.text).toContain('WHERE');
+      expect(page.text).toContain('ra."entityType" =');
+      expect(page.text).toContain('ra."entityId" =');
+      expect(page.text).toContain('ra."action" =');
+      // The user-controlled values are BOUND, not inlined into the SQL text.
+      expect(page.values).toEqual(
+        expect.arrayContaining([
+          'asset',
+          'casset0000000000000000001',
+          'created',
+        ]),
+      );
+    });
+
+    it('binds an already-resolved actorId (cast to uuid) — the service never sees "me"', async () => {
+      await service.getActivity({
+        limit: 20,
+        offset: 0,
+        deleted: 'active',
+        actorId: '11111111-1111-4111-8111-111111111111',
+      });
+      const page = pageSql();
+      expect(page.text).toContain('ra."actorId" =');
+      expect(page.text).toContain('::uuid');
+      expect(page.values).toContain('11111111-1111-4111-8111-111111111111');
+    });
+
+    it('applies a closed-open [from, to) window over occurredAt as bound timestamps', async () => {
+      await service.getActivity({
+        limit: 20,
+        offset: 0,
+        deleted: 'active',
+        from: '2026-05-01T00:00:00.000Z',
+        to: '2026-06-01T00:00:00.000Z',
+      });
+      const page = pageSql();
+      expect(page.text).toContain('ra."occurredAt" >=');
+      expect(page.text).toContain('ra."occurredAt" <');
+      const dates = page.values.filter((v) => v instanceof Date);
+      expect(dates.map((d) => d.toISOString())).toEqual([
+        '2026-05-01T00:00:00.000Z',
+        '2026-06-01T00:00:00.000Z',
+      ]);
+    });
+
+    it('wraps the free-text q in ILIKE wildcards as a single bound parameter on both summary and actor name', async () => {
+      await service.getActivity({
+        limit: 20,
+        offset: 0,
+        deleted: 'active',
+        q: 'laptop',
+      });
+      const page = pageSql();
+      expect(page.text).toContain('ILIKE');
+      expect(page.text).toContain('ra."summary"');
+      expect(page.text).toContain('firstName');
+      // The wildcards wrap the bound VALUE — the user text stays a parameter, never SQL structure.
+      expect(page.values).toContain('%laptop%');
+    });
+
+    it('the count query carries the SAME filtered WHERE as the page query (total = filtered count)', async () => {
+      await service.getActivity({
+        limit: 20,
+        offset: 0,
+        deleted: 'active',
+        entityType: 'asset',
+        q: 'created',
+      });
+      const page = pageSql();
+      const count = countSql();
+      expect(count.text).toContain('WHERE');
+      expect(count.text).toContain('ra."entityType" =');
+      expect(count.text).toContain('ILIKE');
+      // Identical WHERE binds on both halves → the total can't drift from the page. The page also
+      // binds the trailing LIMIT/OFFSET (take, skip), so compare the leading WHERE values only.
+      expect(page.values.slice(0, count.values.length)).toEqual(count.values);
+      // entityType bind, then the q pattern bound twice (summary + actor-name ILIKE).
+      expect(count.values).toEqual(['asset', '%created%', '%created%']);
     });
   });
 });

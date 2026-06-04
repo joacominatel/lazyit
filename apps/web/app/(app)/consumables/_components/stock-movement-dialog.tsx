@@ -162,7 +162,16 @@ export function StockMovementDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form id={FORM_ID} onSubmit={onSubmit} noValidate>
+        {/* stopPropagation: a form inside a Radix Portal still bubbles its submit through the React
+            tree to any ancestor form, so guard it defensively (issue #164). */}
+        <form
+          id={FORM_ID}
+          onSubmit={(e) => {
+            e.stopPropagation();
+            onSubmit(e);
+          }}
+          noValidate
+        >
           <FieldGroup>
             <Controller
               control={form.control}

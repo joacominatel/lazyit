@@ -2,6 +2,7 @@
 
 import {
   BookOpenIcon,
+  ClockIcon,
   Cog6ToothIcon,
   CubeIcon,
   KeyIcon,
@@ -10,9 +11,11 @@ import {
   Squares2X2Icon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
+import type { Permission } from "@lazyit/shared";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCan } from "@/lib/hooks/use-permissions";
+import type { Pillar } from "@/components/pillar-scope";
+import { useMyPermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -24,12 +27,40 @@ type NavItem = {
    * still gates the routes server-side; this just hides the link from those who can't use it.
    */
   adminOnly?: boolean;
+  /**
+   * Render only for callers who hold this fine-grained permission (RBAC v2). The API's
+   * `@RequirePermission` guard is still the real gate — this just hides a link the caller can't use
+   * (e.g. Reports → `logs:read`, ADMIN-only). Independent of {@link adminOnly}; an item may carry
+   * either, both, or neither. Fails closed: while the permission set is loading the item is hidden.
+   */
+  permission?: Permission;
 };
 
 type NavSection = {
   /** Section heading, or null for the ungrouped top item (Dashboard). */
   heading: string | null;
+  /**
+   * The pillar whose hue the section's ACTIVE item wears on its icon (ADR-0049). Omitted for
+   * the ungrouped Dashboard, which falls back to the brand indigo (Access hue) — the calm
+   * "you're home" tone. The pillar hue only ever colours the (decorative, label-paired) icon;
+   * the readable label stays on `--sidebar-accent-foreground`.
+   */
+  pillar?: Pillar;
   items: NavItem[];
+};
+
+/**
+ * Static, scanner-safe pillar-icon classes for the ACTIVE nav item. The active icon wears its
+ * pillar hue; the brand-indigo `text-primary` is the Dashboard/fallback tone. Active state is
+ * never colour alone — it is also a `--muted` bg-tint + a font-weight bump, so the hue is a
+ * reinforcement, not the sole signifier. Full strings so the Tailwind v4 scanner keeps them.
+ */
+const ACTIVE_ICON_BY_PILLAR: Record<Pillar | "default", string> = {
+  inventory: "text-pillar-inventory",
+  access: "text-pillar-access",
+  knowledge: "text-pillar-knowledge",
+  manage: "text-pillar-manage",
+  default: "text-primary",
 };
 
 /**
@@ -57,6 +88,7 @@ const NAV: NavSection[] = [
   },
   {
     heading: "Inventory",
+    pillar: "inventory",
     items: [
       { label: "Assets", href: "/assets", icon: ServerStackIcon },
       { label: "Consumables", href: "/consumables", icon: CubeIcon },
@@ -64,14 +96,31 @@ const NAV: NavSection[] = [
   },
   {
     heading: "Access",
+    pillar: "access",
     items: [{ label: "Applications", href: "/applications", icon: KeyIcon }],
   },
   {
     heading: "Knowledge",
+    pillar: "knowledge",
     items: [{ label: "Knowledge Base", href: "/kb", icon: BookOpenIcon }],
   },
   {
+    // Reports — the estate-wide activity history (issue #177). `pillar` is omitted so the active
+    // item falls back to the brand indigo (no fifth pillar hue). Gated behind the ADMIN-only
+    // `logs:read` permission, so the section is invisible to everyone else.
+    heading: "Reports",
+    items: [
+      {
+        label: "Informes",
+        href: "/informes",
+        icon: ClockIcon,
+        permission: "logs:read",
+      },
+    ],
+  },
+  {
     heading: "Manage",
+    pillar: "manage",
     items: [
       { label: "Users", href: "/users", icon: UsersIcon },
       { label: "Locations", href: "/locations", icon: MapPinIcon },
@@ -82,16 +131,25 @@ const NAV: NavSection[] = [
 
 export function SidebarNav() {
   const pathname = usePathname();
-  const canManageSettings = useCan("settings:manage");
+  // Resolve the whole permission set ONCE (rules of hooks: no `useCan` inside the item loop). `can`
+  // answers any fine-grained gate (`logs:read`, …); `adminOnly` keeps mapping to `settings:manage`.
+  const { can } = useMyPermissions();
 
   return (
     <nav className="flex-1 space-y-4 p-2">
       {NAV.map((section, index) => {
-        // Hide the settings-only items from those without settings:manage; drop an empty section.
+        // Hide items the caller can't use, then drop a section that empties out:
+        //  - `adminOnly`  → needs `settings:manage` (the Settings shell).
+        //  - `permission` → needs that fine-grained permission (e.g. Reports → `logs:read`).
+        // Fails closed: while the set is loading `can()` is false, so a gated item stays hidden.
         const items = section.items.filter(
-          (item) => !item.adminOnly || canManageSettings,
+          (item) =>
+            (!item.adminOnly || can("settings:manage")) &&
+            (!item.permission || can(item.permission)),
         );
         if (items.length === 0) return null;
+        // The active item's icon wears this section's pillar hue (Dashboard → brand fallback).
+        const activeIconClass = ACTIVE_ICON_BY_PILLAR[section.pillar ?? "default"];
         return (
         <div key={section.heading ?? `section-${index}`} className="space-y-0.5">
           {section.heading ? (
@@ -112,11 +170,14 @@ export function SidebarNav() {
                   // restores desktop density on the always-visible rail.
                   "flex min-h-11 items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors md:min-h-9",
                   active
-                    ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                    ? // Active reads as tint + weight + a pillar-toned icon — three reinforcing
+                      // cues, never colour alone. The readable label stays on the AA-cleared
+                      // accent-foreground; only the (label-paired) icon takes the pillar hue.
+                      "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
                     : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 )}
               >
-                <Icon className="size-5" />
+                <Icon className={cn("size-5", active && activeIconClass)} />
                 {label}
               </Link>
             );

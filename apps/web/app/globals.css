@@ -33,6 +33,21 @@
   --color-avatar-4: var(--avatar-4);
   --color-avatar-5: var(--avatar-5);
   --color-avatar-foreground: var(--avatar-foreground);
+  /* Pillar identity palette (ADR-0049). Registered exactly like --color-avatar-* /
+     --color-chart-* so Tailwind emits scanner-safe `bg-pillar-*` / `text-pillar-*`
+     utilities — NOT bg-[var(--pillar)]/10 (the JIT scanner needs full, non-interpolated
+     class strings; see lib/avatar-color.ts). Each pillar aliases one chart hue, which
+     already carries light/dark parity, so the utilities are theme-correct for free.
+     LOCKED map: Inventory=teal · Access=indigo (the brand hue) · Knowledge=green ·
+     Manage=rose. Consumables shares Inventory teal (it IS inventory — differentiate by
+     icon, never invent a 5th hue).
+       AA RULE: pillar hue is a tint/border/dot/chip ONLY — never small text on bone
+       (teal 0.62L / rose can't clear 4.5:1 as body text). Decorative ≥24px glyphs are
+       exempt; readable text always stays on --foreground/--card-foreground. */
+  --color-pillar-inventory: var(--chart-2);
+  --color-pillar-access: var(--chart-1);
+  --color-pillar-knowledge: var(--chart-3);
+  --color-pillar-manage: var(--chart-5);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -62,6 +77,28 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* Warm elevation scale (ADR-0049) registered as real utilities, so `shadow-e1`,
+     `shadow-e2`, `shadow-e3` map to the elevation tokens (which carry light/dark
+     parity). Use these at composition sites instead of ad-hoc shadow-md/lg. */
+  --shadow-e1: var(--elevation-1);
+  --shadow-e2: var(--elevation-2);
+  --shadow-e3: var(--elevation-3);
+  /* Named type tokens (ADR-0049). Tailwind v4 emits `text-display` / `text-section` /
+     `text-label` carrying the size + line-height + tracking triple, so "big metric" vs
+     "small eyebrow" is intentional, not pixel-guessed. No font change — Geist stays; AA
+     is untouched (these only size foreground-on-card text).
+       display — dashboard hero metrics (mono tabular pairs well here)
+       section — "Needs attention" / "Recent activity" headings
+       label   — uppercase eyebrows / nav section headings */
+  --text-display: 1.875rem;
+  --text-display--line-height: 2.25rem;
+  --text-display--letter-spacing: -0.02em;
+  --text-section: 1.125rem;
+  --text-section--line-height: 1.5rem;
+  --text-section--letter-spacing: -0.01em;
+  --text-label: 0.75rem;
+  --text-label--line-height: 1rem;
+  --text-label--letter-spacing: 0.04em;
 }
 
 :root {
@@ -131,6 +168,25 @@
   --sidebar-accent-foreground: oklch(0.27 0.006 75);
   --sidebar-border: oklch(0.9 0.005 95);
   --sidebar-ring: var(--brand);
+  /* Motion vocabulary (ADR-0049 «Activated Restraint»). One shared dialect so every
+     surface eases and settles the same way. `--ease-out-quad` is the workhorse (settles,
+     never bounces); `--ease-spring` overshoots ONCE and is RESERVED for the success
+     checkmark only — do not borrow it for general motion. Durations stay ≤220ms. */
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 220ms;
+  /* Warm elevation scale (ADR-0049). The codebase had no depth language; these three
+     steps are tinted with the foreground hue (oklch ~0.21 0.006 75) so shadows sit in
+     the bone system — "paper on a warm desk", not a gray sticker. Exposed as
+     shadow-e1/e2/e3 utilities via @theme inline below.
+       e1 — resting cards / panels   e2 — hover/focus   e3 — dialogs/dropdowns/sticky */
+  --elevation-1: 0 1px 2px oklch(0.21 0.006 75 / 0.06),
+    0 1px 1px oklch(0.21 0.006 75 / 0.04);
+  --elevation-2: 0 4px 12px -2px oklch(0.21 0.006 75 / 0.1),
+    0 2px 4px -2px oklch(0.21 0.006 75 / 0.06);
+  --elevation-3: 0 12px 28px -6px oklch(0.21 0.006 75 / 0.14);
 }
 
 .dark {
@@ -184,6 +240,16 @@
   --sidebar-accent-foreground: oklch(0.96 0.004 95);
   --sidebar-border: oklch(0.97 0.004 95 / 10%);
   --sidebar-ring: var(--brand);
+  /* Dark elevation (ADR-0049): warm shadows vanish on near-black, so each step uses the
+     SAME shapes at ~2x alpha PLUS a 1px inset top-highlight (a faint bone line) so a
+     raised surface catches light against the dark canvas — depth via highlight, not just
+     shadow. Tokens keep the e1/e2/e3 names; only the values change here. */
+  --elevation-1: inset 0 1px 0 oklch(0.97 0.004 95 / 0.04),
+    0 1px 2px oklch(0.21 0.006 75 / 0.12), 0 1px 1px oklch(0.21 0.006 75 / 0.08);
+  --elevation-2: inset 0 1px 0 oklch(0.97 0.004 95 / 0.04),
+    0 4px 12px -2px oklch(0.21 0.006 75 / 0.2), 0 2px 4px -2px oklch(0.21 0.006 75 / 0.12);
+  --elevation-3: inset 0 1px 0 oklch(0.97 0.004 95 / 0.04),
+    0 12px 28px -6px oklch(0.21 0.006 75 / 0.28);
 }
 
 @layer base {
@@ -195,5 +261,197 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Motion utilities (ADR-0049 «Activated Restraint»).
+
+   tw-animate-css ships only enter/exit/accordion/collapsible/caret keyframes, so
+   the surface-level vocabulary is authored here as small utility classes (the
+   redesign composes them at call sites). Every animation degrades to instant under
+   `prefers-reduced-motion: reduce` via the consolidated block at the bottom.
+
+   - .animate-rise-in  : section/card/row settle (12px rise + fade) — component-level only.
+   - .animate-fade-in  : route-level cross-route settle (opacity only, no transform, so it
+                         never traps sticky descendants in a transform containing block).
+   - .animate-pulse-soft : ONE calm attention heartbeat — danger dots only.
+   - .animate-shimmer  : skeleton sweep (composed onto Skeleton at call sites).
+   - .animate-check-draw : success-check stroke draw (the single --ease-spring use).
+--------------------------------------------------------------------------- */
+@layer utilities {
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* Opacity-only sibling of rise-in, for the route-level cross-route settle. It carries NO
+     transform, so it never establishes a containing block — a `position: sticky` descendant
+     keeps sticking to the viewport during the ~220ms settle. Use rise-in for component-level
+     surfaces (cards/lists) where there is no sticky ancestor; use fade-in at the route root. */
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes pulse-soft {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+
+  @keyframes shimmer {
+    from {
+      background-position: -150% 0;
+    }
+    to {
+      background-position: 150% 0;
+    }
+  }
+
+  @keyframes check-draw {
+    from {
+      stroke-dashoffset: 100;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  .animate-rise-in {
+    animation: rise-in var(--dur-slow) var(--ease-out-quad) both;
+  }
+
+  .animate-fade-in {
+    animation: fade-in var(--dur-slow) var(--ease-out-quad) both;
+  }
+
+  .animate-pulse-soft {
+    animation: pulse-soft 2.4s ease-in-out infinite;
+  }
+
+  /* A moving highlight band over the muted skeleton fill. Compose alongside the
+     vendored Skeleton's bg-muted at the call site (the primitive stays untouched). */
+  .animate-shimmer {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      oklch(1 0 0 / 0.06) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+
+  .animate-check-draw {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+    animation: check-draw var(--dur-slow) var(--ease-spring) forwards;
+  }
+}
+
+/* The single source of truth for reduced-motion. Lands FIRST in the Wave-0 series so
+   everything that animates afterwards is opt-out-safe by construction: animations and
+   transitions collapse to ~instant and hover translate is neutralized, while the
+   elevation/tone changes still apply (only the movement is removed). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Neutralize the hover lift so reduced-motion users still get the elevation/ring change
+     without any positional movement. `lift` (lib/recipes.ts) is a className recipe that
+     EXPANDS to utility classes — there is no literal `lift` element — so the guard targets
+     the real translate utility the recipe emits (`hover:-translate-y-0.5`), not the recipe
+     name. Add any further translate utilities the recipe gains to this list. */
+  .hover\:-translate-y-0\.5:hover {
+    transform: none !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Print (Wave 3b — offboarding Return Act). ADDITIVE block: it only governs the
+   printed page and defines no new design tokens. The printable act lives in the
+   chrome-less `(print)` route group, so there is no app sidebar/header to strip;
+   this only sets the page box, forces a clean white sheet, and hides any
+   on-screen-only control marked `[data-print-hide]` (e.g. the "Print" button).
+   --------------------------------------------------------------------------- */
+@media print {
+  /* Single-sheet defaults: a modest, printer-safe margin on A4. */
+  @page {
+    margin: 0.5in;
+    size: A4;
+  }
+
+  /* A true white sheet with black ink — the warm bone canvas is for the screen. */
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  /* On-screen-only affordances never reach paper. */
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  /* Let the document use the full printable width and avoid awkward row splits. */
+  [data-print-document] {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  [data-print-document] li,
+  [data-print-document] section {
+    break-inside: avoid;
+  }
+
+  /* De-emphasized meta prints as near-ink, not mid-gray — `muted-foreground` washes out on a
+     B&W laser. Screen tone is unchanged; this only applies inside the printed document. */
+  [data-print-document] .text-muted-foreground {
+    color: oklch(0.4 0.008 75) !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Print — Reports/Informes (issue #177). ADDITIVE block: defines no new tokens.
+   The Reports screen lives INSIDE the `(app)` shell (sidebar + topbar + breadcrumb
+   bar), unlike the chrome-less offboarding `(print)` route group above. So when a
+   print-document is on a chromed page, strip the app frame and let the report sheet
+   own the page. Scoped via `:has(...)` so it only fires when an Informes document is
+   present — every other print path (and the whole screen view) is untouched.
+   --------------------------------------------------------------------------- */
+@media print {
+  /* Hide the persistent app chrome around the printed report: the desktop rail, the
+     topbar, the breadcrumb bar (the bar wrapping the route-driven Breadcrumb), and the
+     mobile-nav sheet trigger. The breadcrumb bar is targeted by its layout marker. */
+  body:has([data-print-document]) aside,
+  body:has([data-print-document]) header,
+  body:has([data-print-document]) [data-app-chrome] {
+    display: none !important;
+  }
+
+  /* With the chrome gone, let the main content use the full sheet width. */
+  body:has([data-print-document]) main {
+    padding: 0 !important;
   }
 }

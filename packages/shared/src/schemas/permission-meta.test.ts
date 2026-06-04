@@ -225,9 +225,11 @@ describe("PERMISSION_PRESETS — the one-click bundles", () => {
         expect(PERMISSION_META[p].pillar).toBe("inventory");
       }
     }
-    // …and it does NOT leak the two pre-tightened sensitive reads (matches the read-only baseline).
+    // …and it does NOT leak the two pre-tightened sensitive reads nor the admin-only reads
+    // (logs:read) — it stays aligned with the read-only / VIEWER baseline.
     expect(op).not.toContain("accessGrant:read" as Permission);
     expect(op).not.toContain("user:read" as Permission);
+    expect(op).not.toContain("logs:read" as Permission);
   });
 });
 

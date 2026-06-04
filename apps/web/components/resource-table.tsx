@@ -13,7 +13,8 @@ import {
 } from "@heroicons/react/24/outline";
 import { ChevronDownIcon, ChevronUpIcon, XMarkIcon } from "@heroicons/react/16/solid";
 import Link from "next/link";
-import type { ComponentType, ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import type { ComponentProps, ComponentType, MouseEvent, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { RequestIdNote } from "@/components/request-id-note";
 import { Button } from "@/components/ui/button";
@@ -266,6 +267,70 @@ export function SelectCell({
         aria-label={label}
       />
     </TableCell>
+  );
+}
+
+/**
+ * The reveal recipe for a row's trailing actions cell — applied to the actions WRAPPER inside a
+ * {@link LinkableRow}. Default lists are dense, so the per-row `RowActions` ellipsis at full
+ * opacity makes them noisy; this fades the actions in only when the operator reaches for the row.
+ *
+ * a11y contract (these three are HARD rules, not polish):
+ * - `group-hover/row:opacity-100` — visible on pointer hover (the row is `group/row`).
+ * - `group-focus-within/row:opacity-100` — visible when ANYTHING in the row takes keyboard focus,
+ *   so a Tab-only user always sees the action they're about to open.
+ * - `[@media(hover:none)]:opacity-100` — touch devices can't hover, so the actions stay visible
+ *   there unconditionally (a phone/tablet must never hide the only way to act on a row).
+ * `transition-opacity` rides the motion tokens; reduced-motion collapses it globally.
+ */
+export const rowActionsReveal =
+  "opacity-0 transition-opacity duration-[var(--dur-fast)] group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none";
+
+/**
+ * A whole-row-clickable {@link TableRow}: clicking anywhere on the row navigates to `href`, turning
+ * the ~70% of dead row space (everything outside the name `<Link>`) into a navigation target. Drop-in
+ * for `<TableRow>` — pass the same `data-state`/children; it adds `cursor-pointer`, the `group/row`
+ * marker that drives {@link rowActionsReveal}, and the click handler.
+ *
+ * Interactive descendants keep working: the handler ignores clicks that originate inside a link,
+ * button, checkbox, menu, input or any element opting out via `data-row-noclick`, so the name
+ * `<Link>`, the row's `RowActions` menu and the selection `<SelectCell>` all behave exactly as
+ * before — only genuine "empty cell" clicks navigate. Selection/checkbox behaviour is untouched.
+ *
+ * Keyboard a11y: the row is deliberately NOT a tab stop — the name cell already exposes a focusable
+ * `<Link href={href}>` as the canonical keyboard path to the detail, so adding a row-level tabindex
+ * would create a confusing duplicate stop. The whole-row click is a pointer convenience layered on
+ * top of that existing, accessible link.
+ */
+export function LinkableRow({
+  href,
+  className,
+  children,
+  ...props
+}: ComponentProps<typeof TableRow> & { href: string }) {
+  const router = useRouter();
+  const onClick = (event: MouseEvent<HTMLTableRowElement>) => {
+    // Honour modifier-clicks / middle-clicks (open-in-new-tab) — only a plain left click navigates.
+    if (event.defaultPrevented || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    // Bail when the click landed on (or inside) an interactive element — let it do its own thing.
+    if (
+      (event.target as HTMLElement).closest(
+        "a, button, input, label, select, textarea, [role=checkbox], [role=menuitem], [data-row-noclick]",
+      )
+    ) {
+      return;
+    }
+    router.push(href);
+  };
+  return (
+    <TableRow
+      {...props}
+      onClick={onClick}
+      className={cn("group/row cursor-pointer", className)}
+    >
+      {children}
+    </TableRow>
   );
 }
 
@@ -551,7 +616,7 @@ export function EmptyState({
 }) {
   return (
     <div
-      className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed py-16 text-center"
+      className="animate-rise-in flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed py-16 text-center"
       aria-live="polite"
     >
       <div className="flex size-12 items-center justify-center rounded-full bg-muted">
@@ -582,7 +647,7 @@ export function ErrorState({
   const requestId = error instanceof ApiError ? error.requestId : undefined;
   return (
     <div
-      className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
+      className="animate-rise-in flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
       role="status"
       aria-live="polite"
     >

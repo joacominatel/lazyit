@@ -149,3 +149,11 @@ black anchors. Two CEO-driven amendments have since refined this **at the token 
   [[stack]] still lists shadcn/ui as "not yet installed" and should be updated; revisit if
   shadcn ever supports Heroicons natively. Frontend testing remains deferred
   ([[0012-testing-strategy]]).
+- **Extended by [[0049-activated-restraint-ux-direction]] (2026-06-03).** The «Activated
+  Restraint» direction adds an *expression* layer on top of this token system — a motion
+  vocabulary + reduced-motion guard, a warm elevation scale (`shadow-e1/e2/e3`), a per-pillar
+  colour family (`bg-pillar-*`/`text-pillar-*`, registered like the avatar tokens) and named
+  type tokens — and de-hardcodes the three remaining raw-Tailwind status breaks. ADR-0049's
+  **AA rule** (pillar hue = tint/border/dot/chip, **never** small text on the bone canvas)
+  carries the amendment-3 "solid-fill, not tinted-text" discipline into the categorical hues.
+  This ADR is the spine; ADR-0049 activates the dormant tokens it left for later.

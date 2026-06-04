@@ -51,13 +51,21 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   | Role | Seeded permissions |
   | --- | --- |
   | **ADMIN** | the COMPLETE catalog (immutable/full) |
-  | **MEMBER** | every `:read` + every `:write` (no `:delete`, no coarse verb) |
-  | **VIEWER** | every `:read` **except** `accessGrant:read` and `user:read` |
+  | **MEMBER** | every `:read` (minus the admin-only reads) + every `:write` (no `:delete`, no coarse verb) |
+  | **VIEWER** | every `:read` **except** `accessGrant:read`, `user:read` **and** the admin-only reads |
 
-  So every `<domain>:read` is open to all three roles **except** the two pre-tightened reads
-  (`accessGrant:read`, `user:read`), which are ADMIN + MEMBER only — VIEWER can no longer enumerate the
-  access map or the user directory. This closed the long-standing read-authz gap (the old DEF-001
-  residual). See [[user]] and [[0046-roles-permissions-v2]] §4.
+  So every `<domain>:read` is open to all three roles **except** two tighter tiers: the two
+  **pre-tightened reads** (`accessGrant:read`, `user:read`) are ADMIN + MEMBER only — VIEWER can no
+  longer enumerate the access map or the user directory; and the **admin-only reads**
+  (`ADMIN_ONLY_READS`, today just `logs:read`) are seeded to **ADMIN only** — strictly more restrictive
+  than the pre-tightening, excluded from BOTH MEMBER and VIEWER. The two sets are disjoint (a read is
+  either pre-tightened or admin-only, never both). `logs:read` is the **first admin-only read** (issue
+  #175): it gates the future Reports/Informes section over the estate-wide activity history, which
+  aggregates who-did-what across every domain and is therefore the most sensitive read in the catalog.
+  Like every non-ADMIN row it stays **configurable** — an admin may grant it to MEMBER/VIEWER from the
+  role matrix (`PUT /config/permissions`) — but it is never *seeded* to them. This closed the
+  long-standing read-authz gap (the old DEF-001 residual). See [[user]] and
+  [[0046-roles-permissions-v2]] §4.
 - **Permissions are lazyit-local.** They are NEVER mirrored to the IdP (BYOI-safe); only the three
   coarse roles keep their `grantRole` write-back ([[0043-zitadel-source-of-truth]] §3).
 

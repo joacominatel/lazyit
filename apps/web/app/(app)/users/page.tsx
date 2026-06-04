@@ -4,6 +4,7 @@ import {
   ArrowUturnLeftIcon,
   PlusIcon,
   UserPlusIcon,
+  UsersIcon,
 } from "@heroicons/react/24/outline";
 import type { BatchResult, User } from "@lazyit/shared";
 import Link from "next/link";
@@ -11,12 +12,12 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
-import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import {
   BatchActionBar,
-  EmptyState,
   ErrorState,
+  LinkableRow,
   Pagination,
   ResourceCard,
   ResourceCardMeta,
@@ -24,6 +25,7 @@ import {
   ResourceTable,
   RestoreRowAction,
   RowActions,
+  rowActionsReveal,
   SelectCell,
   SortableHeader,
 } from "@/components/resource-table";
@@ -37,13 +39,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TableCell, TableRow } from "@/components/ui/table";
+import { TableCell } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
 import { useUserList } from "@/lib/api/hooks/use-users";
-import {
-  useDeleteUser,
-  useRestoreUser,
-} from "@/lib/api/hooks/use-user-mutations";
+import { useRestoreUser } from "@/lib/api/hooks/use-user-mutations";
 import { restoreUser } from "@/lib/api/endpoints/users";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
@@ -51,8 +50,10 @@ import { runPerIdBatch } from "@/lib/api/per-id-batch";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
+import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils/format";
 import { ByoiBanner } from "./_components/byoi-banner";
+import { OffboardingSheet } from "./_components/offboarding-sheet";
 import { UserFormDialog } from "./_components/user-form-dialog";
 import { UserRoleSelect } from "./_components/user-role-select";
 import { UserStatusBadge } from "./_components/user-status-badge";
@@ -110,7 +111,6 @@ export default function UsersPage() {
       offset,
       deleted: archived ? "only" : undefined,
     });
-  const deleteUser = useDeleteUser();
   const restoreUserMutation = useRestoreUser();
 
   const [formOpen, setFormOpen] = useState(false);
@@ -262,6 +262,8 @@ export default function UsersPage() {
     <div className="space-y-6">
       <PageHeader
         title="Users"
+        pillar="manage"
+        icon={UsersIcon}
         subtitle="The people in your organization."
         actions={
           <>
@@ -297,15 +299,13 @@ export default function UsersPage() {
       ) : isEmpty && !filtersActive ? (
         <EmptyState
           icon={UserPlusIcon}
-          title="No users yet"
-          description="Add your first user to start tracking who is in your organization."
+          pillar="manage"
+          title="No people here yet"
+          description="Add the people in your organization — once they're here you can assign assets and grant them access."
           action={
-            canManage ? (
-              <Button onClick={openCreate}>
-                <PlusIcon />
-                Create your first user
-              </Button>
-            ) : undefined
+            canManage
+              ? { label: "Add your first user", onClick: openCreate }
+              : undefined
           }
         />
       ) : (
@@ -401,6 +401,7 @@ export default function UsersPage() {
                       onEdit={() => openEdit(user)}
                       onClone={() => openClone(user)}
                       onDelete={() => setDeleting(user)}
+                      deleteLabel="Offboard"
                     />
                   ) : undefined
                 }
@@ -408,8 +409,9 @@ export default function UsersPage() {
             ))}
           >
             {rows.map((user) => (
-              <TableRow
+              <LinkableRow
                 key={user.id}
+                href={`/users/${user.id}`}
                 data-state={
                   selectable && selection.isSelected(user.id)
                     ? "selected"
@@ -458,14 +460,17 @@ export default function UsersPage() {
                       </div>
                     ) : null
                   ) : canManage ? (
-                    <RowActions
-                      onEdit={() => openEdit(user)}
-                      onClone={() => openClone(user)}
-                      onDelete={() => setDeleting(user)}
-                    />
+                    <div className={cn("flex justify-end", rowActionsReveal)}>
+                      <RowActions
+                        onEdit={() => openEdit(user)}
+                        onClone={() => openClone(user)}
+                        onDelete={() => setDeleting(user)}
+                        deleteLabel="Offboard"
+                      />
+                    </div>
                   ) : null}
                 </TableCell>
-              </TableRow>
+              </LinkableRow>
             ))}
           </ResourceTable>
 
@@ -511,17 +516,13 @@ export default function UsersPage() {
         cloneSource={cloning}
       />
       {deleting ? (
-        <DeleteConfirmDialog
+        <OffboardingSheet
           open
           onOpenChange={(open) => {
             if (!open) setDeleting(undefined);
           }}
-          entityLabel="user"
-          name={`${deleting.firstName} ${deleting.lastName}`}
-          onConfirm={() => deleteUser.mutateAsync(deleting.id)}
-        >
-          To keep a person on record but disable them, set them inactive instead.
-        </DeleteConfirmDialog>
+          user={deleting}
+        />
       ) : null}
     </div>
   );

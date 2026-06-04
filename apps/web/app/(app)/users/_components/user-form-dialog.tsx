@@ -175,7 +175,18 @@ export function UserFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form id={FORM_ID} onSubmit={onSubmit} noValidate>
+        {/* stopPropagation: this dialog renders in a Radix Portal, but React events bubble through
+            the React tree (not the DOM), so when opened inline from another form (e.g. an assign
+            dialog's "+ New user") the inner submit would otherwise reach the parent form's onSubmit
+            and submit it too (issue #164). */}
+        <form
+          id={FORM_ID}
+          onSubmit={(e) => {
+            e.stopPropagation();
+            onSubmit(e);
+          }}
+          noValidate
+        >
           <FieldGroup>
             <Controller
               control={form.control}

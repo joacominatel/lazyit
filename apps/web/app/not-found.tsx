@@ -1,10 +1,14 @@
+import { MapIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 /**
- * Global 404. Next renders this (inside the root layout) for any unmatched route
- * and for `notFound()` calls that aren't caught by a segment-local not-found. Kept
- * deliberately simple — a clear message and a way back to the app.
+ * Global 404. Next renders this (inside the root layout) for any unmatched route and for
+ * `notFound()` calls that aren't caught by a segment-local not-found. Crafted in the Calm
+ * Workshop voice (ADR-0049 «Activated Restraint»): a pillar-tinted map glyph in a chip, a warm
+ * headline, one line of copy, and a clear way back — settling in with `rise-in` on mount
+ * (reduced-motion-safe via the global guard). The "404" stays a quiet mono caption; colour lives
+ * only in the decorative ≥24px chip glyph, never in readable text.
  */
 export default function NotFound() {
   return (
@@ -12,16 +16,30 @@ export default function NotFound() {
       id="main-content"
       className="flex min-h-svh flex-col items-center justify-center gap-6 px-6 text-center"
     >
-      <p className="font-mono text-sm font-medium text-muted-foreground">404</p>
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Page not found</h1>
-        <p className="max-w-md text-sm text-muted-foreground">
-          The page you&apos;re looking for doesn&apos;t exist or may have moved.
-        </p>
+      <div className="animate-rise-in flex flex-col items-center gap-6">
+        <span
+          className="flex size-14 items-center justify-center rounded-full bg-pillar-access/10 text-pillar-access"
+          aria-hidden
+        >
+          <MapIcon className="size-7" />
+        </span>
+        <div className="space-y-2">
+          <p className="font-mono text-sm font-medium text-muted-foreground">
+            404
+          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            This page wandered off
+          </h1>
+          <p className="max-w-md text-sm text-muted-foreground">
+            We couldn&apos;t find what you were looking for — it may have moved,
+            been archived, or never existed. Let&apos;s get you back to the
+            bench.
+          </p>
+        </div>
+        <Button asChild>
+          <Link href="/dashboard">Back to dashboard</Link>
+        </Button>
       </div>
-      <Button asChild>
-        <Link href="/dashboard">Back to dashboard</Link>
-      </Button>
     </main>
   );
 }

@@ -33,10 +33,11 @@ shape (`Record<Role, Permission[]>`), all in [[shared-package]]
 mint a permission, CI fails on an unknown literal, and the set is greppable and reviewable.
 
 - **Domains** are the existing modules: `asset`, `application`, `accessGrant`, `consumable`,
-  `article`/KB, `location`, `assetModel`, `category`, `user`, `dashboard`, `search`, `settings`.
+  `article`/KB, `location`, `assetModel`, `category`, `user`, `dashboard`, `search`, `settings`, plus
+  `logs` (the estate-wide activity history for the future Reports/Informes section).
 - **Actions** are `read | write | delete` plus the **coarse capability verbs** that map to the old
   ADMIN-only gates: `accessGrant:grant`, `user:manage`, `settings:manage`. Read-only surfaces
-  (`dashboard`, `search`) expose only `:read`.
+  (`dashboard`, `search`, `logs`) expose only `:read`.
 - The catalog is deliberately **not coupled to `User`/`Role`** — a flat capability list — so the SAME
   vocabulary authorizes both humans and service accounts ("fundación unificada").
 
@@ -88,9 +89,21 @@ their inverse restores → `<domain>:delete` (ADMIN-only); AccessGrant mutations
 ## 4. Reads tightened (the read-authz gap closed)
 
 41 read `GET`s now carry `@RequirePermission('<domain>:read')`. Every `<domain>:read` is seeded to all
-three roles **except** the two pre-tightened reads — `accessGrant:read` and `user:read` — seeded to
-ADMIN + MEMBER only. So a **VIEWER can no longer enumerate the access map or the user directory** (it
-gets 403); `GET /search` additionally drops the `users` facet for a caller without `user:read`.
+three roles **except** two tighter tiers:
+
+- the two **pre-tightened reads** — `accessGrant:read` and `user:read` (`VIEWER_DENIED_READS`) — seeded
+  to ADMIN + MEMBER only. So a **VIEWER can no longer enumerate the access map or the user directory**
+  (it gets 403); `GET /search` additionally drops the `users` facet for a caller without `user:read`.
+- the **admin-only reads** — `ADMIN_ONLY_READS`, today just `logs:read` — seeded to **ADMIN only**
+  (excluded from BOTH MEMBER and VIEWER, strictly tighter than the pre-tightening; the two sets are
+  disjoint). `logs:read` is the **first admin-only read** (issue #175): it gates the estate-wide
+  activity log behind the Reports/Informes section. **Now enforced (issue #181):** `GET /dashboard/activity`
+  — the unified [[recent-activity]] feed that both the dashboard panel and the Informes screen consume —
+  is annotated `@RequirePermission('logs:read')`, replacing its earlier `dashboard:read` gate and
+  closing the v1 gap where the sensitive who-did-what data was reachable on a read every role held. The
+  same endpoint also gained optional server-side filters (entityType/entityId/actorId/action/from/to/q).
+  Like every non-ADMIN row, `logs:read` stays admin-grantable from the role matrix.
+
 `GET /users/me` stays open (the self-read the web gates its UI off). This closed the long-standing
 read-authz gap (the old DEF-001 residual / "reads open to any authenticated user"). The seed is derived
 1:1 from `DEFAULT_ROLE_PERMISSIONS` in [[shared-package]] (a golden test fails CI on drift). See

@@ -7,9 +7,8 @@ import {
 } from "@heroicons/react/24/outline";
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
-import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
@@ -22,7 +21,6 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useArticles } from "@/lib/api/hooks/use-articles";
 import { useAssets } from "@/lib/api/hooks/use-assets";
-import { useDeleteUser } from "@/lib/api/hooks/use-user-mutations";
 import {
   useUser,
   useUserAssignments,
@@ -30,6 +28,7 @@ import {
 } from "@/lib/api/hooks/use-users";
 import { formatDate } from "@/lib/utils/format";
 import { ArticleStatusBadge } from "../../kb/_components/article-status-badge";
+import { OffboardingSheet } from "../_components/offboarding-sheet";
 import { UserFormDialog } from "../_components/user-form-dialog";
 import { UserPasswordResetButton } from "../_components/user-password-reset-button";
 import { UserRoleSelect } from "../_components/user-role-select";
@@ -44,7 +43,6 @@ import { UserStatusBadge } from "../_components/user-status-badge";
  */
 export default function UserDetailPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const id = params.id;
   // Edit and Offboard are both the coarse user:manage capability (so is the role control below).
   const canManage = useCan("user:manage");
@@ -60,12 +58,11 @@ export default function UserDetailPage() {
   // Catalogs to resolve the lean FK ids to display labels (asset name, application name).
   const { data: assetsPage } = useAssets({ limit: MAX_PAGE_LIMIT });
   const { data: applications } = useApplications();
-  const deleteUser = useDeleteUser();
   // Snapshot "now" once (not during render) so the expiry comparison stays pure and stable.
   const [now] = useState(() => Date.now());
 
   const [editOpen, setEditOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [offboardOpen, setOffboardOpen] = useState(false);
 
   const assetNameById = useMemo(
     () =>
@@ -141,12 +138,12 @@ export default function UserDetailPage() {
               </Button>
               <UserPasswordResetButton user={user} />
               <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Offboard user"
-                onClick={() => setDeleteOpen(true)}
+                variant="destructive"
+                size="sm"
+                onClick={() => setOffboardOpen(true)}
               >
                 <TrashIcon />
+                Offboard
               </Button>
             </>
           ) : undefined
@@ -349,17 +346,17 @@ export default function UserDetailPage() {
         onOpenChange={setEditOpen}
         user={user}
       />
-      <DeleteConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        entityLabel="user"
-        name={`${user.firstName} ${user.lastName}`}
-        onConfirm={() => deleteUser.mutateAsync(user.id)}
-        onDeleted={() => router.push("/users")}
-      >
-        Offboarding revokes their access grants and releases their assets. To
-        keep them on record but disabled, set them inactive instead.
-      </DeleteConfirmDialog>
+      <OffboardingSheet
+        key={`offboard-${user.id}`}
+        open={offboardOpen}
+        onOpenChange={setOffboardOpen}
+        user={{
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+        }}
+      />
     </div>
   );
 }

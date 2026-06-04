@@ -32,6 +32,7 @@ updated: 2026-05-25
 ## People
 
 - 🟢 [[user]] — central to access, peripheral to assets (role + DB-first permissions).
+- 🟢 [[user-history]] — append-only log of user lifecycle events. [[0050-user-history-and-activity-user-entity]]
 
 ## Auth / AuthZ
 
@@ -67,6 +68,6 @@ updated: 2026-05-25
 
 ## Dashboard (derived)
 
-- 🟢 [[recent-activity]] — read-only DB **view** unifying asset/access/stock activity into one feed.
+- 🟢 [[recent-activity]] — read-only DB **view** unifying asset/access/stock/user activity into one feed.
 
 Model overview & order: [[02-domain/_MOC|Domain]]. Conventions: [[conventions]].

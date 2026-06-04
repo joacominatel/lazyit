@@ -200,7 +200,8 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   `DEFAULT_ROLE_PERMISSIONS` single source of truth in which `ADMIN` is the **complete** catalog.
 - `apps/api/prisma/seed.ts` — seeds the matrix 1:1 from `DEFAULT_ROLE_PERMISSIONS` (idempotent upsert).
 - `apps/api/src/auth/role-permissions.golden.spec.ts` — golden test: a wrong/edited matrix (e.g. an
-  incomplete ADMIN set, or the pre-tightening drifting) fails CI.
+  incomplete ADMIN set, the pre-tightening drifting, or an admin-only read — `ADMIN_ONLY_READS`, today
+  `logs:read` — leaking into MEMBER/VIEWER) fails CI.
 - `apps/api/src/auth/permission-resolver.service.ts` — **the runtime resolver (P2):** resolves a role's
   permission set from the `RolePermission` rows via `prisma.rolePermission.findMany` — DB-first, never a
   token claim. ADMIN short-circuits to the COMPLETE catalog (immutable/full) WITHOUT a DB read, so a

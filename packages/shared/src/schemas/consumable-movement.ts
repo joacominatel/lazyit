@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { int4 } from "./primitives";
+import { int4, optionalText } from "./primitives";
 
 /**
  * ConsumableMovement — an append-only ledger of stock changes for a Consumable (ADR-0034). Each row
@@ -35,8 +35,8 @@ export const ConsumableMovementSchema = z.object({
 export const CreateConsumableMovementSchema = z.strictObject({
   type: ConsumableMovementTypeSchema,
   quantity: int4({ min: 1, example: 1 }),
-  reason: z.string().trim().min(1).max(500).optional(),
-  notes: z.string().trim().min(1).max(2000).optional(),
+  reason: optionalText(500),
+  notes: optionalText(2000),
 });
 
 /**

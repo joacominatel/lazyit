@@ -2,20 +2,11 @@
 
 import {
   ArrowPathIcon,
-  CubeIcon,
   ExclamationTriangleIcon,
-  KeyIcon,
-  ServerStackIcon,
 } from "@heroicons/react/24/outline";
-import type {
-  ActivityEntityType,
-  RecentActivityItem,
-} from "@lazyit/shared";
-import Link from "next/link";
-import type { ComponentType } from "react";
 import { useMemo, useState } from "react";
+import { ActivityRow } from "@/components/activity-row";
 import { RequestIdNote } from "@/components/request-id-note";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,11 +16,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { groupByDay } from "@/lib/activity-grouping";
 import { ApiError } from "@/lib/api/client";
 import { useDashboardActivity } from "@/lib/api/hooks/use-dashboard";
-import { avatarColorFor } from "@/lib/avatar-color";
-import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/utils/format";
 
 /**
  * Recent activity — the unified, cross-pillar feed (CEO Round 2). Reads the paginated
@@ -61,6 +50,11 @@ export function RecentActivityPanel() {
     [data],
   );
 
+  // Group the newest-first stream into "Today" / "Yesterday" / "Earlier" buckets, computed
+  // against the snapshotted `now` so the dividers stay pure across renders. The stream is
+  // already newest-first, so a single pass yields the dividers in order.
+  const groups = useMemo(() => groupByDay(items, now), [items, now]);
+
   return (
     <section>
       <h2 className="mb-3 text-lg font-semibold tracking-tight">
@@ -85,16 +79,24 @@ export function RecentActivityPanel() {
             </p>
           ) : (
             <div className="space-y-4">
-              <ol>
-                {items.map((item, index) => (
-                  <ActivityRow
-                    key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}-${index}`}
-                    item={item}
-                    isLast={index === items.length - 1}
-                    now={now}
-                  />
-                ))}
-              </ol>
+              {groups.map((group) => (
+                <div key={group.label}>
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">
+                    {group.label}
+                  </p>
+                  <ol>
+                    {group.items.map(({ item, index }, rowInGroup) => (
+                      <ActivityRow
+                        key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}-${index}`}
+                        item={item}
+                        isLast={rowInGroup === group.items.length - 1}
+                        index={index}
+                        now={now}
+                      />
+                    ))}
+                  </ol>
+                </div>
+              ))}
               {hasNextPage && (
                 <Button
                   variant="outline"
@@ -116,117 +118,22 @@ export function RecentActivityPanel() {
   );
 }
 
-/** Per-pillar icon + the area the entity links into. */
-const ENTITY_META: Record<
-  ActivityEntityType,
-  { icon: ComponentType<{ className?: string }>; href: (id: string) => string }
-> = {
-  asset: { icon: ServerStackIcon, href: (id) => `/assets/${id}` },
-  application: { icon: KeyIcon, href: (id) => `/applications/${id}` },
-  consumable: { icon: CubeIcon, href: (id) => `/consumables/${id}` },
-};
-
-/** Tone classes for the leading icon chip, by pillar. Full strings so Tailwind keeps them. */
-const ENTITY_TONE: Record<ActivityEntityType, string> = {
-  asset: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  application: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-  consumable: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-};
-
-/** One timeline row: a pillar-tinted icon, the server `summary`, the actor, and a relative time. */
-function ActivityRow({
-  item,
-  isLast,
-  now,
-}: {
-  item: RecentActivityItem;
-  isLast: boolean;
-  now: number;
-}) {
-  const meta = ENTITY_META[item.entityType];
-  const Icon = meta.icon;
-  return (
-    <li className="relative flex gap-3 pb-5 last:pb-0">
-      {!isLast && (
-        <span
-          className="absolute top-8 left-[15px] h-[calc(100%-1.5rem)] w-px bg-border"
-          aria-hidden
-        />
-      )}
-      <span
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-lg ring-2 ring-background",
-          ENTITY_TONE[item.entityType],
-        )}
-        aria-hidden
-      >
-        <Icon className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <Link
-            href={meta.href(item.entityId)}
-            className="text-sm font-medium outline-none hover:underline focus-visible:underline"
-          >
-            {item.summary}
-          </Link>
-          <span
-            className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground"
-            title={new Date(item.occurredAt).toLocaleString()}
-          >
-            {formatRelativeTime(item.occurredAt, now)}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          {item.actorName ? (
-            <>
-              <ActorAvatar name={item.actorName} seed={item.actorId} />
-              <span>{item.actorName}</span>
-            </>
-          ) : (
-            <span>System</span>
-          )}
-        </div>
-      </div>
-    </li>
-  );
-}
-
-function actorInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const first = parts[0]?.[0] ?? "";
-  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
-  return `${first}${last}`.toUpperCase() || "?";
-}
-
-/**
- * Tiny actor avatar for the feed. The activity row carries only a display name + id (no email), so
- * initials come from the name and the color is seeded by the actor id (stable per person), falling
- * back to the name when the id is null. Uses the canonical {@link avatarColorFor} palette so the
- * same identity gets the same color here as on Users, asset owners and access grantees.
- */
-function ActorAvatar({ name, seed }: { name: string; seed: string | null }) {
-  return (
-    <Avatar size="sm" title={name}>
-      <AvatarFallback className={cn("font-medium", avatarColorFor(seed ?? name))}>
-        {actorInitials(name)}
-      </AvatarFallback>
-    </Avatar>
-  );
-}
-
 const SKELETON_KEYS = ["a", "b", "c", "d"] as const;
 
-/** Loading placeholder mirroring the timeline rows. */
+/**
+ * Loading placeholder mirroring the timeline rows. The `animate-shimmer` sweep composes over
+ * each Skeleton's muted fill at the call site (the vendored primitive stays untouched);
+ * reduced-motion stills the sweep globally.
+ */
 function ActivitySkeleton() {
   return (
     <ul className="space-y-5">
       {SKELETON_KEYS.map((key) => (
         <li key={key} className="flex gap-3">
-          <Skeleton className="size-8 shrink-0 rounded-lg" />
+          <Skeleton className="size-8 shrink-0 rounded-lg animate-shimmer" />
           <div className="flex-1 space-y-2">
-            <Skeleton className="h-4 w-2/3" />
-            <Skeleton className="h-3 w-1/4" />
+            <Skeleton className="h-4 w-2/3 animate-shimmer" />
+            <Skeleton className="h-3 w-1/4 animate-shimmer" />
           </div>
         </li>
       ))}

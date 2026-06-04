@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireAtLeastOneKey } from "./primitives";
+import { optionalText, requireAtLeastOneKey } from "./primitives";
 
 /**
  * Location — where an asset physically lives.
@@ -46,7 +46,7 @@ export const CreateLocationSchema = z.strictObject({
   description: z.string().trim().min(1).max(2000).optional(),
   address: z.string().trim().min(1).max(500).optional(),
   floor: z.string().trim().min(1).max(50).optional(),
-  notes: z.string().trim().min(1).max(2000).optional(),
+  notes: optionalText(2000),
 });
 
 /** Partial update; any subset of the editable fields (an empty body is rejected). */

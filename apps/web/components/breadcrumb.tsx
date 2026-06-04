@@ -18,6 +18,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   consumables: "Consumables",
   applications: "Applications",
   kb: "Knowledge Base",
+  informes: "Informes",
   users: "Users",
   locations: "Locations",
   new: "New",
