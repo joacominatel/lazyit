@@ -55,13 +55,19 @@ authored in `@layer utilities`. One shared dialect:
 - **Easing/duration tokens:** `--ease-out-quad: cubic-bezier(.25,.46,.45,.94)` (workhorse),
   `--ease-spring: cubic-bezier(.34,1.3,.64,1)` (RESERVED for the success-check overshoot only),
   `--dur-fast:120ms` / `--dur-base:180ms` / `--dur-slow:220ms`.
-- **Keyframes + utilities:** `.animate-rise-in` (12px rise + fade), `.animate-pulse-soft`
-  (opacity 1↔.55 over 2.4s — the one calm attention heartbeat, danger dots only),
-  `.animate-shimmer` (skeleton sweep), `.animate-check-draw` (success-check stroke draw).
+- **Keyframes + utilities:** `.animate-rise-in` (12px rise + fade — component-level surfaces),
+  `.animate-fade-in` (opacity-only sibling for the route-level settle — see below),
+  `.animate-pulse-soft` (opacity 1↔.55 over 2.4s — the one calm attention heartbeat, danger
+  dots only), `.animate-shimmer` (skeleton sweep), `.animate-check-draw` (success-check stroke
+  draw).
 - **ONE consolidated `@media (prefers-reduced-motion: reduce)` block** collapses
-  animation/transition to ~0.01ms and neutralizes the hover translate, so surfaces still get
-  the instant elevation/tone change. This landed FIRST so everything after is opt-out-safe.
-- `app/(app)/template.tsx` wraps each route in `rise-in` for a ~220ms cross-route settle.
+  animation/transition to ~0.01ms (covering every `animate-*` including `fade-in`) and
+  neutralizes the hover translate — targeting the real `hover:-translate-y-0.5` utility the
+  `lift` recipe emits, not a literal `.lift` class — so surfaces still get the instant
+  elevation/tone change. This landed FIRST so everything after is opt-out-safe.
+- `app/(app)/template.tsx` wraps each route in `fade-in` (opacity only — a transform here would
+  establish a containing block and re-anchor `position: sticky` descendants for the duration of
+  the settle) for a ~220ms cross-route settle. `rise-in` stays for component-level surfaces.
 
 ### 2. Warm elevation scale
 
