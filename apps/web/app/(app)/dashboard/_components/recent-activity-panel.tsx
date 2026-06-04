@@ -12,7 +12,7 @@ import type {
   RecentActivityItem,
 } from "@lazyit/shared";
 import Link from "next/link";
-import type { ComponentType } from "react";
+import type { ComponentType, CSSProperties } from "react";
 import { useMemo, useState } from "react";
 import { RequestIdNote } from "@/components/request-id-note";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -61,6 +61,11 @@ export function RecentActivityPanel() {
     [data],
   );
 
+  // Group the newest-first stream into "Today" / "Yesterday" / "Earlier" buckets, computed
+  // against the snapshotted `now` so the dividers stay pure across renders. The stream is
+  // already newest-first, so a single pass yields the dividers in order.
+  const groups = useMemo(() => groupByDay(items, now), [items, now]);
+
   return (
     <section>
       <h2 className="mb-3 text-lg font-semibold tracking-tight">
@@ -85,16 +90,24 @@ export function RecentActivityPanel() {
             </p>
           ) : (
             <div className="space-y-4">
-              <ol>
-                {items.map((item, index) => (
-                  <ActivityRow
-                    key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}-${index}`}
-                    item={item}
-                    isLast={index === items.length - 1}
-                    now={now}
-                  />
-                ))}
-              </ol>
+              {groups.map((group) => (
+                <div key={group.label}>
+                  <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground/70 uppercase">
+                    {group.label}
+                  </p>
+                  <ol>
+                    {group.items.map(({ item, index }, rowInGroup) => (
+                      <ActivityRow
+                        key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}-${index}`}
+                        item={item}
+                        isLast={rowInGroup === group.items.length - 1}
+                        index={index}
+                        now={now}
+                      />
+                    ))}
+                  </ol>
+                </div>
+              ))}
               {hasNextPage && (
                 <Button
                   variant="outline"
@@ -114,6 +127,47 @@ export function RecentActivityPanel() {
       </Card>
     </section>
   );
+}
+
+/**
+ * Cap the staggered settle to the first page's worth of rows: beyond this, the rise-in delay
+ * is clamped so a long feed (or "Load more"-appended pages) never grows a sluggish cascade —
+ * the stagger is a first-mount reveal, not a per-row reflex. ~8 keeps the total under ~190ms.
+ */
+const STAGGER_CAP = 8;
+
+/** A day bucket of activity rows, carrying each row's GLOBAL index for the capped stagger. */
+interface ActivityGroup {
+  label: string;
+  items: { item: RecentActivityItem; index: number }[];
+}
+
+/** Local Y-M-D key for a timestamp, so "same day" is judged in the viewer's local zone. */
+function dayKey(date: Date): string {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+/**
+ * Bucket a newest-first activity stream into Today / Yesterday / Earlier, comparing each
+ * row's local calendar day against the snapshotted `now`. Single pass (the stream is already
+ * ordered), so the returned groups stay newest-first and carry each row's global index.
+ */
+function groupByDay(items: RecentActivityItem[], now: number): ActivityGroup[] {
+  const today = dayKey(new Date(now));
+  const yesterday = dayKey(new Date(now - 24 * 60 * 60 * 1000));
+  const order = ["Today", "Yesterday", "Earlier"] as const;
+  const buckets = new Map<string, { item: RecentActivityItem; index: number }[]>();
+  items.forEach((item, index) => {
+    const key = dayKey(new Date(item.occurredAt));
+    const label =
+      key === today ? "Today" : key === yesterday ? "Yesterday" : "Earlier";
+    const bucket = buckets.get(label);
+    if (bucket) bucket.push({ item, index });
+    else buckets.set(label, [{ item, index }]);
+  });
+  return order
+    .filter((label) => buckets.has(label))
+    .map((label) => ({ label, items: buckets.get(label) ?? [] }));
 }
 
 /** Per-pillar icon + the area the entity links into. */
@@ -143,16 +197,22 @@ const ENTITY_TONE: Record<ActivityEntityType, string> = {
 function ActivityRow({
   item,
   isLast,
+  index,
   now,
 }: {
   item: RecentActivityItem;
   isLast: boolean;
+  /** Global 0-based position in the flattened stream, for the capped staggered settle. */
+  index: number;
   now: number;
 }) {
   const meta = ENTITY_META[item.entityType];
   const Icon = meta.icon;
   return (
-    <li className="relative flex gap-3 pb-5 last:pb-0">
+    <li
+      className="relative flex animate-rise-in gap-3 pb-5 [animation-delay:calc(var(--i)*24ms)] last:pb-0"
+      style={{ "--i": Math.min(index, STAGGER_CAP) } as CSSProperties}
+    >
       {!isLast && (
         <span
           className="absolute top-8 left-[15px] h-[calc(100%-1.5rem)] w-px bg-border"
@@ -223,16 +283,20 @@ function ActorAvatar({ name, seed }: { name: string; seed: string | null }) {
 
 const SKELETON_KEYS = ["a", "b", "c", "d"] as const;
 
-/** Loading placeholder mirroring the timeline rows. */
+/**
+ * Loading placeholder mirroring the timeline rows. The `animate-shimmer` sweep composes over
+ * each Skeleton's muted fill at the call site (the vendored primitive stays untouched);
+ * reduced-motion stills the sweep globally.
+ */
 function ActivitySkeleton() {
   return (
     <ul className="space-y-5">
       {SKELETON_KEYS.map((key) => (
         <li key={key} className="flex gap-3">
-          <Skeleton className="size-8 shrink-0 rounded-lg" />
+          <Skeleton className="size-8 shrink-0 rounded-lg animate-shimmer" />
           <div className="flex-1 space-y-2">
-            <Skeleton className="h-4 w-2/3" />
-            <Skeleton className="h-3 w-1/4" />
+            <Skeleton className="h-4 w-2/3 animate-shimmer" />
+            <Skeleton className="h-3 w-1/4 animate-shimmer" />
           </div>
         </li>
       ))}
