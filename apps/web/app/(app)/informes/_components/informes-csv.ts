@@ -19,12 +19,18 @@ const COLUMNS = [
   "summary",
 ] as const;
 
-/** RFC-4180 cell escaping: wrap in quotes and double any embedded quote when needed. */
+/**
+ * RFC-4180 cell escaping + spreadsheet formula-injection guard. A leading `=`/`+`/`-`/`@` (or a
+ * control char) is defused with a single quote so a crafted `actorName`/`summary` can't execute as
+ * a formula when the export is opened in Excel/Sheets; then quote-wrap (doubling embedded quotes)
+ * when the cell holds a comma/quote/newline.
+ */
 function escapeCell(value: string): string {
-  if (/[",\n\r]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
+  const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  if (/[",\n\r]/.test(guarded)) {
+    return `"${guarded.replace(/"/g, '""')}"`;
   }
-  return value;
+  return guarded;
 }
 
 /** Serialize the given rows to a CSV string (header + one line per row). */
