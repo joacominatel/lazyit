@@ -421,6 +421,96 @@ describe('ArticlesService', () => {
       expect(listWhere().AND).toContainEqual({ links: { some: {} } });
     });
 
+    // --- specific-entity link filters (#213) -------------------------------
+
+    it('assetId=[as1, as2] narrows to articles linked to one of those exact assets (`{ in }`, #213)', async () => {
+      await service.findPage({ assetId: ['as1', 'as2'] }, PAGE, undefined);
+      expect(listWhere().AND).toContainEqual({
+        links: { some: { assetId: { in: ['as1', 'as2'] } } },
+      });
+    });
+
+    it('applicationId=[app1] narrows to articles linked to that exact application (`{ in }`, #213)', async () => {
+      await service.findPage({ applicationId: ['app1'] }, PAGE, undefined);
+      expect(listWhere().AND).toContainEqual({
+        links: { some: { applicationId: { in: ['app1'] } } },
+      });
+    });
+
+    it('a specific assetId selection implies linked=only even without the linked param (#213)', async () => {
+      // No `linked` passed — the entity selection alone produces a `links` clause (linked-only).
+      await service.findPage({ assetId: ['as1'] }, PAGE, undefined);
+      const and = listWhere().AND;
+      expect(and.some((c) => 'links' in c)).toBe(true);
+    });
+
+    it('a specific assetId selection WINS over a redundant linkedTo=asset (entity narrowing, #213)', async () => {
+      // linkedTo=asset is "any asset"; the specific ids are more granular, so the `{ in }` wins —
+      // the broad `{ assetId: { not: null } }` is not emitted.
+      await service.findPage(
+        { linkedTo: ['asset'], assetId: ['as1'] },
+        PAGE,
+        undefined,
+      );
+      const and = listWhere().AND;
+      expect(and).toContainEqual({
+        links: { some: { assetId: { in: ['as1'] } } },
+      });
+      expect(and).not.toContainEqual({
+        links: { some: { assetId: { not: null } } },
+      });
+    });
+
+    it('assetId + applicationId OR across two `some` EXISTS (linked to these assets OR these apps, #213)', async () => {
+      await service.findPage(
+        { assetId: ['as1'], applicationId: ['app1'] },
+        PAGE,
+        undefined,
+      );
+      expect(listWhere().AND).toContainEqual({
+        OR: [
+          { links: { some: { assetId: { in: ['as1'] } } } },
+          { links: { some: { applicationId: { in: ['app1'] } } } },
+        ],
+      });
+    });
+
+    it('specific assetId + kind-only linkedTo=application → entity `{ in }` ORs with the broad app kind (#213)', async () => {
+      // Asset side narrows to the specific id; application side stays the broad kind predicate.
+      await service.findPage(
+        { assetId: ['as1'], linkedTo: ['application'] },
+        PAGE,
+        undefined,
+      );
+      expect(listWhere().AND).toContainEqual({
+        OR: [
+          { links: { some: { assetId: { in: ['as1'] } } } },
+          { links: { some: { applicationId: { not: null } } } },
+        ],
+      });
+    });
+
+    it('empty assetId/applicationId arrays are omitted (no specific-entity `links` clause, #213)', async () => {
+      await service.findPage(
+        { assetId: [], applicationId: [] },
+        PAGE,
+        undefined,
+      );
+      const and = listWhere().AND;
+      expect(and.some((c) => 'links' in c || 'OR' in c)).toBe(false);
+    });
+
+    it('the specific-entity filter is ANDed on TOP of the visibility rule (draft privacy still honored, #213)', async () => {
+      await service.findPage({ assetId: ['as1'] }, PAGE, AUTHOR_USER as never);
+      const and = listWhere().AND;
+      expect(and[0]).toEqual({
+        OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: AUTHOR }],
+      });
+      expect(and).toContainEqual({
+        links: { some: { assetId: { in: ['as1'] } } },
+      });
+    });
+
     it('the linked filter is ANDed on TOP of the visibility rule (draft privacy still honored)', async () => {
       // The first AND clause is always the visibility gate; the linked clause is added, not replacing it.
       await service.findPage({ linked: 'only' }, PAGE, AUTHOR_USER as never);
