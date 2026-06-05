@@ -81,6 +81,11 @@
     "copiedLabel": "{label} — copiado",
     "copyError": "No se pudo copiar al portapapeles"
   },
+  "code": {
+    "copyCode": "Copiar código",
+    "copied": "Código copiado",
+    "plainText": "texto"
+  },
   "filters": {
     "activeFilters": "Filtros activos",
     "clearFilter": "Quitar filtro",
@@ -88,6 +93,10 @@
     "clearAll": "Limpiar todo",
     "clearFilters": "Limpiar filtros",
     "showArchived": "Mostrar archivados"
+  },
+  "multiSelect": {
+    "triggerLabelWithCount": "{label} ({count} seleccionados)",
+    "empty": "Sin opciones"
   },
   "search": {
     "trigger": "Buscar",

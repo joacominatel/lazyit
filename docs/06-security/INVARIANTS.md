@@ -138,6 +138,21 @@ stores consistent in practice without pretending a multi-call mirror is atomic.
   so a failure rolls the whole offboarding back. Every write-back is audited. `requestPasswordReset`
   (issue #149) is NOT a mirror but a triggered IdP action — it 404s a missing/soft-deleted user, **422**s
   an inactive one, and 503s a Zitadel Management failure (the email itself is sent by ZITADEL's SMTP).
+- `apps/api/src/auth/identity/zitadel-management.service.ts` — the 503 itself was hardened in issue #196
+  **without changing this invariant**: (a) the **public** `ServiceUnavailableException` message is now
+  GENERIC + actionable (*"The identity provider is temporarily unavailable. Your change was not saved,
+  please try again in a moment."*) — the internal verb/path/upstream status no longer leak to the toast
+  (`notifyError` surfaces the API message verbatim); the rich detail stays in the WARN log, correlated by
+  request id (ADR-0031). (b) `request()` retries a **transient** upstream failure (a network error or a
+  `408/429/5xx`) with a bounded exponential backoff + jitter (≤3 attempts, total added latency capped
+  ~1.8s, honours `Retry-After`), so a brief Zitadel blip is invisible to the admin while a **sustained**
+  outage still falls through to the revert-and-503 path above unchanged. A permanent `4xx` is **never**
+  retried, the token/auth fetch is not retried, and the two NON-idempotent writes (create-user `POST
+  /v2/users/human`, the grant-ADD `POST .../grants`) single-shot so a lost-response retry can never
+  duplicate a user/grant. The **consistency model (strong coupling) is unchanged** — retry only shrinks
+  the window in which a *transient* blip trips the revert; it does not relax INV-5. *(The queue/reconcile
+  vs. strong-coupling consistency-model question — issue #196 layer (c) — is DEFERRED to a future CEO
+  decision and is intentionally not addressed here.)*
 - **Exception (deliberate):** `apps/api/src/config/config.service.ts` `setup()` is the one place that
   **degrades instead of blocking** — a first-run mirror failure keeps the local ADMIN (`mirrored:
   false`, warn) rather than 503, so a Zitadel misconfiguration can never wedge first-run (ADR-0043 §6

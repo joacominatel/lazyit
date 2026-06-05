@@ -78,6 +78,13 @@ can be added later without a destructive migration**.
   join table (**done** in [[0042]] — [[article-link]]); content search = projecting `content` into
   Meilisearch (**done** in [[0042]]); tags = a join table (still ⚪ deferred). None reshaped
   `Article`, exactly as designed.
+- **Render enrichment (issue #200), authoring unchanged:** the web renderer (`MarkdownView`)
+  syntax-highlights fenced code blocks (a curated language set: powershell/bash/shell/ts/js/
+  json/yaml/sql/diff) with a bespoke warm-bone token theme and a per-block copy button (reusing
+  `CopyButton`). This is **render-only** — authoring stays a raw-Markdown textarea + live preview
+  (no TipTap/WYSIWYG), so the "simple wiki" decision holds. Highlighting is produced by a React
+  `components.code` override that runs **after** [[0029-untrusted-content-sanitization|rehype-sanitize]],
+  so the sanitize allow-list is untouched and the SEC-003 guarantee is preserved by construction.
 - **Trade-offs:** no edit history (an overwrite loses the previous body until versioning lands);
   search is substring-only and excludes `content`; `metadata` is unvalidated (same debt as `specs`).
 - **Deferred import formats:** `.pdf` (ugly text extraction), `.html` (→ `turndown`), `.odt`/`.rtf`

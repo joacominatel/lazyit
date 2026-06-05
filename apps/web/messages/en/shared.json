@@ -81,6 +81,11 @@
     "copiedLabel": "{label} — copied",
     "copyError": "Couldn't copy to clipboard"
   },
+  "code": {
+    "copyCode": "Copy code",
+    "copied": "Code copied",
+    "plainText": "text"
+  },
   "filters": {
     "activeFilters": "Active filters",
     "clearFilter": "Clear filter",
@@ -88,6 +93,10 @@
     "clearAll": "Clear all",
     "clearFilters": "Clear filters",
     "showArchived": "Show archived"
+  },
+  "multiSelect": {
+    "triggerLabelWithCount": "{label} ({count} selected)",
+    "empty": "No options"
   },
   "search": {
     "trigger": "Search",

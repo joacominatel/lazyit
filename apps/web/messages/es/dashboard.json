@@ -11,7 +11,10 @@
     "criticalGrants": "{count, plural, one {# concesión activa en aplicaciones críticas} other {# concesiones activas en aplicaciones críticas}}",
     "lowStock": "{count, plural, one {# consumible en o por debajo del umbral de reposición} other {# consumibles en o por debajo del umbral de reposición}}",
     "inMaintenance": "{count, plural, one {# activo en mantenimiento} other {# activos en mantenimiento}}",
-    "lost": "{count, plural, one {# activo marcado como perdido} other {# activos marcados como perdidos}}"
+    "lost": "{count, plural, one {# activo marcado como perdido} other {# activos marcados como perdidos}}",
+    "dismiss": "Descartar \"{label}\"",
+    "dismissed": "Descartado",
+    "undo": "Deshacer"
   },
   "pillars": {
     "assets": {

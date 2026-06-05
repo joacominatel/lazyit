@@ -76,8 +76,10 @@ compose, and points the operator at **`https://<host>/setup`**. It **never** reg
 ## CI/CD
 
 CI (GitHub Actions) gates every PR/push: typecheck, lint, test, build, and a Docker image build
-(not published). **CD is deferred** — there's no deploy target yet; the registry will be GHCR when
-one exists. → [[0027-ci-pipeline]].
+(not published). The image builds run **in parallel** (a matrix over `api`/`web`/`migrate`) and
+**concurrently with** the verify gate, so the Docker stage is no longer the wall-clock long pole
+([[0052-ci-parallel-docker-and-decoupled-verify]]). **CD is deferred** — there's no deploy target
+yet; the registry will be GHCR when one exists. → [[0027-ci-pipeline]].
 
 ## Identity & authorization (as built)
 

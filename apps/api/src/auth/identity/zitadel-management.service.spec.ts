@@ -107,11 +107,21 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
     };
   }
 
-  /** A successful JSON Response for a v2 call. */
-  function jsonResponse(body: unknown, status = 200) {
+  /**
+   * A JSON Response for a v2 call. `retryAfter` (seconds) seeds a `Retry-After` header so the retry
+   * path (issue #196) can be exercised; the `headers` shape mimics the WHATWG `Headers.get` the
+   * service reads. A real `fetch` Response always exposes `headers`, so the mock carries one too.
+   */
+  function jsonResponse(body: unknown, status = 200, retryAfter?: number) {
     return {
       ok: status >= 200 && status < 300,
       status,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === 'retry-after' && retryAfter !== undefined
+            ? String(retryAfter)
+            : null,
+      },
       json: () => Promise.resolve(body),
       text: () => Promise.resolve(JSON.stringify(body)),
     };
@@ -431,16 +441,18 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
     expect(JSON.parse(bodyOf(call))).toEqual({ sendLink: {} });
   });
 
-  it('a non-2xx Management response throws a 503 (no silent partial write)', async () => {
+  it('a permanent 4xx Management response throws a 503 WITHOUT retrying (no silent partial write)', async () => {
     const svc = configure();
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     fetchMock
       .mockResolvedValueOnce(tokenResponse())
-      .mockResolvedValueOnce(jsonResponse({ error: 'boom' }, 500));
+      .mockResolvedValueOnce(jsonResponse({ error: 'gone' }, 404));
 
     await expect(svc.deactivateUser('ext-1')).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
+    // A 404 is permanent — exactly one management call (the token + the single 404), no retry.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('a failed token exchange throws a 503', async () => {
@@ -498,5 +510,230 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
     const svc = new ZitadelManagementService();
     expect(svc.isConfigured()).toBe(true);
     expect(svc.projectId).toBe('file-project-1');
+  });
+
+  // --------- issue #196: friendly 503 message + bounded transient retry --------------------------
+
+  /**
+   * A test subclass that makes the retry deterministic: `sleep` records the requested delay and
+   * resolves INSTANTLY (no real wall-clock wait → the suite stays fast + deterministic), and `random`
+   * returns a fixed value so the jittered backoff is reproducible. Both hooks are `protected` on the
+   * service precisely so a test can substitute them.
+   */
+  class TestableMgmt extends ZitadelManagementService {
+    readonly sleeps: number[] = [];
+    protected sleep(ms: number): Promise<void> {
+      this.sleeps.push(ms);
+      return Promise.resolve();
+    }
+    protected random(): number {
+      return 0.5; // mid-window jitter — deterministic, non-zero.
+    }
+  }
+
+  function configureTestable(): TestableMgmt {
+    process.env.ZITADEL_MGMT_SA_KEY = saKeyJson;
+    process.env.ZITADEL_MGMT_PROJECT_ID = 'project-1';
+    process.env.ZITADEL_MGMT_API_URL = 'http://zitadel:8080';
+    process.env.OIDC_ISSUER = 'https://auth.example.com';
+    return new TestableMgmt();
+  }
+
+  describe('issue #196 — friendly 503 + bounded transient retry', () => {
+    it('the public 503 message is GENERIC + actionable — no internal verb/path/status leaked', async () => {
+      const svc = configure();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      // A permanent 404 surfaces immediately (no retry), so the message is the only thing under test.
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse())
+        .mockResolvedValueOnce(jsonResponse({ error: 'gone' }, 404));
+
+      const err = await svc.deactivateUser('ext-1').catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ServiceUnavailableException);
+      const message = (err as ServiceUnavailableException).message;
+      expect(message).toBe(
+        'The identity provider is temporarily unavailable. Your change was not saved, please try again in a moment.',
+      );
+      // The user-facing message must NOT contain the internal verb/path or the raw upstream status.
+      expect(message).not.toMatch(
+        /POST|PUT|\/v2\/|\/management\/|404|deactivate/,
+      );
+    });
+
+    it('the RICH failure detail (verb + path + upstream status) stays in the WARN log', async () => {
+      const svc = configure();
+      const warnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse())
+        .mockResolvedValueOnce(jsonResponse({ error: 'gone' }, 404));
+
+      await expect(svc.deactivateUser('ext-9')).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+      // The operator-facing log keeps the operation (verb + path) and the raw upstream status.
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'POST /v2/users/ext-9/deactivate failed: Management API returned 404',
+        ),
+      );
+    });
+
+    it('retries a transient 503 then SUCCEEDS — invisible to the admin (deactivate, idempotent)', async () => {
+      const svc = configureTestable();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse()) // token
+        .mockResolvedValueOnce(jsonResponse({ error: 'blip' }, 503)) // 1st: transient
+        .mockResolvedValueOnce(jsonResponse({})); // 2nd: recovered
+
+      await expect(svc.deactivateUser('ext-1')).resolves.toBeUndefined();
+
+      // token + 2 management attempts (one 503, one 200); exactly one backoff sleep happened.
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(svc.sleeps).toHaveLength(1);
+    });
+
+    it('retries 408/429/500/502/503/504 and a network error — but NEVER a 4xx', async () => {
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      for (const status of [408, 429, 500, 502, 503, 504]) {
+        const svc = configureTestable();
+        fetchMock.mockReset();
+        fetchMock
+          .mockResolvedValueOnce(tokenResponse())
+          .mockResolvedValueOnce(jsonResponse({ error: 't' }, status)) // transient
+          .mockResolvedValueOnce(jsonResponse({})); // recovered
+        await expect(svc.deactivateUser('ext-1')).resolves.toBeUndefined();
+        expect(svc.sleeps.length).toBeGreaterThanOrEqual(1);
+      }
+
+      // A network/transport error is transient too.
+      {
+        const svc = configureTestable();
+        fetchMock.mockReset();
+        fetchMock
+          .mockResolvedValueOnce(tokenResponse())
+          .mockRejectedValueOnce(new Error('ECONNRESET')) // transport blip
+          .mockResolvedValueOnce(jsonResponse({})); // recovered
+        await expect(svc.deactivateUser('ext-1')).resolves.toBeUndefined();
+        expect(svc.sleeps).toHaveLength(1);
+      }
+
+      // A permanent 4xx is NEVER retried (no sleep, single attempt → straight to the friendly 503).
+      for (const status of [400, 401, 403, 404, 409]) {
+        const svc = configureTestable();
+        fetchMock.mockReset();
+        fetchMock
+          .mockResolvedValueOnce(tokenResponse())
+          .mockResolvedValueOnce(jsonResponse({ error: 'p' }, status));
+        await expect(svc.deactivateUser('ext-1')).rejects.toBeInstanceOf(
+          ServiceUnavailableException,
+        );
+        expect(svc.sleeps).toHaveLength(0);
+        expect(fetchMock).toHaveBeenCalledTimes(2); // token + the single 4xx
+      }
+    });
+
+    it('a SUSTAINED transient outage exhausts the bounded budget then throws the friendly 503 (revert still holds)', async () => {
+      const svc = configureTestable();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      // Every attempt 503s: token + MAX_ATTEMPTS(3) management calls, then it gives up.
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse())
+        .mockResolvedValue(jsonResponse({ error: 'down' }, 503));
+
+      await expect(svc.deactivateUser('ext-1')).rejects.toMatchObject({
+        message:
+          'The identity provider is temporarily unavailable. Your change was not saved, please try again in a moment.',
+      });
+
+      // 3 attempts (1 + 2 retries) => exactly 2 sleeps; total added latency is bounded well under ~2s.
+      expect(svc.sleeps).toHaveLength(2);
+      const total = svc.sleeps.reduce((a, b) => a + b, 0);
+      expect(total).toBeLessThanOrEqual(1_800);
+      // token + 3 management attempts.
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    });
+
+    it('honours Retry-After (seconds) on a 503, clamped to the per-sleep budget', async () => {
+      const svc = configureTestable();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse())
+        .mockResolvedValueOnce(jsonResponse({ error: 'busy' }, 503, 0.4)) // Retry-After: 0.4s = 400ms
+        .mockResolvedValueOnce(jsonResponse({}));
+
+      await expect(svc.deactivateUser('ext-1')).resolves.toBeUndefined();
+      // The honoured wait is the Retry-After value (400ms), not the jittered default.
+      expect(svc.sleeps).toEqual([400]);
+    });
+
+    it('does NOT retry the non-idempotent grant-ADD POST on a transient 503 (avoids a duplicate grant)', async () => {
+      const svc = configureTestable();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse()) // token
+        .mockResolvedValueOnce(jsonResponse({ result: [] })) // search → no existing grant
+        .mockResolvedValueOnce(jsonResponse({ error: 'blip' }, 503)); // ADD grant → transient 503
+
+      await expect(svc.grantRole('ext-1', 'ADMIN')).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+      // No retry on the ADD: token + search + a single ADD attempt, and ZERO sleeps.
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(svc.sleeps).toHaveLength(0);
+    });
+
+    it('DOES retry the idempotent grant-UPDATE PUT on a transient 503', async () => {
+      const svc = configureTestable();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse()) // token
+        .mockResolvedValueOnce(
+          jsonResponse({ result: [{ id: 'g-1', projectId: 'project-1' }] }),
+        ) // search → existing grant
+        .mockResolvedValueOnce(jsonResponse({ error: 'blip' }, 503)) // PUT → transient 503
+        .mockResolvedValueOnce(jsonResponse({})); // PUT retry → recovered
+
+      await expect(svc.grantRole('ext-1', 'ADMIN')).resolves.toBeUndefined();
+      // The PUT (set-roles, idempotent) is retried: token + search + 2 PUT attempts; one sleep.
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(svc.sleeps).toHaveLength(1);
+    });
+
+    it('does NOT retry the non-idempotent createUser POST /v2/users/human on a transient 503', async () => {
+      const svc = configureTestable();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse()) // token
+        .mockResolvedValueOnce(jsonResponse({ error: 'blip' }, 503)); // create → transient 503
+
+      await expect(
+        svc.createUser({
+          email: 'a@b.com',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          role: 'MEMBER',
+        }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+      // No retry on create: token + a single create attempt, ZERO sleeps (no duplicate-user risk).
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(svc.sleeps).toHaveLength(0);
+    });
+
+    it('does NOT retry a getAccessToken (auth) failure', async () => {
+      const svc = configureTestable();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      // The token endpoint itself 503s — auth path, not a Management call: no retry, no sleep.
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'down' }, 503));
+
+      await expect(svc.deactivateUser('ext-1')).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1); // only the token attempt
+      expect(svc.sleeps).toHaveLength(0);
+    });
   });
 });

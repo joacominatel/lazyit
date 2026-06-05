@@ -323,22 +323,58 @@ describe('ArticlesService', () => {
       });
     });
 
-    it('applies category / author / status / q filters', async () => {
+    it('applies category / author / status / q filters (single value → IN with one element)', async () => {
       await service.findPage(
-        { categoryId: 'c1', authorId: AUTHOR, status: 'PUBLISHED', q: 'vpn' },
+        {
+          categoryId: ['c1'],
+          authorId: AUTHOR,
+          status: ['PUBLISHED'],
+          q: 'vpn',
+        },
         PAGE,
         undefined,
       );
       const and = listWhere().AND;
-      expect(and).toContainEqual({ categoryId: 'c1' });
+      // Multi-select shape (#198): a single value is still threaded as a one-element `{ in: [...] }`.
+      expect(and).toContainEqual({ categoryId: { in: ['c1'] } });
       expect(and).toContainEqual({ authorId: AUTHOR });
-      expect(and).toContainEqual({ status: 'PUBLISHED' });
+      expect(and).toContainEqual({ status: { in: ['PUBLISHED'] } });
       expect(and).toContainEqual({
         OR: [
           { title: { contains: 'vpn', mode: 'insensitive' } },
           { excerpt: { contains: 'vpn', mode: 'insensitive' } },
         ],
       });
+    });
+
+    it('multi-value status → `status: { in: [...] }` (OR within the filter, #198)', async () => {
+      await service.findPage({ status: ['DRAFT', 'PUBLISHED'] }, PAGE, undefined);
+      expect(listWhere().AND).toContainEqual({
+        status: { in: ['DRAFT', 'PUBLISHED'] },
+      });
+    });
+
+    it('multi-value categoryId → `categoryId: { in: [...] }` (OR within the filter, #198)', async () => {
+      await service.findPage({ categoryId: ['c1', 'c2'] }, PAGE, undefined);
+      expect(listWhere().AND).toContainEqual({
+        categoryId: { in: ['c1', 'c2'] },
+      });
+    });
+
+    it('an empty filter array is omitted (no `categoryId`/`status` IN clause, #198)', async () => {
+      // The anonymous visibility gate (AND[0]) carries `status: 'PUBLISHED'`, so we assert the absence
+      // of the multi-select `{ in: [...] }` clauses specifically, not any `status`/`categoryId` key.
+      await service.findPage({ categoryId: [], status: [] }, PAGE, undefined);
+      const and = listWhere().AND;
+      const hasInClause = (key: 'categoryId' | 'status') =>
+        and.some((c) => {
+          const v = (c as Record<string, unknown>)[key];
+          return (
+            typeof v === 'object' && v !== null && 'in' in (v as object)
+          );
+        });
+      expect(hasInClause('categoryId')).toBe(false);
+      expect(hasInClause('status')).toBe(false);
     });
 
     it('no link filter by default: the where has no `links` clause (linked AND unlinked included)', async () => {
@@ -352,18 +388,28 @@ describe('ArticlesService', () => {
       expect(listWhere().AND).toContainEqual({ links: { some: {} } });
     });
 
-    it('linkedTo=asset narrows the link filter to articles linked to an Asset', async () => {
-      await service.findPage({ linkedTo: 'asset' }, PAGE, undefined);
+    it('linkedTo=[asset] narrows the link filter to articles linked to an Asset', async () => {
+      await service.findPage({ linkedTo: ['asset'] }, PAGE, undefined);
       expect(listWhere().AND).toContainEqual({
         links: { some: { assetId: { not: null } } },
       });
     });
 
-    it('linkedTo=application narrows to articles linked to an Application', async () => {
-      await service.findPage({ linkedTo: 'application' }, PAGE, undefined);
+    it('linkedTo=[application] narrows to articles linked to an Application', async () => {
+      await service.findPage({ linkedTo: ['application'] }, PAGE, undefined);
       expect(listWhere().AND).toContainEqual({
         links: { some: { applicationId: { not: null } } },
       });
+    });
+
+    it('linkedTo=[asset, application] unions both kinds → any link counts (#198)', async () => {
+      // Both kinds selected = "has ≥1 link to an Asset OR an Application" = an unnarrowed `some: {}`.
+      await service.findPage(
+        { linkedTo: ['asset', 'application'] },
+        PAGE,
+        undefined,
+      );
+      expect(listWhere().AND).toContainEqual({ links: { some: {} } });
     });
 
     it('the linked filter is ANDed on TOP of the visibility rule (draft privacy still honored)', async () => {
@@ -468,7 +514,7 @@ describe('ArticlesService', () => {
       article.count.mockResolvedValueOnce(9);
 
       const result = await service.findPage(
-        { status: 'PUBLISHED' },
+        { status: ['PUBLISHED'] },
         { limit: 5, offset: 10, deleted: 'active' },
         undefined,
       );

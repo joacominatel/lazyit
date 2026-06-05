@@ -36,13 +36,12 @@ import {
   ImportArticleSchema,
   UpdateArticleSchema,
   type ArticleLinkedFilter,
-  type ArticleLinkedTo,
-  type ArticleStatus,
 } from '@lazyit/shared';
 import { ArticlesService } from './articles.service';
 import { maxImportBytes } from './article-import';
 import { parseUuidQuery } from '../common/parse-uuid-query';
-import { parseCuidQuery } from '../common/parse-cuid-query';
+import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
+import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
@@ -74,12 +73,20 @@ export class ArticlesController {
     summary:
       'List articles (paginated; lean — no markdown content, excerpt kept). Excludes soft-deleted; drafts are visible only to their author.',
   })
-  @ApiQuery({ name: 'categoryId', required: false })
+  @ApiQuery({
+    name: 'categoryId',
+    required: false,
+    description:
+      'Filter by category. Multi-value (#198): comma-separated (categoryId=cuid1,cuid2) or repeated; values OR-combine (union). Each element must be a cuid — an invalid element → 400. A single value still works.',
+  })
   @ApiQuery({ name: 'authorId', required: false })
   @ApiQuery({
     name: 'status',
     required: false,
     enum: [...ArticleStatusSchema.options],
+    isArray: true,
+    description:
+      'Filter by status. Multi-value (#198): comma-separated (status=DRAFT,PUBLISHED) or repeated; values OR-combine (union). Unknown value → 400. A single value still works.',
   })
   @ApiQuery({
     name: 'q',
@@ -97,8 +104,9 @@ export class ArticlesController {
     name: 'linkedTo',
     required: false,
     enum: [...ArticleLinkedToSchema.options],
+    isArray: true,
     description:
-      'Narrow the linked filter to a target kind (asset | application). Implies linked=only. Unknown value → 400.',
+      'Narrow the linked filter to one or more target kinds. Multi-value (#198): comma-separated (linkedTo=asset,application) or repeated; kinds OR-combine. Implies linked=only. Unknown value → 400.',
   })
   @ApiQuery({
     name: 'limit',
@@ -121,34 +129,32 @@ export class ArticlesController {
   @ApiOkResponse({ type: ArticleListPageDto })
   findAll(
     @CurrentUser() user: User | undefined,
-    @Query('categoryId') categoryId?: string,
+    // Multi-value filters (#198) arrive comma-encoded (one param) OR repeated (Nest hands a string[]).
+    @Query('categoryId') categoryId?: string | string[],
     @Query('authorId') authorId?: string,
-    @Query('status') status?: string,
+    @Query('status') status?: string | string[],
     @Query('q') q?: string,
     @Query('linked') linked?: string,
-    @Query('linkedTo') linkedTo?: string,
+    @Query('linkedTo') linkedTo?: string | string[],
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
   ) {
-    let parsedStatus: ArticleStatus | undefined;
-    if (status !== undefined) {
-      const result = ArticleStatusSchema.safeParse(status);
-      if (!result.success) {
-        throw new BadRequestException(
-          `Invalid status. Expected one of: ${ArticleStatusSchema.options.join(', ')}`,
-        );
-      }
-      parsedStatus = result.data;
-    }
     return this.articles.findPage(
       {
-        categoryId: parseCuidQuery(categoryId, 'categoryId'),
+        // status / categoryId / linkedTo are multi-select (#198): each value OR-combines within the
+        // filter (union), filters AND-combine. Parsed to arrays here; each element is validated
+        // against its allowlist (unknown element → 400, ADR-0030). A single value still parses.
+        categoryId: parseCuidArrayQuery(categoryId, 'categoryId'),
         authorId: parseUuidQuery(authorId, 'authorId'),
-        status: parsedStatus,
+        status: parseEnumArrayQuery(status, ArticleStatusSchema, 'status'),
         q,
         linked: this.parseLinked(linked),
-        linkedTo: this.parseLinkedTo(linkedTo),
+        linkedTo: parseEnumArrayQuery(
+          linkedTo,
+          ArticleLinkedToSchema,
+          'linkedTo',
+        ),
       },
       parsePageQuery({ limit, offset, page }),
       user,
@@ -167,18 +173,6 @@ export class ArticlesController {
     if (!result.success) {
       throw new BadRequestException(
         `Invalid linked. Expected one of: ${ArticleLinkedFilterSchema.options.join(', ')}`,
-      );
-    }
-    return result.data;
-  }
-
-  /** Same allowlist/400 contract as {@link parseLinked}, for `?linkedTo=` (asset | application). */
-  private parseLinkedTo(value?: string): ArticleLinkedTo | undefined {
-    if (value === undefined) return undefined;
-    const result = ArticleLinkedToSchema.safeParse(value);
-    if (!result.success) {
-      throw new BadRequestException(
-        `Invalid linkedTo. Expected one of: ${ArticleLinkedToSchema.options.join(', ')}`,
       );
     }
     return result.data;
