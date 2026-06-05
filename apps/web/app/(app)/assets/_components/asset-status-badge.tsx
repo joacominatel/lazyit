@@ -31,25 +31,6 @@ export function useAssetStatusLabel(): (status: AssetStatus) => string {
   return (status: AssetStatus) => t(status);
 }
 
-/**
- * English fallback label for an asset status, keyed by the enum value. Prefer
- * {@link useAssetStatusLabel} (locale-aware) in React render; this synchronous helper
- * survives for non-React / cross-area callers (e.g. the dashboard) that the i18n
- * migration hasn't reached yet — they read English until rewired by their own area pass.
- */
-const STATUS_LABEL_EN: Record<AssetStatus, string> = {
-  OPERATIONAL: "Operational",
-  IN_MAINTENANCE: "In maintenance",
-  IN_STORAGE: "In storage",
-  RETIRED: "Retired",
-  LOST: "Lost",
-  UNKNOWN: "Unknown",
-};
-
-export function formatAssetStatus(status: AssetStatus): string {
-  return STATUS_LABEL_EN[status];
-}
-
 export function AssetStatusBadge({
   status,
   className,
