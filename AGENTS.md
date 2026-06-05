@@ -2,6 +2,34 @@
 
 Guidance for cloud agents working in the lazyit monorepo.
 
+## Before any change
+
+`docs/` is the source of truth for vision, domain rules, ADRs, runbooks, and security
+findings. When docs and code disagree, **docs win** — then update both. Root `CLAUDE.md`
+is a short orientation; the vault in `docs/` is the full picture.
+
+**Default workflow** (full version: `docs/04-development/claude-workflow.md`):
+
+1. Read `docs/README.md` and `docs/04-development/claude-workflow.md`.
+2. Search `docs/` for the affected area: entities, domain rules, ADRs, conventions, runbooks.
+3. Investigate the codebase only after you understand the *why*.
+4. Ask the user when a decision is missing or critical (data model, auth, deletes, security).
+5. Keep `docs/` in sync with any core logic change (review affected notes before committing).
+
+| You need… | Read |
+| --- | --- |
+| What/why the product is | `docs/00-overview/` |
+| Stack, monorepo, deploy, `@lazyit/shared` | `docs/01-architecture/` |
+| Domain model and rules | `docs/02-domain/` + `docs/02-domain/entities/` |
+| Why a decision was made | `docs/03-decisions/` (ADRs) |
+| Setup, workflow, conventions | `docs/04-development/` |
+| Operations / deploy / backups | `docs/05-runbooks/` |
+| Security findings (SEC-NNN) | `docs/06-security/` |
+| Vocabulary | `docs/99-glossary/` |
+
+Front/back tasks: split into separate subagents; shared contracts live in `packages/shared`.
+Git: branch off `dev`, one file per commit, agents do not merge PRs (see `CLAUDE.md`).
+
 ## Cursor Cloud specific instructions
 
 ### Services (native dev)
