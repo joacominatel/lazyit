@@ -1,8 +1,6 @@
-<!-- TODO: hero banner — a wide ~1280×320 image: the lazyit wordmark on the warm-bone
-     background, the dashboard's pillar cards faded in behind it, one indigo accent.
-     Drop it at docs/assets/hero.png and swap the line below for an <img>. -->
-
-<h1 align="center">lazyit</h1>
+<p align="center">
+  <img src="brand/lazyit-github-readme.png" alt="lazyit — asset-centric IT operations" width="720">
+</p>
 
 <p align="center">
   <strong>The IT inventory & access tool small teams actually want to open.</strong><br/>
