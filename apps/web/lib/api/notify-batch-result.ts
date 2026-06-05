@@ -11,7 +11,10 @@ export type BatchVerb = "deleted" | "restored" | "revoked" | "updated";
  * instead of concatenating English literals (issue #204). `args` is left loose because next-intl's
  * translator is heavily overloaded; the call sites are all `useTranslations("shared")`.
  */
-type SharedTranslator = (key: string, args?: Record<string, unknown>) => string;
+type SharedTranslator = (
+  key: string,
+  args?: Record<string, string | number | Date>,
+) => string;
 
 /**
  * Toast the per-id outcome of a batch (#104) mutation — `{ requested, succeeded, skipped }`. A fully
