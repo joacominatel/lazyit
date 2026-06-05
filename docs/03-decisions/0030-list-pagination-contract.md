@@ -293,7 +293,15 @@ one filter; they **OR-combine within the filter** (a `{ in: [...] }` / relation-
 the convention is generic so any list can adopt it. **Second adopter (#220):** the reverse KB lookups
 `GET /assets/:id/articles` / `GET /applications/:id/articles` reuse the same `q` / `status` /
 `categoryId` parsing (`parseEnumArrayQuery` / `parseCuidArrayQuery`) over their own PUBLISHED-pinned
-`where`.
+`where`. **Third adopter (#213):** `GET /articles` gains two more multi-value cuid filters,
+**`assetId[]`** and **`applicationId[]`** (the *specific* linked entities, reading (2) of "linked
+target" — [[0042-article-versioning-and-linking]]), both parsed with the **same `parseCuidArrayQuery`**
+(per-element cuid validation, unknown → 400, de-dup). They narrow the link `some` predicate to
+`{ assetId: { in: [...] } }` / `{ applicationId: { in: [...] } }` — more granular than #198's
+kind-level `linkedTo`, OR-combining across kinds (linked to one of these assets OR these apps) and
+implying `linked=only`. Frontend: a reusable searchable **`EntityMultiSelect`** (multi-select sibling
+of the #199 `Combobox`; composes the vendored Popover + cmdk Command — no new primitive), URL-synced via
+`setFilterValues`, cleared atomically alongside `linked`/`linkedTo` with `setFilters` (#217).
 
 **Wire shape = comma-encoded, one param per filter (option A).** A multi-value filter is a single
 query param whose value is a comma-joined list (`?status=DRAFT,PUBLISHED`). This matches the existing
