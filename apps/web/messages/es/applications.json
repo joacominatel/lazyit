@@ -97,6 +97,7 @@
     "grantDescription": "Otorga a un usuario acceso a esta aplicación. Un usuario puede tener varias concesiones con distintos niveles de acceso.",
     "userLabel": "Usuario",
     "selectUser": "Selecciona un usuario",
+    "searchUser": "Buscar usuarios…",
     "noActiveUsers": "No hay usuarios activos",
     "selectUserError": "Selecciona un usuario",
     "alreadyHasAccess": "Ya tiene acceso:",

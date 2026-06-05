@@ -338,6 +338,8 @@
         "categoryLabel": "Category",
         "categoryPlaceholder": "Optional — pick a category",
         "noCategory": "No category",
+        "searchCategory": "Search categories…",
+        "noCategories": "No categories found",
         "descriptionLabel": "Description",
         "descriptionPlaceholder": "Optional",
         "saveChanges": "Save changes",
