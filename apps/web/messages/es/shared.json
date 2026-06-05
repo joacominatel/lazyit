@@ -125,7 +125,9 @@
   },
   "multiSelect": {
     "triggerLabelWithCount": "{label} ({count} seleccionados)",
-    "empty": "Sin opciones"
+    "empty": "Sin opciones",
+    "searchPlaceholder": "Buscar…",
+    "loading": "Buscando…"
   },
   "search": {
     "trigger": "Buscar",
