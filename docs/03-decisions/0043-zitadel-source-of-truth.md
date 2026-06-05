@@ -203,6 +203,20 @@ recorded in lazyit's own audit trail (`actor='system'|admin`, `operation`, subje
 > single-shot to avoid a duplicate. The **queue/reconcile vs. strong-coupling consistency model** (issue
 > #196 layer (c)) is **DEFERRED to a future CEO decision** — this ADR's strong-coupling contract stands.
 
+> [!note] #219 — management WARN logs are now request-correlatable (diagnostic-enablement only)
+> The #196 note above claimed the management WARN "correlated by request id" — but the management
+> client logged via the static `@nestjs/common` `Logger`, so its lines did **not** carry the
+> `X-Request-Id` echoed to the browser, leaving an operator unable to join a failing edit's 503 toast
+> to its upstream cause. **Issue #219** closes that gap: the auth module injects the request-scoped
+> `PinoLogger` (nestjs-pino) into the Zitadel management client, so every management WARN now rides the
+> request's `X-Request-Id` / `actor` via AsyncLocalStorage (ADR-0031) and carries a **structured**
+> `{ operation, method, path, upstreamStatus, reason }` shape. The SA token/key is still **never**
+> logged (INV-6). This is **diagnostic-enablement only** — the friendly 503 message and the bounded
+> retry from #196 are unchanged, and it makes the *sustained* `PUT /v2/users/human/{id}` 503
+> root-causable against the live stack. The actual root-cause diagnosis (needs the running Zitadel) and
+> the **#196 layer (c) consistency-model decision** both **remain open** for the CEO — see the DEFERRED
+> note above; this ADR's strong-coupling contract still stands.
+
 ### 4. Zero-touch bootstrap + in-app setup wizard ("one build, one run")
 
 Two cooperating pieces replace the console chore:

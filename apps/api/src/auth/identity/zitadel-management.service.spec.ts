@@ -736,4 +736,113 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
       expect(svc.sleeps).toHaveLength(0);
     });
   });
+
+  // --------- issue #219: request-id-correlated management WARN logs ------------------------------
+
+  describe('issue #219 — request-correlatable management WARN logs', () => {
+    /**
+     * A stand-in for the request-scoped nestjs-pino {@link PinoLogger}: records `warn(fields, msg)`
+     * calls so the test can assert the STRUCTURED shape, and a `setContext`/`assign` no-op so the
+     * service can wire it like the real logger. In the wired app the real PinoLogger reads the
+     * request's child logger (with `req.id`/`actor`) from AsyncLocalStorage AT LOG TIME — that part is
+     * nestjs-pino's contract (ADR-0031) and is not re-tested here; what we prove is that the service
+     * ROUTES its WARNs through the injected logger with the verb/path/upstream-status metadata an
+     * operator needs to correlate, and never the SA key (INV-6).
+     */
+    class FakePinoLogger {
+      readonly warns: { fields: unknown; msg: string }[] = [];
+      context = '';
+      setContext(ctx: string): void {
+        this.context = ctx;
+      }
+      warn(fields: unknown, msg: string): void {
+        this.warns.push({ fields, msg });
+      }
+    }
+
+    /** Configure a fully-wired service that logs through the injected (fake) request-scoped logger. */
+    function configureWithLogger(logger: FakePinoLogger): ZitadelManagementService {
+      process.env.ZITADEL_MGMT_SA_KEY = saKeyJson;
+      process.env.ZITADEL_MGMT_PROJECT_ID = 'project-1';
+      process.env.ZITADEL_MGMT_API_URL = 'http://zitadel:8080';
+      process.env.OIDC_ISSUER = 'https://auth.example.com';
+      // The DI seam: the IdP adapter threads the request-scoped PinoLogger in here (issue #219).
+      return new ZitadelManagementService(
+        logger as unknown as import('nestjs-pino').PinoLogger,
+      );
+    }
+
+    it('routes the failing-call WARN through the injected request logger with structured verb/path/upstream-status fields', async () => {
+      // Spy on the static Logger BEFORE the call: when a request logger is present it must NOT be used
+      // (no double log / no uncorrelated line). Spying after the fact would assert nothing.
+      const staticWarn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const logger = new FakePinoLogger();
+      const svc = configureWithLogger(logger);
+      // A sustained 503 on the human-profile PUT — the exact #219 symptom (updateUser, last-name edit).
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse()) // token
+        .mockResolvedValue(jsonResponse({ error: 'down' }, 503)); // every attempt 503s
+
+      await expect(
+        svc.updateUser('zitadel-user-9', { lastName: 'Renamed' }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      // The FINAL failure WARN (after the bounded retry is exhausted) carries the structured shape so
+      // an operator can correlate it with the X-Request-Id the browser saw (ADR-0031).
+      const failWarn = logger.warns.find((w) =>
+        w.msg.includes('failed: Management API returned 503'),
+      );
+      expect(failWarn).toBeDefined();
+      expect(failWarn!.fields).toMatchObject({
+        operation: 'PUT /v2/users/human/zitadel-user-9',
+        method: 'PUT',
+        path: '/v2/users/human/zitadel-user-9',
+        upstreamStatus: 503,
+      });
+      // Every retry WARN + the final failure WARN went through the injected logger, not the static one.
+      expect(staticWarn).not.toHaveBeenCalled();
+    });
+
+    it('NEVER includes the service-account key/token in any logged WARN (INV-6)', async () => {
+      const logger = new FakePinoLogger();
+      const svc = configureWithLogger(logger);
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse('super-secret-mgmt-token')) // token (must never leak)
+        .mockResolvedValueOnce(jsonResponse({ error: 'gone' }, 404)); // permanent → single WARN
+
+      await expect(svc.deactivateUser('ext-9')).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+
+      expect(logger.warns.length).toBeGreaterThan(0);
+      const serialized = JSON.stringify(logger.warns);
+      // Neither the SA key PEM, the assertion, nor the access token may appear in the structured log.
+      expect(serialized).not.toContain('super-secret-mgmt-token');
+      expect(serialized).not.toContain('signed.jwt.assertion');
+      expect(serialized).not.toContain('PRIVATE KEY');
+    });
+
+    it('falls back to the static Logger (single-line message) when NO request logger is injected', async () => {
+      // The unit-test / boot path: `new ZitadelManagementService()` with no logger still WARNs, via
+      // the static @nestjs/common Logger, preserving the existing operator-facing single-line message.
+      const warnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const svc = configure(); // no logger argument
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse())
+        .mockResolvedValueOnce(jsonResponse({ error: 'gone' }, 404));
+
+      await expect(svc.deactivateUser('ext-9')).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'POST /v2/users/ext-9/deactivate failed: Management API returned 404',
+        ),
+      );
+    });
+  });
 });

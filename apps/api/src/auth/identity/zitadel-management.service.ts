@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createPrivateKey, type KeyObject } from 'node:crypto';
 import { Logger, ServiceUnavailableException } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
 import { SignJWT } from 'jose';
 import type { Role } from '../../../generated/prisma/client';
 
@@ -84,7 +85,33 @@ const RETRY_BASE_DELAY_MS = 200;
 const RETRY_MAX_DELAY_MS = 1_000;
 const RETRY_TOTAL_BUDGET_MS = 1_800;
 
+/**
+ * Structured fields attached to a management WARN line so an operator can correlate it with the
+ * failing edit's `X-Request-Id` (the request id + actor ride automatically via nestjs-pino's
+ * AsyncLocalStorage when the request-scoped logger is present — issue #219 / ADR-0031). NONE of these
+ * fields ever carry the SA token/key (INV-6); they are verb/path/upstream-status metadata only.
+ */
+interface ManagementWarnFields {
+  /** The logical operation, e.g. `PUT /v2/users/human/{id}` or `assertConfigured`. */
+  operation: string;
+  /** HTTP verb of the upstream Management call, when the WARN is about a request. */
+  method?: string;
+  /** Request path of the upstream Management call, when the WARN is about a request. */
+  path?: string;
+  /** Upstream HTTP status, when the WARN is about a non-2xx Management response. */
+  upstreamStatus?: number;
+  /** Human-readable reason (transport error text or `Management API returned <status>`). */
+  reason?: string;
+}
+
 export class ZitadelManagementService {
+  /**
+   * Out-of-request fallback logger (the static `@nestjs/common` Logger). Used only when NO
+   * request-scoped {@link PinoLogger} was injected — e.g. unit tests that `new` the service directly,
+   * or the resolveConfig WARNs that can fire at boot before any request exists. In the wired app the
+   * injected PinoLogger below is preferred so every management WARN inherits the request's
+   * `X-Request-Id` / `actor` via nestjs-pino's AsyncLocalStorage (issue #219).
+   */
   private readonly logger = new Logger(ZitadelManagementService.name);
 
   /** Parsed SA key (lazy). `null` once we have tried and found the config absent/invalid. */
@@ -95,6 +122,41 @@ export class ZitadelManagementService {
   private configResolved = false;
   /** The cached Management-API access token (null until first fetch / after a failure). */
   private cachedToken: CachedToken | null = null;
+
+  /**
+   * Request-scoped structured logger (nestjs-pino). When the service is constructed through DI
+   * (the wired app), the IdP adapter threads the injected {@link PinoLogger} here; it is `null` when
+   * the service is `new`'d directly (unit tests) — then {@link warn} falls back to the static Logger.
+   *
+   * A single PinoLogger instance is correct even though `IDENTITY_PROVIDER` is a startup singleton:
+   * PinoLogger resolves the per-request child logger from AsyncLocalStorage AT LOG TIME, so each WARN
+   * still carries the CURRENT request's `X-Request-Id` / `actor` (same pattern as the singleton
+   * `AllExceptionsFilter`, ADR-0031). Out of any request scope the logger transparently uses the
+   * root logger, so a boot-time WARN is never dropped.
+   */
+  constructor(private readonly requestLogger: PinoLogger | null = null) {
+    this.requestLogger?.setContext(ZitadelManagementService.name);
+  }
+
+  /**
+   * Emit an operator-facing WARN for a management failure, correlated by request id (ADR-0031).
+   *
+   * With the request-scoped {@link PinoLogger} present, the line is STRUCTURED — `{ operation, method,
+   * path, upstreamStatus, reason }` plus the `X-Request-Id` / `actor` nestjs-pino attaches from the
+   * request context — so an operator can join the management WARN to the 503 toast the browser saw
+   * (issue #219). Without it (unit tests / boot-time config WARNs) we fall back to the static Logger
+   * and the same single-line message. NEVER logs the SA token/key (INV-6): only verb/path/status
+   * metadata ever reaches here.
+   */
+  private warn(message: string, fields?: ManagementWarnFields): void {
+    if (this.requestLogger) {
+      // Pass the structured fields as the first arg so they become top-level log properties, then the
+      // human message — the request id + actor ride automatically via AsyncLocalStorage.
+      this.requestLogger.warn(fields ?? {}, message);
+      return;
+    }
+    this.logger.warn(message);
+  }
 
   /**
    * Visible for testing: the configured project id (the role grants target this project). Sourced
@@ -437,10 +499,11 @@ export class ZitadelManagementService {
           ? this.nextBackoffMs(attempt, spentMs, undefined)
           : null;
         if (waitMs === null) {
-          throw this.fail(`${method} ${path}`, reason);
+          throw this.fail(`${method} ${path}`, reason, true, { method, path });
         }
-        this.logger.warn(
+        this.warn(
           `Zitadel management ${method} ${path} transient (${reason}); retrying in ${waitMs}ms (attempt ${attempt}/${MAX_ATTEMPTS})`,
+          { operation: `${method} ${path}`, method, path, reason },
         );
         spentMs += waitMs;
         await this.sleep(waitMs);
@@ -455,10 +518,21 @@ export class ZitadelManagementService {
             : null;
         if (waitMs === null) {
           // Permanent 4xx, exhausted budget, or a non-idempotent call: surface as the friendly 503.
-          throw this.fail(`${method} ${path}`, reason);
+          throw this.fail(`${method} ${path}`, reason, true, {
+            method,
+            path,
+            upstreamStatus: res.status,
+          });
         }
-        this.logger.warn(
+        this.warn(
           `Zitadel management ${method} ${path} transient (${reason}); retrying in ${waitMs}ms (attempt ${attempt}/${MAX_ATTEMPTS})`,
+          {
+            operation: `${method} ${path}`,
+            method,
+            path,
+            upstreamStatus: res.status,
+            reason,
+          },
         );
         spentMs += waitMs;
         await this.sleep(waitMs);
@@ -594,14 +668,16 @@ export class ZitadelManagementService {
       try {
         rawJson = readFileSync(path, 'utf8');
       } catch (err) {
-        this.logger.warn(
+        this.warn(
           `Zitadel management: could not read ZITADEL_MGMT_SA_KEY_PATH (${err instanceof Error ? err.message : String(err)}); write-back disabled (login unaffected)`,
+          { operation: 'resolveConfig' },
         );
         return;
       }
     } else {
-      this.logger.warn(
+      this.warn(
         'Zitadel management: no service-account key configured (set ZITADEL_MGMT_SA_KEY or ZITADEL_MGMT_SA_KEY_PATH); write-back disabled (login unaffected)',
+        { operation: 'resolveConfig' },
       );
       return;
     }
@@ -610,20 +686,23 @@ export class ZitadelManagementService {
     try {
       parsed = JSON.parse(rawJson) as ZitadelServiceAccountKey;
     } catch {
-      this.logger.warn(
+      this.warn(
         'Zitadel management: service-account key is not valid JSON; write-back disabled (login unaffected)',
+        { operation: 'resolveConfig' },
       );
       return;
     }
     if (!parsed.key || !parsed.keyId || !parsed.userId) {
-      this.logger.warn(
+      this.warn(
         'Zitadel management: service-account key JSON is missing key/keyId/userId; write-back disabled (login unaffected)',
+        { operation: 'resolveConfig' },
       );
       return;
     }
     if (!this.projectId) {
-      this.logger.warn(
+      this.warn(
         'Zitadel management: ZITADEL_MGMT_PROJECT_ID is not set; write-back disabled (login unaffected)',
+        { operation: 'resolveConfig' },
       );
       // Keep the parsed key so isConfigured() reports the precise gap, but management methods still throw.
     }
@@ -729,10 +808,17 @@ export class ZitadelManagementService {
     operation: string,
     reason: string,
     logIt = true,
+    fields?: Pick<ManagementWarnFields, 'method' | 'path' | 'upstreamStatus'>,
   ): ServiceUnavailableException {
     if (logIt) {
-      // Rich, operator-facing detail stays in the log (never the credential), correlated by request id.
-      this.logger.warn(`Zitadel management ${operation} failed: ${reason}`);
+      // Rich, operator-facing detail stays in the log (never the credential), correlated by request
+      // id via nestjs-pino's request context (ADR-0031 / issue #219). The structured fields let an
+      // operator join this WARN to the failing edit's X-Request-Id echoed to the browser.
+      this.warn(`Zitadel management ${operation} failed: ${reason}`, {
+        operation,
+        reason,
+        ...fields,
+      });
     }
     return new ServiceUnavailableException(
       operation === 'assertConfigured'
