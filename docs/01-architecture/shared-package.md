@@ -49,8 +49,13 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
 >   the documented matrix and the seeded rows can never drift).
 > - `UpdateRolePermissionsSchema` (the strict `PUT /config/permissions` body — MEMBER/VIEWER keys only;
 >   ADMIN immutable).
-> - The **human layer** — `PERMISSION_META` / `CAPABILITIES` / presets — the plain-language wording the
->   role-first editor renders, guarded by a covering-set test so it can't drift from the machine catalog.
+> - The **human layer** — `PERMISSION_META` / `CAPABILITIES` / presets — the catalog's structure (ids,
+>   pillars, tiers, capability/preset bundling), guarded by a covering-set test so it can't drift from the
+>   machine catalog. Its English `label`/`description` strings are the **default copy**, but the editor no
+>   longer renders them directly: the user-facing labels are localized in the web i18n catalog
+>   (`apps/web/messages/{en,es}/settings.json` under `permissionMeta.*`), keyed by the SAME ids and
+>   resolved at the render sites (issue #215, [[0051-i18n-next-intl|ADR-0051]]) — so `shared` stays a
+>   framework-agnostic leaf (no React, no next-intl) and the contract values are unchanged.
 > - `ServiceAccountSchema` (no secret — `tokenPrefix` only), `CreateServiceAccountSchema`,
 >   `UpdateServiceAccountSchema`, and the **once-only** `ServiceAccountWithSecretSchema`; permissions
 >   validated against the same `PermissionSchema`. See [[role-permission]] · [[service-account]] ·
