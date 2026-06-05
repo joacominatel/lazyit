@@ -10,6 +10,10 @@ import {
   isAboveDefaultTier,
   permissionSetsEqual,
 } from "@lazyit/shared";
+import {
+  permissionLabel,
+  type SettingsTranslator,
+} from "../../../_lib/permission-labels";
 
 /**
  * Web-local (presentation) helpers for the role permissions editor. PURE — no React, no fetching.
@@ -113,12 +117,11 @@ export interface SaveDiff {
 /**
  * The minimal translator shape the consequence builders need: a `t(key, values?)` over the
  * `settings` namespace (matches next-intl's `useTranslations("settings")`). The page passes its
- * own `t`, so the human consequence sentences come from the catalog rather than being hardcoded.
+ * own `t`, so the human consequence sentences — and the localized permission labels they embed
+ * (issue #215) — come from the catalog rather than being hardcoded. Aliased to `SettingsTranslator`
+ * so the same `t` resolves both the consequence keys and the `permissionMeta.*` label keys.
  */
-export type ConsequenceTranslator = (
-  key: string,
-  values?: Record<string, string>,
-) => string;
+export type ConsequenceTranslator = SettingsTranslator;
 
 /**
  * Compute the human consequences of replacing `before` with `after` for `role`. Drives whether the
@@ -143,7 +146,7 @@ export function analyzeSaveDiff(
         permission: p,
         message: t("roles.permissions.consequence.removedRead", {
           who,
-          action: verbForRead(p),
+          action: verbForRead(p, t),
         }),
       });
     }
@@ -166,11 +169,11 @@ export function analyzeSaveDiff(
   };
 }
 
-/** A lower-case "see X" phrase for a removed read, from the permission's label. */
-function verbForRead(permission: Permission): string {
-  const label = PERMISSION_META[permission].label;
-  // Labels start with a capitalized verb ("View assets", "Read the Knowledge Base", "See who has
-  // access", "Use global search"); lower-case the first letter for the mid-sentence form.
+/** A lower-case "see X" phrase for a removed read, from the permission's localized label. */
+function verbForRead(permission: Permission, t: SettingsTranslator): string {
+  const label = permissionLabel(t, permission);
+  // Labels start with a capitalized verb ("View assets", "Read the Knowledge Base"; in es "Ver
+  // activos", "Leer la base de conocimiento"); lower-case the first letter for the mid-sentence form.
   return label.charAt(0).toLowerCase() + label.slice(1);
 }
 
@@ -189,7 +192,7 @@ function consequenceForAboveTier(
       return t("roles.permissions.consequence.settingsManage", { who });
     default: {
       // Every other above-tier permission is a :delete.
-      const action = PERMISSION_META[permission].label.toLowerCase();
+      const action = permissionLabel(t, permission).toLowerCase();
       return t("roles.permissions.consequence.deleteDefault", { who, action });
     }
   }

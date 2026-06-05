@@ -279,6 +279,150 @@
       "adminLevel": "Nivel administrador"
     }
   },
+  "permissionMeta": {
+    "pillars": {
+      "inventory": {
+        "label": "Inventario",
+        "description": "Activos, consumibles, modelos, categorías y ubicaciones."
+      },
+      "access": {
+        "label": "Acceso",
+        "description": "Aplicaciones y quién puede acceder a ellas."
+      },
+      "knowledge": {
+        "label": "Conocimiento",
+        "description": "La base de conocimiento — artículos y sus categorías."
+      },
+      "manage": {
+        "label": "Gestión",
+        "description": "Usuarios, configuración de la instancia, el panel y la búsqueda."
+      }
+    },
+    "permissions": {
+      "asset:read": { "label": "Ver activos" },
+      "asset:write": { "label": "Agregar y editar activos" },
+      "asset:delete": { "label": "Eliminar activos" },
+      "consumable:read": { "label": "Ver consumibles" },
+      "consumable:write": { "label": "Agregar, editar y ajustar consumibles" },
+      "consumable:delete": { "label": "Eliminar consumibles" },
+      "assetModel:read": { "label": "Ver modelos de activo" },
+      "assetModel:write": { "label": "Agregar y editar modelos de activo" },
+      "assetModel:delete": { "label": "Eliminar modelos de activo" },
+      "category:read": { "label": "Ver categorías" },
+      "category:write": { "label": "Agregar y editar categorías" },
+      "category:delete": { "label": "Eliminar categorías" },
+      "location:read": { "label": "Ver ubicaciones" },
+      "location:write": { "label": "Agregar y editar ubicaciones" },
+      "location:delete": { "label": "Eliminar ubicaciones" },
+      "application:read": { "label": "Ver aplicaciones" },
+      "application:write": { "label": "Agregar y editar aplicaciones" },
+      "application:delete": { "label": "Eliminar aplicaciones" },
+      "accessGrant:read": { "label": "Ver quién tiene acceso" },
+      "accessGrant:write": { "label": "Editar registros de acceso (reservado)" },
+      "accessGrant:delete": { "label": "Eliminar registros de acceso" },
+      "accessGrant:grant": { "label": "Otorgar y revocar acceso" },
+      "article:read": { "label": "Leer la base de conocimiento" },
+      "article:write": { "label": "Escribir y editar artículos" },
+      "article:delete": { "label": "Eliminar artículos" },
+      "user:read": { "label": "Ver el directorio de usuarios" },
+      "user:write": { "label": "Editar registros de usuario (reservado)" },
+      "user:delete": { "label": "Eliminar usuarios" },
+      "user:manage": { "label": "Administrar usuarios" },
+      "dashboard:read": { "label": "Ver el panel" },
+      "search:read": { "label": "Usar la búsqueda global" },
+      "logs:read": { "label": "Ver registros de actividad" },
+      "settings:read": { "label": "Ver la configuración de la instancia" },
+      "settings:manage": { "label": "Configurar la instancia" }
+    },
+    "capabilities": {
+      "inventory:view": {
+        "label": "Ver inventario",
+        "description": "Ver activos, consumibles, modelos, categorías y ubicaciones."
+      },
+      "inventory:edit": {
+        "label": "Agregar y editar inventario",
+        "description": "Crear y actualizar activos, consumibles, modelos, categorías y ubicaciones (incl. ajustes de stock)."
+      },
+      "inventory:delete": {
+        "label": "Eliminar inventario",
+        "description": "Archivar activos, consumibles, modelos, categorías y ubicaciones."
+      },
+      "application:view": {
+        "label": "Ver aplicaciones",
+        "description": "Explorar el catálogo de aplicaciones."
+      },
+      "application:edit": {
+        "label": "Agregar y editar aplicaciones",
+        "description": "Crear y actualizar aplicaciones."
+      },
+      "application:delete": {
+        "label": "Eliminar aplicaciones",
+        "description": "Archivar aplicaciones."
+      },
+      "accessGrant:view": {
+        "label": "Ver quién tiene acceso",
+        "description": "Ver el registro de concesiones de acceso — quién puede acceder a qué aplicaciones."
+      },
+      "accessGrant:grant": {
+        "label": "Otorgar y revocar acceso",
+        "description": "Abrir, revocar y editar concesiones de acceso para cualquier usuario — incluso a aplicaciones sensibles."
+      },
+      "article:view": {
+        "label": "Leer la base de conocimiento",
+        "description": "Ver artículos y sus categorías."
+      },
+      "article:edit": {
+        "label": "Escribir y editar artículos",
+        "description": "Crear, actualizar y publicar artículos de la base de conocimiento."
+      },
+      "article:delete": {
+        "label": "Eliminar artículos",
+        "description": "Archivar artículos de la base de conocimiento."
+      },
+      "user:view": {
+        "label": "Ver el directorio de usuarios",
+        "description": "Explorar la lista de usuarios (nombres, correos, roles)."
+      },
+      "user:manage": {
+        "label": "Administrar usuarios",
+        "description": "Crear, editar, cambiar roles, dar de baja y restaurar usuarios."
+      },
+      "user:delete": {
+        "label": "Eliminar usuarios",
+        "description": "Eliminación definitiva de registros de usuario."
+      },
+      "dashboardSearch:view": {
+        "label": "Ver panel y búsqueda",
+        "description": "Ver el panel y usar la búsqueda global."
+      },
+      "logs:view": {
+        "label": "Ver registros de actividad",
+        "description": "Ver el historial de actividad de toda la organización (Informes)."
+      },
+      "settings:view": {
+        "label": "Ver la configuración de la instancia",
+        "description": "Ver el área de configuración (configuración de la instancia, taxonomías)."
+      },
+      "settings:manage": {
+        "label": "Configurar la instancia",
+        "description": "Cambiar la configuración de la instancia y gestionar taxonomías — toda la superficie de configuración del administrador."
+      }
+    },
+    "presets": {
+      "editor": {
+        "label": "Editor",
+        "description": "Leer y editar todo excepto eliminaciones y acciones de administrador."
+      },
+      "readOnly": {
+        "label": "Solo lectura",
+        "description": "Acceso de lectura en toda la app (sin ediciones)."
+      },
+      "inventoryOperator": {
+        "label": "Operador de inventario",
+        "description": "Leer y editar el inventario; solo lectura en Acceso, Conocimiento y Gestión."
+      }
+    }
+  },
   "taxonomies": {
     "title": "Taxonomías",
     "subtitle": "Gestiona las categorías que clasifican los registros, además de los modelos de activo que los activos referencian.",

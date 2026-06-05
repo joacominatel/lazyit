@@ -10,7 +10,6 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import {
-  PERMISSION_META,
   type Permission,
   type ServiceAccount,
 } from "@lazyit/shared";
@@ -45,6 +44,7 @@ import {
 } from "@/lib/api/hooks/use-service-accounts";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { formatRelativeTime } from "@/lib/utils/format";
+import { permissionLabel } from "../../_lib/permission-labels";
 import { RotateDialog } from "./rotate-dialog";
 import { ServiceAccountFormDialog } from "./service-account-form-dialog";
 import {
@@ -115,7 +115,7 @@ export function ServiceAccountsManager() {
     if (permissions.length === 0) return t("serviceAccounts.permissionsSummary.none");
     const labels = permissions
       .slice(0, MAX_PERMISSION_LABELS)
-      .map((p) => PERMISSION_META[p]?.label ?? p);
+      .map((p) => permissionLabel(t, p));
     const extra = permissions.length - labels.length;
     const count = t("serviceAccounts.permissionsSummary.count", {
       count: permissions.length,
