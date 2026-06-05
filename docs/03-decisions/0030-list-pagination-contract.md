@@ -319,6 +319,26 @@ de-dupe, clears on empty) and `getFilterValues(name)` (the inverse read), and a 
 `DropdownMenuCheckboxItem` — **no new primitive**) renders the control; selections show as one
 removable chip per value in the active-filter bar (Activated Restraint, ADR-0049).
 
+## Amendment (2026-06-05) — atomic multi-key filter writes (#217)
+
+**Problem.** Every setter writes via one `router.replace(...)` computed from the **render-time**
+`searchParams` snapshot — there is no merge between calls. So a handler that fired **two** setters in
+one event (e.g. KB's "Linked only" off, clearing `linked` + `linkedTo`; or informes writing a
+`from`/`to` date pair) hit **last-write-wins**: the second `replace` re-emitted the stale snapshot and
+re-introduced the key the first had removed. The KB toggle could be turned on but **not off**
+(regression of #198 / PR #212, which split the linked filter into two params).
+
+**Fix — one public atomic multi-key setter.** `useListParams` gained
+`setFilters(patch: Record<string, string | string[]>)`: it applies the **same** per-key default /
+comma-encode rules as `setFilter` / `setFilterValues` (a `string` value follows the single-value rule,
+a `string[]` the multi-value one), merges them into **one** patch, and does **one** `commit` → **one**
+`router.replace`. Two keys changed together can no longer clobber each other. The pure patch math
+(`buildNextUrl` / `singleFilterPatch` / `multiFilterPatch` / `buildFiltersPatch`) lives in
+`apps/web/lib/hooks/list-params-url.ts` — framework-agnostic, so the atomicity guarantee is
+unit-tested (`list-params-url.test.ts`, the first `apps/web` test; revisits ADR-0012's deferred
+frontend runner with `bun test`, wired as a CI **Test web** step). Backend unchanged: after the KB
+toggle is off, `GET /articles` is called with neither `linked` nor `linkedTo`.
+
 ## Amendment (2026-06-05) — server-search Combobox shows the first page on open (#218)
 
 The server-search `Combobox` (§8) used to **gate** the list behind a typed query: with 0 characters

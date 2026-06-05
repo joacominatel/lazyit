@@ -193,6 +193,7 @@ export function InformesScreen() {
     filters,
     setQ,
     setFilter,
+    setFilters,
     setOffset,
     clearFilters,
     filtersActive,
@@ -332,10 +333,13 @@ export function InformesScreen() {
                     from: fromDate || "…",
                     to: toDate || "…",
                   }),
-            onClear: () => {
-              setFilter("from", FILTER_DEFAULTS.from);
-              setFilter("to", FILTER_DEFAULTS.to);
-            },
+            // Clear both bounds in one navigation (#217) — two setFilter calls would clobber,
+            // dropping one bound.
+            onClear: () =>
+              setFilters({
+                from: FILTER_DEFAULTS.from,
+                to: FILTER_DEFAULTS.to,
+              }),
           },
         ]
       : []),
@@ -494,8 +498,8 @@ export function InformesScreen() {
           value={rangePreset === "custom" ? "all" : rangePreset}
           onValueChange={(value) => {
             const r = presetRange(value as RangeValue, now);
-            setFilter("from", r.from);
-            setFilter("to", r.to);
+            // Both bounds in one navigation (#217); two setFilter calls would clobber.
+            setFilters({ from: r.from, to: r.to });
           }}
         >
           <SelectTrigger className="lg:w-44">

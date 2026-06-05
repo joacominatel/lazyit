@@ -76,8 +76,8 @@ export default function KnowledgeBasePage() {
     limit,
     filters,
     setQ,
-    setFilter,
     setFilterValues,
+    setFilters,
     getFilterValues,
     setOffset,
     clearFilters,
@@ -120,10 +120,14 @@ export default function KnowledgeBasePage() {
   const total = page?.total ?? 0;
   const isEmpty = total === 0;
 
-  // Toggling "Linked only" off also clears any linkedTo narrowing (it's meaningless alone).
+  // Toggling "Linked only" writes both linked + linkedTo in ONE navigation (#217): turning it off
+  // clears both atomically (linkedTo narrowing is meaningless alone), so the prior two-write handler
+  // can't re-emit linked=only from a stale snapshot and leave the toggle stuck on.
   const setLinkedOnly = (next: boolean) => {
-    setFilter("linked", next ? "only" : FILTER_DEFAULTS.linked);
-    if (!next) setFilterValues("linkedTo", []);
+    setFilters({
+      linked: next ? "only" : FILTER_DEFAULTS.linked,
+      linkedTo: [],
+    });
   };
 
   const removeValue = (name: string, values: string[], value: string) =>
