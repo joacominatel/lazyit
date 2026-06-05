@@ -81,6 +81,11 @@
     "copiedLabel": "{label} — copied",
     "copyError": "Couldn't copy to clipboard"
   },
+  "code": {
+    "copyCode": "Copy code",
+    "copied": "Code copied",
+    "plainText": "text"
+  },
   "filters": {
     "activeFilters": "Active filters",
     "clearFilter": "Clear filter",
