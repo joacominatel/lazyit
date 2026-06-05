@@ -8,11 +8,12 @@ import {
   Squares2X2Icon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
-import { type ArticleLink, MAX_PAGE_LIMIT } from "@lazyit/shared";
+import type { ArticleLink } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { AssetCombobox } from "@/components/asset-combobox";
 import { DetailPanel } from "@/components/detail-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,7 +40,7 @@ import {
 } from "@/components/ui/select";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { useApplications } from "@/lib/api/hooks/use-applications";
-import { useAssets } from "@/lib/api/hooks/use-assets";
+import { useAsset } from "@/lib/api/hooks/use-assets";
 import {
   useArticleLinks,
   useCreateArticleLink,
@@ -68,41 +69,19 @@ export function ArticleLinksPanel({
 }) {
   const t = useTranslations("kb");
   const { data: links, isLoading } = useArticleLinks(articleId);
-  // Catalogs to resolve a link's FK to a display name + to populate the picker.
-  const { data: assetsPage } = useAssets({ limit: MAX_PAGE_LIMIT });
+  // Applications are a small, curated catalog — keep the full list to resolve a link's app name.
+  // Assets are searched server-side now (no full-directory load; the old 200-asset cap is gone — #199);
+  // each asset-link row resolves its own name by id (see {@link LinkRow}).
   const { data: applications } = useApplications();
   const removeLink = useDeleteArticleLink();
 
   const [addOpen, setAddOpen] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
-  const assetById = useMemo(
-    () => new Map((assetsPage?.items ?? []).map((a) => [a.id, a.name])),
-    [assetsPage],
-  );
   const appById = useMemo(
     () => new Map((applications ?? []).map((a) => [a.id, a.name])),
     [applications],
   );
-
-  function targetOf(link: ArticleLink): {
-    kind: Target;
-    name: string;
-    href: string;
-  } {
-    if (link.assetId) {
-      return {
-        kind: "asset",
-        name: assetById.get(link.assetId) ?? t("links.fallbackAsset"),
-        href: `/assets/${link.assetId}`,
-      };
-    }
-    return {
-      kind: "application",
-      name: appById.get(link.applicationId ?? "") ?? t("links.fallbackApplication"),
-      href: `/applications/${link.applicationId}`,
-    };
-  }
 
   function handleRemove(link: ArticleLink) {
     setRemovingId(link.id);
@@ -144,48 +123,22 @@ export function ArticleLinksPanel({
         </div>
       ) : (
         <ul className="divide-y">
-          {rows.map((link) => {
-            const target = targetOf(link);
-            const Icon = target.kind === "asset" ? CubeIcon : Squares2X2Icon;
-            return (
-              <li
-                key={link.id}
-                className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
-              >
-                <Link
-                  href={target.href}
-                  className="flex min-w-0 items-center gap-2 font-medium hover:underline"
-                >
-                  <Icon
-                    className="size-4 shrink-0 text-muted-foreground"
-                    aria-hidden
-                  />
-                  <span className="truncate">{target.name}</span>
-                  <span className="text-xs font-normal text-muted-foreground capitalize">
-                    {target.kind === "asset"
-                      ? t("links.kindAsset")
-                      : t("links.kindApplication")}
-                  </span>
-                  <ArrowTopRightOnSquareIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                </Link>
-                {canWrite && (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t("links.removeAriaLabel")}
-                    onClick={() => handleRemove(link)}
-                    disabled={removeLink.isPending}
-                  >
-                    {removingId === link.id ? (
-                      <ArrowPathIcon className="animate-spin" />
-                    ) : (
-                      <TrashIcon />
-                    )}
-                  </Button>
-                )}
-              </li>
-            );
-          })}
+          {rows.map((link) => (
+            <LinkRow
+              key={link.id}
+              link={link}
+              appName={
+                link.applicationId
+                  ? (appById.get(link.applicationId) ??
+                    t("links.fallbackApplication"))
+                  : undefined
+              }
+              canWrite={canWrite}
+              removing={removingId === link.id}
+              removeDisabled={removeLink.isPending}
+              onRemove={() => handleRemove(link)}
+            />
+          ))}
         </ul>
       )}
 
@@ -194,10 +147,6 @@ export function ArticleLinksPanel({
           open={addOpen}
           onOpenChange={setAddOpen}
           articleId={articleId}
-          assets={(assetsPage?.items ?? []).map((a) => ({
-            id: a.id,
-            name: a.name,
-          }))}
           applications={(applications ?? []).map((a) => ({
             id: a.id,
             name: a.name,
@@ -208,18 +157,82 @@ export function ArticleLinksPanel({
   );
 }
 
+/**
+ * One forward-link row. An asset link resolves its own name by id (`useAsset`) — assets are no longer
+ * loaded en masse (#199), so the panel doesn't carry a full asset map. Application links read their
+ * name from the small applications catalog passed in via `appName`.
+ */
+function LinkRow({
+  link,
+  appName,
+  canWrite,
+  removing,
+  removeDisabled,
+  onRemove,
+}: {
+  link: ArticleLink;
+  /** Pre-resolved application name (when this is an application link). */
+  appName?: string;
+  canWrite: boolean;
+  removing: boolean;
+  removeDisabled: boolean;
+  onRemove: () => void;
+}) {
+  const t = useTranslations("kb");
+  const isAsset = Boolean(link.assetId);
+  // Resolve an asset link's name by id; idle for application links.
+  const { data: asset } = useAsset(link.assetId ?? undefined);
+
+  const name = isAsset
+    ? (asset?.name ?? t("links.fallbackAsset"))
+    : (appName ?? t("links.fallbackApplication"));
+  const href = isAsset
+    ? `/assets/${link.assetId}`
+    : `/applications/${link.applicationId}`;
+  const Icon = isAsset ? CubeIcon : Squares2X2Icon;
+
+  return (
+    <li className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+      <Link
+        href={href}
+        className="flex min-w-0 items-center gap-2 font-medium hover:underline"
+      >
+        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="truncate">{name}</span>
+        <span className="text-xs font-normal text-muted-foreground capitalize">
+          {isAsset ? t("links.kindAsset") : t("links.kindApplication")}
+        </span>
+        <ArrowTopRightOnSquareIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      </Link>
+      {canWrite && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("links.removeAriaLabel")}
+          onClick={onRemove}
+          disabled={removeDisabled}
+        >
+          {removing ? (
+            <ArrowPathIcon className="animate-spin" />
+          ) : (
+            <TrashIcon />
+          )}
+        </Button>
+      )}
+    </li>
+  );
+}
+
 /** Inline picker dialog to link the article to an asset XOR an application (POST /articles/:id/links). */
 function AddArticleLinkDialog({
   open,
   onOpenChange,
   articleId,
-  assets,
   applications,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   articleId: string;
-  assets: { id: string; name: string }[];
   applications: { id: string; name: string }[];
 }) {
   const t = useTranslations("kb");
@@ -259,8 +272,6 @@ function AddArticleLinkDialog({
       },
     );
   }
-
-  const options = target === "asset" ? assets : applications;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -303,38 +314,51 @@ function AddArticleLinkDialog({
                 ? t("links.targetAssetLabel")
                 : t("links.targetApplicationLabel")}
             </FieldLabel>
-            <Select
-              value={targetId}
-              onValueChange={(value) => {
-                setTargetId(value);
-                if (error) setError(null);
-              }}
-            >
-              <SelectTrigger
+            {target === "asset" ? (
+              // Assets are searched server-side (no full-directory load; the old 200-asset cap is
+              // gone — #199), so any asset is reachable regardless of fleet size.
+              <AssetCombobox
                 id="link-target"
-                className="w-full"
-                aria-invalid={error ? true : undefined}
+                value={targetId}
+                onValueChange={(value) => {
+                  setTargetId(value);
+                  if (error) setError(null);
+                }}
+                ariaInvalid={Boolean(error)}
+                placeholder={t("links.selectAsset")}
+                searchPlaceholder={t("links.searchAsset")}
+                emptyText={t("links.noAssets")}
+              />
+            ) : (
+              <Select
+                value={targetId}
+                onValueChange={(value) => {
+                  setTargetId(value);
+                  if (error) setError(null);
+                }}
               >
-                <SelectValue
-                  placeholder={
-                    options.length > 0
-                      ? target === "asset"
-                        ? t("links.selectAsset")
-                        : t("links.selectApplication")
-                      : target === "asset"
-                        ? t("links.noAssets")
+                <SelectTrigger
+                  id="link-target"
+                  className="w-full"
+                  aria-invalid={error ? true : undefined}
+                >
+                  <SelectValue
+                    placeholder={
+                      applications.length > 0
+                        ? t("links.selectApplication")
                         : t("links.noApplications")
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {options.map((option) => (
-                  <SelectItem key={option.id} value={option.id}>
-                    {option.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {applications.map((option) => (
+                    <SelectItem key={option.id} value={option.id}>
+                      {option.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <FieldError>{error}</FieldError>
             <FieldDescription>{t("links.duplicateHint")}</FieldDescription>
           </Field>
