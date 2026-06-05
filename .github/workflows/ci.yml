@@ -98,6 +98,12 @@ jobs:
         working-directory: packages/shared
         run: bun test
 
+      # Web unit tests cover the framework-agnostic list-state helpers (#217 — the pure URL-patch
+      # core of useListParams). No DOM/router: `bun test` runs them directly, like the shared step.
+      - name: Test web
+        working-directory: apps/web
+        run: bun test
+
       # --cache-dir=.turbo makes turbo read/write the cache at the path persisted by actions/cache
       # above (its default is node_modules/.cache/turbo, which isn't cached). Still builds all three
       # workspaces; on a cache hit unchanged ones are replayed instead of recompiled.
