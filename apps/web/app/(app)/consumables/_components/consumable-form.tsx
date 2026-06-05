@@ -202,7 +202,7 @@ export function ConsumableForm({
                   {t("form.categoryLabel")}
                 </FieldLabel>
                 <CreatableField
-                  label="category"
+                  entityKey="category"
                   renderDialog={(dialog) => (
                     <CreateCategoryDialog
                       kind="consumable"
