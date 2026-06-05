@@ -81,7 +81,18 @@ export function RecentActivityPanel() {
               {t("recentActivity.empty")}
             </p>
           ) : (
-            <div className="space-y-4">
+            // Issue #195: on `lg+` cap the scrollable feed to roughly the viewport so the long
+            // activity stream stops dictating an ever-growing row height — that gap under the
+            // sticky Pulse rail (which pins at `lg:top-6`) closes because the feed no longer
+            // towers over it. The `calc(100vh-13rem)` budget leaves room for the chrome above
+            // the list (section heading + card header + page padding) plus a little breathing
+            // space below, so the feed end and the rail end roughly coincide. Below `lg` the cap
+            // is absent: the layout is a single column and the feed flows normally (unchanged).
+            // `pr-1` keeps the inner scrollbar off the row content / focus rings; `overscroll-contain`
+            // stops the inner scroll from chaining to the page once the feed bottoms out. The
+            // "Load more" button rides at the end of this scroll region, so it stays reachable by
+            // pointer and keyboard. No new colour or motion — Tailwind utilities only (ADR-0049).
+            <div className="space-y-4 lg:max-h-[calc(100vh-13rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
               {groups.map((group) => (
                 <div key={group.label}>
                   <p className="mb-2 text-xs font-medium text-muted-foreground">
