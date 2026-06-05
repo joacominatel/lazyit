@@ -70,11 +70,16 @@ describe('ArticlesController POST /articles/import (upload size limit, SEC-001)'
 });
 
 /**
- * The `linked` / `linkedTo` list filters are validated against a per-resource ALLOWLIST at the edge
- * (ADR-0030 / ADR-0042): a recognized value is forwarded to the service; an unknown value is rejected
- * with 400, never silently ignored. Tested as a unit (the method directly) — no guard/DB wiring.
+ * The `status` / `categoryId` / `linked` / `linkedTo` list filters are validated against a
+ * per-resource ALLOWLIST at the edge (ADR-0030 / ADR-0042): a recognized value is forwarded to the
+ * service; an unknown value is rejected with 400, never silently ignored. `status` / `categoryId` /
+ * `linkedTo` are **multi-select** (#198) — comma-encoded or repeated, parsed to a de-duplicated
+ * array, each element validated. A single value still parses (backward-compat). Tested as a unit (the
+ * method directly) — no guard/DB wiring.
+ *
+ * `findAll` positional args: (user, categoryId, authorId, status, q, linked, linkedTo, limit, …).
  */
-describe('ArticlesController GET /articles (linked filter allowlist)', () => {
+describe('ArticlesController GET /articles (multi-select filters + allowlist, #198)', () => {
   const findPage = jest.fn().mockResolvedValue({ items: [], total: 0 });
   const controller = new ArticlesController({
     findPage,
@@ -99,7 +104,7 @@ describe('ArticlesController GET /articles (linked filter allowlist)', () => {
     );
   });
 
-  it('forwards a valid linkedTo=asset to the service', () => {
+  it('parses a single linkedTo=asset to a one-element array (backward-compat)', () => {
     void controller.findAll(
       undefined,
       undefined,
@@ -110,7 +115,52 @@ describe('ArticlesController GET /articles (linked filter allowlist)', () => {
       'asset',
     );
     expect(findPage).toHaveBeenCalledWith(
-      expect.objectContaining({ linkedTo: 'asset' }),
+      expect.objectContaining({ linkedTo: ['asset'] }),
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('comma-encodes multi-value linkedTo into a de-duplicated array (#198)', () => {
+    void controller.findAll(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'asset,application,asset',
+    );
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ linkedTo: ['asset', 'application'] }),
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('parses multi-value status into an array (#198)', () => {
+    void controller.findAll(
+      undefined,
+      undefined,
+      undefined,
+      'DRAFT,PUBLISHED',
+    );
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ status: ['DRAFT', 'PUBLISHED'] }),
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('accepts repeated params (string[]) for status (#198)', () => {
+    void controller.findAll(
+      undefined,
+      undefined,
+      undefined,
+      ['DRAFT', 'PUBLISHED'],
+    );
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ status: ['DRAFT', 'PUBLISHED'] }),
       expect.anything(),
       undefined,
     );
@@ -130,7 +180,7 @@ describe('ArticlesController GET /articles (linked filter allowlist)', () => {
     expect(findPage).not.toHaveBeenCalled();
   });
 
-  it('rejects an unknown linkedTo value with 400 (never reaches the service)', () => {
+  it('rejects an unknown element in a multi-value linkedTo with 400 (#198)', () => {
     expect(() =>
       controller.findAll(
         undefined,
@@ -139,8 +189,22 @@ describe('ArticlesController GET /articles (linked filter allowlist)', () => {
         undefined,
         undefined,
         undefined,
-        'database',
+        'asset,database',
       ),
+    ).toThrow(BadRequestException);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown element in a multi-value status with 400 (#198)', () => {
+    expect(() =>
+      controller.findAll(undefined, undefined, undefined, 'DRAFT,ARCHIVED'),
+    ).toThrow(BadRequestException);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed cuid element in a multi-value categoryId with 400 (#198)', () => {
+    expect(() =>
+      controller.findAll(undefined, 'clh1abc0000xyz0000000abcd,not-a-cuid!'),
     ).toThrow(BadRequestException);
     expect(findPage).not.toHaveBeenCalled();
   });
