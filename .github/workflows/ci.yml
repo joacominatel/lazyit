@@ -41,6 +41,17 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
+      # Persist Turborepo's local cache across runs so `turbo build` is warm on a hit and only
+      # rebuilds the workspaces whose inputs changed. Keyed on the source/lockfile hash with a
+      # restore-key prefix so a partial (older) cache still seeds a faster rebuild. Turbo verifies
+      # task inputs itself, so a stale entry is never reused incorrectly — at worst it rebuilds.
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('bun.lock', 'apps/**', 'packages/**', 'turbo.json') }}
+          restore-keys: turbo-${{ runner.os }}-
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -87,42 +98,40 @@ jobs:
         working-directory: packages/shared
         run: bun test
 
+      # --cache-dir=.turbo makes turbo read/write the cache at the path persisted by actions/cache
+      # above (its default is node_modules/.cache/turbo, which isn't cached). Still builds all three
+      # workspaces; on a cache hit unchanged ones are replayed instead of recompiled.
       - name: Build all workspaces
-        run: bunx turbo build
+        run: bunx turbo build --cache-dir=.turbo
 
+  # The three images are built in PARALLEL (one matrix job per image, each on its own runner)
+  # instead of sequentially in one job — docker wall-clock drops from the SUM of the three builds
+  # to the MAX. This job is NOT gated on `verify` (no `needs:`): the image build and the quality
+  # gate run concurrently, so the slow Docker stage no longer waits out the verify job.
+  #   Trade-off: a run still spends Docker-build minutes even when `verify` fails. Accepted —
+  #   fast feedback wins, the two failure modes are independent (a broken Dockerfile is worth
+  #   surfacing immediately regardless of typecheck/test), and `cancel-in-progress` (above) kills
+  #   superseded runs anyway. (ADR-0052.)
   docker:
-    name: Build Docker images (no push)
+    name: Build ${{ matrix.image }} image (no push)
     runs-on: ubuntu-latest
-    needs: verify
+    strategy:
+      # Build every image even if one fails, so all three Dockerfiles are validated per run.
+      fail-fast: false
+      matrix:
+        image: [api, web, migrate]
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build API image
+      # Per-image GHA cache scope keeps each image's layer cache isolated (unchanged from before).
+      - name: Build ${{ matrix.image }} image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: infra/docker/api.Dockerfile
+          file: infra/docker/${{ matrix.image }}.Dockerfile
           push: false
-          cache-from: type=gha,scope=api
-          cache-to: type=gha,mode=max,scope=api
-
-      - name: Build Web image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: infra/docker/web.Dockerfile
-          push: false
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
-
-      - name: Build migrate image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: infra/docker/migrate.Dockerfile
-          push: false
-          cache-from: type=gha,scope=migrate
-          cache-to: type=gha,mode=max,scope=migrate
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

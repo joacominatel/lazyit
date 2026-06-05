@@ -49,6 +49,9 @@ Repo facts that shape the pipeline:
   `apps/api` and `apps/web`) → test (api Jest, no DB; shared `bun test`) → `turbo build`.
 - **Job `docker`** (needs `verify`): build the three images with `docker/build-push-action`,
   **`push: false`**, GHA layer cache — proves the Dockerfiles build. No DB, no registry.
+  > **Updated by [[0052-ci-parallel-docker-and-decoupled-verify]]:** `docker` is now a parallel
+  > **matrix** (one runner per image) and **no longer `needs: verify`** — it runs concurrently with
+  > the gate. Everything else here still holds.
 - **CD: deferred.** No deploy step. When CD lands, the registry is **GHCR** (GitHub-native, free for
   the repo) — a follow-up ADR will define the publish/deploy flow and image tagging (commit SHA +
   semver).
