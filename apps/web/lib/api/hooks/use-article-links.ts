@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { CreateArticleLink } from "@lazyit/shared";
 import {
   createArticleLink,
@@ -6,6 +11,7 @@ import {
   getApplicationArticles,
   getArticleLinks,
   getAssetArticles,
+  type ReverseArticleFilters,
 } from "../endpoints/article-links";
 
 /**
@@ -26,12 +32,18 @@ export const articleLinkKeys = {
   /** Forward: one article's own links. */
   forArticle: (articleId: string) =>
     [...articleLinkKeys.all, "article", articleId] as const,
-  /** Reverse: published articles linked to an asset. */
-  forAsset: (assetId: string) =>
-    [...articleLinkKeys.all, "asset", assetId] as const,
-  /** Reverse: published articles linked to an application. */
-  forApplication: (applicationId: string) =>
-    [...articleLinkKeys.all, "application", applicationId] as const,
+  /**
+   * Reverse: published articles linked to an asset. The filter/page dimension (#220) is part of the
+   * key so each distinct search/filter/page is cached independently and refetches correctly.
+   */
+  forAsset: (assetId: string, filters: ReverseArticleFilters = {}) =>
+    [...articleLinkKeys.all, "asset", assetId, filters] as const,
+  /** Reverse: published articles linked to an application (filter/page-aware key, #220). */
+  forApplication: (
+    applicationId: string,
+    filters: ReverseArticleFilters = {},
+  ) =>
+    [...articleLinkKeys.all, "application", applicationId, filters] as const,
 };
 
 /** One article's links (forward direction); idle until an id is provided. */
@@ -43,21 +55,36 @@ export function useArticleLinks(articleId: string | undefined) {
   });
 }
 
-/** Published articles linked to an asset (reverse direction); idle until an id is provided. */
-export function useAssetArticles(assetId: string | undefined) {
+/**
+ * A page of the PUBLISHED articles linked to an asset (reverse direction); idle until an id is
+ * provided. Accepts the #220 `q`/`status`/`categoryId` + page filters; `keepPreviousData` keeps the
+ * current page visible (no flash to the loading state) while the next search/filter/page resolves.
+ */
+export function useAssetArticles(
+  assetId: string | undefined,
+  filters: ReverseArticleFilters = {},
+) {
   return useQuery({
-    queryKey: articleLinkKeys.forAsset(assetId ?? ""),
-    queryFn: () => getAssetArticles(assetId as string),
+    queryKey: articleLinkKeys.forAsset(assetId ?? "", filters),
+    queryFn: () => getAssetArticles(assetId as string, filters),
     enabled: Boolean(assetId),
+    placeholderData: keepPreviousData,
   });
 }
 
-/** Published articles linked to an application (reverse direction); idle until an id is provided. */
-export function useApplicationArticles(applicationId: string | undefined) {
+/**
+ * A page of the PUBLISHED articles linked to an application (reverse direction); idle until an id is
+ * provided. Same #220 filter/page contract + `keepPreviousData` as {@link useAssetArticles}.
+ */
+export function useApplicationArticles(
+  applicationId: string | undefined,
+  filters: ReverseArticleFilters = {},
+) {
   return useQuery({
-    queryKey: articleLinkKeys.forApplication(applicationId ?? ""),
-    queryFn: () => getApplicationArticles(applicationId as string),
+    queryKey: articleLinkKeys.forApplication(applicationId ?? "", filters),
+    queryFn: () => getApplicationArticles(applicationId as string, filters),
     enabled: Boolean(applicationId),
+    placeholderData: keepPreviousData,
   });
 }
 

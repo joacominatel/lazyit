@@ -130,6 +130,31 @@ deep-links unbroken).
   body). The list reads it through the same typed lean `select` — no body load, and it is
   future-sortable via the ADR-0030 sort allowlist. The owner is already exposed as `authorId`.
 
+### Reverse KB lookups become paginated + filterable (#220, 2026-06-05)
+
+The reverse lookups `GET /assets/:id/articles` and `GET /applications/:id/articles` ("the runbook for
+THIS server / this app") shipped as an **unbounded** `findMany` — every linked PUBLISHED article in one
+request, no filter, no paging. For a large KB linked to one ERP/app that doesn't scale. They are now
+**paginated + filterable**, reusing the existing list machinery rather than a new bespoke surface
+(Activated Restraint, ADR-0049):
+
+- **Wire shape change (breaking).** Each endpoint now returns the lean `Page<ArticleListItem>` envelope
+  (`{ items, total, limit, offset }`, [[0030-list-pagination-contract]]) instead of a bare
+  `ArticleListItem[]`. The `@ApiOkResponse` is the page DTO. Front and back moved in lockstep
+  (`endpoints/article-links.ts`, the `use*Articles` hooks, `RelatedArticlesPanel`).
+- **Service.** `findArticlesForAsset` / `findArticlesForApplication` take a `(filters, page)` signature
+  and run the page `findMany(take/skip)` + a paired `count` over the **same** `where` in one
+  `$transaction` (via the shared `offsetOf`/`pageOf`), through a private `findLinkedArticlesPage` engine
+  that flattens `_count.links → linkCount`. `limit` defaults to 50, hard-capped at 200 (a larger value
+  is **rejected** with 400, not clamped — ADR-0030).
+- **Filters.** `q` (case-insensitive substring over title/excerpt), `status` and `categoryId` —
+  multi-select (#198), parsed by the controllers with `parseEnumArrayQuery` / `parseCuidArrayQuery`
+  (unknown element → **400**, never silently ignored).
+- **Privacy unchanged.** The `where` still **hard-pins `status: 'PUBLISHED'`** and ANDs the link scope
+  + filters on top — a draft never leaks (a `status=DRAFT` filter validly parses but matches nothing).
+  `article:read`-gated, soft-delete rules unchanged. The panel exposes only a `q` search + a **category**
+  filter (no status control, which could only surface drafts or be a no-op) and "Load more" paging.
+
 ### Search: index article content
 
 - `projectArticle` now includes **`content`** in the Meilisearch document ([[0035-search-architecture]]),
@@ -168,7 +193,9 @@ deep-links unbroken).
 - **Retention** — cap/prune very old versions? Not for now (append-only, keep everything).
 - ~~**Reverse link list for applications** — `GET /applications/:id/articles`~~ **Resolved
   (2026-06-01, ADR-0030 amendment):** the application reverse lookup shipped, symmetric to the asset
-  one (PUBLISHED only, lean list shape).
+  one (PUBLISHED only, lean list shape). **Now paginated + filterable (2026-06-05, #220)** — see the
+  reverse-KB-lookups section above; both surfaces return `Page<ArticleListItem>` with `q`/`status`/
+  `categoryId` filters.
 
 Related: [[article]] · [[article-version]] · [[article-link]] · [[asset-history]] ·
 [[0021-knowledge-base-design]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·

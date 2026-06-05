@@ -18,7 +18,8 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
-  ArticleListItemSchema,
+  ArticleListPageSchema,
+  ArticleStatusSchema,
   AssetAssignmentWithUserSchema,
   AssetHistoryQuerySchema,
   AssetHistorySchema,
@@ -39,7 +40,9 @@ import { ArticlesService } from '../articles/articles.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
+import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
+import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -59,8 +62,9 @@ class AssetAssignmentWithUserDto extends createZodDto(
   AssetAssignmentWithUserSchema,
 ) {}
 class AssetHistoryDto extends createZodDto(AssetHistorySchema) {}
-// Reverse KB lookup (ADR-0042): the lean article-list shape for GET /assets/:id/articles.
-class ArticleListItemDto extends createZodDto(ArticleListItemSchema) {}
+// Reverse KB lookup (ADR-0042 / #220): the lean, paginated article-list envelope for
+// GET /assets/:id/articles (a Page<ArticleListItem>, no markdown content).
+class ArticleListPageDto extends createZodDto(ArticleListPageSchema) {}
 // Batch (bulk) action DTOs (ADR-0030 amendment): the ids payload, the status payload, and the
 // per-item batch result envelope.
 class BatchIdsDto extends createZodDto(BatchIdsSchema) {}
@@ -253,12 +257,67 @@ export class AssetsController {
   @RequirePermission('article:read')
   @ApiOperation({
     summary:
-      "List the PUBLISHED knowledge-base articles linked to this asset ('the runbook for THIS server'). (ADR-0042)",
+      "List the PUBLISHED knowledge-base articles linked to this asset ('the runbook for THIS server'; paginated + filterable). (ADR-0042 / ADR-0030 / #220)",
   })
-  @ApiOkResponse({ type: [ArticleListItemDto] })
-  async findArticles(@Param('id') id: string) {
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description: 'Case-insensitive substring match on title and excerpt.',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: [...ArticleStatusSchema.options],
+    isArray: true,
+    description:
+      'Filter by status. Multi-value (#198): comma-separated or repeated; values OR-combine. Unknown value → 400. The list is always PUBLISHED-only, so this only narrows within PUBLISHED (a draft never surfaces here).',
+  })
+  @ApiQuery({
+    name: 'categoryId',
+    required: false,
+    description:
+      'Filter by category. Multi-value (#198): comma-separated (categoryId=cuid1,cuid2) or repeated; values OR-combine. Each element must be a cuid — an invalid element → 400.',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: ArticleListPageDto })
+  async findArticles(
+    @Param('id') id: string,
+    @Query('q') q?: string,
+    // Multi-value filters (#198) arrive comma-encoded (one param) OR repeated (Nest hands a string[]).
+    @Query('status') status?: string | string[],
+    @Query('categoryId') categoryId?: string | string[],
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+  ) {
     await this.assets.assertExists(id); // 404 if the asset is missing or soft-deleted
-    return this.articles.findArticlesForAsset(id);
+    return this.articles.findArticlesForAsset(
+      id,
+      {
+        q,
+        // Each value is validated against its allowlist (unknown element → 400, ADR-0030).
+        status: parseEnumArrayQuery(status, ArticleStatusSchema, 'status'),
+        categoryId: parseCuidArrayQuery(categoryId, 'categoryId'),
+      },
+      parsePageQuery({ limit, offset, page }),
+    );
   }
 
   @Post()
