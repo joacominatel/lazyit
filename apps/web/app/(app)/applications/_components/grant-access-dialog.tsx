@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { UserFormDialog } from "@/app/(app)/users/_components/user-form-dialog";
 import { AccessLevelCombobox } from "@/components/access-level-combobox";
 import { CreatableField } from "@/components/creatable-field";
+import { UserCombobox } from "@/components/user-combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,17 +27,9 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useGrantAccess } from "@/lib/api/hooks/use-access-grant-mutations";
 import { useApplicationGrants } from "@/lib/api/hooks/use-applications";
-import { useUsers } from "@/lib/api/hooks/use-users";
 import { notifyError } from "@/lib/api/notify-error";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
@@ -86,7 +79,6 @@ export function GrantAccessDialog({
 }: GrantAccessDialogProps) {
   const t = useTranslations("applications");
   const tc = useTranslations("common");
-  const { data: users } = useUsers();
   // The app's current active grants — to show the grantee's existing context (no duplicate by mistake).
   const { data: activeGrants } = useApplicationGrants(applicationId, {
     activeOnly: true,
@@ -138,8 +130,6 @@ export function GrantAccessDialog({
     (_errors, event) => scrollToFirstError(event?.target ?? null),
   );
 
-  const available = (users ?? []).filter((user) => user.isActive);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -169,7 +159,7 @@ export function GrantAccessDialog({
                     {t("access.userLabel")}
                   </FieldLabel>
                   <CreatableField
-                    label="user"
+                    entityKey="user"
                     renderDialog={(dialog) => (
                       <UserFormDialog
                         open={dialog.open}
@@ -178,28 +168,15 @@ export function GrantAccessDialog({
                       />
                     )}
                   >
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger
-                        id="grant-user"
-                        className="w-full"
-                        aria-invalid={fieldState.invalid || undefined}
-                      >
-                        <SelectValue
-                          placeholder={
-                            available.length > 0
-                              ? t("access.selectUser")
-                              : t("access.noActiveUsers")
-                          }
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {available.map((user) => (
-                          <SelectItem key={user.id} value={user.id}>
-                            {user.firstName} {user.lastName}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <UserCombobox
+                      id="grant-user"
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      ariaInvalid={fieldState.invalid}
+                      placeholder={t("access.selectUser")}
+                      searchPlaceholder={t("access.searchUser")}
+                      emptyText={t("access.noActiveUsers")}
+                    />
                   </CreatableField>
                   {field.value && existingForUser.length > 0 && (
                     <FieldDescription className="flex flex-wrap items-center gap-1.5">

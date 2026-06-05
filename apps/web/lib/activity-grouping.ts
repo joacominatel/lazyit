@@ -7,9 +7,17 @@ import type { RecentActivityItem } from "@lazyit/shared";
  * so the dividers stay pure across renders.
  */
 
+/**
+ * Stable day-bucket key — drives React keys/grouping AND selects the localized divider label at
+ * the render site (`shared.activity.dateGroup.*`). NOT a display string, so it never gets
+ * translated in this pure util (issue #204).
+ */
+export type ActivityGroupKey = "today" | "yesterday" | "earlier";
+
 /** A day bucket of activity rows, carrying each row's GLOBAL index for the capped stagger. */
 export interface ActivityGroup {
-  label: string;
+  /** Stable key — use as the React key and to resolve the localized label at the render site. */
+  key: ActivityGroupKey;
   items: { item: RecentActivityItem; index: number }[];
 }
 
@@ -30,20 +38,20 @@ export function groupByDay(
 ): ActivityGroup[] {
   const today = dayKey(new Date(now));
   const yesterday = dayKey(new Date(now - 24 * 60 * 60 * 1000));
-  const order = ["Today", "Yesterday", "Earlier"] as const;
+  const order: ActivityGroupKey[] = ["today", "yesterday", "earlier"];
   const buckets = new Map<
-    string,
+    ActivityGroupKey,
     { item: RecentActivityItem; index: number }[]
   >();
   items.forEach((item, index) => {
-    const key = dayKey(new Date(item.occurredAt));
-    const label =
-      key === today ? "Today" : key === yesterday ? "Yesterday" : "Earlier";
-    const bucket = buckets.get(label);
+    const day = dayKey(new Date(item.occurredAt));
+    const key: ActivityGroupKey =
+      day === today ? "today" : day === yesterday ? "yesterday" : "earlier";
+    const bucket = buckets.get(key);
     if (bucket) bucket.push({ item, index });
-    else buckets.set(label, [{ item, index }]);
+    else buckets.set(key, [{ item, index }]);
   });
   return order
-    .filter((label) => buckets.has(label))
-    .map((label) => ({ label, items: buckets.get(label) ?? [] }));
+    .filter((key) => buckets.has(key))
+    .map((key) => ({ key, items: buckets.get(key) ?? [] }));
 }

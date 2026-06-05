@@ -6,6 +6,7 @@ import { type AssetModel, CreateAssetModelSchema } from "@lazyit/shared";
 import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { CategoryCombobox } from "@/components/category-combobox";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,20 +23,11 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useCreateAssetModel } from "@/lib/api/hooks/use-asset-models";
 import { notifyError } from "@/lib/api/notify-error";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
-/** Radix Select forbids an empty-string item value; sentinel for "no category". */
-const NONE = "__none__";
 const FORM_ID = "create-asset-model-form";
 
 type FormValues = {
@@ -166,24 +158,17 @@ export function CreateAssetModelDialog({
               render={({ field }) => (
                 <Field>
                   <FieldLabel htmlFor="new-model-category">Category</FieldLabel>
-                  <Select
-                    value={field.value ?? NONE}
+                  <CategoryCombobox
+                    id="new-model-category"
+                    value={field.value ?? ""}
                     onValueChange={(value) =>
-                      field.onChange(value === NONE ? undefined : value)
+                      field.onChange(value === "" ? undefined : value)
                     }
-                  >
-                    <SelectTrigger id="new-model-category" className="w-full">
-                      <SelectValue placeholder="Select a category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>— None —</SelectItem>
-                      {(categories ?? []).map((category) => (
-                        <SelectItem key={category.id} value={category.id}>
-                          {category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    categories={categories ?? []}
+                    placeholder="Select a category"
+                    searchPlaceholder="Search categories…"
+                    emptyText="No categories found"
+                  />
                 </Field>
               )}
             />

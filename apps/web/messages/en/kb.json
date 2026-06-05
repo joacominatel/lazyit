@@ -18,25 +18,19 @@
     "linkedTooltip": "{count, plural, one {Linked to # item} other {Linked to # items}}"
   },
   "filters": {
-    "statusAll": "All statuses",
-    "statusDraftsOnly": "Drafts only",
-    "statusPublishedOnly": "Published only",
-    "categoryAll": "All categories",
+    "statusLabelName": "Status",
+    "categoryLabelName": "Category",
+    "linkedToLabelName": "Target",
     "linkedOnly": "Linked only",
-    "anyTarget": "Any target",
-    "targetAssets": "Assets",
-    "targetApplications": "Applications",
     "chipSearch": "Search: “{query}”",
     "chipStatus": "Status: {value}",
     "chipCategory": "Category: {value}",
     "chipLinkedTo": "Linked to: {value}",
     "statusLabel": {
-      "all": "All",
       "drafts": "Drafts",
       "published": "Published"
     },
     "linkedToLabel": {
-      "any": "Any target",
       "assets": "Assets",
       "applications": "Applications"
     }
@@ -105,6 +99,7 @@
     "targetAssetLabel": "Asset",
     "targetApplicationLabel": "Application",
     "selectAsset": "Select an asset",
+    "searchAsset": "Search assets…",
     "selectApplication": "Select an application",
     "noAssets": "No assets yet",
     "noApplications": "No applications yet",

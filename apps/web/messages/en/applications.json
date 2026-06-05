@@ -97,6 +97,7 @@
     "grantDescription": "Give a user access to this application. A user may hold several grants at different access levels.",
     "userLabel": "User",
     "selectUser": "Select a user",
+    "searchUser": "Search users…",
     "noActiveUsers": "No active users",
     "selectUserError": "Select a user",
     "alreadyHasAccess": "Already has access:",

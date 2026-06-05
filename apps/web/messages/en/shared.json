@@ -10,7 +10,7 @@
     "bulkActions": "Bulk actions",
     "clearSelection": "Clear selection",
     "selectRow": "Select row",
-    "selectedCount": "{count, plural, =0 {No {noun} selected} one {# {noun} selected} other {# {noun} selected}}",
+    "selectedCount": "{count, plural, =0 {No {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} other {items}} selected} one {# {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}} selected} other {# {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} other {items}} selected}}",
     "noResults": "No results",
     "showingRange": "Showing <b>{from}</b>–<b>{to}</b> of <b>{total}</b>",
     "previous": "Previous",
@@ -25,7 +25,31 @@
     "view": "View"
   },
   "activity": {
-    "system": "System"
+    "system": "System",
+    "dateGroup": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier"
+    },
+    "action": {
+      "created": "Created",
+      "status_changed": "Status changed",
+      "location_changed": "Location changed",
+      "model_changed": "Model changed",
+      "specs_changed": "Specs changed",
+      "assigned": "Assigned",
+      "released": "Released",
+      "granted": "Granted",
+      "revoked": "Revoked",
+      "stock_in": "Stock in",
+      "stock_out": "Stock out",
+      "stock_adjustment": "Stock adjustment",
+      "updated": "Updated",
+      "role_changed": "Role changed",
+      "password_reset_sent": "Password reset sent",
+      "deleted": "Deleted",
+      "restored": "Restored"
+    }
   },
   "empty": {},
   "errors": {
@@ -69,10 +93,10 @@
     }
   },
   "dialog": {
-    "deleteTitle": "Delete {entity}?",
+    "deleteTitle": "Delete {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}}?",
     "deleteDescriptionPrefix": "will be archived — a soft delete that hides it from the list without erasing its history.",
-    "deleted": "{entity} deleted",
-    "deleteError": "Couldn't delete {entity}",
+    "deleted": "{entity, select, asset {Asset} application {Application} consumable {Consumable} article {Article} user {User} location {Location} model {Model} category {Category} serviceAccount {Service account} other {Item}} deleted",
+    "deleteError": "Couldn't delete {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}}",
     "cancel": "Cancel",
     "delete": "Delete"
   },
@@ -81,6 +105,11 @@
     "copiedLabel": "{label} — copied",
     "copyError": "Couldn't copy to clipboard"
   },
+  "code": {
+    "copyCode": "Copy code",
+    "copied": "Code copied",
+    "plainText": "text"
+  },
   "filters": {
     "activeFilters": "Active filters",
     "clearFilter": "Clear filter",
@@ -88,6 +117,10 @@
     "clearAll": "Clear all",
     "clearFilters": "Clear filters",
     "showArchived": "Show archived"
+  },
+  "multiSelect": {
+    "triggerLabelWithCount": "{label} ({count} selected)",
+    "empty": "No options"
   },
   "search": {
     "trigger": "Search",
@@ -114,7 +147,12 @@
     }
   },
   "field": {
-    "newEntity": "New {label}"
+    "newEntity": "New {label, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}}"
+  },
+  "batch": {
+    "allSucceeded": "{count, plural, one {# {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}}} other {# {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} other {items}}}} {verb, select, deleted {deleted} restored {restored} revoked {revoked} updated {updated} other {{verb}}}.",
+    "noneSucceeded": "No {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} other {items}} {verb, select, deleted {deleted} restored {restored} revoked {revoked} updated {updated} other {{verb}}}. {skipped, plural, one {# skipped} other {# skipped}}.",
+    "partial": "{count, plural, one {# {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}}} other {# {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} other {items}}}} {verb, select, deleted {deleted} restored {restored} revoked {revoked} updated {updated} other {{verb}}}; {skipped} skipped."
   },
   "editor": {
     "markdownPlaceholder": "Write in Markdown…",

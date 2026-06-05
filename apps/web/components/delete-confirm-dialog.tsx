@@ -15,12 +15,17 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { notifyError } from "@/lib/api/notify-error";
+import type { EntityKey } from "@/lib/entity-key";
 
 interface DeleteConfirmDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Lowercase singular entity, e.g. "location", "user" — drives title + toasts. */
-  entityLabel: string;
+  /**
+   * Stable entity key from the closed set ({@link EntityKey}) — the dialog resolves the localized,
+   * correctly-pluralized/gendered noun internally for the title + toasts (issue #204). Never a raw
+   * English word.
+   */
+  entityKey: EntityKey;
   /** Human-readable record name, shown in bold in the prompt. */
   name: string;
   /**
@@ -37,19 +42,15 @@ interface DeleteConfirmDialogProps {
   onDeleted?: () => void;
 }
 
-function capitalize(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
 /**
  * Reusable confirmation for a soft delete: stays open on error, closes on
  * success. The shared replacement for the per-entity delete dialogs — pass the
- * entity label, the record name and a `mutateAsync` thunk. See ADR-0020.
+ * entity key, the record name and a `mutateAsync` thunk. See ADR-0020.
  */
 export function DeleteConfirmDialog({
   open,
   onOpenChange,
-  entityLabel,
+  entityKey,
   name,
   onConfirm,
   children,
@@ -62,11 +63,11 @@ export function DeleteConfirmDialog({
     setIsPending(true);
     try {
       await onConfirm();
-      toast.success(t("dialog.deleted", { entity: capitalize(entityLabel) }));
+      toast.success(t("dialog.deleted", { entity: entityKey }));
       onOpenChange(false);
       onDeleted?.();
     } catch (error) {
-      notifyError(error, t("dialog.deleteError", { entity: entityLabel }));
+      notifyError(error, t("dialog.deleteError", { entity: entityKey }));
     } finally {
       setIsPending(false);
     }
@@ -77,7 +78,7 @@ export function DeleteConfirmDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {t("dialog.deleteTitle", { entity: entityLabel })}
+            {t("dialog.deleteTitle", { entity: entityKey })}
           </AlertDialogTitle>
           <AlertDialogDescription>
             <span className="font-medium text-foreground">{name}</span>{" "}

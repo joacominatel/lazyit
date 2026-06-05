@@ -167,7 +167,7 @@ export function ArticleForm({ article }: { article?: Article }) {
                 {t("form.categoryLabel")}
               </FieldLabel>
               <CreatableField
-                label="category"
+                entityKey="category"
                 renderDialog={(dialog) => (
                   <CreateCategoryDialog
                     kind="article"

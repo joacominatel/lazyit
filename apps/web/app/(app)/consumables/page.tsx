@@ -70,6 +70,7 @@ const FILTER_DEFAULTS = {
 
 export default function ConsumablesPage() {
   const t = useTranslations("consumables");
+  const tShared = useTranslations("shared");
   const router = useRouter();
   // `isAdmin` still gates the archived (`deleted=only`) slice (API keeps it ADMIN-only). Create/edit/
   // quick-adjust are consumable:write; delete/restore are consumable:delete.
@@ -156,7 +157,11 @@ export default function ConsumablesPage() {
       );
       // The per-id calls bypass the mutation hook, so refetch the list explicitly via a no-op restore
       // is unnecessary — invalidate by re-running the query through the mutation's invalidator.
-      notifyBatchResult(result, { noun: "consumable", verb: "restored" });
+      notifyBatchResult(result, {
+        entityKey: "consumable",
+        verb: "restored",
+        t: tShared,
+      });
       selection.clear();
       await refetch();
     } catch (err) {
@@ -591,7 +596,7 @@ export default function ConsumablesPage() {
             <BatchActionBar
               count={selection.count}
               onClear={selection.clear}
-              noun="consumable"
+              entityKey="consumable"
             >
               <Button
                 size="sm"
@@ -621,7 +626,7 @@ export default function ConsumablesPage() {
           onOpenChange={(open) => {
             if (!open) setDeleting(null);
           }}
-          entityLabel="consumable"
+          entityKey="consumable"
           name={deleting.name}
           onConfirm={() => deleteConsumable.mutateAsync(deleting.id)}
         />

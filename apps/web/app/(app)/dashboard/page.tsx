@@ -10,12 +10,14 @@ import {
   KeyIcon,
   ServerStackIcon,
   WrenchScrewdriverIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline";
 import type { AssetStatus, DashboardSummary } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import type { ComponentType, CSSProperties, ReactNode } from "react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import type { Pillar } from "@/components/pillar-scope";
 import { ErrorState } from "@/components/resource-table";
@@ -29,11 +31,12 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDashboardSummary } from "@/lib/api/hooks/use-dashboard";
+import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { lift } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/format";
-import { formatAssetStatus } from "../assets/_components/asset-status-badge";
+import { useAssetStatusLabel } from "../assets/_components/asset-status-badge";
 import { PulseRail, type QuickAction } from "./_components/pulse-rail";
 import { RecentActivityPanel } from "./_components/recent-activity-panel";
 
@@ -161,6 +164,7 @@ function DashboardContent({
   canSeeActivityFeed: boolean;
 }) {
   const t = useTranslations("dashboard");
+  const assetStatusLabel = useAssetStatusLabel();
   const { assets, access, consumables, articles } = summary;
 
   return (
@@ -180,7 +184,7 @@ function DashboardContent({
           breakdown={ASSET_STATUS_ORDER.filter(
             (status) => (assets.byStatus[status] ?? 0) > 0,
           ).map((status) => ({
-            label: formatAssetStatus(status),
+            label: assetStatusLabel(status),
             value: assets.byStatus[status] ?? 0,
             href: `/assets?status=${status}`,
           }))}
@@ -569,6 +573,28 @@ interface AttentionItem {
 }
 
 /**
+ * localStorage key for the dismissed "Needs attention" rows (issue #194). Stores a `string[]` of
+ * the dismissed `AttentionItem.key`s — a PERMANENT, key-only dismissal (no count/escalation): once a
+ * condition type is dismissed it stays gone even if the same condition recurs. Per-browser/per-device
+ * (matches the offboarding-template precedent in `lib/offboarding/constants.ts`); client-only and
+ * cosmetic — it never hides data from the source lists, only from the dashboard glance.
+ */
+const DISMISSED_ATTENTION_KEY = "lazyit:dashboard:dismissed-attention";
+
+/**
+ * The full universe of keys `buildAttentionItems` can emit. Used to self-heal the dismissed set: we
+ * intersect stored keys with this set so a key for a condition the builder no longer produces can't
+ * linger in storage forever.
+ */
+const ATTENTION_KEYS = [
+  "expiring-grants",
+  "critical-grants",
+  "low-stock",
+  "in-maintenance",
+  "lost",
+] as const;
+
+/**
  * The operationally noteworthy subset of the summary, as the deep-linked rows the "Needs
  * attention" zone renders: in-maintenance and lost assets, low-stock consumables, soon-to-expire
  * grants and grants on critical apps. Zero-count items are dropped, so an empty array means
@@ -643,12 +669,47 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
   const t = useTranslations("dashboard");
   const items = buildAttentionItems(summary, t);
 
+  // Permanent, key-only dismissals (issue #194), persisted per-browser. `mounted` is false until
+  // hydration so the filter doesn't run on the server / first paint (the hook returns `[]` there) —
+  // this keeps SSR and the first client tree in agreement; dismissed rows resolve after hydration.
+  const [dismissed, setDismissed, mounted] = useLocalStorage<string[]>(
+    DISMISSED_ATTENTION_KEY,
+    [],
+  );
+
+  // Only hide rows once we've hydrated the stored set; pre-hydration everything shows.
+  const visibleItems =
+    mounted && dismissed.length > 0
+      ? items.filter((item) => !dismissed.includes(item.key))
+      : items;
+
+  const dismissItem = (item: AttentionItem) => {
+    // Self-heal on every write: keep only keys the builder can still emit, plus the one just
+    // dismissed — so stale keys for vanished conditions don't accumulate in storage.
+    setDismissed((prev) => {
+      const pruned = prev.filter((key) =>
+        (ATTENTION_KEYS as readonly string[]).includes(key),
+      );
+      return pruned.includes(item.key) ? pruned : [...pruned, item.key];
+    });
+    // Toast-undo: the cheap recovery affordance (no persistent "show dismissed" toggle). The action
+    // restores the row by dropping its key back out of the dismissed set.
+    toast(t("needsAttention.dismissed"), {
+      description: item.label,
+      action: {
+        label: t("needsAttention.undo"),
+        onClick: () =>
+          setDismissed((prev) => prev.filter((key) => key !== item.key)),
+      },
+    });
+  };
+
   return (
     <section>
       <h2 className="mb-3 text-lg font-semibold tracking-tight">
         {t("needsAttention.heading")}
       </h2>
-      {items.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <Card>
           <CardContent className="flex items-center gap-3 py-6 text-sm">
             <span
@@ -664,9 +725,9 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
         </Card>
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2">
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <li key={item.key}>
-              <AttentionRow item={item} />
+              <AttentionRow item={item} onDismiss={() => dismissItem(item)} />
             </li>
           ))}
         </ul>
@@ -691,32 +752,54 @@ const TONE: Record<AttentionTone, { dot: string; ring: string; pulse: boolean }>
 const ATTENTION_LIFT =
   "shadow-e1 transition-[transform,box-shadow,background-color] duration-[var(--dur-base)] ease-[var(--ease-out-quad)] hover:-translate-y-0.5 hover:shadow-e2 motion-reduce:transition-none";
 
-function AttentionRow({ item }: { item: AttentionItem }) {
+function AttentionRow({
+  item,
+  onDismiss,
+}: {
+  item: AttentionItem;
+  onDismiss: () => void;
+}) {
+  const t = useTranslations("dashboard");
   const { icon: Icon, label, count, tone, href } = item;
   const meta = TONE[tone];
+  // A `<button>` can't nest inside an `<a>` (HTML), so the row is a relatively-positioned container
+  // holding the deep-link `<Link>` and the dismiss `<button>` as SIBLINGS. The Link reserves room on
+  // its right (`pr-11`) so the absolutely-positioned dismiss control never overlaps the row content.
   return (
-    <Link
-      href={href}
-      className={cn(
-        "flex items-center gap-3 rounded-lg border p-3 text-sm outline-none ring-1 hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring",
-        meta.ring,
-        ATTENTION_LIFT,
-      )}
-    >
-      <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-        <Icon className="size-4" />
-        <span
-          className={cn(
-            "absolute -top-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-card",
-            meta.dot,
-            meta.pulse && "animate-pulse-soft",
-          )}
-        />
-      </span>
-      <span className="flex-1">{label}</span>
-      <span className="text-base font-semibold tabular-nums">{count}</span>
-      <ArrowRightIcon className="size-4 text-muted-foreground" />
-    </Link>
+    <div className="relative">
+      <Link
+        href={href}
+        className={cn(
+          "flex items-center gap-3 rounded-lg border p-3 pr-11 text-sm outline-none ring-1 hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring",
+          meta.ring,
+          ATTENTION_LIFT,
+        )}
+      >
+        <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+          <Icon className="size-4" />
+          <span
+            className={cn(
+              "absolute -top-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-card",
+              meta.dot,
+              meta.pulse && "animate-pulse-soft",
+            )}
+          />
+        </span>
+        <span className="flex-1">{label}</span>
+        <span className="text-base font-semibold tabular-nums">{count}</span>
+        <ArrowRightIcon className="size-4 text-muted-foreground" />
+      </Link>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        onClick={onDismiss}
+        aria-label={t("needsAttention.dismiss", { label })}
+        className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+      >
+        <XMarkIcon className="size-4" />
+      </Button>
+    </div>
   );
 }
 

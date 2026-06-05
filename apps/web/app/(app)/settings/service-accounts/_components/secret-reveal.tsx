@@ -5,10 +5,12 @@ import {
   ClipboardIcon,
   ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
+import type { Permission } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { TestItPanel } from "./test-it-panel";
 
 interface SecretRevealProps {
   /** The service account's display name (for the heading). */
@@ -19,6 +21,12 @@ interface SecretRevealProps {
   onAcknowledge: () => void;
   /** Heading verb — create ("created") vs rotate ("rotated"). */
   action: "created" | "rotated";
+  /**
+   * The account's permissions — when provided, a compact permission-aware "how to test it works"
+   * block ({@link TestItPanel}) is appended so the operator can verify the fresh token immediately
+   * (issue #197). The snippet uses a `<…>` placeholder, NEVER the real `token` above.
+   */
+  permissions?: readonly Permission[];
 }
 
 /**
@@ -37,6 +45,7 @@ export function SecretReveal({
   token,
   onAcknowledge,
   action,
+  permissions,
 }: SecretRevealProps) {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
@@ -92,6 +101,13 @@ export function SecretReveal({
           </Button>
         </div>
       </div>
+
+      {permissions && permissions.length > 0 ? (
+        <TestItPanel
+          permissions={permissions}
+          className="rounded-lg border bg-muted/20 p-3"
+        />
+      ) : null}
 
       <label className="flex items-start gap-2 text-sm">
         <input

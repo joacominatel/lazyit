@@ -14,19 +14,17 @@ import Link from "next/link";
 import { useState } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { EmptyState } from "@/components/empty-state";
+import {
+  MultiSelectFilter,
+  type MultiSelectOption,
+} from "@/components/multi-select-filter";
 import { PageHeader } from "@/components/page-header";
 import { ErrorState, Pagination } from "@/components/resource-table";
 import { SearchInput } from "@/components/search-input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusDot } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useArticles } from "@/lib/api/hooks/use-articles";
@@ -36,34 +34,36 @@ import { useListParams } from "@/lib/hooks/use-list-params";
 import { ArticleCard } from "./_components/article-card";
 import { ImportArticleDialog } from "./_components/import-article-dialog";
 
-type StatusFilter = "ALL" | ArticleStatus;
-type LinkedToFilter = "ALL" | ArticleLinkedTo;
+/** The two article statuses, as multi-select values (#198). */
+const STATUS_VALUES = ["DRAFT", "PUBLISHED"] as const satisfies readonly ArticleStatus[];
+/** The two link-target kinds, as multi-select values (#198) — the data model has exactly these. */
+const LINKED_TO_VALUES = ["asset", "application"] as const satisfies readonly ArticleLinkedTo[];
 
-/**
- * Filter param defaults — every key here is a server-side filter routed through the URL by
- * `useListParams`. `linked` flips to `"only"` to keep just linked articles (ADR-0042) and
- * `linkedTo` narrows that to a single target kind; both default to `"ALL"` (the inactive
- * sentinel) so they're omitted from the URL and the server query until set.
- */
-const FILTER_DEFAULTS = {
-  status: "ALL",
-  categoryId: "ALL",
-  linked: "ALL",
-  linkedTo: "ALL",
-} as const;
-
-/** Maps a status/linked-target filter value to its translation subkey (keeps the maps exhaustive). */
-const STATUS_LABEL_KEY: Record<StatusFilter, string> = {
-  ALL: "all",
+/** Maps a status value to its translation subkey (keeps the map exhaustive). */
+const STATUS_LABEL_KEY: Record<ArticleStatus, string> = {
   DRAFT: "drafts",
   PUBLISHED: "published",
 };
 
-const LINKED_TO_LABEL_KEY: Record<LinkedToFilter, string> = {
-  ALL: "any",
+/** Maps a link-target kind to its translation subkey (keeps the map exhaustive). */
+const LINKED_TO_LABEL_KEY: Record<ArticleLinkedTo, string> = {
   asset: "assets",
   application: "applications",
 };
+
+/**
+ * Filter param defaults — every key here is a server-side filter routed through the URL by
+ * `useListParams`. `status`, `categoryId` and `linkedTo` are **multi-select** (#198): each holds a
+ * comma-encoded list of values, read/written via `getFilterValues`/`setFilterValues`, and defaults
+ * to `""` (the inactive sentinel — omitted from the URL + server query until set). `linked` flips to
+ * `"only"` to keep just linked articles (ADR-0042); any selected `linkedTo` also implies it.
+ */
+const FILTER_DEFAULTS = {
+  status: "",
+  categoryId: "",
+  linked: "ALL",
+  linkedTo: "",
+} as const;
 
 export default function KnowledgeBasePage() {
   const t = useTranslations("kb");
@@ -77,27 +77,32 @@ export default function KnowledgeBasePage() {
     filters,
     setQ,
     setFilter,
+    setFilterValues,
+    getFilterValues,
     setOffset,
     clearFilters,
     filtersActive,
   } = useListParams({ filters: FILTER_DEFAULTS });
 
-  const statusFilter = filters.status as StatusFilter;
-  const categoryFilter = filters.categoryId;
-  const linkedOnly = filters.linked === "only";
-  const linkedToFilter = filters.linkedTo as LinkedToFilter;
+  // Multi-select filters (#198): each is a string[] read from / written to the comma-encoded URL param.
+  const statusValues = getFilterValues("status") as ArticleStatus[];
+  const categoryValues = getFilterValues("categoryId");
+  const linkedToValues = getFilterValues("linkedTo") as ArticleLinkedTo[];
+  // "Linked only" is on when the explicit toggle is set OR any target kind is selected (selecting a
+  // kind implies linked=only — the backend treats multi linkedTo as linked=only).
+  const linkedOnly = filters.linked === "only" || linkedToValues.length > 0;
 
   const [importOpen, setImportOpen] = useState(false);
 
   const { data: page, isLoading, isFetching, isError, error, refetch } =
     useArticles({
       q: q || undefined,
-      status: statusFilter === "ALL" ? undefined : statusFilter,
-      categoryId: categoryFilter === "ALL" ? undefined : categoryFilter,
+      status: statusValues.length > 0 ? statusValues : undefined,
+      categoryId: categoryValues.length > 0 ? categoryValues : undefined,
       linked: linkedOnly ? "only" : undefined,
       // linkedTo is only meaningful alongside linked=only; never send it on its own.
       linkedTo:
-        linkedOnly && linkedToFilter !== "ALL" ? linkedToFilter : undefined,
+        linkedOnly && linkedToValues.length > 0 ? linkedToValues : undefined,
       limit,
       offset,
     });
@@ -118,9 +123,15 @@ export default function KnowledgeBasePage() {
   // Toggling "Linked only" off also clears any linkedTo narrowing (it's meaningless alone).
   const setLinkedOnly = (next: boolean) => {
     setFilter("linked", next ? "only" : FILTER_DEFAULTS.linked);
-    if (!next) setFilter("linkedTo", FILTER_DEFAULTS.linkedTo);
+    if (!next) setFilterValues("linkedTo", []);
   };
 
+  const removeValue = (name: string, values: string[], value: string) =>
+    setFilterValues(name, values.filter((v) => v !== value));
+
+  // One dismissible chip per selected value (#198): status / category / linked-target each contribute
+  // a chip per choice. A token-driven StatusDot carries the status hue (Activated Restraint — never
+  // colored text on the bone canvas); category/linked chips stay neutral.
   const chips = [
     ...(q
       ? [
@@ -131,45 +142,55 @@ export default function KnowledgeBasePage() {
           },
         ]
       : []),
-    ...(statusFilter !== "ALL"
-      ? [
-          {
-            key: "status",
-            label: t("filters.chipStatus", {
-              value: t(`filters.statusLabel.${STATUS_LABEL_KEY[statusFilter]}`),
-            }),
-            onClear: () => setFilter("status", FILTER_DEFAULTS.status),
-          },
-        ]
-      : []),
-    ...(categoryFilter !== "ALL"
-      ? [
-          {
-            key: "categoryId",
-            label: t("filters.chipCategory", {
-              value: categoryName(categoryFilter),
-            }),
-            onClear: () => setFilter("categoryId", FILTER_DEFAULTS.categoryId),
-          },
-        ]
-      : []),
-    ...(linkedOnly
+    ...statusValues.map((status) => ({
+      key: `status:${status}`,
+      label: (
+        <span className="inline-flex items-center gap-1.5">
+          <StatusDot tone={status === "DRAFT" ? "warning" : "success"} />
+          {t("filters.chipStatus", {
+            value: t(`filters.statusLabel.${STATUS_LABEL_KEY[status]}`),
+          })}
+        </span>
+      ),
+      onClear: () => removeValue("status", statusValues, status),
+    })),
+    ...categoryValues.map((categoryId) => ({
+      key: `categoryId:${categoryId}`,
+      label: t("filters.chipCategory", { value: categoryName(categoryId) }),
+      onClear: () => removeValue("categoryId", categoryValues, categoryId),
+    })),
+    ...linkedToValues.map((kind) => ({
+      key: `linkedTo:${kind}`,
+      label: t("filters.chipLinkedTo", {
+        value: t(`filters.linkedToLabel.${LINKED_TO_LABEL_KEY[kind]}`),
+      }),
+      onClear: () => removeValue("linkedTo", linkedToValues, kind),
+    })),
+    // "Linked only" with no target narrowing keeps its own chip (the toggle, not a target choice).
+    ...(linkedOnly && linkedToValues.length === 0
       ? [
           {
             key: "linked",
-            label:
-              linkedToFilter !== "ALL"
-                ? t("filters.chipLinkedTo", {
-                    value: t(
-                      `filters.linkedToLabel.${LINKED_TO_LABEL_KEY[linkedToFilter]}`,
-                    ),
-                  })
-                : t("filters.linkedOnly"),
+            label: t("filters.linkedOnly"),
             onClear: () => setLinkedOnly(false),
           },
         ]
       : []),
   ];
+
+  // Options for the multi-select controls.
+  const statusOptions: MultiSelectOption[] = STATUS_VALUES.map((status) => ({
+    value: status,
+    label: t(`filters.statusLabel.${STATUS_LABEL_KEY[status]}`),
+    adornment: <StatusDot tone={status === "DRAFT" ? "warning" : "success"} />,
+  }));
+  const categoryOptions: MultiSelectOption[] = (categories ?? []).map(
+    (category) => ({ value: category.id, label: category.name }),
+  );
+  const linkedToOptions: MultiSelectOption[] = LINKED_TO_VALUES.map((kind) => ({
+    value: kind,
+    label: t(`filters.linkedToLabel.${LINKED_TO_LABEL_KEY[kind]}`),
+  }));
 
   return (
     <div className="space-y-6">
@@ -206,39 +227,22 @@ export default function KnowledgeBasePage() {
           placeholder={t("list.searchPlaceholder")}
           className="sm:max-w-xs sm:flex-1"
         />
-        <Select
-          value={statusFilter}
-          onValueChange={(value) => setFilter("status", value)}
-        >
-          <SelectTrigger className="sm:w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">{t("filters.statusAll")}</SelectItem>
-            <SelectItem value="DRAFT">{t("filters.statusDraftsOnly")}</SelectItem>
-            <SelectItem value="PUBLISHED">
-              {t("filters.statusPublishedOnly")}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={categoryFilter}
-          onValueChange={(value) => setFilter("categoryId", value)}
-        >
-          <SelectTrigger className="sm:w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">{t("filters.categoryAll")}</SelectItem>
-            {(categories ?? []).map((category) => (
-              <SelectItem key={category.id} value={category.id}>
-                {category.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <MultiSelectFilter
+          label={t("filters.statusLabelName")}
+          options={statusOptions}
+          selected={statusValues}
+          onChange={(next) => setFilterValues("status", next)}
+          className="sm:w-40"
+        />
+        <MultiSelectFilter
+          label={t("filters.categoryLabelName")}
+          options={categoryOptions}
+          selected={categoryValues}
+          onChange={(next) => setFilterValues("categoryId", next)}
+          className="sm:w-48"
+        />
 
-        {/* Linked filter: a "Linked only" toggle, plus a target narrowing once it's on. */}
+        {/* Linked filter: a "Linked only" toggle, plus a multi-select target narrowing once it's on. */}
         <div className="flex items-center gap-2">
           <Label
             htmlFor="kb-linked-only"
@@ -252,21 +256,13 @@ export default function KnowledgeBasePage() {
             {t("filters.linkedOnly")}
           </Label>
           {linkedOnly ? (
-            <Select
-              value={linkedToFilter}
-              onValueChange={(value) => setFilter("linkedTo", value)}
-            >
-              <SelectTrigger className="sm:w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{t("filters.anyTarget")}</SelectItem>
-                <SelectItem value="asset">{t("filters.targetAssets")}</SelectItem>
-                <SelectItem value="application">
-                  {t("filters.targetApplications")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <MultiSelectFilter
+              label={t("filters.linkedToLabelName")}
+              options={linkedToOptions}
+              selected={linkedToValues}
+              onChange={(next) => setFilterValues("linkedTo", next)}
+              className="sm:w-44"
+            />
           ) : null}
         </div>
       </div>

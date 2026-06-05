@@ -18,25 +18,19 @@
     "linkedTooltip": "{count, plural, one {Vinculado a # elemento} other {Vinculado a # elementos}}"
   },
   "filters": {
-    "statusAll": "Todos los estados",
-    "statusDraftsOnly": "Solo borradores",
-    "statusPublishedOnly": "Solo publicados",
-    "categoryAll": "Todas las categorías",
+    "statusLabelName": "Estado",
+    "categoryLabelName": "Categoría",
+    "linkedToLabelName": "Destino",
     "linkedOnly": "Solo vinculados",
-    "anyTarget": "Cualquier destino",
-    "targetAssets": "Activos",
-    "targetApplications": "Aplicaciones",
     "chipSearch": "Búsqueda: “{query}”",
     "chipStatus": "Estado: {value}",
     "chipCategory": "Categoría: {value}",
     "chipLinkedTo": "Vinculado a: {value}",
     "statusLabel": {
-      "all": "Todos",
       "drafts": "Borradores",
       "published": "Publicados"
     },
     "linkedToLabel": {
-      "any": "Cualquier destino",
       "assets": "Activos",
       "applications": "Aplicaciones"
     }
@@ -105,6 +99,7 @@
     "targetAssetLabel": "Activo",
     "targetApplicationLabel": "Aplicación",
     "selectAsset": "Selecciona un activo",
+    "searchAsset": "Buscar activos…",
     "selectApplication": "Selecciona una aplicación",
     "noAssets": "Aún no hay activos",
     "noApplications": "Aún no hay aplicaciones",

@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { CategoryCombobox } from "@/components/category-combobox";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { Button } from "@/components/ui/button";
@@ -23,13 +24,6 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useConsumableCategories } from "@/lib/api/hooks/use-consumable-categories";
 import {
@@ -39,8 +33,6 @@ import {
 import { notifyError } from "@/lib/api/notify-error";
 
 const FORM_ID = "consumable-form";
-/** Radix Select forbids an empty-string item value; use a sentinel for "no category". */
-const NONE = "__none__";
 
 type ConsumableFormValues = {
   name: string;
@@ -210,7 +202,7 @@ export function ConsumableForm({
                   {t("form.categoryLabel")}
                 </FieldLabel>
                 <CreatableField
-                  label="category"
+                  entityKey="category"
                   renderDialog={(dialog) => (
                     <CreateCategoryDialog
                       kind="consumable"
@@ -220,26 +212,17 @@ export function ConsumableForm({
                     />
                   )}
                 >
-                  <Select
-                    value={field.value ?? NONE}
+                  <CategoryCombobox
+                    id="categoryId"
+                    value={field.value ?? ""}
                     onValueChange={(value) =>
-                      field.onChange(value === NONE ? undefined : value)
+                      field.onChange(value === "" ? undefined : value)
                     }
-                  >
-                    <SelectTrigger id="categoryId" className="w-full">
-                      <SelectValue placeholder={t("form.categoryPlaceholder")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>
-                        {t("form.categoryNone")}
-                      </SelectItem>
-                      {(categories ?? []).map((category) => (
-                        <SelectItem key={category.id} value={category.id}>
-                          {category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    categories={categories ?? []}
+                    placeholder={t("form.categoryPlaceholder")}
+                    searchPlaceholder={t("form.searchCategory")}
+                    emptyText={t("form.noCategories")}
+                  />
                 </CreatableField>
               </Field>
             )}

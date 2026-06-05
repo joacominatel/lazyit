@@ -66,6 +66,17 @@ The guard's SA branch verifies it DB-first (constant-time hash compare), updates
 authorizes the request against the account's direct grants. A missing/revoked/inactive/expired account →
 a **generic 401** (no enumeration oracle).
 
+> [!tip] In-app "How to test this works" panel
+> The web screen surfaces the same check, keyed to the account's permissions, so you don't have to
+> hand-write the `curl`. It appears in **two** places: appended to the one-time token reveal (right
+> after create/rotate) and from each row's action menu (**How to test**) at any time. It derives **at
+> most three** copy-pasteable checks from `account.permissions` — a **Read** GET (e.g. `GET /assets`),
+> a **Write** POST with a minimal sample body, and an **Admin** `GET /service-accounts` — showing only
+> the buckets the account qualifies for, plus (in dev) a link to the OpenAPI explorer. The snippet
+> always uses a `lzit_sa_<id>_<secret>` **placeholder** — the real secret is never baked in — so paste
+> your copied token before running it. Snippets show the **dev** host (bare routes, `http://localhost:3001/assets`);
+> behind the reverse proxy in production the public path is `/api/*` (e.g. `/api/assets`).
+
 ## Rotate (the secret leaked, or routine hygiene)
 
 Rotation mints a **new** secret (shown once) and **immediately invalidates the old one**.

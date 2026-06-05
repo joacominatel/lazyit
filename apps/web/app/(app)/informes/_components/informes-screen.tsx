@@ -183,6 +183,7 @@ function toDateToIso(date: string): string | undefined {
 
 export function InformesScreen() {
   const t = useTranslations("informes");
+  const tAction = useTranslations("shared.activity.action");
   // Snapshot "now" once so relative times + the relative-range presets stay pure across renders.
   const [now] = useState(() => Date.now());
   const {
@@ -311,7 +312,9 @@ export function InformesScreen() {
       ? [
           {
             key: "action",
-            label: t("filters.chips.action", { value: actionLabel(actionFilter) }),
+            label: t("filters.chips.action", {
+              value: actionLabel(actionFilter, tAction),
+            }),
             onClear: () => setFilter("action", FILTER_DEFAULTS.action),
           },
         ]
@@ -480,7 +483,7 @@ export function InformesScreen() {
             <SelectItem value="ALL">{t("filters.allActions")}</SelectItem>
             {RECENT_ACTIVITY_ACTIONS.map((action) => (
               <SelectItem key={action} value={action}>
-                {actionLabel(action)}
+                {actionLabel(action, tAction)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -645,13 +648,14 @@ function TimelineView({
   onLoadMore: () => void;
 }) {
   const t = useTranslations("informes");
+  const tShared = useTranslations("shared");
   const groups = useMemo(() => groupByDay(items, now), [items, now]);
   return (
     <div className="space-y-5">
       {groups.map((group) => (
-        <div key={group.label}>
+        <div key={group.key}>
           <p className="mb-2 text-xs font-medium text-muted-foreground">
-            {group.label}
+            {tShared(`activity.dateGroup.${group.key}`)}
           </p>
           <ol>
             {group.items.map(({ item, index }, rowInGroup) => (
@@ -698,13 +702,14 @@ function ActivityRowWithBadge({
   index: number;
   now: number;
 }) {
+  const tAction = useTranslations("shared.activity.action");
   return (
     <div className="flex items-start gap-2">
       <div className="min-w-0 flex-1">
         <ActivityRow item={item} isLast={isLast} index={index} now={now} />
       </div>
       <StatusBadge tone={actionTone(item.action)} className="mt-0.5 shrink-0">
-        {actionLabel(item.action)}
+        {actionLabel(item.action, tAction)}
       </StatusBadge>
     </div>
   );
@@ -732,6 +737,7 @@ function TableView({
   onClearFilters: () => void;
 }) {
   const t = useTranslations("informes");
+  const tAction = useTranslations("shared.activity.action");
   const columns: ResourceColumn[] = [
     {
       key: "when",
@@ -776,7 +782,7 @@ function TableView({
               title={item.summary}
               badge={
                 <StatusBadge tone={actionTone(item.action)}>
-                  {actionLabel(item.action)}
+                  {actionLabel(item.action, tAction)}
                 </StatusBadge>
               }
               meta={
@@ -817,7 +823,7 @@ function TableView({
               </TableCell>
               <TableCell>
                 <StatusBadge tone={actionTone(item.action)}>
-                  {actionLabel(item.action)}
+                  {actionLabel(item.action, tAction)}
                 </StatusBadge>
               </TableCell>
               <TableCell>

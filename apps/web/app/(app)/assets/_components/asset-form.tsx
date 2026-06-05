@@ -16,8 +16,10 @@ import { useState } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { LocationFormDialog } from "@/app/(app)/locations/_components/location-form-dialog";
+import { AssetModelCombobox } from "@/components/asset-model-combobox";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
+import { LocationCombobox } from "@/components/location-combobox";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -34,9 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
-import { useLocations } from "@/lib/api/hooks/use-locations";
 import { notifyError } from "@/lib/api/notify-error";
 import { useAssetStatusLabel } from "./asset-status-badge";
 import {
@@ -49,8 +49,6 @@ import {
 } from "./custom-fields-editor";
 
 const FORM_ID = "asset-form";
-/** Radix Select forbids an empty-string item value; use a sentinel for "none". */
-const NONE = "__none__";
 
 type AssetFormValues = {
   name: string;
@@ -134,8 +132,6 @@ export function AssetForm({
   const t = useTranslations("assets.form");
   const tc = useTranslations("common");
   const statusLabel = useAssetStatusLabel();
-  const { data: models } = useAssetModels();
-  const { data: locations } = useLocations();
   const createAsset = useCreateAsset();
   const updateAsset = useUpdateAsset();
   const isPending = createAsset.isPending || updateAsset.isPending;
@@ -262,7 +258,7 @@ export function AssetForm({
               <Field>
                 <FieldLabel htmlFor="modelId">{t("model")}</FieldLabel>
                 <CreatableField
-                  label="model"
+                  entityKey="model"
                   renderDialog={(dialog) => (
                     <CreateAssetModelDialog
                       open={dialog.open}
@@ -271,24 +267,16 @@ export function AssetForm({
                     />
                   )}
                 >
-                  <Select
-                    value={field.value ?? NONE}
+                  <AssetModelCombobox
+                    id="modelId"
+                    value={field.value ?? ""}
                     onValueChange={(value) =>
-                      field.onChange(value === NONE ? undefined : value)
+                      field.onChange(value === "" ? undefined : value)
                     }
-                  >
-                    <SelectTrigger id="modelId" className="w-full">
-                      <SelectValue placeholder={t("modelPlaceholder")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>{t("noneOption")}</SelectItem>
-                      {(models ?? []).map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          {model.manufacturer} {model.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder={t("modelPlaceholder")}
+                    searchPlaceholder={t("searchModel")}
+                    emptyText={t("noModels")}
+                  />
                 </CreatableField>
               </Field>
             )}
@@ -301,7 +289,7 @@ export function AssetForm({
               <Field>
                 <FieldLabel htmlFor="locationId">{t("location")}</FieldLabel>
                 <CreatableField
-                  label="location"
+                  entityKey="location"
                   renderDialog={(dialog) => (
                     <LocationFormDialog
                       open={dialog.open}
@@ -310,24 +298,16 @@ export function AssetForm({
                     />
                   )}
                 >
-                  <Select
-                    value={field.value ?? NONE}
+                  <LocationCombobox
+                    id="locationId"
+                    value={field.value ?? ""}
                     onValueChange={(value) =>
-                      field.onChange(value === NONE ? undefined : value)
+                      field.onChange(value === "" ? undefined : value)
                     }
-                  >
-                    <SelectTrigger id="locationId" className="w-full">
-                      <SelectValue placeholder={t("locationPlaceholder")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>{t("noneOption")}</SelectItem>
-                      {(locations ?? []).map((location) => (
-                        <SelectItem key={location.id} value={location.id}>
-                          {location.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder={t("locationPlaceholder")}
+                    searchPlaceholder={t("searchLocation")}
+                    emptyText={t("noLocations")}
+                  />
                 </CreatableField>
               </Field>
             )}

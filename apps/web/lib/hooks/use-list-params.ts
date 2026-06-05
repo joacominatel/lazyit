@@ -88,6 +88,21 @@ export interface ListParams {
   toggleSort: (field: string) => void;
   /** Set one named filter (resets to the first page). Setting it to its default clears it. */
   setFilter: (name: string, value: string) => void;
+  /**
+   * Set a **multi-value** named filter from a list of values (#198), comma-encoded into the one
+   * URL param (e.g. `?status=DRAFT,PUBLISHED` — option A, matching the `search.ts` precedent).
+   * Empty/blank values are dropped and the rest de-duplicated; an empty result clears the filter
+   * (param removed → back to its default). Resets to the first page (a new result set). Read the
+   * values back with {@link ListParams.getFilterValues}.
+   */
+  setFilterValues: (name: string, values: string[]) => void;
+  /**
+   * Read a multi-value filter as a `string[]` (#198) — the inverse of {@link setFilterValues}.
+   * Splits the comma-encoded param, trims, drops empties and de-duplicates. A single-value param
+   * yields a one-element array (backward-compatible with `setFilter`); a filter at its default
+   * yields `[]`.
+   */
+  getFilterValues: (name: string) => string[];
   /** Set the row offset (paging; does not reset). */
   setOffset: (offset: number) => void;
   /** Set the 1-based page (paging; does not reset). */
@@ -196,6 +211,35 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
     [commit, filterDefaults],
   );
 
+  const setFilterValues = useCallback(
+    (name: string, values: string[]) => {
+      // Comma-encode (#198): clean, de-dupe, join into the one param; empty → clear the filter.
+      const cleaned = [
+        ...new Set(values.map((v) => v.trim()).filter((v) => v !== "")),
+      ];
+      const encoded = cleaned.join(",");
+      const isDefault = encoded === "" || encoded === (filterDefaults[name] ?? "");
+      commit({ [name]: isDefault ? undefined : encoded, offset: undefined });
+    },
+    [commit, filterDefaults],
+  );
+
+  const getFilterValues = useCallback(
+    (name: string): string[] => {
+      const raw = filters[name] ?? "";
+      if (raw === "" || raw === (filterDefaults[name] ?? "")) return [];
+      return [
+        ...new Set(
+          raw
+            .split(",")
+            .map((v) => v.trim())
+            .filter((v) => v !== ""),
+        ),
+      ];
+    },
+    [filters, filterDefaults],
+  );
+
   const setOffset = useCallback(
     (next: number) => {
       commit({ offset: next > 0 ? next : undefined });
@@ -249,6 +293,8 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
     setSort,
     toggleSort,
     setFilter,
+    setFilterValues,
+    getFilterValues,
     setOffset,
     setPage,
     clearFilters,

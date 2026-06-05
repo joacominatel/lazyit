@@ -59,6 +59,8 @@
     "categoryLabel": "Category",
     "categoryPlaceholder": "Select a category",
     "categoryNone": "— None —",
+    "searchCategory": "Search categories…",
+    "noCategories": "No categories found",
     "reorderThresholdLabel": "Reorder threshold",
     "reorderThresholdPlaceholder": "5",
     "reorderThresholdHint": "Low-stock alert when on-hand ≤ this. Optional.",

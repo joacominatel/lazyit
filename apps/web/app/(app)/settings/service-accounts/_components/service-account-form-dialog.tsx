@@ -148,9 +148,11 @@ function ServiceAccountForm({
   const [values, setValues] = useState<FormState>(() => initialState(account));
   const [error, setError] = useState<string | undefined>(undefined);
   // After a successful CREATE, the once-only token to reveal. Held in local state only — never cached.
-  const [secret, setSecret] = useState<{ name: string; token: string } | null>(
-    null,
-  );
+  const [secret, setSecret] = useState<{
+    name: string;
+    token: string;
+    permissions: Permission[];
+  } | null>(null);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -237,7 +239,11 @@ function ServiceAccountForm({
       onSuccess: (result) => {
         toast.success(t("serviceAccounts.toast.created"));
         // Swap to the one-time reveal instead of closing — the token is only available now.
-        setSecret({ name: result.name, token: result.token });
+        setSecret({
+          name: result.name,
+          token: result.token,
+          permissions: result.permissions,
+        });
       },
       onError: (err) =>
         notifyError(err, t("serviceAccounts.toast.createError")),
@@ -259,6 +265,7 @@ function ServiceAccountForm({
           token={secret.token}
           action="created"
           onAcknowledge={onClose}
+          permissions={secret.permissions}
         />
       </>
     );

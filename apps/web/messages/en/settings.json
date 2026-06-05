@@ -190,6 +190,7 @@
       "revoked": "Revoked"
     },
     "rowActions": {
+      "testIt": "How to test",
       "rotateToken": "Rotate token",
       "revoke": "Revoke",
       "openActions": "Open actions"
@@ -246,6 +247,30 @@
       "copyTokenAria": "Copy token",
       "acknowledge": "I've saved this token in a secure place.",
       "done": "Done"
+    },
+    "testIt": {
+      "title": "Test it works",
+      "description": "Run a quick check from your terminal to confirm the token authenticates and is scoped as expected. Replace the placeholder with the token you copied.",
+      "dialogTitle": "How to test this token",
+      "dialogDescription": "Quick checks for “{name}”, based on the permissions it holds. The token is shown as a placeholder — paste in your own.",
+      "noChecks": "This account holds no permission that maps to a representative check.",
+      "checks": {
+        "read": {
+          "label": "Read check"
+        },
+        "write": {
+          "label": "Write check"
+        },
+        "admin": {
+          "label": "Admin / settings check"
+        }
+      },
+      "expect": "Expect a {status} on success. Any 401/403 means the token is wrong, inactive, expired, or missing that permission.",
+      "copyAria": "Copy the {method} {path} curl command",
+      "copied": "Command copied",
+      "hostNote": "Host comes from your API URL. In dev, routes are bare (e.g. /assets). Behind the reverse proxy in production, the public path is /api/* (e.g. /api/assets).",
+      "openApi": "Browse the full API (OpenAPI)",
+      "openApiProd": "The OpenAPI explorer is available only in development; it is not exposed publicly in production."
     },
     "permissionPicker": {
       "sectionAria": "{label} permissions",
@@ -338,6 +363,8 @@
         "categoryLabel": "Category",
         "categoryPlaceholder": "Optional — pick a category",
         "noCategory": "No category",
+        "searchCategory": "Search categories…",
+        "noCategories": "No categories found",
         "descriptionLabel": "Description",
         "descriptionPlaceholder": "Optional",
         "saveChanges": "Save changes",

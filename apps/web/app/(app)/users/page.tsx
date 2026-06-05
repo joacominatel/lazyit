@@ -69,6 +69,7 @@ const FILTER_DEFAULTS = { status: "ALL", archived: "ALL" } as const;
 
 export default function UsersPage() {
   const t = useTranslations("users");
+  const tShared = useTranslations("shared");
   // User administration (create / edit / clone / role-change / offboard / restore) is the single
   // coarse `user:manage` capability on the backend. `isAdmin` still gates the archived (`deleted=only`)
   // slice, which the API keeps ADMIN-only.
@@ -144,7 +145,11 @@ export default function UsersPage() {
         selection.selectedIds,
         restoreUser,
       );
-      notifyBatchResult(result, { noun: "user", verb: "restored" });
+      notifyBatchResult(result, {
+        entityKey: "user",
+        verb: "restored",
+        t: tShared,
+      });
       selection.clear();
       await refetch();
     } catch (err) {
@@ -495,7 +500,7 @@ export default function UsersPage() {
             <BatchActionBar
               count={selection.count}
               onClear={selection.clear}
-              noun="user"
+              entityKey="user"
             >
               <Button
                 size="sm"

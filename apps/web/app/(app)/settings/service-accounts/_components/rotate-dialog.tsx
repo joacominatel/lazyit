@@ -83,6 +83,7 @@ function RotateBody({
           token={token}
           action="rotated"
           onAcknowledge={onClose}
+          permissions={account.permissions}
         />
       </>
     );

@@ -39,18 +39,24 @@ export const deleteArticle = crud.remove;
  * Server-side filters for the list endpoint (ADR-0021: `q` is title+excerpt).
  * `limit`/`offset` thread the pagination window (ADR-0030); omit for the defaults.
  *
- * `linked`/`linkedTo` drive the card-UI "linked" filter (ADR-0042): `linked: "only"`
- * keeps just the articles that have ≥1 `ArticleLink`, and `linkedTo` narrows that to a
- * single target kind (`asset` / `application`). Both are allowlisted server-side — an
- * unknown value is rejected with 400, never silently ignored (ADR-0030).
+ * `status` / `categoryId` / `linkedTo` are **multi-select** (#198): each accepts an array whose
+ * values OR-combine within the filter (and AND-combine across filters). `getArticles` comma-encodes
+ * each into its one query param (`status=DRAFT,PUBLISHED`), matching the `search.ts` precedent; the
+ * server splits + validates each element (unknown element → 400, ADR-0030). A single-element array
+ * is equivalent to the prior single-value contract.
+ *
+ * `linked`/`linkedTo` drive the card-UI "linked" filter (ADR-0042): `linked: "only"` keeps just the
+ * articles that have ≥1 `ArticleLink`, and `linkedTo` narrows that to one or more target kinds
+ * (`asset` / `application`). All allowlisted server-side — an unknown value is rejected with 400,
+ * never silently ignored (ADR-0030).
  */
 export interface ArticleFilters {
-  categoryId?: string;
+  categoryId?: string[];
   authorId?: string;
-  status?: ArticleStatus;
+  status?: ArticleStatus[];
   q?: string;
   linked?: ArticleLinkedFilter;
-  linkedTo?: ArticleLinkedTo;
+  linkedTo?: ArticleLinkedTo[];
   limit?: number;
   offset?: number;
 }
@@ -65,12 +71,15 @@ export function getArticles(
   filters: ArticleFilters = {},
 ): Promise<ArticleListPage> {
   const params = new URLSearchParams();
-  if (filters.categoryId) params.set("categoryId", filters.categoryId);
+  // Multi-select filters (#198): comma-encode each non-empty array into its one query param.
+  if (filters.categoryId?.length)
+    params.set("categoryId", filters.categoryId.join(","));
   if (filters.authorId) params.set("authorId", filters.authorId);
-  if (filters.status) params.set("status", filters.status);
+  if (filters.status?.length) params.set("status", filters.status.join(","));
   if (filters.q) params.set("q", filters.q);
   if (filters.linked) params.set("linked", filters.linked);
-  if (filters.linkedTo) params.set("linkedTo", filters.linkedTo);
+  if (filters.linkedTo?.length)
+    params.set("linkedTo", filters.linkedTo.join(","));
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));

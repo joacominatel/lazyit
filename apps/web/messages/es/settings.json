@@ -190,6 +190,7 @@
       "revoked": "Revocada"
     },
     "rowActions": {
+      "testIt": "Cómo probarla",
       "rotateToken": "Rotar token",
       "revoke": "Revocar",
       "openActions": "Abrir acciones"
@@ -246,6 +247,30 @@
       "copyTokenAria": "Copiar token",
       "acknowledge": "He guardado este token en un lugar seguro.",
       "done": "Listo"
+    },
+    "testIt": {
+      "title": "Comprueba que funciona",
+      "description": "Ejecuta una verificación rápida desde tu terminal para confirmar que el token autentica y tiene el alcance esperado. Reemplaza el marcador por el token que copiaste.",
+      "dialogTitle": "Cómo probar este token",
+      "dialogDescription": "Verificaciones rápidas para «{name}», según los permisos que tiene. El token se muestra como marcador — pega el tuyo.",
+      "noChecks": "Esta cuenta no tiene ningún permiso que corresponda a una verificación representativa.",
+      "checks": {
+        "read": {
+          "label": "Verificación de lectura"
+        },
+        "write": {
+          "label": "Verificación de escritura"
+        },
+        "admin": {
+          "label": "Verificación de administración / ajustes"
+        }
+      },
+      "expect": "Espera un {status} si todo va bien. Cualquier 401/403 significa que el token es incorrecto, está inactivo, expirado o le falta ese permiso.",
+      "copyAria": "Copiar el comando curl {method} {path}",
+      "copied": "Comando copiado",
+      "hostNote": "El host proviene de tu URL de la API. En desarrollo, las rutas son directas (p. ej. /assets). Detrás del proxy inverso en producción, la ruta pública es /api/* (p. ej. /api/assets).",
+      "openApi": "Explorar la API completa (OpenAPI)",
+      "openApiProd": "El explorador OpenAPI solo está disponible en desarrollo; no se expone públicamente en producción."
     },
     "permissionPicker": {
       "sectionAria": "Permisos de {label}",
@@ -338,6 +363,8 @@
         "categoryLabel": "Categoría",
         "categoryPlaceholder": "Opcional — elige una categoría",
         "noCategory": "Sin categoría",
+        "searchCategory": "Buscar categorías…",
+        "noCategories": "No se encontraron categorías",
         "descriptionLabel": "Descripción",
         "descriptionPlaceholder": "Opcional",
         "saveChanges": "Guardar cambios",

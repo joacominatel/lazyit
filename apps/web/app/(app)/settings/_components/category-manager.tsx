@@ -212,7 +212,7 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
           onOpenChange={(open) => {
             if (!open) setDeleting(undefined);
           }}
-          entityLabel={label}
+          entityKey="category"
           name={deleting.name}
           onConfirm={() => remove.mutateAsync(deleting.id)}
         />
