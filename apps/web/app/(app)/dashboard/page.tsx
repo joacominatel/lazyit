@@ -36,7 +36,7 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { lift } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/format";
-import { formatAssetStatus } from "../assets/_components/asset-status-badge";
+import { useAssetStatusLabel } from "../assets/_components/asset-status-badge";
 import { PulseRail, type QuickAction } from "./_components/pulse-rail";
 import { RecentActivityPanel } from "./_components/recent-activity-panel";
 
@@ -164,6 +164,7 @@ function DashboardContent({
   canSeeActivityFeed: boolean;
 }) {
   const t = useTranslations("dashboard");
+  const assetStatusLabel = useAssetStatusLabel();
   const { assets, access, consumables, articles } = summary;
 
   return (
@@ -183,7 +184,7 @@ function DashboardContent({
           breakdown={ASSET_STATUS_ORDER.filter(
             (status) => (assets.byStatus[status] ?? 0) > 0,
           ).map((status) => ({
-            label: formatAssetStatus(status),
+            label: assetStatusLabel(status),
             value: assets.byStatus[status] ?? 0,
             href: `/assets?status=${status}`,
           }))}
