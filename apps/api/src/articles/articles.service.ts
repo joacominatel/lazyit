@@ -10,10 +10,12 @@ import {
   slugify,
   type ArticleLinkedFilter,
   type ArticleLinkedTo,
+  type ArticleListItem,
   type ArticleStatus,
   type CreateArticle,
   type CreateArticleLink,
   type ImportArticle,
+  type Page,
   type PageQuery,
   type UpdateArticle,
 } from '@lazyit/shared';
@@ -53,6 +55,25 @@ export interface ArticleListFilters {
    * Asset OR an Application). Implies the linked filter even if `linked` is omitted.
    */
   linkedTo?: ArticleLinkedTo[];
+}
+
+/**
+ * Filters for the **reverse** KB lookups (`GET /assets/:id/articles`, `GET /applications/:id/articles`
+ * — #220). Mirrors the `GET /articles` multi-select convention (#198): `categoryId`/`status` are
+ * `{ in: [...] }` (OR within a filter), `q` is a case-insensitive substring over title/excerpt. The
+ * controllers parse the comma-encoded/repeated query params to arrays (validating + de-duplicating
+ * each element; an empty array is never passed) before they reach the service. Note: the reverse list
+ * is **always** PUBLISHED-only (drafts are author-private and never surface here), so a `status`
+ * filter only ever narrows *within* PUBLISHED — `status=DRAFT` validly parses but matches nothing (no
+ * draft leak). The base scope (the asset/application this list is for) is supplied separately.
+ */
+export interface ReverseArticleListFilters {
+  /** One or more categories; an article matches if its `categoryId` is in the set (#198). */
+  categoryId?: string[];
+  /** One or more statuses (#198). ANDed on top of the hard PUBLISHED pin — never widens it. */
+  status?: ArticleStatus[];
+  /** Case-insensitive substring over title/excerpt. */
+  q?: string;
 }
 
 /** The subset of a multer file the import needs. The controller passes Express.Multer.File. */
@@ -565,30 +586,101 @@ export class ArticlesService {
   }
 
   /**
-   * Reverse lookup: the PUBLISHED articles linked to a given asset (`GET /assets/:id/articles`).
-   * DRAFTs are excluded (a draft is author-private; this list is asset-scoped, not author-scoped, so
-   * it only ever exposes team-visible articles). Returns the lean article list shape (no content).
+   * Reverse lookup: a **page** of the PUBLISHED articles linked to a given asset
+   * (`GET /assets/:id/articles`). DRAFTs are excluded (a draft is author-private; this list is
+   * asset-scoped, not author-scoped, so it only ever exposes team-visible articles). Paginated +
+   * filterable (#220): `take`/`skip` and a paired `count` over the **same** `where`, newest-updated
+   * first; optional `q`/`status`/`categoryId` filters (#198 multi-select). Returns the lean
+   * `ArticleListItem` page envelope (no content; `linkCount`/`readingMinutes` added). See ADR-0030 /
+   * ADR-0042.
    */
-  async findArticlesForAsset(assetId: string) {
-    return this.prisma.article.findMany({
-      where: { status: 'PUBLISHED', links: { some: { assetId } } },
-      orderBy: { updatedAt: 'desc' },
-      select: ARTICLE_LIST_SELECT,
-    });
+  async findArticlesForAsset(
+    assetId: string,
+    filters: ReverseArticleListFilters = {},
+    page: PageQuery,
+  ): Promise<Page<ArticleListItem>> {
+    return this.findLinkedArticlesPage({ links: { some: { assetId } } }, filters, page);
   }
 
   /**
-   * Reverse lookup: the PUBLISHED articles linked to a given application
+   * Reverse lookup: a **page** of the PUBLISHED articles linked to a given application
    * (`GET /applications/:id/articles` — "the runbook for THIS app"). Mirrors
    * {@link findArticlesForAsset}: DRAFTs are excluded (a draft is author-private; this list is
-   * application-scoped, not author-scoped), and it returns the lean article list shape (no content).
+   * application-scoped, not author-scoped), paginated + filterable (#220), and returns the lean
+   * `ArticleListItem` page envelope (no content).
    */
-  async findArticlesForApplication(applicationId: string) {
-    return this.prisma.article.findMany({
-      where: { status: 'PUBLISHED', links: { some: { applicationId } } },
-      orderBy: { updatedAt: 'desc' },
-      select: ARTICLE_LIST_SELECT,
-    });
+  async findArticlesForApplication(
+    applicationId: string,
+    filters: ReverseArticleListFilters = {},
+    page: PageQuery,
+  ): Promise<Page<ArticleListItem>> {
+    return this.findLinkedArticlesPage(
+      { links: { some: { applicationId } } },
+      filters,
+      page,
+    );
+  }
+
+  /**
+   * Shared engine for the reverse KB lookups (#220). Runs the page `findMany(take/skip)` and the
+   * `count` over the **same** `where` inside one `$transaction` (so `total` can't drift from the page)
+   * and flattens the lean rows into the `ArticleListItem` shape (`_count.links` → `linkCount`). The
+   * `where` always pins `status: 'PUBLISHED'` (drafts never leak — the scope is the linked record, not
+   * the author), ANDs the caller-supplied scope (`links: { some: { assetId|applicationId } }`) and the
+   * optional `q`/`status`/`categoryId` filters (#198). The page+count share one `where`, so a `status`
+   * filter narrowing *within* PUBLISHED is reflected identically in both.
+   */
+  private async findLinkedArticlesPage(
+    scope: Prisma.ArticleWhereInput,
+    filters: ReverseArticleListFilters,
+    page: PageQuery,
+  ): Promise<Page<ArticleListItem>> {
+    const where = this.buildReverseWhere(scope, filters);
+    const { take, skip } = offsetOf(page);
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.article.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        take,
+        skip,
+        select: ARTICLE_LIST_SELECT,
+      }),
+      this.prisma.article.count({ where }),
+    ]);
+    // Same flatten as findPage: Prisma's nested `_count.links` → the flat `linkCount` the DTO exposes.
+    const items = rows.map(({ _count, ...row }) => ({
+      ...row,
+      linkCount: _count.links,
+    })) as unknown as ArticleListItem[];
+    return pageOf(items, total, page);
+  }
+
+  /**
+   * The shared `where` for a reverse KB lookup (#220) — used identically by its page + count. Pins the
+   * hard PUBLISHED rule and the link scope, then ANDs the optional multi-select filters (#198): a
+   * `categoryId`/`status` `{ in: [...] }` (OR within the filter) and a `q` substring over title/excerpt.
+   * The controller never passes an empty filter array (an empty selection omits the filter entirely).
+   */
+  private buildReverseWhere(
+    scope: Prisma.ArticleWhereInput,
+    filters: ReverseArticleListFilters,
+  ): Prisma.ArticleWhereInput {
+    const and: Prisma.ArticleWhereInput[] = [{ status: 'PUBLISHED' }, scope];
+    if (filters.categoryId?.length) {
+      and.push({ categoryId: { in: filters.categoryId } });
+    }
+    if (filters.status?.length) {
+      and.push({ status: { in: filters.status } });
+    }
+    if (filters.q) {
+      and.push({
+        OR: [
+          { title: { contains: filters.q, mode: 'insensitive' } },
+          { excerpt: { contains: filters.q, mode: 'insensitive' } },
+        ],
+      });
+    }
+    return { AND: and };
   }
 
   // --- internals -----------------------------------------------------------
