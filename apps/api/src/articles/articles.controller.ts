@@ -109,6 +109,20 @@ export class ArticlesController {
       'Narrow the linked filter to one or more target kinds. Multi-value (#198): comma-separated (linkedTo=asset,application) or repeated; kinds OR-combine. Implies linked=only. Unknown value → 400.',
   })
   @ApiQuery({
+    name: 'assetId',
+    required: false,
+    isArray: true,
+    description:
+      'Narrow the linked filter to SPECIFIC Assets (#213): keep only articles linked to ≥1 of these exact assets. Multi-value (#198): comma-separated (assetId=cuid1,cuid2) or repeated; values OR-combine. Each element must be a cuid — an invalid element → 400. Implies linked=only; more granular than linkedTo=asset.',
+  })
+  @ApiQuery({
+    name: 'applicationId',
+    required: false,
+    isArray: true,
+    description:
+      'Narrow the linked filter to SPECIFIC Applications (#213): keep only articles linked to ≥1 of these exact applications. Multi-value (#198): comma-separated (applicationId=cuid1,cuid2) or repeated; values OR-combine. Each element must be a cuid — an invalid element → 400. Implies linked=only.',
+  })
+  @ApiQuery({
     name: 'limit',
     required: false,
     type: Number,
@@ -136,6 +150,8 @@ export class ArticlesController {
     @Query('q') q?: string,
     @Query('linked') linked?: string,
     @Query('linkedTo') linkedTo?: string | string[],
+    @Query('assetId') assetId?: string | string[],
+    @Query('applicationId') applicationId?: string | string[],
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -155,6 +171,10 @@ export class ArticlesController {
           ArticleLinkedToSchema,
           'linkedTo',
         ),
+        // assetId / applicationId are the specific-entity link filters (#213) — multi-value cuids,
+        // same comma-encoded/repeated wire shape + 400-on-unknown-element contract as categoryId.
+        assetId: parseCuidArrayQuery(assetId, 'assetId'),
+        applicationId: parseCuidArrayQuery(applicationId, 'applicationId'),
       },
       parsePageQuery({ limit, offset, page }),
       user,
