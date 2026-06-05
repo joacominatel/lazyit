@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { PinoLogger } from 'nestjs-pino';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
 import { PermissionResolverService } from './permission-resolver.service';
@@ -42,11 +43,16 @@ import { createIdentityProvider } from './identity/identity-provider.factory';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     // Authorization second: enforce @RequirePermission against the now-populated request.user.
     { provide: APP_GUARD, useClass: RolesGuard },
-    // IdP write-back provider (ADR-0043), selected by IDENTITY_PROVIDER_TYPE. Scaffolding for Phase 2.
+    // IdP write-back provider (ADR-0043), selected by IDENTITY_PROVIDER_TYPE. The request-scoped
+    // PinoLogger is injected and threaded into the Zitadel management client so its failure WARN
+    // lines carry the failing edit's X-Request-Id / actor (ADR-0031), making a sustained 503
+    // root-causable against the live stack (issue #219). A single PinoLogger is correct for this
+    // startup singleton: it resolves the per-request child logger from AsyncLocalStorage at LOG time.
     {
       provide: IDENTITY_PROVIDER,
-      useFactory: () =>
-        createIdentityProvider(process.env.IDENTITY_PROVIDER_TYPE),
+      useFactory: (logger: PinoLogger) =>
+        createIdentityProvider(process.env.IDENTITY_PROVIDER_TYPE, logger),
+      inject: [PinoLogger],
     },
   ],
   exports: [
