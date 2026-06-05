@@ -22,7 +22,9 @@ import { pageSchema } from "./pagination";
  * See docs/03-decisions/0030-list-pagination-contract.md, docs/03-decisions/0042-article-versioning-and-linking.md
  * and the backend-performance-optimization analysis (#3: "GET /articles ships the full markdown content").
  */
-export const ArticleListItemSchema = ArticleSchema.omit({ content: true }).extend({
+export const ArticleListItemSchema = ArticleSchema.omit({
+  content: true,
+}).extend({
   /** Number of `ArticleLink`s on this article (≥ 0). `linkCount > 0` means the article is linked. */
   linkCount: z.number().int().nonnegative(),
   /** Estimated reading time in whole minutes (≥ 0; 0 only for an empty body). */
@@ -71,6 +73,26 @@ export const ArticleLinkedToSchema = z.enum(["asset", "application"]);
  */
 export const ArticleStatusFilterSchema = ArticleStatusSchema;
 export const ArticleLinkedToFilterSchema = ArticleLinkedToSchema;
+
+/**
+ * `?assetId=` / `?applicationId=` — the **specific-entity** link filters for `GET /articles`
+ * (issue #213, reading (2) of "linked target"). Where `linkedTo` (#198) narrows the linked filter to a
+ * target *kind* (any Asset / any Application), these narrow it to *particular* linked entities:
+ * `assetId=cuid1,cuid2` keeps the articles linked to ≥1 of those exact Assets, `applicationId=...` to
+ * ≥1 of those Applications. **Multi-value (#198 wire shape):** comma-encoded (`assetId=cuid1,cuid2`)
+ * or repeated; the values within one param **OR-combine** (a `{ in: [...] }`), and the two params
+ * **OR-combine across kinds** (linked to one of those Assets OR one of those Applications). Selecting
+ * any specific entity **implies `linked=only`** and narrows within the chosen kind(s) — exactly like a
+ * `linkedTo`, only more granular.
+ *
+ * These are the **element** schemas (per-value `cuid` allowlists). As with `categoryId`, the array
+ * shape + the comma-split + the 400-on-unknown contract live in the API controller
+ * (`parseCuidArrayQuery`), not a zod `.array()` here (the global ZodValidationPipe only validates
+ * `@Body()` DTOs, so a raw `@Query` string is parsed/validated by the controller). An invalid/garbage
+ * element is a clean **400** (ADR-0030), never silently dropped.
+ */
+export const ArticleAssetIdFilterSchema = z.cuid();
+export const ArticleApplicationIdFilterSchema = z.cuid();
 
 export type ArticleListItem = z.infer<typeof ArticleListItemSchema>;
 export type ArticleListPage = z.infer<typeof ArticleListPageSchema>;
