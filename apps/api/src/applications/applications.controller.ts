@@ -19,7 +19,8 @@ import { createZodDto } from 'nestjs-zod';
 import {
   ApplicationListPageSchema,
   ApplicationSchema,
-  ArticleListItemSchema,
+  ArticleListPageSchema,
+  ArticleStatusSchema,
   CreateApplicationSchema,
   UpdateApplicationSchema,
 } from '@lazyit/shared';
@@ -30,6 +31,8 @@ import {
 import { ArticlesService } from '../articles/articles.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
+import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
+import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
@@ -41,8 +44,9 @@ class ApplicationDto extends createZodDto(ApplicationSchema) {}
 class ApplicationListPageDto extends createZodDto(ApplicationListPageSchema) {}
 class CreateApplicationDto extends createZodDto(CreateApplicationSchema) {}
 class UpdateApplicationDto extends createZodDto(UpdateApplicationSchema) {}
-// Reverse KB lookup (ADR-0042): the lean article-list shape for GET /applications/:id/articles.
-class ArticleListItemDto extends createZodDto(ArticleListItemSchema) {}
+// Reverse KB lookup (ADR-0042 / #220): the lean, paginated article-list envelope for
+// GET /applications/:id/articles (a Page<ArticleListItem>, no markdown content).
+class ArticleListPageDto extends createZodDto(ArticleListPageSchema) {}
 
 @ApiTags('applications')
 @Controller('applications')
@@ -174,12 +178,67 @@ export class ApplicationsController {
   @RequirePermission('article:read')
   @ApiOperation({
     summary:
-      "List the PUBLISHED knowledge-base articles linked to this application ('the runbook for THIS app'). (ADR-0042)",
+      "List the PUBLISHED knowledge-base articles linked to this application ('the runbook for THIS app'; paginated + filterable). (ADR-0042 / ADR-0030 / #220)",
   })
-  @ApiOkResponse({ type: [ArticleListItemDto] })
-  async findArticles(@Param('id') id: string) {
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description: 'Case-insensitive substring match on title and excerpt.',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: [...ArticleStatusSchema.options],
+    isArray: true,
+    description:
+      'Filter by status. Multi-value (#198): comma-separated or repeated; values OR-combine. Unknown value → 400. The list is always PUBLISHED-only, so this only narrows within PUBLISHED (a draft never surfaces here).',
+  })
+  @ApiQuery({
+    name: 'categoryId',
+    required: false,
+    description:
+      'Filter by category. Multi-value (#198): comma-separated (categoryId=cuid1,cuid2) or repeated; values OR-combine. Each element must be a cuid — an invalid element → 400.',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: ArticleListPageDto })
+  async findArticles(
+    @Param('id') id: string,
+    @Query('q') q?: string,
+    // Multi-value filters (#198) arrive comma-encoded (one param) OR repeated (Nest hands a string[]).
+    @Query('status') status?: string | string[],
+    @Query('categoryId') categoryId?: string | string[],
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+  ) {
     await this.applications.findOne(id); // 404 if the application is missing or soft-deleted
-    return this.articles.findArticlesForApplication(id);
+    return this.articles.findArticlesForApplication(
+      id,
+      {
+        q,
+        // Each value is validated against its allowlist (unknown element → 400, ADR-0030).
+        status: parseEnumArrayQuery(status, ArticleStatusSchema, 'status'),
+        categoryId: parseCuidArrayQuery(categoryId, 'categoryId'),
+      },
+      parsePageQuery({ limit, offset, page }),
+    );
   }
 
   @Post()
