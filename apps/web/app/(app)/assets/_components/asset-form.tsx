@@ -258,7 +258,7 @@ export function AssetForm({
               <Field>
                 <FieldLabel htmlFor="modelId">{t("model")}</FieldLabel>
                 <CreatableField
-                  label="model"
+                  entityKey="model"
                   renderDialog={(dialog) => (
                     <CreateAssetModelDialog
                       open={dialog.open}
@@ -289,7 +289,7 @@ export function AssetForm({
               <Field>
                 <FieldLabel htmlFor="locationId">{t("location")}</FieldLabel>
                 <CreatableField
-                  label="location"
+                  entityKey="location"
                   renderDialog={(dialog) => (
                     <LocationFormDialog
                       open={dialog.open}
