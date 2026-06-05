@@ -35,8 +35,12 @@ policy is part of how we work; see [[claude-workflow]].
 - **Runners:**
   - **API (`apps/api`):** Jest — already the stack ([[0002-nestjs-backend]], [[0009-bun-first-vs-app-stack]]).
   - **`packages/shared`:** `bun test` (pure, framework-agnostic logic — see [[shared-package]]).
-  - **Frontend (`apps/web`):** **deferred** — no frontend unit tests yet; revisit (and pick a
-    runner) when components carry real logic.
+  - **Frontend (`apps/web`):** a full component/DOM runner (Vitest, React Testing Library) stays
+    **deferred** — presentational UI isn't unit-tested yet. But **pure, framework-agnostic logic**
+    extracted out of components (e.g. `lib/hooks/list-params-url.ts`, the URL-patch core of
+    `useListParams`) is tested with **`bun test`** — same runner as `packages/shared`, no DOM/router
+    needed — and runs in CI as the **Test web** step (added with #217). Revisit a component runner
+    when components themselves carry real logic.
 - **E2E:** **none for now.** Choose a tool (Playwright a likely candidate) once there are
   critical user flows worth covering end to end.
 - **Coverage:** **rigor on the core, no blunt global gate.** Core/complex logic must be
