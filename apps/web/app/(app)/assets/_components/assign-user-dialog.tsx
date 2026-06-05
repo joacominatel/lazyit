@@ -9,6 +9,7 @@ import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { UserFormDialog } from "@/app/(app)/users/_components/user-form-dialog";
 import { CreatableField } from "@/components/creatable-field";
+import { UserCombobox } from "@/components/user-combobox";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,16 +25,8 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
-import { useUsers } from "@/lib/api/hooks/use-users";
 import { notifyError } from "@/lib/api/notify-error";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
@@ -72,7 +65,6 @@ export function AssignUserDialog({
 }: AssignUserDialogProps) {
   const t = useTranslations("assets.assign");
   const tc = useTranslations("common");
-  const { data: users } = useUsers();
   const assign = useAssignUser();
 
   const form = useForm<FormValues>({
@@ -101,10 +93,6 @@ export function AssignUserDialog({
       );
     },
     (_errors, event) => scrollToFirstError(event?.target ?? null),
-  );
-
-  const available = (users ?? []).filter(
-    (user) => user.isActive && !excludeUserIds.includes(user.id),
   );
 
   return (
@@ -144,28 +132,16 @@ export function AssignUserDialog({
                       />
                     )}
                   >
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger
-                        id="assign-user"
-                        className="w-full"
-                        aria-invalid={fieldState.invalid || undefined}
-                      >
-                        <SelectValue
-                          placeholder={
-                            available.length > 0
-                              ? t("selectUser")
-                              : t("noAssignableUsers")
-                          }
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {available.map((user) => (
-                          <SelectItem key={user.id} value={user.id}>
-                            {user.firstName} {user.lastName}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <UserCombobox
+                      id="assign-user"
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      excludeUserIds={excludeUserIds}
+                      ariaInvalid={fieldState.invalid}
+                      placeholder={t("selectUser")}
+                      searchPlaceholder={t("searchUser")}
+                      emptyText={t("noAssignableUsers")}
+                    />
                   </CreatableField>
                   <FieldError errors={[fieldState.error]} />
                 </Field>
