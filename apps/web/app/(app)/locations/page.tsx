@@ -74,6 +74,7 @@ const FILTER_DEFAULTS = { type: "ALL", archived: "ALL" } as const;
 
 export default function LocationsPage() {
   const t = useTranslations("locations");
+  const tShared = useTranslations("shared");
   const locationTypeLabel = useLocationTypeLabel();
   // `isAdmin` still gates the archived (`deleted=only`) slice (API keeps it ADMIN-only). Create/edit
   // are location:write; delete/restore are location:delete.
@@ -149,7 +150,11 @@ export default function LocationsPage() {
         selection.selectedIds,
         restoreLocation,
       );
-      notifyBatchResult(result, { noun: "location", verb: "restored" });
+      notifyBatchResult(result, {
+        entityKey: "location",
+        verb: "restored",
+        t: tShared,
+      });
       selection.clear();
       await refetch();
     } catch (err) {
