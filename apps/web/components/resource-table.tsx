@@ -37,6 +37,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ApiError } from "@/lib/api/client";
+import type { EntityKey } from "@/lib/entity-key";
 
 /** A column definition for {@link ResourceTable} — header + loading skeleton. */
 export interface ResourceColumn {
@@ -570,7 +571,7 @@ export function BatchActionBar({
   count,
   onClear,
   children,
-  noun = "item",
+  entityKey,
 }: {
   /** How many rows are selected (the bar hides at 0). */
   count: number;
@@ -578,8 +579,11 @@ export function BatchActionBar({
   onClear: () => void;
   /** The bulk action buttons for this list. */
   children: ReactNode;
-  /** Singular noun for the count label (e.g. "asset"); pluralized via the ICU template. */
-  noun?: string;
+  /**
+   * Stable entity key from the closed set ({@link EntityKey}) — the count label resolves its
+   * localized, correctly-pluralized noun internally via ICU (issue #204). Never a raw English word.
+   */
+  entityKey: EntityKey;
 }) {
   const t = useTranslations("shared");
   const tc = useTranslations("common");
@@ -592,7 +596,7 @@ export function BatchActionBar({
     >
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium tabular-nums" aria-live="polite">
-          {t("table.selectedCount", { count, noun })}
+          {t("table.selectedCount", { count, entity: entityKey })}
         </span>
         <Button
           variant="ghost"
