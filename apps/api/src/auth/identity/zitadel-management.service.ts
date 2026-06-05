@@ -59,6 +59,31 @@ const TOKEN_REFRESH_SKEW_MS = 60_000;
 /** Signed-assertion lifetime (Zitadel caps JWT-profile assertions at 1h). */
 const ASSERTION_TTL_SECONDS = 600;
 
+/**
+ * HTTP statuses worth a bounded retry: a transient upstream blip, NOT a permanent client error.
+ * `408` request-timeout, `429` too-many-requests, and the `5xx` family Zitadel emits while a node is
+ * restarting / overloaded. A `4xx` other than these (esp. `400/404/409`) is permanent — retrying it
+ * only adds latency and never succeeds — so it falls straight through to the friendly 503 (issue #196).
+ */
+const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([
+  408, 429, 500, 502, 503, 504,
+]);
+
+/**
+ * Bounded-retry budget for a transient upstream failure (issue #196 (b)). Total ADDED latency is
+ * capped so a brief blip is invisible to the admin while a sustained outage still falls through to the
+ * friendly 503 in well under a couple of seconds:
+ *  - up to {@link MAX_ATTEMPTS} attempts (1 initial + 2 retries),
+ *  - exponential backoff (base {@link RETRY_BASE_DELAY_MS}, doubling) plus full jitter,
+ *  - each individual sleep clamped to {@link RETRY_MAX_DELAY_MS},
+ *  - and the SUM of all sleeps clamped to {@link RETRY_TOTAL_BUDGET_MS}.
+ * A `Retry-After` header on a `429`/`503` is honoured (clamped to the same per-sleep + total budget).
+ */
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 200;
+const RETRY_MAX_DELAY_MS = 1_000;
+const RETRY_TOTAL_BUDGET_MS = 1_800;
+
 export class ZitadelManagementService {
   private readonly logger = new Logger(ZitadelManagementService.name);
 
@@ -116,7 +141,12 @@ export class ZitadelManagementService {
       // Pre-verified: the operator's directory owns the mailbox (trusted-IdP model, ADR-0037/0038).
       email: { email: input.email, isVerified: true },
     };
-    const res = await this.request('POST', '/v2/users/human', body);
+    // NOT retried on a transient failure: a lost-response retry could create a DUPLICATE Zitadel user
+    // (POST /v2/users/human is non-idempotent — no client-supplied id). A transient blip surfaces the
+    // friendly 503; the Users service then hard-deletes the just-created local row (INV-5), issue #196.
+    const res = await this.request('POST', '/v2/users/human', body, {
+      retryOnTransient: false,
+    });
     const userId = (res as { userId?: unknown }).userId;
     if (typeof userId !== 'string' || userId.length === 0) {
       throw this.fail('createUser', 'response did not include a userId');
@@ -167,10 +197,15 @@ export class ZitadelManagementService {
       );
       return;
     }
+    // NOT retried on a transient failure: ADD-grant is non-idempotent (no client-supplied grant id),
+    // so a lost-response retry could create a SECOND grant on the project. The UPDATE path above (PUT
+    // to a known grant id) IS idempotent and retries by default. A transient blip here surfaces the
+    // friendly 503; the Users service reverts the local role (INV-5), issue #196.
     await this.request(
       'POST',
       `/management/v1/users/${encodeURIComponent(externalId)}/grants`,
       { projectId: this.projectId, roleKeys: [roleKey] },
+      { retryOnTransient: false },
     );
   }
 
@@ -350,11 +385,27 @@ export class ZitadelManagementService {
    * Perform a Management-API request with the cached access token; returns the parsed JSON (or `{}`
    * for an empty body). Maps any non-2xx / transport error to the structured failure the IdP adapter
    * re-throws as 503 — never a silent partial write (ADR-0043 §3/§6).
+   *
+   * On a **transient** upstream failure (a network/transport error or a {@link RETRYABLE_STATUSES}
+   * response — `408/429/5xx`) the call is retried with a bounded exponential backoff + jitter (issue
+   * #196 (b)), so a brief Zitadel blip is invisible to the admin and only a *sustained* outage falls
+   * through to the friendly 503. A **permanent** `4xx` (esp. `400/404/409`) is never retried. The
+   * retry budget is small ({@link MAX_ATTEMPTS} attempts, total added latency capped at
+   * {@link RETRY_TOTAL_BUDGET_MS}).
+   *
+   * `retryOnTransient` defaults to `true` for the HTTP-idempotent verbs (a `PUT`/`DELETE`/`GET` and
+   * the *set/search* `POST`s here are safe to repeat). A NON-idempotent write whose repeat could
+   * duplicate state — the grant-ADD `POST .../grants` and the create-user `POST /v2/users/human` —
+   * passes `retryOnTransient: false`: a lost-response retry there could create a second grant / a
+   * duplicate user, so those single-shot and surface the friendly 503 on the first transient failure
+   * (the Users service then reverts, INV-5). `getAccessToken` is intentionally NOT retried here — a
+   * token-endpoint failure is its own concern (auth), not a Management-call retry.
    */
   private async request(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     body?: unknown,
+    { retryOnTransient = true }: { retryOnTransient?: boolean } = {},
   ): Promise<unknown> {
     const token = await this.getAccessToken();
     const url = `${this.internalOrigin()}${path}`;
@@ -366,35 +417,125 @@ export class ZitadelManagementService {
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
     }
+    const init: RequestInit = {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    };
 
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method,
-        headers,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
-    } catch (err) {
-      throw this.fail(
-        `${method} ${path}`,
-        `request failed: ${err instanceof Error ? err.message : String(err)}`,
+    let spentMs = 0;
+    for (let attempt = 1; ; attempt++) {
+      const hasAttemptsLeft = retryOnTransient && attempt < MAX_ATTEMPTS;
+
+      let res: Response;
+      try {
+        res = await fetch(url, init);
+      } catch (err) {
+        // Network / transport error (DNS, connection refused, reset): transient by nature.
+        const reason = `request failed: ${err instanceof Error ? err.message : String(err)}`;
+        const waitMs = hasAttemptsLeft
+          ? this.nextBackoffMs(attempt, spentMs, undefined)
+          : null;
+        if (waitMs === null) {
+          throw this.fail(`${method} ${path}`, reason);
+        }
+        this.logger.warn(
+          `Zitadel management ${method} ${path} transient (${reason}); retrying in ${waitMs}ms (attempt ${attempt}/${MAX_ATTEMPTS})`,
+        );
+        spentMs += waitMs;
+        await this.sleep(waitMs);
+        continue;
+      }
+
+      if (!res.ok) {
+        const reason = `Management API returned ${res.status}`;
+        const waitMs =
+          hasAttemptsLeft && RETRYABLE_STATUSES.has(res.status)
+            ? this.nextBackoffMs(attempt, spentMs, res.headers)
+            : null;
+        if (waitMs === null) {
+          // Permanent 4xx, exhausted budget, or a non-idempotent call: surface as the friendly 503.
+          throw this.fail(`${method} ${path}`, reason);
+        }
+        this.logger.warn(
+          `Zitadel management ${method} ${path} transient (${reason}); retrying in ${waitMs}ms (attempt ${attempt}/${MAX_ATTEMPTS})`,
+        );
+        spentMs += waitMs;
+        await this.sleep(waitMs);
+        continue;
+      }
+
+      const text = await res.text();
+      if (!text) {
+        return {};
+      }
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        return {};
+      }
+    }
+  }
+
+  /**
+   * Compute the backoff before the next attempt, or `null` when the total budget would be exceeded
+   * (caller then surfaces the failure). Exponential (base {@link RETRY_BASE_DELAY_MS}, doubling per
+   * attempt) with FULL jitter, clamped to {@link RETRY_MAX_DELAY_MS} per sleep. A `Retry-After` header
+   * (delta-seconds; an HTTP-date form is ignored as over-engineering for a same-cluster IdP) takes
+   * precedence on a `429`/`503`, still clamped to the per-sleep + remaining-total budget. Returns the
+   * actual ms to wait; `null` means "no budget left — stop retrying".
+   */
+  private nextBackoffMs(
+    attempt: number,
+    spentMs: number,
+    headers: Headers | undefined,
+  ): number | null {
+    const remaining = RETRY_TOTAL_BUDGET_MS - spentMs;
+    if (remaining <= 0) {
+      return null;
+    }
+    const retryAfter = this.parseRetryAfterMs(headers);
+    let delay: number;
+    if (retryAfter !== null) {
+      delay = Math.min(retryAfter, RETRY_MAX_DELAY_MS);
+    } else {
+      // Exponential window then FULL jitter across [0, window] (decorrelates concurrent admins).
+      const window = Math.min(
+        RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+        RETRY_MAX_DELAY_MS,
       );
+      delay = Math.floor(this.random() * window);
     }
-    if (!res.ok) {
-      throw this.fail(
-        `${method} ${path}`,
-        `Management API returned ${res.status}`,
-      );
+    // Never burn more than the remaining total budget on a single sleep.
+    const clamped = Math.min(delay, remaining);
+    // A zero-length sleep would spin without yielding progress; if budget remains, wait at least 1ms.
+    return clamped > 0 ? clamped : 1;
+  }
+
+  /** Parse a `Retry-After` response header (delta-seconds only) into ms, or `null` if absent/invalid. */
+  private parseRetryAfterMs(headers: Headers | undefined): number | null {
+    const raw = headers?.get('retry-after');
+    if (!raw) {
+      return null;
     }
-    const text = await res.text();
-    if (!text) {
-      return {};
+    const seconds = Number(raw.trim());
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      return null;
     }
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return {};
-    }
+    return seconds * 1000;
+  }
+
+  /**
+   * Sleep `ms` milliseconds. Isolated (and `protected`) so tests can stub the delay — the retry logic
+   * is exercised with NO real wall-clock wait, keeping the suite deterministic (issue #196 tests).
+   */
+  protected sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /** Jitter source. Isolated so tests can make backoff deterministic. */
+  protected random(): number {
+    return Math.random();
   }
 
   /**
@@ -573,10 +714,16 @@ export class ZitadelManagementService {
   }
 
   /**
-   * Build the structured failure thrown by every Management path. Logs a WARN (operation + reason,
-   * never the credential) and returns a {@link ServiceUnavailableException} so the upstream Users flow
-   * surfaces 503 (ADR-0043 §3/§6) instead of a silent partial write. `logIt=false` suppresses the warn
-   * for the deliberate not-configured case (already warned once at resolveConfig time).
+   * Build the structured failure thrown by every Management path. Logs a WARN with the RICH detail
+   * (operation = `${method} ${path}`, the upstream status / transport reason) for an operator to
+   * correlate by request id (ADR-0031), and returns a {@link ServiceUnavailableException} so the
+   * upstream Users flow surfaces 503 (ADR-0043 §3/§6) instead of a silent partial write.
+   *
+   * The PUBLIC `message` is deliberately GENERIC and actionable (issue #196 (a)): it never leaks the
+   * internal HTTP verb / Zitadel path / raw upstream status to the end user. The web `notifyError`
+   * path surfaces this `message` verbatim as the toast title, so this is the whole fix for the leaky
+   * toast — no frontend change needed. `logIt=false` suppresses the warn for the deliberate
+   * not-configured case (already warned once at resolveConfig time).
    */
   private fail(
     operation: string,
@@ -584,12 +731,15 @@ export class ZitadelManagementService {
     logIt = true,
   ): ServiceUnavailableException {
     if (logIt) {
+      // Rich, operator-facing detail stays in the log (never the credential), correlated by request id.
       this.logger.warn(`Zitadel management ${operation} failed: ${reason}`);
     }
     return new ServiceUnavailableException(
       operation === 'assertConfigured'
         ? 'Zitadel management not configured'
-        : `Zitadel management call failed (${operation})`,
+        : // Generic + actionable; no internal verb/path/status. "not saved" is accurate because the
+          // upstream Users flow reverts the local row on any mirror failure (INV-5, no split-brain).
+          'The identity provider is temporarily unavailable. Your change was not saved, please try again in a moment.',
     );
   }
 
