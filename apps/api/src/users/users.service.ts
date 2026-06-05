@@ -300,13 +300,14 @@ export class UsersService {
           // externalId (sub) is UNCHANGED — updates the existing Zitadel user, never a re-link
           // (SEC-006). Email is written PRE-VERIFIED by the adapter, so it never forces re-verification.
           await this.idp.updateUser(current.externalId, {
-            ...(data.firstName !== undefined &&
-            data.firstName !== current.firstName
-              ? { firstName: data.firstName }
-              : {}),
-            ...(data.lastName !== undefined &&
-            data.lastName !== current.lastName
-              ? { lastName: data.lastName }
+            // PUT /v2/users/human/{id} is a full-replace on the profile resource — givenName is
+            // required even when only familyName changed. Always send both name fields when any name
+            // changed: new value if it differs, current stored value if not (issue #219).
+            ...(nameChanged
+              ? {
+                  firstName: data.firstName ?? current.firstName,
+                  lastName: data.lastName ?? current.lastName,
+                }
               : {}),
             ...(emailChanged ? { email: data.email } : {}),
           });

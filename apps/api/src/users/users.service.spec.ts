@@ -824,9 +824,41 @@ describe('UsersService', () => {
         'actor-99',
       );
 
-      // Only the changed name field is pushed (lastName resent unchanged is omitted); externalId stays.
+      // PUT /v2/users/human/{id} is a full-replace — both fields are required even when only one
+      // changed. lastName was unchanged but must still be sent to avoid a Zitadel 400 (issue #219).
       expect(idp.updateUser).toHaveBeenCalledWith('zitadel-user-9', {
         firstName: 'New',
+        lastName: 'Name',
+      });
+      expect(idp.grantRole).not.toHaveBeenCalled();
+    });
+
+    it('lastName-only change sends BOTH name fields to avoid Zitadel 400 (issue #219)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'Existing',
+        lastName: 'Old',
+        email: 'a@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({
+        id: 'member-1',
+        firstName: 'Existing',
+        lastName: 'New',
+        email: 'a@b.com',
+        role: 'MEMBER',
+        externalId: 'zitadel-user-9',
+      });
+
+      await service.update('member-1', { lastName: 'New' }, 'actor-99');
+
+      // firstName was not in the PATCH body but must be sent so Zitadel does not receive a profile
+      // object with only familyName (which returns 400 — the exact regression from issue #219).
+      expect(idp.updateUser).toHaveBeenCalledWith('zitadel-user-9', {
+        firstName: 'Existing',
+        lastName: 'New',
       });
       expect(idp.grantRole).not.toHaveBeenCalled();
     });
