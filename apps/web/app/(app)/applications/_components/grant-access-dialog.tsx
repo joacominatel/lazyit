@@ -159,7 +159,7 @@ export function GrantAccessDialog({
                     {t("access.userLabel")}
                   </FieldLabel>
                   <CreatableField
-                    label="user"
+                    entityKey="user"
                     renderDialog={(dialog) => (
                       <UserFormDialog
                         open={dialog.open}
