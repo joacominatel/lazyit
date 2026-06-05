@@ -31,20 +31,28 @@ import {
   titleFromFilename,
 } from './article-import';
 
-/** Listing filters for GET /articles. */
+/**
+ * Listing filters for GET /articles. The `categoryId`, `status` and `linkedTo` filters are
+ * **multi-select** (#198): each carries one or more values that **OR-combine within the filter**
+ * (a `{ in: [...] }` / OR predicate) and **AND-combine across filters**. The controller parses the
+ * comma-encoded/repeated query params to arrays (validating + de-duplicating each element) before
+ * they reach the service; an empty array is never passed (the controller omits the filter instead).
+ */
 export interface ArticleListFilters {
-  categoryId?: string;
+  /** One or more categories; an article matches if its `categoryId` is in the set (#198). */
+  categoryId?: string[];
   authorId?: string;
-  status?: ArticleStatus;
+  /** One or more statuses; an article matches if its `status` is in the set (#198). */
+  status?: ArticleStatus[];
   q?: string;
   /** `only` → restrict to articles that have ≥1 ArticleLink (ADR-0042). Omitted = no link filter. */
   linked?: ArticleLinkedFilter;
   /**
-   * Narrows `linked` to a single target kind (ADR-0042): `asset` keeps only articles linked to ≥1
-   * Asset, `application` only those linked to ≥1 Application. Implies the linked filter even if
-   * `linked` is omitted.
+   * Narrows `linked` to one or more target kinds (ADR-0042 / #198): `asset` keeps articles linked to
+   * ≥1 Asset, `application` those linked to ≥1 Application; passing both unions them (linked to an
+   * Asset OR an Application). Implies the linked filter even if `linked` is omitted.
    */
-  linkedTo?: ArticleLinkedTo;
+  linkedTo?: ArticleLinkedTo[];
 }
 
 /** The subset of a multer file the import needs. The controller passes Express.Multer.File. */
@@ -141,9 +149,15 @@ export class ArticlesService {
   ): Prisma.ArticleWhereInput {
     const cu = this.resolveCurrentUser(currentUser);
     const and: Prisma.ArticleWhereInput[] = [this.visibilityWhere(cu)];
-    if (filters.categoryId) and.push({ categoryId: filters.categoryId });
+    // Multi-select (#198): categoryId / status are `{ in: [...] }` (OR within the filter). The
+    // controller never passes an empty array — an empty selection omits the filter entirely.
+    if (filters.categoryId?.length) {
+      and.push({ categoryId: { in: filters.categoryId } });
+    }
     if (filters.authorId) and.push({ authorId: filters.authorId });
-    if (filters.status) and.push({ status: filters.status });
+    if (filters.status?.length) {
+      and.push({ status: { in: filters.status } });
+    }
     if (filters.q) {
       and.push({
         OR: [
@@ -158,22 +172,31 @@ export class ArticlesService {
   }
 
   /**
-   * The `linked`/`linkedTo` clause for the article list (ADR-0042). `linked=only` (or any
+   * The `linked`/`linkedTo` clause for the article list (ADR-0042 / #198). `linked=only` (or any
    * `linkedTo`) keeps only articles with ≥1 ArticleLink via a relation `some`; `linkedTo` narrows
-   * that to a single target kind (asset/application). Returns `undefined` when no link filter was
-   * asked for (the list then includes both linked and unlinked articles). The `some` predicate is an
-   * EXISTS subquery — it doesn't multiply rows, so it composes cleanly with the page + count.
+   * that to one or more target kinds. **Multi-select (#198):** the selected kinds OR-combine — a
+   * single kind narrows the `some` predicate to that target column; BOTH kinds keep the unnarrowed
+   * `some: {}` (linked to an Asset OR an Application is exactly "has ≥1 link"), so the EXISTS stays
+   * one subquery. Returns `undefined` when no link filter was asked for (the list then includes both
+   * linked and unlinked articles). The `some` predicate is an EXISTS subquery — it doesn't multiply
+   * rows, so it composes cleanly with the page + count.
    */
   private linkedWhere(
     filters: ArticleListFilters,
   ): Prisma.ArticleWhereInput | undefined {
-    if (!filters.linked && !filters.linkedTo) return undefined;
-    const linkWhere: Prisma.ArticleLinkWhereInput =
-      filters.linkedTo === 'asset'
-        ? { assetId: { not: null } }
-        : filters.linkedTo === 'application'
-          ? { applicationId: { not: null } }
-          : {};
+    const kinds = filters.linkedTo ?? [];
+    if (!filters.linked && kinds.length === 0) return undefined;
+    const wantsAsset = kinds.includes('asset');
+    const wantsApplication = kinds.includes('application');
+    let linkWhere: Prisma.ArticleLinkWhereInput;
+    if (wantsAsset && !wantsApplication) {
+      linkWhere = { assetId: { not: null } };
+    } else if (wantsApplication && !wantsAsset) {
+      linkWhere = { applicationId: { not: null } };
+    } else {
+      // No kind narrowing (linked=only) OR both kinds selected → any link counts.
+      linkWhere = {};
+    }
     return { links: { some: linkWhere } };
   }
 
