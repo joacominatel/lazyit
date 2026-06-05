@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
+  ArticleApplicationIdFilterSchema,
+  ArticleAssetIdFilterSchema,
   ArticleLinkedToFilterSchema,
   ArticleLinkedToSchema,
   ArticleStatusFilterSchema,
@@ -25,7 +27,9 @@ describe("ArticleStatusFilterSchema — multi-value status filter element (#198)
   });
 
   it("is the same allowlist as the base ArticleStatusSchema", () => {
-    expect(ArticleStatusFilterSchema.options).toEqual(ArticleStatusSchema.options);
+    expect(ArticleStatusFilterSchema.options).toEqual(
+      ArticleStatusSchema.options,
+    );
   });
 });
 
@@ -38,15 +42,41 @@ describe("ArticleLinkedToFilterSchema — multi-value linked-target filter eleme
   });
 
   it("rejects an unknown target kind (→ 400 at the edge)", () => {
-    expect(ArticleLinkedToFilterSchema.safeParse("location").success).toBe(false);
-    expect(ArticleLinkedToFilterSchema.safeParse("asset,application").success).toBe(
+    expect(ArticleLinkedToFilterSchema.safeParse("location").success).toBe(
       false,
     );
+    expect(
+      ArticleLinkedToFilterSchema.safeParse("asset,application").success,
+    ).toBe(false);
   });
 
   it("aliases the base ArticleLinkedToSchema (same allowlist)", () => {
     expect(ArticleLinkedToFilterSchema.options).toEqual(
       ArticleLinkedToSchema.options,
     );
+  });
+});
+
+describe("ArticleAssetIdFilterSchema / ArticleApplicationIdFilterSchema — specific-entity link filter elements (#213)", () => {
+  // A representative well-formed cuid (24 chars, `c`-prefixed) — the shape Prisma assigns domain rows.
+  const VALID_CUID = "clh1abc0000xyz0000000abcd";
+
+  it("accepts a well-formed cuid for each specific-entity filter", () => {
+    expect(ArticleAssetIdFilterSchema.safeParse(VALID_CUID).success).toBe(true);
+    expect(ArticleApplicationIdFilterSchema.safeParse(VALID_CUID).success).toBe(
+      true,
+    );
+  });
+
+  it("rejects a malformed/garbage element (→ 400 at the edge, never silently dropped)", () => {
+    expect(ArticleAssetIdFilterSchema.safeParse("not-a-cuid!").success).toBe(
+      false,
+    );
+    expect(ArticleApplicationIdFilterSchema.safeParse("").success).toBe(false);
+    // The comma-encoded list is split by the controller, never validated whole.
+    expect(
+      ArticleAssetIdFilterSchema.safeParse(`${VALID_CUID},${VALID_CUID}`)
+        .success,
+    ).toBe(false);
   });
 });
