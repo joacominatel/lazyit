@@ -543,7 +543,7 @@ export default function ApplicationsPage() {
           onOpenChange={(open) => {
             if (!open) setDeleting(null);
           }}
-          entityLabel={t("list.entityLabel")}
+          entityKey="application"
           name={deleting.name}
           onConfirm={() => deleteApplication.mutateAsync(deleting.id)}
         />

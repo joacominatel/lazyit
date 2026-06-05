@@ -204,7 +204,7 @@ export default function ArticleDetailPage() {
       <DeleteConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        entityLabel="article"
+        entityKey="article"
         name={article.title}
         onConfirm={() => deleteArticle.mutateAsync(article.id)}
         onDeleted={() => router.push("/kb")}

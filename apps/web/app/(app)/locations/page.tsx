@@ -475,7 +475,7 @@ export default function LocationsPage() {
             <BatchActionBar
               count={selection.count}
               onClear={selection.clear}
-              noun="location"
+              entityKey="location"
             >
               <Button
                 size="sm"
@@ -510,7 +510,7 @@ export default function LocationsPage() {
           onOpenChange={(open) => {
             if (!open) setDeleting(undefined);
           }}
-          entityLabel="location"
+          entityKey="location"
           name={deleting.name}
           onConfirm={() => deleteLocation.mutateAsync(deleting.id)}
         />

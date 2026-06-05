@@ -391,7 +391,7 @@ export default function ApplicationDetailPage() {
       <DeleteConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        entityLabel={t("detail.entityLabel")}
+        entityKey="application"
         name={application.name}
         onConfirm={() => deleteApplication.mutateAsync(application.id)}
         onDeleted={() => router.push("/applications")}

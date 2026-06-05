@@ -495,7 +495,7 @@ export default function UsersPage() {
             <BatchActionBar
               count={selection.count}
               onClear={selection.clear}
-              noun="user"
+              entityKey="user"
             >
               <Button
                 size="sm"

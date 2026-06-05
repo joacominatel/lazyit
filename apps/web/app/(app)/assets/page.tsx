@@ -642,7 +642,7 @@ export default function AssetsPage() {
           <BatchActionBar
             count={selection.count}
             onClear={selection.clear}
-            noun="asset"
+            entityKey="asset"
           >
             {archived ? (
               <Button
@@ -721,7 +721,7 @@ export default function AssetsPage() {
           onOpenChange={(open) => {
             if (!open) setDeleting(null);
           }}
-          entityLabel="asset"
+          entityKey="asset"
           name={deleting.name}
           onConfirm={() => deleteAsset.mutateAsync(deleting.id)}
         />

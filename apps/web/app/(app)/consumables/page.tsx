@@ -591,7 +591,7 @@ export default function ConsumablesPage() {
             <BatchActionBar
               count={selection.count}
               onClear={selection.clear}
-              noun="consumable"
+              entityKey="consumable"
             >
               <Button
                 size="sm"
@@ -621,7 +621,7 @@ export default function ConsumablesPage() {
           onOpenChange={(open) => {
             if (!open) setDeleting(null);
           }}
-          entityLabel="consumable"
+          entityKey="consumable"
           name={deleting.name}
           onConfirm={() => deleteConsumable.mutateAsync(deleting.id)}
         />
