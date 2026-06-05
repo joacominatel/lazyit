@@ -2,6 +2,7 @@
 
 import {
   ArrowPathIcon,
+  BeakerIcon,
   EllipsisVerticalIcon,
   KeyIcon,
   PencilSquareIcon,
@@ -50,6 +51,7 @@ import {
   serviceAccountStatus,
   STATUS_TONE,
 } from "./service-account-status";
+import { TestItDialog } from "./test-it-dialog";
 
 const MAX_PERMISSION_LABELS = 2;
 
@@ -136,6 +138,7 @@ export function ServiceAccountsManager() {
   const [revoking, setRevoking] = useState<ServiceAccount | undefined>(
     undefined,
   );
+  const [testing, setTesting] = useState<ServiceAccount | undefined>(undefined);
 
   const accounts = data ?? [];
   const hasData = accounts.length > 0;
@@ -257,7 +260,9 @@ export function ServiceAccountsManager() {
                       onEdit={() => openEdit(account)}
                       onRotate={() => setRotating(account)}
                       onRevoke={() => setRevoking(account)}
+                      onTest={() => setTesting(account)}
                       editLabel={tc("edit")}
+                      testLabel={t("serviceAccounts.rowActions.testIt")}
                       rotateLabel={t("serviceAccounts.rowActions.rotateToken")}
                       revokeLabel={t("serviceAccounts.rowActions.revoke")}
                       openActionsLabel={t("serviceAccounts.rowActions.openActions")}
@@ -299,6 +304,16 @@ export function ServiceAccountsManager() {
           {t("serviceAccounts.revokeExplanation")}
         </DeleteConfirmDialog>
       ) : null}
+
+      {testing ? (
+        <TestItDialog
+          account={testing}
+          open
+          onOpenChange={(open) => {
+            if (!open) setTesting(undefined);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -313,7 +328,9 @@ function ServiceAccountRowActions({
   onEdit,
   onRotate,
   onRevoke,
+  onTest,
   editLabel,
+  testLabel,
   rotateLabel,
   revokeLabel,
   openActionsLabel,
@@ -321,7 +338,9 @@ function ServiceAccountRowActions({
   onEdit: () => void;
   onRotate: () => void;
   onRevoke: () => void;
+  onTest: () => void;
   editLabel: string;
+  testLabel: string;
   rotateLabel: string;
   revokeLabel: string;
   openActionsLabel: string;
@@ -335,6 +354,10 @@ function ServiceAccountRowActions({
       </DropdownMenuTrigger>
       {/* Dialogs open via page state (siblings of the menu), not nested here. */}
       <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem onSelect={onTest}>
+          <BeakerIcon />
+          {testLabel}
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={onEdit}>
           <PencilSquareIcon />
           {editLabel}
