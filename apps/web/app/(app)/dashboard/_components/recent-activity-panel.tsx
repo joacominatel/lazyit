@@ -82,18 +82,23 @@ export function RecentActivityPanel() {
               {t("recentActivity.empty")}
             </p>
           ) : (
-            // Issue #195: on `lg+` cap the scrollable feed to roughly the viewport so the long
-            // activity stream stops dictating an ever-growing row height — that gap under the
-            // sticky Pulse rail (which pins at `lg:top-6`) closes because the feed no longer
-            // towers over it. The `calc(100vh-13rem)` budget leaves room for the chrome above
-            // the list (section heading + card header + page padding) plus a little breathing
-            // space below, so the feed end and the rail end roughly coincide. Below `lg` the cap
-            // is absent: the layout is a single column and the feed flows normally (unchanged).
+            // Issue #222 (re-tunes #195/PR #207): on `lg+` cap the scrollable feed so a long
+            // activity stream stops dictating an ever-growing row height AND so the feed end
+            // lands near the sticky Pulse rail's natural bottom — closing the gap in BOTH
+            // directions. PR #207's `calc(100vh-13rem)` was *viewport*-tall (taller than the
+            // content-sized rail: donut + access-health + quick-actions ≈ 36–40rem), so on a
+            // full feed the left column towered and the `self-start` rail floated above it. The
+            // rail's real height isn't a readable CSS value, so this cap is a HAND-TUNED constant:
+            // `min(36rem, calc(100vh-13rem))`. The `36rem` term is content-proportionate to the
+            // rail (so feed-end ≈ rail-end on tall viewports / long feeds); the `calc(100vh-13rem)`
+            // term keeps the feed inside the viewport on short windows (chrome above the list =
+            // section heading + card header + page padding). Short feeds shrink under both. Below
+            // `lg` the cap is absent: single column, feed flows normally (unchanged).
             // `pr-1` keeps the inner scrollbar off the row content / focus rings; `overscroll-contain`
             // stops the inner scroll from chaining to the page once the feed bottoms out. The
             // "Load more" button rides at the end of this scroll region, so it stays reachable by
             // pointer and keyboard. No new colour or motion — Tailwind utilities only (ADR-0049).
-            <div className="space-y-4 lg:max-h-[calc(100vh-13rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
+            <div className="space-y-4 lg:max-h-[min(36rem,calc(100vh-13rem))] lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
               {groups.map((group) => (
                 <div key={group.key}>
                   <p className="mb-2 text-xs font-medium text-muted-foreground">
