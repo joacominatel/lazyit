@@ -94,6 +94,10 @@
     "clearFilters": "Clear filters",
     "showArchived": "Show archived"
   },
+  "multiSelect": {
+    "triggerLabelWithCount": "{label} ({count} selected)",
+    "empty": "No options"
+  },
   "search": {
     "trigger": "Search",
     "placeholderShort": "Search…",

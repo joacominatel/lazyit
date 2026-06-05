@@ -3,7 +3,7 @@ title: "ADR-0042: Knowledge Base depth — append-only versioning + asset/applic
 tags: [adr]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-05
 deciders: [Joaquín Minatel]
 ---
 
@@ -96,6 +96,31 @@ a separate follow-up — #150):
   (the value sets live in `@lazyit/shared` `article-list.ts`); an unknown value is rejected with
   **400**, never silently ignored (consistent with ADR-0030). The filter is ANDed **on top of** the
   draft-visibility + soft-delete gate, so privacy is unchanged.
+
+### KB list filters become multi-select (#198, 2026-06-05)
+
+The KB list filters were single-choice (one status, one category, one link target). They are now
+**multi-select** — the `status`, `categoryId` and `linkedTo` filters on `GET /articles` each accept
+**several values that OR-combine within the filter** (union) and **AND-combine across filters**
+(intersection). This follows the multi-value list-filter contract recorded in
+[[0030-list-pagination-contract]] (amendment §8): each is a single **comma-encoded** query param
+(`status=DRAFT,PUBLISHED`), the controller splits + validates **each element** against its allowlist
+(unknown element → **400**), and a **single value still parses** (existing URLs / dashboard
+deep-links unbroken).
+
+- `status` → `status: { in: [...] }`; `categoryId` → `categoryId: { in: [...] }` in `buildWhere`.
+- `linkedTo` is now multi-kind: a single kind narrows the link `some` predicate to that target
+  column (`assetId`/`applicationId` `not null`); **both kinds** keep the unnarrowed `some: {}` (linked
+  to an Asset OR an Application is exactly "has ≥1 link"). Any `linkedTo` still implies `linked=only`.
+- The link universe stays **the two target TYPES** (`asset`, `application`) — the data model has
+  exactly those (article ↔ asset XOR application). Picking *specific* linked entities
+  (`assetId[]`/`applicationId[]` predicates + an entity picker) is a **deferred follow-up**, not part
+  of this change.
+- **Frontend:** a reusable `MultiSelectFilter` (`apps/web/components/`, composing the vendored
+  `DropdownMenu` + `DropdownMenuCheckboxItem` — no new primitive) backs each filter; selections are
+  URL-synced (comma-encoded via `useListParams().setFilterValues`/`getFilterValues`) and shown as
+  one removable chip per value in the active-filter bar, Activated-Restraint compliant (ADR-0049 —
+  status hue rides a token `StatusDot`, never colored text).
 - **`linkCount` per row.** The lean `select` adds a relation `_count` of `links`, flattened to a flat
   `linkCount` on the DTO — the card's "linked" indicator (`linkCount > 0`) with **no N+1**.
 - **`readingMinutes` metric.** Rather than `length(content)` at read time (which would force loading

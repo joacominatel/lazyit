@@ -3,7 +3,7 @@ title: "ADR-0030: List endpoint pagination contract (offset; implementation defe
 tags: [adr, security, api]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-06-05
 deciders: [Joaquín Minatel]
 ---
 
@@ -242,6 +242,38 @@ carries `deletedAt`, so the web can render an archived badge + a Restore button.
 
 Shared helper: `apps/api/src/common/deleted-filter.ts` (`assertCanListDeleted` + `deletedWhere` +
 `includeSoftDeletedFor`). Shape: `DeletedFilterSchema` (`active` | `only`) on `PageQuerySchema`.
+
+## Amendment (2026-06-05) — multi-value list filters (comma-encoded) (#198)
+
+A list filter that was single-choice can become **multi-select**: the client picks several values for
+one filter; they **OR-combine within the filter** (a `{ in: [...] }` / relation-OR predicate) and
+**AND-combine across filters** (the existing per-filter `AND`). First adopter: the KB list
+(`status` / `categoryId` / `linkedTo` on `GET /articles`, [[0042-article-versioning-and-linking]]);
+the convention is generic so any list can adopt it.
+
+**Wire shape = comma-encoded, one param per filter (option A).** A multi-value filter is a single
+query param whose value is a comma-joined list (`?status=DRAFT,PUBLISHED`). This matches the existing
+`search.ts` `entities.join(",")` precedent and keeps the frontend `useListParams` model of **one
+string per filter name** (no repeated-param refactor). **Repeated params** (`?status=A&status=B`,
+which Express/Nest hand the controller as a `string[]`) are **also accepted** by the parse helpers, so
+either client encoding works.
+
+**Validation — unchanged 400-on-unknown contract, applied per element.** The controller splits on
+`,`, trims, drops empty segments, **de-duplicates** (`in` is set semantics), and validates **each
+element** against its allowlist. An unknown/garbage element is a clean **400** (never a
+silently-empty list) — the same rule as the single-value filters, now element-wise. **A single value
+still parses** to a one-element array, so existing URLs / dashboard deep-links keep working.
+
+Shared backend helpers (next to `parse-cuid-query.ts`, mirroring its contract):
+`apps/api/src/common/parse-cuid-array-query.ts` (`parseCuidArrayQuery`, reusing `parseCuidQuery`
+element-wise) and `parse-enum-array-query.ts` (`parseEnumArrayQuery`, validating each element against a
+zod-enum allowlist). Each returns `undefined` for an absent/empty filter (so the caller omits it).
+
+**Frontend.** `useListParams` gained `setFilterValues(name, string[])` (comma-encode + clean +
+de-dupe, clears on empty) and `getFilterValues(name)` (the inverse read), and a reusable
+`MultiSelectFilter` (`apps/web/components/`, composing the vendored `DropdownMenu` +
+`DropdownMenuCheckboxItem` — **no new primitive**) renders the control; selections show as one
+removable chip per value in the active-filter bar (Activated Restraint, ADR-0049).
 
 ## References
 
