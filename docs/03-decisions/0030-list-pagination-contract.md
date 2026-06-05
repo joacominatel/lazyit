@@ -307,6 +307,28 @@ de-dupe, clears on empty) and `getFilterValues(name)` (the inverse read), and a 
 `DropdownMenuCheckboxItem` — **no new primitive**) renders the control; selections show as one
 removable chip per value in the active-filter bar (Activated Restraint, ADR-0049).
 
+## Amendment (2026-06-05) — server-search Combobox shows the first page on open (#218)
+
+The server-search `Combobox` (§8) used to **gate** the list behind a typed query: with 0 characters
+it rendered a "Type to search…" placeholder, so the already-fetched first page stayed hidden until the
+user typed. Each picker's hook already fires on mount with `q: undefined` (no `enabled` guard) and the
+API returns a sensible first page for an empty `q` (`buildWhere`/base `where`), so the data was present
+all along — only the rendering was gated.
+
+The gate is now **off by default**: in server-search mode with an empty query the picker renders that
+fetched first page (alongside the existing loading row and `CommandEmpty`), so opening any of the five
+server-search pickers — assign-user, grant-access user, KB asset, asset-form location, asset-form model
+— shows an initial page immediately; typing only **narrows** it via the existing debounced `q`, and
+clearing the box returns to the first page. **No new fetch** is introduced (the on-mount request is
+unchanged), no backend change, no new endpoint or param — purely a presentational change inside
+`components/combobox.tsx`.
+
+The type-to-search precondition is preserved as an **opt-in** via a new `minQueryLength` prop (default
+`0` = show first page). A caller with a directory large enough to warrant a typed precondition can pass
+`minQueryLength={1}` to restore the placeholder until the query reaches that length. No current caller
+needs it. ADR-0049 is untouched (no new colours/motion/tokens — same `bg-popover` surface, `bg-accent`
+selected tint, and `prefers-reduced-motion`-guarded popover motion).
+
 ## References
 
 - [[SEC-007-no-pagination-list-endpoints|SEC-007]].
