@@ -192,6 +192,17 @@ Write-back is wired into the existing ADMIN-gated Users controller:
 A Management-API failure surfaces as **503** (not a silent partial write); all write-back calls are
 recorded in lazyit's own audit trail (`actor='system'|admin`, `operation`, subject, fields).
 
+> [!note] #196 — friendlier 503, transient retry (consistency model UNCHANGED)
+> The 503's *presentation* was hardened in **issue #196** without touching this strong-coupling
+> decision: the **public** message is now generic + actionable (no internal verb/path/upstream status
+> leaks to the toast — the rich detail stays in the WARN log, correlated by request id, ADR-0031), and
+> the Management client **retries a transient upstream failure** (network error or `408/429/5xx`) with a
+> bounded backoff + jitter (≤3 attempts, total added latency capped ~1.8s, `Retry-After`-aware) so a
+> brief blip is invisible while a *sustained* outage still hits the revert-and-503 path above. Permanent
+> `4xx` and the token/auth fetch are not retried; the two non-idempotent writes (create-user, grant-ADD)
+> single-shot to avoid a duplicate. The **queue/reconcile vs. strong-coupling consistency model** (issue
+> #196 layer (c)) is **DEFERRED to a future CEO decision** — this ADR's strong-coupling contract stands.
+
 ### 4. Zero-touch bootstrap + in-app setup wizard ("one build, one run")
 
 Two cooperating pieces replace the console chore:
