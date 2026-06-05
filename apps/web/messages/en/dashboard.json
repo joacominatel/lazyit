@@ -11,7 +11,10 @@
     "criticalGrants": "{count, plural, one {# active grant on critical applications} other {# active grants on critical applications}}",
     "lowStock": "{count, plural, one {# consumable at or below the reorder threshold} other {# consumables at or below the reorder threshold}}",
     "inMaintenance": "{count, plural, one {# asset in maintenance} other {# assets in maintenance}}",
-    "lost": "{count, plural, one {# asset marked lost} other {# assets marked lost}}"
+    "lost": "{count, plural, one {# asset marked lost} other {# assets marked lost}}",
+    "dismiss": "Dismiss \"{label}\"",
+    "dismissed": "Dismissed",
+    "undo": "Undo"
   },
   "pillars": {
     "assets": {
