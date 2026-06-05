@@ -145,6 +145,15 @@ nested join's `user` row is still returned with its `deletedAt`; the field is po
 link endpoints already existed (`GET/POST/DELETE /articles/:id/links`, ADMIN/MEMBER author-gated).
 Reverse lists return the lean `ArticleListItem` shape (no markdown content) and exclude DRAFTs.
 
+**Update (#220, 2026-06-05): both reverse lookups are now paginated + filterable.** They shipped as an
+unbounded `findMany`; they now return the lean **`Page<ArticleListItem>` envelope** (`take`/`skip` + a
+paired `count` over the same `where`; `limit` default 50, hard-capped 200 — rejected, not clamped) with
+`q` / `status` / `categoryId` multi-select filters (§ multi-value amendment below; unknown element →
+400). The `where` keeps its hard `status: 'PUBLISHED'` pin, so paging/filtering never leaks a draft.
+The breaking wire change (`ArticleListItem[]` → `Page<ArticleListItem>`) landed front+back in lockstep
+(`RelatedArticlesPanel` gained a debounced search + a category filter + "Load more"). See
+[[0042-article-versioning-and-linking]].
+
 ### 5. Batch (bulk) mutation endpoints — ADMIN only
 
 Multi-select actions: `POST /assets/batch/delete`, `POST /assets/batch/restore`,
@@ -281,7 +290,10 @@ A list filter that was single-choice can become **multi-select**: the client pic
 one filter; they **OR-combine within the filter** (a `{ in: [...] }` / relation-OR predicate) and
 **AND-combine across filters** (the existing per-filter `AND`). First adopter: the KB list
 (`status` / `categoryId` / `linkedTo` on `GET /articles`, [[0042-article-versioning-and-linking]]);
-the convention is generic so any list can adopt it.
+the convention is generic so any list can adopt it. **Second adopter (#220):** the reverse KB lookups
+`GET /assets/:id/articles` / `GET /applications/:id/articles` reuse the same `q` / `status` /
+`categoryId` parsing (`parseEnumArrayQuery` / `parseCuidArrayQuery`) over their own PUBLISHED-pinned
+`where`.
 
 **Wire shape = comma-encoded, one param per filter (option A).** A multi-value filter is a single
 query param whose value is a comma-joined list (`?status=DRAFT,PUBLISHED`). This matches the existing
