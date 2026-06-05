@@ -99,6 +99,7 @@
     "targetAssetLabel": "Activo",
     "targetApplicationLabel": "Aplicación",
     "selectAsset": "Selecciona un activo",
+    "searchAsset": "Buscar activos…",
     "selectApplication": "Selecciona una aplicación",
     "noAssets": "Aún no hay activos",
     "noApplications": "Aún no hay aplicaciones",

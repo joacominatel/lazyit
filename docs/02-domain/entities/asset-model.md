@@ -58,10 +58,13 @@ Prisma model `AssetModel` → table `asset_models`. Validation schemas (`AssetMo
 
 ## Endpoints
 
-`apps/api/src/asset-models/` (`AssetModelsModule`): `GET /asset-models` (excludes soft-deleted,
-optional `?categoryId=` filter), `GET /asset-models/:id`, `POST`, `PATCH /:id`, `DELETE /:id`
-(soft delete), `POST /:id/restore` (ADMIN-only — clears `deletedAt`,
-[[0041-soft-delete-reuse-and-restore]]). An invalid `categoryId` on write returns `400`
-(FK → [[0018-api-documentation-swagger]]).
+`apps/api/src/asset-models/` (`AssetModelsModule`): `GET /asset-models` — **paginated** `Page<AssetModel>`
+envelope with a server-side case-insensitive **`q`** over name/manufacturer/sku, an optional
+`?categoryId=` filter, an allowlisted `sort` (`name`/`manufacturer`/`sku`/`createdAt`/`updatedAt`,
+default `createdAt desc`) and the `deleted` slice — migrated off the raw array so the searchable model
+picker can search/page authoritatively (issue #199, [[0030-list-pagination-contract]] §8). Then
+`GET /asset-models/:id`, `POST`, `PATCH /:id`, `DELETE /:id` (soft delete), `POST /:id/restore`
+(ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]). An invalid `categoryId` on
+write returns `400` (FK → [[0018-api-documentation-swagger]]).
 
 Related: [[asset]] · [[asset-category]] · [[conventions]] · [[0018-api-documentation-swagger]]

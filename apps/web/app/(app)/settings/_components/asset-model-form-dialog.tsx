@@ -5,6 +5,7 @@ import { type AssetModel, cloneAssetModelDefaults } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import { CategoryCombobox } from "@/components/category-combobox";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,13 +22,6 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import {
@@ -37,7 +31,6 @@ import {
 import { notifyError } from "@/lib/api/notify-error";
 
 const FORM_ID = "asset-model-form";
-const NO_CATEGORY = "__none__";
 
 interface FormState {
   name: string;
@@ -284,28 +277,15 @@ function AssetModelForm({
             <FieldLabel htmlFor="model-category">
               {t("taxonomies.models.form.categoryLabel")}
             </FieldLabel>
-            <Select
-              value={values.categoryId || NO_CATEGORY}
-              onValueChange={(value) =>
-                set("categoryId", value === NO_CATEGORY ? "" : value)
-              }
-            >
-              <SelectTrigger id="model-category" className="w-full">
-                <SelectValue
-                  placeholder={t("taxonomies.models.form.categoryPlaceholder")}
-                />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_CATEGORY}>
-                  {t("taxonomies.models.form.noCategory")}
-                </SelectItem>
-                {(categories ?? []).map((category) => (
-                  <SelectItem key={category.id} value={category.id}>
-                    {category.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <CategoryCombobox
+              id="model-category"
+              value={values.categoryId}
+              onValueChange={(value) => set("categoryId", value)}
+              categories={categories ?? []}
+              placeholder={t("taxonomies.models.form.categoryPlaceholder")}
+              searchPlaceholder={t("taxonomies.models.form.searchCategory")}
+              emptyText={t("taxonomies.models.form.noCategories")}
+            />
           </Field>
 
           <Field>

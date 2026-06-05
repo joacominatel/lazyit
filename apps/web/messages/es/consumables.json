@@ -59,6 +59,8 @@
     "categoryLabel": "Categoría",
     "categoryPlaceholder": "Selecciona una categoría",
     "categoryNone": "— Ninguna —",
+    "searchCategory": "Buscar categorías…",
+    "noCategories": "No se encontraron categorías",
     "reorderThresholdLabel": "Umbral de reposición",
     "reorderThresholdPlaceholder": "5",
     "reorderThresholdHint": "Alerta de stock bajo cuando lo disponible ≤ este valor. Opcional.",

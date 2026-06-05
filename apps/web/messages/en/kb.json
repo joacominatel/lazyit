@@ -99,6 +99,7 @@
     "targetAssetLabel": "Asset",
     "targetApplicationLabel": "Application",
     "selectAsset": "Select an asset",
+    "searchAsset": "Search assets…",
     "selectApplication": "Select an application",
     "noAssets": "No assets yet",
     "noApplications": "No applications yet",
