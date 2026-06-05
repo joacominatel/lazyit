@@ -89,6 +89,10 @@
     "clearFilters": "Limpiar filtros",
     "showArchived": "Mostrar archivados"
   },
+  "multiSelect": {
+    "triggerLabelWithCount": "{label} ({count} seleccionados)",
+    "empty": "Sin opciones"
+  },
   "search": {
     "trigger": "Buscar",
     "placeholderShort": "Buscar…",
