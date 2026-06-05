@@ -4,6 +4,7 @@ import { PlusIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
+import type { EntityKey } from "@/lib/entity-key";
 
 /**
  * Pairs a select (the `children`) with a "+ New" button that opens a create dialog, so a missing
@@ -12,12 +13,15 @@ import { Button } from "@/components/ui/button";
  * new record (the create mutation already refetches the options). Issue #25.
  */
 export function CreatableField({
-  label,
+  entityKey,
   renderDialog,
   children,
 }: {
-  /** Lowercase entity label for the button's tooltip, e.g. "location". */
-  label: string;
+  /**
+   * Stable entity key from the closed set ({@link EntityKey}) — the "+ New" button resolves its
+   * localized, correctly-gendered tooltip internally (issue #204). Never a raw English word.
+   */
+  entityKey: EntityKey;
   renderDialog: (props: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -26,7 +30,7 @@ export function CreatableField({
 }) {
   const t = useTranslations("shared");
   const [open, setOpen] = useState(false);
-  const newLabel = t("field.newEntity", { label });
+  const newLabel = t("field.newEntity", { label: entityKey });
   return (
     <>
       <div className="flex items-center gap-2">

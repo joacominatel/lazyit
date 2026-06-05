@@ -243,7 +243,7 @@ export default function LocationDetailPage() {
       <DeleteConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        entityLabel="location"
+        entityKey="location"
         name={location.name}
         onConfirm={() => deleteLocation.mutateAsync(location.id)}
         onDeleted={() => router.push("/locations")}

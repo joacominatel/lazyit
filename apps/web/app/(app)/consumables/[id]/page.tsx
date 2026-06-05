@@ -347,7 +347,7 @@ export default function ConsumableDetailPage() {
       <DeleteConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        entityLabel="consumable"
+        entityKey="consumable"
         name={consumable.name}
         onConfirm={() => deleteConsumable.mutateAsync(consumable.id)}
         onDeleted={() => router.push("/consumables")}

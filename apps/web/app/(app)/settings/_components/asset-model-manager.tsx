@@ -187,7 +187,7 @@ export function AssetModelManager() {
           onOpenChange={(open) => {
             if (!open) setDeleting(undefined);
           }}
-          entityLabel={t("taxonomies.models.entityLabel")}
+          entityKey="model"
           name={deleting.name}
           onConfirm={() => remove.mutateAsync(deleting.id)}
         />

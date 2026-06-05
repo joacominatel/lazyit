@@ -20,43 +20,52 @@ import type { StatusTone } from "@/components/ui/status-badge";
  * Anything unmapped falls back to `neutral` so a new verb never crashes the screen.
  */
 
-interface ActionMeta {
-  tone: StatusTone;
-  /** A short, human-readable label for the action (Title Case), used in the badge + the filter. */
-  label: string;
-}
-
-const ACTION_META: Record<string, ActionMeta> = {
-  created: { tone: "info", label: "Created" },
-  status_changed: { tone: "neutral", label: "Status changed" },
-  location_changed: { tone: "info", label: "Location changed" },
-  assigned: { tone: "success", label: "Assigned" },
-  released: { tone: "danger", label: "Released" },
-  granted: { tone: "success", label: "Granted" },
-  revoked: { tone: "danger", label: "Revoked" },
-  stock_in: { tone: "success", label: "Stock in" },
-  stock_out: { tone: "danger", label: "Stock out" },
-  stock_adjustment: { tone: "warning", label: "Stock adjustment" },
+/**
+ * Action verb → tone. The human label is NOT held here anymore: it's localized at the render site
+ * via `shared.activity.action.*` (issue #204), keyed by the same raw action VALUE (never translated)
+ * — see {@link actionLabel}.
+ */
+const ACTION_TONE: Record<string, StatusTone> = {
+  created: "info",
+  status_changed: "neutral",
+  location_changed: "info",
+  assigned: "success",
+  released: "danger",
+  granted: "success",
+  revoked: "danger",
+  stock_in: "success",
+  stock_out: "danger",
+  stock_adjustment: "warning",
   // UserHistory verbs (DEBT-2, issue #185). `created` already maps above (shared with AssetHistory).
-  updated: { tone: "info", label: "Updated" },
-  role_changed: { tone: "warning", label: "Role changed" },
-  password_reset_sent: { tone: "info", label: "Password reset sent" },
-  deleted: { tone: "danger", label: "Deleted" },
-  restored: { tone: "success", label: "Restored" },
+  updated: "info",
+  role_changed: "warning",
+  password_reset_sent: "info",
+  deleted: "danger",
+  restored: "success",
 };
 
 /** The {@link StatusBadge} tone for an activity action verb. Falls back to `neutral`. */
 export function actionTone(action: string): StatusTone {
-  return ACTION_META[action]?.tone ?? "neutral";
+  return ACTION_TONE[action] ?? "neutral";
 }
 
 /**
- * A human-readable label for an activity action verb (e.g. `stock_in` → "Stock in"). Falls back to
- * a de-snaked Title-Case of the raw verb so an unmapped action still reads cleanly.
+ * Minimal shape of a next-intl translator scoped to the `shared.activity.action` namespace — the
+ * caller threads its `useTranslations("shared.activity.action")` so this pure (non-React) util can
+ * resolve the localized verb label without importing React or hardcoding English.
  */
-export function actionLabel(action: string): string {
-  const known = ACTION_META[action]?.label;
-  if (known) return known;
+type ActionTranslator = ((key: string) => string) & {
+  has: (key: string) => boolean;
+};
+
+/**
+ * A localized, human-readable label for an activity action verb (e.g. `stock_in` → "Stock in" /
+ * "Entrada de stock"), resolved via `shared.activity.action.{action}`. The caller passes its
+ * `useTranslations("shared.activity.action")` translator. Unmapped verbs (no key for the current
+ * locale) fall back to a de-snaked Title-Case of the raw value so a new action still reads cleanly.
+ */
+export function actionLabel(action: string, t: ActionTranslator): string {
+  if (t.has(action)) return t(action);
   const words = action.replace(/_/g, " ").trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }

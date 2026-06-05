@@ -297,7 +297,7 @@ export function ServiceAccountsManager() {
           onOpenChange={(open) => {
             if (!open) setRevoking(undefined);
           }}
-          entityLabel={t("serviceAccounts.form.entityLabel")}
+          entityKey="serviceAccount"
           name={revoking.name}
           onConfirm={() => revoke.mutateAsync(revoking.id)}
         >

@@ -393,7 +393,7 @@ export default function AssetDetailPage() {
       <DeleteConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        entityLabel="asset"
+        entityKey="asset"
         name={asset.name}
         onConfirm={() => deleteAsset.mutateAsync(asset.id)}
         onDeleted={() => router.push("/assets")}

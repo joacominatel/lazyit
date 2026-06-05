@@ -123,7 +123,7 @@ export function AssignUserDialog({
                     {t("user")}
                   </FieldLabel>
                   <CreatableField
-                    label="user"
+                    entityKey="user"
                     renderDialog={(dialog) => (
                       <UserFormDialog
                         open={dialog.open}

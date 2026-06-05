@@ -58,8 +58,12 @@ import {
   useRestoreAsset,
 } from "@/lib/api/hooks/use-asset-mutations";
 import { useLocations } from "@/lib/api/hooks/use-locations";
-import { notifyBatchResult } from "@/lib/api/notify-batch-result";
+import {
+  type BatchVerb,
+  notifyBatchResult,
+} from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
+import type { EntityKey } from "@/lib/entity-key";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
@@ -98,6 +102,7 @@ export default function AssetsPage() {
   const t = useTranslations("assets.list");
   const tEmpty = useTranslations("assets.empty");
   const tc = useTranslations("common");
+  const tShared = useTranslations("shared");
   const statusLabel = useAssetStatusLabel();
   // `isAdmin` still gates the archived (`deleted=only`) slice: the API's `assertCanListDeleted` keeps
   // that view ADMIN-only (it was NOT migrated to a permission), so a MEMBER with asset:delete still
@@ -175,12 +180,12 @@ export default function AssetsPage() {
   /** Run a batch mutation, toast the per-id outcome, and clear the selection. */
   async function runBatch(
     run: () => Promise<BatchResult>,
-    labels: { noun: string; verb: string },
+    labels: { entityKey: EntityKey; verb: BatchVerb },
     fallback: string,
   ) {
     try {
       const result = await run();
-      notifyBatchResult(result, labels);
+      notifyBatchResult(result, { ...labels, t: tShared });
       selection.clear();
     } catch (err) {
       notifyError(err, fallback);
@@ -642,7 +647,7 @@ export default function AssetsPage() {
           <BatchActionBar
             count={selection.count}
             onClear={selection.clear}
-            noun="asset"
+            entityKey="asset"
           >
             {archived ? (
               <Button
@@ -650,7 +655,7 @@ export default function AssetsPage() {
                 onClick={() =>
                   runBatch(
                     () => batchRestore.mutateAsync(selection.selectedIds),
-                    { noun: "asset", verb: "restored" },
+                    { entityKey: "asset", verb: "restored" },
                     t("batchRestoreError"),
                   )
                 }
@@ -669,7 +674,7 @@ export default function AssetsPage() {
                           ids: selection.selectedIds,
                           status: value as AssetStatus,
                         }),
-                      { noun: "asset", verb: "updated" },
+                      { entityKey: "asset", verb: "updated" },
                       t("batchStatusError"),
                     )
                   }
@@ -691,7 +696,7 @@ export default function AssetsPage() {
                   onClick={() =>
                     runBatch(
                       () => batchDelete.mutateAsync(selection.selectedIds),
-                      { noun: "asset", verb: "deleted" },
+                      { entityKey: "asset", verb: "deleted" },
                       t("batchDeleteError"),
                     )
                   }
@@ -721,7 +726,7 @@ export default function AssetsPage() {
           onOpenChange={(open) => {
             if (!open) setDeleting(null);
           }}
-          entityLabel="asset"
+          entityKey="asset"
           name={deleting.name}
           onConfirm={() => deleteAsset.mutateAsync(deleting.id)}
         />

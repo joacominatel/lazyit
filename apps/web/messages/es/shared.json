@@ -10,7 +10,7 @@
     "bulkActions": "Acciones masivas",
     "clearSelection": "Limpiar selección",
     "selectRow": "Seleccionar fila",
-    "selectedCount": "{count, plural, =0 {Ningún {noun} seleccionado} one {# {noun} seleccionado} other {# {noun} seleccionados}}",
+    "selectedCount": "{count, plural, =0 {{entity, select, application {Ninguna aplicación seleccionada} location {Ninguna ubicación seleccionada} category {Ninguna categoría seleccionada} serviceAccount {Ninguna cuenta de servicio seleccionada} asset {Ningún activo seleccionado} consumable {Ningún consumible seleccionado} article {Ningún artículo seleccionado} user {Ningún usuario seleccionado} model {Ningún modelo seleccionado} other {Ningún elemento seleccionado}}} one {{entity, select, application {# aplicación seleccionada} location {# ubicación seleccionada} category {# categoría seleccionada} serviceAccount {# cuenta de servicio seleccionada} asset {# activo seleccionado} consumable {# consumible seleccionado} article {# artículo seleccionado} user {# usuario seleccionado} model {# modelo seleccionado} other {# elemento seleccionado}}} other {{entity, select, application {# aplicaciones seleccionadas} location {# ubicaciones seleccionadas} category {# categorías seleccionadas} serviceAccount {# cuentas de servicio seleccionadas} asset {# activos seleccionados} consumable {# consumibles seleccionados} article {# artículos seleccionados} user {# usuarios seleccionados} model {# modelos seleccionados} other {# elementos seleccionados}}}}",
     "noResults": "Sin resultados",
     "showingRange": "Mostrando <b>{from}</b>–<b>{to}</b> de <b>{total}</b>",
     "previous": "Anterior",
@@ -25,7 +25,31 @@
     "view": "Ver"
   },
   "activity": {
-    "system": "Sistema"
+    "system": "Sistema",
+    "dateGroup": {
+      "today": "Hoy",
+      "yesterday": "Ayer",
+      "earlier": "Anteriores"
+    },
+    "action": {
+      "created": "Creado",
+      "status_changed": "Estado cambiado",
+      "location_changed": "Ubicación cambiada",
+      "model_changed": "Modelo cambiado",
+      "specs_changed": "Especificaciones cambiadas",
+      "assigned": "Asignado",
+      "released": "Liberado",
+      "granted": "Otorgado",
+      "revoked": "Revocado",
+      "stock_in": "Entrada de stock",
+      "stock_out": "Salida de stock",
+      "stock_adjustment": "Ajuste de stock",
+      "updated": "Actualizado",
+      "role_changed": "Rol cambiado",
+      "password_reset_sent": "Restablecimiento de contraseña enviado",
+      "deleted": "Eliminado",
+      "restored": "Restaurado"
+    }
   },
   "empty": {},
   "errors": {
@@ -69,10 +93,10 @@
     }
   },
   "dialog": {
-    "deleteTitle": "¿Eliminar {entity}?",
+    "deleteTitle": "¿Eliminar {entity, select, asset {activo} application {aplicación} consumable {consumible} article {artículo} user {usuario} location {ubicación} model {modelo} category {categoría} serviceAccount {cuenta de servicio} other {elemento}}?",
     "deleteDescriptionPrefix": "se archivará — una eliminación lógica que lo oculta de la lista sin borrar su historial.",
-    "deleted": "{entity} eliminado",
-    "deleteError": "No se pudo eliminar {entity}",
+    "deleted": "{entity, select, application {Aplicación eliminada} location {Ubicación eliminada} category {Categoría eliminada} serviceAccount {Cuenta de servicio eliminada} asset {Activo eliminado} consumable {Consumible eliminado} article {Artículo eliminado} user {Usuario eliminado} model {Modelo eliminado} other {Elemento eliminado}}",
+    "deleteError": "No se pudo eliminar {entity, select, asset {el activo} application {la aplicación} consumable {el consumible} article {el artículo} user {el usuario} location {la ubicación} model {el modelo} category {la categoría} serviceAccount {la cuenta de servicio} other {el elemento}}",
     "cancel": "Cancelar",
     "delete": "Eliminar"
   },
@@ -123,7 +147,12 @@
     }
   },
   "field": {
-    "newEntity": "Nuevo {label}"
+    "newEntity": "{label, select, application {Nueva aplicación} location {Nueva ubicación} category {Nueva categoría} serviceAccount {Nueva cuenta de servicio} asset {Nuevo activo} consumable {Nuevo consumible} article {Nuevo artículo} user {Nuevo usuario} model {Nuevo modelo} other {Nuevo elemento}}"
+  },
+  "batch": {
+    "allSucceeded": "{verb, select, deleted {Se eliminaron} restored {Se restauraron} revoked {Se revocaron} updated {Se actualizaron} other {Se procesaron}} {count, plural, one {# {entity, select, asset {activo} application {aplicación} consumable {consumible} article {artículo} user {usuario} location {ubicación} model {modelo} category {categoría} serviceAccount {cuenta de servicio} other {elemento}}} other {# {entity, select, asset {activos} application {aplicaciones} consumable {consumibles} article {artículos} user {usuarios} location {ubicaciones} model {modelos} category {categorías} serviceAccount {cuentas de servicio} other {elementos}}}}.",
+    "noneSucceeded": "{verb, select, deleted {No se eliminó ningún} restored {No se restauró ningún} revoked {No se revocó ningún} updated {No se actualizó ningún} other {No se procesó ningún}} {entity, select, asset {activo} application {aplicación} consumable {consumible} article {artículo} user {usuario} location {ubicación} model {modelo} category {categoría} serviceAccount {cuenta de servicio} other {elemento}}. {skipped, plural, one {# omitido} other {# omitidos}}.",
+    "partial": "{verb, select, deleted {Se eliminaron} restored {Se restauraron} revoked {Se revocaron} updated {Se actualizaron} other {Se procesaron}} {count, plural, one {# {entity, select, asset {activo} application {aplicación} consumable {consumible} article {artículo} user {usuario} location {ubicación} model {modelo} category {categoría} serviceAccount {cuenta de servicio} other {elemento}}} other {# {entity, select, asset {activos} application {aplicaciones} consumable {consumibles} article {artículos} user {usuarios} location {ubicaciones} model {modelos} category {categorías} serviceAccount {cuentas de servicio} other {elementos}}}}; {skipped} omitidos."
   },
   "editor": {
     "markdownPlaceholder": "Escribe en Markdown…",

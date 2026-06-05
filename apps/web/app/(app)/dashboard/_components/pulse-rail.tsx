@@ -16,7 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { formatAssetStatus } from "../../assets/_components/asset-status-badge";
+import { useAssetStatusLabel } from "../../assets/_components/asset-status-badge";
 
 /**
  * PulseRail — the dashboard's sticky right-hand "Pulse" column (Wave 3a, ADR-0049
@@ -130,6 +130,7 @@ function AssetStatusDonut({
   fill?: boolean;
 }) {
   const t = useTranslations("dashboard");
+  const assetStatusLabel = useAssetStatusLabel();
   const segments = DONUT_STATUS_ORDER.map((status) => ({
     status,
     value: byStatus[status] ?? 0,
@@ -161,7 +162,7 @@ function AssetStatusDonut({
                       aria-hidden
                     />
                     <span className="flex-1 text-muted-foreground">
-                      {formatAssetStatus(segment.status)}
+                      {assetStatusLabel(segment.status)}
                     </span>
                     <span className="font-medium tabular-nums text-foreground">
                       {segment.value}
@@ -192,6 +193,7 @@ function DonutRing({
   total: number;
 }) {
   const t = useTranslations("dashboard");
+  const assetStatusLabel = useAssetStatusLabel();
   // Build the conic-gradient stops purely (no running-mutable cursor — React Compiler bans
   // reassignment after render): each segment's start angle is the proportional sum of all
   // preceding segment values, its end angle that plus its own. Hard stops keep wedges crisp.
@@ -210,7 +212,7 @@ function DonutRing({
     breakdown: segments
       .map(
         (segment) =>
-          `${segment.value} ${formatAssetStatus(segment.status).toLowerCase()}`,
+          `${segment.value} ${assetStatusLabel(segment.status).toLowerCase()}`,
       )
       .join(", "),
     total,

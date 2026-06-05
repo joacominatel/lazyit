@@ -34,6 +34,7 @@ import { useDashboardActivity } from "@/lib/api/hooks/use-dashboard";
  */
 export function RecentActivityPanel() {
   const t = useTranslations("dashboard");
+  const tShared = useTranslations("shared");
   const {
     data,
     isLoading,
@@ -94,9 +95,9 @@ export function RecentActivityPanel() {
             // pointer and keyboard. No new colour or motion — Tailwind utilities only (ADR-0049).
             <div className="space-y-4 lg:max-h-[calc(100vh-13rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
               {groups.map((group) => (
-                <div key={group.label}>
+                <div key={group.key}>
                   <p className="mb-2 text-xs font-medium text-muted-foreground">
-                    {group.label}
+                    {tShared(`activity.dateGroup.${group.key}`)}
                   </p>
                   <ol>
                     {group.items.map(({ item, index }, rowInGroup) => (
