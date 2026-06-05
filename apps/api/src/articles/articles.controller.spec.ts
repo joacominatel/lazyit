@@ -77,7 +77,8 @@ describe('ArticlesController POST /articles/import (upload size limit, SEC-001)'
  * array, each element validated. A single value still parses (backward-compat). Tested as a unit (the
  * method directly) — no guard/DB wiring.
  *
- * `findAll` positional args: (user, categoryId, authorId, status, q, linked, linkedTo, limit, …).
+ * `findAll` positional args:
+ * (user, categoryId, authorId, status, q, linked, linkedTo, assetId, applicationId, limit, …).
  */
 describe('ArticlesController GET /articles (multi-select filters + allowlist, #198)', () => {
   const findPage = jest.fn().mockResolvedValue({ items: [], total: 0 });
@@ -213,6 +214,109 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
     void controller.findAll(undefined);
     expect(findPage).toHaveBeenCalledWith(
       expect.objectContaining({ linked: undefined, linkedTo: undefined }),
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  // --- specific-entity link filters (assetId / applicationId, #213) --------
+
+  // A representative well-formed cuid — the shape Prisma assigns the linked rows.
+  const CUID_A = 'clh1abc0000xyz0000000abcd';
+  const CUID_B = 'clh1def0000xyz0000000efgh';
+
+  it('comma-encodes multi-value assetId into a de-duplicated cuid array (#213)', () => {
+    void controller.findAll(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      `${CUID_A},${CUID_B},${CUID_A}`,
+    );
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ assetId: [CUID_A, CUID_B] }),
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('parses a single applicationId to a one-element array (backward-compat shape, #213)', () => {
+    void controller.findAll(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      CUID_A,
+    );
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ applicationId: [CUID_A] }),
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('accepts repeated params (string[]) for assetId (#213)', () => {
+    void controller.findAll(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [CUID_A, CUID_B],
+    );
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ assetId: [CUID_A, CUID_B] }),
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('rejects a malformed cuid element in a multi-value assetId with 400 (#213)', () => {
+    expect(() =>
+      controller.findAll(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        `${CUID_A},not-a-cuid!`,
+      ),
+    ).toThrow(BadRequestException);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed cuid element in a multi-value applicationId with 400 (#213)', () => {
+    expect(() =>
+      controller.findAll(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        `${CUID_A},nope`,
+      ),
+    ).toThrow(BadRequestException);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('omits the specific-entity filters when neither param is present (#213)', () => {
+    void controller.findAll(undefined);
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ assetId: undefined, applicationId: undefined }),
       expect.anything(),
       undefined,
     );

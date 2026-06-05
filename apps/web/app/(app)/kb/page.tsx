@@ -5,14 +5,13 @@ import {
   BookOpenIcon,
   PlusIcon,
 } from "@heroicons/react/24/outline";
-import {
-  type ArticleLinkedTo,
-  type ArticleStatus,
-} from "@lazyit/shared";
+import { type ArticleLinkedTo, type ArticleStatus } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
+import { ApplicationMultiSelect } from "@/components/application-multi-select";
+import { AssetMultiSelect } from "@/components/asset-multi-select";
 import { EmptyState } from "@/components/empty-state";
 import {
   MultiSelectFilter,
@@ -26,8 +25,10 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusDot } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
+import { useApplication } from "@/lib/api/hooks/use-applications";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useArticles } from "@/lib/api/hooks/use-articles";
+import { useAsset } from "@/lib/api/hooks/use-assets";
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
@@ -35,9 +36,15 @@ import { ArticleCard } from "./_components/article-card";
 import { ImportArticleDialog } from "./_components/import-article-dialog";
 
 /** The two article statuses, as multi-select values (#198). */
-const STATUS_VALUES = ["DRAFT", "PUBLISHED"] as const satisfies readonly ArticleStatus[];
+const STATUS_VALUES = [
+  "DRAFT",
+  "PUBLISHED",
+] as const satisfies readonly ArticleStatus[];
 /** The two link-target kinds, as multi-select values (#198) — the data model has exactly these. */
-const LINKED_TO_VALUES = ["asset", "application"] as const satisfies readonly ArticleLinkedTo[];
+const LINKED_TO_VALUES = [
+  "asset",
+  "application",
+] as const satisfies readonly ArticleLinkedTo[];
 
 /** Maps a status value to its translation subkey (keeps the map exhaustive). */
 const STATUS_LABEL_KEY: Record<ArticleStatus, string> = {
@@ -53,16 +60,19 @@ const LINKED_TO_LABEL_KEY: Record<ArticleLinkedTo, string> = {
 
 /**
  * Filter param defaults — every key here is a server-side filter routed through the URL by
- * `useListParams`. `status`, `categoryId` and `linkedTo` are **multi-select** (#198): each holds a
- * comma-encoded list of values, read/written via `getFilterValues`/`setFilterValues`, and defaults
- * to `""` (the inactive sentinel — omitted from the URL + server query until set). `linked` flips to
- * `"only"` to keep just linked articles (ADR-0042); any selected `linkedTo` also implies it.
+ * `useListParams`. `status`, `categoryId`, `linkedTo`, `assetId` and `applicationId` are
+ * **multi-select** (#198/#213): each holds a comma-encoded list of values, read/written via
+ * `getFilterValues`/`setFilterValues`, and defaults to `""` (the inactive sentinel — omitted from the
+ * URL + server query until set). `linked` flips to `"only"` to keep just linked articles (ADR-0042);
+ * any selected `linkedTo` (a kind) OR `assetId`/`applicationId` (specific entities) also implies it.
  */
 const FILTER_DEFAULTS = {
   status: "",
   categoryId: "",
   linked: "ALL",
   linkedTo: "",
+  assetId: "",
+  applicationId: "",
 } as const;
 
 export default function KnowledgeBasePage() {
@@ -88,24 +98,43 @@ export default function KnowledgeBasePage() {
   const statusValues = getFilterValues("status") as ArticleStatus[];
   const categoryValues = getFilterValues("categoryId");
   const linkedToValues = getFilterValues("linkedTo") as ArticleLinkedTo[];
-  // "Linked only" is on when the explicit toggle is set OR any target kind is selected (selecting a
-  // kind implies linked=only — the backend treats multi linkedTo as linked=only).
-  const linkedOnly = filters.linked === "only" || linkedToValues.length > 0;
+  // Specific-entity link filters (#213): the chosen asset / application ids.
+  const assetIdValues = getFilterValues("assetId");
+  const applicationIdValues = getFilterValues("applicationId");
+  // "Linked only" is on when the explicit toggle is set OR any target kind (#198) OR any specific
+  // entity (#213) is selected — every narrowing implies linked=only on the backend.
+  const linkedOnly =
+    filters.linked === "only" ||
+    linkedToValues.length > 0 ||
+    assetIdValues.length > 0 ||
+    applicationIdValues.length > 0;
 
   const [importOpen, setImportOpen] = useState(false);
 
-  const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useArticles({
-      q: q || undefined,
-      status: statusValues.length > 0 ? statusValues : undefined,
-      categoryId: categoryValues.length > 0 ? categoryValues : undefined,
-      linked: linkedOnly ? "only" : undefined,
-      // linkedTo is only meaningful alongside linked=only; never send it on its own.
-      linkedTo:
-        linkedOnly && linkedToValues.length > 0 ? linkedToValues : undefined,
-      limit,
-      offset,
-    });
+  const {
+    data: page,
+    isLoading,
+    isFetching,
+    isError,
+    error,
+    refetch,
+  } = useArticles({
+    q: q || undefined,
+    status: statusValues.length > 0 ? statusValues : undefined,
+    categoryId: categoryValues.length > 0 ? categoryValues : undefined,
+    linked: linkedOnly ? "only" : undefined,
+    // linkedTo / assetId / applicationId are only meaningful alongside linked=only; never send them
+    // on their own (the toggle being off clears them anyway).
+    linkedTo:
+      linkedOnly && linkedToValues.length > 0 ? linkedToValues : undefined,
+    assetId: linkedOnly && assetIdValues.length > 0 ? assetIdValues : undefined,
+    applicationId:
+      linkedOnly && applicationIdValues.length > 0
+        ? applicationIdValues
+        : undefined,
+    limit,
+    offset,
+  });
   const { data: categories } = useArticleCategories();
   const { data: users } = useUsers();
 
@@ -120,18 +149,24 @@ export default function KnowledgeBasePage() {
   const total = page?.total ?? 0;
   const isEmpty = total === 0;
 
-  // Toggling "Linked only" writes both linked + linkedTo in ONE navigation (#217): turning it off
-  // clears both atomically (linkedTo narrowing is meaningless alone), so the prior two-write handler
-  // can't re-emit linked=only from a stale snapshot and leave the toggle stuck on.
+  // Toggling "Linked only" writes linked + every narrowing key in ONE navigation (#217): turning it
+  // off clears the kind (linkedTo) AND the specific-entity filters (assetId/applicationId, #213)
+  // atomically — all narrowing is meaningless without linked=only — so the single router.replace
+  // can't re-emit a key from a stale snapshot and leave the toggle stuck on.
   const setLinkedOnly = (next: boolean) => {
     setFilters({
       linked: next ? "only" : FILTER_DEFAULTS.linked,
       linkedTo: [],
+      assetId: [],
+      applicationId: [],
     });
   };
 
   const removeValue = (name: string, values: string[], value: string) =>
-    setFilterValues(name, values.filter((v) => v !== value));
+    setFilterValues(
+      name,
+      values.filter((v) => v !== value),
+    );
 
   // One dismissible chip per selected value (#198): status / category / linked-target each contribute
   // a chip per choice. A token-driven StatusDot carries the status hue (Activated Restraint — never
@@ -170,8 +205,24 @@ export default function KnowledgeBasePage() {
       }),
       onClear: () => removeValue("linkedTo", linkedToValues, kind),
     })),
-    // "Linked only" with no target narrowing keeps its own chip (the toggle, not a target choice).
-    ...(linkedOnly && linkedToValues.length === 0
+    // Specific-entity chips (#213): each selected asset / application resolves its own name by id, so a
+    // selection off the current search page still shows its label (mirrors the link-panel LinkRow).
+    ...assetIdValues.map((assetId) => ({
+      key: `assetId:${assetId}`,
+      label: <AssetChipLabel assetId={assetId} />,
+      onClear: () => removeValue("assetId", assetIdValues, assetId),
+    })),
+    ...applicationIdValues.map((applicationId) => ({
+      key: `applicationId:${applicationId}`,
+      label: <ApplicationChipLabel applicationId={applicationId} />,
+      onClear: () =>
+        removeValue("applicationId", applicationIdValues, applicationId),
+    })),
+    // "Linked only" with no narrowing (no kind, no specific entity) keeps its own chip (the toggle).
+    ...(linkedOnly &&
+    linkedToValues.length === 0 &&
+    assetIdValues.length === 0 &&
+    applicationIdValues.length === 0
       ? [
           {
             key: "linked",
@@ -260,13 +311,27 @@ export default function KnowledgeBasePage() {
             {t("filters.linkedOnly")}
           </Label>
           {linkedOnly ? (
-            <MultiSelectFilter
-              label={t("filters.linkedToLabelName")}
-              options={linkedToOptions}
-              selected={linkedToValues}
-              onChange={(next) => setFilterValues("linkedTo", next)}
-              className="sm:w-44"
-            />
+            <>
+              <MultiSelectFilter
+                label={t("filters.linkedToLabelName")}
+                options={linkedToOptions}
+                selected={linkedToValues}
+                onChange={(next) => setFilterValues("linkedTo", next)}
+                className="sm:w-44"
+              />
+              {/* Specific-entity pickers (#213): narrow to particular assets / applications. Assets
+                  are searched server-side (no fleet ceiling); applications are a small curated list. */}
+              <AssetMultiSelect
+                selected={assetIdValues}
+                onChange={(next) => setFilterValues("assetId", next)}
+                className="sm:w-48"
+              />
+              <ApplicationMultiSelect
+                selected={applicationIdValues}
+                onChange={(next) => setFilterValues("applicationId", next)}
+                className="sm:w-48"
+              />
+            </>
           ) : null}
         </div>
       </div>
@@ -327,6 +392,30 @@ export default function KnowledgeBasePage() {
 
       <ImportArticleDialog open={importOpen} onOpenChange={setImportOpen} />
     </div>
+  );
+}
+
+/**
+ * The label for a selected-asset filter chip (#213). Resolves the asset's name by id (`useAsset`) so a
+ * selection that has paged out of the current asset search still shows its name; falls back to the raw
+ * id while the lookup is in flight or if the asset is gone. The id itself is never translated.
+ */
+function AssetChipLabel({ assetId }: { assetId: string }) {
+  const t = useTranslations("kb");
+  const { data: asset } = useAsset(assetId);
+  return <>{t("filters.chipAsset", { value: asset?.name ?? assetId })}</>;
+}
+
+/** The label for a selected-application filter chip (#213). Resolves by id via `useApplication`. */
+function ApplicationChipLabel({ applicationId }: { applicationId: string }) {
+  const t = useTranslations("kb");
+  const { data: application } = useApplication(applicationId);
+  return (
+    <>
+      {t("filters.chipApplication", {
+        value: application?.name ?? applicationId,
+      })}
+    </>
   );
 }
 

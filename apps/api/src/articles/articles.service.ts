@@ -55,6 +55,19 @@ export interface ArticleListFilters {
    * Asset OR an Application). Implies the linked filter even if `linked` is omitted.
    */
   linkedTo?: ArticleLinkedTo[];
+  /**
+   * Narrows the linked filter to **specific** Assets (issue #213): keep only articles linked to ≥1 of
+   * these exact Assets (`links: { some: { assetId: { in } } }`). More granular than `linkedTo=asset`
+   * (any Asset) — selecting any id implies `linked=only`. OR-combines within the kind (any of these
+   * assets) and across kinds with {@link applicationId} (linked to one of these assets OR these apps).
+   */
+  assetId?: string[];
+  /**
+   * Narrows the linked filter to **specific** Applications (issue #213): keep only articles linked to
+   * ≥1 of these exact Applications (`links: { some: { applicationId: { in } } }`). The Application
+   * counterpart of {@link assetId}; selecting any id implies `linked=only`.
+   */
+  applicationId?: string[];
 }
 
 /**
@@ -193,32 +206,87 @@ export class ArticlesService {
   }
 
   /**
-   * The `linked`/`linkedTo` clause for the article list (ADR-0042 / #198). `linked=only` (or any
-   * `linkedTo`) keeps only articles with ≥1 ArticleLink via a relation `some`; `linkedTo` narrows
-   * that to one or more target kinds. **Multi-select (#198):** the selected kinds OR-combine — a
-   * single kind narrows the `some` predicate to that target column; BOTH kinds keep the unnarrowed
-   * `some: {}` (linked to an Asset OR an Application is exactly "has ≥1 link"), so the EXISTS stays
-   * one subquery. Returns `undefined` when no link filter was asked for (the list then includes both
-   * linked and unlinked articles). The `some` predicate is an EXISTS subquery — it doesn't multiply
-   * rows, so it composes cleanly with the page + count.
+   * The `linked`/`linkedTo`/`assetId`/`applicationId` clause for the article list (ADR-0042 / #198 /
+   * #213). `linked=only` (or any narrowing param) keeps only articles with ≥1 ArticleLink via a
+   * relation `some` EXISTS subquery; the narrowing composes from two layers, both implying the link
+   * filter even when `linked` is omitted:
+   *
+   *  - **kind-level (#198):** `linkedTo` keeps any link to that target *column*
+   *    (`asset` → `assetId: { not: null }`).
+   *  - **entity-level (#213):** `assetId[]` / `applicationId[]` keep only links to *those exact*
+   *    rows (`assetId: { in: [...] }`). More granular than a kind, so a specific selection **wins
+   *    within its kind** — picking specific assets narrows the asset side to `{ in }`, ignoring a
+   *    redundant `linkedTo=asset` (any asset).
+   *
+   * Per-kind the predicate is built independently (entity-level if present, else kind-level); the two
+   * kinds **OR-combine**. With a single active kind that's one `links: { some: <pred> }`. With BOTH
+   * kinds active it's `OR: [{ links: { some: assetPred } }, { links: { some: appPred } }]` — an
+   * ArticleLink is asset XOR application (a row is never both), so a single `some` carrying both
+   * columns could never match; the OR-across-two-`some` shape is what "linked to one of these assets
+   * OR one of these apps" means. The legacy kind-only "both kinds" case (`linkedTo=asset,application`
+   * with no specific ids) stays the collapsed unnarrowed `some: {}` ("has ≥1 link", one subquery),
+   * preserving #198's behavior.
+   *
+   * Returns `undefined` when no link filter was asked for (the list then includes both linked and
+   * unlinked articles). Every branch is an EXISTS subquery — it doesn't multiply rows, so it composes
+   * cleanly with the page + count.
    */
   private linkedWhere(
     filters: ArticleListFilters,
   ): Prisma.ArticleWhereInput | undefined {
     const kinds = filters.linkedTo ?? [];
-    if (!filters.linked && kinds.length === 0) return undefined;
-    const wantsAsset = kinds.includes('asset');
-    const wantsApplication = kinds.includes('application');
-    let linkWhere: Prisma.ArticleLinkWhereInput;
-    if (wantsAsset && !wantsApplication) {
-      linkWhere = { assetId: { not: null } };
-    } else if (wantsApplication && !wantsAsset) {
-      linkWhere = { applicationId: { not: null } };
-    } else {
-      // No kind narrowing (linked=only) OR both kinds selected → any link counts.
-      linkWhere = {};
+    const assetIds = filters.assetId ?? [];
+    const applicationIds = filters.applicationId ?? [];
+    const hasNarrowing =
+      kinds.length > 0 || assetIds.length > 0 || applicationIds.length > 0;
+    if (!filters.linked && !hasNarrowing) return undefined;
+
+    // Per-kind predicate: a specific-entity `{ in }` (#213) is more granular than a kind's
+    // `{ not: null }` (#198), so it wins when both are present for that kind.
+    const wantsAsset = assetIds.length > 0 || kinds.includes('asset');
+    const wantsApplication =
+      applicationIds.length > 0 || kinds.includes('application');
+    const assetPred: Prisma.ArticleLinkWhereInput | undefined = wantsAsset
+      ? assetIds.length > 0
+        ? { assetId: { in: assetIds } }
+        : { assetId: { not: null } }
+      : undefined;
+    const applicationPred: Prisma.ArticleLinkWhereInput | undefined =
+      wantsApplication
+        ? applicationIds.length > 0
+          ? { applicationId: { in: applicationIds } }
+          : { applicationId: { not: null } }
+        : undefined;
+
+    // No kind/entity narrowing at all (bare linked=only) → any link counts.
+    if (!assetPred && !applicationPred) {
+      return { links: { some: {} } };
     }
-    return { links: { some: linkWhere } };
+    // Legacy #198 fast path: BOTH kinds via `linkedTo` only (no specific ids) collapses to the
+    // unnarrowed `some: {}` — "linked to an Asset OR an Application" is exactly "has ≥1 link".
+    if (
+      assetIds.length === 0 &&
+      applicationIds.length === 0 &&
+      assetPred &&
+      applicationPred
+    ) {
+      return { links: { some: {} } };
+    }
+    // Exactly one active kind → a single `some`.
+    if (assetPred && !applicationPred) {
+      return { links: { some: assetPred } };
+    }
+    if (applicationPred && !assetPred) {
+      return { links: { some: applicationPred } };
+    }
+    // Both kinds active with at least one specific-entity narrowing → OR across two `some` EXISTS
+    // (a link row is asset XOR application, so the two columns can't co-match in one `some`).
+    return {
+      OR: [
+        { links: { some: assetPred! } },
+        { links: { some: applicationPred! } },
+      ],
+    };
   }
 
   /**
@@ -599,7 +667,11 @@ export class ArticlesService {
     filters: ReverseArticleListFilters = {},
     page: PageQuery,
   ): Promise<Page<ArticleListItem>> {
-    return this.findLinkedArticlesPage({ links: { some: { assetId } } }, filters, page);
+    return this.findLinkedArticlesPage(
+      { links: { some: { assetId } } },
+      filters,
+      page,
+    );
   }
 
   /**

@@ -112,10 +112,9 @@ deep-links unbroken).
 - `linkedTo` is now multi-kind: a single kind narrows the link `some` predicate to that target
   column (`assetId`/`applicationId` `not null`); **both kinds** keep the unnarrowed `some: {}` (linked
   to an Asset OR an Application is exactly "has ≥1 link"). Any `linkedTo` still implies `linked=only`.
-- The link universe stays **the two target TYPES** (`asset`, `application`) — the data model has
-  exactly those (article ↔ asset XOR application). Picking *specific* linked entities
-  (`assetId[]`/`applicationId[]` predicates + an entity picker) is a **deferred follow-up**, not part
-  of this change.
+- This change covers the two target TYPES (`asset`, `application`) — reading (1) of "linked target".
+  Picking *specific* linked entities (`assetId[]`/`applicationId[]` + an entity picker) — reading (2)
+  — shipped as the follow-up **#213** (next subsection).
 - **Frontend:** a reusable `MultiSelectFilter` (`apps/web/components/`, composing the vendored
   `DropdownMenu` + `DropdownMenuCheckboxItem` — no new primitive) backs each filter; selections are
   URL-synced (comma-encoded via `useListParams().setFilterValues`/`getFilterValues`) and shown as
@@ -129,6 +128,44 @@ deep-links unbroken).
   every write that touches `content` (create/import/edit) at ~200 words/min (min 1 for a non-empty
   body). The list reads it through the same typed lean `select` — no body load, and it is
   future-sortable via the ADR-0030 sort allowlist. The owner is already exposed as `authorId`.
+
+### KB list filter by specific linked entities (#213, 2026-06-05)
+
+Reading (2) of "linked target": where #198 filters by link **kind** (any Asset / any Application),
+`GET /articles` now also filters by **specific** linked entities. Two new multi-value params —
+**`assetId[]`** and **`applicationId[]`** — keep only the articles linked to ≥1 of *those exact*
+assets / applications. Same multi-value wire contract as #198 ([[0030-list-pagination-contract]]
+amendment): each is a single **comma-encoded** (or repeated) param, parsed by the controller with the
+existing **`parseCuidArrayQuery`** (each element validated as a cuid — an unknown/garbage element →
+**400**, never silently dropped), de-duplicated; a single value still parses.
+
+- **Service `linkedWhere` composition.** Per kind the predicate is built independently — a specific
+  selection (`assetId: { in: [...] }`) is **more granular than** the kind's `assetId: { not: null }`
+  (#198), so it **wins within its kind** (a redundant `linkedTo=asset` alongside specific assetIds is
+  ignored). The two kinds **OR-combine**: a single active kind is one `links: { some: <pred> }`; **both**
+  kinds active with a specific narrowing is `OR: [{ links: { some: assetPred } }, { links: { some:
+  appPred } }]` — an ArticleLink is asset XOR application (a row never carries both columns), so one
+  `some` carrying both could never match; the OR-across-two-`some` shape is what "linked to one of these
+  assets OR one of these apps" means. Selecting any specific entity **implies `linked=only`**. The
+  legacy #198 fast path (both kinds via `linkedTo` only, no specific ids → the collapsed unnarrowed
+  `some: {}`) is preserved. Soft-delete / `article:read` gating / draft-privacy (the visibility `where`
+  is ANDed *on top*) are unchanged.
+- **Shared.** `article-list.ts` gains `ArticleAssetIdFilterSchema` / `ArticleApplicationIdFilterSchema`
+  (per-element `z.cuid()` allowlists), mirroring how #198 modeled the multi-value filter elements (the
+  array shape + comma-split + 400-on-unknown live in the controller, not a zod `.array()`).
+- **Frontend.** A reusable **`EntityMultiSelect`** (`apps/web/components/` — composes the same vendored
+  Popover + cmdk Command as the #199 `Combobox`, **no new `ui/*` primitive**) backs a **searchable
+  multi-select with checkmarks**: it keeps the popover open while toggling (the #198 pattern) and shows
+  the first page on open (#218). Two thin wrappers feed it: **`AssetMultiSelect`** (server-search via the
+  `q`-driven `useAssets` — no fleet ceiling) and **`ApplicationMultiSelect`** (client-filter over the
+  small curated `useApplications` directory). Selections are URL-synced (comma-encoded via
+  `useListParams().setFilterValues`/`getFilterValues`) and shown as one removable chip per id in the
+  active-filter bar; each chip resolves its name **by id** (`useAsset`/`useApplication`) so a selection
+  off the current search page still shows its label. The pickers appear under the existing **Linked-only**
+  toggle (an additional, more granular control); toggling Linked-only off clears `linked` + `linkedTo` +
+  `assetId` + `applicationId` in **one** `setFilters` navigation (#217 — no clobber regression).
+  Activated-Restraint compliant (ADR-0049 — bone `bg-popover`, indigo only as the selected-row tint +
+  check, neutral count; motion behind `prefers-reduced-motion`).
 
 ### Reverse KB lookups become paginated + filterable (#220, 2026-06-05)
 
