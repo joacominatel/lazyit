@@ -19,6 +19,7 @@ export * from "./schemas/asset-expanded";
 export * from "./schemas/asset-history";
 export * from "./schemas/asset-list";
 export * from "./schemas/asset-model";
+export * from "./schemas/asset-model-list";
 export * from "./schemas/application-list";
 export * from "./schemas/batch";
 export * from "./schemas/config";
