@@ -17,15 +17,24 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  AssetModelListPageSchema,
   AssetModelSchema,
   CreateAssetModelSchema,
   UpdateAssetModelSchema,
 } from '@lazyit/shared';
-import { AssetModelsService } from './asset-models.service';
+import {
+  ASSET_MODEL_SORT_ALLOWLIST,
+  AssetModelsService,
+} from './asset-models.service';
 import { parseCuidQuery } from '../common/parse-cuid-query';
+import { parsePageQuery } from '../common/parse-page-query';
+import { assertCanListDeleted } from '../common/deleted-filter';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { User } from '../../generated/prisma/client';
 import { RequirePermission } from '../auth/require-permission.decorator';
 
 class AssetModelDto extends createZodDto(AssetModelSchema) {}
+class AssetModelListPageDto extends createZodDto(AssetModelListPageSchema) {}
 class CreateAssetModelDto extends createZodDto(CreateAssetModelSchema) {}
 class UpdateAssetModelDto extends createZodDto(UpdateAssetModelSchema) {}
 
@@ -37,12 +46,65 @@ export class AssetModelsController {
   @Get()
   @RequirePermission('assetModel:read')
   @ApiOperation({
-    summary: 'List asset models (excludes soft-deleted); optional category filter',
+    summary:
+      'List asset models, paged (ADR-0030); optional q search + category filter',
+  })
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description: 'Case-insensitive substring over name / manufacturer / sku.',
   })
   @ApiQuery({ name: 'categoryId', required: false })
-  @ApiOkResponse({ type: [AssetModelDto] })
-  findAll(@Query('categoryId') categoryId?: string) {
-    return this.models.findAll(parseCuidQuery(categoryId, 'categoryId'));
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: Object.keys(ASSET_MODEL_SORT_ALLOWLIST),
+    description:
+      'Server-side sort field. Unknown field → 400. Default: createdAt desc.',
+  })
+  @ApiQuery({
+    name: 'dir',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default asc when sort is set).',
+  })
+  @ApiQuery({
+    name: 'deleted',
+    required: false,
+    enum: ['active', 'only'],
+    description:
+      'Soft-delete slice. active (default) = live rows; only = archived (soft-deleted) rows — ADMIN only (403 otherwise). (ADR-0041)',
+  })
+  @ApiOkResponse({ type: AssetModelListPageDto })
+  findAll(
+    @Query('q') q?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
+  ) {
+    const pageQuery = parsePageQuery({
+      limit,
+      offset,
+      page,
+      sort,
+      dir,
+      deleted,
+    });
+    // The list route is gated only on assetModel:read (a MEMBER/VIEWER may list ACTIVE rows), so gate
+    // the privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
+    assertCanListDeleted(pageQuery.deleted, user);
+    return this.models.findPage(
+      { q, categoryId: parseCuidQuery(categoryId, 'categoryId') },
+      pageQuery,
+    );
   }
 
   @Get(':id')
