@@ -117,6 +117,7 @@ Per-resource sortable-field allowlists:
 | `GET /consumables` | `name`, `sku`, `currentStock`, `createdAt`, `updatedAt` | `name asc` |
 | `GET /users` | `firstName`, `lastName`, `email`, `role`, `createdAt` | `createdAt desc` |
 | `GET /locations` | `name`, `type`, `createdAt`, `updatedAt` | `createdAt desc` |
+| `GET /asset-models` (§8, #199) | `name`, `manufacturer`, `sku`, `createdAt`, `updatedAt` | `createdAt desc` |
 
 ### 2. Four more lists migrated onto `Page<T>` + server-side `q` + sort
 
@@ -242,6 +243,37 @@ carries `deletedAt`, so the web can render an archived badge + a Restore button.
 
 Shared helper: `apps/api/src/common/deleted-filter.ts` (`assertCanListDeleted` + `deletedWhere` +
 `includeSoftDeletedFor`). Shape: `DeletedFilterSchema` (`active` | `only`) on `PageQuerySchema`.
+
+### 8. `GET /asset-models` migrated onto `Page<T>` + server-side `q` + the searchable Combobox (issue #199)
+
+`GET /asset-models` was the last entity-picker list still returning a **raw `AssetModel[]`** (it only
+accepted a `categoryId` filter). The asset form materialized the whole list client-side just to
+populate the model `Select`. It now uses a service **`findPage({ q, categoryId }, pageQuery)`**
+(`findMany` + `count` over one `where` in a `$transaction`), with a **server-side case-insensitive
+`q`** over `name`/`manufacturer`/`sku`, the allowlisted sort, and the `deleted` slice — exactly the
+shape the other five lists use. New envelope schema: `@lazyit/shared/asset-model-list.ts`
+(`AssetModelListPageSchema = pageSchema(AssetModelSchema)`).
+
+Sort allowlist for `GET /asset-models`: `name`, `manufacturer`, `sku`, `createdAt`, `updatedAt`
+(default `createdAt desc`). Read gate unchanged (`assetModel:read`); `deleted=only` is ADMIN-gated at
+the controller via `assertCanListDeleted` (§7).
+
+**Web (no breaking change to the flat consumers).** The bare directory hook `useAssetModels` keeps its
+`AssetModel[]` contract by requesting the hard-max page (200) and `select`-ing `items` (the pattern
+`useUsers`/`useLocations` use) — so the Settings → Taxonomies table is unchanged. A new
+**`useAssetModelList({ q })`** hook returns the envelope for the searchable picker.
+
+**The reusable searchable Combobox.** A single controlled picker — `components/combobox.tsx` (Popover +
+cmdk Command) over a new vendored `components/ui/popover.tsx` (radix-ui `Popover`, no new dep) —
+replaces the plain entity `Select`s. Two modes: **client-filter** (small curated lists) and
+**server-search** (`shouldFilter={false}` + a debounced `q` fed to a paged hook). Migrated call sites:
+the assign-user + grant-access user pickers and the KB asset picker run **server-search** (users /
+assets / asset-models already paginate + search server-side); this also **removes the KB
+200-asset ceiling** that made any asset past the 200th unpickable. The asset form's model + location
+pickers are server-search; the asset-category and consumable-category pickers stay **client-filter
+only** (small, curated — no server search added there, by decision). Design follows ADR-0049 (bone
+`bg-popover`, indigo only as selection tint/check, motion via the shared enter/exit classes behind the
+`prefers-reduced-motion` guard).
 
 ## References
 

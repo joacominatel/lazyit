@@ -31,6 +31,13 @@ Each is `findMany({ where: { deletedAt: null }, orderBy: … })` with no limit. 
 The only mitigation today is scale (a 5–20-person tool has few rows) — which does not hold for articles,
 assignment history, or assets over time.
 
+> **Partial remediation (incremental, [[0030-list-pagination-contract|ADR-0030]]):** `GET /access-grants`,
+> `/assets`, `/articles`, `/applications`, `/consumables`, `/users`, `/locations` are now paginated
+> (`Page<T>` + capped page size); **`GET /asset-models` joined them under issue #199** (ADR-0030 §8 —
+> now `findPage` with server-side `q`/sort/pagination). The remaining small reference / nested-scoped
+> lists (`asset-categories`, `article-categories`, `application-categories`, `asset-assignments`) stay
+> bounded-by-scale debt until migrated.
+
 ## Impact
 
 Low today (small data, dev-only). Grows with data: large JSON serialization and DB load per request,
