@@ -145,6 +145,15 @@ nested join's `user` row is still returned with its `deletedAt`; the field is po
 link endpoints already existed (`GET/POST/DELETE /articles/:id/links`, ADMIN/MEMBER author-gated).
 Reverse lists return the lean `ArticleListItem` shape (no markdown content) and exclude DRAFTs.
 
+**Update (#220, 2026-06-05): both reverse lookups are now paginated + filterable.** They shipped as an
+unbounded `findMany`; they now return the lean **`Page<ArticleListItem>` envelope** (`take`/`skip` + a
+paired `count` over the same `where`; `limit` default 50, hard-capped 200 — rejected, not clamped) with
+`q` / `status` / `categoryId` multi-select filters (§ multi-value amendment below; unknown element →
+400). The `where` keeps its hard `status: 'PUBLISHED'` pin, so paging/filtering never leaks a draft.
+The breaking wire change (`ArticleListItem[]` → `Page<ArticleListItem>`) landed front+back in lockstep
+(`RelatedArticlesPanel` gained a debounced search + a category filter + "Load more"). See
+[[0042-article-versioning-and-linking]].
+
 ### 5. Batch (bulk) mutation endpoints — ADMIN only
 
 Multi-select actions: `POST /assets/batch/delete`, `POST /assets/batch/restore`,
@@ -281,7 +290,10 @@ A list filter that was single-choice can become **multi-select**: the client pic
 one filter; they **OR-combine within the filter** (a `{ in: [...] }` / relation-OR predicate) and
 **AND-combine across filters** (the existing per-filter `AND`). First adopter: the KB list
 (`status` / `categoryId` / `linkedTo` on `GET /articles`, [[0042-article-versioning-and-linking]]);
-the convention is generic so any list can adopt it.
+the convention is generic so any list can adopt it. **Second adopter (#220):** the reverse KB lookups
+`GET /assets/:id/articles` / `GET /applications/:id/articles` reuse the same `q` / `status` /
+`categoryId` parsing (`parseEnumArrayQuery` / `parseCuidArrayQuery`) over their own PUBLISHED-pinned
+`where`.
 
 **Wire shape = comma-encoded, one param per filter (option A).** A multi-value filter is a single
 query param whose value is a comma-joined list (`?status=DRAFT,PUBLISHED`). This matches the existing
@@ -326,6 +338,28 @@ a `string[]` the multi-value one), merges them into **one** patch, and does **on
 unit-tested (`list-params-url.test.ts`, the first `apps/web` test; revisits ADR-0012's deferred
 frontend runner with `bun test`, wired as a CI **Test web** step). Backend unchanged: after the KB
 toggle is off, `GET /articles` is called with neither `linked` nor `linkedTo`.
+
+## Amendment (2026-06-05) — server-search Combobox shows the first page on open (#218)
+
+The server-search `Combobox` (§8) used to **gate** the list behind a typed query: with 0 characters
+it rendered a "Type to search…" placeholder, so the already-fetched first page stayed hidden until the
+user typed. Each picker's hook already fires on mount with `q: undefined` (no `enabled` guard) and the
+API returns a sensible first page for an empty `q` (`buildWhere`/base `where`), so the data was present
+all along — only the rendering was gated.
+
+The gate is now **off by default**: in server-search mode with an empty query the picker renders that
+fetched first page (alongside the existing loading row and `CommandEmpty`), so opening any of the five
+server-search pickers — assign-user, grant-access user, KB asset, asset-form location, asset-form model
+— shows an initial page immediately; typing only **narrows** it via the existing debounced `q`, and
+clearing the box returns to the first page. **No new fetch** is introduced (the on-mount request is
+unchanged), no backend change, no new endpoint or param — purely a presentational change inside
+`components/combobox.tsx`.
+
+The type-to-search precondition is preserved as an **opt-in** via a new `minQueryLength` prop (default
+`0` = show first page). A caller with a directory large enough to warrant a typed precondition can pass
+`minQueryLength={1}` to restore the placeholder until the query reaches that length. No current caller
+needs it. ADR-0049 is untouched (no new colours/motion/tokens — same `bg-popover` surface, `bg-accent`
+selected tint, and `prefers-reduced-motion`-guarded popover motion).
 
 ## References
 

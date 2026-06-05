@@ -279,6 +279,150 @@
       "adminLevel": "Admin-level"
     }
   },
+  "permissionMeta": {
+    "pillars": {
+      "inventory": {
+        "label": "Inventory",
+        "description": "Assets, consumables, models, categories and locations."
+      },
+      "access": {
+        "label": "Access",
+        "description": "Applications and who can access them."
+      },
+      "knowledge": {
+        "label": "Knowledge",
+        "description": "The Knowledge Base — articles and their categories."
+      },
+      "manage": {
+        "label": "Manage",
+        "description": "Users, instance settings, the dashboard and search."
+      }
+    },
+    "permissions": {
+      "asset:read": { "label": "View assets" },
+      "asset:write": { "label": "Add & edit assets" },
+      "asset:delete": { "label": "Delete assets" },
+      "consumable:read": { "label": "View consumables" },
+      "consumable:write": { "label": "Add, edit & adjust consumables" },
+      "consumable:delete": { "label": "Delete consumables" },
+      "assetModel:read": { "label": "View asset models" },
+      "assetModel:write": { "label": "Add & edit asset models" },
+      "assetModel:delete": { "label": "Delete asset models" },
+      "category:read": { "label": "View categories" },
+      "category:write": { "label": "Add & edit categories" },
+      "category:delete": { "label": "Delete categories" },
+      "location:read": { "label": "View locations" },
+      "location:write": { "label": "Add & edit locations" },
+      "location:delete": { "label": "Delete locations" },
+      "application:read": { "label": "View applications" },
+      "application:write": { "label": "Add & edit applications" },
+      "application:delete": { "label": "Delete applications" },
+      "accessGrant:read": { "label": "See who has access" },
+      "accessGrant:write": { "label": "Edit access records (reserved)" },
+      "accessGrant:delete": { "label": "Delete access records" },
+      "accessGrant:grant": { "label": "Grant & revoke access" },
+      "article:read": { "label": "Read the Knowledge Base" },
+      "article:write": { "label": "Write & edit articles" },
+      "article:delete": { "label": "Delete articles" },
+      "user:read": { "label": "View the user directory" },
+      "user:write": { "label": "Edit user records (reserved)" },
+      "user:delete": { "label": "Delete users" },
+      "user:manage": { "label": "Administer users" },
+      "dashboard:read": { "label": "View the dashboard" },
+      "search:read": { "label": "Use global search" },
+      "logs:read": { "label": "View activity logs" },
+      "settings:read": { "label": "View instance settings" },
+      "settings:manage": { "label": "Configure the instance" }
+    },
+    "capabilities": {
+      "inventory:view": {
+        "label": "View inventory",
+        "description": "See assets, consumables, models, categories and locations."
+      },
+      "inventory:edit": {
+        "label": "Add & edit inventory",
+        "description": "Create and update assets, consumables, models, categories and locations (incl. stock adjustments)."
+      },
+      "inventory:delete": {
+        "label": "Delete inventory",
+        "description": "Archive assets, consumables, models, categories and locations."
+      },
+      "application:view": {
+        "label": "View applications",
+        "description": "Browse the application catalog."
+      },
+      "application:edit": {
+        "label": "Add & edit applications",
+        "description": "Create and update applications."
+      },
+      "application:delete": {
+        "label": "Delete applications",
+        "description": "Archive applications."
+      },
+      "accessGrant:view": {
+        "label": "See who has access",
+        "description": "View the access-grant ledger — who can access which applications."
+      },
+      "accessGrant:grant": {
+        "label": "Grant & revoke access",
+        "description": "Open, revoke and edit access grants for any user — including to sensitive applications."
+      },
+      "article:view": {
+        "label": "Read the Knowledge Base",
+        "description": "View articles and their categories."
+      },
+      "article:edit": {
+        "label": "Write & edit articles",
+        "description": "Create, update and publish Knowledge Base articles."
+      },
+      "article:delete": {
+        "label": "Delete articles",
+        "description": "Archive Knowledge Base articles."
+      },
+      "user:view": {
+        "label": "View the user directory",
+        "description": "Browse the list of users (names, emails, roles)."
+      },
+      "user:manage": {
+        "label": "Administer users",
+        "description": "Create, edit, change roles, offboard and restore users."
+      },
+      "user:delete": {
+        "label": "Delete users",
+        "description": "Permanently-style removal of user records."
+      },
+      "dashboardSearch:view": {
+        "label": "View dashboard & search",
+        "description": "See the dashboard and use global search."
+      },
+      "logs:view": {
+        "label": "View activity logs",
+        "description": "See the estate-wide activity history (Reports/Informes)."
+      },
+      "settings:view": {
+        "label": "View instance settings",
+        "description": "See the settings area (instance configuration, taxonomies)."
+      },
+      "settings:manage": {
+        "label": "Configure the instance",
+        "description": "Change instance settings and manage taxonomies — the full admin configuration surface."
+      }
+    },
+    "presets": {
+      "editor": {
+        "label": "Editor",
+        "description": "Read and edit everything except deletes and admin actions."
+      },
+      "readOnly": {
+        "label": "Read-only",
+        "description": "View access across the app (no edits)."
+      },
+      "inventoryOperator": {
+        "label": "Inventory operator",
+        "description": "Read and edit Inventory; view-only on Access, Knowledge and Manage."
+      }
+    }
+  },
   "taxonomies": {
     "title": "Taxonomies",
     "subtitle": "Manage the categories that classify records, plus the asset models assets reference.",

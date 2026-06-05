@@ -34,8 +34,15 @@ import { cn } from "@/lib/utils";
  *  - **server-search** (big, growable lists — users, assets, asset models): pass `onSearchChange`.
  *    cmdk's built-in filter is disabled (`shouldFilter={false}`); the input is debounced and the
  *    debounced query handed back so the caller can feed a `q`-driven paged hook (ADR-0030). The
- *    caller then supplies the matching `items` + `loading`. We render type-to-search / loading /
- *    empty states so the picker reads correctly to a screen reader at every step.
+ *    caller then supplies the matching `items` + `loading`. We render loading / empty states (and,
+ *    when opted in, a type-to-search hint) so the picker reads correctly to a screen reader at every
+ *    step.
+ *
+ * By default the server-search picker shows the **first page** the caller already fetched (with
+ * `q: undefined`) the moment it opens — typing only narrows it, it is never a precondition to see
+ * options (issue #218). A caller with a genuinely huge directory can opt back into a typed
+ * precondition by passing {@link ComboboxProps.minQueryLength} (e.g. `1`), which restores the
+ * type-to-search hint until the query reaches that length.
  *
  * Selection is tracked by the item's stable KEY (the entity id), never the visible label — so
  * duplicate labels never collide and the chosen value survives the list paging out from under it
@@ -87,7 +94,17 @@ export interface ComboboxProps {
    * the selection may have paged out). Falls back to the matching item's label, then the raw value.
    */
   selectedLabel?: string;
-  /** Server-search: copy shown before the user types anything (the list isn't pre-populated). */
+  /**
+   * Server-search opt-in: require at least this many typed characters before any options are shown,
+   * rendering {@link ComboboxProps.typeToSearchText} until then. Defaults to `0` — the picker shows
+   * the already-fetched first page on open and typing only narrows it (issue #218). Raise it (e.g.
+   * `1`) only for directories large enough to warrant a typed precondition.
+   */
+  minQueryLength?: number;
+  /**
+   * Server-search: copy shown before the query reaches {@link ComboboxProps.minQueryLength}. Only
+   * surfaced when `minQueryLength > 0`. Defaults to a generic "Type to search…".
+   */
   typeToSearchText?: string;
   /** Server-search loading copy (screen-reader friendly). Defaults to a generic "Searching…". */
   loadingText?: string;
@@ -108,6 +125,7 @@ export function Combobox({
   loading = false,
   debounceMs = 250,
   selectedLabel,
+  minQueryLength = 0,
   typeToSearchText = "Type to search…",
   loadingText = "Searching…",
 }: ComboboxProps) {
@@ -146,13 +164,17 @@ export function Combobox({
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
-    // Reset the query when closing so reopening starts clean (and server-search shows type-to-search).
+    // Reset the query when closing so reopening starts clean (server-search reopens on its first page).
     if (!next) setQuery("");
   }
 
-  // In server-search mode, don't render the in-memory list until the user has typed (the caller
-  // hasn't fetched anything yet); show the type-to-search hint instead.
-  const showTypeToSearch = isServerSearch && debouncedQuery.trim().length === 0;
+  // Server-search shows the already-fetched first page on open by default (issue #218). A caller that
+  // wants a typed precondition opts in via `minQueryLength > 0`; until the query reaches it we render
+  // the type-to-search hint instead of the list.
+  const showTypeToSearch =
+    isServerSearch &&
+    minQueryLength > 0 &&
+    debouncedQuery.trim().length < minQueryLength;
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>

@@ -32,15 +32,25 @@ interface QuickAdjustVars {
   delta: QuickAdjustDelta;
 }
 
-/** Bump every cached `currentStock` for `consumableId` by `delta` (detail + every list query). */
-function patchCachedStock(
+/**
+ * Bump every cached `currentStock` for `consumableId` by `delta` (detail + every list query).
+ *
+ * The detail write uses the EXACT `setQueryData(detail(id), …)`, not the prefix-matching
+ * `setQueriesData({ queryKey: detail(id) }, …)`: TanStack Query filters match by partial
+ * (prefix) key, and the movement-ledger query `detail(id)/movements/…` is nested under the
+ * detail key — so a prefix write would also run this `Consumable` updater against the movements
+ * ARRAY, spreading it into a plain object and crashing the detail page's `movements.map(…)`.
+ * The exact write hits only the unique detail entry, and stays symmetric with `onMutate`'s exact
+ * snapshot/rollback (`getQueryData`/`setQueryData` on the same key). Exported for regression test.
+ */
+export function patchCachedStock(
   queryClient: ReturnType<typeof useQueryClient>,
   consumableId: string,
   delta: number,
 ): void {
-  // Detail caches (keyed by id) — there's at most one, but match defensively.
-  queryClient.setQueriesData<Consumable>(
-    { queryKey: consumableKeys.detail(consumableId) },
+  // Detail cache (unique per id) — exact write so the nested movements query is never touched.
+  queryClient.setQueryData<Consumable>(
+    consumableKeys.detail(consumableId),
     (current) =>
       current
         ? { ...current, currentStock: current.currentStock + delta }

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { PinoLogger } from 'nestjs-pino';
 import type { Role } from '../../../generated/prisma/client';
 import type {
   CreateIdentityUserInput,
@@ -31,7 +32,17 @@ export class ZitadelIdentityProvider implements IdentityProvider {
 
   // Constructed once. Lazy config resolution lives inside the service, so this is safe at boot even
   // when ZITADEL_MGMT_* are unset (the no-op factory still builds the provider).
-  private readonly management = new ZitadelManagementService();
+  private readonly management: ZitadelManagementService;
+
+  /**
+   * `logger` is the request-scoped {@link PinoLogger} the auth module threads in via the factory
+   * (issue #219) so the management WARN lines carry the failing edit's `X-Request-Id` / `actor`
+   * (ADR-0031). It is optional: the factory / unit tests may `new` this provider with no logger, in
+   * which case the management service falls back to the static `@nestjs/common` Logger.
+   */
+  constructor(logger: PinoLogger | null = null) {
+    this.management = new ZitadelManagementService(logger);
+  }
 
   resolveExternalRef(sub: string): Promise<ExternalRef> {
     // The OIDC `sub` IS the Zitadel user id lazyit stores as externalId; no Management call needed.

@@ -4,6 +4,10 @@ import { CheckIcon } from "@heroicons/react/24/outline";
 import { PERMISSION_PRESETS, type PresetId } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
+import {
+  presetDescription,
+  presetLabel,
+} from "../../../_lib/permission-labels";
 
 interface PresetRowProps {
   /** The preset the staged set currently matches, or `"custom"` after a manual edit. */
@@ -41,10 +45,10 @@ export function PresetRow({ active, onApply }: PresetRowProps) {
             >
               <span className="flex items-center gap-1.5 text-sm font-medium">
                 {isActive && <CheckIcon className="size-4 text-primary" />}
-                {preset.label}
+                {presetLabel(t, preset.id)}
               </span>
               <span className="text-xs text-muted-foreground">
-                {preset.description}
+                {presetDescription(t, preset.id)}
               </span>
             </button>
           );

@@ -6,11 +6,16 @@ import {
   capabilityIsAboveDefaultTier,
   type Permission,
   type PermissionPillar,
-  PILLAR_META,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import {
+  capabilityDescription,
+  capabilityLabel,
+  pillarDescription,
+  pillarLabel,
+} from "../../../_lib/permission-labels";
 import {
   capabilitiesForPillar,
   capabilityIsFullyOn,
@@ -39,19 +44,20 @@ export function CapabilityGroup({
   onToggle,
 }: CapabilityGroupProps) {
   const t = useTranslations("settings");
-  const meta = PILLAR_META[pillar];
   const capabilities = capabilitiesForPillar(pillar);
 
   return (
     <section
       className="space-y-3"
       aria-label={t("roles.permissions.capabilityGroup.ariaLabel", {
-        label: meta.label,
+        label: pillarLabel(t, pillar),
       })}
     >
       <div>
-        <h3 className="text-sm font-semibold">{meta.label}</h3>
-        <p className="text-xs text-muted-foreground">{meta.description}</p>
+        <h3 className="text-sm font-semibold">{pillarLabel(t, pillar)}</h3>
+        <p className="text-xs text-muted-foreground">
+          {pillarDescription(t, pillar)}
+        </p>
       </div>
 
       <ul className="divide-y rounded-lg border">
@@ -59,6 +65,7 @@ export function CapabilityGroup({
           const fullyOn = capabilityIsFullyOn(cap, staged);
           const partiallyOn = !fullyOn && capabilityIsPartiallyOn(cap, staged);
           const aboveTier = capabilityIsAboveDefaultTier(cap);
+          const capLabel = capabilityLabel(t, cap.id);
           return (
             <li
               key={cap.id}
@@ -66,7 +73,7 @@ export function CapabilityGroup({
             >
               <div className="min-w-0 space-y-0.5">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium">{cap.label}</span>
+                  <span className="text-sm font-medium">{capLabel}</span>
                   {aboveTier && (
                     <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-500">
                       <ExclamationTriangleIcon className="size-3" />
@@ -80,13 +87,13 @@ export function CapabilityGroup({
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {cap.description}
+                  {capabilityDescription(t, cap.id)}
                 </p>
               </div>
               <Switch
                 checked={fullyOn}
                 onCheckedChange={(on) => onToggle(cap, on)}
-                aria-label={cap.label}
+                aria-label={capLabel}
                 className={cn(
                   partiallyOn && "data-unchecked:bg-amber-500/40",
                 )}
