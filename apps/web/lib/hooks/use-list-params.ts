@@ -2,6 +2,12 @@
 
 import { useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  buildFiltersPatch,
+  buildNextUrl,
+  multiFilterPatch,
+  singleFilterPatch,
+} from "./list-params-url";
 
 /**
  * URL-synced list view-state (q / filters / sort / paging) for App Router list pages.
@@ -97,6 +103,17 @@ export interface ListParams {
    */
   setFilterValues: (name: string, values: string[]) => void;
   /**
+   * Set **several** named filters in ONE navigation (#217). Each entry is encoded with the same
+   * per-key rules as the single setters — a `string` value follows {@link setFilter} (default
+   * collapses to "cleared"), a `string[]` follows {@link setFilterValues} (clean/de-dupe/
+   * comma-encode, empty clears) — then the whole patch is committed atomically with one
+   * `router.replace`. Use this whenever one handler changes two related keys (e.g. clearing
+   * `linked` + `linkedTo` together, or writing a `from`/`to` date pair): firing two separate
+   * setters instead makes the second `router.replace` overwrite the first from a stale snapshot,
+   * dropping one key (the bug this method exists to prevent). Resets to the first page.
+   */
+  setFilters: (patch: Record<string, string | string[]>) => void;
+  /**
    * Read a multi-value filter as a `string[]` (#198) — the inverse of {@link setFilterValues}.
    * Splits the comma-encoded param, trims, drops empties and de-duplicates. A single-value param
    * yields a one-element array (backward-compatible with `setFilter`); a filter at its default
@@ -157,18 +174,12 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
   }, [filterNames, filterDefaults, searchParams]);
 
   // --- writer: rebuild the param string from the current URL + a patch, then replace() ---
+  // The patch is applied as a whole (see buildNextUrl), so a multi-key patch lands in one
+  // router.replace — two keys changed together can never clobber each other (#217).
   const commit = useCallback(
     (patch: Record<string, string | number | undefined>) => {
-      const next = new URLSearchParams(searchParams.toString());
-      for (const [key, value] of Object.entries(patch)) {
-        if (value === undefined || value === "") {
-          next.delete(key);
-        } else {
-          next.set(key, String(value));
-        }
-      }
-      const qs = next.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      const href = buildNextUrl(searchParams.toString(), pathname, patch);
+      router.replace(href, { scroll: false });
     },
     [router, pathname, searchParams],
   );
@@ -204,9 +215,8 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
 
   const setFilter = useCallback(
     (name: string, value: string) => {
-      const isDefault = value === (filterDefaults[name] ?? "");
       // A filter change is a different result set → reset paging.
-      commit({ [name]: isDefault ? undefined : value, offset: undefined });
+      commit({ ...singleFilterPatch(name, value, filterDefaults), offset: undefined });
     },
     [commit, filterDefaults],
   );
@@ -214,12 +224,15 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
   const setFilterValues = useCallback(
     (name: string, values: string[]) => {
       // Comma-encode (#198): clean, de-dupe, join into the one param; empty → clear the filter.
-      const cleaned = [
-        ...new Set(values.map((v) => v.trim()).filter((v) => v !== "")),
-      ];
-      const encoded = cleaned.join(",");
-      const isDefault = encoded === "" || encoded === (filterDefaults[name] ?? "");
-      commit({ [name]: isDefault ? undefined : encoded, offset: undefined });
+      commit({ ...multiFilterPatch(name, values, filterDefaults), offset: undefined });
+    },
+    [commit, filterDefaults],
+  );
+
+  const setFilters = useCallback(
+    (patch: Record<string, string | string[]>) => {
+      // One patch → one commit → one router.replace: every key is written atomically (#217).
+      commit(buildFiltersPatch(patch, filterDefaults));
     },
     [commit, filterDefaults],
   );
@@ -294,6 +307,7 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
     toggleSort,
     setFilter,
     setFilterValues,
+    setFilters,
     getFilterValues,
     setOffset,
     setPage,
