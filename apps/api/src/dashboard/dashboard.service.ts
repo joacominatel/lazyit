@@ -38,6 +38,12 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * exclude soft-deleted rows. The lifecycle joins (AssetAssignment, AccessGrant) are NOT
  * soft-deletable, so their close markers (`releasedAt` / `revokedAt`) are filtered explicitly.
  *
+ * IMPORTANT (SEC-071): the extension only filters the operation's OWN model — it does NOT scope a
+ * relation predicate inside a `where`, nor an `include`/`select`. So a count on a non-soft-deletable
+ * top-level model (e.g. AccessGrant, AssetHistory) that wants to exclude grants/history tied to a
+ * soft-deleted parent must add `<relation>: { is: { deletedAt: null } }` BY HAND. Those explicit
+ * relation filters below are load-bearing, not redundant.
+ *
  * The queries are independent, so they run concurrently in one `Promise.all` round-trip-ish batch.
  */
 @Injectable()
@@ -74,17 +80,28 @@ export class DashboardService {
         .then((rows) => rows.length),
 
       // --- Access ------------------------------------------------------------
-      this.prisma.accessGrant.count({ where: { revokedAt: null } }),
+      // A grant on a soft-deleted (decommissioned) application is not an "active" grant for the
+      // dashboard's purposes. The relation predicate is NOT auto-scoped by the soft-delete extension
+      // (SEC-071), so `deletedAt: null` on the related Application is explicit on every grant count.
+      // (app.remove() does NOT revoke grants — the delete-side auto-revoke is a separate product/ADR
+      // call tracked in SEC-041; this only fixes the READ-side over-count.)
+      this.prisma.accessGrant.count({
+        where: { revokedAt: null, application: { is: { deletedAt: null } } },
+      }),
       this.prisma.accessGrant.count({
         where: {
           revokedAt: null,
           expiresAt: { gt: now, lte: expiryCutoff },
+          application: { is: { deletedAt: null } },
         },
       }),
-      // Active grants on critical apps. `application` is a relation filter; the related Application
-      // is auto-soft-delete-filtered, so grants whose app is soft-deleted are excluded.
+      // Active grants on critical apps. `application` is a relation filter and is NOT auto-soft-delete-
+      // filtered (SEC-071), so the live-app scope is explicit here too.
       this.prisma.accessGrant.count({
-        where: { revokedAt: null, application: { is: { isCritical: true } } },
+        where: {
+          revokedAt: null,
+          application: { is: { isCritical: true, deletedAt: null } },
+        },
       }),
 
       // --- Consumables -------------------------------------------------------
@@ -108,7 +125,11 @@ export class DashboardService {
       this.prisma.article.count({ where: { status: 'PUBLISHED' } }),
 
       // --- Recent activity ---------------------------------------------------
+      // AssetHistory is append-only (not soft-deletable), so the extension doesn't scope it; scope to
+      // live assets BY HAND so a decommissioned (soft-deleted) asset's history + jsonb payload don't
+      // surface on the summary (SEC-071). The relation filter is NOT auto-scoped either.
       this.prisma.assetHistory.findMany({
+        where: { asset: { is: { deletedAt: null } } },
         orderBy: { id: 'desc' },
         take: RECENT_ACTIVITY_LIMIT,
         select: {
