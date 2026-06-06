@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   CreateApplication,
   PageQuery,
@@ -104,6 +108,7 @@ export class ApplicationsService {
   }
 
   async create(data: CreateApplication) {
+    if (data.categoryId) await this.assertCategoryUsable(data.categoryId);
     const { metadata, ...rest } = data;
     const application = await this.prisma.application.create({
       data: {
@@ -120,6 +125,7 @@ export class ApplicationsService {
 
   async update(id: string, data: UpdateApplication) {
     await this.findOne(id); // 404 if missing or already soft-deleted
+    if (data.categoryId) await this.assertCategoryUsable(data.categoryId);
     const { metadata, ...rest } = data;
     const application = await this.prisma.application.update({
       where: { id },
@@ -173,5 +179,22 @@ export class ApplicationsService {
     // Re-index the restored application (ADR-0035).
     this.search.upsert('applications', projectApplication(restored));
     return restored;
+  }
+
+  /**
+   * 400 if categoryId doesn't reference a LIVE (non-soft-deleted) category (SEC-052). The FK alone is
+   * satisfied by a soft-deleted ApplicationCategory row, so guard it explicitly — the soft-delete
+   * read filter returns null for an archived category. Mirrors the articles `assertCategoryUsable`.
+   */
+  private async assertCategoryUsable(categoryId: string): Promise<void> {
+    const category = await this.prisma.applicationCategory.findFirst({
+      where: { id: categoryId },
+      select: { id: true },
+    });
+    if (!category) {
+      throw new BadRequestException(
+        `categoryId ${categoryId} does not reference a live category`,
+      );
+    }
   }
 }
