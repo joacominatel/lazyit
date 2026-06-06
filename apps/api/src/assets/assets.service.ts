@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   AssetStatus,
   BatchResult,
@@ -47,9 +51,16 @@ export const ASSET_SORT_ALLOWLIST = {
 // Inline relations for the expanded reads (GET /assets, GET /assets/:id): the model (+ its
 // category, which lives on the model), the location, and the *active* owners (releasedAt = null)
 // each with their user. One nested include → a constant number of queries, never N+1.
+// The soft-delete extension only scopes TOP-LEVEL reads (ADR-0032), so the soft-deletable parents
+// pulled in here (model, location, model.category — all nullable to-one) carry an explicit
+// `where: { deletedAt: null }` so a soft-deleted parent resolves to null instead of leaking its data
+// (SEC-040), matching what its own dedicated endpoint returns.
 const ASSET_RELATIONS = {
-  model: { include: { category: true } },
-  location: true,
+  model: {
+    where: { deletedAt: null },
+    include: { category: { where: { deletedAt: null } } },
+  },
+  location: { where: { deletedAt: null } },
   assignments: {
     where: { releasedAt: null },
     orderBy: { assignedAt: 'desc' },
@@ -79,15 +90,20 @@ const ASSET_LIST_SELECT = {
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
+  // Soft-deletable parents carry an explicit `where: { deletedAt: null }` (SEC-040): nested reads
+  // are NOT auto-scoped by the soft-delete extension (ADR-0032), so without this a soft-deleted
+  // model/location/category would still leak its fields through the list. A soft-deleted parent
+  // resolves to null instead (all three are nullable to-one relations).
   model: {
+    where: { deletedAt: null },
     select: {
       id: true,
       name: true,
       manufacturer: true,
-      category: { select: { id: true, name: true } },
+      category: { where: { deletedAt: null }, select: { id: true, name: true } },
     },
   },
-  location: { select: { id: true, name: true, type: true } },
+  location: { where: { deletedAt: null }, select: { id: true, name: true, type: true } },
   assignments: {
     where: { releasedAt: null },
     orderBy: { assignedAt: 'desc' },
@@ -209,10 +225,14 @@ export class AssetsService {
 
   /**
    * Create. Emits a `CREATED` history event transactionally with the insert (ADR-0033); the actor
-   * comes from the authenticated User (ADR-0038). Invalid modelId/locationId hit the FK → 400.
+   * comes from the authenticated User (ADR-0038). A supplied modelId/locationId must reference a LIVE
+   * parent (SEC-030): the FK alone is satisfied by a soft-deleted row, so guard it. A non-existent id
+   * still hits the FK → 400.
    */
   async create(data: CreateAsset, principal?: Principal) {
     const actor = this.actor.resolveActor(principal);
+    if (data.modelId) await this.assertModelUsable(data.modelId);
+    if (data.locationId) await this.assertLocationUsable(data.locationId);
     const { specs, ...rest } = data;
     const asset = await this.prisma.$transaction(async (tx) => {
       // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
@@ -243,6 +263,8 @@ export class AssetsService {
    */
   async update(id: string, data: UpdateAsset, principal?: Principal) {
     const actor = this.actor.resolveActor(principal);
+    if (data.modelId) await this.assertModelUsable(data.modelId);
+    if (data.locationId) await this.assertLocationUsable(data.locationId);
     const before = await this.prisma.asset.findFirst({
       where: { id },
       select: {
@@ -491,6 +513,37 @@ export class AssetsService {
     });
     if (!asset) {
       throw new NotFoundException(`Asset ${id} not found`);
+    }
+  }
+
+  /**
+   * 400 if modelId doesn't reference a LIVE (non-soft-deleted) AssetModel (SEC-030). The soft-delete
+   * read filter hides deleted models, so findFirst returns null for them — attaching an asset to an
+   * archived model is a client error, not a silent dangling reference. Mirrors the assignment/grant
+   * `assertAssetUsable` / `assertApplicationUsable` live-parent guards.
+   */
+  private async assertModelUsable(modelId: string): Promise<void> {
+    const model = await this.prisma.assetModel.findFirst({
+      where: { id: modelId },
+      select: { id: true },
+    });
+    if (!model) {
+      throw new BadRequestException(
+        `modelId ${modelId} does not reference a live model`,
+      );
+    }
+  }
+
+  /** 400 if locationId doesn't reference a LIVE (non-soft-deleted) Location (SEC-030). */
+  private async assertLocationUsable(locationId: string): Promise<void> {
+    const location = await this.prisma.location.findFirst({
+      where: { id: locationId },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new BadRequestException(
+        `locationId ${locationId} does not reference a live location`,
+      );
     }
   }
 
