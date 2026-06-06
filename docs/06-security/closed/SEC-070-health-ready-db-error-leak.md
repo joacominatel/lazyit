@@ -2,7 +2,7 @@
 id: SEC-070
 title: Unauthenticated /health/ready leaks the raw DB driver error (internal host/port) on failure
 severity: low
-status: open
+status: fixed
 cwe: CWE-209
 discovered: 2026-06-06
 module: health
@@ -107,3 +107,36 @@ deliberately generic and "must not echo the offending column or value"). A unit 
 - CWE-200: Exposure of Sensitive Information to an Unauthorized Actor.
 - ADR-0031 (logging — server-side error capture) · ADR-0035 (fail-soft health) · SEC-009 (the other
   public/anonymous surface; the generic-error principle mirrors `PrismaExceptionFilter`).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `6f75c92` (`fix: stop /health/ready leaking the raw DB driver error (SEC-070)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-06-06
+
+### Changes
+- `apps/api/src/health/health.service.ts`: `checkDatabase()` no longer returns `err.message`. On a DB
+  probe throw it logs the rich error server-side via the request-scoped `PinoLogger`
+  (`logger.error({ err }, 'readiness DB check failed')`, correlated by request id per ADR-0031) and
+  returns a fixed generic detail (`error: 'unreachable'`, the `DEPENDENCY_DOWN_DETAIL` constant). The
+  503/`ready: false`/`status: 'error'` semantics are unchanged — orchestrators still pull the
+  instance from rotation; only the public body detail is scrubbed.
+
+### Tests added
+- `apps/api/src/health/health.service.spec.ts`::`does not leak the raw driver message (host/IP/port)
+  on a DB connection failure` — feeds a realistic `connect ECONNREFUSED 172.18.0.2:5432` rejection and
+  asserts the returned detail contains none of the raw message, host/IP, port, or `ECONNREFUSED`.
+  Fails without the fix (the old code echoed `err.message` verbatim), passes with it.
+- `apps/api/src/health/health.service.spec.ts`::`logs the rich error server-side when the DB probe
+  throws (ADR-0031)` — asserts the full error object is handed to the server logger (so operators keep
+  the real cause off the public wire).
+- Updated the existing "reports NOT ready" test to expect the generic `'unreachable'` detail.
+
+### Verification
+- `cd apps/api && bun test src/health/` → 8 pass / 0 fail (4 service + 4 controller).
+- `cd apps/api && bunx tsc --noEmit -p tsconfig.json` → clean.
+
+### Residual risk
+None for this surface. The fix is scoped to the DB readiness check; any future dependency added to the
+readiness report must follow the same pattern (generic client detail, rich detail server-side only).
