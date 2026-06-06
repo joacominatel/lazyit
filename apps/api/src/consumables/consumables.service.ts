@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -140,15 +141,19 @@ export class ConsumablesService {
 
   /**
    * Create. `currentStock` is never set here — it starts at the schema default (0) and only moves
-   * through movements (ADR-0034). Invalid categoryId hits the FK and is mapped to 400.
+   * through movements (ADR-0034). A supplied categoryId must reference a LIVE category (SEC-052):
+   * the FK alone is satisfied by a soft-deleted row, so guard it explicitly. Invalid (non-existent)
+   * categoryId still hits the FK → 400.
    */
-  create(data: CreateConsumable) {
+  async create(data: CreateConsumable) {
+    if (data.categoryId) await this.assertCategoryUsable(data.categoryId);
     return this.prisma.consumable.create({ data });
   }
 
   /** Partial update. `currentStock` is not updatable here. 404 if missing or already soft-deleted. */
   async update(id: string, data: UpdateConsumable) {
     await this.assertExists(id);
+    if (data.categoryId) await this.assertCategoryUsable(data.categoryId);
     return this.prisma.consumable.update({ where: { id }, data });
   }
 
@@ -254,11 +259,16 @@ export class ConsumablesService {
         }
       } else {
         // ADJUSTMENT: an absolute recount. quantity is bounded to int4 by the shared schema, so no
-        // overflow is possible here. `update` 404s (P2025) if the row is missing/soft-deleted.
-        await tx.consumable.update({
-          where: { id: consumableId },
+        // overflow is possible here. Guarded updateMany (like OUT) so it can't recount a soft-deleted
+        // row — writes are NOT auto-scoped by the soft-delete extension (SEC-050), so the deletedAt
+        // filter is explicit here; no live row matched ⇒ 404.
+        const result = await tx.consumable.updateMany({
+          where: { id: consumableId, deletedAt: null },
           data: { currentStock: quantity },
         });
+        if (result.count === 0) {
+          throw new NotFoundException(`Consumable ${consumableId} not found`);
+        }
       }
 
       return tx.consumableMovement.create({
@@ -308,6 +318,24 @@ export class ConsumablesService {
     });
     if (!consumable) {
       throw new NotFoundException(`Consumable ${id} not found`);
+    }
+  }
+
+  /**
+   * 400 if categoryId doesn't reference a LIVE (non-soft-deleted) category (SEC-052). The
+   * soft-delete read filter hides deleted categories, so findFirst returns null for them — attaching
+   * a consumable to an archived category is a client error, not a silent dangling link. Mirrors the
+   * articles `assertCategoryUsable` pattern.
+   */
+  private async assertCategoryUsable(categoryId: string): Promise<void> {
+    const category = await this.prisma.consumableCategory.findFirst({
+      where: { id: categoryId },
+      select: { id: true },
+    });
+    if (!category) {
+      throw new BadRequestException(
+        `categoryId ${categoryId} does not reference a live category`,
+      );
     }
   }
 }
