@@ -1,0 +1,28 @@
+---
+description: lazyit development workflow — context-first, ask don't assume, docs sync
+alwaysApply: true
+---
+
+# Development workflow
+
+Full version: `docs/04-development/claude-workflow.md`
+
+## Order of operations for any task
+
+1. **Read `docs/` before touching code.** Check the entity notes (`docs/02-domain/entities/`), relevant ADRs (`docs/03-decisions/`), and conventions (`docs/04-development/`).
+2. **Ask the user** when a decision is missing or critical. Never assume for: data model changes, auth, deletes/migrations, security, irreversible actions.
+3. **Find the GitHub issue** before starting (see `git-workflow` rule).
+4. **Implement** following the conventions in `CLAUDE.md` and `docs/04-development/code-conventions.md`.
+5. **Update `docs/`** if core logic or behavior changed — entity notes, ADRs, conventions. Before committing, verify docs don't reference removed files or changed philosophy.
+
+## Front/back split
+
+When a task spans **both frontend and backend**: delegate to **separate subagents** (one frontend, one backend). The orchestrating agent defines the task and the shared contract (`@lazyit/shared`); it does not implement both sides.
+
+## External libraries
+
+Always check current official docs (via Context7 MCP or web search) before using or upgrading a library. Do not rely on memory — API surfaces change.
+
+## Docs are the source of truth
+
+`docs/` > `CLAUDE.md` > anything else. When they conflict, docs win — then update both.
