@@ -8,11 +8,15 @@ import {
   type PermissionPillar,
   PERMISSIONS,
   PERMISSION_PILLARS,
-  PILLAR_META,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  permissionLabel,
+  pillarDescription,
+  pillarLabel,
+} from "../../_lib/permission-labels";
 
 /**
  * The catalog grouped by pillar, in catalog order, computed once. A service account is authorized by
@@ -68,7 +72,7 @@ export function PermissionPicker({
     <div className="space-y-4">
       {pillars.map((pillar) => {
         const perms = PERMISSIONS_BY_PILLAR[pillar];
-        const meta = PILLAR_META[pillar];
+        const pLabel = pillarLabel(t, pillar);
         const selectedCount = perms.filter((p) => value.has(p)).length;
         const allOn = selectedCount === perms.length;
         const someOn = selectedCount > 0 && !allOn;
@@ -78,14 +82,14 @@ export function PermissionPicker({
             key={pillar}
             className="space-y-2 rounded-lg border p-3"
             aria-label={t("serviceAccounts.permissionPicker.sectionAria", {
-              label: meta.label,
+              label: pLabel,
             })}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h4 className="text-sm font-semibold">{meta.label}</h4>
+                <h4 className="text-sm font-semibold">{pLabel}</h4>
                 <p className="text-xs text-muted-foreground">
-                  {meta.description}
+                  {pillarDescription(t, pillar)}
                 </p>
               </div>
               <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -95,7 +99,7 @@ export function PermissionPicker({
                   disabled={disabled}
                   aria-label={t(
                     "serviceAccounts.permissionPicker.selectAllAria",
-                    { label: meta.label },
+                    { label: pLabel },
                   )}
                 />
                 {t("serviceAccounts.permissionPicker.all")}
@@ -118,7 +122,7 @@ export function PermissionPicker({
                       htmlFor={checkboxId}
                       className="flex flex-1 flex-wrap items-center gap-2 text-sm"
                     >
-                      <span>{PERMISSION_META[permission].label}</span>
+                      <span>{permissionLabel(t, permission)}</span>
                       <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
                         {permission}
                       </code>

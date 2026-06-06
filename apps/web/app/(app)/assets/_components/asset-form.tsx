@@ -3,7 +3,9 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  applyAssetModelSpecsDefaults,
   type Asset,
+  type AssetModel,
   type AssetStatus,
   AssetStatusSchema,
   cloneAssetDefaults,
@@ -139,13 +141,18 @@ export function AssetForm({
   // Specs source: the edited asset's specs, or the clone source's (deep-copied by the sanitizer).
   const specsSource = asset?.specs ?? cloneSource?.specs;
   // Split existing specs into editable scalar rows + preserved non-scalar entries.
-  const [{ rows: initialRows, preserved }] = useState(() =>
+  const [{ rows: initialRows, preserved: initialPreserved }] = useState(() =>
     specsToRows(specsSource),
   );
   const [specRows, setSpecRows] = useState<CustomFieldRow[]>(initialRows);
+  const [preservedSpecs, setPreservedSpecs] =
+    useState<Record<string, unknown>>(initialPreserved);
   const [specErrors, setSpecErrors] = useState<
     Record<string, CustomFieldError>
   >({});
+  const [modelSpecsSource, setModelSpecsSource] = useState<string | undefined>(
+    undefined,
+  );
   // Did the asset arrive with any specs? Used to clear them on edit (see onSubmit).
   const hadSpecs = asset?.specs != null && Object.keys(asset.specs).length > 0;
 
@@ -156,6 +163,39 @@ export function AssetForm({
     defaultValues: toFormValues(asset, cloneSource),
   });
 
+  function applyModelSpecs(model: AssetModel) {
+    if (isEdit) return;
+    const currentSpecs = rowsToSpecs(specRows, preservedSpecs);
+    const merged = applyAssetModelSpecsDefaults(model.specs, currentSpecs);
+    const { rows, preserved } = specsToRows(merged);
+    setSpecRows(rows);
+    setPreservedSpecs(preserved);
+    setSpecErrors({});
+    setModelSpecsSource(
+      model.specs && Object.keys(model.specs).length > 0
+        ? `${model.manufacturer} ${model.name}`
+        : undefined,
+    );
+  }
+
+  const specLabels = {
+    label: t("customFields.label"),
+    description: t("customFields.description"),
+    empty: t("customFields.empty"),
+    namePlaceholder: t("customFields.namePlaceholder"),
+    valuePlaceholder: t("customFields.valuePlaceholder"),
+    removeFieldTitle: t("customFields.removeFieldTitle"),
+    addField: t("customFields.addField"),
+    nameRequired: t("customFields.nameRequired"),
+    duplicateName: t("customFields.duplicateName"),
+    fieldNameLabel: (index: number) =>
+      t("customFields.fieldNameLabel", { index }),
+    fieldValueLabel: (index: number) =>
+      t("customFields.fieldValueLabel", { index }),
+    removeFieldLabel: (index: number) =>
+      t("customFields.removeFieldLabel", { index }),
+  };
+
   const onSubmit = form.handleSubmit((values) => {
     // Validate the custom-field rows (non-empty + unique names); abort on any error.
     const { errors, ok } = validateRows(specRows);
@@ -163,7 +203,7 @@ export function AssetForm({
     if (!ok) return;
 
     // Serialize rows into the specs object, merging preserved non-scalar entries.
-    let specs = rowsToSpecs(specRows, preserved);
+    let specs = rowsToSpecs(specRows, preservedSpecs);
     // On edit, if the user cleared every field but the asset previously had specs,
     // send `{}` to actually clear them (an omitted key is a no-op in a PATCH).
     if (isEdit && specs === undefined && hadSpecs) specs = {};
@@ -263,16 +303,22 @@ export function AssetForm({
                     <CreateAssetModelDialog
                       open={dialog.open}
                       onOpenChange={dialog.onOpenChange}
-                      onCreated={(model) => field.onChange(model.id)}
+                      onCreated={(model) => {
+                        field.onChange(model.id);
+                        applyModelSpecs(model);
+                      }}
                     />
                   )}
                 >
                   <AssetModelCombobox
                     id="modelId"
                     value={field.value ?? ""}
-                    onValueChange={(value) =>
-                      field.onChange(value === "" ? undefined : value)
-                    }
+                    onValueChange={(value) => {
+                      const next = value === "" ? undefined : value;
+                      field.onChange(next);
+                      setModelSpecsSource(undefined);
+                    }}
+                    onModelSelect={applyModelSpecs}
                     placeholder={t("modelPlaceholder")}
                     searchPlaceholder={t("searchModel")}
                     emptyText={t("noModels")}
@@ -433,6 +479,14 @@ export function AssetForm({
         <CustomFieldsEditor
           rows={specRows}
           errors={specErrors}
+          labels={specLabels}
+          note={
+            modelSpecsSource
+              ? t("customFields.copiedFromModel", {
+                  model: modelSpecsSource,
+                })
+              : undefined
+          }
           onChange={(rows) => {
             setSpecRows(rows);
             if (Object.keys(specErrors).length > 0) setSpecErrors({});

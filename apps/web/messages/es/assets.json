@@ -105,7 +105,8 @@
       "removeFieldTitle": "Quitar campo",
       "addField": "Agregar campo",
       "nameRequired": "El nombre es obligatorio.",
-      "duplicateName": "Nombre de campo duplicado."
+      "duplicateName": "Nombre de campo duplicado.",
+      "copiedFromModel": "Copiado desde {model}. Cambia lo que necesites para esta unidad."
     }
   },
   "detail": {

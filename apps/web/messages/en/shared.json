@@ -18,11 +18,16 @@
     "sortBy": "Sort by {label}",
     "sortByColumn": "Sort by column"
   },
-  "detail": {
-    "relatedArticlesTitle": "Related articles",
-    "loadingRunbooks": "Loading runbooks…",
-    "noLinkedArticles": "No knowledge-base articles are linked yet. Link a runbook from the article's page to surface it here.",
-    "view": "View"
+  "relatedArticles": {
+    "title": "Related articles",
+    "searchLabel": "Search related articles",
+    "searchPlaceholder": "Search runbooks…",
+    "categoryFilterLabel": "Category",
+    "view": "View",
+    "loadMore": "Load more",
+    "loadError": "Could not load related articles. Please try again.",
+    "noMatches": "No related articles match your search.",
+    "noLinkedArticles": "No knowledge-base articles are linked yet. Link a runbook from the article's page to surface it here."
   },
   "activity": {
     "system": "System",
@@ -120,7 +125,9 @@
   },
   "multiSelect": {
     "triggerLabelWithCount": "{label} ({count} selected)",
-    "empty": "No options"
+    "empty": "No options",
+    "searchPlaceholder": "Search…",
+    "loading": "Searching…"
   },
   "search": {
     "trigger": "Search",

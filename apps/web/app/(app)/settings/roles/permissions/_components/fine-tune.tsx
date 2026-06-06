@@ -7,13 +7,13 @@ import {
 import {
   isAboveDefaultTier,
   type Permission,
-  PERMISSION_META,
   PERMISSIONS,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { permissionLabel } from "../../../_lib/permission-labels";
 
 interface FineTuneProps {
   /** The edited role's staged permission set. */
@@ -92,7 +92,7 @@ export function FineTune({ staged, onToggle }: FineTuneProps) {
                             }
                             aria-label={p}
                           />
-                          <span className="flex-1">{PERMISSION_META[p].label}</span>
+                          <span className="flex-1">{permissionLabel(t, p)}</span>
                           <code className="text-[11px] text-muted-foreground">
                             {p}
                           </code>

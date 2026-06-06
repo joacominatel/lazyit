@@ -188,6 +188,15 @@ describe('ArticlesService', () => {
         [{ data: Record<string, unknown> }]
       >
     ).at(-1)![0].data;
+  // Normalized page window for the reverse KB lookups (#220) — the controller passes this shape.
+  const REVERSE_PAGE = { limit: 50, offset: 0, deleted: 'active' as const };
+  // The `where` of the LAST `article.findMany` call — the reverse lookups build a `{ AND: [...] }`.
+  const lastReverseWhere = (): { AND: Array<Record<string, unknown>> } =>
+    (
+      article.findMany.mock.calls as Array<
+        [{ where: { AND: Array<Record<string, unknown>> } }]
+      >
+    ).at(-1)![0].where;
 
   // --- create --------------------------------------------------------------
 
@@ -410,6 +419,96 @@ describe('ArticlesService', () => {
         undefined,
       );
       expect(listWhere().AND).toContainEqual({ links: { some: {} } });
+    });
+
+    // --- specific-entity link filters (#213) -------------------------------
+
+    it('assetId=[as1, as2] narrows to articles linked to one of those exact assets (`{ in }`, #213)', async () => {
+      await service.findPage({ assetId: ['as1', 'as2'] }, PAGE, undefined);
+      expect(listWhere().AND).toContainEqual({
+        links: { some: { assetId: { in: ['as1', 'as2'] } } },
+      });
+    });
+
+    it('applicationId=[app1] narrows to articles linked to that exact application (`{ in }`, #213)', async () => {
+      await service.findPage({ applicationId: ['app1'] }, PAGE, undefined);
+      expect(listWhere().AND).toContainEqual({
+        links: { some: { applicationId: { in: ['app1'] } } },
+      });
+    });
+
+    it('a specific assetId selection implies linked=only even without the linked param (#213)', async () => {
+      // No `linked` passed — the entity selection alone produces a `links` clause (linked-only).
+      await service.findPage({ assetId: ['as1'] }, PAGE, undefined);
+      const and = listWhere().AND;
+      expect(and.some((c) => 'links' in c)).toBe(true);
+    });
+
+    it('a specific assetId selection WINS over a redundant linkedTo=asset (entity narrowing, #213)', async () => {
+      // linkedTo=asset is "any asset"; the specific ids are more granular, so the `{ in }` wins —
+      // the broad `{ assetId: { not: null } }` is not emitted.
+      await service.findPage(
+        { linkedTo: ['asset'], assetId: ['as1'] },
+        PAGE,
+        undefined,
+      );
+      const and = listWhere().AND;
+      expect(and).toContainEqual({
+        links: { some: { assetId: { in: ['as1'] } } },
+      });
+      expect(and).not.toContainEqual({
+        links: { some: { assetId: { not: null } } },
+      });
+    });
+
+    it('assetId + applicationId OR across two `some` EXISTS (linked to these assets OR these apps, #213)', async () => {
+      await service.findPage(
+        { assetId: ['as1'], applicationId: ['app1'] },
+        PAGE,
+        undefined,
+      );
+      expect(listWhere().AND).toContainEqual({
+        OR: [
+          { links: { some: { assetId: { in: ['as1'] } } } },
+          { links: { some: { applicationId: { in: ['app1'] } } } },
+        ],
+      });
+    });
+
+    it('specific assetId + kind-only linkedTo=application → entity `{ in }` ORs with the broad app kind (#213)', async () => {
+      // Asset side narrows to the specific id; application side stays the broad kind predicate.
+      await service.findPage(
+        { assetId: ['as1'], linkedTo: ['application'] },
+        PAGE,
+        undefined,
+      );
+      expect(listWhere().AND).toContainEqual({
+        OR: [
+          { links: { some: { assetId: { in: ['as1'] } } } },
+          { links: { some: { applicationId: { not: null } } } },
+        ],
+      });
+    });
+
+    it('empty assetId/applicationId arrays are omitted (no specific-entity `links` clause, #213)', async () => {
+      await service.findPage(
+        { assetId: [], applicationId: [] },
+        PAGE,
+        undefined,
+      );
+      const and = listWhere().AND;
+      expect(and.some((c) => 'links' in c || 'OR' in c)).toBe(false);
+    });
+
+    it('the specific-entity filter is ANDed on TOP of the visibility rule (draft privacy still honored, #213)', async () => {
+      await service.findPage({ assetId: ['as1'] }, PAGE, AUTHOR_USER as never);
+      const and = listWhere().AND;
+      expect(and[0]).toEqual({
+        OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: AUTHOR }],
+      });
+      expect(and).toContainEqual({
+        links: { some: { assetId: { in: ['as1'] } } },
+      });
     });
 
     it('the linked filter is ANDed on TOP of the visibility rule (draft privacy still honored)', async () => {
@@ -1160,39 +1259,123 @@ describe('ArticlesService', () => {
       ).resolves.toEqual([{ id: 'link1', articleId: 'a' }]);
 
       article.findMany.mockResolvedValueOnce([
-        { id: 'a', status: 'PUBLISHED' },
+        { id: 'a', status: 'PUBLISHED', _count: { links: 1 } },
       ]);
-      await service.findArticlesForAsset('as1');
-      const where = (
-        article.findMany.mock.calls as Array<
-          [{ where: Record<string, unknown> }]
-        >
-      ).at(-1)![0].where;
-      expect(where).toMatchObject({
-        status: 'PUBLISHED',
-        links: { some: { assetId: 'as1' } },
-      });
+      await service.findArticlesForAsset('as1', {}, REVERSE_PAGE);
+      const and = lastReverseWhere().AND;
+      // The hard PUBLISHED pin + the asset scope are the first two AND clauses.
+      expect(and).toContainEqual({ status: 'PUBLISHED' });
+      expect(and).toContainEqual({ links: { some: { assetId: 'as1' } } });
     });
 
-    it('reverse lookup for an application lists only PUBLISHED linked articles (lean shape)', async () => {
+    it('reverse lookup for an application returns a PUBLISHED-only PAGE (lean shape, flattened linkCount)', async () => {
+      // findMany returns the lean rows (nested `_count.links`); count returns the matching total.
       article.findMany.mockResolvedValueOnce([
-        { id: 'a', status: 'PUBLISHED' },
+        { id: 'a', status: 'PUBLISHED', _count: { links: 2 } },
       ]);
+      article.count.mockResolvedValueOnce(1);
 
-      await service.findArticlesForApplication('app1');
+      const result = await service.findArticlesForApplication(
+        'app1',
+        {},
+        REVERSE_PAGE,
+      );
+
+      // Page envelope (ADR-0030): { items, total, limit, offset }; `_count.links` flattened to linkCount.
+      expect(result).toMatchObject({ total: 1, limit: 50, offset: 0 });
+      expect(result.items).toEqual([
+        { id: 'a', status: 'PUBLISHED', linkCount: 2 },
+      ]);
 
       const call = (
         article.findMany.mock.calls as Array<
-          [{ where: Record<string, unknown>; select: Record<string, unknown> }]
+          [
+            {
+              where: Record<string, unknown>;
+              select: Record<string, unknown>;
+              take: number;
+              skip: number;
+            },
+          ]
         >
       ).at(-1)![0];
-      expect(call.where).toMatchObject({
-        status: 'PUBLISHED',
-        links: { some: { applicationId: 'app1' } },
-      });
+      expect((call.where as { AND: Array<Record<string, unknown>> }).AND).toEqual(
+        expect.arrayContaining([
+          { status: 'PUBLISHED' },
+          { links: { some: { applicationId: 'app1' } } },
+        ]),
+      );
+      // take/skip thread the page window (ADR-0030) — no unbounded findMany.
+      expect(call.take).toBe(50);
+      expect(call.skip).toBe(0);
       // Lean projection: the full markdown `content` is never requested.
       expect(call.select).not.toHaveProperty('content');
       expect(call.select).toHaveProperty('excerpt', true);
+    });
+
+    it('paginates the reverse list: take/skip thread the window and total echoes the matching count (#220)', async () => {
+      article.findMany.mockResolvedValueOnce([
+        { id: 'b', status: 'PUBLISHED', _count: { links: 0 } },
+      ]);
+      article.count.mockResolvedValueOnce(42);
+
+      const result = await service.findArticlesForAsset('as1', {}, {
+        limit: 10,
+        offset: 20,
+        deleted: 'active' as const,
+      });
+
+      // The total comes from the paired count over the same where — not the page length (1 row here).
+      expect(result.total).toBe(42);
+      expect(result.limit).toBe(10);
+      expect(result.offset).toBe(20);
+      const call = (
+        article.findMany.mock.calls as Array<[{ take: number; skip: number }]>
+      ).at(-1)![0];
+      expect(call.take).toBe(10);
+      expect(call.skip).toBe(20);
+      // The count runs over the SAME where as the page (so total can't drift).
+      const findManyWhere = lastReverseWhere();
+      const countWhere = (
+        article.count.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      ).at(-1)![0].where;
+      expect(countWhere).toEqual(findManyWhere);
+    });
+
+    it('reverse list filters by q (case-insensitive substring over title/excerpt) (#220)', async () => {
+      article.findMany.mockResolvedValueOnce([]);
+      await service.findArticlesForApplication('app1', { q: 'vpn' }, REVERSE_PAGE);
+      expect(lastReverseWhere().AND).toContainEqual({
+        OR: [
+          { title: { contains: 'vpn', mode: 'insensitive' } },
+          { excerpt: { contains: 'vpn', mode: 'insensitive' } },
+        ],
+      });
+    });
+
+    it('reverse list filters by categoryId (multi-select IN) (#220)', async () => {
+      article.findMany.mockResolvedValueOnce([]);
+      await service.findArticlesForAsset(
+        'as1',
+        { categoryId: ['c1', 'c2'] },
+        REVERSE_PAGE,
+      );
+      expect(lastReverseWhere().AND).toContainEqual({
+        categoryId: { in: ['c1', 'c2'] },
+      });
+    });
+
+    it('reverse list status filter is ANDed on top of the hard PUBLISHED pin — never widens it (no draft leak) (#220)', async () => {
+      article.findMany.mockResolvedValueOnce([]);
+      // Even if a caller passes status=DRAFT, the PUBLISHED pin stays — the intersection matches nothing.
+      await service.findArticlesForApplication(
+        'app1',
+        { status: ['DRAFT'] },
+        REVERSE_PAGE,
+      );
+      const and = lastReverseWhere().AND;
+      expect(and).toContainEqual({ status: 'PUBLISHED' });
+      expect(and).toContainEqual({ status: { in: ['DRAFT'] } });
     });
   });
 

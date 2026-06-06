@@ -199,14 +199,76 @@ describe('SearchService', () => {
 
       expect(client.multiSearch).toHaveBeenCalledWith({
         queries: [
-          { indexUid: 'assets', q: 'srv', limit: 10 },
-          { indexUid: 'users', q: 'srv', limit: 10 },
+          {
+            indexUid: 'assets',
+            q: 'srv',
+            limit: 10,
+            attributesToRetrieve: [
+              'id',
+              'name',
+              'serial',
+              'assetTag',
+              'status',
+              'notes',
+            ],
+          },
+          {
+            indexUid: 'users',
+            q: 'srv',
+            limit: 10,
+            attributesToRetrieve: ['id', 'firstName', 'lastName', 'email'],
+          },
         ],
       });
       expect(result).toEqual({
         assets: { hits: [{ id: 'a1', name: 'SRV-01' }], total: 7 },
         users: { hits: [{ id: 'u1', email: 'a@b.com' }], total: 2 },
       });
+    });
+
+    // SEC-061: every per-index query must pin attributesToRetrieve to the shared *HitSchema fields,
+    // so Meili never ships large/searchable-only blobs (article `content`) back in a hit.
+    it('restricts retrieved attributes per index and never returns article content', async () => {
+      client.multiSearch.mockResolvedValue({ results: [] });
+
+      await service.search({
+        q: 'srv',
+        entities: ['assets', 'articles'],
+        limit: 10,
+      });
+
+      const [params] = client.multiSearch.mock.calls[0] as [
+        {
+          queries: Array<{
+            indexUid: string;
+            attributesToRetrieve?: string[];
+          }>;
+        },
+      ];
+      const byIndex = new Map(
+        params.queries.map((query) => [query.indexUid, query]),
+      );
+
+      // articles: content is indexed (searchable) but must not be retrievable
+      expect(byIndex.get('articles')?.attributesToRetrieve).toEqual([
+        'id',
+        'slug',
+        'title',
+        'excerpt',
+        'status',
+      ]);
+      expect(byIndex.get('articles')?.attributesToRetrieve).not.toContain(
+        'content',
+      );
+      // assets: pinned to its hit shape too
+      expect(byIndex.get('assets')?.attributesToRetrieve).toEqual([
+        'id',
+        'name',
+        'serial',
+        'assetTag',
+        'status',
+        'notes',
+      ]);
     });
 
     it('search defaults to all five indexes when entities is omitted', async () => {

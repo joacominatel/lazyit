@@ -49,6 +49,12 @@ export const deleteArticle = crud.remove;
  * articles that have ≥1 `ArticleLink`, and `linkedTo` narrows that to one or more target kinds
  * (`asset` / `application`). All allowlisted server-side — an unknown value is rejected with 400,
  * never silently ignored (ADR-0030).
+ *
+ * `assetId`/`applicationId` are the **specific-entity** link filters (#213): each is a multi-value
+ * array of cuids keeping only articles linked to ≥1 of those exact assets / applications. Values
+ * OR-combine within a param and across the two params (linked to one of these assets OR these apps);
+ * selecting any id implies `linked: "only"`. Comma-encoded like the other multi-value filters; each
+ * element is validated as a cuid server-side (unknown → 400).
  */
 export interface ArticleFilters {
   categoryId?: string[];
@@ -57,6 +63,8 @@ export interface ArticleFilters {
   q?: string;
   linked?: ArticleLinkedFilter;
   linkedTo?: ArticleLinkedTo[];
+  assetId?: string[];
+  applicationId?: string[];
   limit?: number;
   offset?: number;
 }
@@ -80,6 +88,10 @@ export function getArticles(
   if (filters.linked) params.set("linked", filters.linked);
   if (filters.linkedTo?.length)
     params.set("linkedTo", filters.linkedTo.join(","));
+  // Specific-entity link filters (#213): comma-encode each non-empty array into its one query param.
+  if (filters.assetId?.length) params.set("assetId", filters.assetId.join(","));
+  if (filters.applicationId?.length)
+    params.set("applicationId", filters.applicationId.join(","));
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));

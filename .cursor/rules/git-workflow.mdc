@@ -1,0 +1,46 @@
+---
+description: Git workflow conventions for lazyit — branching, commits, PRs
+alwaysApply: true
+---
+
+# Git workflow
+
+Full runbook: `docs/05-runbooks/git-workflow.md`. This rule summarizes the hard constraints.
+
+## Branch strategy
+
+- `master` = production, protected. Only the user merges into it.
+- `dev` = integration. Every PR lands here first.
+- Work branches: `<prefix>/issue-<n>-<slug>` cut from `dev`.
+  - Prefixes: `feat` · `fix` · `chore` · `del` · `updt` · `docs`
+  - Example: `feat/issue-42-asset-bulk-import`
+
+**Before branching**: find or open the GitHub issue (`gh issue list --search "<keywords>"`). Reuse if it exists; create with label `auto-generated` if it doesn't. If scope isn't clear → ask the user.
+
+## PRs ALWAYS target `dev`
+
+```sh
+gh pr create --base dev ...
+```
+
+Never `--base master` unless the user explicitly says so.
+
+## Commit rules
+
+- **One file per commit** (docs may be grouped in one commit).
+- Use the right prefix: `feat:` / `fix:` / `chore:` / `del:` / `updt:` / `docs:`.
+- Stage explicit files only: `git add <file>`. Never `git add -A` or `git add .`.
+- No `Co-Authored-By` or Claude/Cursor attribution trailers.
+
+## Forbidden operations
+
+Never use: `git commit --amend` · `git rebase` · `git reset` · `git push --force`
+
+These rewrite history and break the PR review trail.
+
+## PR lifecycle
+
+1. Branch → commit file-by-file → push → **tell the user you're done and wait**
+2. On the user's OK → `gh pr create --base dev` (use `.github/PULL_REQUEST_TEMPLATE.md`)
+3. Do NOT open the PR before the user approves
+4. **Agents never merge** — the user reviews, approves, and merges

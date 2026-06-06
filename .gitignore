@@ -22,3 +22,4 @@ docs/.obsidian/graph.json
 # not our skills
 .claude/skills/*
 !.claude/skills/lazyit*
+impeccable/

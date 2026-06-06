@@ -29,6 +29,14 @@ import {
   useUpdateAssetModel,
 } from "@/lib/api/hooks/use-asset-models";
 import { notifyError } from "@/lib/api/notify-error";
+import {
+  type SpecsFieldError,
+  type SpecsFieldRow,
+  rowsToSpecs,
+  SpecsFieldsEditor,
+  specsToRows,
+  validateRows,
+} from "@/components/specs-fields-editor";
 
 const FORM_ID = "asset-model-form";
 
@@ -41,9 +49,8 @@ interface FormState {
 }
 
 /**
- * Initial dialog state. Edit → from `model`. Clone → from the shared `cloneAssetModelDefaults`
- * sanitizer (name " (copy)", `sku` cleared). Otherwise blank. `specs` has no UI field here; on a
- * clone it's threaded straight into the create payload (see {@link AssetModelForm}).
+ * initial dialog state. edit → from `model`. clone → from the shared `cloneAssetModelDefaults`
+ * sanitizer (name " (copy)", `sku` cleared). otherwise blank
  */
 function toFormState(model?: AssetModel, cloneSource?: AssetModel): FormState {
   if (model) {
@@ -86,12 +93,8 @@ interface AssetModelFormDialogProps {
 }
 
 /**
- * Create/edit/clone dialog for an Asset model in the Settings → Taxonomies area. New component (does
- * NOT touch the existing inline `create-asset-model-dialog`). The thin wrapper owns the `<Dialog>`;
- * the body is a keyed inner component so it remounts with fresh state per target (`edit-`/`clone-`/
- * `new` key) — no setState-in-effect. Name + manufacturer are required; SKU, description and the
- * owning asset category are optional. Specs have no UI field (edited via the API/seed), but a clone
- * carries the source's deep-copied specs straight into the create body.
+ * create/edit/clone dialog for an asset model in settings → taxonomies. the thin wrapper owns the
+ * `<Dialog>`; the body remounts per target so stale state never leaks between edit/clone/new
  */
 export function AssetModelFormDialog({
   open,
@@ -107,7 +110,7 @@ export function AssetModelFormDialog({
       : "new";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         {open ? (
           <AssetModelForm
             key={key}
@@ -141,18 +144,46 @@ function AssetModelForm({
   const [values, setValues] = useState<FormState>(() =>
     toFormState(model, cloneSource),
   );
-  // `specs` has no UI field; on a clone, carry the deep-copied blob into the create body (computed
-  // once at mount, stable because the dialog remounts per source via its key).
-  const [clonedSpecs] = useState(() =>
-    cloneSource && !model ? cloneAssetModelDefaults(cloneSource).specs : undefined,
+  const specsSource =
+    model?.specs ??
+    (cloneSource && !model ? cloneAssetModelDefaults(cloneSource).specs : undefined);
+  const [{ rows: initialSpecRows, preserved: initialPreservedSpecs }] =
+    useState(() => specsToRows(specsSource));
+  const [specRows, setSpecRows] =
+    useState<SpecsFieldRow[]>(initialSpecRows);
+  const [preservedSpecs] = useState<Record<string, unknown>>(
+    initialPreservedSpecs,
   );
+  const [specErrors, setSpecErrors] = useState<
+    Record<string, SpecsFieldError>
+  >({});
   const [error, setError] = useState<string | undefined>(undefined);
+  const hadSpecs = model?.specs != null && Object.keys(model.specs).length > 0;
+  const specLabels = {
+    label: t("taxonomies.models.form.defaultSpecs.label"),
+    description: t("taxonomies.models.form.defaultSpecs.description"),
+    empty: t("taxonomies.models.form.defaultSpecs.empty"),
+    namePlaceholder: t("taxonomies.models.form.defaultSpecs.namePlaceholder"),
+    valuePlaceholder: t("taxonomies.models.form.defaultSpecs.valuePlaceholder"),
+    removeFieldTitle: t("taxonomies.models.form.defaultSpecs.removeFieldTitle"),
+    addField: t("taxonomies.models.form.defaultSpecs.addField"),
+    nameRequired: t("taxonomies.models.form.defaultSpecs.nameRequired"),
+    duplicateName: t("taxonomies.models.form.defaultSpecs.duplicateName"),
+    fieldNameLabel: (index: number) =>
+      t("taxonomies.models.form.defaultSpecs.fieldNameLabel", { index }),
+    fieldValueLabel: (index: number) =>
+      t("taxonomies.models.form.defaultSpecs.fieldValueLabel", { index }),
+    removeFieldLabel: (index: number) =>
+      t("taxonomies.models.form.defaultSpecs.removeFieldLabel", { index }),
+  };
 
   function set<K extends keyof FormState>(key: K, value: string) {
     setValues((prev) => ({ ...prev, [key]: value }));
   }
 
-  function buildPayload(): BuildResult {
+  function buildPayload(
+    specs: Record<string, unknown> | undefined,
+  ): BuildResult {
     const name = values.name.trim();
     const manufacturer = values.manufacturer.trim();
     if (name.length === 0) {
@@ -175,14 +206,20 @@ function AssetModelForm({
     if (sku.length > 0) payload.sku = sku;
     if (description.length > 0) payload.description = description;
     if (values.categoryId.length > 0) payload.categoryId = values.categoryId;
-    // On a clone, carry the source's deep-copied specs (no UI field) into the create body.
-    if (clonedSpecs) payload.specs = clonedSpecs;
+    if (specs !== undefined) payload.specs = specs;
     return { ok: true, payload };
   }
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const built = buildPayload();
+    const { errors, ok } = validateRows(specRows);
+    setSpecErrors(errors);
+    if (!ok) return;
+
+    let specs = rowsToSpecs(specRows, preservedSpecs);
+    if (isEdit && specs === undefined && hadSpecs) specs = {};
+
+    const built = buildPayload(specs);
     if (!built.ok) {
       setError(built.error);
       return;
@@ -301,6 +338,16 @@ function AssetModelForm({
               maxLength={2000}
             />
           </Field>
+
+          <SpecsFieldsEditor
+            rows={specRows}
+            errors={specErrors}
+            labels={specLabels}
+            onChange={(rows) => {
+              setSpecRows(rows);
+              if (Object.keys(specErrors).length > 0) setSpecErrors({});
+            }}
+          />
         </FieldGroup>
       </form>
 

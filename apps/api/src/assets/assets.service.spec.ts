@@ -31,6 +31,15 @@ type TxAssetMock = {
   update: jest.Mock;
 };
 
+type TxAssetModelMock = {
+  findFirst: jest.Mock;
+};
+
+type TxClientMock = {
+  asset: TxAssetMock;
+  assetModel: TxAssetModelMock;
+};
+
 // Shapes the create/update calls are cast to, so assertions stay type-safe (no-unsafe-* lint).
 type AssetData = Record<string, unknown>;
 type CreateCall = [{ data: AssetData }];
@@ -185,6 +194,8 @@ describe('AssetsService', () => {
   let service: AssetsService;
   let asset: PrismaAssetMock;
   let tx: TxAssetMock;
+  let txAssetModel: TxAssetModelMock;
+  let txClient: TxClientMock;
   let prisma: {
     asset: PrismaAssetMock;
     $transaction: jest.Mock;
@@ -203,6 +214,10 @@ describe('AssetsService', () => {
     };
     // The transaction client the writes go through; $transaction runs the callback with it.
     tx = { create: jest.fn(), update: jest.fn() };
+    txAssetModel = { findFirst: jest.fn() };
+    txClient = { asset: tx } as TxClientMock;
+    // keep existing transaction assertions focused on the asset delegate
+    Object.defineProperty(txClient, 'assetModel', { value: txAssetModel });
     prisma = {
       asset,
       // create/update/remove pass a CALLBACK (interactive tx); findPage passes an ARRAY of two
@@ -210,9 +225,9 @@ describe('AssetsService', () => {
       $transaction: jest.fn(
         (
           arg:
-            | ((client: { asset: TxAssetMock }) => unknown)
+            | ((client: TxClientMock) => unknown)
             | Array<Promise<unknown>>,
-        ) => (Array.isArray(arg) ? Promise.all(arg) : arg({ asset: tx })),
+        ) => (Array.isArray(arg) ? Promise.all(arg) : arg(txClient)),
       ),
     };
     // ActorService is a pure, dependency-free resolver (the guard already validated the principal), so
@@ -259,6 +274,73 @@ describe('AssetsService', () => {
     const calls = tx.create.mock.calls as CreateCall[];
     expect(calls[0][0].data).not.toHaveProperty('specs');
     expect(calls[0][0].data).toEqual(dto);
+  });
+
+  it('copies model specs into a new asset when modelId is provided without asset specs', async () => {
+    const dto = {
+      name: 'LAT-01',
+      status: 'OPERATIONAL' as const,
+      modelId: 'm1',
+    };
+    txAssetModel.findFirst.mockResolvedValue({
+      specs: { ram: '16GB', screen: '14', touch: false },
+    });
+    tx.create.mockResolvedValue({ id: 'a3', ...dto });
+
+    await service.create(dto);
+
+    expect(txAssetModel.findFirst).toHaveBeenCalledWith({
+      where: { id: 'm1' },
+      select: { specs: true },
+    });
+    expect(tx.create).toHaveBeenCalledWith({
+      data: {
+        ...dto,
+        specs: { ram: '16GB', screen: '14', touch: false },
+      },
+    });
+  });
+
+  it('merges model specs with explicit asset specs, with the asset winning conflicts', async () => {
+    const dto = {
+      name: 'LAT-02',
+      status: 'OPERATIONAL' as const,
+      modelId: 'm1',
+      specs: { ram: '32GB', assetOnly: 'yes' },
+    };
+    txAssetModel.findFirst.mockResolvedValue({
+      specs: { ram: '16GB', screen: '14', cpu: 'i5' },
+    });
+    tx.create.mockResolvedValue({ id: 'a4', ...dto });
+
+    await service.create(dto);
+
+    expect(tx.create).toHaveBeenCalledWith({
+      data: {
+        ...dto,
+        specs: {
+          ram: '32GB',
+          screen: '14',
+          cpu: 'i5',
+          assetOnly: 'yes',
+        },
+      },
+    });
+  });
+
+  it('rejects asset creation when the selected model is missing or soft-deleted', async () => {
+    const dto = {
+      name: 'LAT-03',
+      status: 'OPERATIONAL' as const,
+      modelId: 'missing-model',
+    };
+    txAssetModel.findFirst.mockResolvedValue(null);
+
+    await expect(service.create(dto)).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(tx.create).not.toHaveBeenCalled();
+    expect(history.record).not.toHaveBeenCalled();
+    expect(search.upsert).not.toHaveBeenCalled();
   });
 
   it('records a CREATED history event for the new asset in the same transaction', async () => {

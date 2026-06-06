@@ -10,10 +10,12 @@ import {
   slugify,
   type ArticleLinkedFilter,
   type ArticleLinkedTo,
+  type ArticleListItem,
   type ArticleStatus,
   type CreateArticle,
   type CreateArticleLink,
   type ImportArticle,
+  type Page,
   type PageQuery,
   type UpdateArticle,
 } from '@lazyit/shared';
@@ -53,6 +55,38 @@ export interface ArticleListFilters {
    * Asset OR an Application). Implies the linked filter even if `linked` is omitted.
    */
   linkedTo?: ArticleLinkedTo[];
+  /**
+   * Narrows the linked filter to **specific** Assets (issue #213): keep only articles linked to ≥1 of
+   * these exact Assets (`links: { some: { assetId: { in } } }`). More granular than `linkedTo=asset`
+   * (any Asset) — selecting any id implies `linked=only`. OR-combines within the kind (any of these
+   * assets) and across kinds with {@link applicationId} (linked to one of these assets OR these apps).
+   */
+  assetId?: string[];
+  /**
+   * Narrows the linked filter to **specific** Applications (issue #213): keep only articles linked to
+   * ≥1 of these exact Applications (`links: { some: { applicationId: { in } } }`). The Application
+   * counterpart of {@link assetId}; selecting any id implies `linked=only`.
+   */
+  applicationId?: string[];
+}
+
+/**
+ * Filters for the **reverse** KB lookups (`GET /assets/:id/articles`, `GET /applications/:id/articles`
+ * — #220). Mirrors the `GET /articles` multi-select convention (#198): `categoryId`/`status` are
+ * `{ in: [...] }` (OR within a filter), `q` is a case-insensitive substring over title/excerpt. The
+ * controllers parse the comma-encoded/repeated query params to arrays (validating + de-duplicating
+ * each element; an empty array is never passed) before they reach the service. Note: the reverse list
+ * is **always** PUBLISHED-only (drafts are author-private and never surface here), so a `status`
+ * filter only ever narrows *within* PUBLISHED — `status=DRAFT` validly parses but matches nothing (no
+ * draft leak). The base scope (the asset/application this list is for) is supplied separately.
+ */
+export interface ReverseArticleListFilters {
+  /** One or more categories; an article matches if its `categoryId` is in the set (#198). */
+  categoryId?: string[];
+  /** One or more statuses (#198). ANDed on top of the hard PUBLISHED pin — never widens it. */
+  status?: ArticleStatus[];
+  /** Case-insensitive substring over title/excerpt. */
+  q?: string;
 }
 
 /** The subset of a multer file the import needs. The controller passes Express.Multer.File. */
@@ -172,32 +206,87 @@ export class ArticlesService {
   }
 
   /**
-   * The `linked`/`linkedTo` clause for the article list (ADR-0042 / #198). `linked=only` (or any
-   * `linkedTo`) keeps only articles with ≥1 ArticleLink via a relation `some`; `linkedTo` narrows
-   * that to one or more target kinds. **Multi-select (#198):** the selected kinds OR-combine — a
-   * single kind narrows the `some` predicate to that target column; BOTH kinds keep the unnarrowed
-   * `some: {}` (linked to an Asset OR an Application is exactly "has ≥1 link"), so the EXISTS stays
-   * one subquery. Returns `undefined` when no link filter was asked for (the list then includes both
-   * linked and unlinked articles). The `some` predicate is an EXISTS subquery — it doesn't multiply
-   * rows, so it composes cleanly with the page + count.
+   * The `linked`/`linkedTo`/`assetId`/`applicationId` clause for the article list (ADR-0042 / #198 /
+   * #213). `linked=only` (or any narrowing param) keeps only articles with ≥1 ArticleLink via a
+   * relation `some` EXISTS subquery; the narrowing composes from two layers, both implying the link
+   * filter even when `linked` is omitted:
+   *
+   *  - **kind-level (#198):** `linkedTo` keeps any link to that target *column*
+   *    (`asset` → `assetId: { not: null }`).
+   *  - **entity-level (#213):** `assetId[]` / `applicationId[]` keep only links to *those exact*
+   *    rows (`assetId: { in: [...] }`). More granular than a kind, so a specific selection **wins
+   *    within its kind** — picking specific assets narrows the asset side to `{ in }`, ignoring a
+   *    redundant `linkedTo=asset` (any asset).
+   *
+   * Per-kind the predicate is built independently (entity-level if present, else kind-level); the two
+   * kinds **OR-combine**. With a single active kind that's one `links: { some: <pred> }`. With BOTH
+   * kinds active it's `OR: [{ links: { some: assetPred } }, { links: { some: appPred } }]` — an
+   * ArticleLink is asset XOR application (a row is never both), so a single `some` carrying both
+   * columns could never match; the OR-across-two-`some` shape is what "linked to one of these assets
+   * OR one of these apps" means. The legacy kind-only "both kinds" case (`linkedTo=asset,application`
+   * with no specific ids) stays the collapsed unnarrowed `some: {}` ("has ≥1 link", one subquery),
+   * preserving #198's behavior.
+   *
+   * Returns `undefined` when no link filter was asked for (the list then includes both linked and
+   * unlinked articles). Every branch is an EXISTS subquery — it doesn't multiply rows, so it composes
+   * cleanly with the page + count.
    */
   private linkedWhere(
     filters: ArticleListFilters,
   ): Prisma.ArticleWhereInput | undefined {
     const kinds = filters.linkedTo ?? [];
-    if (!filters.linked && kinds.length === 0) return undefined;
-    const wantsAsset = kinds.includes('asset');
-    const wantsApplication = kinds.includes('application');
-    let linkWhere: Prisma.ArticleLinkWhereInput;
-    if (wantsAsset && !wantsApplication) {
-      linkWhere = { assetId: { not: null } };
-    } else if (wantsApplication && !wantsAsset) {
-      linkWhere = { applicationId: { not: null } };
-    } else {
-      // No kind narrowing (linked=only) OR both kinds selected → any link counts.
-      linkWhere = {};
+    const assetIds = filters.assetId ?? [];
+    const applicationIds = filters.applicationId ?? [];
+    const hasNarrowing =
+      kinds.length > 0 || assetIds.length > 0 || applicationIds.length > 0;
+    if (!filters.linked && !hasNarrowing) return undefined;
+
+    // Per-kind predicate: a specific-entity `{ in }` (#213) is more granular than a kind's
+    // `{ not: null }` (#198), so it wins when both are present for that kind.
+    const wantsAsset = assetIds.length > 0 || kinds.includes('asset');
+    const wantsApplication =
+      applicationIds.length > 0 || kinds.includes('application');
+    const assetPred: Prisma.ArticleLinkWhereInput | undefined = wantsAsset
+      ? assetIds.length > 0
+        ? { assetId: { in: assetIds } }
+        : { assetId: { not: null } }
+      : undefined;
+    const applicationPred: Prisma.ArticleLinkWhereInput | undefined =
+      wantsApplication
+        ? applicationIds.length > 0
+          ? { applicationId: { in: applicationIds } }
+          : { applicationId: { not: null } }
+        : undefined;
+
+    // No kind/entity narrowing at all (bare linked=only) → any link counts.
+    if (!assetPred && !applicationPred) {
+      return { links: { some: {} } };
     }
-    return { links: { some: linkWhere } };
+    // Legacy #198 fast path: BOTH kinds via `linkedTo` only (no specific ids) collapses to the
+    // unnarrowed `some: {}` — "linked to an Asset OR an Application" is exactly "has ≥1 link".
+    if (
+      assetIds.length === 0 &&
+      applicationIds.length === 0 &&
+      assetPred &&
+      applicationPred
+    ) {
+      return { links: { some: {} } };
+    }
+    // Exactly one active kind → a single `some`.
+    if (assetPred && !applicationPred) {
+      return { links: { some: assetPred } };
+    }
+    if (applicationPred && !assetPred) {
+      return { links: { some: applicationPred } };
+    }
+    // Both kinds active with at least one specific-entity narrowing → OR across two `some` EXISTS
+    // (a link row is asset XOR application, so the two columns can't co-match in one `some`).
+    return {
+      OR: [
+        { links: { some: assetPred! } },
+        { links: { some: applicationPred! } },
+      ],
+    };
   }
 
   /**
@@ -565,30 +654,105 @@ export class ArticlesService {
   }
 
   /**
-   * Reverse lookup: the PUBLISHED articles linked to a given asset (`GET /assets/:id/articles`).
-   * DRAFTs are excluded (a draft is author-private; this list is asset-scoped, not author-scoped, so
-   * it only ever exposes team-visible articles). Returns the lean article list shape (no content).
+   * Reverse lookup: a **page** of the PUBLISHED articles linked to a given asset
+   * (`GET /assets/:id/articles`). DRAFTs are excluded (a draft is author-private; this list is
+   * asset-scoped, not author-scoped, so it only ever exposes team-visible articles). Paginated +
+   * filterable (#220): `take`/`skip` and a paired `count` over the **same** `where`, newest-updated
+   * first; optional `q`/`status`/`categoryId` filters (#198 multi-select). Returns the lean
+   * `ArticleListItem` page envelope (no content; `linkCount`/`readingMinutes` added). See ADR-0030 /
+   * ADR-0042.
    */
-  async findArticlesForAsset(assetId: string) {
-    return this.prisma.article.findMany({
-      where: { status: 'PUBLISHED', links: { some: { assetId } } },
-      orderBy: { updatedAt: 'desc' },
-      select: ARTICLE_LIST_SELECT,
-    });
+  async findArticlesForAsset(
+    assetId: string,
+    filters: ReverseArticleListFilters = {},
+    page: PageQuery,
+  ): Promise<Page<ArticleListItem>> {
+    return this.findLinkedArticlesPage(
+      { links: { some: { assetId } } },
+      filters,
+      page,
+    );
   }
 
   /**
-   * Reverse lookup: the PUBLISHED articles linked to a given application
+   * Reverse lookup: a **page** of the PUBLISHED articles linked to a given application
    * (`GET /applications/:id/articles` — "the runbook for THIS app"). Mirrors
    * {@link findArticlesForAsset}: DRAFTs are excluded (a draft is author-private; this list is
-   * application-scoped, not author-scoped), and it returns the lean article list shape (no content).
+   * application-scoped, not author-scoped), paginated + filterable (#220), and returns the lean
+   * `ArticleListItem` page envelope (no content).
    */
-  async findArticlesForApplication(applicationId: string) {
-    return this.prisma.article.findMany({
-      where: { status: 'PUBLISHED', links: { some: { applicationId } } },
-      orderBy: { updatedAt: 'desc' },
-      select: ARTICLE_LIST_SELECT,
-    });
+  async findArticlesForApplication(
+    applicationId: string,
+    filters: ReverseArticleListFilters = {},
+    page: PageQuery,
+  ): Promise<Page<ArticleListItem>> {
+    return this.findLinkedArticlesPage(
+      { links: { some: { applicationId } } },
+      filters,
+      page,
+    );
+  }
+
+  /**
+   * Shared engine for the reverse KB lookups (#220). Runs the page `findMany(take/skip)` and the
+   * `count` over the **same** `where` inside one `$transaction` (so `total` can't drift from the page)
+   * and flattens the lean rows into the `ArticleListItem` shape (`_count.links` → `linkCount`). The
+   * `where` always pins `status: 'PUBLISHED'` (drafts never leak — the scope is the linked record, not
+   * the author), ANDs the caller-supplied scope (`links: { some: { assetId|applicationId } }`) and the
+   * optional `q`/`status`/`categoryId` filters (#198). The page+count share one `where`, so a `status`
+   * filter narrowing *within* PUBLISHED is reflected identically in both.
+   */
+  private async findLinkedArticlesPage(
+    scope: Prisma.ArticleWhereInput,
+    filters: ReverseArticleListFilters,
+    page: PageQuery,
+  ): Promise<Page<ArticleListItem>> {
+    const where = this.buildReverseWhere(scope, filters);
+    const { take, skip } = offsetOf(page);
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.article.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        take,
+        skip,
+        select: ARTICLE_LIST_SELECT,
+      }),
+      this.prisma.article.count({ where }),
+    ]);
+    // Same flatten as findPage: Prisma's nested `_count.links` → the flat `linkCount` the DTO exposes.
+    const items = rows.map(({ _count, ...row }) => ({
+      ...row,
+      linkCount: _count.links,
+    })) as unknown as ArticleListItem[];
+    return pageOf(items, total, page);
+  }
+
+  /**
+   * The shared `where` for a reverse KB lookup (#220) — used identically by its page + count. Pins the
+   * hard PUBLISHED rule and the link scope, then ANDs the optional multi-select filters (#198): a
+   * `categoryId`/`status` `{ in: [...] }` (OR within the filter) and a `q` substring over title/excerpt.
+   * The controller never passes an empty filter array (an empty selection omits the filter entirely).
+   */
+  private buildReverseWhere(
+    scope: Prisma.ArticleWhereInput,
+    filters: ReverseArticleListFilters,
+  ): Prisma.ArticleWhereInput {
+    const and: Prisma.ArticleWhereInput[] = [{ status: 'PUBLISHED' }, scope];
+    if (filters.categoryId?.length) {
+      and.push({ categoryId: { in: filters.categoryId } });
+    }
+    if (filters.status?.length) {
+      and.push({ status: { in: filters.status } });
+    }
+    if (filters.q) {
+      and.push({
+        OR: [
+          { title: { contains: filters.q, mode: 'insensitive' } },
+          { excerpt: { contains: filters.q, mode: 'insensitive' } },
+        ],
+      });
+    }
+    return { AND: and };
   }
 
   // --- internals -----------------------------------------------------------

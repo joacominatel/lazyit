@@ -50,28 +50,41 @@ for years. Boring, durable technology. No Kubernetes required.
 
 ## Screenshots
 
-> [!NOTE]
-> Placeholders for now — the captures below are coming with the public launch. Each row says
-> exactly what to shoot.
+<p align="center">
+  <em>Dark mode · production UI — expand a view below to browse.</em>
+</p>
 
-<!-- TODO: screenshot — the Dashboard at /dashboard: the four pillar cards (Assets, Access,
-     Consumables, Knowledge) across the top, with the sticky right-hand "Pulse" rail showing
-     the live activity feed + quick actions. Capture at ~1440px wide, light theme. -->
-<!-- TODO: screenshot — /informes (Reports): the estate-wide activity history with the tabs,
-     the filter bar engaged (entity + actor + date range), and the CSV/print export buttons
-     visible. -->
-<!-- TODO: screenshot — the printable offboarding act (acta de baja) at
-     /users/[id]/offboarding/act: the clean print layout an operator hands over when an asset
-     or a person leaves. Use the browser's print preview. -->
-<!-- TODO: screenshot — an asset detail page at /assets/[id]: the spec sheet, the assignment
-     history timeline, and the copy-to-clipboard tag/serial. -->
+<details open>
+<summary><strong>Dashboard</strong> — pillar cards, live activity feed, and estate snapshot</summary>
+<br/>
+<p align="center">
+  <img src="brand/dashboard.png" alt="lazyit dashboard — Assets, Access, Knowledge and Consumables at a glance" width="920">
+</p>
+</details>
 
-| View | What it shows |
-| --- | --- |
-| **Dashboard** | Pillar cards + the live "Pulse" activity rail and quick actions. _(screenshot coming)_ |
-| **Reports / `/informes`** | Estate-wide activity history with tabs, filters and CSV/print export. _(screenshot coming)_ |
-| **Offboarding act** | The printable hand-over sheet for an asset or a leaver. _(screenshot coming)_ |
-| **Asset detail** | Specs, the timestamped assignment history, and copyable tag/serial. _(screenshot coming)_ |
+<details>
+<summary><strong>Assets</strong> — search, filter, and manage the full inventory</summary>
+<br/>
+<p align="center">
+  <img src="brand/assets-page.png" alt="lazyit assets page — inventory table with status, owners, and locations" width="920">
+</p>
+</details>
+
+<details>
+<summary><strong>Reports</strong> — estate-wide activity history with filters and export</summary>
+<br/>
+<p align="center">
+  <img src="brand/reports.png" alt="lazyit reports — timeline of who did what, when" width="920">
+</p>
+</details>
+
+<details>
+<summary><strong>Offboarding</strong> — guided handover, assets to return, and printable act</summary>
+<br/>
+<p align="center">
+  <img src="brand/offboard-user.png" alt="lazyit offboarding — asset return checklist and handover note" width="920">
+</p>
+</details>
 
 ---
 

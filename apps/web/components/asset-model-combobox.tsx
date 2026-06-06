@@ -1,5 +1,6 @@
 "use client";
 
+import type { AssetModel } from "@lazyit/shared";
 import { useMemo, useState } from "react";
 import { Combobox } from "@/components/combobox";
 import {
@@ -21,6 +22,7 @@ export function AssetModelCombobox({
   id,
   value,
   onValueChange,
+  onModelSelect,
   ariaInvalid,
   disabled,
   placeholder,
@@ -30,6 +32,7 @@ export function AssetModelCombobox({
   id?: string;
   value?: string;
   onValueChange: (value: string) => void;
+  onModelSelect?: (model: AssetModel) => void;
   ariaInvalid?: boolean;
   disabled?: boolean;
   placeholder?: string;
@@ -57,7 +60,11 @@ export function AssetModelCombobox({
     <Combobox
       id={id}
       value={value}
-      onValueChange={onValueChange}
+      onValueChange={(next) => {
+        onValueChange(next);
+        const model = data?.items.find((item) => item.id === next);
+        if (model) onModelSelect?.(model);
+      }}
       items={items}
       onSearchChange={setQuery}
       loading={isFetching}

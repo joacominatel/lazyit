@@ -18,11 +18,16 @@
     "sortBy": "Ordenar por {label}",
     "sortByColumn": "Ordenar por columna"
   },
-  "detail": {
-    "relatedArticlesTitle": "Artículos relacionados",
-    "loadingRunbooks": "Cargando runbooks…",
-    "noLinkedArticles": "Aún no hay artículos de la base de conocimiento vinculados. Vincula un runbook desde la página del artículo para que aparezca aquí.",
-    "view": "Ver"
+  "relatedArticles": {
+    "title": "Artículos relacionados",
+    "searchLabel": "Buscar artículos relacionados",
+    "searchPlaceholder": "Buscar runbooks…",
+    "categoryFilterLabel": "Categoría",
+    "view": "Ver",
+    "loadMore": "Cargar más",
+    "loadError": "No se pudieron cargar los artículos relacionados. Inténtalo de nuevo.",
+    "noMatches": "Ningún artículo relacionado coincide con tu búsqueda.",
+    "noLinkedArticles": "Aún no hay artículos de la base de conocimiento vinculados. Vincula un runbook desde la página del artículo para que aparezca aquí."
   },
   "activity": {
     "system": "Sistema",
@@ -120,7 +125,9 @@
   },
   "multiSelect": {
     "triggerLabelWithCount": "{label} ({count} seleccionados)",
-    "empty": "Sin opciones"
+    "empty": "Sin opciones",
+    "searchPlaceholder": "Buscar…",
+    "loading": "Buscando…"
   },
   "search": {
     "trigger": "Buscar",

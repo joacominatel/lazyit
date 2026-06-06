@@ -23,16 +23,22 @@ type PrismaModelMock = {
   update: jest.Mock;
 };
 
-// The transaction client the writes go through; $transaction runs the callback with it.
+// The transaction client the writes go through; $transaction runs the callback with it. release()
+// now closes the row with a conditional updateMany (the SEC-031 atomic check-and-set) and re-reads
+// it for the response, so the tx client exposes updateMany + findUnique too.
 type TxAssignmentMock = {
   create: jest.Mock;
   update: jest.Mock;
+  updateMany: jest.Mock;
+  findUnique: jest.Mock;
 };
 
 // Shapes the create/update calls are cast to, so assertions stay type-safe (no-unsafe-* lint).
 type AssignmentData = Record<string, unknown>;
 type CreateCall = [{ data: AssignmentData }];
-type UpdateCall = [{ where: { id: string }; data: AssignmentData }];
+type UpdateManyCall = [
+  { where: { id: string; releasedAt: null }; data: AssignmentData },
+];
 
 // A well-formed UUID used as the human actor in tests, and a service-account id (ADR-0048).
 const ACTOR_ID = '11111111-1111-1111-1111-111111111111';
@@ -74,7 +80,12 @@ describe('AssetAssignmentsService', () => {
     // tests still reach the create path; the guard tests override to null.
     asset = { findFirst: jest.fn().mockResolvedValue({ id: 'a1' }) };
     user = { findFirst: jest.fn().mockResolvedValue({ id: 'u1' }) };
-    tx = { create: jest.fn(), update: jest.fn() };
+    tx = {
+      create: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findUnique: jest.fn().mockResolvedValue({ id: 'as1' }),
+    };
     prisma = {
       assetAssignment,
       asset,
@@ -306,20 +317,22 @@ describe('AssetAssignmentsService', () => {
   });
 
   // --- release (actor via the unified principal, ADR-0048) ----------------
-  it('releases an active assignment (in a transaction), recording releasedById + notes for a HUMAN', async () => {
+  it('releases an active assignment with a conditional updateMany (atomic check-and-set), recording releasedById + notes for a HUMAN', async () => {
     assetAssignment.findUnique.mockResolvedValue({
       id: 'as1',
       assetId: 'a1',
       releasedAt: null,
     });
-    tx.update.mockResolvedValue({ id: 'as1', releasedAt: new Date() });
 
     await service.release('as1', { notes: 'returned' }, HUMAN_PRINCIPAL);
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(tx.update).toHaveBeenCalledTimes(1);
-    const calls = tx.update.mock.calls as UpdateCall[];
-    expect(calls[0][0].where).toEqual({ id: 'as1' });
+    // the write is the conditional updateMany, never the unguarded update (SEC-031)
+    expect(tx.update).not.toHaveBeenCalled();
+    expect(tx.updateMany).toHaveBeenCalledTimes(1);
+    const calls = tx.updateMany.mock.calls as UpdateManyCall[];
+    // the `releasedAt: null` predicate is the race backstop: only the winner transitions the row
+    expect(calls[0][0].where).toEqual({ id: 'as1', releasedAt: null });
     expect(calls[0][0].data.releasedAt).toBeInstanceOf(Date);
     expect(calls[0][0].data.releasedById).toBe(ACTOR_ID);
     expect(calls[0][0].data).not.toHaveProperty('releasedBySaId');
@@ -332,11 +345,10 @@ describe('AssetAssignmentsService', () => {
       assetId: 'a1',
       releasedAt: null,
     });
-    tx.update.mockResolvedValue({ id: 'as1', releasedAt: new Date() });
 
     await service.release('as1', {}, SA_PRINCIPAL);
 
-    const calls = tx.update.mock.calls as UpdateCall[];
+    const calls = tx.updateMany.mock.calls as UpdateManyCall[];
     expect(calls[0][0].data.releasedBySaId).toBe(SA_ID);
     expect(calls[0][0].data).not.toHaveProperty('releasedById');
   });
@@ -348,7 +360,6 @@ describe('AssetAssignmentsService', () => {
       userId: 'u1',
       releasedAt: null,
     });
-    tx.update.mockResolvedValue({ id: 'as1', releasedAt: new Date() });
 
     await service.release('as1', {}, HUMAN_PRINCIPAL);
 
@@ -370,11 +381,10 @@ describe('AssetAssignmentsService', () => {
       assetId: 'a1',
       releasedAt: null,
     });
-    tx.update.mockResolvedValue({ id: 'as1' });
 
     await service.release('as1', {});
 
-    const calls = tx.update.mock.calls as UpdateCall[];
+    const calls = tx.updateMany.mock.calls as UpdateManyCall[];
     expect(calls[0][0].data).not.toHaveProperty('releasedById');
     expect(calls[0][0].data).not.toHaveProperty('releasedBySaId');
   });
@@ -391,7 +401,7 @@ describe('AssetAssignmentsService', () => {
     );
     // Early-exit before any write: the conflict is detected before the transaction opens.
     expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(tx.update).not.toHaveBeenCalled();
+    expect(tx.updateMany).not.toHaveBeenCalled();
   });
 
   it('does not release a missing assignment', async () => {
@@ -401,7 +411,67 @@ describe('AssetAssignmentsService', () => {
       NotFoundException,
     );
     expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(tx.update).not.toHaveBeenCalled();
+    expect(tx.updateMany).not.toHaveBeenCalled();
+  });
+
+  // --- release: TOCTOU / double-release race (SEC-031) --------------------
+  // The findOne pre-check is a friendly guard, not the race guard. Two releases can both read
+  // releasedAt === null (the time-of-check window). The DB backstop is the conditional updateMany:
+  // only the row that still matches `releasedAt: null` transitions (count 1); the loser sees count 0
+  // and 409s WITHOUT recording a second RELEASED event on the append-only history.
+  it('409s and writes no history when the conditional updateMany loses the race (count === 0)', async () => {
+    assetAssignment.findUnique.mockResolvedValue({
+      id: 'as1',
+      assetId: 'a1',
+      userId: 'u1',
+      releasedAt: null, // pre-check passes (a concurrent release has not been observed yet)
+    });
+    // a concurrent release already flipped the row, so the conditional write matches nothing
+    tx.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.release('as1', {}, HUMAN_PRINCIPAL)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(tx.updateMany).toHaveBeenCalledTimes(1);
+    // the loser records NOTHING - the append-only history stays single-RELEASED
+    expect(history.record).not.toHaveBeenCalled();
+    expect(tx.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('two concurrent releases of one assignment → exactly one RELEASED history row + a 409 on the loser', async () => {
+    // both requests slip past the pre-check (the TOCTOU window: both read releasedAt === null)
+    assetAssignment.findUnique.mockResolvedValue({
+      id: 'as1',
+      assetId: 'a1',
+      userId: 'u1',
+      releasedAt: null,
+    });
+    // the atomic check-and-set serializes them: first updateMany flips the row (count 1), the second
+    // matches nothing (count 0). This is what the `releasedAt: null` predicate buys us.
+    let alreadyReleased = false;
+    tx.updateMany.mockImplementation(() => {
+      if (alreadyReleased) return Promise.resolve({ count: 0 });
+      alreadyReleased = true;
+      return Promise.resolve({ count: 1 });
+    });
+
+    const winner = await service.release('as1', {}, HUMAN_PRINCIPAL);
+    await expect(service.release('as1', {}, SA_PRINCIPAL)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+
+    // exactly one transition → exactly one append-only RELEASED event, never two
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      { assetAssignment: tx },
+      {
+        assetId: 'a1',
+        eventType: 'RELEASED',
+        payload: { userId: 'u1' },
+        actor: { userId: ACTOR_ID },
+      },
+    );
+    expect(winner).toEqual({ id: 'as1' });
   });
 
   // --- updateNotes --------------------------------------------------------

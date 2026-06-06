@@ -10,6 +10,7 @@ import { CreateConsumableCategorySchema } from "../schemas/consumable-category";
 import { CreateUserSchema } from "../schemas/user";
 import {
   CLONE_NAME_SUFFIX,
+  applyAssetModelSpecsDefaults,
   cloneApplicationDefaults,
   cloneAssetDefaults,
   cloneAssetModelDefaults,
@@ -93,6 +94,59 @@ describe("cloneAssetDefaults", () => {
   test("the result passes CreateAssetSchema", () => {
     const out = cloneAssetDefaults(source);
     expect(CreateAssetSchema.safeParse(out).success).toBe(true);
+  });
+});
+
+describe("applyAssetModelSpecsDefaults", () => {
+  test("copies all model defaults when the asset has no specs", () => {
+    const out = applyAssetModelSpecsDefaults(
+      { ram: "16GB", screen: "14", touch: false },
+      undefined,
+    );
+    expect(out).toEqual({ ram: "16GB", screen: "14", touch: false });
+  });
+
+  test("lets asset specs override model defaults", () => {
+    const out = applyAssetModelSpecsDefaults(
+      { ram: "16GB", screen: "14", cpu: "i5" },
+      { ram: "32GB" },
+    );
+    expect(out).toEqual({ ram: "32GB", screen: "14", cpu: "i5" });
+  });
+
+  test("preserves asset-only specs", () => {
+    const out = applyAssetModelSpecsDefaults(
+      { ram: "16GB" },
+      { assetTagColor: "blue" },
+    );
+    expect(out).toEqual({ ram: "16GB", assetTagColor: "blue" });
+  });
+
+  test("deep-copies nested specs from both sides", () => {
+    const modelSpecs = { ports: ["usb-c"], cpu: { cores: 8 } };
+    const assetSpecs = { upgrades: ["ram"], cpu: { cores: 12 } };
+    const out = applyAssetModelSpecsDefaults(modelSpecs, assetSpecs);
+
+    expect(out).toEqual({
+      ports: ["usb-c"],
+      cpu: { cores: 12 },
+      upgrades: ["ram"],
+    });
+    expect(out).not.toBe(modelSpecs);
+    expect(out).not.toBe(assetSpecs);
+
+    (out!.ports as string[]).push("hdmi");
+    (out!.upgrades as string[]).push("ssd");
+    (out!.cpu as { cores: number }).cores = 16;
+
+    expect(modelSpecs.ports).toEqual(["usb-c"]);
+    expect(modelSpecs.cpu).toEqual({ cores: 8 });
+    expect(assetSpecs.upgrades).toEqual(["ram"]);
+    expect(assetSpecs.cpu).toEqual({ cores: 12 });
+  });
+
+  test("returns undefined when neither side has specs", () => {
+    expect(applyAssetModelSpecsDefaults(null, undefined)).toBeUndefined();
   });
 });
 

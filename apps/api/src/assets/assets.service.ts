@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type {
   AssetStatus,
   BatchResult,
@@ -6,7 +6,11 @@ import type {
   PageQuery,
   UpdateAsset,
 } from '@lazyit/shared';
-import { offsetOf, pageOf } from '@lazyit/shared';
+import {
+  applyAssetModelSpecsDefaults,
+  offsetOf,
+  pageOf,
+} from '@lazyit/shared';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { Prisma } from '../../generated/prisma/client';
@@ -215,12 +219,26 @@ export class AssetsService {
     const actor = this.actor.resolveActor(principal);
     const { specs, ...rest } = data;
     const asset = await this.prisma.$transaction(async (tx) => {
+      let resolvedSpecs = specs;
+      if (rest.modelId) {
+        const model = await tx.assetModel.findFirst({
+          where: { id: rest.modelId },
+          select: { specs: true },
+        });
+        if (!model) {
+          throw new BadRequestException(`AssetModel ${rest.modelId} not found`);
+        }
+        resolvedSpecs = applyAssetModelSpecsDefaults(
+          model.specs as Record<string, unknown> | null,
+          specs,
+        );
+      }
       // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
       const created = await tx.asset.create({
         data: {
           ...rest,
-          ...(specs !== undefined
-            ? { specs: specs as Prisma.InputJsonValue }
+          ...(resolvedSpecs !== undefined
+            ? { specs: resolvedSpecs as Prisma.InputJsonValue }
             : {}),
         },
       });
