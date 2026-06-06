@@ -24,6 +24,11 @@ export const SOFT_DELETABLE_MODELS: ReadonlySet<string> = new Set([
   'Article',
   'ApplicationCategory',
   'Application',
+  // Consumables carry deletedAt (ADR-0034) and must be auto-scoped too — SEC-050: they were missing
+  // here, so by-id reads/edits and IN/ADJUSTMENT movements hit soft-deleted rows. The list paths pass
+  // the includeSoftDeleted escape hatch for the `only` slice, so they keep working.
+  'Consumable',
+  'ConsumableCategory',
   // Service accounts soft-delete = revoke (ADR-0048): the read filter hides revoked accounts from the
   // management list/detail by default; the guard + restore use the includeSoftDeleted escape hatch.
   'ServiceAccount',
