@@ -11,6 +11,39 @@ tags: [soft-delete-bypass, data-integrity, dangling-reference, fk-integrity, div
 
 # SEC-041 — Soft-delete leaves dangling references to an invisible parent
 
+## Triage note
+
+🚨 Escalated to user on 2026-06-06 — the WRITE-side guards are done; the DELETE-side reconciliation is
+a design choice that needs a short ADR + user call. **Left OPEN intentionally.**
+
+What was fixed (separate findings, this branch `fix/sec-softdelete-integrity`): a child can no longer
+be attached to a soft-deleted parent — assets → model/location (SEC-030), application/consumable →
+category (SEC-052), and article restore → category (SEC-060), all via a live-parent `assertXUsable`
+guard. The soft-deleted parent no longer leaks through the asset includes (SEC-040) or the dashboard
+counts (SEC-071).
+
+What is STILL open here (the DELETE side):
+- Soft-deleting an `AssetCategory` / `AssetModel` / `Location` still leaves live children pointing at
+  the now-invisible parent (the schema `SetNull` only fires on a hard delete, which never happens).
+- The asset-model → soft-deleted-category WRITE guard was NOT added: it lives in
+  `asset-models.service.ts`, which was outside this remediation's file lane.
+- Whether `applications.remove()` should auto-revoke an app's grants on soft-delete (overlaps SEC-071's
+  read-side fix).
+
+Options for the delete-side reconciliation (pick one, per parent, in an ADR):
+(1) **Detach on delete** — null the children's FK inside the `remove()` `$transaction` (matches the
+    documented `SetNull` intent; also retro-cleans what would otherwise dangle; should emit
+    `LOCATION_CHANGED` / `MODEL_CHANGED` history per ADR-0033).
+(2) **In-use guard / 409** — refuse to soft-delete while live children reference the parent (matches
+    the `ArticleCategory.remove()` precedent; simpler, but contradicts the `SetNull` schema comment, so
+    update it).
+
+Recommendation: **(1) detach-on-delete** for model/location/asset-model→category (it realizes the
+schema's stated `SetNull` intent and fixes existing dangling rows), keeping the `ArticleCategory` 409
+precedent where the product wants a hard "reassign first". This touches `asset-categories` /
+`asset-models` / `locations` `remove()` and likely a backfill for already-dangling rows — a data-model
+change that wants the user's sign-off and an ADR amendment to ADR-0032/0041. Not guessed here.
+
 ## Summary
 
 Soft-deleting an `AssetCategory`, `AssetModel` or `Location` neither refuses the delete nor detaches

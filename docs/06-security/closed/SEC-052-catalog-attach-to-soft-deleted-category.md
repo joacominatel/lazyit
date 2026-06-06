@@ -2,7 +2,7 @@
 id: SEC-052
 title: Applications & Consumables can be created/updated with a categoryId pointing at a soft-deleted category (soft-delete FK bypass)
 severity: low
-status: open
+status: fixed
 cwe: CWE-1284
 discovered: 2026-06-06
 module: applications
@@ -89,3 +89,35 @@ review rule would cover applications, consumables, assets (model/location) unifo
   parent) · CWE-20.
 - ADR-0006 (soft delete) · ADR-0023 (application category SetNull) · ADR-0034 (consumable category
   SetNull) · sentinel SKILL §1 (soft-delete / FK note).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commits `330c64b` (consumables) and `d6dc782` (`fix: assert live category on application
+create/update (SEC-052)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-06-06
+
+### Changes
+- `apps/api/src/applications/applications.service.ts`: added a private `assertCategoryUsable` (mirrors
+  the articles guard); `create`/`update` call it when `categoryId` is supplied. A soft-deleted
+  `ApplicationCategory` resolves to `null` under the read filter → `400 "categoryId … does not
+  reference a live category"`.
+- `apps/api/src/consumables/consumables.service.ts`: same `assertCategoryUsable` against
+  `ConsumableCategory`, wired into `create`/`update`. (`create` is now `async`.)
+
+### Tests added
+- `apps/api/src/applications/applications.service.spec.ts`: create/update 400 on a soft-deleted
+  category; create attaches to a live one (asserts the `findFirst({ where:{id}, select:{id:true} })`).
+- `apps/api/src/consumables/consumables.service.spec.ts`: the same three cases for consumables.
+  All fail without the guard (the write went straight to Prisma and the FK accepted the soft-deleted
+  row).
+
+### Verification
+`bun test` on both service specs → green (19 + 49 pass). API type-check green.
+
+### Residual risk
+The asset-model → category attach variant noted in SEC-041 is NOT covered here (it lives in
+`asset-models.service.ts`, outside this change's lane) and remains tracked under the still-open
+SEC-041. The delete-side reconciliation (what happens to children when a category is soft-deleted) is
+the separate SEC-041 ADR question.

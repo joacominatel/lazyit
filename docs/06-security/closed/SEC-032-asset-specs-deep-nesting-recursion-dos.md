@@ -2,7 +2,7 @@
 id: SEC-032
 title: Deeply-nested asset specs trigger unbounded recursion in jsonDeepEqual on update (stack-overflow 500)
 severity: low
-status: open
+status: fixed
 cwe: CWE-674
 discovered: 2026-06-06
 module: assets
@@ -97,3 +97,32 @@ throwing.
 
 - CWE-674: Uncontrolled Recursion. CWE-400: Uncontrolled Resource Consumption.
 - ADR-0007 (flexible specs jsonb), `docs/06-security/deferred.md` DEF-004 (unvalidated jsonb — storage angle).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `6051c4a` (`fix: bound jsonDeepEqual recursion depth (SEC-032)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-06-06
+
+### Changes
+- `apps/api/src/common/deep-equal.ts`: added a `depth` argument (default 0) and a `MAX_DEPTH = 100`
+  bound. Past the bound `jsonDeepEqual` returns `false` (treats the values as "changed") instead of
+  recursing further; every recursive call threads `depth + 1`. Emitting a spurious `SPECS_CHANGED` is
+  harmless and correct-enough; no real specs nest 100 levels deep. The attacker-controlled recursion
+  that the `PATCH /assets/:id` diff drove (`changeEvents` → `jsonDeepEqual(before.specs, updated.specs)`)
+  can no longer reach a V8 stack-overflow `RangeError` → 500.
+
+### Tests added
+- `apps/api/src/common/deep-equal.spec.ts`::"bounds recursion depth instead of overflowing the stack on
+  a deep object" — builds two 50,000-deep `{a:{a:…}}` chains; without the fix `jsonDeepEqual` throws a
+  `RangeError`, with it it returns (`false`) and does not throw.
+
+### Verification
+`bun test apps/api/src/common/deep-equal.spec.ts` → 10 pass / 0 fail (all the existing order-insensitive
+/ array / primitive cases still hold; only deep chains short-circuit).
+
+### Residual risk
+None for this path. The broader unvalidated-jsonb storage debt (DEF-004 / ADR-0007) is unchanged; the
+long-term per-category `specsSchema` should still cap nesting at validation time so no unbounded
+structure reaches any recursive consumer.

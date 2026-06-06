@@ -2,7 +2,7 @@
 id: SEC-051
 title: isSafeApplicationUrl host:port carve-out is bypassable — "javascript:1/<payload>" passes the SEC-008 scheme guard
 severity: medium
-status: open
+status: fixed
 cwe: CWE-79
 discovered: 2026-06-06
 module: applications
@@ -109,3 +109,33 @@ SEC-008), and make the shared predicate the single tested source of truth for bo
 
 - CWE-79: Improper Neutralization of Input During Web Page Generation (XSS) · CWE-84.
 - OWASP XSS Prevention Cheat Sheet (URL contexts) · SEC-008 (closed) · SEC-003 (open) · ADR-0023.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `d1f5e2b` (`fix: tighten isSafeApplicationUrl host:port carve-out to a bare port (SEC-051)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-06-06
+
+### Changes
+- `packages/shared/src/schemas/application.ts`: tightened the `host:port` carve-out from
+  `^\d+(\/.*)?$` to `^\d{1,5}$` — a bare port with NO path. The `/<rest>` tail is what let
+  `javascript:1/alert(document.cookie)` (the JS expression `1 / alert(...)`, whose division *calls*
+  alert) pass the scheme guard. A non-`http(s)` scheme followed by anything but pure digits is now
+  rejected. A scheme-less host that needs a path can always be written `http(s)://host:port/path`.
+
+### Tests added
+- `packages/shared/src/schemas/application.test.ts`::"rejects the host:port carve-out bypass" — fails
+  without the fix (the old regex returns `true` for `javascript:1/alert(1)`, `javascript:0//x`,
+  `vbscript:1/msgbox(1)`, `data:1/text`, and obfuscated variants), passes with it. The existing
+  `vpn.corp.local:8080` / IP-with-port cases still pass (the bare-port shape is preserved).
+
+### Verification
+`bun test packages/shared/src/schemas/application.test.ts` → 5 pass / 0 fail. Predicate-level:
+`isSafeApplicationUrl("javascript:1/alert(document.cookie)") === false`.
+
+### Residual risk
+The render-time half stays latent until the frontend renders application links (no frontend yet —
+same posture as SEC-008). `isSafeApplicationUrl` remains exported so the render layer reuses this one
+tested predicate. A payload-less `javascript:<digits>` (e.g. `javascript:12345`) is still accepted but
+is inert (no call, no side effect), as SEC-008's residual note already conceded.

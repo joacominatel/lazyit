@@ -2,7 +2,7 @@
 id: SEC-050
 title: Consumable & ConsumableCategory are not soft-delete filtered — archived rows leak on by-id reads / category list, and writes/movements hit soft-deleted rows
 severity: medium
-status: open
+status: fixed
 cwe: CWE-283
 discovered: 2026-06-06
 module: consumables
@@ -130,3 +130,39 @@ failed the day `Consumable`/`ConsumableCategory` were added. Stop relying on per
 - CWE-283: Unverified Ownership · CWE-200: Exposure of Sensitive Information.
 - ADR-0032 (soft-delete extension; the "must be added to SOFT_DELETABLE_MODELS" rule) ·
   ADR-0034 (consumables design) · ADR-0006 (soft delete / never resurrect) · ADR-0041 (restore).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commits `109d501` (`fix: register Consumable + ConsumableCategory as soft-deletable`) and
+`330c64b` (`fix: guard ADJUSTMENT write + live-category on consumable writes`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-06-06
+
+### Changes
+- `apps/api/src/prisma/soft-delete.extension.ts`: added `'Consumable'` and `'ConsumableCategory'` to
+  `SOFT_DELETABLE_MODELS` (set size 10 → 12). All `findFirst`/`findMany`/`count` on those models are
+  now auto-scoped to `deletedAt: null`, so `findOne`/`assertExists` (consumables), `findAll`/`findOne`
+  (consumable-categories) and the `IN` movement pre-read 404 a soft-deleted row; the existing list
+  paths keep working (the `only` slice already passes the `includeSoftDeleted` escape hatch).
+- `apps/api/src/consumables/consumables.service.ts`: the `ADJUSTMENT` movement (a bare `update`, which
+  the extension does NOT scope) is now a guarded `updateMany({ where: { id, deletedAt: null } })`
+  mirroring `OUT`; `count === 0` ⇒ 404, so a soft-deleted consumable can no longer be recounted.
+
+### Tests added
+- `apps/api/src/prisma/soft-delete.extension.spec.ts`: size asserted as 12; `Consumable` /
+  `ConsumableCategory` present, `ConsumableMovement` (append-only ledger) absent; a filter case proving
+  their reads get `deletedAt: null`.
+- `apps/api/src/consumables/consumables.service.spec.ts`: ADJUSTMENT now expects the live-guarded
+  `updateMany` and 404s on `count === 0` — fails without the fix (old code called `update`, which the
+  unscoped write path let through on a soft-deleted row).
+
+### Verification
+`bun test apps/api/src/consumables/consumables.service.spec.ts apps/api/src/prisma/soft-delete.extension.spec.ts`
+→ 46 pass / 0 fail. API type-check (`tsc -p tsconfig.build.json`) green.
+
+### Residual risk
+None for the read/movement paths. The write-time `categoryId` liveness gap that compounded here is
+closed by SEC-052 (same `330c64b` commit). The `OUT` "insufficient stock" 409-vs-404 message nicety
+from the recommendation is moot now that the by-id read filter 404s a soft-deleted consumable before
+any movement.

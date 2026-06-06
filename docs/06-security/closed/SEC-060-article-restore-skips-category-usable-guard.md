@@ -2,7 +2,7 @@
 id: SEC-060
 title: Article restore skips assertCategoryUsable — an article can be resurrected into a soft-deleted category
 severity: low
-status: open
+status: fixed
 cwe: CWE-863
 discovered: 2026-06-06
 module: articles
@@ -101,3 +101,29 @@ location, already weaker — see prior sweeps).
 - ADR-0006 (soft delete & auditing) · ADR-0032 (soft-delete middleware) · ADR-0041 (soft-delete reuse
   and restore) · ADR-0021 (KB design). `.claude/skills/lazyit-sentinel/SKILL.md` §1 (soft-delete
   bypass: reference to a soft-deleted parent).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `5d2b746` (`fix: re-run assertCategoryUsable on article restore (SEC-060)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-06-06
+
+### Changes
+- `apps/api/src/articles/articles.service.ts`: `restore()` now calls `assertCategoryUsable(article.
+  categoryId)` after the idempotent (`deletedAt === null`) short-circuit and before clearing
+  `deletedAt` — the same guard `create`/`update` run. A restore onto a now-soft-deleted category 400s
+  instead of resurrecting a live article into a ghost category. (`categoryId` is required on Article,
+  so no null check is needed.)
+
+### Tests added
+- `apps/api/src/articles/articles.service.spec.ts` › "restore": 400 when the category is now
+  soft-deleted (article.update NOT called); restores when the category is live (asserts the guard
+  read); idempotent no-op (no guard, no update) when already live. Fails without the fix.
+
+### Verification
+`bun test apps/api/src/articles/articles.service.spec.ts` → 77 pass / 0 fail.
+
+### Residual risk
+None. The operator path to surface this (delete article → delete its now-childless category → restore
+article) now ends in a 400 telling them to restore/reassign the category first.

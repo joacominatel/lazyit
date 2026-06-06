@@ -2,7 +2,7 @@
 id: SEC-071
 title: Dashboard counts include grants/history tied to soft-deleted entities (nested-relation soft-delete bypass)
 severity: low
-status: open
+status: fixed
 cwe: CWE-840
 discovered: 2026-06-06
 module: dashboard
@@ -127,3 +127,37 @@ location's or an offboarded user's data through the relation graph. Recommended 
 - CWE-840: Business Logic Errors. CWE-200: Exposure of Sensitive Information (the history-payload slice).
 - ADR-0032 (soft-delete extension — top-level only; "revisit if an include must hide soft-deleted
   relations") · ADR-0006 (soft delete) · ADR-0030/0050 (dashboard/activity).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `a370d2e` (`fix: scope dashboard grant/history counts to live parents (SEC-071)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-06-06
+
+### Changes
+- `apps/api/src/dashboard/dashboard.service.ts`:
+  - Corrected the false header/inline comments that claimed the related Application is
+    auto-soft-delete-filtered; added an explicit note that relation predicates / includes are NOT
+    scoped by the extension (ADR-0032), so the `deletedAt: null` filters below are load-bearing.
+  - `onCriticalApps`: `application: { is: { isCritical: true, deletedAt: null } }`.
+  - `activeGrants` and `expiringSoon`: added `application: { is: { deletedAt: null } }` so grants on a
+    decommissioned (soft-deleted) app no longer count as active — the read-side over-count the finding
+    flagged.
+  - `recentActivity`: `assetHistory.findMany` now filters `where: { asset: { is: { deletedAt: null } } }`
+    so a soft-deleted asset's history + jsonb payload don't surface on the summary.
+
+### Tests added
+- `apps/api/src/dashboard/dashboard.service.spec.ts`: onCriticalApps asserts `isCritical + deletedAt`;
+  new cases assert activeGrants/expiringSoon carry the live-app filter and recentActivity scopes to
+  live assets. Fail without the fix.
+
+### Verification
+`bun test apps/api/src/dashboard/dashboard.service.spec.ts` → 23 pass / 0 fail.
+
+### Residual risk
+This is the READ-side fix only. Whether `applications.remove()` should auto-revoke an app's grants on
+soft-delete is a DELETE-side product/ADR call **left open under SEC-041** (do not change delete
+semantics here). The same nested-relation footgun exists wherever else a soft-deletable model is pulled
+via `include`/`select`/relation-filter — captured as the standing convention note for a future
+ADR-0032 amendment.

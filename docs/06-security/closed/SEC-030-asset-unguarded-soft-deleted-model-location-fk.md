@@ -2,7 +2,7 @@
 id: SEC-030
 title: Asset create/update accept a soft-deleted modelId/locationId (no liveness guard)
 severity: low
-status: open
+status: fixed
 cwe: CWE-672
 discovered: 2026-06-06
 module: assets
@@ -96,3 +96,31 @@ pattern instead of per-module memory.
 - CWE-672: Operation on a Resource after Expiration or Release.
 - ADR-0006 (soft delete & auditing), ADR-0032 (soft-delete read filter), ADR-0004 (asset-centric), ADR-0007 (specs).
 - Sentinel skill §1 "Soft-delete bypass" (the FK-to-soft-deleted-parent class).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `63a7eb0` (`fix: guard live model/location on write + filter nested soft-deleted includes (SEC-030, SEC-040)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-06-06
+
+### Changes
+- `apps/api/src/assets/assets.service.ts`: added private `assertModelUsable` / `assertLocationUsable`
+  (the `assertAssetUsable`/`assertApplicationUsable` shape). `create`/`update` call them when
+  `modelId`/`locationId` is supplied; a soft-deleted parent resolves to `null` under the read filter →
+  `400 "modelId/locationId … does not reference a live model/location"`. A non-existent id still hits
+  the FK.
+
+### Tests added
+- `apps/api/src/assets/assets.service.spec.ts`: create 400 on a soft-deleted model and on a
+  soft-deleted location; update 400 (no transaction opened) on a soft-deleted model; a live-parent
+  create asserting the `findFirst({ where:{id}, select:{id:true} })` guard reads. Fail without the
+  guard (the write went straight to Prisma).
+
+### Verification
+`bun test apps/api/src/assets/assets.service.spec.ts` → 50 pass / 0 fail. API type-check green.
+
+### Residual risk
+None for the asset write path. The dangling references that *already exist* from a parent soft-deleted
+before this fix (and the delete-side reconciliation that would prevent them) are the still-open
+SEC-041. The read-side leak through the asset include is closed by SEC-040 (same commit).

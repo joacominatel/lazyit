@@ -2,7 +2,7 @@
 id: SEC-040
 title: Soft-deleted location / model / category leaks back to readers through the asset relation includes
 severity: low
-status: open
+status: fixed
 cwe: CWE-200
 discovered: 2026-06-06
 module: asset-categories / asset-models / locations (integration with assets)
@@ -114,3 +114,34 @@ referencing asset's detail/list read no longer carries the deleted parent's fiel
   if an include must hide soft-deleted relations")
 - ADR-0006 (soft delete & auditing), ADR-0041 (soft-delete reuse/restore)
 - Related: SEC-041 (no child reconciliation on parent soft-delete — shared root cause)
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `63a7eb0` (`fix: guard live model/location on write + filter nested soft-deleted includes (SEC-030, SEC-040)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-06-06
+
+### Changes
+- `apps/api/src/assets/assets.service.ts`: added an explicit `where: { deletedAt: null }` to the
+  soft-deletable parents in both `ASSET_RELATIONS` (detail) and `ASSET_LIST_SELECT` (list) — `model`,
+  `model.category`, and `location`. They are nullable to-one relations, and Prisma 7 supports a
+  filtered to-one include/select (`Asset$modelArgs` carries `where`), so a soft-deleted parent now
+  resolves to `null` for the reader instead of leaking its fields — matching what the parent's own
+  dedicated endpoint returns. (Chosen over recommendation #2 because parent-delete reconciliation is
+  the deferred SEC-041 design call.)
+
+### Tests added
+- `apps/api/src/assets/assets.service.spec.ts`: `EXPECTED_INCLUDE` and `EXPECTED_LIST_SELECT` now carry
+  the nested `deletedAt: null` filters, so the existing `findOne`/`findPage` assertions fail unless the
+  service requests the soft-delete-scoped relations.
+
+### Verification
+`bun test apps/api/src/assets/assets.service.spec.ts` → 50 pass / 0 fail. API type-check green
+(confirms the filtered to-one include/select type-checks under Prisma 7).
+
+### Residual risk
+This filters the asset includes specifically. The general "nested relation reads are not auto-scoped"
+footgun (ADR-0032's deferred caveat) still applies to any other `include`/`select`/relation-filter of
+a soft-deletable model — see SEC-071 for the dashboard instance and the standing convention note. The
+underlying dangling FK (root cause) is the still-open SEC-041.
