@@ -1,10 +1,18 @@
 import { Injectable } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { PrismaService } from '../prisma/prisma.service';
+
+/**
+ * Generic, non-revealing detail returned in the public readiness body when a dependency is down.
+ * SEC-070: the raw pg driver message embeds the internal DB host/IP + port — operators get the real
+ * cause from the correlated server log (ADR-0031), not the @Public() 503 body.
+ */
+const DEPENDENCY_DOWN_DETAIL = 'unreachable';
 
 /** A single dependency's health, reported in the readiness payload. */
 export interface DependencyHealth {
   status: 'up' | 'down';
-  /** Error summary when `status === 'down'` (never the raw stack — kept terse for a probe). */
+  /** Coarse, fixed summary when `status === 'down'` — never the raw driver error (SEC-070). */
   error?: string;
 }
 
@@ -27,7 +35,11 @@ export interface ReadinessReport {
  */
 @Injectable()
 export class HealthService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @InjectPinoLogger(HealthService.name)
+    private readonly logger: PinoLogger,
+  ) {}
 
   /** Verify the DB connection with a trivial round-trip; `ready=false` when it fails. */
   async readiness(): Promise<ReadinessReport> {
@@ -45,10 +57,10 @@ export class HealthService {
       await this.prisma.$queryRaw`SELECT 1`;
       return { status: 'up' };
     } catch (err) {
-      return {
-        status: 'down',
-        error: err instanceof Error ? err.message : String(err),
-      };
+      // log the rich detail server-side (correlated by request id, ADR-0031); the public body only
+      // gets a coarse generic string so an anonymous caller can't read the DB host/port (SEC-070)
+      this.logger.error({ err }, 'readiness DB check failed');
+      return { status: 'down', error: DEPENDENCY_DOWN_DETAIL };
     }
   }
 }
