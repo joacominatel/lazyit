@@ -35,6 +35,11 @@ A `specs Json` field (jsonb in Postgres) on [[asset]]. The [[asset-category]] ca
 expected shape of `specs` for its models; stable, frequently-queried attributes graduate to
 real columns over time.
 
+`AssetModel.specs` acts as type-level defaults. When an [[asset]] is created with a live model,
+those defaults are copied into `Asset.specs` as an editable snapshot. If the create payload already
+contains specs, asset-provided keys override model keys. There is no live sync from later model edits
+to existing assets.
+
 ## Consequences
 
 - **Positive:** add asset types/attributes without migrations; one `Asset` table; Postgres can

@@ -26,6 +26,9 @@ The generic make/model definition an [[asset]] is an instance of — e.g. "Dell 
 
 - A model captures *type-level* facts; per-unit facts (serial, the flexible `specs`, owner)
   belong to the [[asset]].
+- On [[asset]] creation, a live model's `specs` are materialized into `Asset.specs` as an editable
+  snapshot. Explicit asset specs win over model defaults, and later model edits do not sync into
+  existing assets.
 - **Soft delete only** — we never hard-delete, so existing [[asset]]s keep referencing a
   soft-deleted model. The FK's `onDelete: SetNull` is only a safety net for a (non-occurring)
   hard delete: it would detach assets rather than delete them (audit > strict integrity).

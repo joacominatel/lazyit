@@ -28,6 +28,9 @@ concrete instance of a generic [[asset-model]].
 
 - Asset-specific attributes that vary by type live in a flexible `specs` jsonb field
   ([[0007-flexible-asset-specs-jsonb]]).
+- When creating an asset from a live [[asset-model]], the model's default `specs` are copied into
+  this field as a snapshot. Asset-provided specs override matching model keys, so an individual unit
+  can diverge immediately.
 - `status` is a **required** enum (`AssetStatus`), **no default** — every asset is classified
   (consistent with [[location]]`.type`).
 - `serial` and `assetTag` are each unique **among live rows** when present (a live duplicate returns
