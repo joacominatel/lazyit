@@ -2,7 +2,7 @@
 id: SEC-031
 title: Assignment release has no DB backstop (TOCTOU → duplicate RELEASED history + actor overwrite)
 severity: low
-status: open
+status: fixed
 cwe: CWE-367
 discovered: 2026-06-06
 module: asset-assignments
@@ -113,3 +113,48 @@ index. A concurrency test (two parallel releases → exactly one 200, one 409, o
 - CWE-367: Time-of-check Time-of-use (TOCTOU) Race Condition.
 - ADR-0019 (asset-assignment integrity), ADR-0024 (actor shim), ADR-0033 (asset-history), ADR-0006 (append-only/auditing).
 - `docs/06-security/deferred.md` — "Assignment create race is backstopped" (the create-side pattern this release path lacks).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `4cbffbf` (`fix: make assignment release atomic to close the release TOCTOU (SEC-031)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-06-06
+
+### Changes
+
+- `apps/api/src/asset-assignments/asset-assignments.service.ts` — `release()` now closes the row with a
+  conditional `updateMany({ where: { id, releasedAt: null }, ... })`. Only the winning transaction sees
+  `count === 1` and records the single `RELEASED` history event; the loser sees `count === 0` and throws
+  the same 409 (`already released`) *before* the history write (the throw rolls the transaction back), so
+  no duplicate `RELEASED` row and no actor overwrite. The `findOne` pre-check stays as a friendly 404/409;
+  the conditional write is the race backstop (mirrors the create path's pre-check + partial-unique-index
+  pattern - a unique index can't express "release once", so the conditional `updateMany` is the right
+  tool). `updateMany` returns only a count, so the row is re-read for the response.
+- `releaseAllForUser` was left as-is: it is naturally serialized inside the offboarding `$transaction`
+  (per the finding, lower risk) and is not the exposed per-id path.
+
+### Tests added
+
+- `apps/api/src/asset-assignments/asset-assignments.service.spec.ts`::
+  "409s and writes no history when the conditional updateMany loses the race (count === 0)" — asserts the
+  loser 409s and never calls `history.record`.
+- ...::"two concurrent releases of one assignment → exactly one RELEASED history row + a 409 on the loser"
+  — drives two releases through a stateful `updateMany` mock (first `count: 1`, second `count: 0`) and
+  asserts exactly one `RELEASED` event + a `ConflictException` on the second. Both fail against the old
+  `findFirst`+`update` path (it double-emits history and never 409s), pass with the conditional write.
+- The pre-existing release specs were updated to assert the conditional `updateMany` (and that the
+  unguarded `update` is never used).
+
+### Verification
+
+`cd apps/api && bun test src/asset-assignments/asset-assignments.service.spec.ts` → **30 pass / 0 fail**
+(82 expect()). Reverting only the service fix (keeping the new tests) → **5 fail** (the two race tests +
+the three pre-existing release tests that assert the conditional write), confirming the tests fail
+without the fix. `bunx tsc --noEmit` on `apps/api` is green.
+
+### Residual risk
+
+None for the per-id release path. `releaseAllForUser` keeps the read-then-update shape but is safe by
+virtue of running inside the single offboarding transaction; if it is ever exposed as a standalone
+concurrent endpoint, apply the same conditional-`updateMany` pattern there too.
