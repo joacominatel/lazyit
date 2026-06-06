@@ -32,6 +32,22 @@ describe("isSafeApplicationUrl (SEC-008)", () => {
     ];
     for (const url of bad) expect(isSafeApplicationUrl(url)).toBe(false);
   });
+
+  // SEC-051 — the host:port carve-out used to accept `<scheme>:<digits>/<anything>`, so a
+  // `javascript:1/alert(1)` (the JS expression `1 / alert(1)`, whose division CALLS alert) slipped
+  // past the SEC-008 scheme guard. The port carve-out is now a BARE port only.
+  test("rejects the host:port carve-out bypass: scheme + digits + /payload (SEC-051)", () => {
+    const bad = [
+      "javascript:1/alert(document.cookie)",
+      "javascript:1/alert(1)",
+      "javascript:0//x",
+      "vbscript:1/msgbox(1)",
+      "data:1/text",
+      "JavaScript:1/alert(1)", // case + tail
+      "java\tscript:1/alert(1)", // obfuscated scheme + tail
+    ];
+    for (const url of bad) expect(isSafeApplicationUrl(url)).toBe(false);
+  });
 });
 
 describe("CreateApplicationSchema.url scheme guard (SEC-008)", () => {
