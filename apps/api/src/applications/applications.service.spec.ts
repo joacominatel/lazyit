@@ -22,6 +22,8 @@ type ApplicationMock = {
   count: jest.Mock;
 };
 
+type CategoryMock = { findFirst: jest.Mock };
+
 type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
 
 type DataCall = [{ data: Record<string, unknown> }];
@@ -33,6 +35,7 @@ type FindManyCall = [
 describe('ApplicationsService', () => {
   let service: ApplicationsService;
   let application: ApplicationMock;
+  let applicationCategory: CategoryMock;
   let search: SearchMock;
 
   beforeEach(async () => {
@@ -43,11 +46,13 @@ describe('ApplicationsService', () => {
       update: jest.fn(),
       count: jest.fn(),
     };
+    applicationCategory = { findFirst: jest.fn() };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
     // findPage runs [findMany, count] inside $transaction(array) — resolve each promise in the array.
     const prisma = {
       application,
+      applicationCategory,
       $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
 
@@ -165,6 +170,40 @@ describe('ApplicationsService', () => {
       vendor: 'Atlassian',
       description: null,
     });
+  });
+
+  // SEC-052 — a supplied categoryId must reference a LIVE category; a soft-deleted one satisfies the
+  // FK but leaves a dangling link. The soft-delete read filter returns null for an archived category.
+  it('create 400s when categoryId points at a soft-deleted category (SEC-052)', async () => {
+    applicationCategory.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.create({ name: 'X', isCritical: false, categoryId: 'cat-gone' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(application.create).not.toHaveBeenCalled();
+  });
+
+  it('create attaches to a LIVE category (SEC-052)', async () => {
+    applicationCategory.findFirst.mockResolvedValue({ id: 'cat-live' });
+    application.create.mockResolvedValue({ id: 'app1', categoryId: 'cat-live' });
+
+    await service.create({ name: 'X', isCritical: false, categoryId: 'cat-live' });
+
+    expect(applicationCategory.findFirst).toHaveBeenCalledWith({
+      where: { id: 'cat-live' },
+      select: { id: true },
+    });
+    expect(application.create).toHaveBeenCalled();
+  });
+
+  it('update 400s when categoryId points at a soft-deleted category (SEC-052)', async () => {
+    application.findFirst.mockResolvedValue({ id: 'app1', deletedAt: null });
+    applicationCategory.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.update('app1', { categoryId: 'cat-gone' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(application.update).not.toHaveBeenCalled();
   });
 
   it('passes metadata through to the create when provided', async () => {
