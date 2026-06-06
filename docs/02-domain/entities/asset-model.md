@@ -59,6 +59,12 @@ Prisma model `AssetModel` → table `asset_models`. Validation schemas (`AssetMo
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete. |
 
+## UI behavior
+
+Settings → Taxonomies → Asset models lets operators edit `specs` as simple key/value defaults.
+Those defaults are copied into the asset form when a model is selected, where the operator can adjust
+the values before saving the concrete unit.
+
 ## Endpoints
 
 `apps/api/src/asset-models/` (`AssetModelsModule`): `GET /asset-models` — **paginated** `Page<AssetModel>`

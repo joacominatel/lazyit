@@ -53,3 +53,6 @@ to existing assets.
   key/value list. The editor handles **scalar string** values only (per "se envie en json y
   listo"); pre-existing non-scalar entries are preserved untouched. The shared schema stays the
   open `z.record(z.string(), z.unknown())` — no narrowing — so legacy data keeps validating.
+- **Model defaults UI (delivered):** Settings → Taxonomies → Asset models uses the same key/value
+  editor for `AssetModel.specs`. Selecting a model in the asset create form copies those defaults
+  into the editable asset specs rows; user-entered asset values still win.
