@@ -880,6 +880,60 @@ describe('ArticlesService', () => {
     });
   });
 
+  // --- restore (SEC-060) ---------------------------------------------------
+
+  describe('restore', () => {
+    it('re-runs the live-category guard and 400s when the category is now soft-deleted (SEC-060)', async () => {
+      // The soft-deleted article is found via the includeSoftDeleted escape hatch...
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        authorId: AUTHOR,
+        categoryId: 'c-gone',
+        deletedAt: new Date(),
+      });
+      // ...but its category was soft-deleted in the meantime → the guard read returns null.
+      articleCategory.findFirst.mockResolvedValueOnce(null);
+
+      await expect(
+        service.restore('a', AUTHOR_PRINCIPAL),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      // The article is NOT brought back live onto a dead category.
+      expect(article.update).not.toHaveBeenCalled();
+    });
+
+    it('restores when the category is still live', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        authorId: AUTHOR,
+        categoryId: 'c1',
+        deletedAt: new Date(),
+      });
+      articleCategory.findFirst.mockResolvedValueOnce({ id: 'c1' });
+
+      await service.restore('a', AUTHOR_PRINCIPAL);
+
+      const data = lastUpdate();
+      expect(data.deletedAt).toBeNull();
+      expect(articleCategory.findFirst).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        select: { id: true },
+      });
+    });
+
+    it('is idempotent (no category check, no update) when already live', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        authorId: AUTHOR,
+        categoryId: 'c1',
+        deletedAt: null,
+      });
+
+      await service.restore('a', AUTHOR_PRINCIPAL);
+
+      expect(article.update).not.toHaveBeenCalled();
+    });
+  });
+
   // --- import --------------------------------------------------------------
 
   describe('importArticle', () => {
