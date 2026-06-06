@@ -24,6 +24,9 @@ type PrismaAssetMock = {
   count: jest.Mock;
 };
 
+// Soft-deletable parents the SEC-030 live-guards read (assertModelUsable / assertLocationUsable).
+type ParentMock = { findFirst: jest.Mock };
+
 // The transaction client the service writes through. $transaction is mocked to invoke the callback
 // with this `tx`, so create/update/remove run against these delegates and the history mock.
 type TxAssetMock = {
@@ -50,9 +53,14 @@ const SA_PRINCIPAL = {
 
 // The nested relations the expanded reads request. Mirrors ASSET_RELATIONS in the service: model
 // (+category), location, and the active owners (releasedAt null) each with their user.
+// Soft-deletable parents carry an explicit deletedAt:null filter on the nested read (SEC-040), since
+// the extension only scopes top-level ops.
 const EXPECTED_INCLUDE = {
-  model: { include: { category: true } },
-  location: true,
+  model: {
+    where: { deletedAt: null },
+    include: { category: { where: { deletedAt: null } } },
+  },
+  location: { where: { deletedAt: null } },
   assignments: {
     where: { releasedAt: null },
     orderBy: { assignedAt: 'desc' },
@@ -78,14 +86,15 @@ const EXPECTED_LIST_SELECT = {
   updatedAt: true,
   deletedAt: true,
   model: {
+    where: { deletedAt: null },
     select: {
       id: true,
       name: true,
       manufacturer: true,
-      category: { select: { id: true, name: true } },
+      category: { where: { deletedAt: null }, select: { id: true, name: true } },
     },
   },
-  location: { select: { id: true, name: true, type: true } },
+  location: { where: { deletedAt: null }, select: { id: true, name: true, type: true } },
   assignments: {
     where: { releasedAt: null },
     orderBy: { assignedAt: 'desc' },
@@ -184,9 +193,13 @@ const beforeRow = (overrides: Record<string, unknown> = {}) => ({
 describe('AssetsService', () => {
   let service: AssetsService;
   let asset: PrismaAssetMock;
+  let assetModel: ParentMock;
+  let location: ParentMock;
   let tx: TxAssetMock;
   let prisma: {
     asset: PrismaAssetMock;
+    assetModel: ParentMock;
+    location: ParentMock;
     $transaction: jest.Mock;
   };
   let actor: ActorService;
@@ -201,10 +214,16 @@ describe('AssetsService', () => {
       update: jest.fn(),
       count: jest.fn(),
     };
+    // SEC-030 live-parent guards default to "live" so the existing model/location-change tests pass;
+    // the SEC-030 specs override these to null to prove the guard rejects a soft-deleted parent.
+    assetModel = { findFirst: jest.fn().mockResolvedValue({ id: 'm' }) };
+    location = { findFirst: jest.fn().mockResolvedValue({ id: 'l' }) };
     // The transaction client the writes go through; $transaction runs the callback with it.
     tx = { create: jest.fn(), update: jest.fn() };
     prisma = {
       asset,
+      assetModel,
+      location,
       // create/update/remove pass a CALLBACK (interactive tx); findPage passes an ARRAY of two
       // promises (findMany + count). Support both forms.
       $transaction: jest.fn(
@@ -311,6 +330,60 @@ describe('AssetsService', () => {
         actor: { serviceAccountId: SA_ID },
       },
     );
+  });
+
+  // --- SEC-030: live-parent guards on write -------------------------------
+  it('create 400s when modelId references a soft-deleted model (SEC-030)', async () => {
+    assetModel.findFirst.mockResolvedValue(null); // the read filter hides the archived model
+
+    await expect(
+      service.create({ name: 'X', status: 'OPERATIONAL', modelId: 'm-gone' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('create 400s when locationId references a soft-deleted location (SEC-030)', async () => {
+    location.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.create({
+        name: 'X',
+        status: 'OPERATIONAL',
+        locationId: 'l-gone',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('create attaches to a LIVE model/location and reads them via the soft-delete filter (SEC-030)', async () => {
+    tx.create.mockResolvedValue({ id: 'a1' });
+
+    await service.create({
+      name: 'X',
+      status: 'OPERATIONAL',
+      modelId: 'm1',
+      locationId: 'l1',
+    });
+
+    expect(assetModel.findFirst).toHaveBeenCalledWith({
+      where: { id: 'm1' },
+      select: { id: true },
+    });
+    expect(location.findFirst).toHaveBeenCalledWith({
+      where: { id: 'l1' },
+      select: { id: true },
+    });
+    expect(tx.create).toHaveBeenCalled();
+  });
+
+  it('update 400s (no transaction) when modelId references a soft-deleted model (SEC-030)', async () => {
+    assetModel.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.update('a1', { modelId: 'm-gone' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(asset.findFirst).not.toHaveBeenCalled();
   });
 
   // --- findOne (expanded) -------------------------------------------------
