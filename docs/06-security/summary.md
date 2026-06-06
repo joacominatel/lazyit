@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-06-03
+updated: 2026-06-06
 ---
 
 # Security summary
@@ -36,6 +36,17 @@ Snapshot of the security review. Updated each sweep. Method:
    are [[INVARIANTS]] (INV-8 + INV-SA-1…4). This **resolves the DEF-001 residual** (the long-standing
    "reads open to any authenticated user").
 
+6. **2026-06-06 — Full-backend parallel sweep (7 domain agents).** A coordinated CTO-led sweep split
+   the whole `apps/api` backend across 7 blue-team agents, each owning 2-4 domains **and their
+   cross-service integration**: auth+identity/config/service-accounts, users/user-history/access-grants,
+   assets/asset-assignments/asset-history, asset-categories/asset-models/locations,
+   applications/consumables (+ categories + movements), articles/article-categories/search, and the
+   transversal/infra surface (common pipe, prisma, logging, dashboard, health, main, compose/caddy).
+   → SEC-011, SEC-012, SEC-020..022, SEC-030..032, SEC-040..041, SEC-050..052, SEC-060..061,
+   SEC-070..071 (17 new). No Critical. One **High** (SEC-020, JIT email-link account-takeover under
+   BYOI). Per-agent sweep reports: `sweep-2026-06-06-*.md`. Re-verified SEC-004/005/008/009/010 (closed)
+   did not regress — **except SEC-051 re-opens the SEC-008 class** via a new bypass vector.
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 
 ## Counts by severity (open)
@@ -43,11 +54,11 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | Severity | Count |
 | --- | --- |
 | Critical | 0 |
-| High | 0 |
-| Medium | 1 |
-| Low | 2 |
+| High | 1 |
+| Medium | 5 |
+| Low | 14 |
 | Info | 0 |
-| **Total open** | **3** |
+| **Total open** | **20** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -56,20 +67,51 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 
 | ID | Sev | Module | Title |
 | --- | --- | --- | --- |
+| [[SEC-020-jit-email-link-no-email-verified\|SEC-020]] | 🔴 High | users | JIT email-linking never checks `email_verified` → seeded-ADMIN takeover under BYOI |
 | [[SEC-002-docx-decompression-bomb\|SEC-002]] | 🟠 Medium | articles | `.docx` decompression bomb (compressed size is checked, not expanded) |
+| [[SEC-011-service-account-coarse-meta-permission-escalation\|SEC-011]] | 🟠 Medium | service-accounts | SA granted `settings:manage`/`user:manage` becomes ADMIN-equivalent (self-escalation) |
+| [[SEC-021-last-admin-lockout-via-isactive\|SEC-021]] | 🟠 Medium | users | Last-admin lockout via `PATCH {isActive:false}` (skips `assertNotLastAdmin`) |
+| [[SEC-050-consumable-soft-delete-bypass\|SEC-050]] | 🟠 Medium | consumables | `Consumable`/`ConsumableCategory` missing from `SOFT_DELETABLE_MODELS` → reads/writes archived rows |
+| [[SEC-051-application-url-scheme-guard-port-carveout-bypass\|SEC-051]] | 🟠 Medium | applications | URL `host:port` carve-out accepts `javascript:1/…` → re-opens the SEC-008 XSS class |
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
+| [[SEC-012-oidc-audience-not-validated\|SEC-012]] | 🟡 Low | auth | OIDC token audience unvalidated when `OIDC_CLIENT_ID` unset (audience confusion under BYOI) |
+| [[SEC-022-isactive-not-rolled-back-on-idp-revert\|SEC-022]] | 🟡 Low | users | `isActive` not reverted on a Zitadel write-back 503 (bounded INV-5 divergence) |
+| [[SEC-030-asset-unguarded-soft-deleted-model-location-fk\|SEC-030]] | 🟡 Low | assets | Asset create/update accept a soft-deleted `modelId`/`locationId` (no live-parent guard) |
+| [[SEC-031-assignment-release-toctou-duplicate-history\|SEC-031]] | 🟡 Low | asset-assignments | Release TOCTOU → duplicate `RELEASED` history + actor overwrite (no DB backstop) |
+| [[SEC-032-asset-specs-deep-nesting-recursion-dos\|SEC-032]] | 🟡 Low | assets | Deeply-nested `specs` jsonb → unbounded recursion in `jsonDeepEqual` (stack-overflow 500) |
+| [[SEC-040-soft-deleted-parent-leaks-via-asset-includes\|SEC-040]] | 🟡 Low | transversal | Soft-deleted model/location/category leaks via nested asset includes |
+| [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]] | 🟡 Low | transversal | Soft-delete doesn't reconcile children (dangling FK to invisible parent; `SetNull` only on hard-delete) |
+| [[SEC-052-catalog-attach-to-soft-deleted-category\|SEC-052]] | 🟡 Low | applications | App/consumable create/update attach to a soft-deleted `categoryId` (no `assertCategoryUsable`) |
+| [[SEC-060-article-restore-skips-category-usable-guard\|SEC-060]] | 🟡 Low | articles | `restore()` skips `assertCategoryUsable` → live article on a soft-deleted category |
+| [[SEC-061-search-returns-full-article-content-in-hits\|SEC-061]] | 🟡 Low | search | `/search` returns full markdown `content` per hit (response amplification, undocumented field) |
+| [[SEC-070-health-ready-db-error-leak\|SEC-070]] | 🟡 Low | health | `GET /health/ready` leaks raw pg driver error (internal host/IP/port) to anonymous callers |
+| [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]] | 🟡 Low | dashboard | Dashboard aggregates count soft-deleted apps/assets via nested relations (same class as SEC-040) |
 
 ## Top findings
 
-1. **SEC-002 — `.docx` decompression bomb.** A limit-compliant `.docx` can decompress to gigabytes
-   during mammoth parsing on `POST /articles/import`. The compressed size is checked; the expanded
-   size is not. Fix: enforce an expanded-size cap before/during parsing.
-2. **SEC-003 — latent stored XSS (markdown sink).** KB markdown is stored unsanitized and
-   **escalates to High** the moment the frontend renders it. Hand to the Phase-3 frontend review as
-   part of the "untrusted-string → web sink" policy.
-3. **SEC-007 — unbounded list responses.** No list endpoint paginates (incl. the sensitive
-   `GET /access-grants`). Low now, grows with exposure/data volume.
+1. **SEC-020 (High) — seeded-ADMIN account-takeover via JIT email-linking.** `jwt-auth.guard.ts` links
+   a first-login `sub` to a live `externalId IS NULL` row by email **without ever checking the token's
+   `email_verified` claim**. Under **BYOI** (a generic OIDC IdP with self-registration, a first-class
+   supported mode), an attacker registers `admin@…`, logs in once, and the JIT claims the seeded ADMIN
+   row → full administrative takeover. Not Critical only because the default Zitadel verifies email; it
+   IS a divergence from the ADR-0038/INV-2 "verified email" assumption. **Fix:** reject linking unless
+   `email_verified === true`.
+2. **SEC-051 (Medium) — SEC-008 XSS class re-opened.** The `^\d+(\/.*)?$` host:port carve-out in
+   `isSafeApplicationUrl` accepts `javascript:1/alert(document.cookie)` (the `1/…` is valid JS division),
+   evading the SEC-008 fix on both create and update. The predicate is exported for frontend reuse →
+   escalates to High once a renderer exists.
+3. **SEC-011 (Medium) — service account → ADMIN-equivalent.** A service account granted the coarse
+   `settings:manage` or `user:manage` can self-escalate to the full catalog, mint backdoor SAs, rewrite
+   the human permission matrix, or create a human ADMIN — diverging from INV-SA-3 ("never
+   ADMIN-equivalent").
+4. **Systemic soft-delete / nested-relation class (SEC-030/040/041/050/052/060/071).** A recurring
+   pattern across six modules: top-level soft-delete filtering (ADR-0032) doesn't reach nested
+   relations, FK guards don't check for a *live* parent, and `SetNull` only fires on hard-delete. One
+   architectural fix (filter nested includes + a shared live-parent guard + register all soft-deletable
+   models) closes most of them.
+5. **SEC-002 — `.docx` decompression bomb.** A limit-compliant `.docx` can decompress to gigabytes
+   during mammoth parsing on `POST /articles/import`. Still open, deferred to the BullMQ worker.
 
 ## Posture context (not a finding — see [[deferred]])
 
