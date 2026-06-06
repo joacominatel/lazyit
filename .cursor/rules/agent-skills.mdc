@@ -1,0 +1,43 @@
+---
+description: When to read each lazyit agent skill — navigator, cto, sentinel, remediator, devops
+alwaysApply: true
+---
+
+# Agent skills
+
+The project has specialized agent skills in `.claude/skills/`. These are the source of truth for each role.
+**Always read the relevant skill file before starting work in that domain.**
+
+## lazyit-navigator — start here for any code change
+
+File: `.claude/skills/lazyit-navigator/SKILL.md`
+
+Read before: implementing a feature, adding an endpoint or entity, wiring the frontend, or making any technical decision in the repo. It maps where everything lives and the reasoning path for tasks.
+
+## lazyit-cto — coordination across multiple agents/domains
+
+File: `.claude/skills/lazyit-cto/SKILL.md`
+
+Read when: orchestrating work that spans multiple domains (frontend + backend + infra), decomposing a large strategic request, or coordinating multiple subagents. The CTO doesn't write code; it orchestrates.
+
+## lazyit-sentinel — backend security review
+
+File: `.claude/skills/lazyit-sentinel/SKILL.md`
+
+Read when: asked to security-review the API, audit a module for vulnerabilities, or triage a suspected bug class (IDOR, mass assignment, soft-delete bypass, injection, DoS, etc.). **Find, don't fix** — writes only to `docs/06-security/`.
+
+## lazyit-remediator — fixing security findings
+
+File: `.claude/skills/lazyit-remediator/SKILL.md`
+
+Read when: asked to fix, close, or triage a security finding (`docs/06-security/issues/SEC-NNN`). Prove the bug, write a failing test, apply the minimal fix, close the finding.
+
+## lazyit-devops — infrastructure and CI/CD
+
+File: `.claude/skills/lazyit-devops/SKILL.md`
+
+Read when: working on Dockerfiles, compose files, GitHub Actions CI, Caddy reverse proxy, deployment runbooks, or any infrastructure decision. **Does not touch `apps/` or `packages/`** — that's the feature agents' lane.
+
+---
+
+The lazyit-navigator skill has its own reference to `docs/` — follow its §2 reasoning path for any feature work.
