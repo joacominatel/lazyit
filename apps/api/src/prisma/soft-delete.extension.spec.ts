@@ -97,16 +97,30 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     });
   });
 
-  it('SOFT_DELETABLE_MODELS lists exactly the 10 mutable domain entities', () => {
+  it('SOFT_DELETABLE_MODELS lists exactly the 12 mutable domain entities', () => {
     expect(SOFT_DELETABLE_MODELS.has('User')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('Asset')).toBe(true);
     // ServiceAccount is soft-deletable (revoke = soft delete; ADR-0048).
     expect(SOFT_DELETABLE_MODELS.has('ServiceAccount')).toBe(true);
+    // Consumable + ConsumableCategory carry deletedAt (ADR-0034) — SEC-050.
+    expect(SOFT_DELETABLE_MODELS.has('Consumable')).toBe(true);
+    expect(SOFT_DELETABLE_MODELS.has('ConsumableCategory')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('AssetAssignment')).toBe(false);
     expect(SOFT_DELETABLE_MODELS.has('AccessGrant')).toBe(false);
+    // ConsumableMovement is an append-only ledger (ADR-0006/0034) — NOT soft-deletable.
+    expect(SOFT_DELETABLE_MODELS.has('ConsumableMovement')).toBe(false);
     // ServiceAccountPermission (join) and ServiceAccountAuditLog (append-only) are NOT soft-deletable.
     expect(SOFT_DELETABLE_MODELS.has('ServiceAccountPermission')).toBe(false);
     expect(SOFT_DELETABLE_MODELS.has('ServiceAccountAuditLog')).toBe(false);
-    expect(SOFT_DELETABLE_MODELS.size).toBe(10);
+    expect(SOFT_DELETABLE_MODELS.size).toBe(12);
+  });
+
+  it('auto-scopes Consumable / ConsumableCategory reads to deletedAt: null (SEC-050)', () => {
+    expect(
+      withSoftDeleteFilter('Consumable', 'findFirst', { where: { id: 'k1' } }),
+    ).toEqual({ where: { id: 'k1', deletedAt: null } });
+    expect(
+      withSoftDeleteFilter('ConsumableCategory', 'findMany', {}),
+    ).toEqual({ where: { deletedAt: null } });
   });
 });
