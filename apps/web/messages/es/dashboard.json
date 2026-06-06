@@ -71,7 +71,6 @@
   },
   "recentActivity": {
     "heading": "Actividad reciente",
-    "cardTitle": "En todo el entorno",
     "cardDescription": "Los últimos cambios en activos, accesos y stock: lo más reciente primero.",
     "empty": "Aún no se registró actividad. Los cambios en activos, accesos y consumibles aparecerán aquí.",
     "loadMore": "Cargar más",
