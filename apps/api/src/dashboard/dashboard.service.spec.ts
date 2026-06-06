@@ -222,12 +222,36 @@ describe('DashboardService', () => {
     expect(windowMs).toBe(10 * 24 * 60 * 60 * 1000);
   });
 
-  it('filters critical-app grants to active grants on isCritical applications', async () => {
+  it('filters critical-app grants to active grants on LIVE isCritical applications (SEC-071)', async () => {
     await service.getSummary();
-    // 3rd accessGrant.count call is onCriticalApps.
+    // 3rd accessGrant.count call is onCriticalApps — the related app must be live (deletedAt: null),
+    // since the relation predicate is not auto-soft-delete-filtered.
     expect(prisma.accessGrant.count.mock.calls[2][0]).toEqual({
-      where: { revokedAt: null, application: { is: { isCritical: true } } },
+      where: {
+        revokedAt: null,
+        application: { is: { isCritical: true, deletedAt: null } },
+      },
     });
+  });
+
+  it('excludes grants on soft-deleted apps from activeGrants + expiringSoon (SEC-071)', async () => {
+    await service.getSummary();
+    // 1st call = activeGrants, 2nd = expiringSoon: both scope the related app to live (deletedAt: null).
+    expect(prisma.accessGrant.count.mock.calls[0][0]).toEqual({
+      where: { revokedAt: null, application: { is: { deletedAt: null } } },
+    });
+    expect(prisma.accessGrant.count.mock.calls[1][0].where.application).toEqual({
+      is: { deletedAt: null },
+    });
+  });
+
+  it('scopes recentActivity to live assets so soft-deleted history/payload is hidden (SEC-071)', async () => {
+    await service.getSummary();
+    expect(prisma.assetHistory.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { asset: { is: { deletedAt: null } } },
+      }),
+    );
   });
 
   it('post-filters low stock to currentStock <= minStock (and ignores null minStock via the query)', async () => {
