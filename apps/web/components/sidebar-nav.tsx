@@ -145,7 +145,7 @@ const NAV: NavSection[] = [
   },
 ];
 
-export function SidebarNav() {
+export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
   const pathname = usePathname();
   // Sidebar labels/headings live in the `nav` namespace (ADR-0051). This is the Phase-0
   // worked example: one real section of the chrome wired through next-intl, proving the
@@ -156,7 +156,7 @@ export function SidebarNav() {
   const { can } = useMyPermissions();
 
   return (
-    <nav className="flex-1 space-y-4 p-2">
+    <nav className={cn("flex-1 overflow-y-auto p-2", collapsed ? "space-y-0.5" : "space-y-4")}>
       {NAV.map((section, index) => {
         // Hide items the caller can't use, then drop a section that empties out:
         //  - `adminOnly`  → needs `settings:manage` (the Settings shell).
@@ -172,10 +172,13 @@ export function SidebarNav() {
         const activeIconClass = ACTIVE_ICON_BY_PILLAR[section.pillar ?? "default"];
         return (
         <div key={section.headingKey ?? `section-${index}`} className="space-y-0.5">
-          {section.headingKey ? (
-            <p className="px-3 pt-1 pb-1 text-xs font-medium tracking-wide text-muted-foreground/70 uppercase">
+          {/* section heading - hidden when collapsed, a divider line takes its place */}
+          {section.headingKey && !collapsed ? (
+            <p className="px-3 pb-1 pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
               {t(section.headingKey)}
             </p>
+          ) : section.headingKey && collapsed ? (
+            <div className="mx-2 my-1 border-t border-border" />
           ) : null}
           {items.map(({ labelKey, href, icon: Icon }) => {
             // Active for the exact route and any nested route (e.g. /assets/:id).
@@ -185,10 +188,12 @@ export function SidebarNav() {
                 key={href}
                 href={href}
                 aria-current={active ? "page" : undefined}
+                title={collapsed ? t(labelKey) : undefined}
                 className={cn(
                   // min-h-11 gives a ~44px tap target on touch; md:min-h-9
                   // restores desktop density on the always-visible rail.
-                  "flex min-h-11 items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors md:min-h-9",
+                  "flex min-h-11 items-center rounded-md py-2 text-sm transition-colors md:min-h-9",
+                  collapsed ? "justify-center px-0" : "gap-2.5 px-3",
                   active
                     ? // Active reads as tint + weight + a pillar-toned icon — three reinforcing
                       // cues, never colour alone. The readable label stays on the AA-cleared
@@ -197,8 +202,8 @@ export function SidebarNav() {
                     : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 )}
               >
-                <Icon className={cn("size-5", active && activeIconClass)} />
-                {t(labelKey)}
+                <Icon className={cn("size-5 shrink-0", active && activeIconClass)} />
+                {!collapsed && t(labelKey)}
               </Link>
             );
           })}
