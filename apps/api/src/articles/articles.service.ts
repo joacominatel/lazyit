@@ -447,6 +447,10 @@ export class ArticlesService {
     if (article.deletedAt === null) {
       return article; // already live — idempotent
     }
+    // The category may have been soft-deleted while this article was archived (category delete only
+    // counts LIVE articles, so a soft-deleted one doesn't block it). Re-run the same guard create/
+    // update use so a restore can't bring the article back onto a dead category (SEC-060).
+    await this.assertCategoryUsable(article.categoryId);
     const restored = await this.prisma.article.update({
       where: { id },
       data: { deletedAt: null, lastEditedById: cu },
