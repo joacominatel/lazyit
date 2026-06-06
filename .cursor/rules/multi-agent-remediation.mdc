@@ -1,0 +1,43 @@
+---
+description: How the CTO/orchestrator coordinates multiple agents fixing things in parallel (security findings, batch fixes) without collisions
+alwaysApply: true
+---
+
+# Multi-agent parallel remediation
+
+how to run several agents at once on a batch of fixes (e.g. closing a sweep of `SEC-NNN`
+findings) so they never step on each other. the orchestrator (CTO) does NOT write the fixes - it
+scopes, dispatches, reviews.
+
+## the loop (per fix-agent)
+
+1. **new agent -> new branch -> isolated worktree.** use a `best-of-n-runner` subagent so each agent
+   gets its own git worktree + branch. never let two agents share a working dir.
+2. **give it the backend skill** (`.claude/skills/lazyit-remediator/SKILL.md`) and the relevant
+   sentinel context.
+3. **point it at the exact docs**: the `docs/06-security/issues/SEC-NNN-*.md` finding(s) it owns +
+   any ADR/invariant it needs (`docs/06-security/INVARIANTS.md`, the module's ADRs).
+4. it analyzes -> writes a failing test -> applies the minimal fix -> verifies -> moves the finding to
+   `docs/06-security/closed/` with a Resolution block.
+5. **commit file-by-file -> push -> open PR with `gh pr create --base dev`** (ALWAYS target `dev`,
+   never `master`).
+6. orchestrator reviews the PR. **if it's clearly OK -> merge. if there are doubts, it's
+   auth/authz/admin-safety critical, or it needs an ADR/product call -> leave it for the user.**
+
+## no-collision rule (hard)
+
+group findings **by file ownership, not by domain**. two agents must NEVER touch the same file. if
+two findings share a file (or a shared module like the prisma soft-delete extension), the SAME agent
+owns both. reserve disjoint id ranges when agents also write reports.
+
+## merge authority
+
+- the orchestrator MAY merge low-risk, isolated PRs into `dev` once reviewed and CI is green.
+- the orchestrator does NOT merge: anything touching authN/authZ, the admin/last-admin guards,
+  privilege escalation, deletes/migrations, or anything needing a new ADR -> hand those to the user.
+- never merge into `master` - only the user promotes `dev` -> `master`.
+- still no `--amend` / `rebase` / `reset` / `force-push` / `git add -A`; stage explicit files.
+
+> this complements `git-workflow.mdc`. that rule's default "agents never merge" is relaxed ONLY for
+> the orchestrator on low-risk reviewed PRs into `dev`, per the user's standing instruction for
+> parallel remediation batches.
