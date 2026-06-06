@@ -116,6 +116,13 @@ export class AssetAssignmentsService {
    * Release an active assignment: set `releasedAt = now()` (+ `releasedById` from the authenticated
    * User, optional `notes`). 404 if missing; 409 if already released (release is not repeatable).
    * Releasing one owner does not affect any other active assignment on the same asset.
+   *
+   * The findOne pre-check is a friendly 404/409, not the race guard: two concurrent releases (or a
+   * double-click) can both read `releasedAt === null`. The DB backstop is the conditional
+   * `updateMany({ where: { id, releasedAt: null } })` — only the winner flips the row (`count === 1`)
+   * and records the single RELEASED event; the loser sees `count === 0` and 409s, writing nothing.
+   * Mirrors the create path's friendly-pre-check + DB-backstop pattern (there a partial unique index;
+   * a unique index can't express "release once", so the conditional write is the right tool). SEC-031.
    */
   async release(
     id: string,
@@ -128,8 +135,10 @@ export class AssetAssignmentsService {
     }
     const actor = this.actor.resolveActor(principal);
     return this.prisma.$transaction(async (tx) => {
-      const released = await tx.assetAssignment.update({
-        where: { id },
+      const { count } = await tx.assetAssignment.updateMany({
+        // atomic check-and-set: the `releasedAt: null` predicate makes the transition happen at most
+        // once even under concurrency, so the history-write below only runs when WE did the release.
+        where: { id, releasedAt: null },
         data: {
           releasedAt: new Date(),
           // Attribute the RELEASE action: human → releasedById, service account → releasedBySaId.
@@ -141,6 +150,11 @@ export class AssetAssignmentsService {
           ...(data.notes !== undefined ? { notes: data.notes } : {}),
         },
       });
+      if (count === 0) {
+        // lost the race - a concurrent release committed first; same 409 as the pre-check, and we
+        // bail before recording history (the throw rolls the tx back), so no duplicate RELEASED row
+        throw new ConflictException(`AssetAssignment ${id} is already released`);
+      }
       await this.history.record(tx, {
         assetId: assignment.assetId,
         eventType: 'RELEASED',
@@ -149,7 +163,8 @@ export class AssetAssignmentsService {
         payload: { userId: assignment.userId },
         actor,
       });
-      return released;
+      // updateMany returns only a count; re-read the row for the response (identity is immutable)
+      return tx.assetAssignment.findUnique({ where: { id } });
     });
   }
 
