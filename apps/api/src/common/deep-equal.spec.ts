@@ -54,4 +54,24 @@ describe('jsonDeepEqual', () => {
     expect(jsonDeepEqual(1, 1)).toBe(true);
     expect(jsonDeepEqual(true, false)).toBe(false);
   });
+
+  // SEC-032 — a pathologically deep specs object (unvalidated jsonb) must NOT overflow the stack.
+  // Past the depth bound the compare returns (treating the values as "changed"), never throws.
+  it('bounds recursion depth instead of overflowing the stack on a deep object', () => {
+    const deep = (levels: number): Record<string, unknown> => {
+      const root: Record<string, unknown> = {};
+      let cur = root;
+      for (let i = 0; i < levels; i++) {
+        const next: Record<string, unknown> = {};
+        cur.a = next;
+        cur = next;
+      }
+      return root;
+    };
+    const a = deep(50_000);
+    const b = deep(50_000);
+    expect(() => jsonDeepEqual(a, b)).not.toThrow();
+    // Identical-but-too-deep chains are reported as "changed" (false) rather than crashing.
+    expect(jsonDeepEqual(a, b)).toBe(false);
+  });
 });
