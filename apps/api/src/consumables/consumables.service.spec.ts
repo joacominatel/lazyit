@@ -39,6 +39,8 @@ type TxMock = {
   consumableMovement: { create: jest.Mock };
 };
 
+type CategoryModelMock = { findFirst: jest.Mock };
+
 type MovementData = Record<string, unknown>;
 type CreateMovementCall = [{ data: MovementData }];
 type StockUpdateCall = [
@@ -63,10 +65,12 @@ describe('ConsumablesService', () => {
   let service: ConsumablesService;
   let consumable: ConsumableModelMock;
   let consumableMovement: MovementModelMock;
+  let consumableCategory: CategoryModelMock;
   let tx: TxMock;
   let prisma: {
     consumable: ConsumableModelMock;
     consumableMovement: MovementModelMock;
+    consumableCategory: CategoryModelMock;
     $transaction: jest.Mock;
   };
   let actor: ActorService;
@@ -81,6 +85,7 @@ describe('ConsumablesService', () => {
       fields: { minStock: MIN_STOCK_FIELD },
     };
     consumableMovement = { findMany: jest.fn(), create: jest.fn() };
+    consumableCategory = { findFirst: jest.fn() };
     tx = {
       consumable: {
         findFirst: jest.fn(),
@@ -92,6 +97,7 @@ describe('ConsumablesService', () => {
     prisma = {
       consumable,
       consumableMovement,
+      consumableCategory,
       // Handles BOTH forms: callback (createMovement) and array (findPage's [findMany, count]).
       $transaction: jest.fn(
         (arg: ((client: TxMock) => unknown) | Promise<unknown>[]) =>
@@ -262,6 +268,40 @@ describe('ConsumablesService', () => {
     expect(consumable.create).toHaveBeenCalledWith({ data: dto });
   });
 
+  // SEC-052 — a supplied categoryId must reference a LIVE category; a soft-deleted one satisfies the
+  // FK but is a dangling link. The soft-delete read filter returns null for an archived category.
+  it('create 400s when categoryId points at a soft-deleted category (SEC-052)', async () => {
+    consumableCategory.findFirst.mockResolvedValue(null); // filter hides the archived category
+
+    await expect(
+      service.create({ name: 'Cable', categoryId: 'cat-gone' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(consumable.create).not.toHaveBeenCalled();
+  });
+
+  it('create attaches to a LIVE category (SEC-052)', async () => {
+    consumableCategory.findFirst.mockResolvedValue({ id: 'cat-live' });
+    consumable.create.mockResolvedValue({ id: 'k1', categoryId: 'cat-live' });
+
+    await service.create({ name: 'Cable', categoryId: 'cat-live' });
+
+    expect(consumableCategory.findFirst).toHaveBeenCalledWith({
+      where: { id: 'cat-live' },
+      select: { id: true },
+    });
+    expect(consumable.create).toHaveBeenCalled();
+  });
+
+  it('update 400s when categoryId points at a soft-deleted category (SEC-052)', async () => {
+    consumable.findFirst.mockResolvedValue({ id: 'k1' });
+    consumableCategory.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.update('k1', { categoryId: 'cat-gone' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(consumable.update).not.toHaveBeenCalled();
+  });
+
   it('applies a partial update after confirming the consumable exists', async () => {
     consumable.findFirst.mockResolvedValue({ id: 'k1' });
     consumable.update.mockResolvedValue({ id: 'k1', minStock: 3 });
@@ -384,16 +424,28 @@ describe('ConsumablesService', () => {
     expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
 
-  it('ADJUSTMENT sets currentStock to the absolute quantity (even below current)', async () => {
-    tx.consumable.update.mockResolvedValue({ id: 'k1' });
+  it('ADJUSTMENT sets currentStock to the absolute quantity via a live-guarded updateMany (SEC-050)', async () => {
+    tx.consumable.updateMany.mockResolvedValue({ count: 1 });
     tx.consumableMovement.create.mockResolvedValue({ id: 4 });
 
     await service.createMovement('k1', { type: 'ADJUSTMENT', quantity: 7 });
 
-    expect(tx.consumable.update).toHaveBeenCalledWith({
-      where: { id: 'k1' },
+    // Guarded by deletedAt: null so a soft-deleted consumable can't be recounted (writes are not
+    // auto-scoped by the soft-delete extension).
+    expect(tx.consumable.updateMany).toHaveBeenCalledWith({
+      where: { id: 'k1', deletedAt: null },
       data: { currentStock: 7 },
     });
+    expect(tx.consumable.update).not.toHaveBeenCalled();
+  });
+
+  it('ADJUSTMENT against a missing/soft-deleted consumable (count 0) throws 404 (SEC-050)', async () => {
+    tx.consumable.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.createMovement('gone', { type: 'ADJUSTMENT', quantity: 7 }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
 
   it('IN whose result would exceed int4 (INT4_MAX) throws 409 and persists nothing', async () => {
