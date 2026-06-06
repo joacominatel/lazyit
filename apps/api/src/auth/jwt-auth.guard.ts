@@ -277,6 +277,14 @@ export class JwtAuthGuard implements CanActivate {
       this.jwks = createRemoteJWKSet(new URL(jwksUri), options);
     }
 
+    // SEC-012: the expected token audience is OIDC_AUDIENCE (the resource/project aud some IdPs put
+    // on access tokens, e.g. Zitadel), falling back to OIDC_CLIENT_ID (ID-token style aud). When
+    // either is configured we PIN it so a token minted for a different relying party on the same
+    // issuer is rejected. When NEITHER is set audience stays unvalidated — but that is no longer a
+    // silent default: boot-config emits a loud WARN (validateBootConfig) so the operator opts in
+    // knowingly. We do not fail closed here because BYOI must degrade gracefully (INV-4).
+    const expectedAudience =
+      process.env.OIDC_AUDIENCE ?? process.env.OIDC_CLIENT_ID;
     let payload: JWTPayload;
     try {
       ({ payload } = await jwtVerify(token, this.jwks, {
@@ -284,11 +292,7 @@ export class JwtAuthGuard implements CanActivate {
         // Pin the signature algorithm to RS256 so a token can never be verified under a weaker or
         // attacker-chosen `alg` (alg-confusion / "none" downgrade). Zitadel signs OIDC tokens RS256.
         algorithms: ['RS256'],
-        // audience validation: omit if OIDC_CLIENT_ID is unset so the guard does not fail when
-        // access tokens carry a resource audience rather than the client id.
-        ...(process.env.OIDC_CLIENT_ID
-          ? { audience: process.env.OIDC_CLIENT_ID }
-          : {}),
+        ...(expectedAudience ? { audience: expectedAudience } : {}),
       }));
     } catch {
       throw new UnauthorizedException('Invalid or expired Bearer token');
@@ -321,10 +325,12 @@ export class JwtAuthGuard implements CanActivate {
    *  - a *soft-deleted* User with that sub → 403 (do NOT re-provision): re-creating a fresh row
    *    would silently resurrect an offboarded account and orphan its old User.id audit links;
    *  - no row by externalId → first login: enrich the access token's claims with the OIDC userinfo
-   *    profile (the access token alone lacks email/name), then ACCOUNT-LINK BY EMAIL before creating:
-   *    if a LIVE user already holds the (normalized) email and is UNCLAIMED (externalId IS NULL), bind
-   *    this sub onto that row and inherit its role (this is how the seeded ADMIN is adopted by the
-   *    operator's IdP identity). If that email is already linked to a DIFFERENT sub, 409 (never steal
+   *    profile (the access token alone lacks email/name), then ACCOUNT-LINK BY VERIFIED EMAIL before
+   *    creating: when the token asserts email_verified (SEC-020), if a LIVE user already holds the
+   *    (normalized) email and is UNCLAIMED (externalId IS NULL), bind this sub onto that row and
+   *    inherit its role (this is how the seeded ADMIN is adopted by the operator's IdP identity). An
+   *    UNVERIFIED email is never linked — it falls through to a fresh JIT identity. If that email is
+   *    already linked to a DIFFERENT sub, 409 (never steal
    *    an account). Otherwise create a fresh User: sub → externalId, email, given_name + family_name →
    *    firstName/lastName (falls back to splitting `name`, then the email local-part).
    *
@@ -375,6 +381,15 @@ export class JwtAuthGuard implements CanActivate {
 
     const emailClaim =
       typeof profile['email'] === 'string' ? profile['email'] : undefined;
+    // SEC-020: email-linking is sound ONLY for a VERIFIED email (OIDC Core §5.7, ADR-0038 / INV-2).
+    // A BYOI IdP can mint a token with an arbitrary, unverified `email` claim; trusting it would let
+    // an attacker claim the seeded ADMIN row (externalId IS NULL) and inherit its role. Only treat the
+    // email as link-worthy when the IdP asserts it is verified (boolean true, or the string "true"
+    // some IdPs emit). An unverified email never enters the claim branch below — it falls through to a
+    // fresh externalId-bound JIT identity instead.
+    const emailVerified =
+      profile['email_verified'] === true ||
+      profile['email_verified'] === 'true';
     // Normalize (trim + lowercase) so the JIT-provisioned email matches the citext column and the
     // @lazyit/shared EmailSchema (ADR-0041). Without this, an IdP that returns "Bob@x" would store a
     // mixed-case row that the case-insensitive unique index still treats as "bob@x" — fine for
@@ -431,12 +446,16 @@ export class JwtAuthGuard implements CanActivate {
     // offboarded user with the same email is invisible here and is NEVER linked or resurrected.
     //
     // SECURITY: linking by email is sound ONLY because the IdP is trusted to own/verify the email
-    // (ADR-0037/0038). We therefore (a) CLAIM a row only when its externalId IS NULL (an account no
-    // identity has bound yet) and (b) NEVER re-bind a row already linked to a different `sub` —
-    // re-binding would be account takeover. The claim is a race-safe `updateMany` guarded by
-    // `{ id, externalId: null }`: a concurrent first-login wins the row exactly once; the loser's
-    // updateMany matches 0 rows and it refetches the now-linked row, so the flow stays idempotent.
-    const emailOwner = await this.prisma.user.findFirst({ where: { email } });
+    // (ADR-0037/0038). We therefore (a) require email_verified (SEC-020 — skip the lookup entirely
+    // for an unverified email so an unclaimed row can never be claimed by an attacker-chosen address),
+    // (b) CLAIM a row only when its externalId IS NULL (an account no identity has bound yet) and
+    // (c) NEVER re-bind a row already linked to a different `sub` — re-binding would be account
+    // takeover. The claim is a race-safe `updateMany` guarded by `{ id, externalId: null }`: a
+    // concurrent first-login wins the row exactly once; the loser's updateMany matches 0 rows and it
+    // refetches the now-linked row, so the flow stays idempotent.
+    const emailOwner = emailVerified
+      ? await this.prisma.user.findFirst({ where: { email } })
+      : null;
     if (emailOwner) {
       if (emailOwner.externalId === sub) {
         // Defensive: normally the externalId lookup already caught this; return the live row.
