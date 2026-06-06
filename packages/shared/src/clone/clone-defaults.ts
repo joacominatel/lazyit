@@ -61,6 +61,17 @@ function cloneJson<T>(value: T | null | undefined): T | undefined {
   return value == null ? undefined : structuredClone(value);
 }
 
+export function applyAssetModelSpecsDefaults(
+  modelSpecs: Record<string, unknown> | null | undefined,
+  assetSpecs: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | undefined {
+  const defaults = cloneJson(modelSpecs);
+  const overrides = cloneJson(assetSpecs);
+  if (defaults === undefined) return overrides;
+  if (overrides === undefined) return defaults;
+  return { ...defaults, ...overrides };
+}
+
 /**
  * The `CreateAsset`-shaped partial for cloning an Asset. Copies the descriptive + classification
  * fields, DEEP-COPIES `specs`, and CLEARS the unique partial-index fields `serial` / `assetTag` (so
