@@ -121,6 +121,30 @@ export const PermissionSchema = z.enum(PERMISSIONS);
 export type Permission = z.infer<typeof PermissionSchema>;
 
 /**
+ * The permissions a SERVICE ACCOUNT may NEVER hold (SEC-011, INV-SA-3). A service account is authorized
+ * purely by its direct grant set, so granting it a privilege-management verb would make it
+ * ADMIN-equivalent — the exact thing INV-SA-3 forbids ("a service account is NEVER ADMIN-equivalent").
+ * These two are the privilege-administration verbs that let a principal grant ITSELF more:
+ *   - `settings:manage` — gates the whole Service-Accounts management API + `PUT /config/permissions`,
+ *     so a bot holding it can self-escalate (PATCH its own grant set to the full catalog), mint backdoor
+ *     bots, and rewrite the human MEMBER/VIEWER matrix.
+ *   - `user:manage`     — gates `POST /users`, which can create a human ADMIN.
+ *
+ * Deliberately NOT here: `accessGrant:grant` and the `:delete` family. They are destructive but they do
+ * NOT confer more permissions on the holder (they grant application access / delete domain rows), so a
+ * legitimate provisioning/cleanup bot may hold them — only the self-escalation verbs are forbidden.
+ *
+ * Enforced at the SA grant write boundary (`ServiceAccountsService.create`/`update`) — a forbidden grant
+ * is a 400 — and defensively re-filtered before persisting so a forbidden literal can never be stored.
+ */
+export const SERVICE_ACCOUNT_FORBIDDEN_PERMISSIONS = [
+  "settings:manage",
+  "user:manage",
+] as const satisfies readonly Permission[];
+export type ServiceAccountForbiddenPermission =
+  (typeof SERVICE_ACCOUNT_FORBIDDEN_PERMISSIONS)[number];
+
+/**
  * The wire shape for the full per-role permission matrix: every {@link Role} mapped to the set of
  * permissions it currently holds. This is what a future config endpoint reads/writes and what the
  * golden test asserts against the seed. It is the materialized view of the `RolePermission` rows.
