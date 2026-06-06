@@ -11,13 +11,24 @@
  * Scope: JSON values only (the shape `specs` can hold). `null`/`undefined` are treated as the same
  * "empty" so an absent vs explicitly-null spec doesn't read as a change. Not a general deep-equal
  * (no Date/Map/Set/cycles) — `jsonb` round-trips as plain JSON, so those never occur here.
+ *
+ * Depth is bounded (SEC-032): `specs` is unvalidated jsonb (`z.unknown()`, DEF-004), so a caller can
+ * store an arbitrarily deep `{"a":{"a":…}}` chain. Recursing it unbounded blows V8's call stack and
+ * 500s the update. Past {@link MAX_DEPTH} we stop and treat the values as "changed" (return false) —
+ * emitting a spurious SPECS_CHANGED is harmless and correct-enough, and no real specs nest that deep.
  */
-export function jsonDeepEqual(a: unknown, b: unknown): boolean {
+const MAX_DEPTH = 100;
+
+export function jsonDeepEqual(a: unknown, b: unknown, depth = 0): boolean {
   // Treat null and undefined as equivalent "no specs".
   if (a == null && b == null) return true;
   if (a == null || b == null) return false;
 
   if (a === b) return true;
+
+  // Bail out before the recursion can overflow the stack (SEC-032). "Too deep to compare cheaply"
+  // is reported as a change, never an exception.
+  if (depth >= MAX_DEPTH) return false;
 
   const aIsArray = Array.isArray(a);
   const bIsArray = Array.isArray(b);
@@ -25,7 +36,7 @@ export function jsonDeepEqual(a: unknown, b: unknown): boolean {
 
   if (aIsArray && bIsArray) {
     if (a.length !== b.length) return false;
-    return a.every((item, i) => jsonDeepEqual(item, b[i]));
+    return a.every((item, i) => jsonDeepEqual(item, b[i], depth + 1));
   }
 
   if (typeof a === 'object' && typeof b === 'object') {
@@ -38,7 +49,7 @@ export function jsonDeepEqual(a: unknown, b: unknown): boolean {
     return aKeys.every(
       (key) =>
         Object.prototype.hasOwnProperty.call(bObj, key) &&
-        jsonDeepEqual(aObj[key], bObj[key]),
+        jsonDeepEqual(aObj[key], bObj[key], depth + 1),
     );
   }
 
