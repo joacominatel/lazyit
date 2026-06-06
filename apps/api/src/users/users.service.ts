@@ -264,24 +264,6 @@ export class UsersService {
       }
     }
 
-    // SEC-021: deactivating an ADMIN is just as privilege-removing as demoting one — a deactivated
-    // account cannot authenticate (401/anonymous), so disabling the only admin bricks the instance
-    // with no in-app recovery. Run the SAME guards as a role demotion when isActive flips true→false
-    // on an ADMIN. Reactivation (false→true) and deactivating a non-admin are unrestricted.
-    const deactivatingAdmin =
-      data.isActive === false &&
-      current.isActive !== false &&
-      current.role === 'ADMIN';
-    if (deactivatingAdmin) {
-      // No self-deactivation: a single admin can't quietly lock themselves out — always a second
-      // pair of hands (mirrors the self-role-change guard above).
-      if (actorId !== undefined && actorId === id) {
-        throw new ForbiddenException('You cannot deactivate your own account');
-      }
-      // Never disable the LAST remaining live ADMIN (409).
-      await this.assertNotLastAdmin(id);
-    }
-
     const roleChanged = data.role !== undefined && data.role !== current.role;
     // Profile edits an ADMIN can mirror (issue #149). A field only counts as CHANGED when it is present
     // AND differs from the stored value — so a PATCH that resends the same name/email skips the IdP
@@ -292,11 +274,6 @@ export class UsersService {
     const emailChanged =
       data.email !== undefined && data.email !== current.email;
     const profileChanged = nameChanged || emailChanged;
-    // SEC-022: isActive is never mirrored, but it can ride along in the SAME PATCH as a mirrored
-    // field. Track whether it actually changed so the revert below can restore it too — otherwise a
-    // failed mirror leaves isActive committed behind a "your change was not saved" 503.
-    const isActiveChanged =
-      data.isActive !== undefined && data.isActive !== current.isActive;
 
     const user = await this.prisma.user.update({ where: { id }, data });
 
@@ -354,9 +331,6 @@ export class UsersService {
               ? { firstName: current.firstName, lastName: current.lastName }
               : {}),
             ...(emailChanged ? { email: current.email } : {}),
-            // SEC-022: a non-mirrored field that rode along in this PATCH is reverted too, so the
-            // 503 ("your change was not saved") is truthful and no silent partial write survives.
-            ...(isActiveChanged ? { isActive: current.isActive } : {}),
           },
         });
         this.search.upsert('users', projectUser(reverted));

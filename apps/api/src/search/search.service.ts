@@ -15,21 +15,6 @@ export const SEARCH_INDEXES = [
 
 export type SearchIndex = (typeof SEARCH_INDEXES)[number];
 
-/**
- * What each index is allowed to **return** in a hit — pinned to the shared `*HitSchema` (the wire
- * contract). The indexed (searchable) surface is wider than this: articles index the full markdown
- * `content` so runbook bodies are findable (ADR-0042), but `content` is deliberately NOT retrievable
- * (SEC-061) — full-text matching over it stays intact, the blob just never ships in the response.
- * Retrieval ≠ searchability in Meili. Keep this in lockstep with the `*HitSchema` in @lazyit/shared.
- */
-const RETRIEVE: Record<SearchIndex, string[]> = {
-  assets: ['id', 'name', 'serial', 'assetTag', 'status', 'notes'],
-  articles: ['id', 'slug', 'title', 'excerpt', 'status'], // content indexed, never returned
-  users: ['id', 'firstName', 'lastName', 'email'],
-  locations: ['id', 'name', 'type', 'address', 'floor'],
-  applications: ['id', 'name', 'vendor', 'description'],
-};
-
 /** Per-index result block returned to the caller: the raw hits and Meili's total estimate. */
 export interface SearchEntityResult {
   hits: unknown[];
@@ -139,13 +124,7 @@ export class SearchService {
     }
 
     const params: MultiSearchParams = {
-      queries: requested.map((indexUid) => ({
-        indexUid,
-        q,
-        limit,
-        // cap the per-hit payload to the documented hit fields (SEC-061)
-        attributesToRetrieve: RETRIEVE[indexUid],
-      })),
+      queries: requested.map((indexUid) => ({ indexUid, q, limit })),
     };
 
     try {
