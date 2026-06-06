@@ -2,7 +2,7 @@
 id: SEC-061
 title: /search returns the full article markdown body in every hit (response amplification + undocumented field)
 severity: low
-status: open
+status: fixed
 cwe: CWE-770
 discovered: 2026-06-06
 module: search
@@ -109,3 +109,40 @@ asserting an article hit has no `content` key would lock it in.
 - Meilisearch `attributesToRetrieve` / `attributesToCrop`. ADR-0035 (search architecture) ·
   ADR-0042 (article content indexed) · SEC-007 (unbounded list responses) · SEC-002 (large `.docx`
   content).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `5746f5f` (`fix: restrict /search retrieved attributes to hit schema fields (SEC-061)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-06-06
+
+### Changes
+
+- `apps/api/src/search/search.service.ts`: added a `RETRIEVE: Record<SearchIndex, string[]>` map
+  pinned to the shared `*HitSchema` fields and set `attributesToRetrieve: RETRIEVE[indexUid]` on
+  every per-index `multiSearch` query. The `articles` entry omits `content`, so the markdown body
+  stays indexed (searchable, ADR-0042) but is never returned in a hit. Caps the per-hit payload to
+  the documented wire shape; full-text matching over `content` is unaffected (retrieval ≠
+  searchability in Meili).
+
+### Tests added
+
+- `apps/api/src/search/search.service.spec.ts`::`restricts retrieved attributes per index and never
+  returns article content` — asserts the `articles` query's `attributesToRetrieve` equals the
+  `ArticleHitSchema` fields and excludes `content`, and that `assets` is likewise pinned. Fails
+  without the fix (no `attributesToRetrieve` was set → `undefined`), passes with it. The existing
+  "maps the results" test was updated to expect the new per-query `attributesToRetrieve`.
+
+### Verification
+
+`bun test src/search/` → 42 pass / 0 fail (the new assertion + the updated query-shape test green);
+`bunx tsc --noEmit` clean. No change to `packages/shared` (`ArticleHitSchema` already omits
+`content` — the query was aligned to the existing contract, not the other way around).
+
+### Residual risk
+
+None for this class. Per-hit payload is now bounded to small projected fields; the broader
+per-call result-count bound is tracked separately under SEC-007. A short highlighted snippet
+(`attributesToCrop`/`cropLength`) was deliberately not added — `excerpt` is already returned and
+adding a crop field would be a new wire field outside `ArticleHitSchema`.
