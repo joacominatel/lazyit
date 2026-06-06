@@ -39,10 +39,14 @@ export function isSafeApplicationUrl(value: string): boolean {
   if (!match) return true; // scheme-less host/path, e.g. vpn.corp.local
   const scheme = match[1].toLowerCase();
   if (scheme === "http" || scheme === "https") return true;
-  // A scheme-less host with a port (vpn.corp.local:8080) is read as scheme=host by the regex above;
-  // allow it when what follows the first colon is only a port (+ optional path).
+  // A scheme-less host with a port (vpn.corp.local:8080) is read as scheme=host by the regex above.
+  // Only accept that shape when what follows the colon is a BARE port — digits and nothing else.
+  // The old `^\d+(\/.*)?$` carve-out allowed a `/<anything>` tail, which let `javascript:1/alert(1)`
+  // through (`1 / alert(1)` is a JS expression whose division CALLS alert) — SEC-051. A path after
+  // the port can always be written with an explicit http(s):// scheme, so dropping it costs nothing
+  // and closes the whole `<scheme>:<digits>/<payload>` class.
   const afterColon = normalized.slice(match[0].length);
-  return /^\d+(\/.*)?$/.test(afterColon);
+  return /^\d{1,5}$/.test(afterColon);
 }
 
 const ApplicationUrlSchema = z
