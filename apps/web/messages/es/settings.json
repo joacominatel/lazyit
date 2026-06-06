@@ -496,7 +496,7 @@
       "form": {
         "editTitle": "Editar modelo de activo",
         "newTitle": "Nuevo modelo de activo",
-        "editDescription": "Actualiza esta marca/modelo. Las especificaciones se gestionan mediante la API.",
+        "editDescription": "Actualiza esta marca/modelo y los valores predeterminados que se copian a nuevos activos.",
         "newDescription": "Una marca/modelo genérica de la que los activos son instancias, p. ej. «Dell Latitude 5520».",
         "nameLabel": "Nombre",
         "namePlaceholder": "Latitude 5520",
@@ -511,6 +511,20 @@
         "noCategories": "No se encontraron categorías",
         "descriptionLabel": "Descripción",
         "descriptionPlaceholder": "Opcional",
+        "defaultSpecs": {
+          "label": "Especificaciones predeterminadas",
+          "description": "Campos que se copian a los nuevos activos que usen este modelo. Cada activo puede cambiarlos.",
+          "empty": "Aún no hay especificaciones predeterminadas.",
+          "namePlaceholder": "Nombre (p. ej. ram)",
+          "valuePlaceholder": "Valor (p. ej. 16GB)",
+          "fieldNameLabel": "Nombre de especificación predeterminada {index}",
+          "fieldValueLabel": "Valor de especificación predeterminada {index}",
+          "removeFieldLabel": "Quitar especificación predeterminada {index}",
+          "removeFieldTitle": "Quitar especificación predeterminada",
+          "addField": "Agregar especificación predeterminada",
+          "nameRequired": "El nombre es obligatorio.",
+          "duplicateName": "Nombre de especificación duplicado."
+        },
         "saveChanges": "Guardar cambios",
         "createButton": "Crear modelo",
         "errors": {

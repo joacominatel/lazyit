@@ -496,7 +496,7 @@
       "form": {
         "editTitle": "Edit asset model",
         "newTitle": "New asset model",
-        "editDescription": "Update this make/model. Specs are managed via the API.",
+        "editDescription": "Update this make/model and the defaults copied into new assets.",
         "newDescription": "A generic make/model that assets are instances of, e.g. “Dell Latitude 5520”.",
         "nameLabel": "Name",
         "namePlaceholder": "Latitude 5520",
@@ -511,6 +511,20 @@
         "noCategories": "No categories found",
         "descriptionLabel": "Description",
         "descriptionPlaceholder": "Optional",
+        "defaultSpecs": {
+          "label": "Default specs",
+          "description": "Fields copied into new assets that use this model. Each asset can still change them.",
+          "empty": "No default specs yet.",
+          "namePlaceholder": "Name (e.g. ram)",
+          "valuePlaceholder": "Value (e.g. 16GB)",
+          "fieldNameLabel": "Default spec {index} name",
+          "fieldValueLabel": "Default spec {index} value",
+          "removeFieldLabel": "Remove default spec {index}",
+          "removeFieldTitle": "Remove default spec",
+          "addField": "Add default spec",
+          "nameRequired": "Name is required.",
+          "duplicateName": "Duplicate spec name."
+        },
         "saveChanges": "Save changes",
         "createButton": "Create model",
         "errors": {

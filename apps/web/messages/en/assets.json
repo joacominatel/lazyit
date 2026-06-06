@@ -105,7 +105,8 @@
       "removeFieldTitle": "Remove field",
       "addField": "Add field",
       "nameRequired": "Name is required.",
-      "duplicateName": "Duplicate field name."
+      "duplicateName": "Duplicate field name.",
+      "copiedFromModel": "Copied from {model}. Edit anything for this unit."
     }
   },
   "detail": {
