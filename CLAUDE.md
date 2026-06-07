@@ -84,9 +84,11 @@ Every change rides a GitHub branch+PR flow. Full runbook: `docs/05-runbooks/git-
 | Backend | NestJS (Express), strict TypeScript | 11.0.1 |
 | ORM | Prisma | 7.8.0 |
 | Database | PostgreSQL (Docker Compose for dev) | 18-alpine |
+| Queue/cache | Valkey (Redis-compatible) — backs BullMQ async workers | 8-alpine |
+| Async workers | BullMQ + `@nestjs/bullmq` (ioredis client) — sandboxed processors | — |
 | Shared | `@lazyit/shared` — zod schemas/types front↔back | workspace |
 
-Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432`.
+Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` · Valkey → `:6379`.
 Details and rationale: `docs/01-architecture/stack.md` and the ADRs.
 
 ## Repo layout
@@ -163,5 +165,7 @@ server/data layer, which is deliberately NestJS + Prisma. Decision:
 - Database access: **Prisma** — not `Bun.sql` / `pg` / `postgres.js`.
 - API tests: **Jest** (in `apps/api`) — `bun test` is for shared/scripts only.
 - Frontend: **Next.js** — not Bun HTML-import serving.
-- Future async workers may use **BullMQ + Redis** (which pulls in `ioredis`) despite the
-  `Bun.redis` preference — to be settled in an ADR when chosen.
+- Async workers use **BullMQ on Valkey** via `@nestjs/bullmq` (pulls in `ioredis`) — an accepted
+  app-layer carve-out from the `Bun.redis` preference, scoped to api/worker only (never the Bun
+  tooling layer). Memory-heavy/untrusted jobs run in **sandboxed processors**. See
+  `docs/03-decisions/0053-async-workers-bullmq-valkey.md`.
