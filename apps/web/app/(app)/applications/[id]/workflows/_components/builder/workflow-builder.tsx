@@ -4,6 +4,7 @@ import {
   ArrowDownIcon,
   ArrowPathIcon,
   ArrowUpIcon,
+  BeakerIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import {
@@ -62,6 +63,7 @@ import {
   WorkflowNode,
   WorkflowTerminal,
 } from "../workflow-graph";
+import { DryRunDialog } from "./dry-run-dialog";
 import { StepEditor } from "./step-editor";
 import { StepPalette } from "./step-palette";
 
@@ -132,6 +134,7 @@ export function WorkflowBuilder({
     new Set(),
   );
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
+  const [dryRunOpen, setDryRunOpen] = useState(false);
 
   const isEdit = workflow != null;
 
@@ -254,6 +257,16 @@ export function WorkflowBuilder({
               />
               {enabled ? t("builder.enabled") : t("builder.disabled")}
             </label>
+            {canManage && workflowId ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDryRunOpen(true)}
+              >
+                <BeakerIcon />
+                {t("dryRun.button")}
+              </Button>
+            ) : null}
             <Button variant="outline" size="sm" asChild>
               <Link href={`/applications/${applicationId}/workflows`}>
                 {tc("cancel")}
@@ -409,6 +422,17 @@ export function WorkflowBuilder({
           otherSteps={steps.filter((_, i) => i !== editingIndex)}
           onSave={(next) => saveStep(editingIndex as number, next)}
           onClose={() => setEditingIndex(null)}
+        />
+      ) : null}
+
+      {canManage && workflowId ? (
+        <DryRunDialog
+          open={dryRunOpen}
+          onOpenChange={setDryRunOpen}
+          workflowId={workflowId}
+          applicationId={applicationId}
+          trigger={trigger}
+          steps={steps}
         />
       ) : null}
     </div>
