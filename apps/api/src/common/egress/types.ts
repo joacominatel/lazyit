@@ -3,12 +3,14 @@ import type { AddressCategory } from './ip-rules';
 /** Why an outbound request was refused by the egress guard. */
 export type EgressDenyReason =
   | 'invalid-url' // not a parseable absolute URL
-  | 'scheme-not-allowed' // scheme not in the allowlist (http/https)
+  | 'scheme-not-allowed' // scheme not in the allowlist (https by default; http opt-in)
   | 'empty-host' // no host component
   | 'dns-resolution-failed' // the hostname did not resolve to any address
   | 'blocked-address' // a resolved address is in a denied range / private-not-allowlisted
   | 'too-many-redirects' // redirect chain exceeded the cap
-  | 'redirect-missing-location'; // a 3xx response with no usable Location header
+  | 'redirect-missing-location' // a 3xx response with no usable Location header
+  | 'request-timeout' // the per-socket idle timeout fired (no activity within the budget)
+  | 'deadline-exceeded'; // the overall total-time budget elapsed (slowloris / trickle guard)
 
 /**
  * The error thrown by every guard rejection. Carries a machine-readable {@link EgressDenyReason} plus
@@ -90,7 +92,11 @@ export type DnsLookup = (hostname: string) => Promise<Array<{ address: string; f
 
 /** Options for {@link assertUrlAllowed}. */
 export interface EgressGuardOptions {
-  /** Allowed URL schemes (compared against `URL.protocol`, e.g. `'http:'`). Default: http + https. */
+  /**
+   * Allowed URL schemes (compared against `URL.protocol`, e.g. `'http:'`). Default: HTTPS ONLY
+   * (`['https:']`). `http:` is opt-in — a caller that genuinely needs cleartext must request it
+   * explicitly (SEC-A4: secure-by-default, no implicit downgrade).
+   */
   allowedProtocols?: string[];
   /** The internal-target allowlist seam (see {@link InternalTargetAllowlist}). Default: deny. */
   isInternalTargetAllowed?: InternalTargetAllowlist;
@@ -117,7 +123,14 @@ export interface EgressTransportRequest {
   /** The validated IP the socket MUST dial (pinned to defeat DNS rebinding). */
   pin: { address: string; family: 4 | 6 };
   signal?: AbortSignal;
+  /** Per-socket IDLE timeout in ms (resets on activity). Default applied by the transport. */
   timeoutMs?: number;
+  /**
+   * Overall TOTAL-time budget in ms for the whole attempt (connect → headers → body), independent of
+   * the idle timeout. A slowloris/trickle that keeps resetting the idle timer is still aborted here.
+   * Default: the transport falls back to {@link timeoutMs}.
+   */
+  deadlineMs?: number;
 }
 
 /** The pluggable transport (default: a `node:http`/`node:https` client with a pinning DNS lookup). */
@@ -127,8 +140,14 @@ export type EgressTransport = (url: URL, req: EgressTransportRequest) => Promise
 export interface GuardedFetchOptions extends EgressGuardOptions {
   /** Max redirects to follow, each re-validated. Default: 5. */
   maxRedirects?: number;
-  /** Per-attempt timeout in ms applied by the default transport. Default: 30000. */
+  /** Per-socket IDLE timeout in ms applied by the default transport. Default: 30000. */
   timeoutMs?: number;
+  /**
+   * Overall TOTAL-time budget in ms per attempt (in addition to the idle {@link timeoutMs}). Bounds
+   * the whole request lifetime so a trickle/slowloris cannot hold the socket open indefinitely.
+   * Default (in the node transport): falls back to {@link timeoutMs}.
+   */
+  deadlineMs?: number;
   /** Transport override (tests / custom client). Default: the pinning node transport. */
   transport?: EgressTransport;
 }
