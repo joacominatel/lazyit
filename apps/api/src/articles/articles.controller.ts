@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -13,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  ApiAcceptedResponse,
   ApiBody,
   ApiConsumes,
   ApiCreatedResponse,
@@ -34,10 +36,13 @@ import {
   CreateArticleLinkSchema,
   CreateArticleSchema,
   ImportArticleSchema,
+  ImportJobAcceptedSchema,
+  ImportJobStatusSchema,
   UpdateArticleSchema,
   type ArticleLinkedFilter,
 } from '@lazyit/shared';
 import { ArticlesService } from './articles.service';
+import { ArticleImportService } from './import/article-import.service';
 import { maxImportBytes } from './article-import';
 import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
@@ -55,6 +60,9 @@ class ArticleDto extends createZodDto(ArticleSchema) {}
 class CreateArticleDto extends createZodDto(CreateArticleSchema) {}
 class UpdateArticleDto extends createZodDto(UpdateArticleSchema) {}
 class ImportArticleDto extends createZodDto(ImportArticleSchema) {}
+// Async import (ADR-0053): the 202 handle and the polled status envelope.
+class ImportJobAcceptedDto extends createZodDto(ImportJobAcceptedSchema) {}
+class ImportJobStatusDto extends createZodDto(ImportJobStatusSchema) {}
 class ArticleListPageDto extends createZodDto(ArticleListPageSchema) {}
 // Versioning + linking (ADR-0042).
 class ArticleVersionDto extends createZodDto(ArticleVersionSchema) {}
@@ -65,7 +73,10 @@ class CreateArticleLinkDto extends createZodDto(CreateArticleLinkSchema) {}
 @ApiTags('articles')
 @Controller('articles')
 export class ArticlesController {
-  constructor(private readonly articles: ArticlesService) {}
+  constructor(
+    private readonly articles: ArticlesService,
+    private readonly imports: ArticleImportService,
+  ) {}
 
   @Get()
   @RequirePermission('article:read')
@@ -287,10 +298,11 @@ export class ArticlesController {
   }
 
   @Post('import')
+  @HttpCode(202)
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Import an article from a .md, .txt or .docx file (ADMIN or MEMBER)',
+      'Import an article from a .md, .txt or .docx file — ASYNC (ADMIN or MEMBER). Validates type + size synchronously, enqueues a job and returns 202 + a jobId; poll GET /articles/import/:jobId for the result. The .docx parse runs in a sandboxed worker (ADR-0053 / SEC-002).',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -306,12 +318,13 @@ export class ArticlesController {
       },
     },
   })
-  @ApiCreatedResponse({ type: ArticleDto })
+  @ApiAcceptedResponse({ type: ImportJobAcceptedDto })
   // Cap the upload at the interceptor so multer aborts the stream early instead of buffering an
   // arbitrarily large file into the heap (SEC-001). platform-express maps multer's LIMIT_FILE_SIZE
   // to 413. The limit is fixed at boot from MAX_IMPORT_SIZE_MB (decoration-time eval); the
   // service-level file.size check stays as defense in depth. This does not bound .docx decompression
-  // (SEC-002) — a limit-compliant zip can still expand during parsing.
+  // (SEC-002) — a limit-compliant zip can still expand during parsing — which is exactly why the
+  // parse is deferred to the sandboxed worker child (ADR-0053).
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: maxImportBytes() } }),
   )
@@ -320,7 +333,18 @@ export class ArticlesController {
     @Body() dto: ImportArticleDto,
     @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.articles.importArticle(file, dto, principal);
+    return this.imports.enqueue(file, dto, principal);
+  }
+
+  @Get('import/:jobId')
+  @RequirePermission('article:write')
+  @ApiOperation({
+    summary:
+      'Poll the status of an async article import (ADR-0053). state ∈ queued|active|completed|failed; articleId is set once completed; error is a short, permanent-failure message once failed. 404 for an unknown jobId.',
+  })
+  @ApiOkResponse({ type: ImportJobStatusDto })
+  importStatus(@Param('jobId') jobId: string) {
+    return this.imports.getStatus(jobId);
   }
 
   @Patch(':id')

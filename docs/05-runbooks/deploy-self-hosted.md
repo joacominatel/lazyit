@@ -177,10 +177,16 @@ opt-in `backup` profile sidecar automates the two DB dumps with retention (see [
 
 The compose file sets a modest `mem_limit`/`cpus` per service (and `logging:` rotation so logs can't
 fill the disk). They cap a runaway service from OOM-ing the host; tune them to your box. The stack
-runs **seven** long-running containers (db, api, web, zitadel, zitadel_db, meilisearch, caddy) plus
-the one-shot migrate. Suggested minimum host for a small team (≤50 assets): **2 vCPU / 4 GB RAM /
+runs **eight** long-running containers (db, api, web, zitadel, zitadel_db, meilisearch, valkey, caddy)
+plus the one-shot migrate. Suggested minimum host for a small team (≤50 assets): **2 vCPU / 4 GB RAM /
 20 GB disk**, growing with data and search volume. Watch `docker stats` and raise the limits if a
 service is constrained.
+
+> **Valkey** (ADR-0053) is the BullMQ broker for async workers (e.g. the async `.docx` import). It is
+> lightweight (256 MB ceiling — mostly job metadata) and runs AOF persistence on the `valkey_data`
+> volume so queued jobs survive a restart. It holds only in-flight job state — PostgreSQL is the system
+> of record — so it is **not** a backup target (like Meilisearch, its volume is rebuildable); the
+> `backup` sidecar only dumps the two Postgres DBs (see [[backups]]).
 
 Build/boot problems → [[docker-build-troubleshooting]].
 

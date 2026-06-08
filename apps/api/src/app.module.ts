@@ -24,6 +24,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { HealthModule } from './health/health.module';
 import { CommonModule } from './common/common.module';
 import { ConfigModule } from './config/config.module';
+import { QueueModule } from './queue/queue.module';
 import { ServiceAccountsModule } from './service-accounts/service-accounts.module';
 import { SearchModule } from './search/search.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
@@ -40,6 +41,9 @@ import { buildLoggerParams } from './logging/logging.config';
     AuthModule,
     // Global cross-cutting providers (ActorService — resolves actor id from User entity, ADR-0038).
     CommonModule,
+    // Async workers foundation (ADR-0053): the shared BullMQ connection to Valkey (REDIS_URL).
+    // Global so feature modules can register their queues. Powers the async .docx import (SEC-002).
+    QueueModule,
     // Global cross-cutting search (ADR-0035): exports SearchService for fire-and-forget index sync,
     // hosts GET /search. No-ops when MEILI_HOST is unset.
     SearchModule,

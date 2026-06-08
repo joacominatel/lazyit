@@ -65,11 +65,14 @@ export function useUnpublishArticle() {
   });
 }
 
+/**
+ * Enqueue an async import (ADR-0053). The mutation resolves when the job is **accepted** (HTTP 202)
+ * — it returns `{ jobId }`, not an Article. The article doesn't exist yet, so there's nothing to
+ * invalidate here; the caller polls `useArticleImportStatus(jobId)` and invalidates on completion.
+ */
 export function useImportArticle() {
-  const invalidate = useInvalidateArticles();
   return useMutation({
     mutationFn: ({ file, fields }: { file: File; fields: ImportArticle }) =>
       importArticle(file, fields),
-    onSuccess: invalidate,
   });
 }

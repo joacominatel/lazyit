@@ -135,6 +135,8 @@
     "categoryNone": "Aún no hay categorías",
     "statusLabel": "Estado",
     "submit": "Importar",
+    "importing": "Importando…",
+    "processingHint": "Importando tu archivo. Los documentos de Word grandes pueden tardar un momento.",
     "toast": {
       "signInRequired": "Debes iniciar sesión para importar artículos",
       "chooseFile": "Elige un archivo para importar",
