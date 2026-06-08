@@ -9,6 +9,7 @@ export * from "./schemas/application";
 export * from "./schemas/application-category";
 export * from "./schemas/article";
 export * from "./schemas/article-category";
+export * from "./schemas/article-import-job";
 export * from "./schemas/article-link";
 export * from "./schemas/article-list";
 export * from "./schemas/article-version";
