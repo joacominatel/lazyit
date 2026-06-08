@@ -28,8 +28,12 @@ import {
   classifySuccessEdge,
   isTerminalTarget,
 } from './transitions';
-import { MAX_WALK_STEPS } from './workflow-run.constants';
-import type { ManualTaskOrigin, TransitionTaken } from './workflow-run.types';
+import {
+  MAX_INPROCESS_BACKOFF_MS,
+  MAX_WALK_STEPS,
+} from './workflow-run.constants';
+import type { TransitionTaken } from './workflow-run.types';
+import { WorkflowTriggerService } from './workflow-trigger.service';
 
 /** A clock/sleep seam so the per-step retry backoff is a no-op in unit tests (no real timers). */
 export interface Sleeper {
@@ -40,14 +44,31 @@ export const realSleeper: Sleeper = {
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
-/** The outcome of executing one step across its retry attempts (the FINAL attempt's data). */
-interface StepExecution {
-  status: 'SUCCEEDED' | 'FAILED' | 'AWAITING_INPUT';
-  attempt: number;
-  metadata: Record<string, unknown>;
-  externalCorrelationId?: string | null;
-  manualTaskSpec?: ManualTaskSpec;
-}
+/**
+ * The classified outcome of executing ONE attempt of a step (CCOR-3 — the per-attempt unit; the retry
+ * backoff is no longer an in-process loop). `RETRY` means "transient failure, attempts remain" — the
+ * walk schedules the next attempt OFF the worker (a delayed re-enqueue) instead of sleeping in-slot.
+ */
+type StepOutcome =
+  | {
+      status: 'AWAITING_INPUT';
+      attempt: number;
+      metadata: Record<string, unknown>;
+      manualTaskSpec?: ManualTaskSpec;
+    }
+  | {
+      status: 'SUCCEEDED';
+      attempt: number;
+      metadata: Record<string, unknown>;
+      externalCorrelationId?: string | null;
+    }
+  | { status: 'FAILED'; attempt: number; metadata: Record<string, unknown> }
+  | {
+      status: 'RETRY';
+      attempt: number;
+      metadata: Record<string, unknown>;
+      retryDelayMs: number;
+    };
 
 /**
  * The run orchestrator — the normative DAG walk of ADR-0054 §8 over a pinned `WorkflowVersion.steps`.
@@ -70,6 +91,7 @@ export class WorkflowRunOrchestrator {
     private readonly secrets: SecretService,
     private readonly contextBuilder: RunContextBuilder,
     @Inject(WORKFLOW_SLEEPER) private readonly sleeper: Sleeper,
+    private readonly trigger: WorkflowTriggerService,
   ) {}
 
   // ── public entrypoints ────────────────────────────────────────────────────
@@ -107,11 +129,42 @@ export class WorkflowRunOrchestrator {
     await this.walk(runId, resumeCursor);
   }
 
+  /**
+   * Re-enter a RUNNING run at `stepKey` to execute its NEXT retry `attempt` after the per-step backoff
+   * elapsed OFF the worker (CCOR-3 — a delayed job, not an in-process sleep). Idempotent against a stalled
+   * re-delivery: if this attempt already produced an append-only row it is a no-op; and only a run still
+   * RUNNING proceeds (a run finalized meanwhile — e.g. by the RUNNING-staleness reconciler — is skipped).
+   */
+  async retryStep(
+    runId: string,
+    stepKey: string,
+    attempt: number,
+  ): Promise<void> {
+    const already = await this.prisma.workflowStepRun.findFirst({
+      where: { runId, stepKey, attempt },
+      select: { id: true },
+    });
+    if (already) {
+      // This attempt was already executed (the delayed job was re-delivered) — idempotent skip.
+      return;
+    }
+    const run = await this.prisma.workflowRun.findFirst({
+      where: { id: runId },
+      select: { status: true },
+    });
+    if (!run || run.status !== 'RUNNING') {
+      // The run advanced/terminated while the retry sat delayed — a stale retry is a no-op.
+      return;
+    }
+    await this.walk(runId, stepKey, attempt);
+  }
+
   // ── the walk ──────────────────────────────────────────────────────────────
 
   private async walk(
     runId: string,
     startCursor: string | undefined,
+    startAttempt = 1,
   ): Promise<void> {
     const run = await this.prisma.workflowRun.findFirst({
       where: { id: runId },
@@ -124,6 +177,9 @@ export class WorkflowRunOrchestrator {
     const ctx = await this.contextBuilder.build(runId);
 
     let cursor: string = startCursor ?? steps[0].key;
+    // The attempt number for the step at `cursor`. Carried (incremented) across a degraded in-process
+    // retry of the SAME step; reset to 1 whenever the cursor advances to a different step.
+    let attempt = startAttempt;
 
     for (let guard = 0; guard < MAX_WALK_STEPS; guard++) {
       if (isTerminalTarget(cursor)) {
@@ -136,18 +192,14 @@ export class WorkflowRunOrchestrator {
         return;
       }
       const step = steps[index];
-      const exec = await this.executeWithRetries(run.id, step, index, ctx);
       const { onSuccess, onFailure } = resolveStepTransitions(steps, index);
+      const exec = await this.executeStep(run.id, step, index, ctx, attempt);
 
-      // A MANUAL step's own pause (handler returned AWAITING_INPUT): create the task, pause the run.
+      // A MANUAL step's own pause (handler returned AWAITING_INPUT): create the task + pause the run
+      // ATOMICALLY (CCOR-2 — the task becomes resolvable only once the run is already AWAITING_INPUT, so
+      // a completion can never race in while the run is still RUNNING and no-op its own resume).
       if (exec.status === 'AWAITING_INPUT') {
-        const task = await this.createManualTask(
-          runId,
-          step,
-          'MANUAL_STEP',
-          exec.manualTaskSpec,
-        );
-        await this.appendStepRun(
+        await this.pauseForManual(
           runId,
           step,
           index,
@@ -159,11 +211,34 @@ export class WorkflowRunOrchestrator {
               outcome: 'PAUSE',
               edge: 'PAUSE',
             } satisfies TransitionTaken,
-            manualTaskId: task.id,
           },
+          exec.manualTaskSpec,
         );
-        await this.setStatus(runId, 'AWAITING_INPUT');
         return;
+      }
+
+      // Transient failure with attempts remaining (CCOR-3): record the attempt, then run the backoff OFF
+      // the worker — a delayed re-enqueue re-enters at this same step, freeing the slot. Only when the
+      // broker can't take the delayed job do we fall back to a SHORT, lock-bounded in-process backoff.
+      if (exec.status === 'RETRY') {
+        await this.appendStepRun(runId, step, index, exec.attempt, 'FAILED', {
+          ...exec.metadata,
+          retriedAfterMs: exec.retryDelayMs,
+        });
+        const scheduled = await this.trigger.enqueueRetry(
+          runId,
+          step.key,
+          exec.attempt + 1,
+          exec.retryDelayMs,
+        );
+        if (scheduled) {
+          return;
+        }
+        await this.sleeper.sleep(
+          Math.min(exec.retryDelayMs, MAX_INPROCESS_BACKOFF_MS),
+        );
+        attempt = exec.attempt + 1;
+        continue;
       }
 
       if (exec.status === 'SUCCEEDED') {
@@ -182,25 +257,19 @@ export class WorkflowRunOrchestrator {
           return;
         }
         cursor = onSuccess;
+        attempt = 1;
         continue;
       }
 
-      // FAILED (after retries, handler stopped marking it retryable) — follow `onFailure`.
+      // FAILED (permanent, or retries exhausted) — follow `onFailure`.
       if (onFailure === WORKFLOW_ESCALATE_TO_MANUAL) {
-        const task = await this.createManualTask(
-          runId,
-          step,
-          'ESCALATED_FAILURE',
-        );
-        await this.appendStepRun(runId, step, index, exec.attempt, 'FAILED', {
+        await this.pauseForManual(runId, step, index, exec.attempt, 'FAILED', {
           ...exec.metadata,
           transitionTaken: {
             outcome: 'FAILURE',
             edge: 'ESCALATE',
           } satisfies TransitionTaken,
-          manualTaskId: task.id,
         });
-        await this.setStatus(runId, 'AWAITING_INPUT');
         return;
       }
       if (onFailure === WORKFLOW_COMPENSATE) {
@@ -238,6 +307,7 @@ export class WorkflowRunOrchestrator {
         transitionTaken,
       });
       cursor = onFailure;
+      attempt = 1;
     }
 
     // Defensive: an acyclic graph can never reach this, but never loop forever.
@@ -247,22 +317,24 @@ export class WorkflowRunOrchestrator {
   // ── step execution + retries ────────────────────────────────────────────────
 
   /**
-   * Execute one step, honouring its retry policy. Writes an append-only `WorkflowStepRun` for each
-   * RETRIED (transient-failed) attempt and returns the FINAL attempt's classified outcome (the walk
-   * writes the final row, stamped with the transition it then takes). Absent `retry` ⇒ a single
-   * attempt; a retry fires only when the handler marked the failure `retryable`.
+   * Execute ONE attempt of a step against its retry policy and classify the outcome (CCOR-3 — the retry
+   * backoff is no longer an in-process loop; the walk schedules the next attempt off the worker). Absent
+   * `retry` ⇒ a single attempt (`RETRY` is impossible); a `RETRY` is returned only when the handler
+   * marked the failure `retryable` AND attempts remain. The walk writes the append-only `WorkflowStepRun`
+   * rows; this method is side-effect-free on the ledger (it only runs the handler).
    */
-  private async executeWithRetries(
+  private async executeStep(
     runId: string,
     step: WorkflowStep,
     index: number,
     ctx: Readonly<WorkflowMappingContext>,
-  ): Promise<StepExecution> {
+    attempt: number,
+  ): Promise<StepOutcome> {
     const handler = this.registry.get(step.kind);
     if (!handler) {
       return {
         status: 'FAILED',
-        attempt: 1,
+        attempt,
         metadata: {
           errorClass: 'connector-unavailable',
           reason: `no handler for kind ${step.kind}`,
@@ -273,59 +345,57 @@ export class WorkflowRunOrchestrator {
     // Resolve the connector config + credential accessor for this step.
     const resolved = await this.resolveConnection(step);
     if ('error' in resolved) {
-      return { status: 'FAILED', attempt: 1, metadata: resolved.error };
+      return { status: 'FAILED', attempt, metadata: resolved.error };
     }
 
     const policy: RetryPolicy =
       'retry' in step && step.retry ? step.retry : DEFAULT_RETRY_POLICY;
-    const maxAttempts = policy.maxAttempts;
 
-    let attempt = 0;
-    for (;;) {
-      attempt += 1;
-      let raw: StepResult;
-      try {
-        raw = await handler.execute({
-          connection: resolved.config as never,
-          step: step,
-          revealSecret: resolved.revealSecret,
-          data: ctx,
-          meta: { runId, stepKey: step.key, stepIndex: index, attempt },
-        });
-      } catch (err) {
-        // A handler should never throw for an EXPECTED failure, but be defensive.
-        raw = {
-          status: 'FAILED',
-          retryable: false,
-          metadata: { errorClass: 'handler-threw', reason: messageOf(err) },
-        };
-      }
-
-      const classified = this.classify(raw, step);
-      if (
-        classified.status === 'AWAITING_INPUT' ||
-        classified.status === 'SUCCEEDED'
-      ) {
-        return {
-          status: classified.status,
-          attempt,
-          metadata: classified.metadata,
-          externalCorrelationId: classified.externalCorrelationId,
-          manualTaskSpec: raw.manualTask,
-        };
-      }
-
-      // FAILED — retry only if the handler signalled retryable and attempts remain.
-      if (classified.retryable && attempt < maxAttempts) {
-        await this.appendStepRun(runId, step, index, attempt, 'FAILED', {
-          ...classified.metadata,
-          retriedAfterMs: backoffMs(policy, attempt),
-        });
-        await this.sleeper.sleep(backoffMs(policy, attempt));
-        continue;
-      }
-      return { status: 'FAILED', attempt, metadata: classified.metadata };
+    let raw: StepResult;
+    try {
+      raw = await handler.execute({
+        connection: resolved.config as never,
+        step: step,
+        revealSecret: resolved.revealSecret,
+        data: ctx,
+        meta: { runId, stepKey: step.key, stepIndex: index, attempt },
+      });
+    } catch (err) {
+      // A handler should never throw for an EXPECTED failure, but be defensive.
+      raw = {
+        status: 'FAILED',
+        retryable: false,
+        metadata: { errorClass: 'handler-threw', reason: messageOf(err) },
+      };
     }
+
+    const classified = this.classify(raw, step);
+    if (classified.status === 'AWAITING_INPUT') {
+      return {
+        status: 'AWAITING_INPUT',
+        attempt,
+        metadata: classified.metadata,
+        manualTaskSpec: raw.manualTask,
+      };
+    }
+    if (classified.status === 'SUCCEEDED') {
+      return {
+        status: 'SUCCEEDED',
+        attempt,
+        metadata: classified.metadata,
+        externalCorrelationId: classified.externalCorrelationId,
+      };
+    }
+    // FAILED — a retry is due only if the handler signalled retryable and attempts remain.
+    if (classified.retryable && attempt < policy.maxAttempts) {
+      return {
+        status: 'RETRY',
+        attempt,
+        metadata: classified.metadata,
+        retryDelayMs: backoffMs(policy, attempt),
+      };
+    }
+    return { status: 'FAILED', attempt, metadata: classified.metadata };
   }
 
   /**
@@ -443,25 +513,48 @@ export class WorkflowRunOrchestrator {
 
   // ── manual tasks ───────────────────────────────────────────────────────────
 
-  /** Create a PENDING ManualTask for a paused (MANUAL) or escalated (failed) step. */
-  private async createManualTask(
+  /**
+   * Pause a run for a human: create the PENDING ManualTask, append the pausing step row (stamped with
+   * the created task id), and flip the run to AWAITING_INPUT — ALL IN ONE TRANSACTION (CCOR-2). Doing
+   * the three writes atomically closes the pause-ordering TOCTOU: there is no window in which the task is
+   * resolvable (committed PENDING) while the run is still RUNNING, so a completion can never arrive early
+   * and no-op its own resume (which would strand the run AWAITING_INPUT forever). Covers both a MANUAL
+   * step's own pause (`spec` carries the prompt/cohort) and an ESCALATED_FAILURE pause (default prompt).
+   */
+  private async pauseForManual(
     runId: string,
     step: WorkflowStep,
-    origin: ManualTaskOrigin,
+    stepIndex: number,
+    attempt: number,
+    stepRunStatus: 'AWAITING_INPUT' | 'FAILED',
+    metadata: Record<string, unknown>,
     spec?: ManualTaskSpec,
-  ) {
+  ): Promise<void> {
     const prompt =
       spec?.prompt ??
       `Step "${step.name ?? step.key}" failed and was escalated for manual handling.`;
     const cohort = spec?.cohort ?? null;
-    return this.prisma.manualTask.create({
-      data: {
-        runId,
-        stepKey: step.key,
-        prompt,
-        cohort,
-        status: 'PENDING',
-      },
+    await this.prisma.$transaction(async (tx) => {
+      const task = await tx.manualTask.create({
+        data: { runId, stepKey: step.key, prompt, cohort, status: 'PENDING' },
+      });
+      await tx.workflowStepRun.create({
+        data: {
+          runId,
+          stepIndex,
+          stepKey: step.key,
+          attempt,
+          status: stepRunStatus,
+          metadata: {
+            ...metadata,
+            manualTaskId: task.id,
+          },
+        },
+      });
+      await tx.workflowRun.update({
+        where: { id: runId },
+        data: { status: 'AWAITING_INPUT' },
+      });
     });
   }
 

@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   resolveStepTransitions,
+  WORKFLOW_ESCALATE_TO_MANUAL,
   type WorkflowStep,
   type WorkflowSteps,
 } from '@lazyit/shared';
@@ -8,18 +9,62 @@ import {
 /**
  * Graph validations a WorkflowVersion write must satisfy BEYOND the shared `WorkflowStepsSchema` (which
  * already enforces unique keys, no reserved-token collisions, valid edge targets, and acyclicity). Here
- * we add what needs whole-graph reasoning the zod schema does not cover:
+ * we add what needs whole-graph (or per-kind) reasoning the zod discriminated-union schema does not
+ * cover:
  *
  *  - REACHABILITY: every step must be reachable from the entry node (`steps[0]`) over the EFFECTIVE
  *    edges (the shared `resolveStepTransitions` — never re-deriving precedence). An orphan step is a
  *    builder bug; we surface it as a field-addressable 400 the UI can attach to the box.
+ *  - MANUAL FAILURE EDGE (CCOR-6): a MANUAL step's `onFailure` may NOT be `ESCALATE_TO_MANUAL`.
+ *    Escalating a human-cancelled manual task to ANOTHER manual task is meaningless (and re-targets the
+ *    same step, a cancel→escalate→cancel loop); at runtime that cursor reaches the walk's terminal
+ *    handler and collapses to FAILED. Disallowing it at author-time is the clean prevention.
  *
- * Connection-reference validity (a REST/WEBHOOK step's `connectionId` must exist, belong to the same
- * application, and match the kind) needs the DB and lives in the service, not here.
+ * Both run through {@link assertAllStepsReachable} (the single graph-validation entry the version-author
+ * path already calls). Connection-reference validity (a REST/WEBHOOK step's `connectionId` must exist,
+ * belong to the same application, and match the kind) needs the DB and lives in the service, not here.
  */
 
-/** Throw a 400 listing any step not reachable from the entry node over the effective edges. */
+/**
+ * The full author-time graph gate: reachability + the MANUAL failure-edge rule. (Named for its
+ * historical first check; the version-author path calls this one function.)
+ */
 export function assertAllStepsReachable(steps: WorkflowSteps): void {
+  assertNoManualEscalationFailureEdge(steps);
+  assertEveryStepReachable(steps);
+}
+
+/**
+ * CCOR-6 — reject a MANUAL step whose EFFECTIVE failure edge is `ESCALATE_TO_MANUAL`. Field-addressable
+ * so the builder UI can attach the error to the offending step. Uses the shared `resolveStepTransitions`
+ * (a MANUAL step has no legacy `onError`, so this is just its explicit `onFailure`, if any).
+ */
+export function assertNoManualEscalationFailureEdge(
+  steps: WorkflowSteps,
+): void {
+  const offending = steps
+    .map((step, index) => ({ step, index }))
+    .filter(
+      ({ step, index }) =>
+        step.kind === 'MANUAL' &&
+        resolveStepTransitions(steps, index).onFailure ===
+          WORKFLOW_ESCALATE_TO_MANUAL,
+    );
+  if (offending.length > 0) {
+    throw new BadRequestException({
+      message: `A MANUAL step's failure edge may not be ESCALATE_TO_MANUAL: ${offending
+        .map((o) => `"${o.step.key}"`)
+        .join(', ')}`,
+      manualEscalationSteps: offending.map((o) => ({
+        index: o.index,
+        key: o.step.key,
+      })),
+    });
+  }
+}
+
+/** Throw a 400 listing any step not reachable from the entry node over the effective edges. */
+export function assertEveryStepReachable(steps: WorkflowSteps): void {
   const indexByKey = new Map(steps.map((s, i) => [s.key, i]));
   const reachable = new Set<number>();
   const stack = [0];
