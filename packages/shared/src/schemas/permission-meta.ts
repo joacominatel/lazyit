@@ -35,6 +35,7 @@ export const PERMISSION_PILLARS = [
   "access",
   "knowledge",
   "manage",
+  "automation",
 ] as const;
 export type PermissionPillar = (typeof PERMISSION_PILLARS)[number];
 
@@ -58,6 +59,11 @@ export const PILLAR_META: Record<
   manage: {
     label: "Manage",
     description: "Users, instance settings, the dashboard and search.",
+  },
+  automation: {
+    label: "Automation",
+    description:
+      "The Applications Workflow Engine — workflow definitions, runs, manual tasks and connector credentials.",
   },
 };
 
@@ -210,6 +216,32 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
     pillar: "manage",
     tier: "coarse",
   },
+  // ── Automation (Applications Workflow Engine, epic #248) ─────────────────────
+  "workflow:read": {
+    label: "View workflows & runs",
+    pillar: "automation",
+    tier: "view",
+  },
+  "workflow:manage": {
+    label: "Configure workflows & connections",
+    pillar: "automation",
+    tier: "coarse",
+  },
+  "workflow:run": {
+    label: "Run & retry workflows",
+    pillar: "automation",
+    tier: "coarse",
+  },
+  "workflow:task": {
+    label: "Complete manual tasks",
+    pillar: "automation",
+    tier: "coarse",
+  },
+  "workflow:secrets": {
+    label: "Manage connector credentials",
+    pillar: "automation",
+    tier: "coarse",
+  },
 };
 
 /**
@@ -258,6 +290,12 @@ export const CAPABILITY_IDS = [
   "logs.view",
   "settings.view",
   "settings.manage",
+  // Automation
+  "workflow.view",
+  "workflow.manage",
+  "workflow.run",
+  "workflow.task",
+  "workflow.secrets",
 ] as const;
 export type CapabilityId = (typeof CAPABILITY_IDS)[number];
 
@@ -435,6 +473,49 @@ export const CAPABILITIES: readonly Capability[] = [
     pillar: "manage",
     permissions: ["settings:manage"],
   },
+  // ── Automation (Applications Workflow Engine, epic #248) ─────────────────────
+  // Each workflow verb is a distinct, consequential decision (and `secrets` is a separate duty from
+  // `manage`), so they stay per-verb toggles rather than being bundled — mirroring the Access/Manage
+  // coarse verbs. All but `view` are above-default tier (the ⚠ admin-level marker).
+  {
+    id: "workflow.view",
+    label: "View workflows & runs",
+    description:
+      "See workflow definitions, run history and the manual-task inbox.",
+    pillar: "automation",
+    permissions: ["workflow:read"],
+  },
+  {
+    id: "workflow.manage",
+    label: "Configure workflows & connections",
+    description:
+      "Create, edit, enable and delete workflow definitions and their connections.",
+    pillar: "automation",
+    permissions: ["workflow:manage"],
+  },
+  {
+    id: "workflow.run",
+    label: "Run & retry workflows",
+    description: "Manually trigger, re-run and retry workflow runs.",
+    pillar: "automation",
+    permissions: ["workflow:run"],
+  },
+  {
+    id: "workflow.task",
+    label: "Complete manual tasks",
+    description:
+      "Action and complete manual task steps assigned to you (or your cohort).",
+    pillar: "automation",
+    permissions: ["workflow:task"],
+  },
+  {
+    id: "workflow.secrets",
+    label: "Manage connector credentials",
+    description:
+      "Configure, enter and rotate per-app connector credentials — kept separate from authoring the workflow logic.",
+    pillar: "automation",
+    permissions: ["workflow:secrets"],
+  },
 ];
 
 /** Quick lookup of a capability by id. */
@@ -466,7 +547,7 @@ export interface PermissionPreset {
   readonly permissions: readonly Permission[];
 }
 
-/** Every `:read` literal — the read surface of all twelve domains (mirrors the seed's read tier). */
+/** Every `:read` literal — the read surface of all thirteen domains (mirrors the seed's read tier). */
 const READS = PERMISSIONS.filter((p) => p.endsWith(":read"));
 /** The inventory pillar's write literals (for the inventory-operator preset). */
 const INVENTORY_WRITES = PERMISSIONS.filter(
