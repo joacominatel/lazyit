@@ -102,10 +102,19 @@ describe("Above-default-tier markers", () => {
     }
   });
 
-  test("the coarse verbs are exactly the three above-default capability verbs", () => {
+  test("the coarse verbs are exactly the above-default capability verbs (core + workflow)", () => {
     const coarse = PERMISSIONS.filter((p) => PERMISSION_META[p].tier === "coarse");
     expect([...coarse].sort()).toEqual(
-      ["accessGrant:grant", "settings:manage", "user:manage"].sort(),
+      [
+        "accessGrant:grant",
+        "settings:manage",
+        "user:manage",
+        // workflow coarse verbs (epic #248) — `read` is a view tier, the other four are coarse
+        "workflow:manage",
+        "workflow:run",
+        "workflow:task",
+        "workflow:secrets",
+      ].sort(),
     );
   });
 
@@ -181,6 +190,52 @@ describe("CAPABILITIES — the human toggle layer", () => {
         expect(seen.has(p)).toBe(false);
         seen.set(p, cap.id);
       }
+    }
+  });
+});
+
+describe("Automation pillar — the workflow capabilities (epic #248)", () => {
+  test("the automation pillar exists with display copy", () => {
+    expect(PERMISSION_PILLARS).toContain("automation");
+    expect(PILLAR_META.automation?.label.trim().length).toBeGreaterThan(0);
+    expect(PILLAR_META.automation?.description.trim().length).toBeGreaterThan(0);
+  });
+
+  test("every workflow permission has automation-pillar META", () => {
+    for (const p of [
+      "workflow:read",
+      "workflow:manage",
+      "workflow:run",
+      "workflow:task",
+      "workflow:secrets",
+    ] as const) {
+      expect(PERMISSION_META[p].pillar).toBe("automation");
+    }
+  });
+
+  test("the workflow capabilities cover each workflow verb 1:1", () => {
+    const automationCaps = CAPABILITIES.filter((c) => c.pillar === "automation");
+    const covered = automationCaps.flatMap((c) => c.permissions).sort();
+    expect(covered).toEqual(
+      [
+        "workflow:read",
+        "workflow:manage",
+        "workflow:run",
+        "workflow:task",
+        "workflow:secrets",
+      ].sort(),
+    );
+  });
+
+  test("workflow.view is within-tier; manage/run/task/secrets are above-default (⚠ admin-level)", () => {
+    expect(capabilityIsAboveDefaultTier(CAPABILITY_BY_ID["workflow.view"])).toBe(false);
+    for (const id of [
+      "workflow.manage",
+      "workflow.run",
+      "workflow.task",
+      "workflow.secrets",
+    ] as const) {
+      expect(capabilityIsAboveDefaultTier(CAPABILITY_BY_ID[id])).toBe(true);
     }
   });
 });

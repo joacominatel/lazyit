@@ -40,6 +40,7 @@ export const PERMISSION_DOMAINS = [
   "search",
   "logs", // the estate-wide activity history (Reports/Informes); read is ADMIN-only by default
   "settings",
+  "workflow", // the Applications Workflow Engine (epic #248) — pre-provisioned RBAC; NO routes yet
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
 
@@ -59,6 +60,19 @@ export type PermissionBaseAction = (typeof PERMISSION_BASE_ACTIONS)[number];
  *   - `accessGrant:grant` — open / revoke / patch a grant, and batch-revoke (the AccessGrant writes).
  *   - `user:manage`       — user administration: create / update (incl. role) / offboard / restore.
  *   - `settings:manage`   — instance configuration (the `settings`/config admin surface).
+ *
+ * The `workflow` domain (Applications Workflow Engine, epic #248) is pre-provisioned here as
+ * catalog-as-code ONLY — there are no engine routes/entities yet. Its verbs are deliberately split by
+ * sensitivity (synthesis §5 / security.md §4): a plain `:read` plus four coarse verbs, with
+ * `workflow:secrets` kept DISTINCT from `workflow:manage` so credential-holding can be a separate
+ * duty from authoring the automation logic (who writes the workflow ≠ who holds the Jira token):
+ *   - `workflow:read`    — view workflow definitions, run history and the manual-task inbox
+ *     (sensitive — run history reveals who-gets-provisioned-where; treated like `logs:read`, ADMIN-only).
+ *   - `workflow:manage`  — configure the engine + connections (create/edit/delete/enable definitions).
+ *   - `workflow:run`     — manually trigger / re-run / retry a run.
+ *   - `workflow:task`    — complete a manual task step (permission alone is not enough; the completer
+ *     must also be a valid assignee — the engine's IDOR guard, enforced server-side when the engine ships).
+ *   - `workflow:secrets` — configure / enter / rotate per-app connector credentials (separation of duties).
  *
  * Read-only domains (`dashboard`, `search`) expose only `:read`; they have no mutation surface today.
  */
@@ -110,6 +124,14 @@ export const PERMISSIONS = [
   // settings (instance configuration) — `manage` is the coarse ADMIN capability
   "settings:read",
   "settings:manage",
+  // workflow (Applications Workflow Engine, epic #248) — pre-provisioned; ALL ADMIN-only by default.
+  // `read` is admin-only (see ADMIN_ONLY_READS, treated like logs:read); `manage`/`run`/`task`/`secrets`
+  // are coarse verbs. `secrets` is DISTINCT from `manage` for separation of duties (synthesis §5).
+  "workflow:read",
+  "workflow:manage",
+  "workflow:run",
+  "workflow:task",
+  "workflow:secrets",
 ] as const;
 
 /**
@@ -136,7 +158,7 @@ export const RolePermissionMatrixSchema = z.record(
 export type RolePermissionMatrix = z.infer<typeof RolePermissionMatrixSchema>;
 
 /**
- * Every `:read` permission in the catalog — the read surface of all twelve domains.
+ * Every `:read` permission in the catalog — the read surface of all thirteen domains.
  */
 export const READ_PERMISSIONS: readonly Permission[] = PERMISSIONS.filter(
   (p): p is Permission => p.endsWith(":read"),
@@ -175,12 +197,19 @@ export const VIEWER_DENIED_READS = [
  *     per-domain list (which an operator can already see scoped), the cross-cutting activity log
  *     aggregates who-did-what across every domain, so it is the most sensitive read in the catalog and
  *     defaults to ADMIN-only. This is the FIRST admin-only read (ADR-0046 extension, issue #175).
+ *   - `workflow:read` — the Applications Workflow Engine's definitions, run history and manual-task
+ *     inbox (epic #248). Run history reveals who-gets-provisioned-where and the shape of external
+ *     payloads, so it is sensitive and defaults to ADMIN-only — the same posture as `logs:read`
+ *     (synthesis §5 / security.md §4). The four coarse workflow verbs (`manage`/`run`/`task`/`secrets`)
+ *     are ADMIN-only by construction of the seed (they are neither `:read` nor `:write`); only the
+ *     `:read` needs listing here to keep it out of the default-open read tier.
  *
  * Catalog invariant: `ADMIN_ONLY_READS` and `VIEWER_DENIED_READS` are disjoint — a read is either
  * pre-tightened (ADMIN + MEMBER) or admin-only (ADMIN), never both.
  */
 export const ADMIN_ONLY_READS = [
   "logs:read",
+  "workflow:read",
 ] as const satisfies readonly Permission[];
 
 /**
@@ -195,8 +224,13 @@ export const ADMIN_ONLY_READS = [
  *   - VIEWER = all `:read` EXCEPT the pre-tightened reads ({@link VIEWER_DENIED_READS}) AND the
  *     admin-only reads ({@link ADMIN_ONLY_READS}).
  *
- *   - {@link ADMIN_ONLY_READS} (`logs:read`) are excluded from BOTH MEMBER and VIEWER — strictly more
- *     restrictive than the pre-tightening: only ADMIN holds them by default (still admin-grantable).
+ *   - {@link ADMIN_ONLY_READS} (`logs:read`, `workflow:read`) are excluded from BOTH MEMBER and VIEWER —
+ *     strictly more restrictive than the pre-tightening: only ADMIN holds them by default (still
+ *     admin-grantable).
+ *   - The `workflow` verbs (epic #248) follow a SAFE DEFAULT of ADMIN-only: `workflow:read` via
+ *     {@link ADMIN_ONLY_READS}, and the coarse `workflow:manage`/`run`/`task`/`secrets` automatically,
+ *     since they are neither `:read` nor `:write` and so never enter the MEMBER/VIEWER seed sets. They
+ *     remain admin-grantable from the role matrix (with the ⚠ delegation UX), like the other coarse verbs.
  *
  * Permissions are sorted by their catalog order for a stable, reviewable shape.
  */

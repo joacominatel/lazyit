@@ -50,7 +50,13 @@ import { RoleSummary } from "./_components/role-summary";
 import { SaveBar } from "./_components/save-bar";
 import { notifyError } from "@/lib/api/notify-error";
 
-const PILLAR_ORDER = ["inventory", "access", "knowledge", "manage"] as const;
+const PILLAR_ORDER = [
+  "inventory",
+  "access",
+  "knowledge",
+  "manage",
+  "automation",
+] as const;
 
 /** Parse the `?role=` deep-link to an editable role, defaulting to MEMBER for an absent/bad value. */
 function roleFromParam(value: string | null): EditableRole {
