@@ -39,6 +39,14 @@ erDiagram
     Article ||--o{ ArticleLink : links
     Asset ||--o{ ArticleLink : "documented by"
     Application ||--o{ ArticleLink : "documented by"
+    Application ||--o{ ApplicationWorkflow : "automates via"
+    Application ||--o{ WorkflowConnection : "connects via"
+    ApplicationWorkflow ||--o{ WorkflowVersion : "versioned-by"
+    ApplicationWorkflow ||--o{ WorkflowRun : "executed as"
+    AccessGrant ||--o{ WorkflowRun : fires
+    WorkflowRun ||--o{ WorkflowStepRun : logs
+    WorkflowRun ||--o{ ManualTask : "pauses on"
+    WorkflowConnection ||--o{ WorkflowSecret : "authenticates with"
 ```
 
 > [!note] Conceptual ERD. Relationships only — no fields. `Asset ↔ User` via
@@ -56,6 +64,9 @@ The model is organized in loosely-coupled areas:
 4. **Access** — [[application]], [[application-category]], [[access-grant]], [[access-request]].
 5. **Consumables** — [[consumable]], [[consumable-movement]].
 6. **Knowledge base** — [[article]], [[article-category]], [[article-version]], [[article-link]].
+7. **Workflow engine** — [[application-workflow]], [[workflow-connection]], [[workflow-version]],
+   [[workflow-run]], [[workflow-step-run]], [[manual-task]], [[workflow-secret]] (an opt-in extension
+   of **Access** — [[0054-applications-workflow-engine]]).
 
 ## Implementation order
 
@@ -68,5 +79,8 @@ The model is built atomic-first (see each entity note for status):
 5. [[application]] + [[application-category]] + [[access-grant]] + [[access-request]].
 6. [[consumable]] + [[consumable-movement]].
 7. [[article]] + [[article-category]] + [[article-version]] + [[article-link]].
+8. **Workflow engine** (opt-in, after Access) — [[application-workflow]] + [[workflow-connection]] +
+   [[workflow-version]] + [[workflow-run]] + [[workflow-step-run]] + [[manual-task]] +
+   [[workflow-secret]] ([[0054-applications-workflow-engine]], epic #248).
 
 Why asset-centric? → [[0004-asset-centric-design]].
