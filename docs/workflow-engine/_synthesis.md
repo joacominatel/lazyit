@@ -115,10 +115,12 @@ These five rules are the spine. They are what make a *light* substrate sufficien
    load-bearing reason we do not need Temporal.*
 
 4. **Step-at-a-time re-enqueue, not a BullMQ Flow tree (for v1).** The grant/revoke trigger fires
-   one **linear** sequence; modelling it as re-enqueued single-step jobs is what lets a run pause
-   indefinitely at no cost. BullMQ's flow/parent-child capability (the feature ADR-0053 cited
-   against pg-boss) remains a **latent** capability for future *parallel fan-out* (e.g. provisioning
-   into several sub-systems at once) — it is **not** the backbone of the pausable linear run. (See
+   one **sequence** — an opinionated error-handling **DAG** (a mostly-linear happy path with
+   first-class success/failure edges; ADR-0054 §8, the 1a-revision); modelling it as re-enqueued
+   single-step jobs is what lets a run pause indefinitely at no cost. BullMQ's flow/parent-child
+   capability (the feature ADR-0053 cited against pg-boss) remains a **latent** capability for future
+   *parallel fan-out* (e.g. provisioning into several sub-systems at once) — it is **not** the
+   backbone of the pausable run. (See
    [[#Reconciled conflicts|conflict #2]].)
 
 5. **At-least-once delivery + effectively-once provisioning.** A unique `idempotencyKey` of
