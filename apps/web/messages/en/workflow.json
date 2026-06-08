@@ -142,6 +142,14 @@
       "invalidFields": "Please check the fields and try again."
     }
   },
+  "connectionTest": {
+    "button": "Test connection",
+    "hint": "A read-only check — it never provisions.",
+    "ok": "Reachable",
+    "failed": "Failed",
+    "httpStatus": "HTTP {status}",
+    "error": "Couldn't test the connection."
+  },
   "secret": {
     "notConfigured": "Not configured",
     "add": "Add credential",
@@ -189,6 +197,42 @@
     "failureEdge": "failure → {edge} {target}",
     "notFoundTitle": "Run not found",
     "notFoundDescription": "This run may have been removed, or you don't have access to it."
+  },
+  "dryRun": {
+    "button": "Test run (dry-run)",
+    "title": "Test run (dry-run)",
+    "description": "Preview the would-be requests and the path through this workflow against a real grant. Nothing is sent and nothing is provisioned.",
+    "banner": "Dry run",
+    "bannerHint": "No requests were sent and nothing was provisioned.",
+    "version": "Version {version}",
+    "grantee": "Grantee",
+    "application": "Application",
+    "event": "Event",
+    "accessLevel": "Access level",
+    "accessLevelNone": "—",
+    "noSteps": "This version has no steps to preview.",
+    "noGrants": "No active grants to sample — grant someone access to this application first.",
+    "sampleGrant": "Sample grant",
+    "sampleGrantHint": "The grant whose context the requests resolve against.",
+    "unknownUser": "Unknown user",
+    "simulateLabel": "Simulate a step failure",
+    "simulateHint": "Force one step to fail to preview its failure edge (escalate / compensate / stop).",
+    "simulateStep": "Step to fail",
+    "run": "Run dry-run",
+    "error": "Couldn't run the dry-run.",
+    "simulated": "Forced failure",
+    "mappedFields": "Mapped fields",
+    "manualPrompt": "Instructions",
+    "headers": "Headers",
+    "body": "Body",
+    "signed": "Signed",
+    "wouldPause": "The run would pause here for a manual task.",
+    "endState": {
+      "END_SUCCESS": "End · succeeded",
+      "STOP_FAIL": "Stopped · failed",
+      "ESCALATE_TO_MANUAL": "Escalated to a human",
+      "COMPENSATE": "Compensating"
+    }
   },
   "builder": {
     "newTitle": "New workflow",
