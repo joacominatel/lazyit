@@ -86,6 +86,15 @@ for years. Boring, durable technology. No Kubernetes required.
 </p>
 </details>
 
+<details>
+<summary><strong>Workflows</strong> — visual builder & dry-run for per-app provisioning</summary>
+<br/>
+<!-- placeholder: replace brand/workflow-builder.png with a real capture of the box-diagram DAG builder + dry-run -->
+<p align="center">
+  <img src="brand/workflow-builder.png" alt="lazyit workflows — visual box-diagram DAG builder with test-connection and dry-run" width="920">
+</p>
+</details>
+
 ---
 
 ## Demo
@@ -103,6 +112,15 @@ Honest scope: this is what's **built and usable right now**, not a roadmap.
   assignment history** so ownership is never a guess.
 - 🔑 **Application access** — register the apps/SaaS you run, then grant and (critically)
   **revoke** access per user, with an access map of who can touch what.
+- ⚙️ **Applications Workflow Engine** — *opt-in, per application.* When access is granted or
+  revoked, admin-configured **workflows** provision/deprovision the user in external systems
+  (Jira, Redmine, any REST or webhook target). You wire them in a **visual box-diagram DAG
+  builder** with first-class error handling — per-step success criteria, retries, and explicit
+  success/failure edges — plus **manual (human-task)** steps, a **test-connection** check and a
+  no-side-effect **dry-run** payload preview. An app with **no** workflow behaves exactly as
+  today (granting just records the access grant); the engine fires *after* the grant commits,
+  decoupled via a transactional outbox, so a failing external call never blocks or rolls it
+  back. Gated by `workflow:*`.
 - 🧰 **Consumables** — stock you burn through (cables, toner, adapters) tracked as an
   **append-only movement ledger**, so counts are always reconcilable.
 - 📚 **Knowledge base** — internal articles with categories and versioning, for the runbooks
@@ -151,6 +169,7 @@ flowchart TB
         subgraph data["Backing services (internal network only)"]
             pg[("PostgreSQL 18<br/>:5432 — app data")]
             meili["Meilisearch<br/>cross-entity search"]
+            valkey[("Valkey 8<br/>:6379 — BullMQ broker")]
             zitadel["Zitadel (OIDC IdP)<br/>+ its own Postgres 16"]
         end
     end
@@ -163,6 +182,7 @@ flowchart TB
     api -. "build-time types" .- shared
     api --> pg
     api --> meili
+    api -- "BullMQ jobs" --> valkey
     api -- "OIDC verify (or your own IdP)" --> zitadel
 
     classDef ext fill:#eef,stroke:#88a;
@@ -175,8 +195,14 @@ actor from an `X-User-Id` header instead of validating tokens, so you can run th
 without bootstrapping Zitadel. The shim trusts a forgeable header — it is **dev/test only and
 must never run in production.**
 
-Only Caddy publishes ports in prod; Postgres, the API, the web app and Zitadel all stay on the
-internal Docker network. Deep dive: [`docs/01-architecture/deployment.md`](docs/01-architecture/deployment.md)
+The API also runs **async workers on Valkey via BullMQ** — the **Applications Workflow Engine**
+and the sandboxed, heap-capped **`.docx` knowledge-base import** — under the rule "BullMQ
+executes; PostgreSQL remembers"
+([ADR-0053](docs/03-decisions/0053-async-workers-bullmq-valkey.md) ·
+[ADR-0054](docs/03-decisions/0054-applications-workflow-engine.md)).
+
+Only Caddy publishes ports in prod; Postgres, Valkey, the API, the web app and Zitadel all stay
+on the internal Docker network. Deep dive: [`docs/01-architecture/deployment.md`](docs/01-architecture/deployment.md)
 · [`docs/01-architecture/stack.md`](docs/01-architecture/stack.md).
 
 ---
@@ -275,7 +301,7 @@ The pattern is always the same: `cp <something>.env.example <something>.env`, th
 | Scope | File | What it holds |
 | --- | --- | --- |
 | **Root** | `.env` | Postgres + Meili + the dev Zitadel block — read by Compose |
-| **API** | `apps/api/.env` | `DATABASE_URL`, `PORT`, `WEB_ORIGIN`, Meili + the auth block (`AUTH_MODE`, `OIDC_*`) |
+| **API** | `apps/api/.env` | `DATABASE_URL`, `PORT`, `WEB_ORIGIN`, Meili, `REDIS_URL` (Valkey/BullMQ), `WORKFLOW_SECRET_KEY` + the auth block (`AUTH_MODE`, `OIDC_*`) |
 | **Web** | `apps/web/.env` | `NEXT_PUBLIC_API_URL` + the Auth.js v5 vars (`AUTH_SECRET`, `AUTH_ISSUER`, …) |
 
 The variables you'll touch most:
@@ -284,6 +310,8 @@ The variables you'll touch most:
 | --- | --- | --- |
 | `AUTH_MODE` | `apps/api/.env` | `shim` = dev header auth (`X-User-Id`); **unset = OIDC mode (production)** |
 | `DATABASE_URL` | `apps/api/.env` | Postgres connection for Prisma + the API runtime |
+| `REDIS_URL` | `apps/api/.env` | Valkey connection for the BullMQ async workers (dev: `redis://127.0.0.1:6379`; prod: `redis://valkey:6379`) |
+| `WORKFLOW_SECRET_KEY` | `apps/api/.env` (prod) | 32-byte key (64 hex, `openssl rand -hex 32`) for the workflow secret store — **fail-loud at boot**, a **DR linchpin** alongside `POSTGRES_PASSWORD` / `ZITADEL_MASTERKEY` (losing it loses every stored connector credential) |
 | `NEXT_PUBLIC_API_URL` | `apps/web/.env` | Where the browser reaches the API (dev: `http://localhost:3001`; prod: `/api`, baked at build) |
 | `MEILI_MASTER_KEY` / `MEILI_HOST` | root + `apps/api/.env` | Meilisearch auth + URL (must match between scopes) |
 | `OIDC_ISSUER` / `AUTH_ISSUER` (+ client id/secret) | api / web | Your identity provider — the three vars you change for bring-your-own-IdP |
@@ -325,7 +353,9 @@ Worth reading before you decide:
 [ADR-0039 — Auth.js v5 frontend OIDC](docs/03-decisions/0039-authjs-v5-frontend-oidc.md) ·
 [ADR-0046 — roles & permissions v2](docs/03-decisions/0046-roles-permissions-v2.md) ·
 [ADR-0048 — service accounts](docs/03-decisions/0048-service-accounts.md) ·
-[ADR-0009 — Bun vs the app stack](docs/03-decisions/0009-bun-first-vs-app-stack.md).
+[ADR-0009 — Bun vs the app stack](docs/03-decisions/0009-bun-first-vs-app-stack.md) ·
+[ADR-0053 — async workers (BullMQ/Valkey)](docs/03-decisions/0053-async-workers-bullmq-valkey.md) ·
+[ADR-0054 — Applications Workflow Engine](docs/03-decisions/0054-applications-workflow-engine.md).
 
 ---
 
@@ -340,9 +370,18 @@ things are deliberately not here yet:
 - **Reports (Informes) are v1.** The activity history works, but some filters are first-pass, and
   the access gate on the page is a **UI-level** restriction (the underlying feed isn't yet
   permission-scoped end-to-end) — fine for an internal small-team deploy, on the list to harden.
-- **Async workers are pending an ADR.** Things that want a background queue — scheduled backups
-  triggered from the UI, low-stock alerts on consumables — aren't built yet. The backup sidecar
-  runs on cron in the container, not from the app. (BullMQ + Redis is the likely future stack.)
+- **Async workers are built — and the workflow engine is new.** Background work runs on
+  **BullMQ over self-hosted Valkey** ([ADR-0053](docs/03-decisions/0053-async-workers-bullmq-valkey.md)):
+  it powers the **Applications Workflow Engine**
+  ([ADR-0054](docs/03-decisions/0054-applications-workflow-engine.md)) and the sandboxed,
+  heap-capped **`.docx` import**. The engine is freshly shipped and still polishing — run/task
+  status is **polled** (no realtime notification bell yet), and v1 connectors are public-HTTPS
+  **REST / WEBHOOK_OUT / MANUAL** only. **On-prem/internal-target connectors and timer/scheduled
+  triggers are future**, and the manual-task inbox is a provisioning queue, not a generic
+  ticketing/approval system.
+- **A couple of background jobs are still future.** UI-triggered scheduled backups and low-stock
+  consumable alerts aren't built yet — the queue substrate is now in place for them. The backup
+  sidecar still runs on cron in the container, not from the app.
 - **Backups are semi-manual.** The opt-in backup sidecar does scheduled `pg_dump`s to a host
   directory; offsite copy is an optional hook you wire yourself. No one-click restore from the UI.
 - **The dev auth shim is dev-only.** It's a convenience, not a feature — see the warnings above.
