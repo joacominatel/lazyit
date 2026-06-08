@@ -27,6 +27,22 @@ export interface UpdateWorkflowConnection {
   secretId?: string | null;
 }
 
+/**
+ * C3 — the outcome of a `POST /workflow-connections/:id/test` probe. A single bounded, READ-ONLY
+ * connectivity + credential check that NEVER provisions and never echoes the secret. `status` is
+ * present only for an HTTP probe (a REST/WEBHOOK connection); a MANUAL connection returns `ok: true`
+ * with a "nothing to test" message. `requestId` correlates the probe in the API logs (ADR-0031). The
+ * backend models this as an api-internal shape (no shared schema), so the wire type is declared here.
+ */
+export interface TestConnectionResult {
+  ok: boolean;
+  /** The probe's HTTP status, when the connection actually made an HTTP call. */
+  status?: number;
+  /** A human, already-safe summary of the outcome (rendered as escaped text). */
+  message: string;
+  requestId: string;
+}
+
 /** List connections, optionally scoped to one application. */
 export function getWorkflowConnections(
   applicationId?: string,
@@ -65,4 +81,17 @@ export function updateWorkflowConnection(
 /** Soft-delete a connection (`DELETE /workflow-connections/:id` → 204). */
 export function deleteWorkflowConnection(id: string): Promise<void> {
   return apiFetch<void>(`${BASE}/${id}`, { method: "DELETE" });
+}
+
+/**
+ * C3 — probe a connection's connectivity + credential (`POST /workflow-connections/:id/test`, no body).
+ * Bodyless, READ-ONLY and synchronous; gated `workflow:manage`. 404 if the connection is missing. The
+ * result is already redacted (no secret value); the UI renders only `message` + `requestId`.
+ */
+export function testWorkflowConnection(
+  id: string,
+): Promise<TestConnectionResult> {
+  return apiFetch<TestConnectionResult>(`${BASE}/${id}/test`, {
+    method: "POST",
+  });
 }

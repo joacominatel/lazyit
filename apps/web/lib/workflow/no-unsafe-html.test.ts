@@ -43,6 +43,22 @@ describe("workflow surfaces never use dangerouslySetInnerHTML (SEC-A5)", () => {
     expect(files.length).toBeGreaterThan(0);
   });
 
+  test("the new C3/C4 (test-connection + dry-run) surfaces are in scope", () => {
+    // The C3/C4 affordances render resolved grantee PII, would-be request bodies and ‹secret:label›
+    // placeholders — pin them into the scan so a future refactor can't quietly drop them from the guard.
+    const rel = files.map((file) =>
+      file.slice(WEB_ROOT.length + 1).replaceAll("\\", "/"),
+    );
+    const required = [
+      "app/(app)/applications/[id]/workflows/_components/connection-test.tsx",
+      "app/(app)/applications/[id]/workflows/_components/builder/dry-run-dialog.tsx",
+      "app/(app)/applications/[id]/workflows/_components/builder/dry-run-timeline.tsx",
+    ];
+    for (const path of required) {
+      expect(rel).toContain(path);
+    }
+  });
+
   for (const file of files) {
     test(`${file.slice(WEB_ROOT.length + 1)} has no dangerouslySetInnerHTML`, async () => {
       const source = await Bun.file(file).text();

@@ -12,6 +12,7 @@ import { useWorkflowSecrets } from "@/lib/api/hooks/use-workflow-secrets";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { ConfirmDialog } from "./confirm-dialog";
 import { ConnectionFormDialog } from "./connection-form-dialog";
+import { ConnectionTest } from "./connection-test";
 import { StepKindBadge } from "./workflow-graph";
 import { WorkflowSecretField } from "./workflow-secret-field";
 
@@ -128,6 +129,8 @@ export function ConnectionCard({ applicationId }: { applicationId: string }) {
               />
             </div>
           ) : null}
+
+          {canManage ? <ConnectionTest connectionId={connection.id} /> : null}
         </div>
       )}
 

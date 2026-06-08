@@ -8,6 +8,8 @@ import { WorkflowConnectionsService } from './workflow-connections.service';
 import { PermissionResolverService } from '../../auth/permission-resolver.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { Principal } from '../../auth/principal';
+import type { ConnectorRegistry } from '../connectors.registry';
+import type { SecretService } from '../secrets/secret.service';
 
 /**
  * CSEC-1 — manage/secrets Separation of Duties on the connection PATCH. `workflow:manage` configures
@@ -59,7 +61,16 @@ function build() {
     rolePermission,
   } as unknown as PrismaService;
   const resolver = new PermissionResolverService(prisma);
-  const service = new WorkflowConnectionsService(prisma, resolver);
+  // The registry + secret store are only exercised by `test()` (a separate spec); the CSEC-1 SoD path
+  // never touches them, so stub them out here.
+  const registry = {} as unknown as ConnectorRegistry;
+  const secrets = {} as unknown as SecretService;
+  const service = new WorkflowConnectionsService(
+    prisma,
+    resolver,
+    registry,
+    secrets,
+  );
   return { service, workflowConnection, workflowSecret, rolePermission };
 }
 

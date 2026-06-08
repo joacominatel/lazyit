@@ -142,6 +142,14 @@
       "invalidFields": "Revisa los campos e inténtalo de nuevo."
     }
   },
+  "connectionTest": {
+    "button": "Probar conexión",
+    "hint": "Una comprobación de solo lectura — nunca aprovisiona.",
+    "ok": "Accesible",
+    "failed": "Fallida",
+    "httpStatus": "HTTP {status}",
+    "error": "No se pudo probar la conexión."
+  },
   "secret": {
     "notConfigured": "Sin configurar",
     "add": "Añadir credencial",
@@ -189,6 +197,42 @@
     "failureEdge": "fallo → {edge} {target}",
     "notFoundTitle": "Ejecución no encontrada",
     "notFoundDescription": "Puede que se haya eliminado o que no tengas acceso a ella."
+  },
+  "dryRun": {
+    "button": "Ejecución de prueba (simulada)",
+    "title": "Ejecución de prueba (simulada)",
+    "description": "Previsualiza las solicitudes que se harían y el recorrido por este flujo con una concesión real. No se envía nada ni se aprovisiona nada.",
+    "banner": "Simulación",
+    "bannerHint": "No se envió ninguna solicitud ni se aprovisionó nada.",
+    "version": "Versión {version}",
+    "grantee": "Beneficiario",
+    "application": "Aplicación",
+    "event": "Evento",
+    "accessLevel": "Nivel de acceso",
+    "accessLevelNone": "—",
+    "noSteps": "Esta versión no tiene pasos que previsualizar.",
+    "noGrants": "No hay concesiones activas para muestrear — concede acceso a alguien en esta aplicación primero.",
+    "sampleGrant": "Concesión de muestra",
+    "sampleGrantHint": "La concesión contra cuyo contexto se resuelven las solicitudes.",
+    "unknownUser": "Usuario desconocido",
+    "simulateLabel": "Simular el fallo de un paso",
+    "simulateHint": "Fuerza el fallo de un paso para previsualizar su arista de fallo (escalar / compensar / detener).",
+    "simulateStep": "Paso a fallar",
+    "run": "Ejecutar simulación",
+    "error": "No se pudo ejecutar la simulación.",
+    "simulated": "Fallo forzado",
+    "mappedFields": "Campos mapeados",
+    "manualPrompt": "Instrucciones",
+    "headers": "Cabeceras",
+    "body": "Cuerpo",
+    "signed": "Firmado",
+    "wouldPause": "La ejecución se pausaría aquí para una tarea manual.",
+    "endState": {
+      "END_SUCCESS": "Fin · completado",
+      "STOP_FAIL": "Detenido · fallido",
+      "ESCALATE_TO_MANUAL": "Escalado a una persona",
+      "COMPENSATE": "Compensando"
+    }
   },
   "builder": {
     "newTitle": "Nuevo flujo",

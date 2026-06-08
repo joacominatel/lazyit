@@ -29,6 +29,17 @@ id strategy ([[0005-id-strategy]]). It is the deliberate **inverse** of the Zita
 > rest of the engine is built against — §8’s "Execution semantics for the orchestrator (1b-B)" is the
 > normative spec the run orchestrator implements.
 
+> **Implementation status (updated 2026-06-08).** The "Phase 1b" forward-references below are the
+> ORIGINAL phasing and are now **shipped**. Implemented and merged to `dev`: Phase 1a + 1a-revision
+> (this ADR); Phase **1b** — the full engine runtime (`WorkflowEngineModule`, the run orchestrator +
+> `workflow-run` BullMQ worker + the PENDING / AWAITING_INPUT / RUNNING reconcilers, the transactional
+> outbox in `access-grants.service`, the REST / WEBHOOK_OUT / MANUAL connectors, test-connection +
+> dry-run, the `workflow:*`-gated definition / run / manual-task endpoints, the dedicated engine
+> ServiceAccount, `LAST_ACTIVE_GRANT` enforcement); and the **1c builder UI**. The slice was hardened
+> against an adversarial security + correctness audit (advisory-lock on the concurrent-revoke
+> deprovision race, manual-resume recovery, off-worker retry backoff, the `workflow:manage` vs
+> `workflow:secrets` SoD gate). Read the "Phase 1b" notes below as **done**, not "future".
+
 ## Context
 
 The CEO mandate: lazyit's **Access pillar** ([[0023-access-management-design]]) records *intent* — IT
