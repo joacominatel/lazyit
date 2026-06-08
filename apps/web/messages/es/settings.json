@@ -18,6 +18,10 @@
       "title": "Cuentas de servicio",
       "description": "Crea y gestiona credenciales de API no humanas para CI, scripts e integraciones — acotadas por permiso y revocables."
     },
+    "integrations": {
+      "title": "Integraciones y flujos",
+      "description": "La bandeja de tareas manuales entre aplicaciones para los flujos de aprovisionamiento. La automatización por aplicación se configura en la pestaña Flujos de cada una."
+    },
     "instance": {
       "title": "Instancia",
       "description": "Revisa cómo está configurada esta instancia de lazyit — proveedor de identidad, estado de configuración y postura de ejecución."

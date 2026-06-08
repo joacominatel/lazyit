@@ -1,0 +1,331 @@
+{
+  "gate": {
+    "title": "Flujos restringidos",
+    "description": "Necesitas el permiso workflow:read para ver la automatización de esta aplicación.",
+    "manageTitle": "Gestión de flujos restringida",
+    "manageDescription": "Necesitas el permiso workflow:manage para configurar flujos."
+  },
+  "breadcrumb": {
+    "applications": "Accesos",
+    "workflows": "Flujos",
+    "settings": "Ajustes"
+  },
+  "tab": {
+    "title": "Flujos",
+    "subtitle": "Automatiza el aprovisionamiento cuando se concede o revoca un acceso para esta aplicación."
+  },
+  "empty": {
+    "title": "Sin automatización configurada",
+    "description": "Las concesiones de esta aplicación solo se registran — no se aprovisiona nada automáticamente."
+  },
+  "triggers": {
+    "ACCESS_GRANTED": "Acceso concedido",
+    "ACCESS_REVOKED": "Acceso revocado",
+    "TIMER_AFTER_GRANT": "Temporizador tras concesión",
+    "SCHEDULED": "Programado",
+    "RECERTIFICATION": "Recertificación"
+  },
+  "kind": {
+    "REST": "API / HTTP",
+    "WEBHOOK_OUT": "Webhook",
+    "MANUAL": "Tarea humana",
+    "SDK": "SDK de proveedor",
+    "MCP": "Servidor MCP",
+    "PREBUILT": "Conector predefinido",
+    "CUSTOM": "Personalizado"
+  },
+  "authScheme": {
+    "NONE": "Ninguna",
+    "BEARER": "Token Bearer",
+    "BASIC": "Autenticación básica",
+    "HEADER": "Cabecera de API key"
+  },
+  "backoff": {
+    "fixed": "Fijo",
+    "exponential": "Exponencial"
+  },
+  "deprovision": {
+    "LAST_ACTIVE_GRANT": "Solo la última concesión activa",
+    "EACH_GRANT": "Cada concesión"
+  },
+  "fieldType": {
+    "text": "Texto",
+    "number": "Número",
+    "boolean": "Sí / no",
+    "select": "Opción"
+  },
+  "runStatus": {
+    "PENDING": "En cola",
+    "RUNNING": "En ejecución",
+    "AWAITING_INPUT": "Esperando (manual)",
+    "SUCCEEDED": "Completado",
+    "FAILED": "Fallido",
+    "COMPENSATED": "Compensado"
+  },
+  "stepStatus": {
+    "SUCCEEDED": "Completado",
+    "FAILED": "Fallido",
+    "AWAITING_INPUT": "Esperando",
+    "SKIPPED": "Omitido",
+    "COMPENSATED": "Compensado"
+  },
+  "edge": {
+    "NEXT": "siguiente paso",
+    "GOTO": "ir al paso",
+    "END": "fin",
+    "CONTINUE": "continuar",
+    "ESCALATE": "escalar",
+    "COMPENSATE": "compensar",
+    "STOP": "detener",
+    "PAUSE": "pausar"
+  },
+  "grantChip": {
+    "provisioned": "Aprovisionado",
+    "provisioning": "Aprovisionando…",
+    "needsAttention": "Requiere atención"
+  },
+  "onSuccess": {
+    "NEXT": "Continuar al siguiente paso (por defecto)",
+    "END": "Terminar la ejecución como completada",
+    "GOTO": "Ir a un paso concreto"
+  },
+  "onFailure": {
+    "STOP": "Avisar y detener (por defecto)",
+    "ESCALATE": "Escalar a una persona",
+    "COMPENSATE": "Ejecutar un paso de compensación",
+    "CONTINUE": "Continuar de todos modos"
+  },
+  "onFailureHint": {
+    "STOP": "Marca la ejecución como fallida, avisa y se detiene. La concesión nunca se toca.",
+    "ESCALATE": "Pausa la ejecución y abre una tarea manual para que una persona la complete y luego reanude.",
+    "COMPENSATE": "Ejecuta un paso de compensación designado (p. ej. deshacer un cambio a medias) y se detiene.",
+    "CONTINUE": "Ignora el fallo y continúa. La ejecución se marca como parcialmente fallida."
+  },
+  "connection": {
+    "title": "Conexión",
+    "kindLabel": "Tipo",
+    "nameLabel": "Nombre",
+    "baseUrlLabel": "URL base",
+    "webhookUrlLabel": "URL del webhook",
+    "authLabel": "Autenticación",
+    "secretLabel": "Credencial",
+    "none": "Sin automatización configurada — las concesiones solo se registran.",
+    "add": "Añadir conexión",
+    "edit": "Editar",
+    "deleteAria": "Eliminar conexión",
+    "deleteTitle": "¿Eliminar la conexión?",
+    "deleteDescription": "¿Eliminar la conexión «{name}»? Los flujos que la usen dejarán de aprovisionar.",
+    "deleteConfirm": "Eliminar conexión"
+  },
+  "connectionForm": {
+    "newTitle": "Nueva conexión",
+    "editTitle": "Editar conexión",
+    "description": "Cómo llega lazyit a este sistema y con qué credencial.",
+    "kindLabel": "Tipo",
+    "kindImmutable": "El tipo no se puede cambiar — recrea la conexión para cambiarlo.",
+    "nameLabel": "Nombre",
+    "namePlaceholder": "p. ej. Jira producción",
+    "baseUrlLabel": "URL base",
+    "webhookUrlLabel": "URL del webhook",
+    "urlHint": "Una URL pública https://.",
+    "authLabel": "Método de autenticación",
+    "authHeaderLabel": "Nombre de la cabecera",
+    "signatureHeaderLabel": "Cabecera de firma",
+    "signatureHeaderHint": "La cabecera donde se envía la firma HMAC (el secreto de firma se guarda aparte).",
+    "createButton": "Crear conexión",
+    "saveChanges": "Guardar cambios",
+    "toastCreated": "Conexión creada.",
+    "toastUpdated": "Conexión actualizada.",
+    "toastError": "No se pudo guardar la conexión.",
+    "errors": {
+      "nameRequired": "El nombre es obligatorio.",
+      "invalidFields": "Revisa los campos e inténtalo de nuevo."
+    }
+  },
+  "secret": {
+    "notConfigured": "Sin configurar",
+    "add": "Añadir credencial",
+    "replace": "Reemplazar",
+    "remove": "Eliminar",
+    "valueLabel": "Valor de la credencial",
+    "newValueLabel": "Nuevo valor de la credencial",
+    "valuePlaceholder": "Pega el valor del secreto",
+    "labelLabel": "Etiqueta",
+    "labelPlaceholder": "p. ej. token de API",
+    "writeOnlyHint": "Se guarda cifrada y no se vuelve a mostrar — solo puedes reemplazarla.",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "toastSaved": "Credencial guardada.",
+    "toastRotated": "Credencial reemplazada.",
+    "toastRemoved": "Credencial eliminada.",
+    "toastError": "No se pudo guardar la credencial."
+  },
+  "list": {
+    "title": "Flujos",
+    "addWorkflow": "Nuevo flujo",
+    "disabled": "Deshabilitado",
+    "stepCount": "{count, plural, =0 {Sin pasos} one {# paso} other {# pasos}}",
+    "lastRun": "última ejecución {status}",
+    "toggleAria": "Habilitar o deshabilitar {name}",
+    "editAria": "Editar {name}",
+    "toastEnabled": "Flujo habilitado.",
+    "toastDisabled": "Flujo deshabilitado.",
+    "toastError": "No se pudo actualizar el flujo."
+  },
+  "runs": {
+    "title": "Ejecuciones recientes",
+    "empty": "Aún no hay ejecuciones."
+  },
+  "runDetail": {
+    "title": "Ejecución",
+    "subtitle": "El recorrido ejecutado a través del flujo, paso a paso.",
+    "timelineTitle": "Cronología",
+    "noSteps": "Esta ejecución aún no tiene pasos registrados.",
+    "attempt": "intento {attempt}",
+    "httpStatus": "HTTP {status}",
+    "compensatedWith": "Compensado con el paso «{step}»",
+    "openManualTask": "Abrir la tarea manual",
+    "successEdge": "éxito → {edge} {target}",
+    "failureEdge": "fallo → {edge} {target}",
+    "notFoundTitle": "Ejecución no encontrada",
+    "notFoundDescription": "Puede que se haya eliminado o que no tengas acceso a ella."
+  },
+  "builder": {
+    "newTitle": "Nuevo flujo",
+    "editTitle": "Editar flujo",
+    "subtitle": "Una conexión y una secuencia de pasos con control de errores.",
+    "detailsTitle": "Detalles",
+    "nameLabel": "Nombre",
+    "namePlaceholder": "p. ej. Aprovisionar Jira al conceder acceso",
+    "triggerLabel": "Disparador",
+    "triggerHint": "Cuándo se ejecuta este flujo.",
+    "triggerImmutable": "El disparador no se puede cambiar — recrea el flujo para cambiarlo.",
+    "deprovisionLabel": "Política de desaprovisionamiento",
+    "connectionLabel": "Conexión",
+    "connectionMissing": "Sin conexión configurada — añade una en la pestaña Flujos.",
+    "connectionRequired": "Añade una conexión antes de añadir un paso de API o webhook.",
+    "stepsTitle": "Pasos",
+    "noSteps": "Aún no hay pasos — añade uno para empezar la secuencia.",
+    "triggerNode": "Disparador · {trigger}",
+    "enabled": "Habilitado",
+    "disabled": "Deshabilitado",
+    "enabledAria": "Habilitar o deshabilitar este flujo",
+    "save": "Guardar",
+    "nameRequired": "El nombre es obligatorio.",
+    "invalidSteps": "Algunos pasos están incompletos — abre cada paso marcado y corrígelo.",
+    "toastSaved": "Flujo guardado.",
+    "toastError": "No se pudo guardar el flujo.",
+    "editStepAria": "Configurar el paso {name}",
+    "moveUpAria": "Subir paso",
+    "moveDownAria": "Bajar paso",
+    "removeStepAria": "Eliminar paso",
+    "notFoundTitle": "Flujo no encontrado",
+    "notFoundDescription": "Puede que se haya eliminado o que no tengas acceso a él."
+  },
+  "palette": {
+    "addStep": "Añadir paso",
+    "comingSoon": "Próximamente",
+    "sdk": "SDK / conector de proveedor",
+    "mcp": "Llamada a servidor MCP",
+    "categories": {
+      "apiHttp": "API / HTTP",
+      "webhooks": "Webhooks",
+      "humanTasks": "Tareas humanas"
+    }
+  },
+  "mapping": {
+    "empty": "Aún no hay campos mapeados.",
+    "add": "Añadir campo",
+    "fieldLabel": "Campo externo",
+    "fieldPlaceholder": "Campo externo",
+    "valueLabel": "Origen del valor",
+    "removeAria": "Eliminar mapeo"
+  },
+  "stepEditor": {
+    "title": "Configurar paso {kind}",
+    "description": "Cómo se ejecuta este paso, qué cuenta como éxito y qué pasa al fallar.",
+    "nameLabel": "Nombre",
+    "namePlaceholder": "p. ej. Crear usuario en Jira",
+    "methodLabel": "Método",
+    "pathLabel": "Ruta",
+    "idempotentLabel": "Idempotente",
+    "idempotentHint": "Seguro de reintentar sin aprovisionar dos veces.",
+    "promptLabel": "Instrucciones",
+    "promptPlaceholder": "Lo que la persona debe hacer.",
+    "inputFieldsLabel": "Campos a rellenar",
+    "inputFieldsHint": "Las entradas tipadas que aporta la persona.",
+    "fieldNameLabel": "Clave del campo",
+    "fieldNamePlaceholder": "clave",
+    "fieldLabelLabel": "Etiqueta del campo",
+    "fieldLabelPlaceholder": "Etiqueta",
+    "fieldRequired": "Obligatorio",
+    "addField": "Añadir campo",
+    "removeFieldAria": "Eliminar campo",
+    "cohortLabel": "Grupo asignado",
+    "cohortPlaceholder": "p. ej. equipo de IT (opcional)",
+    "mappingLabel": "Mapeo de datos",
+    "mappingHint": "Mapea el contexto de lazyit al payload saliente.",
+    "successCriteriaLabel": "Códigos de estado de éxito",
+    "successCriteriaHint": "Separados por comas. Vacío para el valor por defecto 2xx.",
+    "retryLabel": "Reintentar al fallar",
+    "retryHint": "Reintenta fallos transitorios antes de aplicar la arista de fallo.",
+    "maxAttemptsLabel": "Intentos",
+    "backoffLabel": "Espera",
+    "delayLabel": "Retardo (ms)",
+    "onSuccessLabel": "Al tener éxito →",
+    "onFailureLabel": "Al fallar →",
+    "pickStep": "Elige un paso",
+    "apply": "Aplicar",
+    "invalid": "Algunos campos no son válidos — revísalos."
+  },
+  "edgeLabel": {
+    "endSuccess": "Fin · completado",
+    "successEnd": "éxito → fin",
+    "successGoto": "éxito → {step}",
+    "failureEscalate": "fallo → escalar a una persona",
+    "failureGoto": "fallo → {step}"
+  },
+  "inbox": {
+    "title": "Tareas manuales",
+    "subtitle": "Pasos de aprovisionamiento que necesitan que una persona actúe.",
+    "columns": {
+      "task": "Tarea",
+      "step": "Paso",
+      "age": "Antigüedad"
+    },
+    "emptyTitle": "Nada necesita a una persona",
+    "emptyDescription": "Aquí aparecen las tareas manuales pendientes de todas las aplicaciones.",
+    "errorTitle": "No se pudieron cargar las tareas",
+    "origin": {
+      "MANUAL_STEP": "Paso manual",
+      "ESCALATED_FAILURE": "Fallo escalado"
+    }
+  },
+  "taskAction": {
+    "title": "Tarea manual",
+    "subtitle": "Completa el paso y luego reanuda la ejecución.",
+    "contextTitle": "Qué pasó",
+    "originLabel": "Origen",
+    "stepLabel": "Paso",
+    "formTitle": "Tu entrada",
+    "resolvedTitle": "Resuelta",
+    "resolvedStatus": {
+      "PENDING": "Esta tarea sigue pendiente.",
+      "COMPLETED": "Esta tarea ya se completó.",
+      "CANCELLED": "Esta tarea fue cancelada."
+    },
+    "submit": "Enviar",
+    "skip": "Omitir paso",
+    "fail": "Fallar ejecución",
+    "failReasonLabel": "Motivo (para fallar)",
+    "failReasonPlaceholder": "¿Por qué fallas esta ejecución?",
+    "failReasonHint": "Solo se usa si eliges Fallar ejecución.",
+    "noPermission": "No tienes permiso para actuar sobre esta tarea.",
+    "notFoundTitle": "Tarea no encontrada",
+    "notFoundDescription": "Puede que se haya resuelto o que no tengas acceso a ella.",
+    "toastSubmitted": "Tarea enviada — la ejecución se reanudará.",
+    "toastSkipped": "Paso omitido.",
+    "toastFailed": "Ejecución fallida.",
+    "toastError": "No se pudo completar la acción."
+  }
+}
