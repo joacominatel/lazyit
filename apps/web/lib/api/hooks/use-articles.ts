@@ -3,8 +3,12 @@ import {
   type ArticleFilters,
   getArticle,
   getArticleBySlug,
+  getArticleImportStatus,
   getArticles,
 } from "../endpoints/articles";
+
+/** Poll cadence for an in-flight import job (ADR-0053). md/txt finish near-instantly. */
+const IMPORT_POLL_INTERVAL_MS = 1500;
 
 /**
  * Query keys for the Article resource. Hand-written (not `createQueryKeys`)
@@ -19,6 +23,8 @@ export const articleKeys = {
     [...articleKeys.all, "list", filters] as const,
   detail: (id: string) => [...articleKeys.all, "detail", id] as const,
   bySlug: (slug: string) => [...articleKeys.all, "by-slug", slug] as const,
+  importStatus: (jobId: string) =>
+    [...articleKeys.all, "import", jobId] as const,
 };
 
 /**
@@ -51,5 +57,26 @@ export function useArticle(id: string | undefined) {
     queryKey: articleKeys.detail(id ?? ""),
     queryFn: () => getArticle(id as string),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * Poll an async import job (ADR-0053). Idle until a `jobId` is provided; refetches every
+ * {@link IMPORT_POLL_INTERVAL_MS} while the job is `queued`/`active` and stops once it reaches a
+ * terminal state (`completed`/`failed`). `keepPreviousData` avoids a flash while each poll resolves.
+ * The caller reacts to the terminal state (navigate on completed, toast on failed).
+ */
+export function useArticleImportStatus(jobId: string | undefined) {
+  return useQuery({
+    queryKey: articleKeys.importStatus(jobId ?? ""),
+    queryFn: () => getArticleImportStatus(jobId as string),
+    enabled: Boolean(jobId),
+    placeholderData: keepPreviousData,
+    refetchInterval: (query) => {
+      const state = query.state.data?.state;
+      return state === "completed" || state === "failed"
+        ? false
+        : IMPORT_POLL_INTERVAL_MS;
+    },
   });
 }
