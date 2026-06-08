@@ -21,6 +21,8 @@ import {
   UpdateWorkflowConnectionDto,
 } from './workflow.dto';
 import { RequirePermission } from '../../auth/require-permission.decorator';
+import { CurrentPrincipal } from '../../auth/current-principal.decorator';
+import type { Principal } from '../../auth/principal';
 import { parseCuidQuery } from '../../common/parse-cuid-query';
 import { parsePageQuery } from '../../common/parse-page-query';
 
@@ -74,10 +76,14 @@ export class WorkflowConnectionsController {
   @RequirePermission('workflow:manage')
   @ApiOperation({
     summary:
-      'Patch a connection (name / config / credential reference) (ADMIN).',
+      'Patch a connection (name / config / credential reference) (ADMIN). Attaching a secretId or re-pointing the host of a secret-bearing connection additionally requires workflow:secrets (CSEC-1 SoD).',
   })
-  update(@Param('id') id: string, @Body() dto: UpdateWorkflowConnectionDto) {
-    return this.connections.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateWorkflowConnectionDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.connections.update(id, dto, principal);
   }
 
   @Delete(':id')

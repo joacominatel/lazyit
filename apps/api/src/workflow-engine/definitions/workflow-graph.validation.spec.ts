@@ -2,8 +2,17 @@ import { BadRequestException } from '@nestjs/common';
 import { WorkflowStepsSchema } from '@lazyit/shared';
 import {
   assertAllStepsReachable,
+  assertNoManualEscalationFailureEdge,
   stepsNeedingConnection,
 } from './workflow-graph.validation';
+
+const manual = (key: string, extra: Record<string, unknown> = {}) => ({
+  kind: 'MANUAL',
+  key,
+  prompt: 'Pick a team',
+  inputFields: [{ name: 'team', label: 'Team', type: 'text' }],
+  ...extra,
+});
 
 const CONN = 'cjld2cjxh0000qzrmn831i7rn';
 const rest = (key: string, extra: Record<string, unknown> = {}) => ({
@@ -45,6 +54,45 @@ describe('assertAllStepsReachable', () => {
       };
       expect(body.unreachableSteps.map((u) => u.key)).toEqual(['orphan']);
     }
+  });
+});
+
+describe('assertNoManualEscalationFailureEdge (CCOR-6)', () => {
+  it('rejects a MANUAL step whose onFailure is ESCALATE_TO_MANUAL (field-addressable)', () => {
+    const steps = WorkflowStepsSchema.parse([
+      manual('m1', { onFailure: 'ESCALATE_TO_MANUAL' }),
+      rest('s2'),
+    ]);
+    try {
+      assertNoManualEscalationFailureEdge(steps);
+      throw new Error('expected to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(BadRequestException);
+      const body = (err as BadRequestException).getResponse() as {
+        manualEscalationSteps: { key: string }[];
+      };
+      expect(body.manualEscalationSteps.map((s) => s.key)).toEqual(['m1']);
+    }
+  });
+
+  it('is enforced through assertAllStepsReachable (the version-author gate)', () => {
+    const steps = WorkflowStepsSchema.parse([
+      manual('m1', { onFailure: 'ESCALATE_TO_MANUAL' }),
+    ]);
+    expect(() => assertAllStepsReachable(steps)).toThrow(BadRequestException);
+  });
+
+  it('still allows a NON-manual step to escalate its failure to manual', () => {
+    const steps = WorkflowStepsSchema.parse([
+      rest('s1', { onFailure: 'ESCALATE_TO_MANUAL' }),
+      rest('handler'),
+    ]);
+    expect(() => assertNoManualEscalationFailureEdge(steps)).not.toThrow();
+  });
+
+  it('allows a MANUAL step with a default (STOP_FAIL) failure edge', () => {
+    const steps = WorkflowStepsSchema.parse([manual('m1'), rest('s2')]);
+    expect(() => assertNoManualEscalationFailureEdge(steps)).not.toThrow();
   });
 });
 

@@ -1,4 +1,5 @@
 import {
+  resolveStepTransitions,
   WORKFLOW_COMPENSATE,
   WORKFLOW_END_SUCCESS,
   WORKFLOW_ESCALATE_TO_MANUAL,
@@ -54,6 +55,36 @@ export function classifyFailureEdge(
     return { outcome: 'FAILURE', edge: 'CONTINUE', targetStepKey: onFailure };
   }
   return { outcome: 'FAILURE', edge: 'GOTO', targetStepKey: onFailure };
+}
+
+/**
+ * Re-derive the resume CURSOR a resolved ManualTask hands back to the run — the SINGLE source of truth
+ * shared by the live manual-tasks resume path AND the sweeper's AWAITING_INPUT reconciler (CCOR-2), so a
+ * recovered (lost) resume re-enters the DAG at exactly the same target the live path would have. Mirrors
+ * the manual-tasks contract (C5):
+ *
+ *  - a COMPLETED task (submit/skip) → the step's `onSuccess` edge;
+ *  - a CANCELLED task (fail) → STOP_FAIL when it escalated a NON-manual step's failure (an
+ *    ESCALATED_FAILURE task), else the MANUAL step's own `onFailure` edge.
+ *
+ * Pure — derives off the resolved targets from the shared `resolveStepTransitions` (never re-deriving
+ * precedence) and the step's `kind` (which IS the task origin; no column — ADR-0054 §8 / C5).
+ */
+export function deriveResumeCursor(
+  steps: readonly WorkflowStep[],
+  index: number,
+  taskStatus: 'COMPLETED' | 'CANCELLED',
+): string {
+  if (taskStatus === 'COMPLETED') {
+    return resolveStepTransitions(steps, index).onSuccess;
+  }
+  // CANCELLED — an escalated-failure task (the paused step is NOT a MANUAL step) hard-stops the run;
+  // a cancelled MANUAL step takes its own failure edge.
+  const step = steps[index];
+  if (step && step.kind !== 'MANUAL') {
+    return WORKFLOW_STOP_FAIL;
+  }
+  return resolveStepTransitions(steps, index).onFailure;
 }
 
 /** True when a resolved transition target is a terminal token (not a step key). */

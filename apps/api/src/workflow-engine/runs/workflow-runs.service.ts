@@ -70,7 +70,92 @@ export class WorkflowRunsService {
   }
 }
 
-/** Surface the DAG fields stored in the redacted `metadata` jsonb at the top level of a step attempt. */
+/**
+ * The CLOSED vocabulary of step error classes the engine records (orchestrator + the v1 handlers /
+ * egress classifier). Any value outside it — including a future raw/verbatim string a handler might
+ * mis-set — collapses to `OTHER`, so the read can never surface an unbounded error token (CSEC-4).
+ */
+const KNOWN_ERROR_CLASSES: ReadonlySet<string> = new Set([
+  'step-failed',
+  'connector-unavailable',
+  'handler-threw',
+  'config',
+  'engine-error',
+  'egress-blocked',
+  'timeout',
+  'network',
+  'http-4xx',
+  'http-5xx',
+  'http-other',
+]);
+const KNOWN_TRANSITION_OUTCOMES: ReadonlySet<string> = new Set([
+  'SUCCESS',
+  'FAILURE',
+  'PAUSE',
+]);
+const KNOWN_TRANSITION_EDGES: ReadonlySet<string> = new Set([
+  'NEXT',
+  'GOTO',
+  'END',
+  'CONTINUE',
+  'ESCALATE',
+  'COMPENSATE',
+  'STOP',
+  'PAUSE',
+]);
+
+/** Bound the recorded error class to the closed taxonomy; unknown non-empty values → `OTHER`. */
+function boundErrorClass(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0) {
+    return null;
+  }
+  return KNOWN_ERROR_CLASSES.has(value) ? value : 'OTHER';
+}
+
+/** The closed projected transition shape — fixed-vocabulary outcome/edge + an optional target key. */
+export interface ProjectedTransition {
+  outcome: string | null;
+  edge: string | null;
+  targetStepKey?: string;
+}
+
+/**
+ * Project `metadata.transitionTaken` to its closed shape ONLY (outcome / edge from the fixed
+ * vocabularies + the target step key) — never the raw jsonb. Returns null when it is absent or not a
+ * recognisable transition, so no arbitrary nested object can ride out through this field.
+ */
+function projectTransition(value: unknown): ProjectedTransition | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+  const t = value as Record<string, unknown>;
+  const outcome =
+    typeof t.outcome === 'string' && KNOWN_TRANSITION_OUTCOMES.has(t.outcome)
+      ? t.outcome
+      : null;
+  const edge =
+    typeof t.edge === 'string' && KNOWN_TRANSITION_EDGES.has(t.edge)
+      ? t.edge
+      : null;
+  if (outcome === null && edge === null) {
+    return null;
+  }
+  return {
+    outcome,
+    edge,
+    ...(typeof t.targetStepKey === 'string'
+      ? { targetStepKey: t.targetStepKey }
+      : {}),
+  };
+}
+
+/**
+ * Project a step attempt to the C2 wire shape — an ALLOWLIST of the redacted `metadata` jsonb, NEVER
+ * the whole blob (CSEC-4). The orchestrator writes diagnostic-but-potentially-sensitive keys into that
+ * jsonb (e.g. a verbatim `reason` error string on a handler throw); the run-detail read is gated only
+ * by `workflow:read`, so it must surface ONLY the bounded DAG/observability fields the §7b timeline
+ * needs and a BOUNDED error class — no raw error message, no unexpected key, escapes.
+ */
 function projectStepRun(s: {
   id: number;
   runId: string;
@@ -93,15 +178,19 @@ function projectStepRun(s: {
     externalCorrelationId: s.externalCorrelationId,
     durationMs: typeof meta.durationMs === 'number' ? meta.durationMs : null,
     statusCode: typeof meta.statusCode === 'number' ? meta.statusCode : null,
-    errorClass: typeof meta.errorClass === 'string' ? meta.errorClass : null,
-    transitionTaken: meta.transitionTaken ?? null,
+    errorClass: boundErrorClass(meta.errorClass),
+    // The NAMES of the mapped fields that were sent — never their values (the handler only records
+    // keys, INV-6). Filtered to strings so no foreign jsonb rides along.
+    mappedFields: Array.isArray(meta.mappedFields)
+      ? meta.mappedFields.filter((f): f is string => typeof f === 'string')
+      : [],
+    transitionTaken: projectTransition(meta.transitionTaken),
     manualTaskId:
       typeof meta.manualTaskId === 'string' ? meta.manualTaskId : null,
     compensationStepKey:
       typeof meta.compensationStepKey === 'string'
         ? meta.compensationStepKey
         : null,
-    metadata: meta,
     createdAt: s.createdAt,
   };
 }

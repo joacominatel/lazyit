@@ -6,6 +6,7 @@ import { WorkflowRunOrchestrator } from './workflow-run.orchestrator';
 import {
   WORKFLOW_RUN_QUEUE,
   WORKFLOW_RUN_RESUME_JOB,
+  WORKFLOW_RUN_RETRY_JOB,
   WORKFLOW_RUN_START_JOB,
 } from './workflow-run.constants';
 import type { WorkflowRunJobData } from './workflow-run.types';
@@ -32,7 +33,7 @@ export class WorkflowRunWorker extends WorkerHost {
   }
 
   async process(job: Job<WorkflowRunJobData>): Promise<void> {
-    const { runId, resumeCursor } = job.data;
+    const { runId, resumeCursor, retryStepKey, retryAttempt } = job.data;
     try {
       switch (job.name) {
         case WORKFLOW_RUN_START_JOB:
@@ -43,6 +44,14 @@ export class WorkflowRunWorker extends WorkerHost {
             throw new Error(`resume job for run ${runId} has no resumeCursor`);
           }
           await this.orchestrator.resume(runId, resumeCursor);
+          return;
+        case WORKFLOW_RUN_RETRY_JOB:
+          if (!retryStepKey || retryAttempt == null) {
+            throw new Error(
+              `retry job for run ${runId} is missing its retry cursor`,
+            );
+          }
+          await this.orchestrator.retryStep(runId, retryStepKey, retryAttempt);
           return;
         default:
           this.logger.warn(

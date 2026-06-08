@@ -7,8 +7,6 @@ import {
 import {
   offsetOf,
   pageOf,
-  resolveStepTransitions,
-  WORKFLOW_STOP_FAIL,
   WorkflowStepsSchema,
   type CompleteManualTask,
   type ManualInputField,
@@ -21,6 +19,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ActorService } from '../../common/actor.service';
 import { isHumanPrincipal, type Principal } from '../../auth/principal';
 import { WorkflowTriggerService } from '../run/workflow-trigger.service';
+import { deriveResumeCursor } from '../run/transitions';
 import type { ManualTaskOrigin } from '../run/workflow-run.types';
 import { validateManualInput } from './manual-input.validation';
 
@@ -98,7 +97,7 @@ export class ManualTasksService {
     this.assertCanComplete(loaded.task.assigneeId, principal);
     const cleaned = validateManualInput(loaded.inputFields, dto.input);
     await this.complete(loaded.task.id, 'COMPLETED', cleaned, principal);
-    const cursor = resolveStepTransitions(loaded.steps, loaded.index).onSuccess;
+    const cursor = deriveResumeCursor(loaded.steps, loaded.index, 'COMPLETED');
     await this.trigger.enqueueResume(loaded.task.runId, cursor);
     return { ok: true, runId: loaded.task.runId, resumeCursor: cursor };
   }
@@ -109,7 +108,7 @@ export class ManualTasksService {
     this.assertPending(loaded.task.status);
     this.assertCanComplete(loaded.task.assigneeId, principal);
     await this.complete(loaded.task.id, 'COMPLETED', {}, principal);
-    const cursor = resolveStepTransitions(loaded.steps, loaded.index).onSuccess;
+    const cursor = deriveResumeCursor(loaded.steps, loaded.index, 'COMPLETED');
     await this.trigger.enqueueResume(loaded.task.runId, cursor);
     return { ok: true, runId: loaded.task.runId, resumeCursor: cursor };
   }
@@ -120,10 +119,8 @@ export class ManualTasksService {
     this.assertPending(loaded.task.status);
     this.assertCanComplete(loaded.task.assigneeId, principal);
     await this.complete(loaded.task.id, 'CANCELLED', null, principal);
-    const cursor =
-      loaded.origin === 'ESCALATED_FAILURE'
-        ? WORKFLOW_STOP_FAIL
-        : resolveStepTransitions(loaded.steps, loaded.index).onFailure;
+    // deriveResumeCursor reads the failure edge off the step KIND (the task origin), matching `load()`.
+    const cursor = deriveResumeCursor(loaded.steps, loaded.index, 'CANCELLED');
     await this.trigger.enqueueResume(loaded.task.runId, cursor);
     return { ok: true, runId: loaded.task.runId, resumeCursor: cursor };
   }

@@ -18,6 +18,21 @@ import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.
 const APP = 'app_cuid_1';
 const USER = '22222222-2222-2222-2222-222222222222';
 
+/** The PENDING-run create call shape, so assertions on the outbox row stay type-safe (no-unsafe-*). */
+type RunCreateCall = [
+  {
+    data: {
+      idempotencyKey: string;
+      status: string;
+      workflowId: string;
+      workflowVersionId: number;
+      applicationId: string;
+      accessGrantId: string;
+      executedAsServiceAccountId?: string;
+    };
+  },
+];
+
 function plan(overrides: Record<string, unknown> = {}) {
   return {
     id: 'wf1',
@@ -46,7 +61,11 @@ function build() {
     ),
   };
   const application = { findFirst: jest.fn().mockResolvedValue({ id: APP }) };
-  const tx = { accessGrant, workflowRun };
+  // The per-(userId, applicationId) advisory lock the LAST_ACTIVE_GRANT decision takes inside the tx
+  // (CCOR-1). The mock just records the call; the real serialization semantics are proven in
+  // access-grants.concurrency.spec.ts.
+  const queryRaw = jest.fn().mockResolvedValue([]);
+  const tx = { accessGrant, workflowRun, $queryRaw: queryRaw };
   const prisma = {
     accessGrant,
     workflowRun,
@@ -72,6 +91,7 @@ function build() {
     workflowRun,
     applicationWorkflow,
     queue,
+    queryRaw,
   };
 }
 
@@ -88,7 +108,8 @@ describe('AccessGrant outbox — create', () => {
     const grant = await h.service.create({ userId: USER, applicationId: APP });
 
     expect(grant).toMatchObject({ id: 'g1' });
-    const runData = h.workflowRun.create.mock.calls[0][0].data;
+    const runData = (h.workflowRun.create.mock.calls as RunCreateCall[])[0][0]
+      .data;
     expect(runData.idempotencyKey).toBe('ACCESS_GRANTED:g1');
     expect(runData.status).toBe('PENDING');
     expect(runData.workflowVersionId).toBe(5);
@@ -191,12 +212,34 @@ describe('AccessGrant outbox — revoke (LAST_ACTIVE_GRANT)', () => {
 
     await h.service.revoke('g1', {});
 
-    const runData = h.workflowRun.create.mock.calls[0][0].data;
+    const runData = (h.workflowRun.create.mock.calls as RunCreateCall[])[0][0]
+      .data;
     expect(runData.idempotencyKey).toBe('ACCESS_REVOKED:g1');
     expect(h.queue.add).toHaveBeenCalled();
   });
 
-  it('EACH_GRANT policy fires on every revoke regardless of remaining grants', async () => {
+  it('CCOR-1: takes the per-(user,app) advisory lock BEFORE counting (serializes the last-grant decision)', async () => {
+    const h = build();
+    h.accessGrant.findUnique.mockResolvedValue(grantRow);
+    h.applicationWorkflow.findFirst.mockResolvedValue(plan()); // LAST_ACTIVE_GRANT
+    h.accessGrant.update.mockResolvedValue({
+      id: 'g1',
+      userId: USER,
+      applicationId: APP,
+    });
+    h.accessGrant.count.mockResolvedValue(0);
+
+    await h.service.revoke('g1', {});
+
+    // The advisory lock is acquired (the count would race without it) and BEFORE the count, so a
+    // waiter re-counts only after the holder commits.
+    expect(h.queryRaw).toHaveBeenCalledTimes(1);
+    expect(h.queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      h.accessGrant.count.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('EACH_GRANT policy fires on every revoke regardless of remaining grants (no count, no lock)', async () => {
     const h = build();
     h.accessGrant.findUnique.mockResolvedValue(grantRow);
     h.applicationWorkflow.findFirst.mockResolvedValue(
@@ -213,5 +256,68 @@ describe('AccessGrant outbox — revoke (LAST_ACTIVE_GRANT)', () => {
 
     expect(h.workflowRun.create).toHaveBeenCalledTimes(1);
     expect(h.accessGrant.count).not.toHaveBeenCalled();
+    // EACH_GRANT needs no last-grant decision, so it never takes the serialization lock.
+    expect(h.queryRaw).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * CCOR-5: the in-tx PENDING-run INSERT is the one engine write in the grant's critical path (the
+ * transactional-outbox tradeoff). It is determined-safe ONLY by DB invariants: a UNIQUE idempotencyKey
+ * (`<trigger>:<accessGrantId>`, fresh per grant event) and FK references resolved by the pre-tx plan
+ * lookup. These assertions pin those invariants AND that there is EXACTLY ONE engine write in the tx —
+ * a regression guard against anyone adding a second, fallible engine write beside it (which would
+ * recouple the grant to a rollback). The DB-level FK/unique enforcement itself is verified against
+ * Postgres (mocked unit tests have no DB — ADR-0012).
+ */
+describe('CCOR-5 — the in-tx PENDING run INSERT is determined-safe by invariants', () => {
+  it('grant: a single run INSERT carrying a unique idempotencyKey + resolved FK references', async () => {
+    const h = build();
+    h.applicationWorkflow.findFirst.mockResolvedValue(plan());
+    h.accessGrant.create.mockResolvedValue({
+      id: 'g1',
+      userId: USER,
+      applicationId: APP,
+    });
+
+    await h.service.create({ userId: USER, applicationId: APP });
+
+    // Exactly one engine write in the tx (no second fallible write may be added beside it).
+    expect(h.workflowRun.create).toHaveBeenCalledTimes(1);
+    const runData = (h.workflowRun.create.mock.calls as RunCreateCall[])[0][0]
+      .data;
+    // UNIQUE per fresh grant event — the idempotency invariant that makes the INSERT non-conflicting.
+    expect(runData.idempotencyKey).toBe('ACCESS_GRANTED:g1');
+    // Every FK the row carries was resolved by the pre-tx plan lookup (so the INSERT cannot dangle).
+    expect(runData.accessGrantId).toBe('g1');
+    expect(runData.workflowId).toBe('wf1');
+    expect(runData.workflowVersionId).toBe(5);
+    expect(runData.applicationId).toBe(APP);
+  });
+
+  it('revoke (fired): a single run INSERT, distinct idempotencyKey from the grant', async () => {
+    const h = build();
+    h.accessGrant.findUnique.mockResolvedValue({
+      id: 'g1',
+      revokedAt: null,
+      userId: USER,
+      applicationId: APP,
+    });
+    h.applicationWorkflow.findFirst.mockResolvedValue(plan());
+    h.accessGrant.update.mockResolvedValue({
+      id: 'g1',
+      userId: USER,
+      applicationId: APP,
+    });
+    h.accessGrant.count.mockResolvedValue(0);
+
+    await h.service.revoke('g1', {});
+
+    expect(h.workflowRun.create).toHaveBeenCalledTimes(1);
+    const runData = (h.workflowRun.create.mock.calls as RunCreateCall[])[0][0]
+      .data;
+    expect(runData.idempotencyKey).toBe('ACCESS_REVOKED:g1');
+    expect(runData.accessGrantId).toBe('g1');
+    expect(runData.workflowVersionId).toBe(5);
   });
 });
