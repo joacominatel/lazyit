@@ -14,8 +14,9 @@ import { HealthService, type ReadinessReport } from './health.service';
  * orchestrator / load balancer / `docker healthcheck` can poll them.
  *
  * - GET /health/live  — liveness: always 200 while the process can serve HTTP. No dependency checks.
- * - GET /health/ready — readiness: 200 when the DB answers, 503 otherwise. Meilisearch is fail-soft
- *   (ADR-0035) and is never a readiness gate.
+ * - GET /health/ready — readiness: 200 when the DB answers, 503 otherwise. Meilisearch (ADR-0035) and
+ *   Valkey (ADR-0053) are fail-soft and never readiness gates — the `valkey` check is reported for
+ *   observability only (a broker outage reads as `degraded`, still 200; OPS-6).
  */
 @ApiTags('health')
 @Controller('health')
@@ -43,7 +44,10 @@ export class HealthController {
       example: {
         status: 'ok',
         ready: true,
-        checks: { database: { status: 'up' } },
+        checks: {
+          database: { status: 'up' },
+          valkey: { status: 'up' },
+        },
       },
     },
   })
