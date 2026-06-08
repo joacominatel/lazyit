@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
 } from '@nestjs/common';
 import {
   ApiOkResponse,
@@ -25,6 +26,7 @@ import { CurrentPrincipal } from '../../auth/current-principal.decorator';
 import type { Principal } from '../../auth/principal';
 import { parseCuidQuery } from '../../common/parse-cuid-query';
 import { parsePageQuery } from '../../common/parse-page-query';
+import { requestIdOf } from '../request-id';
 
 /**
  * WorkflowConnection CRUD (contract C1). Reads gated by `workflow:read`; mutations by `workflow:manage`
@@ -84,6 +86,24 @@ export class WorkflowConnectionsController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.connections.update(id, dto, principal);
+  }
+
+  @Post(':id/test')
+  @HttpCode(200)
+  @RequirePermission('workflow:manage')
+  @ApiOperation({
+    summary:
+      'C3 — Test a connection (ADMIN). A single bounded, READ-ONLY probe of connectivity + credential; never provisions / POSTs a mutation, never echoes the secret. Returns { ok, status?, message, requestId }.',
+  })
+  @ApiOkResponse({
+    description:
+      'The probe outcome: { ok, status?, message, requestId }. A MANUAL/webhook connection returns a "nothing to test" message.',
+  })
+  test(@Param('id') id: string, @Req() req: unknown) {
+    return this.connections.test(
+      id,
+      requestIdOf(req as { id?: unknown; headers?: Record<string, unknown> }),
+    );
   }
 
   @Delete(':id')
