@@ -130,6 +130,9 @@ services:
       # before the api validates its OIDC config at boot (ADR-0043 §4c/§4d).
       zitadel-bootstrap:
         condition: service_completed_successfully
+      # BullMQ broker must be accepting connections before the worker/queue wire up (ADR-0053).
+      valkey:
+        condition: service_healthy
     networks: [internal]
 
   # --- Web (Next.js standalone on Node) — internal only (prod) ------------
@@ -370,6 +373,35 @@ services:
       start_period: 30s
     networks: [internal]
 
+  # --- Valkey — BullMQ broker for async workers, internal network only (prod) ------
+  # ADR-0053: BullMQ requires a Redis-protocol server; Valkey is the Linux Foundation BSD-3 fork of
+  # Redis 7.2 — wire-compatible (ioredis/BullMQ treat it as Redis), clean redistribution licence, low
+  # footprint. AOF persistence (appendonly yes, appendfsync everysec) so queued jobs survive a restart —
+  # durability the backups/workflow jobs need. PostgreSQL stays the system of record; this is transport.
+  # UNPROFILED: comes up on plain `docker compose up` so native `bun run dev` can reach it (like db /
+  # meilisearch / zitadel). Never published to the host in prod — internal network only (SEC-005 /
+  # ADR-0028). compose.override.yaml publishes 127.0.0.1:6379 and drops the resource ceiling for dev.
+  valkey:
+    # valkey/valkey:8-alpine — pinned by digest (rolling tag; re-pin on a deliberate bump).
+    image: valkey/valkey:8-alpine@sha256:77643d152547b446fc15cbafaff22004545663fcd40c6b28038ad283837baa75
+    restart: unless-stopped
+    logging: *default-logging
+    # Modest ceiling — a small-team queue is lightweight (job metadata, not bulk data).
+    mem_limit: 256m
+    cpus: 0.5
+    # Enable AOF so queued jobs are durable across a restart; everysec balances safety vs. fsync cost.
+    command: ["valkey-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      # valkey-cli ships in the image; PONG => the server accepts connections.
+      test: ["CMD-SHELL", "valkey-cli ping | grep -q PONG || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [internal]
+
   # --- Caddy reverse proxy + automatic HTTPS — the only public surface (prod) -----
   caddy:
     profiles: [prod]
@@ -485,6 +517,9 @@ volumes:
   db_data:
   zitadel_db_data:
   meili_data:
+  # Valkey AOF (ADR-0053). Holds in-flight BullMQ job state — transport, not the system of record
+  # (that's Postgres). Persisted so queued jobs survive `down`/recreate; safe to drop for a clean reset.
+  valkey_data:
   caddy_data:
   caddy_config:
   # Shared secrets volume for the zero-touch Zitadel bootstrap (ADR-0043 §4 / §9e). Zitadel writes
