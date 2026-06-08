@@ -83,6 +83,19 @@ function harness(
       findMany: jest.fn(async () =>
         state.stepRuns.filter((s) => s.status === 'SUCCEEDED'),
       ),
+      findFirst: jest.fn(
+        async ({
+          where,
+        }: {
+          where: { runId: string; stepKey: string; attempt: number };
+        }) =>
+          state.stepRuns.find(
+            (s) =>
+              s.runId === where.runId &&
+              s.stepKey === where.stepKey &&
+              s.attempt === where.attempt,
+          ) ?? null,
+      ),
     },
     manualTask: {
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -103,6 +116,22 @@ function harness(
         },
       })),
     },
+  };
+
+  // A transactional pause (CCOR-2) runs task + step-run + status-flip in one tx; the mock executes the
+  // callback against the same in-memory prisma so the three writes are observed atomically.
+  (prisma as unknown as { $transaction: unknown }).$transaction = jest.fn(
+    async (arg: unknown) =>
+      typeof arg === 'function'
+        ? (arg as (tx: typeof prisma) => Promise<unknown>)(prisma)
+        : Promise.all(arg as Promise<unknown>[]),
+  );
+
+  // The trigger seam: enqueueRetry schedules the OFF-worker backoff (CCOR-3). Default true (the slot is
+  // freed); a test can make it resolve false to exercise the degraded in-process fallback.
+  const trigger = {
+    enqueueRetry: jest.fn().mockResolvedValue(true),
+    enqueueResume: jest.fn().mockResolvedValue(true),
   };
 
   const registry = { get: (kind: string) => handlers[kind] };
@@ -131,8 +160,9 @@ function harness(
     secrets as never,
     contextBuilder as never,
     sleeper,
+    trigger as never,
   );
-  return { orchestrator, prisma, state, sleeper };
+  return { orchestrator, prisma, state, sleeper, trigger };
 }
 
 const restStep = (key: string, extra: Record<string, unknown> = {}) => ({
@@ -259,11 +289,11 @@ describe('WorkflowRunOrchestrator — the DAG walk (ADR-0054 §8)', () => {
     expect(compensated[0].stepKey).toBe('s1');
   });
 
-  it('retries a transient failure per step.retry, then succeeds (one row per attempt)', async () => {
-    const { orchestrator, state, sleeper } = harness(
+  it('CCOR-3 off-worker backoff: a transient failure schedules a DELAYED retry and frees the slot (no in-process sleep)', async () => {
+    const { orchestrator, state, sleeper, trigger } = harness(
       [
         restStep('s1', {
-          retry: { maxAttempts: 2, backoff: 'fixed', delayMs: 0 },
+          retry: { maxAttempts: 2, backoff: 'fixed', delayMs: 1000 },
         }),
       ],
       { REST: scripted('REST', [failTransient(503), ok()]) },
@@ -271,15 +301,69 @@ describe('WorkflowRunOrchestrator — the DAG walk (ADR-0054 §8)', () => {
 
     await orchestrator.start('run1');
 
-    expect(state.runStatus).toBe('SUCCEEDED');
-    // Two attempts → two append-only rows (attempt 1 FAILED, attempt 2 SUCCEEDED).
-    expect(state.stepRuns).toHaveLength(2);
+    // The walk RETURNED to the broker mid-step: the run stays RUNNING (not slept-on), one FAILED attempt
+    // row is recorded, and the next attempt is a delayed re-enqueue — the worker slot is free.
+    expect(state.runStatus).toBe('RUNNING');
+    expect(state.stepRuns).toHaveLength(1);
     expect(state.stepRuns[0]).toMatchObject({ attempt: 1, status: 'FAILED' });
+    expect(state.stepRuns[0].metadata).toMatchObject({ retriedAfterMs: 1000 });
+    expect(sleeper.sleep).not.toHaveBeenCalled();
+    expect(trigger.enqueueRetry).toHaveBeenCalledWith('run1', 's1', 2, 1000);
+
+    // The delayed retry re-enters at the same step's attempt 2 and finishes the run.
+    await orchestrator.retryStep('run1', 's1', 2);
+    expect(state.runStatus).toBe('SUCCEEDED');
+    expect(state.stepRuns).toHaveLength(2);
     expect(state.stepRuns[1]).toMatchObject({
       attempt: 2,
       status: 'SUCCEEDED',
     });
+  });
+
+  it('CCOR-3 retryStep is idempotent: a re-delivered attempt that already ran is a no-op', async () => {
+    const rest = scripted('REST', [ok()]);
+    const { orchestrator, state } = harness(
+      [
+        restStep('s1', {
+          retry: { maxAttempts: 3, backoff: 'fixed', delayMs: 1 },
+        }),
+      ],
+      { REST: rest },
+    );
+    // Pretend attempt 2 already produced its append-only row (the first delivery ran it).
+    state.runStatus = 'RUNNING';
+    state.stepRuns.push({
+      runId: 'run1',
+      stepKey: 's1',
+      attempt: 2,
+      status: 'FAILED',
+    });
+
+    await orchestrator.retryStep('run1', 's1', 2);
+
+    expect(rest.execute).not.toHaveBeenCalled();
+    expect(state.stepRuns).toHaveLength(1);
+  });
+
+  it('CCOR-3 degraded fallback: a broker-down retry backs off IN-PROCESS capped well under the lock, then continues', async () => {
+    const { orchestrator, state, sleeper, trigger } = harness(
+      [
+        restStep('s1', {
+          // A 1h base backoff: the in-process fallback must CAP it (MAX_INPROCESS_BACKOFF_MS = 2000ms).
+          retry: { maxAttempts: 2, backoff: 'fixed', delayMs: 3_600_000 },
+        }),
+      ],
+      { REST: scripted('REST', [failTransient(503), ok()]) },
+    );
+    trigger.enqueueRetry.mockResolvedValue(false); // broker unavailable → no off-worker re-enqueue
+
+    await orchestrator.start('run1');
+
+    expect(state.runStatus).toBe('SUCCEEDED');
+    expect(state.stepRuns).toHaveLength(2);
+    // The in-process sleep is CAPPED at MAX_INPROCESS_BACKOFF_MS, never the full 1h.
     expect(sleeper.sleep).toHaveBeenCalledTimes(1);
+    expect(sleeper.sleep).toHaveBeenCalledWith(2000);
   });
 
   it('does NOT retry a non-idempotent permanent failure (single attempt)', async () => {
@@ -327,6 +411,44 @@ describe('WorkflowRunOrchestrator — the DAG walk (ADR-0054 §8)', () => {
     // Resume at the manual step's onSuccess (the next step s2).
     await orchestrator.resume('run1', 's2');
     expect(state.runStatus).toBe('SUCCEEDED');
+  });
+
+  it('CCOR-2 pause is transactional: a MANUAL pause flips AWAITING_INPUT atomically with the resolvable task (TOCTOU-safe)', async () => {
+    const steps = [
+      {
+        kind: 'MANUAL',
+        key: 'm1',
+        prompt: 'Pick a team',
+        inputFields: [{ name: 'team', label: 'Team', type: 'text' }],
+      },
+      restStep('s2'),
+    ];
+    const manual = {
+      kind: 'MANUAL',
+      execute: jest.fn(async () => ({
+        status: 'AWAITING_INPUT' as const,
+        manualTask: { stepKey: 'm1', prompt: 'Pick a team', inputFields: [] },
+      })),
+    };
+    const { orchestrator, prisma, state } = harness(steps, {
+      MANUAL: manual,
+      REST: scripted('REST', [ok()]),
+    });
+
+    await orchestrator.start('run1');
+
+    // Task + the pausing step row + the AWAITING_INPUT flip commit in ONE tx — so the PENDING task is
+    // never resolvable while the run is still RUNNING (which would let a completion no-op its own resume
+    // and strand the run AWAITING_INPUT forever).
+    expect(
+      (prisma as unknown as { $transaction: jest.Mock }).$transaction,
+    ).toHaveBeenCalledTimes(1);
+    expect(state.runStatus).toBe('AWAITING_INPUT');
+    expect(state.manualTasks).toHaveLength(1);
+    const paused = state.stepRuns.find((s) => s.status === 'AWAITING_INPUT');
+    expect((paused!.metadata as Record<string, unknown>).manualTaskId).toBe(
+      'task1',
+    );
   });
 
   it('start() is idempotent: a second start of an already-RUNNING run is a no-op', async () => {
