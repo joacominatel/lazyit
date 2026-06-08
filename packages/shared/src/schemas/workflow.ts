@@ -246,10 +246,169 @@ export type WorkflowConnectionConfig = z.infer<
 /** Stable per-step node key within a version (referenced by WorkflowStepRun.stepKey / ManualTask). */
 const stepKey = z.string().trim().min(1).max(100);
 
-/** What to do when a step fails (governance): hard-fail the run, continue, or escalate to a human. */
+/**
+ * LEGACY per-step failure governance (fail / continue / manual). SUPERSEDED by the first-class
+ * {@link stepGraphShape} transition model (`onFailure`) below, but kept on the wire for backward
+ * compatibility: a version authored before the DAG revision still validates and resolves. The
+ * canonical mapping is encoded in {@link resolveStepTransitions}: `fail` → STOP_FAIL,
+ * `continue` → take the success edge (fall through), `manual` → ESCALATE_TO_MANUAL. New authoring
+ * SHOULD set `onSuccess`/`onFailure`; `onError` is the fallback when `onFailure` is unset.
+ */
 export const WORKFLOW_STEP_ON_ERROR = ["fail", "continue", "manual"] as const;
 export const WorkflowStepOnErrorSchema = z.enum(WORKFLOW_STEP_ON_ERROR);
 export type WorkflowStepOnError = z.infer<typeof WorkflowStepOnErrorSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// The opinionated error-handling DAG (ADR-0054 §8) — success criteria, retry policy, transitions
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * SUCCESS CRITERIA for an HTTP step (REST / WEBHOOK_OUT). An outbound call is a STEP SUCCESS only when
+ * its status matches the criteria — a 500 / 404 outside the set is a step FAILURE, never a silent
+ * "succeeded" (the CEO's rule: no error-blind linear flow). When a step omits `successCriteria` the
+ * engine applies the default {@link DEFAULT_HTTP_SUCCESS_RANGE} (2xx). The contract carries the policy;
+ * the 1b-B orchestrator evaluates it via {@link isHttpStatusSuccess}.
+ */
+export const HttpStatusRangeSchema = z
+  .strictObject({
+    from: int4({ min: 100, max: 599 }),
+    to: int4({ min: 100, max: 599 }),
+  })
+  .refine((r) => r.from <= r.to, {
+    error: "status range `from` must be ≤ `to`",
+    path: ["to"],
+  });
+export type HttpStatusRange = z.infer<typeof HttpStatusRangeSchema>;
+
+export const HttpSuccessCriteriaSchema = z
+  .strictObject({
+    // Explicit individual status codes treated as success (e.g. [200, 201, 204]).
+    statuses: z.array(int4({ min: 100, max: 599 })).max(20).optional(),
+    // Inclusive status-code ranges treated as success (e.g. [{ from: 200, to: 299 }]).
+    ranges: z.array(HttpStatusRangeSchema).max(10).optional(),
+  })
+  .refine(
+    (c) => (c.statuses?.length ?? 0) + (c.ranges?.length ?? 0) > 0,
+    "successCriteria must list at least one status or range (omit the field for the 2xx default)",
+  );
+export type HttpSuccessCriteria = z.infer<typeof HttpSuccessCriteriaSchema>;
+
+/** The default success window applied when a step has no explicit {@link HttpSuccessCriteriaSchema}. */
+export const DEFAULT_HTTP_SUCCESS_RANGE = { from: 200, to: 299 } as const;
+
+/**
+ * Pure predicate: is `status` a SUCCESS under `criteria`? With no criteria, the 2xx default
+ * ({@link DEFAULT_HTTP_SUCCESS_RANGE}) applies. Framework-agnostic so `api` (executor) and `web`
+ * (builder preview) classify identically.
+ */
+export function isHttpStatusSuccess(
+  status: number,
+  criteria?: HttpSuccessCriteria,
+): boolean {
+  if (!criteria) {
+    return (
+      status >= DEFAULT_HTTP_SUCCESS_RANGE.from &&
+      status <= DEFAULT_HTTP_SUCCESS_RANGE.to
+    );
+  }
+  if (criteria.statuses?.includes(status)) {
+    return true;
+  }
+  return (
+    criteria.ranges?.some((r) => status >= r.from && status <= r.to) ?? false
+  );
+}
+
+/** Backoff shape the BullMQ worker (1b-B) applies between attempts. */
+export const WORKFLOW_RETRY_BACKOFF = ["fixed", "exponential"] as const;
+export const WorkflowRetryBackoffSchema = z.enum(WORKFLOW_RETRY_BACKOFF);
+export type WorkflowRetryBackoff = z.infer<typeof WorkflowRetryBackoffSchema>;
+
+/**
+ * RETRY POLICY for a step (after a FAILED outcome, before the `onFailure` edge fires). The contract
+ * only CARRIES the policy — the BullMQ worker executes the attempts in 1b-B (mapping `maxAttempts`/
+ * `backoff`/`delayMs` onto its `attempts` + `backoff` options). Bounded to keep a misconfiguration from
+ * hammering a third party. A retry still only happens when the handler marked the failure `retryable`
+ * (transient AND, for a create, idempotent — the zitadel-management posture); `maxAttempts` caps HOW
+ * MANY, the handler gates WHETHER. Omitting `retry` ⇒ {@link DEFAULT_RETRY_POLICY} (a single attempt).
+ */
+export const RetryPolicySchema = z.strictObject({
+  // TOTAL attempts including the first (1 = no retry).
+  maxAttempts: int4({ min: 1, max: 10 }).default(1),
+  backoff: WorkflowRetryBackoffSchema.default("exponential"),
+  // Base delay in ms between attempts (the worker scales it per `backoff`). ≤ 1h.
+  delayMs: int4({ min: 0, max: 3_600_000 }).default(1000),
+});
+export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
+
+/** The engine default when a step omits `retry`: a single attempt (opt in to retries explicitly). */
+export const DEFAULT_RETRY_POLICY = {
+  maxAttempts: 1,
+  backoff: "exponential",
+  delayMs: 1000,
+} as const satisfies RetryPolicy;
+
+/**
+ * Terminal transition targets — a FINITE, opinionated set (NO arbitrary boolean / business
+ * conditions; the n8n free-form canvas was explicitly rejected for v1, ADR-0054 §8).
+ *
+ *  - `END_SUCCESS`  — the success terminal: the run reached its goal → status SUCCEEDED.
+ *  - `ESCALATE_TO_MANUAL` — spawn a ManualTask and PAUSE the run (status AWAITING_INPUT).
+ *  - `COMPENSATE`   — run the saga compensations for already-succeeded steps (status COMPENSATED).
+ *  - `STOP_FAIL`    — terminate the run (status FAILED) and emit the `workflow.run_failed` alert.
+ *
+ * `onSuccess` may target a step key OR `END_SUCCESS`. `onFailure` may target a step key (an alert /
+ * compensation / error-handler step) OR one of the three failure terminals. These tokens are RESERVED
+ * — a step `key` may not collide with one (enforced in {@link WorkflowStepsSchema}).
+ */
+export const WORKFLOW_END_SUCCESS = "END_SUCCESS" as const;
+export const WORKFLOW_ESCALATE_TO_MANUAL = "ESCALATE_TO_MANUAL" as const;
+export const WORKFLOW_COMPENSATE = "COMPENSATE" as const;
+export const WORKFLOW_STOP_FAIL = "STOP_FAIL" as const;
+
+export const WORKFLOW_SUCCESS_TERMINALS = [WORKFLOW_END_SUCCESS] as const;
+export const WORKFLOW_FAILURE_TERMINALS = [
+  WORKFLOW_ESCALATE_TO_MANUAL,
+  WORKFLOW_COMPENSATE,
+  WORKFLOW_STOP_FAIL,
+] as const;
+export const WORKFLOW_TRANSITION_TERMINALS = [
+  ...WORKFLOW_SUCCESS_TERMINALS,
+  ...WORKFLOW_FAILURE_TERMINALS,
+] as const;
+/** Tokens a step `key` may NOT equal (they are transition sentinels, not nodes). */
+export const WORKFLOW_RESERVED_TRANSITION_TARGETS = WORKFLOW_TRANSITION_TERMINALS;
+
+export const WorkflowSuccessTerminalSchema = z.enum(WORKFLOW_SUCCESS_TERMINALS);
+export type WorkflowSuccessTerminal = z.infer<
+  typeof WorkflowSuccessTerminalSchema
+>;
+export const WorkflowFailureTerminalSchema = z.enum(WORKFLOW_FAILURE_TERMINALS);
+export type WorkflowFailureTerminal = z.infer<
+  typeof WorkflowFailureTerminalSchema
+>;
+export type WorkflowTransitionTerminal =
+  (typeof WORKFLOW_TRANSITION_TERMINALS)[number];
+
+/**
+ * The first-class success/failure EDGES every step carries (optional — the degenerate linear case
+ * leaves them unset). A target is either another step's `key` or a terminal token (validated as a
+ * whole graph in {@link WorkflowStepsSchema}). Resolution of the EFFECTIVE edges (defaults + legacy
+ * `onError`) is {@link resolveStepTransitions} — the single source the 1b-B orchestrator implements.
+ */
+const stepGraphShape = {
+  // Success edge: a step `key`, or `END_SUCCESS`. Unset ⇒ the next step in order, else `END_SUCCESS`.
+  onSuccess: z.string().trim().min(1).max(100).optional(),
+  // Failure edge (after retries): a step `key`, or a failure terminal. Unset ⇒ legacy `onError`, else
+  // `STOP_FAIL`.
+  onFailure: z.string().trim().min(1).max(100).optional(),
+} as const;
+
+/** The HTTP-outbound-only step fields (REST / WEBHOOK_OUT): success window + retry policy. */
+const httpOutboundShape = {
+  successCriteria: HttpSuccessCriteriaSchema.optional(),
+  retry: RetryPolicySchema.optional(),
+} as const;
 
 /** A REST step: call the connection's API with a logic-less data mapping. */
 export const RestStepSchema = z.strictObject({
@@ -263,6 +422,11 @@ export const RestStepSchema = z.strictObject({
   dataMapping: WorkflowDataMappingSchema.optional(),
   // Whether the external operation is idempotent (a retried create must not double-provision).
   idempotent: z.boolean().default(false),
+  // Per-step success window (default 2xx) + retry policy. See {@link httpOutboundShape}.
+  ...httpOutboundShape,
+  // First-class success/failure edges (default linear; see {@link stepGraphShape}).
+  ...stepGraphShape,
+  // LEGACY fallback when `onFailure` is unset (mapped by {@link resolveStepTransitions}).
   onError: WorkflowStepOnErrorSchema.default("fail"),
 });
 export type RestStep = z.infer<typeof RestStepSchema>;
@@ -274,6 +438,11 @@ export const WebhookOutStepSchema = z.strictObject({
   name: z.string().trim().min(1).max(200).optional(),
   connectionId: z.cuid(),
   dataMapping: WorkflowDataMappingSchema.optional(),
+  // Per-step success window (default 2xx) + retry policy. See {@link httpOutboundShape}.
+  ...httpOutboundShape,
+  // First-class success/failure edges (default linear; see {@link stepGraphShape}).
+  ...stepGraphShape,
+  // LEGACY fallback when `onFailure` is unset (mapped by {@link resolveStepTransitions}).
   onError: WorkflowStepOnErrorSchema.default("fail"),
 });
 export type WebhookOutStep = z.infer<typeof WebhookOutStepSchema>;
@@ -288,6 +457,9 @@ export const ManualStepSchema = z.strictObject({
   inputFields: z.array(ManualInputFieldSchema).min(1).max(25),
   // Optional cohort the task is offered to (a role/team label) when not directly assigned.
   cohort: z.string().trim().min(1).max(100).optional(),
+  // First-class edges: completion → `onSuccess`; cancellation → `onFailure`. A MANUAL step has no
+  // HTTP success window / retry; it has no legacy `onError` (unset `onFailure` ⇒ STOP_FAIL).
+  ...stepGraphShape,
 });
 export type ManualStep = z.infer<typeof ManualStepSchema>;
 
@@ -300,9 +472,57 @@ export const WorkflowStepSchema = z.discriminatedUnion("kind", [
 export type WorkflowStep = z.infer<typeof WorkflowStepSchema>;
 
 /**
- * The ordered step graph embedded in a WorkflowVersion (the immutable, replayable definition). At
- * least one step; step keys must be UNIQUE within a version (a WorkflowStepRun references a step by
- * its key, so a duplicate would make the timeline ambiguous).
+ * Resolve a step's EFFECTIVE success/failure edges — the SINGLE source of truth the 1b-B orchestrator
+ * implements (and the same logic {@link WorkflowStepsSchema} uses for acyclicity). Precedence:
+ *
+ *  - `onSuccess` (explicit) ▸ else the NEXT step's `key` in array order ▸ else `END_SUCCESS` (last).
+ *  - `onFailure` (explicit) ▸ else legacy `onError` mapped (`continue` → the success edge,
+ *    `manual` → `ESCALATE_TO_MANUAL`, `fail` → `STOP_FAIL`) ▸ else `STOP_FAIL`.
+ *
+ * The degenerate linear case (no explicit edges, no `onError`) therefore means "onSuccess → next step,
+ * onFailure → STOP_FAIL" — a plain ordered sequence is just the degenerate DAG. Targets are returned
+ * verbatim (a step `key` or a terminal token); the caller dispatches on the terminals.
+ */
+export function resolveStepTransitions(
+  steps: readonly WorkflowStep[],
+  index: number,
+): { onSuccess: string; onFailure: string } {
+  const step = steps[index];
+  if (!step) {
+    // Out-of-range index — inert terminals. Never reached in practice (callers iterate in range);
+    // present only to satisfy strict index access.
+    return { onSuccess: WORKFLOW_END_SUCCESS, onFailure: WORKFLOW_STOP_FAIL };
+  }
+  const nextStep = steps[index + 1];
+  const onSuccess =
+    step.onSuccess ?? (nextStep ? nextStep.key : WORKFLOW_END_SUCCESS);
+
+  let onFailure: string;
+  if (step.onFailure !== undefined) {
+    onFailure = step.onFailure;
+  } else if ("onError" in step && step.onError === "continue") {
+    // `continue` = ignore the failure and take the success edge (fall through).
+    onFailure = onSuccess;
+  } else if ("onError" in step && step.onError === "manual") {
+    onFailure = WORKFLOW_ESCALATE_TO_MANUAL;
+  } else {
+    // `onError: "fail"`, or a kind without `onError` (MANUAL): hard-stop the run.
+    onFailure = WORKFLOW_STOP_FAIL;
+  }
+  return { onSuccess, onFailure };
+}
+
+/**
+ * The step graph embedded in a WorkflowVersion (the immutable, replayable definition) — an OPINIONATED
+ * ERROR-HANDLING DAG (ADR-0054 §8). The array ORDER defines the entry node (index 0) and the default
+ * linear fall-through; explicit `onSuccess`/`onFailure` edges layer error handling on top. Validation:
+ *
+ *  1. ≥ 1 step, ≤ 50 steps.
+ *  2. step `key`s are UNIQUE within a version (a WorkflowStepRun references a step by key).
+ *  3. no step `key` collides with a reserved terminal token (END_SUCCESS / STOP_FAIL / …).
+ *  4. every explicit `onSuccess` targets a known `key` or `END_SUCCESS`; every explicit `onFailure`
+ *     targets a known `key` or a failure terminal.
+ *  5. the EFFECTIVE graph ({@link resolveStepTransitions}) is ACYCLIC — no transition cycle.
  */
 export const WorkflowStepsSchema = z
   .array(WorkflowStepSchema)
@@ -311,7 +531,110 @@ export const WorkflowStepsSchema = z
   .refine(
     (steps) => new Set(steps.map((s) => s.key)).size === steps.length,
     "Step keys must be unique within a version",
-  );
+  )
+  .superRefine((steps, ctx) => {
+    const keys = new Set(steps.map((s) => s.key));
+    const reserved = new Set<string>(WORKFLOW_RESERVED_TRANSITION_TARGETS);
+    const failureTerminals = new Set<string>(WORKFLOW_FAILURE_TERMINALS);
+
+    // (3) a step key may not be a transition sentinel.
+    steps.forEach((s, i) => {
+      if (reserved.has(s.key)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Step key "${s.key}" collides with a reserved transition target`,
+          path: [i, "key"],
+          input: s.key,
+        });
+      }
+    });
+
+    // (4) explicit edge targets must resolve to a known node or the right kind of terminal.
+    steps.forEach((s, i) => {
+      if (
+        s.onSuccess !== undefined &&
+        s.onSuccess !== WORKFLOW_END_SUCCESS &&
+        !keys.has(s.onSuccess)
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message: `onSuccess "${s.onSuccess}" is not a known step key or END_SUCCESS`,
+          path: [i, "onSuccess"],
+          input: s.onSuccess,
+        });
+      }
+      if (
+        s.onFailure !== undefined &&
+        !failureTerminals.has(s.onFailure) &&
+        !keys.has(s.onFailure)
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message: `onFailure "${s.onFailure}" is not a known step key or a failure terminal (${WORKFLOW_FAILURE_TERMINALS.join(" | ")})`,
+          path: [i, "onFailure"],
+          input: s.onFailure,
+        });
+      }
+    });
+
+    // (5) acyclicity over the EFFECTIVE step-key edges (terminals are sinks, not nodes).
+    const indexByKey = new Map(steps.map((s, i) => [s.key, i]));
+    const adjacency: number[][] = steps.map((_, i) => {
+      const { onSuccess, onFailure } = resolveStepTransitions(steps, i);
+      const out: number[] = [];
+      for (const target of [onSuccess, onFailure]) {
+        const j = indexByKey.get(target);
+        if (j !== undefined) {
+          out.push(j);
+        }
+      }
+      return out;
+    });
+
+    // Iterative DFS three-colour cycle detection (white = 0, gray = 1, black = 2).
+    const color = new Array<number>(steps.length).fill(0);
+    let hasCycle = false;
+    for (let start = 0; start < steps.length && !hasCycle; start++) {
+      if (color[start] !== 0) {
+        continue;
+      }
+      const stack: Array<{ node: number; next: number }> = [
+        { node: start, next: 0 },
+      ];
+      color[start] = 1;
+      while (stack.length > 0 && !hasCycle) {
+        const frame = stack[stack.length - 1];
+        if (!frame) {
+          break;
+        }
+        const edges = adjacency[frame.node] ?? [];
+        if (frame.next < edges.length) {
+          const child = edges[frame.next];
+          frame.next += 1;
+          if (child === undefined) {
+            continue;
+          }
+          if (color[child] === 1) {
+            hasCycle = true;
+          } else if (color[child] === 0) {
+            color[child] = 1;
+            stack.push({ node: child, next: 0 });
+          }
+        } else {
+          color[frame.node] = 2;
+          stack.pop();
+        }
+      }
+    }
+    if (hasCycle) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "The workflow step graph must be acyclic — a transition cycle was detected",
+        input: steps,
+      });
+    }
+  });
 export type WorkflowSteps = z.infer<typeof WorkflowStepsSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
