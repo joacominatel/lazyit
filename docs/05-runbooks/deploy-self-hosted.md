@@ -182,6 +182,23 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > and 503s the import instead of hanging — but async import stays broken until `REDIS_URL` is set
 > (issue #257). See **[[docker-build-troubleshooting]]** for the symptom/diagnosis.
 
+> **Upgrade note — `WORKFLOW_SECRET_KEY` before enabling the Applications Workflow Engine (ADR-0054).**
+> The engine encrypts its connector credentials (`WorkflowSecret`, AES-256-GCM) with this key and
+> **fails loud at boot** if it is enabled while the key is missing or the wrong length. As with
+> `REDIS_URL` above, the guided `start.sh` only writes it on a **fresh** render — a `.env.prod` that
+> predates the engine has no such line — so add it by hand before turning the engine on:
+>
+> ```sh
+> grep -q '^WORKFLOW_SECRET_KEY=' infra/env/.env.prod \
+>   || echo "WORKFLOW_SECRET_KEY=$(openssl rand -hex 32)" >> infra/env/.env.prod   # 32 bytes -> 64 hex chars
+> docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+>   --env-file infra/env/.env.prod up -d api
+> ```
+>
+> Treat this key like `ZITADEL_MASTERKEY`: it is **unrotatable and irreplaceable** — a DB restore
+> without the *matching* key yields undecryptable connector credentials. Back it up off-host (it lives
+> in `.env.prod`; see **[[backups]]**). Do **not** generate a fresh one on a restore.
+
 ## 5. Backups & disaster recovery
 
 Configure backups before real use — see **[[backups]]**. The prod stack has **two** databases (the
@@ -197,6 +214,21 @@ runs **eight** long-running containers (db, api, web, zitadel, zitadel_db, meili
 plus the one-shot migrate. Suggested minimum host for a small team (≤50 assets): **2 vCPU / 4 GB RAM /
 20 GB disk**, growing with data and search volume. Watch `docker stats` and raise the limits if a
 service is constrained.
+
+> **`api` `mem_limit` vs the sandboxed import child (OPS-5/SEC-002).** The async `.docx` import runs
+> in a **forked sandboxed child** whose V8 heap is capped at `IMPORT_CHILD_HEAP_MB` (default **256m**;
+> `apps/api/src/articles/import/import-job.constants.ts`) so a decompression bomb makes the *child's*
+> V8 abort while the API process survives. That isolation only holds if the **child OOMs before the
+> api container's cgroup does**. Invariant (worker concurrency = 1):
+>
+> ```
+> api mem_limit  >  NestJS baseline RSS (~250m)  +  IMPORT_CHILD_HEAP_MB
+> ```
+>
+> The api ceiling is therefore **768m** (256m heap → ~506m floor; 512m was too tight and would let the
+> kernel OOM-killer take the whole API instead of just the child). If you raise `IMPORT_CHILD_HEAP_MB`
+> for genuinely large documents, raise `api` `mem_limit` to keep the headroom; if you must shrink
+> `mem_limit`, lower the heap cap to match. Keep the two coupled.
 
 > **Valkey** (ADR-0053) is the BullMQ broker for async workers (e.g. the async `.docx` import). It is
 > lightweight (256 MB ceiling — mostly job metadata) and runs AOF persistence on the `valkey_data`

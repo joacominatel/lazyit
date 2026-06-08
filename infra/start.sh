@@ -91,6 +91,7 @@ POSTGRES_PASSWORD=""
 ZITADEL_DB_PASSWORD=""
 MEILI_MASTER_KEY=""
 AUTH_SECRET=""
+WORKFLOW_SECRET_KEY=""
 ZITADEL_ADMIN_PASSWORD=""
 DATABASE_URL_VAL=""
 
@@ -318,6 +319,17 @@ generate_secrets() {
   AUTH_SECRET=$(openssl rand -base64 33)
   ok "POSTGRES_PASSWORD / ZITADEL_DB_PASSWORD / MEILI_MASTER_KEY / AUTH_SECRET generated"
 
+  # WORKFLOW_SECRET_KEY — AES-256-GCM master key for the Applications Workflow Engine's encrypted
+  # connector-credential store (WorkflowSecret, ADR-0054). Must be EXACTLY 32 bytes -> 64 hex chars
+  # (openssl rand -hex 32). The engine FAILS LOUD at boot if it is missing/wrong length, and it is the
+  # THIRD unrotatable DR linchpin (alongside ZITADEL_MASTERKEY + POSTGRES_PASSWORD): a DB restore
+  # without the matching key yields undecryptable connector credentials. See docs/05-runbooks/backups.md.
+  WORKFLOW_SECRET_KEY=$(openssl rand -hex 32)
+  if [ "${#WORKFLOW_SECRET_KEY}" -ne 64 ]; then
+    die "internal error: generated WORKFLOW_SECRET_KEY is ${#WORKFLOW_SECRET_KEY} chars, expected exactly 64 (32 hex bytes). Aborting (a wrong length fails the engine's boot check)."
+  fi
+  ok "WORKFLOW_SECRET_KEY generated (exactly 64 hex chars — verified)"
+
   # Zitadel console admin password — random, complexity-compliant (upper+lower+digit+symbol),
   # surfaced ONCE at the end. base64 gives upper/lower/digit; append a guaranteed symbol + Aa1.
   ZITADEL_ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '\n')_Aa1!"
@@ -394,6 +406,7 @@ render_env_file() {
       OIDC_ISSUER=*)            printf 'OIDC_ISSUER=%s\n'            "$ISSUER_URL"          >>"$_tmp" ;;
       AUTH_ISSUER=*)            printf 'AUTH_ISSUER=%s\n'            "$ISSUER_URL"          >>"$_tmp" ;;
       AUTH_SECRET=*)            printf 'AUTH_SECRET=%s\n'            "$AUTH_SECRET"         >>"$_tmp" ;;
+      WORKFLOW_SECRET_KEY=*)    printf 'WORKFLOW_SECRET_KEY=%s\n'    "$WORKFLOW_SECRET_KEY" >>"$_tmp" ;;
       *) printf '%s\n' "$line" >>"$_tmp" ;;
     esac
   done <"$ENV_EXAMPLE"
@@ -431,6 +444,9 @@ render_env_file() {
   _sp=$(grep -E '^LAZYIT_HTTPS_PORT=' "$_tmp" | head -n1 | cut -d= -f2-)
   case "$_hp" in ''|*[!0-9]*) die "render check failed: LAZYIT_HTTP_PORT is not numeric ('$_hp')." ;; esac
   case "$_sp" in ''|*[!0-9]*) die "render check failed: LAZYIT_HTTPS_PORT is not numeric ('$_sp')." ;; esac
+  # WORKFLOW_SECRET_KEY must be 64 hex chars (32 bytes) — a wrong length fails the engine's boot check.
+  _wsk=$(grep -E '^WORKFLOW_SECRET_KEY=' "$_tmp" | head -n1 | cut -d= -f2-)
+  [ "${#_wsk}" -eq 64 ] || die "render check failed: WORKFLOW_SECRET_KEY in the file is ${#_wsk} chars, not 64 (32 hex bytes)."
   if [ "$PG_MODE" = "internal" ]; then
     _du=$(grep -E '^DATABASE_URL=' "$_tmp" | head -n1 | cut -d= -f2-)
     case "$_du" in
@@ -438,7 +454,7 @@ render_env_file() {
       *) die "render check failed: DATABASE_URL password does not match POSTGRES_PASSWORD." ;;
     esac
   fi
-  ok "rendered file validated (no stray CHANGE_ME, MASTERKEY=32, ports numeric, DB password matches)"
+  ok "rendered file validated (no stray CHANGE_ME, MASTERKEY=32, WORKFLOW_SECRET_KEY=64, ports numeric, DB password matches)"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     warn "DRY RUN: NOT writing $ENV_FILE and NOT running docker."
