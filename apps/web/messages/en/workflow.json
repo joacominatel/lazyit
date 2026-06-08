@@ -1,0 +1,375 @@
+{
+  "gate": {
+    "title": "Workflows are restricted",
+    "description": "You need the workflow:read permission to view automation for this application.",
+    "manageTitle": "Workflow management is restricted",
+    "manageDescription": "You need the workflow:manage permission to configure workflows."
+  },
+  "breadcrumb": {
+    "applications": "Access",
+    "workflows": "Workflows",
+    "settings": "Settings"
+  },
+  "tab": {
+    "title": "Workflows",
+    "subtitle": "Automate provisioning when access is granted or revoked for this application."
+  },
+  "empty": {
+    "title": "No automation configured",
+    "description": "Grants for this application are recorded only — nothing is provisioned automatically."
+  },
+  "triggers": {
+    "ACCESS_GRANTED": "Access granted",
+    "ACCESS_REVOKED": "Access revoked",
+    "TIMER_AFTER_GRANT": "Timer after grant",
+    "SCHEDULED": "Scheduled",
+    "RECERTIFICATION": "Recertification"
+  },
+  "kind": {
+    "REST": "API / HTTP",
+    "WEBHOOK_OUT": "Webhook",
+    "MANUAL": "Human task",
+    "SDK": "Vendor SDK",
+    "MCP": "MCP server",
+    "PREBUILT": "Prebuilt connector",
+    "CUSTOM": "Custom"
+  },
+  "authScheme": {
+    "NONE": "None",
+    "BEARER": "Bearer token",
+    "BASIC": "Basic auth",
+    "HEADER": "API key header"
+  },
+  "backoff": {
+    "fixed": "Fixed",
+    "exponential": "Exponential"
+  },
+  "deprovision": {
+    "LAST_ACTIVE_GRANT": "Only the last active grant",
+    "EACH_GRANT": "Each grant"
+  },
+  "fieldType": {
+    "text": "Text",
+    "number": "Number",
+    "boolean": "Yes / no",
+    "select": "Choice"
+  },
+  "runStatus": {
+    "PENDING": "Queued",
+    "RUNNING": "Running",
+    "AWAITING_INPUT": "Waiting (manual)",
+    "SUCCEEDED": "Succeeded",
+    "FAILED": "Failed",
+    "COMPENSATED": "Compensated"
+  },
+  "stepStatus": {
+    "SUCCEEDED": "Succeeded",
+    "FAILED": "Failed",
+    "AWAITING_INPUT": "Waiting",
+    "SKIPPED": "Skipped",
+    "COMPENSATED": "Compensated"
+  },
+  "edge": {
+    "NEXT": "next step",
+    "GOTO": "go to step",
+    "END": "end",
+    "CONTINUE": "continue",
+    "ESCALATE": "escalate",
+    "COMPENSATE": "compensate",
+    "STOP": "stop",
+    "PAUSE": "pause"
+  },
+  "grantChip": {
+    "provisioned": "Provisioned",
+    "provisioning": "Provisioning…",
+    "needsAttention": "Needs attention"
+  },
+  "onSuccess": {
+    "NEXT": "Continue to the next step (default)",
+    "END": "End the run as succeeded",
+    "GOTO": "Go to a specific step"
+  },
+  "onFailure": {
+    "STOP": "Alert and stop (default)",
+    "ESCALATE": "Escalate to a human",
+    "COMPENSATE": "Run a compensation step",
+    "CONTINUE": "Continue anyway"
+  },
+  "onFailureHint": {
+    "STOP": "Mark the run failed, alert, and stop. The grant is never touched.",
+    "ESCALATE": "Pause the run and open a manual task so a person can complete it, then resume.",
+    "COMPENSATE": "Run a designated compensation step (e.g. undo a half-finished change), then stop.",
+    "CONTINUE": "Ignore the failure and proceed. The run is still marked partially failed."
+  },
+  "connection": {
+    "title": "Connection",
+    "kindLabel": "Type",
+    "nameLabel": "Name",
+    "baseUrlLabel": "Base URL",
+    "webhookUrlLabel": "Webhook URL",
+    "authLabel": "Auth",
+    "secretLabel": "Credential",
+    "none": "No automation configured — grants are recorded only.",
+    "add": "Add connection",
+    "edit": "Edit",
+    "deleteAria": "Delete connection",
+    "deleteTitle": "Delete connection?",
+    "deleteDescription": "Delete the connection \"{name}\"? Workflows using it will stop provisioning.",
+    "deleteConfirm": "Delete connection"
+  },
+  "connectionForm": {
+    "newTitle": "New connection",
+    "editTitle": "Edit connection",
+    "description": "How lazyit reaches this system, and with what credential.",
+    "kindLabel": "Type",
+    "kindImmutable": "The type can't be changed — recreate the connection to change it.",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. Jira production",
+    "baseUrlLabel": "Base URL",
+    "webhookUrlLabel": "Webhook URL",
+    "urlHint": "A public https:// URL.",
+    "authLabel": "Auth method",
+    "authHeaderLabel": "Header name",
+    "signatureHeaderLabel": "Signature header",
+    "signatureHeaderHint": "The header the HMAC signature is sent in (the signing secret is stored separately).",
+    "createButton": "Create connection",
+    "saveChanges": "Save changes",
+    "toastCreated": "Connection created.",
+    "toastUpdated": "Connection updated.",
+    "toastError": "Couldn't save the connection.",
+    "errors": {
+      "nameRequired": "A name is required.",
+      "invalidFields": "Please check the fields and try again."
+    }
+  },
+  "connectionTest": {
+    "button": "Test connection",
+    "hint": "A read-only check — it never provisions.",
+    "ok": "Reachable",
+    "failed": "Failed",
+    "httpStatus": "HTTP {status}",
+    "error": "Couldn't test the connection."
+  },
+  "secret": {
+    "notConfigured": "Not configured",
+    "add": "Add credential",
+    "replace": "Replace",
+    "remove": "Remove",
+    "valueLabel": "Credential value",
+    "newValueLabel": "New credential value",
+    "valuePlaceholder": "Paste the secret value",
+    "labelLabel": "Label",
+    "labelPlaceholder": "e.g. API token",
+    "writeOnlyHint": "Stored encrypted and never shown again — you can only replace it.",
+    "save": "Save",
+    "cancel": "Cancel",
+    "toastSaved": "Credential saved.",
+    "toastRotated": "Credential replaced.",
+    "toastRemoved": "Credential removed.",
+    "toastError": "Couldn't save the credential."
+  },
+  "list": {
+    "title": "Workflows",
+    "addWorkflow": "New workflow",
+    "disabled": "Disabled",
+    "stepCount": "{count, plural, =0 {No steps} one {# step} other {# steps}}",
+    "lastRun": "last run {status}",
+    "toggleAria": "Enable or disable {name}",
+    "editAria": "Edit {name}",
+    "toastEnabled": "Workflow enabled.",
+    "toastDisabled": "Workflow disabled.",
+    "toastError": "Couldn't update the workflow."
+  },
+  "runs": {
+    "title": "Recent runs",
+    "empty": "No runs yet."
+  },
+  "runDetail": {
+    "title": "Run",
+    "subtitle": "The executed path through the workflow, step by step.",
+    "timelineTitle": "Timeline",
+    "noSteps": "This run has no recorded steps yet.",
+    "attempt": "attempt {attempt}",
+    "httpStatus": "HTTP {status}",
+    "compensatedWith": "Compensated with step \"{step}\"",
+    "openManualTask": "Open the manual task",
+    "successEdge": "success → {edge} {target}",
+    "failureEdge": "failure → {edge} {target}",
+    "notFoundTitle": "Run not found",
+    "notFoundDescription": "This run may have been removed, or you don't have access to it."
+  },
+  "dryRun": {
+    "button": "Test run (dry-run)",
+    "title": "Test run (dry-run)",
+    "description": "Preview the would-be requests and the path through this workflow against a real grant. Nothing is sent and nothing is provisioned.",
+    "banner": "Dry run",
+    "bannerHint": "No requests were sent and nothing was provisioned.",
+    "version": "Version {version}",
+    "grantee": "Grantee",
+    "application": "Application",
+    "event": "Event",
+    "accessLevel": "Access level",
+    "accessLevelNone": "—",
+    "noSteps": "This version has no steps to preview.",
+    "noGrants": "No active grants to sample — grant someone access to this application first.",
+    "sampleGrant": "Sample grant",
+    "sampleGrantHint": "The grant whose context the requests resolve against.",
+    "unknownUser": "Unknown user",
+    "simulateLabel": "Simulate a step failure",
+    "simulateHint": "Force one step to fail to preview its failure edge (escalate / compensate / stop).",
+    "simulateStep": "Step to fail",
+    "run": "Run dry-run",
+    "error": "Couldn't run the dry-run.",
+    "simulated": "Forced failure",
+    "mappedFields": "Mapped fields",
+    "manualPrompt": "Instructions",
+    "headers": "Headers",
+    "body": "Body",
+    "signed": "Signed",
+    "wouldPause": "The run would pause here for a manual task.",
+    "endState": {
+      "END_SUCCESS": "End · succeeded",
+      "STOP_FAIL": "Stopped · failed",
+      "ESCALATE_TO_MANUAL": "Escalated to a human",
+      "COMPENSATE": "Compensating"
+    }
+  },
+  "builder": {
+    "newTitle": "New workflow",
+    "editTitle": "Edit workflow",
+    "subtitle": "A connection and an error-handling sequence of steps.",
+    "detailsTitle": "Details",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. Provision Jira on access granted",
+    "triggerLabel": "Trigger",
+    "triggerHint": "When this workflow runs.",
+    "triggerImmutable": "The trigger can't be changed — recreate the workflow to change it.",
+    "deprovisionLabel": "Deprovision policy",
+    "connectionLabel": "Connection",
+    "connectionMissing": "No connection configured — add one on the Workflows tab.",
+    "connectionRequired": "Add a connection before adding an API or webhook step.",
+    "stepsTitle": "Steps",
+    "noSteps": "No steps yet — add one to start the sequence.",
+    "triggerNode": "Trigger · {trigger}",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "enabledAria": "Enable or disable this workflow",
+    "save": "Save",
+    "nameRequired": "A name is required.",
+    "invalidSteps": "Some steps are incomplete — open each flagged step and fix it.",
+    "toastSaved": "Workflow saved.",
+    "toastError": "Couldn't save the workflow.",
+    "editStepAria": "Configure step {name}",
+    "moveUpAria": "Move step up",
+    "moveDownAria": "Move step down",
+    "removeStepAria": "Remove step",
+    "notFoundTitle": "Workflow not found",
+    "notFoundDescription": "This workflow may have been removed, or you don't have access to it."
+  },
+  "palette": {
+    "addStep": "Add step",
+    "comingSoon": "Coming soon",
+    "sdk": "Vendor SDK / connector",
+    "mcp": "MCP server call",
+    "categories": {
+      "apiHttp": "API / HTTP",
+      "webhooks": "Webhooks",
+      "humanTasks": "Human tasks"
+    }
+  },
+  "mapping": {
+    "empty": "No fields mapped yet.",
+    "add": "Add field",
+    "fieldLabel": "External field",
+    "fieldPlaceholder": "External field",
+    "valueLabel": "Value source",
+    "removeAria": "Remove mapping"
+  },
+  "stepEditor": {
+    "title": "Configure {kind} step",
+    "description": "How this step runs, what counts as success, and what happens on failure.",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. Create Jira user",
+    "methodLabel": "Method",
+    "pathLabel": "Path",
+    "idempotentLabel": "Idempotent",
+    "idempotentHint": "Safe to retry without double-provisioning.",
+    "promptLabel": "Instructions",
+    "promptPlaceholder": "What the person needs to do.",
+    "inputFieldsLabel": "Fields to fill",
+    "inputFieldsHint": "The typed inputs the person provides.",
+    "fieldNameLabel": "Field key",
+    "fieldNamePlaceholder": "key",
+    "fieldLabelLabel": "Field label",
+    "fieldLabelPlaceholder": "Label",
+    "fieldRequired": "Required",
+    "addField": "Add field",
+    "removeFieldAria": "Remove field",
+    "cohortLabel": "Assignee cohort",
+    "cohortPlaceholder": "e.g. IT team (optional)",
+    "mappingLabel": "Data mapping",
+    "mappingHint": "Map lazyit context into the outbound payload.",
+    "successCriteriaLabel": "Success status codes",
+    "successCriteriaHint": "Comma-separated. Leave empty for the 2xx default.",
+    "retryLabel": "Retry on failure",
+    "retryHint": "Retry transient failures before the on-failure edge fires.",
+    "maxAttemptsLabel": "Attempts",
+    "backoffLabel": "Backoff",
+    "delayLabel": "Delay (ms)",
+    "onSuccessLabel": "On success →",
+    "onFailureLabel": "On failure →",
+    "pickStep": "Pick a step",
+    "apply": "Apply",
+    "invalid": "Some fields are invalid — please check them."
+  },
+  "edgeLabel": {
+    "endSuccess": "End · succeeded",
+    "successEnd": "success → end",
+    "successGoto": "success → {step}",
+    "failureEscalate": "failure → escalate to a human",
+    "failureGoto": "failure → {step}"
+  },
+  "inbox": {
+    "title": "Manual tasks",
+    "subtitle": "Provisioning steps that need a person to act.",
+    "columns": {
+      "task": "Task",
+      "step": "Step",
+      "age": "Age"
+    },
+    "emptyTitle": "Nothing needs a human",
+    "emptyDescription": "Pending manual tasks across all applications appear here.",
+    "errorTitle": "Couldn't load tasks",
+    "origin": {
+      "MANUAL_STEP": "Manual step",
+      "ESCALATED_FAILURE": "Escalated failure"
+    }
+  },
+  "taskAction": {
+    "title": "Manual task",
+    "subtitle": "Complete the step, then resume the run.",
+    "contextTitle": "What happened",
+    "originLabel": "Origin",
+    "stepLabel": "Step",
+    "formTitle": "Your input",
+    "resolvedTitle": "Resolved",
+    "resolvedStatus": {
+      "PENDING": "This task is still pending.",
+      "COMPLETED": "This task has already been completed.",
+      "CANCELLED": "This task was cancelled."
+    },
+    "submit": "Submit",
+    "skip": "Skip step",
+    "fail": "Fail run",
+    "failReasonLabel": "Reason (for failing)",
+    "failReasonPlaceholder": "Why are you failing this run?",
+    "failReasonHint": "Only used if you choose Fail run.",
+    "noPermission": "You don't have permission to act on this task.",
+    "notFoundTitle": "Task not found",
+    "notFoundDescription": "This task may have been resolved, or you don't have access to it.",
+    "toastSubmitted": "Task submitted — the run will resume.",
+    "toastSkipped": "Step skipped.",
+    "toastFailed": "Run failed.",
+    "toastError": "Couldn't complete the action."
+  }
+}

@@ -54,6 +54,20 @@ updated: 2026-05-25
 - 🟢 [[access-grant]] — a user's access to an application, with grant/revoke history.
 - ⚪ [[access-request]] — approval workflow; **deferred** by [[0023-access-management-design]].
 
+## Workflow engine (Access automation)
+
+The opt-in, per-application engine that provisions / deprovisions a user in an external system when
+access changes — fired **after** the [[access-grant]] commits, decoupled (the inverse of INV-5). See
+[[0054-applications-workflow-engine]] · [[0053-async-workers-bullmq-valkey]] · epic #248.
+
+- 🟢 [[application-workflow]] — the opt-in `(application, trigger)` binding; soft-delete.
+- 🟢 [[workflow-connection]] — the per-app connector instance (REST | WEBHOOK_OUT | MANUAL); soft-delete.
+- 🟢 [[workflow-version]] — the immutable, append-only definition snapshot (the error-handling DAG).
+- 🟢 [[workflow-run]] — the execution ledger, one row per fired grant event (idempotent, append-only).
+- 🟢 [[workflow-step-run]] — append-only, one row per step attempt.
+- 🟢 [[manual-task]] — the human-in-the-loop pause (`AWAITING_INPUT`); statuses, no soft-delete.
+- 🟢 [[workflow-secret]] — the engine's own AES-256-GCM, write-only credential store; soft-delete.
+
 ## Consumables
 
 - ⚪ [[consumable]] — stock-counted item (cables, mice, toner…).

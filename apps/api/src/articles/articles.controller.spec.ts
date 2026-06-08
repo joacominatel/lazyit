@@ -3,6 +3,7 @@ import { BadRequestException, INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { ArticlesController } from './articles.controller';
 import { ArticlesService } from './articles.service';
+import { ArticleImportService } from './import/article-import.service';
 import { maxImportBytes } from './article-import';
 
 // Mock the generated Prisma client so importing ArticlesService (the DI token) never loads the
@@ -19,17 +20,23 @@ jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
  * SEC-001 — the import endpoint must cap the upload at the multer interceptor, so an oversized file
  * is rejected before it is buffered into memory (DoS). With FileInterceptor's `limits.fileSize`,
  * multer aborts the stream early and platform-express maps `LIMIT_FILE_SIZE` to a 413, so the
- * service handler never runs. Without the cap the whole file is buffered and the handler runs.
+ * handler never runs. Without the cap the whole file is buffered and the handler runs.
+ *
+ * Async import (ADR-0053): a within-limit upload no longer creates the article inline — it enqueues
+ * a job and returns 202 + a jobId (the .docx parse runs later in the sandboxed worker, SEC-002).
  */
 describe('ArticlesController POST /articles/import (upload size limit, SEC-001)', () => {
   let app: INestApplication;
-  const importArticle = jest.fn();
+  const enqueue = jest.fn();
   const someUserId = '00000000-0000-0000-0000-000000000000';
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [ArticlesController],
-      providers: [{ provide: ArticlesService, useValue: { importArticle } }],
+      providers: [
+        { provide: ArticlesService, useValue: {} },
+        { provide: ArticleImportService, useValue: { enqueue } },
+      ],
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
@@ -40,10 +47,10 @@ describe('ArticlesController POST /articles/import (upload size limit, SEC-001)'
   });
 
   beforeEach(() => {
-    importArticle.mockReset();
+    enqueue.mockReset();
   });
 
-  it('rejects an over-limit upload with 413 and never reaches the service', async () => {
+  it('rejects an over-limit upload with 413 and never reaches the handler', async () => {
     const overLimit = Buffer.alloc(maxImportBytes() + 1024, 0x61); // one KB past the cap
     const res = await request(app.getHttpServer())
       .post('/articles/import')
@@ -53,19 +60,20 @@ describe('ArticlesController POST /articles/import (upload size limit, SEC-001)'
 
     expect(res.status).toBe(413);
     // The interceptor aborted before the handler — proof the whole file was not buffered.
-    expect(importArticle).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it('lets an under-limit upload reach the service handler', async () => {
-    importArticle.mockResolvedValue({ id: 'a1' });
+  it('enqueues a within-limit upload and returns 202 + a jobId', async () => {
+    enqueue.mockResolvedValue({ jobId: 'job-1' });
     const res = await request(app.getHttpServer())
       .post('/articles/import')
       .set('X-User-Id', someUserId)
       .field('categoryId', 'irrelevant')
       .attach('file', Buffer.from('# hello\n'), 'ok.md');
 
-    expect(res.status).toBe(201);
-    expect(importArticle).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(202);
+    expect(res.body).toEqual({ jobId: 'job-1' });
+    expect(enqueue).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -82,9 +90,10 @@ describe('ArticlesController POST /articles/import (upload size limit, SEC-001)'
  */
 describe('ArticlesController GET /articles (multi-select filters + allowlist, #198)', () => {
   const findPage = jest.fn().mockResolvedValue({ items: [], total: 0 });
-  const controller = new ArticlesController({
-    findPage,
-  } as unknown as ArticlesService);
+  const controller = new ArticlesController(
+    { findPage } as unknown as ArticlesService,
+    {} as unknown as ArticleImportService,
+  );
 
   beforeEach(() => findPage.mockClear());
 

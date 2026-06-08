@@ -98,7 +98,9 @@ All open questions from the initial briefing are now decided (2026-05-25):
 
 - Entity **field tables** — added once a model lands in Prisma (most now have them); still conceptual-only
   for the not-yet-built entities (Ticket, AccessRequest — see [[entities/_MOC|Entities]]).
-- The one ADR still pending: **async workers** (BullMQ + Redis) — see [[03-decisions/_MOC|Decisions]].
+- **Async workers** are now decided — BullMQ on Valkey with sandboxed processors
+  ([[0053-async-workers-bullmq-valkey]]); the first job is the async `.docx` import. Remaining pending
+  ADRs: **CD / image publishing** and **E2E tooling** (see [[03-decisions/_MOC|Decisions]]).
   (The **auth IdP** is decided — Zitadel/BYOI, [[0037-idp-choice-zitadel-byoi]] /
   [[0043-zitadel-source-of-truth]]; **authorization** is decided — [[0046-roles-permissions-v2]] +
   [[0048-service-accounts]]; the **deployment model + topology** are built — [[0015-deployment-model]] /

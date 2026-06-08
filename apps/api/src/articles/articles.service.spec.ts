@@ -881,89 +881,10 @@ describe('ArticlesService', () => {
   });
 
   // --- import --------------------------------------------------------------
-
-  describe('importArticle', () => {
-    const file = (name: string, body: string) => ({
-      originalname: name,
-      buffer: Buffer.from(body),
-      size: Buffer.byteLength(body),
-    });
-
-    it('imports a .md, deriving the title from the filename', async () => {
-      await service.importArticle(
-        file('network-guide.md', '# Net'),
-        { categoryId: 'c1', status: 'DRAFT' },
-        AUTHOR_PRINCIPAL,
-      );
-      const data = lastCreate();
-      expect(data.title).toBe('network guide');
-      expect(data.slug).toBe('network-guide');
-      expect(data.content).toContain('# Net');
-      expect(data.authorId).toBe(AUTHOR);
-      expect(data.publishedAt).toBeNull();
-      // Imported as DRAFT -> not indexed (draft privacy, ADR-0022/0035).
-      expect(search.upsert).not.toHaveBeenCalled();
-    });
-
-    it('indexes an imported article when imported as PUBLISHED', async () => {
-      await service.importArticle(
-        file('guide.md', '# Net'),
-        { categoryId: 'c1', status: 'PUBLISHED' },
-        AUTHOR_PRINCIPAL,
-      );
-      expect(search.upsert).toHaveBeenCalledWith(
-        'articles',
-        expect.objectContaining({ status: 'PUBLISHED', slug: 'guide' }),
-      );
-    });
-
-    it('rejects a file over the size limit (400)', async () => {
-      const big = {
-        originalname: 'big.md',
-        buffer: Buffer.alloc(1),
-        size: 6 * 1024 * 1024,
-      };
-      await expect(
-        service.importArticle(
-          big,
-          { categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR_PRINCIPAL,
-        ),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(article.create).not.toHaveBeenCalled();
-    });
-
-    it('rejects a missing file (400)', async () => {
-      await expect(
-        service.importArticle(
-          undefined,
-          { categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR_PRINCIPAL,
-        ),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects an empty file (400)', async () => {
-      await expect(
-        service.importArticle(
-          file('empty.txt', '   '),
-          { categoryId: 'c1', status: 'DRAFT' },
-          AUTHOR_PRINCIPAL,
-        ),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(article.create).not.toHaveBeenCalled();
-    });
-
-    it('requires current user (400 when user is undefined)', async () => {
-      await expect(
-        service.importArticle(
-          file('a.md', '# x'),
-          { categoryId: 'c1', status: 'DRAFT' },
-          undefined,
-        ),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-  });
+  // Article import is now ASYNC (ADR-0053): parse + create moved out of ArticlesService into the
+  // sandboxed worker. Its behavior is covered by import/create-imported-article.spec.ts (the create
+  // path) and import/docx-bomb.spec.ts (SEC-002 isolation); the enqueue/status edge lives in
+  // ArticleImportService.
 
   // --- versioning (append-only edit history, ADR-0042) ---------------------
 
@@ -990,21 +911,6 @@ describe('ArticlesService', () => {
         status: 'DRAFT',
         editedById: AUTHOR,
       });
-    });
-
-    it('snapshots version 1 on import', async () => {
-      const body = '# Guide\nbody';
-      await service.importArticle(
-        {
-          originalname: 'guide.md',
-          buffer: Buffer.from(body),
-          size: Buffer.byteLength(body),
-        },
-        { categoryId: 'c1', status: 'DRAFT' },
-        AUTHOR_PRINCIPAL,
-      );
-      expect(articleVersion.create).toHaveBeenCalledTimes(1);
-      expect(lastVersion()).toMatchObject({ version: 1, editedById: AUTHOR });
     });
 
     it('appends the NEXT version on an edit that changes a versioned field', async () => {

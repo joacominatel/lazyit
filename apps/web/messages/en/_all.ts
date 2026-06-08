@@ -16,6 +16,7 @@ import nav from "./nav.json";
 import settings from "./settings.json";
 import shared from "./shared.json";
 import users from "./users.json";
+import workflow from "./workflow.json";
 
 const messages = {
   common,
@@ -31,6 +32,7 @@ const messages = {
   settings,
   informes,
   auth,
+  workflow,
 };
 
 export default messages;

@@ -24,7 +24,9 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { HealthModule } from './health/health.module';
 import { CommonModule } from './common/common.module';
 import { ConfigModule } from './config/config.module';
+import { QueueModule } from './queue/queue.module';
 import { ServiceAccountsModule } from './service-accounts/service-accounts.module';
+import { WorkflowEngineModule } from './workflow-engine/workflow-engine.module';
 import { SearchModule } from './search/search.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
@@ -40,6 +42,9 @@ import { buildLoggerParams } from './logging/logging.config';
     AuthModule,
     // Global cross-cutting providers (ActorService — resolves actor id from User entity, ADR-0038).
     CommonModule,
+    // Async workers foundation (ADR-0053): the shared BullMQ connection to Valkey (REDIS_URL).
+    // Global so feature modules can register their queues. Powers the async .docx import (SEC-002).
+    QueueModule,
     // Global cross-cutting search (ADR-0035): exports SearchService for fire-and-forget index sync,
     // hosts GET /search. No-ops when MEILI_HOST is unset.
     SearchModule,
@@ -67,6 +72,10 @@ import { buildLoggerParams } from './logging/logging.config';
     // Service Accounts management (ADR-0048): ADMIN-gated /service-accounts CRUD + token lifecycle.
     // The SA authentication branch itself lives in AuthModule's JwtAuthGuard.
     ServiceAccountsModule,
+    // Applications Workflow Engine CORE (ADR-0054 / epic #248): the run orchestrator + BullMQ worker
+    // + the AccessGrant → workflow transactional outbox + the run/manual-task/definition endpoints.
+    // Activates SecretService's fail-loud onModuleInit — the app requires WORKFLOW_SECRET_KEY at boot.
+    WorkflowEngineModule,
   ],
   controllers: [AppController],
   providers: [
