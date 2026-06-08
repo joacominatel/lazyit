@@ -95,7 +95,8 @@
           "dashboard": "Panel",
           "search": "Búsqueda",
           "settings": "Configuración",
-          "logs": "Registros de actividad"
+          "logs": "Registros de actividad",
+          "workflow": "Flujos de trabajo"
         }
       },
       "segmented": {
@@ -296,6 +297,10 @@
       "manage": {
         "label": "Gestión",
         "description": "Usuarios, configuración de la instancia, el panel y la búsqueda."
+      },
+      "automation": {
+        "label": "Automatización",
+        "description": "El motor de flujos de trabajo de Aplicaciones — definiciones de flujos, ejecuciones, tareas manuales y credenciales de conectores."
       }
     },
     "permissions": {
@@ -332,7 +337,12 @@
       "search:read": { "label": "Usar la búsqueda global" },
       "logs:read": { "label": "Ver registros de actividad" },
       "settings:read": { "label": "Ver la configuración de la instancia" },
-      "settings:manage": { "label": "Configurar la instancia" }
+      "settings:manage": { "label": "Configurar la instancia" },
+      "workflow:read": { "label": "Ver flujos de trabajo y ejecuciones" },
+      "workflow:manage": { "label": "Configurar flujos de trabajo y conexiones" },
+      "workflow:run": { "label": "Ejecutar y reintentar flujos de trabajo" },
+      "workflow:task": { "label": "Completar tareas manuales" },
+      "workflow:secrets": { "label": "Gestionar credenciales de conectores" }
     },
     "capabilities": {
       "inventory:view": {
@@ -406,6 +416,26 @@
       "settings:manage": {
         "label": "Configurar la instancia",
         "description": "Cambiar la configuración de la instancia y gestionar taxonomías — toda la superficie de configuración del administrador."
+      },
+      "workflow:view": {
+        "label": "Ver flujos de trabajo y ejecuciones",
+        "description": "Ver definiciones de flujos de trabajo, el historial de ejecuciones y la bandeja de tareas manuales."
+      },
+      "workflow:manage": {
+        "label": "Configurar flujos de trabajo y conexiones",
+        "description": "Crear, editar, activar y eliminar definiciones de flujos de trabajo y sus conexiones."
+      },
+      "workflow:run": {
+        "label": "Ejecutar y reintentar flujos de trabajo",
+        "description": "Disparar manualmente, reejecutar y reintentar ejecuciones de flujos de trabajo."
+      },
+      "workflow:task": {
+        "label": "Completar tareas manuales",
+        "description": "Tomar y completar pasos de tareas manuales asignados a ti (o a tu grupo)."
+      },
+      "workflow:secrets": {
+        "label": "Gestionar credenciales de conectores",
+        "description": "Configurar, introducir y rotar las credenciales de conectores por aplicación — separado de la autoría de la lógica del flujo."
       }
     },
     "presets": {

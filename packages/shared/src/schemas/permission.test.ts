@@ -66,6 +66,41 @@ describe("Permission catalog", () => {
   });
 });
 
+describe("Workflow permissions (Applications Workflow Engine, epic #248)", () => {
+  const WORKFLOW_PERMISSIONS = [
+    "workflow:read",
+    "workflow:manage",
+    "workflow:run",
+    "workflow:task",
+    "workflow:secrets",
+  ] as const satisfies readonly Permission[];
+
+  test("the `workflow` domain is in the catalog with all five verbs", () => {
+    expect(PERMISSION_DOMAINS).toContain("workflow");
+    for (const p of WORKFLOW_PERMISSIONS) {
+      expect(PERMISSIONS).toContain(p);
+    }
+  });
+
+  test("workflow:secrets is DISTINCT from workflow:manage (separation of duties)", () => {
+    expect(PERMISSIONS).toContain("workflow:secrets" as Permission);
+    expect(PERMISSIONS).toContain("workflow:manage" as Permission);
+    expect("workflow:secrets").not.toBe("workflow:manage");
+  });
+
+  test("workflow:read is an admin-only read (treated like logs:read)", () => {
+    expect(ADMIN_ONLY_READS).toContain("workflow:read" as Permission);
+  });
+
+  test("SAFE DEFAULT: every workflow verb is ADMIN-only — MEMBER/VIEWER hold none", () => {
+    for (const p of WORKFLOW_PERMISSIONS) {
+      expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain(p);
+      expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain(p);
+      expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain(p);
+    }
+  });
+});
+
 describe("RolePermissionMatrix wire shape", () => {
   test("accepts a Role → Permission[] record for all three roles", () => {
     const matrix = {
@@ -163,13 +198,16 @@ describe("DEFAULT_ROLE_PERMISSIONS (the seed source of truth)", () => {
     }
   });
 
-  test("the admin-only reads are EXACTLY logs:read, and seeded to ADMIN only", () => {
-    // logs:read is the first admin-only read (issue #175): strictly more restrictive than the
-    // pre-tightening — excluded from BOTH MEMBER and VIEWER, held only by ADMIN's full catalog.
-    expect([...ADMIN_ONLY_READS]).toEqual(["logs:read"]);
-    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain("logs:read" as Permission);
-    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain("logs:read" as Permission);
-    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain("logs:read" as Permission);
+  test("the admin-only reads are EXACTLY logs:read + workflow:read, and seeded to ADMIN only", () => {
+    // logs:read is the first admin-only read (issue #175); workflow:read joins it (epic #248) with the
+    // same posture — both are strictly more restrictive than the pre-tightening: excluded from BOTH
+    // MEMBER and VIEWER, held only by ADMIN's full catalog.
+    expect([...ADMIN_ONLY_READS]).toEqual(["logs:read", "workflow:read"]);
+    for (const p of ADMIN_ONLY_READS) {
+      expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain(p);
+      expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain(p);
+      expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain(p);
+    }
   });
 
   test("ADMIN_ONLY_READS and VIEWER_DENIED_READS are disjoint", () => {
