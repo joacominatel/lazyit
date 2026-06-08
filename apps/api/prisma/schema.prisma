@@ -17,7 +17,7 @@ datasource db {
 /// A person in the organization. Central to access, peripheral to assets:
 /// users come and go while assets persist. See docs/02-domain/entities/user.md
 model User {
-  id String @id @default(uuid()) @db.Uuid
+  id         String    @id @default(uuid()) @db.Uuid
   // Case-insensitive (citext, ADR-0041): "Bob@x" and "bob@x" are the same address, so OIDC/JIT can
   // never mint two users from one mailbox. UNIQUENESS is a PARTIAL unique index WHERE "deletedAt" IS
   // NULL (raw SQL in the migration — Prisma can't express partial uniques), so a soft-deleted user
@@ -79,8 +79,18 @@ model User {
 
   // Service accounts this user created + the ServiceAccount lifecycle events they performed (ADR-0048).
   // SetNull on both: deleting the user keeps the (soft-deletable) account and the append-only audit row.
-  serviceAccountsCreated    ServiceAccount[]         @relation("ServiceAccountCreator")
+  serviceAccountsCreated     ServiceAccount[]         @relation("ServiceAccountCreator")
   serviceAccountAuditEntries ServiceAccountAuditLog[] @relation("ServiceAccountAuditActor")
+
+  // Applications Workflow Engine (ADR-0054, epic #248). The human-actor sides of the engine's
+  // attribution columns — all SetNull, so deleting the user never blocks deletion and the
+  // append-only run/version rows survive: workflow definitions this user authored
+  // (WorkflowVersion.createdById), runs they caused by granting/revoking access
+  // (WorkflowRun.triggeredById), and manual tasks assigned to / completed by them.
+  workflowVersionsAuthored WorkflowVersion[] @relation("WorkflowVersionAuthor")
+  workflowRunsTriggered    WorkflowRun[]     @relation("WorkflowRunTriggeredBy")
+  manualTasksAssigned      ManualTask[]      @relation("ManualTaskAssignee")
+  manualTasksCompleted     ManualTask[]      @relation("ManualTaskCompletedBy")
 
   @@map("users")
 }
@@ -124,12 +134,12 @@ model RolePermission {
 /// deleted. The ADMIN row is immutable in the endpoint, so only MEMBER/VIEWER edits land here.
 model PermissionAuditLog {
   // autoincrement: a log table, never exposed externally (ADR-0005).
-  id         Int                  @id @default(autoincrement())
+  id         Int                   @id @default(autoincrement())
   // Who made the edit — the authenticated ADMIN's User.id. SetNull (mirrors AssetHistory.performedBy):
   // deleting the actor never blocks deletion and the audit row survives. null = system/unknown.
   // @db.Uuid to match User.id.
-  actorId    String?              @db.Uuid
-  actor      User?                @relation("PermissionAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorId    String?               @db.Uuid
+  actor      User?                 @relation("PermissionAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
   // The role whose permission set changed (MEMBER or VIEWER — ADMIN is immutable, never audited here).
   role       Role
   // The catalog permission literal (`domain:action`) granted or revoked. Plain String, mirroring
@@ -137,7 +147,7 @@ model PermissionAuditLog {
   permission String
   // Whether the permission was added to (GRANT) or removed from (REVOKE) the role's set.
   action     PermissionAuditAction
-  createdAt  DateTime             @default(now())
+  createdAt  DateTime              @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). Indexed for the per-role / chronological audit query.
   @@index([role, id])
@@ -203,15 +213,27 @@ model ServiceAccount {
   // Append-only actor attribution (ADR-0048): rows this service account authored on the audit-bearing
   // tables. SetNull keeps the log row when the account is hard-deleted (which never happens — soft
   // delete only). Mirrors the human-actor back-relations on User.
-  assetHistoryActed   AssetHistory[]       @relation("AssetHistorySaActor")
-  userHistoryActed    UserHistory[]        @relation("UserHistorySaActor")
-  consumableMovements ConsumableMovement[] @relation("ConsumableMovementSaActor")
-  assignmentsMade     AssetAssignment[]    @relation("AssignmentAssignedBySa")
-  assignmentsReleased AssetAssignment[]    @relation("AssignmentReleasedBySa")
-  accessGrantsGranted AccessGrant[]        @relation("AccessGrantGrantedBySa")
-  accessGrantsRevoked AccessGrant[]        @relation("AccessGrantRevokedBySa")
-  articleVersionsEdited ArticleVersion[]   @relation("ArticleVersionEditorSa")
-  articleLinksCreated   ArticleLink[]      @relation("ArticleLinkCreatorSa")
+  assetHistoryActed     AssetHistory[]       @relation("AssetHistorySaActor")
+  userHistoryActed      UserHistory[]        @relation("UserHistorySaActor")
+  consumableMovements   ConsumableMovement[] @relation("ConsumableMovementSaActor")
+  assignmentsMade       AssetAssignment[]    @relation("AssignmentAssignedBySa")
+  assignmentsReleased   AssetAssignment[]    @relation("AssignmentReleasedBySa")
+  accessGrantsGranted   AccessGrant[]        @relation("AccessGrantGrantedBySa")
+  accessGrantsRevoked   AccessGrant[]        @relation("AccessGrantRevokedBySa")
+  articleVersionsEdited ArticleVersion[]     @relation("ArticleVersionEditorSa")
+  articleLinksCreated   ArticleLink[]        @relation("ArticleLinkCreatorSa")
+
+  // Applications Workflow Engine (ADR-0054, epic #248). The service-account-actor sides of the
+  // engine's attribution columns — all SetNull. A workflow runs AS a dedicated least-privilege
+  // engine SA (ApplicationWorkflow.executedAsServiceAccountId, copied onto
+  // WorkflowRun.executedAsServiceAccountId), an SA may TRIGGER a run by granting/revoking access
+  // (WorkflowRun.triggeredBySaId), author a definition (WorkflowVersion.createdBySaId) or complete
+  // a manual task (ManualTask.completedBySaId). Never a fabricated human, never ADMIN (INV-SA-2/4).
+  workflowsAsEngine        ApplicationWorkflow[] @relation("ApplicationWorkflowEngineSa")
+  workflowVersionsAuthored WorkflowVersion[]     @relation("WorkflowVersionAuthorSa")
+  workflowRunsTriggered    WorkflowRun[]         @relation("WorkflowRunTriggeredBySa")
+  workflowRunsExecutedAs   WorkflowRun[]         @relation("WorkflowRunExecutedAsSa")
+  manualTasksCompleted     ManualTask[]          @relation("ManualTaskCompletedBySa")
 
   @@index([isActive])
   @@map("service_accounts")
@@ -243,17 +265,17 @@ model ServiceAccountPermission {
 /// added/removed permissions on a PERMISSION_CHANGE). The secret is NEVER recorded here.
 model ServiceAccountAuditLog {
   // autoincrement: a log table, never exposed externally (ADR-0005).
-  id               Int                     @id @default(autoincrement())
+  id               Int                       @id @default(autoincrement())
   serviceAccountId String
-  serviceAccount   ServiceAccount          @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  serviceAccount   ServiceAccount            @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
   action           ServiceAccountAuditAction
   // Who performed it — the authenticated ADMIN's User.id. SetNull. @db.Uuid to match User.id. null =
   // system/unknown actor.
-  actorId          String?                 @db.Uuid
-  actor            User?                   @relation("ServiceAccountAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorId          String?                   @db.Uuid
+  actor            User?                     @relation("ServiceAccountAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
   // Optional contextual jsonb (e.g. { added: [...], removed: [...] } on PERMISSION_CHANGE). Never a secret.
   detail           Json?
-  createdAt        DateTime                @default(now())
+  createdAt        DateTime                  @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (serviceAccountId, id) serves the per-account
   // chronological audit query.
@@ -308,7 +330,7 @@ enum LocationType {
 /// edited and soft-deleted from the app — the seed set is just an initial, non-special list.
 /// See docs/02-domain/entities/asset-category.md
 model AssetCategory {
-  id String @id @default(cuid())
+  id          String    @id @default(cuid())
   // Unique among LIVE rows only: a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
   // migration — Prisma can't express it), so a soft-deleted category frees its name for reuse and
   // Restore can reclaim it. No `@unique` (that re-introduces the ghost-row collision). See ADR-0041.
@@ -377,8 +399,8 @@ model Asset {
   updatedAt    DateTime    @updatedAt
   deletedAt    DateTime?
 
-  assignments AssetAssignment[]
-  history     AssetHistory[]
+  assignments  AssetAssignment[]
+  history      AssetHistory[]
   // KB links (ADR-0042): knowledge-base articles linked to this asset ("the runbook for THIS server").
   articleLinks ArticleLink[]
 
@@ -402,23 +424,23 @@ enum AssetStatus {
 /// releasedAt (ADR-0006). Multi-owner: an asset may have several active assignments at once.
 /// See docs/02-domain/entities/asset-assignment.md and docs/03-decisions/0019-asset-assignment-integrity.md
 model AssetAssignment {
-  id           String    @id @default(cuid())
+  id             String          @id @default(cuid())
   // Required FKs use Restrict: an Asset/User that has assignment history cannot be hard-deleted
   // (history is preserved). Contrast Asset.modelId/locationId (SetNull). See ADR-0019.
-  assetId      String
-  asset        Asset     @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  assetId        String
+  asset          Asset           @relation(fields: [assetId], references: [id], onDelete: Restrict)
   // @db.Uuid to match User.id (uuid). Same for the audit FKs below.
-  userId       String    @db.Uuid
-  user         User      @relation("AssignmentOwner", fields: [userId], references: [id], onDelete: Restrict)
-  assignedAt   DateTime  @default(now())
+  userId         String          @db.Uuid
+  user           User            @relation("AssignmentOwner", fields: [userId], references: [id], onDelete: Restrict)
+  assignedAt     DateTime        @default(now())
   // null => active. Setting it ends the assignment without deleting the row (not a soft delete).
-  releasedAt   DateTime?
+  releasedAt     DateTime?
   // Optional audit FKs — who assigned / released. SetNull: losing the actor never blocks
   // deleting them, and the assignment record itself survives.
-  assignedById String?   @db.Uuid
-  assignedBy   User?     @relation("AssignmentAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
-  releasedById String?   @db.Uuid
-  releasedBy   User?     @relation("AssignmentReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
+  assignedById   String?         @db.Uuid
+  assignedBy     User?           @relation("AssignmentAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+  releasedById   String?         @db.Uuid
+  releasedBy     User?           @relation("AssignmentReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
   // Service-account actors (ADR-0048): set instead of the User actor when a SERVICE ACCOUNT assigned /
   // released. A DB CHECK enforces at-most-one of (assignedById, assignedBySaId) and likewise for
   // released. Plain String (cuid → text). SetNull.
@@ -426,9 +448,9 @@ model AssetAssignment {
   assignedBySa   ServiceAccount? @relation("AssignmentAssignedBySa", fields: [assignedBySaId], references: [id], onDelete: SetNull)
   releasedBySaId String?
   releasedBySa   ServiceAccount? @relation("AssignmentReleasedBySa", fields: [releasedBySaId], references: [id], onDelete: SetNull)
-  notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  notes          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   // No deletedAt: this is a lifecycle join, not a soft-deletable entity (ADR-0006).
   // A partial UNIQUE INDEX (assetId, userId) WHERE releasedAt IS NULL — "at most one active
@@ -444,24 +466,24 @@ model AssetAssignment {
 /// deleted. See docs/02-domain/entities/asset-history.md
 model AssetHistory {
   // autoincrement: a log/history table, never exposed externally (ADR-0005).
-  id            Int                   @id @default(autoincrement())
+  id               Int                   @id @default(autoincrement())
   // Required FK with Restrict: an asset with history cannot be hard-deleted (history is preserved),
   // mirroring AssetAssignment. Soft delete (UPDATE deletedAt) bypasses it. See ADR-0019/0033.
-  assetId       String
-  asset         Asset                 @relation(fields: [assetId], references: [id], onDelete: Restrict)
-  eventType     AssetHistoryEventType
+  assetId          String
+  asset            Asset                 @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  eventType        AssetHistoryEventType
   // Contextual data (e.g. { from, to } on STATUS_CHANGED, { userId } on ASSIGNED). Unvalidated jsonb.
-  payload       Json?
+  payload          Json?
   // Who caused the change — from the X-User-Id shim (ADR-0022). SetNull: losing the actor never
   // blocks deleting them and the log row survives. null = system/unknown. @db.Uuid to match User.id.
-  performedById String?               @db.Uuid
-  performedBy   User?                 @relation("AssetHistoryActor", fields: [performedById], references: [id], onDelete: SetNull)
+  performedById    String?               @db.Uuid
+  performedBy      User?                 @relation("AssetHistoryActor", fields: [performedById], references: [id], onDelete: SetNull)
   // Service-account actor (ADR-0048): set instead of performedById when a SERVICE ACCOUNT caused the
   // change. A DB CHECK enforces at-most-one of (performedById, serviceAccountId) — never both. SetNull
   // so the log survives a (never-issued) hard delete of the account. Plain String (cuid → text).
   serviceAccountId String?
-  serviceAccount   ServiceAccount?    @relation("AssetHistorySaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
-  createdAt     DateTime              @default(now())
+  serviceAccount   ServiceAccount?       @relation("AssetHistorySaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  createdAt        DateTime              @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (assetId, id) serves the per-asset timeline
   // query (filter by asset, order by id desc, cursor on id).
@@ -491,26 +513,26 @@ enum AssetHistoryEventType {
 /// fourth source (entityType "user"). See docs/02-domain/entities/user.md + ADR-0050.
 model UserHistory {
   // autoincrement: a log/history table, never exposed externally (ADR-0005).
-  id            Int                  @id @default(autoincrement())
+  id               Int                  @id @default(autoincrement())
   // Required FK with Restrict: a user with history cannot be hard-deleted (history is preserved),
   // mirroring AssetHistory.assetId. Soft delete (UPDATE deletedAt) bypasses it. @db.Uuid to match User.id.
-  userId        String               @db.Uuid
-  user          User                 @relation("UserHistorySubject", fields: [userId], references: [id], onDelete: Restrict)
-  eventType     UserHistoryEventType
+  userId           String               @db.Uuid
+  user             User                 @relation("UserHistorySubject", fields: [userId], references: [id], onDelete: Restrict)
+  eventType        UserHistoryEventType
   // Contextual data (e.g. { from, to } on ROLE_CHANGED, { fields } on UPDATED). Unvalidated jsonb.
-  payload       Json?
+  payload          Json?
   // Who caused the change — the authenticated human actor (ADR-0022). SetNull: losing the actor never
   // blocks deleting them and the log row survives. null = system/unknown. @db.Uuid to match User.id.
   // NOTE: on a self-action (e.g. a JIT-provisioned user, or an admin editing themselves) performedById
   // may equal userId — that is fine; subject and actor are distinct relations to the same User.
-  performedById String?              @db.Uuid
-  performedBy   User?                @relation("UserHistoryActor", fields: [performedById], references: [id], onDelete: SetNull)
+  performedById    String?              @db.Uuid
+  performedBy      User?                @relation("UserHistoryActor", fields: [performedById], references: [id], onDelete: SetNull)
   // Service-account actor (ADR-0048): set instead of performedById when a SERVICE ACCOUNT caused the
   // change. A DB CHECK enforces at-most-one of (performedById, serviceAccountId) — never both. SetNull
   // so the log survives a (never-issued) hard delete of the account. Plain String (cuid → text).
   serviceAccountId String?
-  serviceAccount   ServiceAccount?   @relation("UserHistorySaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
-  createdAt     DateTime             @default(now())
+  serviceAccount   ServiceAccount?      @relation("UserHistorySaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  createdAt        DateTime             @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (userId, id) serves the per-user timeline query
   // (filter by user, order by id desc). A second index on createdAt powers the recent_activity view.
@@ -536,7 +558,7 @@ enum UserHistoryEventType {
 /// AssetCategory: created/edited/soft-deleted from the app; the seed set is an initial, non-special
 /// list. See docs/02-domain/entities/article-category.md
 model ArticleCategory {
-  id String @id @default(cuid())
+  id          String    @id @default(cuid())
   // Unique among LIVE rows only: a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
   // migration). A soft-deleted category frees its name for reuse; Restore reclaims it. No `@unique`
   // (that re-introduces the ghost-row collision). See ADR-0041.
@@ -560,7 +582,7 @@ model ArticleCategory {
 /// visibility rules live in the service (ADR-0022). Content is indexed in search (ADR-0035).
 /// See docs/02-domain/entities/article.md
 model Article {
-  id String @id @default(cuid())
+  id             String          @id @default(cuid())
   // Short, memorable, unique among LIVE rows. Format/length validated in @lazyit/shared (lowercase,
   // [a-z0-9-], <=60). UNIQUENESS is a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
   // migration), so a soft-deleted article frees its slug for reuse and Restore reclaims it. No
@@ -623,28 +645,28 @@ enum ArticleStatus {
 model ArticleVersion {
   // autoincrement: an append-only history table, never exposed externally (ADR-0005), mirroring
   // AssetHistory. The externally meaningful key is (articleId, version), enforced unique below.
-  id         Int           @id @default(autoincrement())
+  id               Int             @id @default(autoincrement())
   // Required FK with Restrict: an article with version history cannot be hard-deleted (history is
   // preserved), mirroring AssetHistory/AssetAssignment. Soft delete (UPDATE deletedAt) bypasses it.
-  articleId  String
-  article    Article       @relation(fields: [articleId], references: [id], onDelete: Restrict)
+  articleId        String
+  article          Article         @relation(fields: [articleId], references: [id], onDelete: Restrict)
   // Monotonic per-article revision number (1 on create, then 2, 3, …). Allocated in the same
   // transaction as the article write, so the snapshot can't drift from the article it describes.
-  version    Int
+  version          Int
   // Frozen copy of the article's editable state at this revision.
-  title      String
-  content    String
-  excerpt    String?
-  status     ArticleStatus
+  title            String
+  content          String
+  excerpt          String?
+  status           ArticleStatus
   // Who produced this revision (the editor / creator) — from the auth shim (ADR-0022). SetNull:
   // losing the actor never blocks deleting them and the log row survives. @db.Uuid to match User.id.
-  editedById String?       @db.Uuid
-  editedBy   User?         @relation("ArticleVersionEditor", fields: [editedById], references: [id], onDelete: SetNull)
+  editedById       String?         @db.Uuid
+  editedBy         User?           @relation("ArticleVersionEditor", fields: [editedById], references: [id], onDelete: SetNull)
   // Service-account actor (ADR-0048): set instead of editedById when a SERVICE ACCOUNT produced the
   // revision. A DB CHECK enforces at-most-one of (editedById, serviceAccountId). Plain String. SetNull.
   serviceAccountId String?
   serviceAccount   ServiceAccount? @relation("ArticleVersionEditorSa", fields: [serviceAccountId], references: [id], onDelete: SetNull)
-  createdAt  DateTime      @default(now())
+  createdAt        DateTime        @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (articleId, version) is the natural unique key
   // and also serves the per-article version timeline query (filter by article, order by version).
@@ -658,26 +680,26 @@ model ArticleVersion {
 /// exactly-one-target and partial unique indexes prevent duplicate links (raw SQL in the migration).
 /// See docs/02-domain/entities/article-link.md
 model ArticleLink {
-  id            String       @id @default(cuid())
+  id               String          @id @default(cuid())
   // The linked article. Cascade: the link is meaningless without its article and carries no audit
   // value, so a (rare) hard-delete of the article removes its links. Articles normally soft-delete.
-  articleId     String
-  article       Article      @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  articleId        String
+  article          Article         @relation(fields: [articleId], references: [id], onDelete: Cascade)
   // Exactly one of assetId / applicationId is set (enforced by a CHECK constraint in the migration).
   // Cascade on both targets for the same reason as the article side.
-  assetId       String?
-  asset         Asset?       @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  applicationId String?
-  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  assetId          String?
+  asset            Asset?          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  applicationId    String?
+  application      Application?    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   // Who created the link — from the auth shim (ADR-0022). SetNull: losing the actor never blocks
   // deleting them and the link survives. @db.Uuid to match User.id.
-  createdById   String?      @db.Uuid
-  createdBy     User?        @relation("ArticleLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById      String?         @db.Uuid
+  createdBy        User?           @relation("ArticleLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
   // Service-account actor (ADR-0048): set instead of createdById when a SERVICE ACCOUNT created the
   // link. A DB CHECK enforces at-most-one of (createdById, serviceAccountId). Plain String. SetNull.
   serviceAccountId String?
   serviceAccount   ServiceAccount? @relation("ArticleLinkCreatorSa", fields: [serviceAccountId], references: [id], onDelete: SetNull)
-  createdAt     DateTime     @default(now())
+  createdAt        DateTime        @default(now())
 
   // No updatedAt / deletedAt: a link is current-state, created or removed (hard delete), never
   // edited or soft-deleted. Duplicate-link prevention is two PARTIAL unique indexes (one per target,
@@ -692,7 +714,7 @@ model ArticleLink {
 /// ArticleCategory: created, edited and soft-deleted from the app; the seed set is an initial,
 /// non-special list. See docs/02-domain/entities/application-category.md
 model ApplicationCategory {
-  id String @id @default(cuid())
+  id          String    @id @default(cuid())
   // Unique among LIVE rows only: a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
   // migration). A soft-deleted category frees its name for reuse; Restore reclaims it. No `@unique`
   // (that re-introduces the ghost-row collision). See ADR-0041.
@@ -736,9 +758,19 @@ model Application {
   updatedAt   DateTime             @updatedAt
   deletedAt   DateTime?
 
-  grants AccessGrant[]
+  grants       AccessGrant[]
   // KB links (ADR-0042): knowledge-base articles linked to this application ("the runbook for THIS app").
   articleLinks ArticleLink[]
+
+  // Applications Workflow Engine (ADR-0054, epic #248). An application MAY own workflows that
+  // provision/deprovision access in its external system; with none enabled it behaves exactly as
+  // today (the opt-in default). Per-app integration config + the engine's own encrypted secrets
+  // also hang here. All FKs are Restrict (an app with workflow history can't be hard-deleted; soft
+  // delete bypasses) — see WorkflowRun.applicationId is denormalized for cheap per-app reporting.
+  workflows           ApplicationWorkflow[]
+  workflowConnections WorkflowConnection[]
+  workflowRuns        WorkflowRun[]
+  workflowSecrets     WorkflowSecret[]
 
   @@index([categoryId])
   @@map("applications")
@@ -751,27 +783,27 @@ model Application {
 /// The actor (grantedById / revokedById) comes from the X-User-Id shim (ADR-0022 / ADR-0023).
 /// See docs/02-domain/entities/access-grant.md
 model AccessGrant {
-  id            String      @id @default(cuid())
+  id            String          @id @default(cuid())
   // Required FKs use Restrict: a User / Application with grant history cannot be hard-deleted
   // (history is preserved). Soft delete (UPDATE deletedAt) bypasses this — see ADR-0023.
   // @db.Uuid to match User.id (uuid); same for the audit FKs below.
-  userId        String      @db.Uuid
-  user          User        @relation("AccessGrantUser", fields: [userId], references: [id], onDelete: Restrict)
+  userId        String          @db.Uuid
+  user          User            @relation("AccessGrantUser", fields: [userId], references: [id], onDelete: Restrict)
   applicationId String
-  application   Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  application   Application     @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   // Free-form, app-defined (e.g. "admin", "developer", "viewer"); lazyit never interprets it.
   accessLevel   String?
-  grantedAt     DateTime    @default(now())
+  grantedAt     DateTime        @default(now())
   // null => active. Setting it ends the grant without deleting the row (not a soft delete).
   revokedAt     DateTime?
   // Informative only — no scheduler auto-revokes at expiry (ADR-0023). null => no expiry.
   expiresAt     DateTime?
   // Optional audit FKs — who granted / revoked. SetNull: losing the actor never blocks deleting
   // them, and the grant record survives. null => system / unknown.
-  grantedById   String?     @db.Uuid
-  grantedBy     User?       @relation("AccessGrantGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
-  revokedById   String?     @db.Uuid
-  revokedBy     User?       @relation("AccessGrantRevokedBy", fields: [revokedById], references: [id], onDelete: SetNull)
+  grantedById   String?         @db.Uuid
+  grantedBy     User?           @relation("AccessGrantGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+  revokedById   String?         @db.Uuid
+  revokedBy     User?           @relation("AccessGrantRevokedBy", fields: [revokedById], references: [id], onDelete: SetNull)
   // Service-account actors (ADR-0048): set instead of the User actor when a SERVICE ACCOUNT granted /
   // revoked. A DB CHECK enforces at-most-one of (grantedById, grantedBySaId) and likewise for revoked.
   // Plain String (cuid → text). SetNull.
@@ -780,8 +812,14 @@ model AccessGrant {
   revokedBySaId String?
   revokedBySa   ServiceAccount? @relation("AccessGrantRevokedBySa", fields: [revokedBySaId], references: [id], onDelete: SetNull)
   notes         String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  // Applications Workflow Engine (ADR-0054, epic #248). The provisioning/deprovisioning runs this
+  // grant triggered (WorkflowRun.accessGrantId). Restrict on that side: a grant with run history
+  // can't be hard-deleted (grants are append-only anyway). The engine fires AFTER this grant's tx
+  // commits and NEVER rolls it back — the deliberate inverse of the Zitadel strong-coupling.
+  workflowRuns WorkflowRun[]
 
   // No deletedAt: a lifecycle join, not a soft-deletable entity (ADR-0006). No uniqueness
   // constraint — multi-grant is allowed by design (ADR-0023).
@@ -794,7 +832,7 @@ model AccessGrant {
 /// ApplicationCategory: created, edited and soft-deleted from the app; the seed set is an initial,
 /// non-special list. See docs/02-domain/entities/consumable-category.md
 model ConsumableCategory {
-  id String @id @default(cuid())
+  id          String    @id @default(cuid())
   // Unique among LIVE rows only: a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
   // migration). A soft-deleted category frees its name for reuse; Restore reclaims it. No `@unique`
   // (that re-introduces the ghost-row collision). See ADR-0041.
@@ -850,24 +888,24 @@ model Consumable {
 /// See docs/02-domain/entities/consumable-movement.md
 model ConsumableMovement {
   // autoincrement: a log/history table, never exposed externally (ADR-0005).
-  id            Int                    @id @default(autoincrement())
+  id               Int                    @id @default(autoincrement())
   // Required FK with Restrict: a consumable with movement history cannot be hard-deleted.
-  consumableId  String
-  consumable    Consumable             @relation(fields: [consumableId], references: [id], onDelete: Restrict)
-  type          ConsumableMovementType
+  consumableId     String
+  consumable       Consumable             @relation(fields: [consumableId], references: [id], onDelete: Restrict)
+  type             ConsumableMovementType
   // Always positive. IN adds, OUT subtracts (409 if it would go negative), ADJUSTMENT sets
   // currentStock to this value (an absolute recount). See ADR-0034.
-  quantity      Int
-  reason        String?
+  quantity         Int
+  reason           String?
   // Who performed it — from the X-User-Id shim (ADR-0022). SetNull. @db.Uuid to match User.id.
-  performedById String?                @db.Uuid
-  performedBy   User?                  @relation("ConsumableMovementActor", fields: [performedById], references: [id], onDelete: SetNull)
+  performedById    String?                @db.Uuid
+  performedBy      User?                  @relation("ConsumableMovementActor", fields: [performedById], references: [id], onDelete: SetNull)
   // Service-account actor (ADR-0048): set instead of performedById when a SERVICE ACCOUNT performed the
   // movement. A DB CHECK enforces at-most-one of (performedById, serviceAccountId). Plain String. SetNull.
   serviceAccountId String?
-  serviceAccount   ServiceAccount?     @relation("ConsumableMovementSaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
-  notes         String?
-  createdAt     DateTime               @default(now())
+  serviceAccount   ServiceAccount?        @relation("ConsumableMovementSaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  notes            String?
+  createdAt        DateTime               @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (consumableId, id) serves the ledger query.
   @@index([consumableId, id])
@@ -898,3 +936,365 @@ enum ConsumableMovementType {
 // The contract lives in @lazyit/shared (schemas/recent-activity.ts). Documented here so the view is
 // discoverable from the schema. See docs/02-domain/entities/recent-activity.md.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// APPLICATIONS WORKFLOW ENGINE (ADR-0054, epic #248) — Phase 1a: data-model foundation ONLY.
+//
+// An Application MAY OPT IN to workflows that provision/deprovision a user in its EXTERNAL system
+// when access changes inside lazyit. The load-bearing default is opt-in: an application with no
+// enabled workflow behaves EXACTLY as today (ADR-0023) — granting access just records the
+// AccessGrant, one indexed lookup of overhead, nothing fires.
+//
+// THE DECOUPLING INVARIANT (the deliberate inverse of the Zitadel strong-coupling, ADR-0043/INV-5):
+// the engine fires AFTER the AccessGrant transaction commits, NEVER inside it. A failing external
+// call never rolls back, blocks or 503s the grant. The grant is the source of truth; provisioning
+// is an eventually-consistent downstream effect surfaced as a FAILED run + notification.
+//
+// SUBSTRATE (ADR-0053): "BullMQ executes, Postgres remembers." These tables ARE the durable system
+// of record (run state, the pinned version, idempotency keys, the audit ledger); BullMQ/Valkey only
+// carries `{ workflowRunId }` jobs. A Valkey flush is a reconcile, not data loss.
+//
+// SCOPE: this block is DATA MODEL only — no engine runtime, routes, services or connectors land
+// until Phase 1b. v1 connectors = REST + WEBHOOK_OUT + MANUAL (public destinations only); SDK / MCP
+// / PREBUILT / CUSTOM and the timer triggers are reserved enum slots with NO behavior.
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+
+/// What access-lifecycle event starts a workflow (ADR-0054). v1 builds the two AccessGrant-derived
+/// triggers; the timer-based ones are RESERVED slots (no behavior in Phase 1a) so adding them later
+/// never forces a schema/enum migration mid-flight.
+enum WorkflowTrigger {
+  // v1 — fired AFTER an AccessGrant is created / revoked (one event per grant, incl. batchRevoke).
+  ACCESS_GRANTED
+  ACCESS_REVOKED
+  // RESERVED (Phase 3, no behavior yet): N days after a grant; cron-like periodic; periodic
+  // "is this access still valid?" → bounded to re-run + report (NEVER an IGA/attestation subsystem).
+  TIMER_AFTER_GRANT
+  SCHEDULED
+  RECERTIFICATION
+}
+
+/// Multi-grant deprovision semantics for an ACCESS_REVOKED workflow (ADR-0054, CEO Q1). Because a
+/// user may hold several active grants on one app (ADR-0023, no uniqueness), revoking ONE grant must
+/// not always cut external access. The enforcement is Phase 1b; this is just the policy field.
+enum WorkflowDeprovisionPolicy {
+  // DEFAULT, safer: deprovision externally only when the LAST active grant for that user+app is
+  // revoked — never cuts off a user who still holds legitimate access.
+  LAST_ACTIVE_GRANT
+  // Deprovision on every revoke (one run per grant acts independently).
+  EACH_GRANT
+}
+
+/// The connector kind discriminator for a WorkflowConnection (ADR-0054). v1 ships REST + WEBHOOK_OUT
+/// + MANUAL; SDK / MCP / PREBUILT / CUSTOM are RESERVED slots (no executor in Phase 1a) so the model
+/// never needs a migration when they land. The per-kind `config` shape is a zod discriminated union
+/// in @lazyit/shared (ADR-0007), validated at the edge — never per-kind tables.
+enum WorkflowConnectionKind {
+  // v1 — declarative, zero code per app: any HTTP API (the Jira case), a signed outbound webhook,
+  // or a human task (no external call).
+  REST
+  WEBHOOK_OUT
+  MANUAL
+  // RESERVED (later phases, no behavior): vendor SDK, MCP tool target, curated prebuilt connector,
+  // bespoke in-image connector. Code-backed tiers are shipped IN THE IMAGE, never runtime-loaded.
+  SDK
+  MCP
+  PREBUILT
+  CUSTOM
+}
+
+/// The run-level state machine (ADR-0054). One row per fired event walks this set. AWAITING_INPUT is
+/// the load-bearing pause state: NO BullMQ job is in flight (a manual step / inbound callback parks
+/// the run in Postgres, the worker is freed, resume is an event) — which is why a multi-day human
+/// wait costs one row, not a worker, and why we do not need Temporal.
+enum WorkflowRunStatus {
+  PENDING // created (the durable outbox row written in the grant tx), not yet picked up.
+  RUNNING // a worker is advancing a step.
+  AWAITING_INPUT // paused on a manual step / inbound callback — no job in flight.
+  SUCCEEDED // terminal — all steps done.
+  FAILED // terminal — a step failed terminally (the grant is NEVER touched).
+  COMPENSATED // terminal — saga rollback of already-applied EXTERNAL effects ran (never the grant).
+}
+
+/// The per-attempt status of a WorkflowStepRun (ADR-0054). Append-only: one row per attempt, so the
+/// "current" state of a step is the latest row for (runId, stepKey). A retry is a NEW row.
+enum WorkflowStepRunStatus {
+  SUCCEEDED
+  FAILED
+  AWAITING_INPUT // this attempt suspended the run for a human / callback.
+  SKIPPED // the effectively-once guard short-circuited (a prior attempt already SUCCEEDED).
+  COMPENSATED // this row records a compensation (saga rollback) of the step's external effect.
+}
+
+/// The lifecycle of a ManualTask (ADR-0054). Mutable lifecycle entity: COMPLETED / CANCELLED are
+/// STATUSES, not a soft delete — so it carries NO deletedAt.
+enum ManualTaskStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+/// The opt-in binding "application X automates trigger T" (ADR-0054). Mutable config, soft-delete
+/// (ADR-0006/0041): edited, disabled and restorable. The "is this app automated for this trigger?"
+/// lookup the grant path does — cached so the opt-in default stays one indexed read. The active
+/// definition is the LATEST WorkflowVersion for this workflow (no denormalized pointer in v1, which
+/// avoids a circular FK); a run snapshots and PINS the version it executed.
+model ApplicationWorkflow {
+  id                         String                    @id @default(cuid())
+  // Required FK with Restrict: an app with workflow history can't be hard-deleted (soft delete
+  // bypasses), mirroring AccessGrant. cuid (text) FK — Application.id is cuid.
+  applicationId              String
+  application                Application               @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  trigger                    WorkflowTrigger
+  // Admin label + optional description.
+  name                       String
+  description                String?
+  // A disabled workflow never fires (the grant path still does nothing extra). Default off so a
+  // freshly-created/draft workflow is inert until explicitly enabled.
+  enabled                    Boolean                   @default(false)
+  // Multi-grant deprovision policy (CEO Q1). Default LAST_ACTIVE_GRANT (safer). Enforcement: Phase 1b.
+  deprovisionPolicy          WorkflowDeprovisionPolicy @default(LAST_ACTIVE_GRANT)
+  // The dedicated least-privilege ServiceAccount the engine EXECUTES this workflow AS (ADR-0048).
+  // SetNull: losing the SA never blocks deletion; never a fabricated human, never ADMIN. The chosen
+  // SA is copied onto each run (WorkflowRun.executedAsServiceAccountId) so a run's principal is
+  // pinned even if this changes later.
+  executedAsServiceAccountId String?
+  executedAsServiceAccount   ServiceAccount?           @relation("ApplicationWorkflowEngineSa", fields: [executedAsServiceAccountId], references: [id], onDelete: SetNull)
+  createdAt                  DateTime                  @default(now())
+  updatedAt                  DateTime                  @updatedAt
+  deletedAt                  DateTime?
+
+  versions WorkflowVersion[]
+  runs     WorkflowRun[]
+
+  // At most ONE LIVE workflow per (applicationId, trigger) — a deterministic "the engine fires the
+  // workflow that matches" rule. A PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
+  // migration; Prisma can't express it), so a soft-deleted binding frees the slot for reuse/replace
+  // (ADR-0041). No `@@unique` here (that re-introduces the ghost-row collision).
+  @@index([applicationId])
+  @@index([executedAsServiceAccountId])
+  @@map("application_workflows")
+}
+
+/// The per-application integration config — the connector INSTANCE (ADR-0054). Mutable config,
+/// soft-delete. Credentials are NEVER inlined: `secretId` references the engine's own encrypted
+/// store (WorkflowSecret). The per-kind `config` shape is zod-validated jsonb in @lazyit/shared
+/// (ADR-0007) — non-secret connection settings only (base URL, auth SCHEME, header names, …).
+model WorkflowConnection {
+  id            String                 @id @default(cuid())
+  // Per-app credentials/config; one connection is reused by the app's grant + revoke workflows.
+  applicationId String
+  application   Application            @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  kind          WorkflowConnectionKind
+  // Admin label for the connection.
+  name          String
+  // Non-secret, zod-validated-per-kind connection config (ADR-0007). NEVER a cleartext credential.
+  config        Json
+  // The credential this connection authenticates with — a REFERENCE into WorkflowSecret, never the
+  // secret itself (INV-6). SetNull: losing the secret row never deletes the connection (it surfaces
+  // as "no credential configured"). Rotation = point this at a new WorkflowSecret.
+  secretId      String?
+  secret        WorkflowSecret?        @relation("ConnectionCredential", fields: [secretId], references: [id], onDelete: SetNull)
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  deletedAt     DateTime?
+
+  // Inverse of WorkflowSecret.connection ("SecretConnectionScope") — secrets scoped to THIS
+  // connection (a secret may also be app-level, with a null connectionId).
+  scopedSecrets WorkflowSecret[] @relation("SecretConnectionScope")
+
+  @@index([applicationId])
+  @@index([secretId])
+  @@map("workflow_connections")
+}
+
+/// The immutable, replayable definition snapshot (ADR-0054) — the ArticleVersion precedent (ADR-0042).
+/// Every edit APPENDS a new version; a WorkflowRun PINS the `workflowVersionId` it executed so editing
+/// a definition never corrupts an in-flight or paused run. The step graph is embedded as zod-validated
+/// jsonb `steps` (a discriminated union keyed on the step kind, ADR-0007) — atomically snapshot-able
+/// as one unit; a WorkflowStep is a LOGICAL node inside the jsonb, not a v1 table.
+model WorkflowVersion {
+  // autoincrement: an append-only definition table, never exposed externally (ADR-0005). The
+  // externally meaningful key is (workflowId, version), enforced unique below.
+  id            Int                 @id @default(autoincrement())
+  // Required FK with Restrict: a workflow with version history can't be hard-deleted (soft delete
+  // bypasses), mirroring ArticleVersion → Article.
+  workflowId    String
+  workflow      ApplicationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  // Monotonic per-workflow revision number (1, 2, 3, …) — the human handle ("v3").
+  version       Int
+  // The frozen step graph: a zod-validated discriminated list (ADR-0007). Immutable.
+  steps         Json
+  // Who authored this version (ADR-0048): human XOR service account, at-most-one CHECK in the
+  // migration. SetNull both; @db.Uuid for the User FK (User.id is uuid).
+  createdById   String?             @db.Uuid
+  createdBy     User?               @relation("WorkflowVersionAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBySaId String?
+  createdBySa   ServiceAccount?     @relation("WorkflowVersionAuthorSa", fields: [createdBySaId], references: [id], onDelete: SetNull)
+  createdAt     DateTime            @default(now())
+
+  runs WorkflowRun[]
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). (workflowId, version) is the natural unique key
+  // and also serves the per-workflow version timeline query.
+  @@unique([workflowId, version])
+  @@map("workflow_versions")
+}
+
+/// The execution ledger — one row per fired event (ADR-0054). Append-only WITH lifecycle markers
+/// (the AccessGrant precedent): never deleted, identity immutable, but `status` + timestamps
+/// transition during execution. The unique `idempotencyKey` ("<trigger>:<accessGrantId>") yields AT
+/// MOST ONE run per grant event; retries live INSIDE a run as WorkflowStepRun.attempt rows. The run
+/// is the idempotency unit; the step is the retry unit.
+model WorkflowRun {
+  id                         String              @id @default(cuid())
+  // The definition + the EXACT version executed (replay/audit). Restrict on both (history-bearing).
+  workflowId                 String
+  workflow                   ApplicationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  workflowVersionId          Int
+  workflowVersion            WorkflowVersion     @relation(fields: [workflowVersionId], references: [id], onDelete: Restrict)
+  // Denormalized for cheap "runs for this app" reporting (the dashboard/per-app history). Restrict.
+  applicationId              String
+  application                Application         @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  trigger                    WorkflowTrigger
+  // The source event for ACCESS_GRANTED / ACCESS_REVOKED. Nullable for a future pure SCHEDULED run.
+  // Restrict: a grant with run history isn't hard-deleted (grants are append-only anyway).
+  accessGrantId              String?
+  accessGrant                AccessGrant?        @relation(fields: [accessGrantId], references: [id], onDelete: Restrict)
+  // The dedup key, UNIQUE (full unique — this table has no soft delete, so no ghost-row concern).
+  // "<trigger>:<accessGrantId>" for grant-derived triggers → exactly one run per grant event.
+  idempotencyKey             String              @unique
+  status                     WorkflowRunStatus   @default(PENDING)
+  // THE CAUSE (ADR-0048): inherited from the grant's actor — the human XOR service account who
+  // granted/revoked. at-most-one CHECK in the migration. SetNull both; @db.Uuid for the User FK.
+  triggeredById              String?             @db.Uuid
+  triggeredBy                User?               @relation("WorkflowRunTriggeredBy", fields: [triggeredById], references: [id], onDelete: SetNull)
+  triggeredBySaId            String?
+  triggeredBySa              ServiceAccount?     @relation("WorkflowRunTriggeredBySa", fields: [triggeredBySaId], references: [id], onDelete: SetNull)
+  // THE PRINCIPAL THE RUN ACTS AS for any lazyit-side audited effect — the engine's own SA (ADR-0048),
+  // pinned from ApplicationWorkflow at run creation. SetNull. NOT part of the at-most-one CHECK (it
+  // is a separate axis from the triggering actor).
+  executedAsServiceAccountId String?
+  executedAsServiceAccount   ServiceAccount?     @relation("WorkflowRunExecutedAsSa", fields: [executedAsServiceAccountId], references: [id], onDelete: SetNull)
+  startedAt                  DateTime?
+  finishedAt                 DateTime?
+  // REDACTED failure summary (error class + step key) — NEVER bodies/secrets/PII (INV-6, ADR-0031).
+  error                      Json?
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
+
+  steps       WorkflowStepRun[]
+  manualTasks ManualTask[]
+
+  // No deletedAt: an append-only ledger (ADR-0006). Indexes for the per-app/-workflow history reads
+  // and the operator "failed runs" view; accessGrantId for the reconcile/de-dup path.
+  @@index([applicationId])
+  @@index([workflowId])
+  @@index([accessGrantId])
+  @@index([status])
+  @@map("workflow_runs")
+}
+
+/// The per-attempt execution log (ADR-0054) — strictly append-only, the AssetHistory precedent: one
+/// immutable row per step ATTEMPT. A retry is a NEW row with attempt+1; the current state of a step
+/// is the latest row for (runId, stepKey). This is the audit trail and report source — it is never
+/// updated or deleted, only appended.
+model WorkflowStepRun {
+  // autoincrement: a child execution log, never an external handle (ADR-0005).
+  id                    Int                   @id @default(autoincrement())
+  // Restrict on the parent run (history-bearing; the run is itself append-only and never hard-deleted).
+  runId                 String
+  run                   WorkflowRun           @relation(fields: [runId], references: [id], onDelete: Restrict)
+  // The step's position in the pinned version's step list, and its stable node key within that jsonb.
+  stepIndex             Int
+  stepKey               String
+  // 1-based; a retry is a new row with attempt+1.
+  attempt               Int
+  status                WorkflowStepRunStatus
+  // The captured EXTERNAL id (e.g. the created Jira user id) so a later revoke deprovisions the EXACT
+  // account this run created — the correlation that makes provisioning effectively-once.
+  externalCorrelationId String?
+  // REDACTED outcome metadata ONLY (HTTP status, duration, error class, mapped field NAMES) — NEVER
+  // request/response bodies, credentials or mapped PII values (INV-6, ADR-0031).
+  metadata              Json?
+  createdAt             DateTime              @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). (runId, id) serves the per-run step timeline.
+  @@index([runId, id])
+  @@map("workflow_step_runs")
+}
+
+/// Human-in-the-loop step (ADR-0054) — a mutable LIFECYCLE entity, NO soft-delete: COMPLETED /
+/// CANCELLED are statuses, not a deletedAt. Created when a run hits a MANUAL step (or onError:manual);
+/// surfaced through the notification bell/SSE inbox; completion (with typed input) re-enqueues the
+/// run. The typed input SCHEMA lives in the pinned version's step config (referenced by stepKey) —
+/// completion validates the human's `input` against it as untrusted data (ADR-0054 §scope: v1 = typed
+/// input + STATIC suggestions only; role/team/manager/AD are a FUTURE model-first ADR, NOT here).
+model ManualTask {
+  id              String           @id @default(cuid())
+  // Restrict on the parent run (the run carries the timeline; runs are append-only).
+  runId           String
+  run             WorkflowRun      @relation(fields: [runId], references: [id], onDelete: Restrict)
+  // The suspended step's stable node key within the pinned version (where the input schema is defined).
+  stepKey         String
+  // Optional direct assignee (SetNull; @db.Uuid). When null, the task is offered to a COHORT.
+  assigneeId      String?          @db.Uuid
+  assignee        User?            @relation("ManualTaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  // Optional cohort the task is offered to (e.g. a role/team label). Completion requires
+  // `workflow:task` AND an assignee/cohort match — permission alone is the IDOR trap (enforced 1b).
+  cohort          String?
+  // What the human must do/answer.
+  prompt          String
+  // The value(s) the human provided, fed back into the run on completion. Validated by zod against
+  // the step's expected shape; MAY contain PII → treated as sensitive, never logged (INV-6).
+  input           Json?
+  status          ManualTaskStatus @default(PENDING)
+  // Who resolved it (ADR-0048): human XOR service account, at-most-one CHECK in the migration.
+  completedById   String?          @db.Uuid
+  completedBy     User?            @relation("ManualTaskCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+  completedBySaId String?
+  completedBySa   ServiceAccount?  @relation("ManualTaskCompletedBySa", fields: [completedBySaId], references: [id], onDelete: SetNull)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  // No deletedAt: status (COMPLETED/CANCELLED) is the lifecycle (ADR-0006). Indexes for the inbox.
+  @@index([runId])
+  @@index([assigneeId, status])
+  @@index([status])
+  @@map("manual_tasks")
+}
+
+/// The engine's OWN encrypted credential store (ADR-0054). Mutable config, soft-delete. AES-256-GCM
+/// at rest: the ciphertext + per-value random IV + GCM auth tag + the key version are stored; the
+/// CLEARTEXT is NEVER persisted and never returned by any read (INV-6). The encryption SERVICE is
+/// Phase 1b — this is the at-rest column shape only. (Decision: the engine brings its own store
+/// rather than coupling to the Settings/SystemSecret store; one key axis per subsystem.)
+model WorkflowSecret {
+  id            String              @id @default(cuid())
+  // Scope: every secret belongs to an application (Restrict — a secret's app can't be hard-deleted).
+  applicationId String
+  application   Application         @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  // Optional connection scope: the connection this credential was provisioned for. SetNull; null =
+  // an app-level secret not yet bound to a specific connection. (Named distinctly from the
+  // connection's own `secretId` credential reference — see WorkflowConnection.)
+  connectionId  String?
+  connection    WorkflowConnection? @relation("SecretConnectionScope", fields: [connectionId], references: [id], onDelete: SetNull)
+  // Human-recognizable, NON-secret label (e.g. "Jira API token").
+  label         String
+  // AES-256-GCM envelope (at-rest only; never cleartext). base64/hex text columns for portability.
+  ciphertext    String
+  iv            String
+  authTag       String
+  // Which encryption key produced this envelope — supports key rotation without re-reading plaintext.
+  keyVersion    Int                 @default(1)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  deletedAt     DateTime?
+
+  // Inverse of WorkflowConnection.secret ("ConnectionCredential") — connections currently USING
+  // this secret as their credential.
+  connectionsUsing WorkflowConnection[] @relation("ConnectionCredential")
+
+  @@index([applicationId])
+  @@index([connectionId])
+  @@map("workflow_secrets")
+}
