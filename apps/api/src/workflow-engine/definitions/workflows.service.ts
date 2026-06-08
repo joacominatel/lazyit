@@ -57,6 +57,7 @@ export class WorkflowsService {
         `A workflow already exists for this application + ${dto.trigger} trigger`,
       );
     }
+    await this.assertEngineExecutor(dto.executedAsServiceAccountId);
     const executedAsServiceAccountId =
       dto.executedAsServiceAccountId ?? (await this.engineSa.getOrCreate());
     return this.prisma.applicationWorkflow.create({
@@ -109,6 +110,7 @@ export class WorkflowsService {
   /** Patch the header (name / description / enabled / deprovisionPolicy / executor). 404 if missing. */
   async update(id: string, dto: UpdateApplicationWorkflow) {
     await this.assertWorkflowLive(id);
+    await this.assertEngineExecutor(dto.executedAsServiceAccountId);
     return this.prisma.applicationWorkflow.update({
       where: { id },
       data: {
@@ -177,6 +179,27 @@ export class WorkflowsService {
   }
 
   // ── internals ───────────────────────────────────────────────────────────────
+
+  /**
+   * Pin-check the executor (CSEC-3). A run executes AS — and is audited AS — the workflow's
+   * `executedAsServiceAccountId`, so an unvalidated id would let a caller pin ANY ServiceAccount (e.g.
+   * a privileged one) onto every run and impersonate it. Only the dedicated, least-privilege engine SA
+   * (ADR-0048 / ADR-0054 §6) is acceptable; reject any other id with 400. `undefined` (create defaults
+   * it) and `null` (update clears it to "no executor") are not impersonation and pass through.
+   */
+  private async assertEngineExecutor(
+    id: string | null | undefined,
+  ): Promise<void> {
+    if (id === undefined || id === null) {
+      return;
+    }
+    const engineSaId = await this.engineSa.getOrCreate();
+    if (id !== engineSaId) {
+      throw new BadRequestException(
+        'executedAsServiceAccountId must reference the dedicated engine service account',
+      );
+    }
+  }
 
   private async assertWorkflowLive(id: string) {
     const workflow = await this.prisma.applicationWorkflow.findFirst({
