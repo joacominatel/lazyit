@@ -114,16 +114,60 @@ export function unpublishArticle(id: string): Promise<Article> {
   return apiFetch<Article>(`${BASE}/${id}/unpublish`, { method: "POST" });
 }
 
-/** Import an article from a .md/.txt/.docx file (multipart). Author = caller. */
+/**
+ * Async import contract (ADR-0053). Every import (`.md` / `.txt` / `.docx`) flows through a
+ * BullMQ queue for a uniform UX: the `POST` validates the file synchronously, enqueues a job and
+ * returns `202 { jobId }`; the client then polls {@link getArticleImportStatus}. The `.docx` parse
+ * runs in a sandboxed child so a decompression bomb crashes the child, not the API (SEC-002).
+ */
+
+/** BullMQ job lifecycle as exposed to the client (ADR-0053). */
+export type ImportJobState = "queued" | "active" | "completed" | "failed";
+
+/** Body of the `202` from `POST /articles/import`: the enqueued job's id. */
+export interface ImportArticleResult {
+  jobId: string;
+}
+
+/**
+ * Body of `GET /articles/import/:jobId` — the poll target.
+ * `articleId` is present only when `state === "completed"`; `error` is a short, friendly message
+ * present only when `state === "failed"`. A parse/bomb failure is **permanent** — the message is
+ * never phrased as a transient "try again".
+ */
+export interface ImportJobStatus {
+  jobId: string;
+  state: ImportJobState;
+  articleId?: string;
+  error?: string;
+}
+
+/**
+ * Enqueue an async import from a `.md`/`.txt`/`.docx` file (multipart). Author = caller. The API
+ * validates extension + size synchronously and returns `202 { jobId }`; poll
+ * {@link getArticleImportStatus} for the result.
+ */
 export function importArticle(
   file: File,
   fields: ImportArticle,
-): Promise<Article> {
+): Promise<ImportArticleResult> {
   const form = new FormData();
   form.set("file", file);
   form.set("categoryId", fields.categoryId);
   form.set("status", fields.status);
   if (fields.title) form.set("title", fields.title);
   if (fields.slug) form.set("slug", fields.slug);
-  return apiFetch<Article>(`${BASE}/import`, { method: "POST", body: form });
+  return apiFetch<ImportArticleResult>(`${BASE}/import`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+/** Poll the status of an import job (ADR-0053). 404 → unknown/expired job id. */
+export function getArticleImportStatus(
+  jobId: string,
+): Promise<ImportJobStatus> {
+  return apiFetch<ImportJobStatus>(
+    `${BASE}/import/${encodeURIComponent(jobId)}`,
+  );
 }
