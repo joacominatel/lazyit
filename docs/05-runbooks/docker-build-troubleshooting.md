@@ -61,6 +61,30 @@ The API reads `DATABASE_URL` from its environment (not a `.env` file — `node d
 one). In compose it comes from `env_file: env/.env.prod`. Make sure `infra/env/.env.prod` exists and
 sets `DATABASE_URL` (host `db`, matching `POSTGRES_*`).
 
+## API logs `connect ECONNREFUSED …:6379` / article import hangs
+
+The async worker broker (Valkey, ADR-0053) is unreachable. Almost always `REDIS_URL` is **unset** in
+`infra/env/.env.prod` (it predates the async-workers release), so the api fell back to
+`redis://127.0.0.1:6379` — itself, where no Valkey runs. At boot the api now logs the **resolved URL
+(password redacted)** and warns when it used the localhost fallback — check the api logs for that line:
+
+```sh
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod logs api | grep -i valkey
+```
+
+Fix it (the api no longer floods — reconnection is bounded and import POSTs return a clean **503**
+instead of hanging — but async import stays down until this is set):
+
+```sh
+grep -q '^REDIS_URL=' infra/env/.env.prod || echo 'REDIS_URL=redis://valkey:6379' >> infra/env/.env.prod
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+  --env-file infra/env/.env.prod up -d api
+```
+
+`api depends_on valkey: service_healthy` guarantees Valkey is *up*, but not that the api has the right
+*URL* — Valkey is reachable as `valkey:6379` on the internal network, never `localhost`. See the
+upgrade note in [[deploy-self-hosted]] §4.
+
 ## Postgres container won't start
 
 If `POSTGRES_PASSWORD` is empty, Postgres **fails closed** (refuses to start) — by design

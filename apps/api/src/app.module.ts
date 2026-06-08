@@ -26,6 +26,7 @@ import { CommonModule } from './common/common.module';
 import { ConfigModule } from './config/config.module';
 import { QueueModule } from './queue/queue.module';
 import { ServiceAccountsModule } from './service-accounts/service-accounts.module';
+import { WorkflowEngineModule } from './workflow-engine/workflow-engine.module';
 import { SearchModule } from './search/search.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
@@ -71,6 +72,10 @@ import { buildLoggerParams } from './logging/logging.config';
     // Service Accounts management (ADR-0048): ADMIN-gated /service-accounts CRUD + token lifecycle.
     // The SA authentication branch itself lives in AuthModule's JwtAuthGuard.
     ServiceAccountsModule,
+    // Applications Workflow Engine CORE (ADR-0054 / epic #248): the run orchestrator + BullMQ worker
+    // + the AccessGrant → workflow transactional outbox + the run/manual-task/definition endpoints.
+    // Activates SecretService's fail-loud onModuleInit — the app requires WORKFLOW_SECRET_KEY at boot.
+    WorkflowEngineModule,
   ],
   controllers: [AppController],
   providers: [

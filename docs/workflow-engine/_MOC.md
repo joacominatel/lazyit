@@ -42,8 +42,11 @@ updated: 2026-06-07
 - [[security]] — the threat model: the egress guard (SSRF), write-only encrypted secrets, no
   arbitrary code in mapping, sandboxed processors, the at-most-one-actor audit ledger, and the
   inbound-webhook contract.
-- [[frontend]] — the admin builder UX: per-Application Workflows tab, list-not-canvas builder,
-  write-only secret fields, the run timeline, and the manual-task inbox on the notification bell/SSE.
+- [[frontend]] — the admin builder UX: per-Application Workflows tab, the **opinionated error-handling
+  DAG** builder (boxes wired by first-class success/failure edges, a category-organized step palette,
+  per-step success criteria + retry + "on failure →"; a constrained diagram renderer reusing the
+  asset-history timeline grammar, no React Flow — NOT a free-form business-condition canvas), write-only
+  secret fields, the edge-aware run timeline, and the manual-task inbox on the notification bell/SSE.
 
 ## Key referenced decisions
 

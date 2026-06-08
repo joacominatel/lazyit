@@ -41,4 +41,5 @@ export * from "./schemas/service-account";
 export * from "./schemas/user";
 export * from "./schemas/user-history";
 export * from "./schemas/user-list";
+export * from "./schemas/workflow";
 export * from "./utils/slug";

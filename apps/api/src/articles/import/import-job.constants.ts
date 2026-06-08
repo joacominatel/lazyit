@@ -18,6 +18,13 @@ const DEFAULT_IMPORT_HEAP_MB = 256;
  * decompression bomb expands far beyond any sane cap, so the child OOMs and dies while the API
  * process stays alive (SEC-002). Overridable via `IMPORT_CHILD_HEAP_MB`; falls back to the default
  * on a missing/invalid value. Keep it generous enough for legitimately large documents.
+ *
+ * SIZING INVARIANT (OPS-5): this cap is the isolation boundary ONLY when the child's V8 aborts
+ * BEFORE the api container's cgroup OOM-killer fires. With concurrency=1, the api `mem_limit`
+ * (compose.yaml, currently 768m) must comfortably exceed `NestJS baseline RSS (~250m) +
+ * IMPORT_CHILD_HEAP_MB`. If you RAISE this value, raise `mem_limit` to match; if you LOWER the api
+ * `mem_limit`, lower this so the child still OOMs well below the cgroup. The pair is documented in
+ * docs/05-runbooks/deploy-self-hosted.md §6.
  */
 export function importChildHeapMb(): number {
   const raw = process.env.IMPORT_CHILD_HEAP_MB;

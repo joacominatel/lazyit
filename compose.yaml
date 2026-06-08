@@ -101,7 +101,15 @@ services:
     image: lazyit-api:dev
     restart: unless-stopped
     logging: *default-logging
-    mem_limit: 512m
+    # 768m (not 512m) so the V8 heap cap — not this cgroup — is the binding constraint on the
+    # sandboxed import child (OPS-5/SEC-002). The forked import worker is capped at
+    # IMPORT_CHILD_HEAP_MB (default 256, see apps/api/src/articles/import/import-job.constants.ts):
+    # a .docx decompression bomb must make the CHILD's V8 abort, not push parent+child past the
+    # cgroup so the kernel OOM-killer takes the whole API instead. Invariant (concurrency=1):
+    # mem_limit must comfortably exceed NestJS baseline RSS (~250m) + IMPORT_CHILD_HEAP_MB. With
+    # 256m heap that floor is ~506m, so 512m was too tight; 768m leaves real headroom. Document
+    # in docs/05-runbooks/deploy-self-hosted.md §6 when tuning either number.
+    mem_limit: 768m
     cpus: 1.0
     env_file: [infra/env/.env.prod]
     # Zero-touch OIDC (ADR-0043 Phase 3, §4c): the zitadel-bootstrap sidecar GENERATES the OIDC client

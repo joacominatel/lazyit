@@ -42,7 +42,10 @@ describe('HealthController', () => {
     readiness.mockResolvedValue({
       status: 'ok',
       ready: true,
-      checks: { database: { status: 'up' } },
+      checks: {
+        database: { status: 'up' },
+        valkey: { status: 'up' },
+      },
     });
 
     const res = await request(app.getHttpServer()).get('/health/ready');
@@ -50,11 +53,32 @@ describe('HealthController', () => {
     expect(res.body.ready).toBe(true);
   });
 
+  it('GET /health/ready stays 200 when Valkey is down (degraded, non-gating)', async () => {
+    readiness.mockResolvedValue({
+      status: 'degraded',
+      ready: true,
+      checks: {
+        database: { status: 'up' },
+        valkey: { status: 'down', error: "Stream isn't writeable" },
+      },
+    });
+
+    const res = await request(app.getHttpServer()).get('/health/ready');
+    // The broker is transport, not the record — a Valkey outage must not 503 the instance.
+    expect(res.status).toBe(200);
+    expect(res.body.ready).toBe(true);
+    expect(res.body.status).toBe('degraded');
+    expect(res.body.checks.valkey.status).toBe('down');
+  });
+
   it('GET /health/ready returns 503 (carrying the report) when the DB is down', async () => {
     readiness.mockResolvedValue({
       status: 'error',
       ready: false,
-      checks: { database: { status: 'down', error: 'connection refused' } },
+      checks: {
+        database: { status: 'down', error: 'connection refused' },
+        valkey: { status: 'up' },
+      },
     });
 
     const res = await request(app.getHttpServer()).get('/health/ready');

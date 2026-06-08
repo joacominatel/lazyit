@@ -24,7 +24,7 @@ right order. lazyit holds sensitive inventory/access data on a single host
 
 | # | Item | Where | Back up? | How to recover if lost |
 | - | --- | --- | --- | --- |
-| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `ZITADEL_MASTERKEY` (the DR linchpin), `AUTH_SECRET`, OIDC secrets. |
+| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `ZITADEL_MASTERKEY` and `WORKFLOW_SECRET_KEY` (the two unrotatable DR linchpins), `AUTH_SECRET`, OIDC secrets. |
 | 2 | **App database** | `db` (Postgres 18, `db_data` volume) | **YES — `pg_dump`** | Restore from dump. |
 | 3 | **Zitadel database** | `zitadel_db` (Postgres 16, `zitadel_db_data` volume) | **YES — `pg_dump`** | Restore from dump **+ the same `ZITADEL_MASTERKEY`**. |
 | 4 | Meilisearch index | `meili_data` volume | No (rebuildable) | Re-run `reindex:all` — it rebuilds the index from the DBs ([[0035-search-architecture]]). |
@@ -34,6 +34,14 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > It decrypts Zitadel's store. Losing it = losing all logins, even with a perfect DB dump. Keep a
 > sealed copy off-host (see [[auth-bootstrap]]). It lives in item #1 (`.env.prod`) — so backing up
 > `.env.prod` covers it, but never let that file be your *only* copy of the masterkey.
+
+> [!warning] `WORKFLOW_SECRET_KEY` is the *third* unrotatable linchpin (ADR-0054)
+> The Applications Workflow Engine encrypts every stored connector credential (`WorkflowSecret`,
+> AES-256-GCM) with this key. A DB restore **without the matching `WORKFLOW_SECRET_KEY`** yields
+> **undecryptable connector credentials** — the workflow data restores fine, but the engine can no
+> longer read any saved secret (recoverable only by re-entering them by hand). Exactly like
+> `ZITADEL_MASTERKEY`: it is unrotatable, lives in item #1 (`.env.prod`), and must be backed up
+> off-host with the *matching* DB dump. Never generate a fresh one on a restore.
 
 > [!info] Automation: the opt-in backup sidecar (see below)
 > Items #2 and #3 can be automated by the `backup` profile service in the canonical `compose.yaml`
@@ -117,7 +125,9 @@ ls -lh backups/
 ### Restore order (full DR — host rebuilt from scratch)
 
 1. **`.env.prod` first** — put your backed-up `infra/env/.env.prod` back (it must contain the
-   **same `ZITADEL_MASTERKEY`** as when the Zitadel DB was dumped). `chmod 600 infra/env/.env.prod`.
+   **same `ZITADEL_MASTERKEY`** as when the Zitadel DB was dumped, **and the same `WORKFLOW_SECRET_KEY`**
+   as when the app DB was dumped — or the engine's stored connector credentials are undecryptable).
+   `chmod 600 infra/env/.env.prod`.
 2. **Zitadel DB** — restore `zitadel-*.dump` (subsection below).
 3. **App DB** — restore `app-*.dump` (subsection below).
 4. **Bring the stack up** — `$DC --env-file infra/env/.env.prod up -d`.
