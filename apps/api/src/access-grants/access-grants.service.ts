@@ -146,8 +146,15 @@ export class AccessGrantsService {
             : {}),
         },
       });
-      // The PENDING run row is committed ATOMICALLY with the grant (the outbox). The only in-tx engine
-      // write, and one that cannot realistically fail (the idempotency key is unique per fresh grant).
+      // The PENDING run row is committed ATOMICALLY with the grant — the TRANSACTIONAL-OUTBOX tradeoff
+      // (ADR-0054 §1, the INV-5 inverse): this one engine write lives in the grant's CRITICAL PATH, so
+      // its failure WOULD roll back the grant. It is determined-safe ONLY by DB invariants — the unique
+      // `idempotencyKey` (`<trigger>:<accessGrantId>`) is fresh per new grant, and every FK it carries
+      // (workflowVersionId / applicationId / accessGrantId) was resolved by the pre-tx plan lookup, so
+      // the INSERT cannot violate a constraint here (CCOR-5). DO NOT add any other fallible engine write
+      // beside it inside this tx: a new engine call belongs to the post-commit best-effort enqueue (or a
+      // future dedicated outbox row), never here, or it reintroduces the grant-rollback coupling this
+      // decoupling exists to avoid.
       const runId = plan
         ? (
             await tx.workflowRun.create({
@@ -329,9 +336,15 @@ export class AccessGrantsService {
   /**
    * Write the PENDING run row for a REVOKE inside the grant tx, applying the deprovision policy: under
    * the default LAST_ACTIVE_GRANT, the workflow fires ONLY when the revoked grant was the user's LAST
-   * active grant on the application (so a user who still holds access is never deprovisioned). The count
-   * runs INSIDE the tx (after the revoke update) so concurrent revokes can't both miss "last". Returns
+   * active grant on the application (so a user who still holds access is never deprovisioned). Returns
    * the created run id, or null when no workflow fires.
+   *
+   * CONCURRENCY (CCOR-1): the count alone is NOT enough. The grant tx runs at the Postgres default
+   * READ COMMITTED (no isolationLevel is set), so two concurrent revokes of the user's last two grants
+   * would each fail to see the OTHER's uncommitted revoke and both compute "one still active" → both
+   * skip → NEITHER deprovisions (a write skew that silently leaks lingering external access). {@link
+   * isLastActiveGrant} closes this with a per-(userId, applicationId) transaction-scoped advisory lock
+   * taken BEFORE the count, so concurrent revokes serialize and EXACTLY ONE sees count 0 and fires.
    */
   private async recordRevokeRun(
     tx: Prisma.TransactionClient,
@@ -345,21 +358,44 @@ export class AccessGrantsService {
     const fire =
       plan.deprovisionPolicy === 'EACH_GRANT'
         ? true
-        : (await tx.accessGrant.count({
-            where: {
-              userId: grant.userId,
-              applicationId: grant.applicationId,
-              revokedAt: null,
-            },
-          })) === 0;
+        : await this.isLastActiveGrant(tx, grant);
     if (!fire) {
       return null;
     }
+    // CCOR-5: the SAME transactional-outbox tradeoff as create() — this PENDING-run INSERT is the one
+    // engine write in the revoke's critical path, determined-safe only by the unique idempotencyKey +
+    // resolved FKs. Do NOT add any other fallible engine write beside it inside this tx.
     const run = await tx.workflowRun.create({
       data: this.workflowTrigger.buildRunData(plan, grant.id, actor),
       select: { id: true },
     });
     return run.id;
+  }
+
+  /**
+   * Whether the just-revoked grant was the user's LAST active grant on the application — the
+   * LAST_ACTIVE_GRANT deprovision gate, made race-safe (CCOR-1). It serializes concurrent revokes of
+   * the same (userId, applicationId) with a transaction-scoped PostgreSQL advisory lock taken BEFORE
+   * the count, then recomputes the count under the lock. Because the lock is held until COMMIT, a
+   * second concurrent revoke BLOCKS here until the first commits, then counts a snapshot that already
+   * reflects the first's revoke — so the READ COMMITTED write skew (both seeing "one still active")
+   * cannot occur and exactly one revoke observes 0 remaining. The key is the (userId, applicationId)
+   * pair hashed into the two-int `pg_advisory_xact_lock` signature; the lock is auto-released on
+   * commit/rollback (xact-scoped), never leaked. Parameters are bound as a prepared statement.
+   */
+  private async isLastActiveGrant(
+    tx: Prisma.TransactionClient,
+    grant: { userId: string; applicationId: string },
+  ): Promise<boolean> {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${grant.userId}), hashtext(${grant.applicationId}))`;
+    const remainingActive = await tx.accessGrant.count({
+      where: {
+        userId: grant.userId,
+        applicationId: grant.applicationId,
+        revokedAt: null,
+      },
+    });
+    return remainingActive === 0;
   }
 
   /** Post-commit enqueue that never throws (a broker outage leaves the run PENDING for the sweeper). */
