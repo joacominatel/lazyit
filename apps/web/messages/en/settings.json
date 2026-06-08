@@ -18,6 +18,10 @@
       "title": "Service accounts",
       "description": "Create and manage non-human API credentials for CI, scripts and integrations — scoped by permission and revocable."
     },
+    "integrations": {
+      "title": "Integrations & workflows",
+      "description": "The cross-application manual-task inbox for provisioning workflows. Per-app automation is configured on each application's Workflows tab."
+    },
     "instance": {
       "title": "Instance",
       "description": "Review how this lazyit instance is configured — identity provider, setup state and runtime posture."

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BoltIcon,
   ChevronRightIcon,
   KeyIcon,
   ServerStackIcon,
@@ -17,7 +18,7 @@ import { AdminGate } from "./_components/admin-gate";
 interface SettingsSection {
   href: string;
   /** The `hub` subkey holding this section's `title` / `description`. */
-  key: "taxonomies" | "roles" | "serviceAccounts" | "instance";
+  key: "taxonomies" | "roles" | "serviceAccounts" | "instance" | "integrations";
   icon: ComponentType<{ className?: string }>;
 }
 
@@ -32,6 +33,11 @@ const SECTIONS: SettingsSection[] = [
     href: "/settings/service-accounts",
     key: "serviceAccounts",
     icon: KeyIcon,
+  },
+  {
+    href: "/settings/integrations/tasks",
+    key: "integrations",
+    icon: BoltIcon,
   },
   { href: "/settings/instance", key: "instance", icon: ServerStackIcon },
 ];

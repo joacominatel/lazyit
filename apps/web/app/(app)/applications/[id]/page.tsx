@@ -2,6 +2,7 @@
 
 import {
   ArrowTopRightOnSquareIcon,
+  Cog6ToothIcon,
   DocumentDuplicateIcon,
   PencilIcon,
   PencilSquareIcon,
@@ -36,6 +37,7 @@ import { formatDate } from "@/lib/utils/format";
 import { EditGrantDialog } from "../_components/edit-grant-dialog";
 import { GrantAccessDialog } from "../_components/grant-access-dialog";
 import { RevokeGrantDialog } from "../_components/revoke-grant-dialog";
+import { GrantRunChip } from "./workflows/_components/grant-run-chip";
 
 /** isSafeApplicationUrl guarantees scheme-less or http(s); make scheme-less hosts absolute so the
  *  browser treats them as external links, not relative paths (SEC-008 defense in depth). */
@@ -51,6 +53,7 @@ export default function ApplicationDetailPage() {
   const canWrite = useCan("application:write");
   const canDelete = useCan("application:delete");
   const canGrant = useCan("accessGrant:grant");
+  const canReadWorkflows = useCan("workflow:read");
 
   const { data: application, isLoading, isError, error, refetch } =
     useApplication(id);
@@ -135,8 +138,16 @@ export default function ApplicationDetailPage() {
           ) : undefined
         }
         actions={
-          canWrite || canDelete ? (
+          canReadWorkflows || canWrite || canDelete ? (
             <>
+              {canReadWorkflows ? (
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/applications/${application.id}/workflows`}>
+                    <Cog6ToothIcon />
+                    {t("detail.workflows")}
+                  </Link>
+                </Button>
+              ) : null}
               {canWrite ? (
                 <>
                   <Button variant="outline" size="sm" asChild>
@@ -286,6 +297,12 @@ export default function ApplicationDetailPage() {
                           <StatusBadge tone="warning">
                             {t("detail.expiredBadge")}
                           </StatusBadge>
+                        )}
+                        {canReadWorkflows && (
+                          <GrantRunChip
+                            applicationId={application.id}
+                            accessGrantId={grant.id}
+                          />
                         )}
                       </div>
                       <p className="truncate text-sm text-muted-foreground">
