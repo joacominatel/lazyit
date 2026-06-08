@@ -166,6 +166,22 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 `prisma migrate deploy` — never `migrate dev`/`reset` in production; [[prisma-migrations]]).
 **Back up the database before any update** ([[backups]]).
 
+> **Upgrade note — `REDIS_URL` is required (ADR-0053).** Deployments created **before** the async-workers
+> release have a `.env.prod` that predates `REDIS_URL`. The guided `start.sh` only writes it on a
+> **fresh** render — it never edits an existing `.env.prod` — so after pulling, add it by hand and
+> recreate the api container:
+>
+> ```sh
+> grep -q '^REDIS_URL=' infra/env/.env.prod || echo 'REDIS_URL=redis://valkey:6379' >> infra/env/.env.prod
+> docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+>   --env-file infra/env/.env.prod up -d api
+> ```
+>
+> Without it the api falls back to `redis://127.0.0.1:6379` (itself, no Valkey there). The api no
+> longer floods on this misconfig — it logs the resolved URL (redacted) at boot, bounds reconnection,
+> and 503s the import instead of hanging — but async import stays broken until `REDIS_URL` is set
+> (issue #257). See **[[docker-build-troubleshooting]]** for the symptom/diagnosis.
+
 ## 5. Backups & disaster recovery
 
 Configure backups before real use — see **[[backups]]**. The prod stack has **two** databases (the
