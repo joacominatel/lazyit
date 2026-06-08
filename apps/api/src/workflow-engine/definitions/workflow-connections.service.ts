@@ -16,12 +16,39 @@ import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PermissionResolverService } from '../../auth/permission-resolver.service';
 import { type Principal, isServicePrincipal } from '../../auth/principal';
+import { ConnectorRegistry } from '../connectors.registry';
+import { SecretService } from '../secrets/secret.service';
+import type {
+  RevealSecret,
+  TestConnectionResult,
+} from '../handlers/step-handler';
 
 /** The api-internal connection patch (name / config / credential reference). Kind is immutable. */
 export interface UpdateWorkflowConnectionInput {
   name?: string;
   config?: WorkflowConnectionConfig;
   secretId?: string | null;
+}
+
+/**
+ * Bounded timeout for the C3 connectivity probe — snappier than the 30s run-time outbound default, so
+ * an interactive "Test connection" click fails fast rather than hanging the builder.
+ */
+const TEST_CONNECTION_TIMEOUT_MS = 10_000;
+
+/**
+ * The C3 test-connection outcome (frontend §4c). Redacted by construction — `message` is a short,
+ * non-secret diagnostic and `requestId` is surfaced for client-side correlation (ADR-0031). The
+ * credential is NEVER echoed (INV-6).
+ */
+export interface TestConnectionOutcome {
+  ok: boolean;
+  /** HTTP status of the probe, when an HTTP call was actually made. */
+  status?: number;
+  /** A short, non-secret message (success / failure reason / "nothing to test"). */
+  message: string;
+  /** The originating request id, surfaced for client-side correlation (ADR-0031). */
+  requestId: string;
 }
 
 /**
@@ -45,6 +72,8 @@ export class WorkflowConnectionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly permissions: PermissionResolverService,
+    private readonly registry: ConnectorRegistry,
+    private readonly secrets: SecretService,
   ) {}
 
   /** Create a connection. `config.kind` must equal `kind` (the shared DTO refine already guarantees it). */
@@ -131,6 +160,61 @@ export class WorkflowConnectionsService {
     if (result.count === 0) {
       throw new NotFoundException(`WorkflowConnection ${id} not found`);
     }
+  }
+
+  /**
+   * C3 — TEST A CONNECTION (ADR-0054 §11 / frontend §4c). A SINGLE bounded, READ-ONLY probe of the
+   * connection's connectivity + credential, delegated to the connector handler's side-effect-free
+   * {@link import('../handlers/step-handler').StepHandler.testConnection} capability — for REST, an
+   * authenticated GET to the base URL routed THROUGH the egress guard (`guardedFetch`: https-only,
+   * private/loopback/metadata denied, DNS-rebinding pinned, bounded deadline). It NEVER provisions /
+   * POSTs a mutation and NEVER echoes the secret: the credential is revealed in memory ONLY for the
+   * probe and the result carries redacted diagnostics + the request id (ADR-0031).
+   *
+   * A kind with NO read-only probe returns a clear "nothing to test" result rather than guessing:
+   * MANUAL performs no external call, and WEBHOOK_OUT is write-only (a signed POST) — a read-only
+   * probe would either send a real event or cannot validate the signing secret. Gated `workflow:manage`
+   * at the controller. 404 if the connection is missing/deleted.
+   */
+  async test(id: string, requestId: string): Promise<TestConnectionOutcome> {
+    const connection = await this.findOne(id);
+    const handler = this.registry.get(connection.kind);
+    if (!handler?.testConnection) {
+      return {
+        ok: true,
+        message: nothingToTestMessage(connection.kind),
+        requestId,
+      };
+    }
+
+    const parsed = WorkflowConnectionConfigSchema.safeParse(connection.config);
+    if (!parsed.success) {
+      return {
+        ok: false,
+        message:
+          'The connection configuration is invalid — fix it before testing.',
+        requestId,
+      };
+    }
+
+    // Reveal the stored credential in memory ONLY (INV-6) — the handler attaches it for the probe and
+    // it never leaves through the redacted result. No secret configured ⇒ an unauthenticated probe.
+    const secretId = connection.secretId;
+    const revealSecret: RevealSecret = secretId
+      ? () => this.secrets.revealById(secretId)
+      : () => Promise.resolve(null);
+
+    const result = await handler.testConnection({
+      connection: parsed.data,
+      revealSecret,
+      meta: { requestId, timeoutMs: TEST_CONNECTION_TIMEOUT_MS },
+    });
+    return {
+      ok: result.ok,
+      ...(result.statusCode !== undefined ? { status: result.statusCode } : {}),
+      message: testOutcomeMessage(result),
+      requestId,
+    };
   }
 
   // ── internals ───────────────────────────────────────────────────────────────
@@ -231,4 +315,27 @@ export class WorkflowConnectionsService {
       );
     }
   }
+}
+
+/** The "nothing to probe" message for a connection kind that has no read-only test (non-secret). */
+function nothingToTestMessage(kind: string): string {
+  if (kind === 'WEBHOOK_OUT') {
+    return (
+      'Webhook connections are write-only (a signed POST), so there is nothing to probe read-only — ' +
+      'run a dry-run to preview the payload, or send a real test event to verify delivery.'
+    );
+  }
+  // MANUAL (and any other kind that exposes no testConnection capability).
+  return 'Manual connections perform no external call — there is nothing to test.';
+}
+
+/** Render a redacted handler probe result into a short, non-secret user message. */
+function testOutcomeMessage(result: TestConnectionResult): string {
+  const status =
+    result.statusCode !== undefined ? ` (HTTP ${result.statusCode})` : '';
+  if (result.ok) {
+    return `Connection succeeded${status}.`;
+  }
+  const reason = result.reason ? `: ${result.reason}` : '.';
+  return `Connection failed${status}${reason}`;
 }
