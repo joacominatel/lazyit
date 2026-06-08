@@ -12,5 +12,8 @@
   "manage": "Manage",
   "users": "Users",
   "locations": "Locations",
-  "settings": "Settings"
+  "settings": "Settings",
+  "expandApplications": "Expand applications",
+  "collapseApplications": "Collapse applications",
+  "noApplications": "No applications"
 }
