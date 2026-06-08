@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -24,6 +25,7 @@ import {
   ARTICLE_IMPORT_JOB_NAME,
   ARTICLE_IMPORT_QUEUE,
 } from './import-job.constants';
+import { isQueueUnavailableError } from '../../queue/redis-connection';
 import type {
   ImportJobData,
   ImportJobResult,
@@ -86,14 +88,28 @@ export class ArticleImportService {
       authorId,
     };
 
-    const job = await this.queue.add(ARTICLE_IMPORT_JOB_NAME, data, {
-      // A parse / bomb failure is PERMANENT — retrying would just kill another child (SEC-002).
-      attempts: 1,
-      // Keep finished jobs pollable for a while, but bound the set (the queue is transport, not the
-      // system of record). Failures linger longer so the user can read the outcome.
-      removeOnComplete: { age: 3600, count: 1000 },
-      removeOnFail: { age: 24 * 3600, count: 1000 },
-    });
+    // Enqueue. With `enableOfflineQueue: false` on the broker connection (issue #257), a queue.add
+    // against an unreachable Valkey REJECTS immediately instead of buffering the job forever — so we
+    // translate that into a clean 503 here. Without this the POST hung as a 202 that never resolved.
+    let job;
+    try {
+      job = await this.queue.add(ARTICLE_IMPORT_JOB_NAME, data, {
+        // A parse / bomb failure is PERMANENT — retrying would just kill another child (SEC-002).
+        attempts: 1,
+        // Keep finished jobs pollable for a while, but bound the set (the queue is transport, not the
+        // system of record). Failures linger longer so the user can read the outcome.
+        removeOnComplete: { age: 3600, count: 1000 },
+        removeOnFail: { age: 24 * 3600, count: 1000 },
+      });
+    } catch (err) {
+      if (isQueueUnavailableError(err)) {
+        // 503: a clear "try again later", never the raw connection error (ADR-0031).
+        throw new ServiceUnavailableException(
+          'The import service is temporarily unavailable (the job queue is unreachable). Please try again in a moment.',
+        );
+      }
+      throw err;
+    }
     if (!job.id) {
       // Should never happen (BullMQ always assigns an id); fail loudly rather than return a bad handle.
       throw new Error('Failed to enqueue import job (no job id assigned)');
@@ -143,6 +159,13 @@ export class ArticleImportService {
    */
   private friendlyError(reason: string | undefined): string {
     const r = reason ?? '';
+    // A STALLED job (issue #257): the worker picked the job up (active) but its lock expired before
+    // completion — e.g. the sandboxed child was OOM-killed by a `.docx` bomb (SEC-002), or it hung.
+    // BullMQ's stalled-job checker (lockDuration/maxStalledCount defaults) moves it to `failed` after
+    // `maxStalledCount` so it can never hang forever. Unlike a parse failure this CAN be retried.
+    if (r.includes('stalled')) {
+      return 'The import timed out while processing and was cancelled. Please try again.';
+    }
     if (r.includes('no text content')) {
       return 'The file has no readable text content.';
     }

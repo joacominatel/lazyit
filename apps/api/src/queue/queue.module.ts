@@ -1,7 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
-import type { ConnectionOptions } from 'bullmq';
-import IORedis from 'ioredis';
+import { buildRedisConnection } from './redis-connection';
 
 /**
  * Async workers foundation (ADR-0053). Registers the shared BullMQ connection used by every queue
@@ -12,25 +11,12 @@ import IORedis from 'ioredis';
  *
  * Architectural note: PostgreSQL stays the system of record; BullMQ is transport. A job's external
  * (parse) failure must never roll back unrelated local state.
+ *
+ * Connection ROBUSTNESS (issue #257) lives in {@link buildRedisConnection} (./redis-connection.ts):
+ * the resolved URL is logged redacted at boot, reconnection is bounded (no infinite ECONNREFUSED
+ * loop), error logs are throttled (no flood), and `enableOfflineQueue: false` makes producer
+ * enqueues fail fast (a 503 on the import POST instead of a hung 202) when Valkey is unreachable.
  */
-
-/** Default connection when `REDIS_URL` is unset (local dev without an explicit URL). */
-const DEFAULT_REDIS_URL = 'redis://localhost:6379';
-
-/**
- * Build the ioredis connection from `REDIS_URL`. BullMQ requires `maxRetriesPerRequest: null` on the
- * connection it uses for blocking commands, so we set it here. A single instance is shared with the
- * queues/workers; BullMQ duplicates it as needed for its blocking connections.
- */
-export function buildRedisConnection(): ConnectionOptions {
-  const url = process.env.REDIS_URL ?? DEFAULT_REDIS_URL;
-  // BullMQ bundles its own ioredis copy, so the instance type differs from this app's direct ioredis
-  // dependency only at the type level — the runtime client is fully compatible. Bridge that
-  // duplicate-package type skew with a single cast here (not a behavior change).
-  return new IORedis(url, {
-    maxRetriesPerRequest: null,
-  }) as unknown as ConnectionOptions;
-}
 
 @Global()
 @Module({
