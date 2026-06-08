@@ -1,7 +1,6 @@
 "use client";
 
 import { PencilSquareIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
-import type { WorkflowConnection, WorkflowSecret } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { DetailField, DetailPanel } from "@/components/detail-panel";
@@ -10,24 +9,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useDeleteWorkflowConnection, useWorkflowConnections } from "@/lib/api/hooks/use-workflow-connections";
 import { useWorkflowSecrets } from "@/lib/api/hooks/use-workflow-secrets";
 import { useCan } from "@/lib/hooks/use-permissions";
+import {
+  secretForConnection,
+  selectActiveConnection,
+} from "@/lib/workflow/connection-select";
 import { ConfirmDialog } from "./confirm-dialog";
 import { ConnectionFormDialog } from "./connection-form-dialog";
 import { ConnectionTest } from "./connection-test";
 import { StepKindBadge } from "./workflow-graph";
 import { WorkflowSecretField } from "./workflow-secret-field";
-
-/** Pick the redacted secret descriptor linked to a connection (by id, else by connectionId). */
-function secretForConnection(
-  connection: WorkflowConnection,
-  secrets: WorkflowSecret[] | undefined,
-): WorkflowSecret | undefined {
-  if (!secrets) return undefined;
-  if (connection.secretId) {
-    const byId = secrets.find((s) => s.id === connection.secretId);
-    if (byId) return byId;
-  }
-  return secrets.find((s) => s.connectionId === connection.id);
-}
 
 /**
  * The per-application connection card (frontend.md §2a / §4) — "how do we reach this system + with what
@@ -48,7 +38,7 @@ export function ConnectionCard({ applicationId }: { applicationId: string }) {
   const [formOpen, setFormOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const connection = connections?.[0];
+  const connection = selectActiveConnection(connections);
 
   return (
     <DetailPanel
@@ -124,7 +114,7 @@ export function ConnectionCard({ applicationId }: { applicationId: string }) {
               <WorkflowSecretField
                 applicationId={applicationId}
                 connectionId={connection.id}
-                secret={secretForConnection(connection, secrets)}
+                secret={secretForConnection(connection, secrets?.items)}
                 defaultLabel={connection.name}
               />
             </div>
