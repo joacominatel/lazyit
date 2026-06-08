@@ -1,8 +1,10 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import {
+  dryRunWorkflow,
   getWorkflowRun,
   getWorkflowRuns,
   isTerminalRunStatus,
+  type WorkflowDryRunInput,
   type WorkflowRunFilters,
 } from "../endpoints/workflow-runs";
 import { createQueryKeys } from "../query-keys";
@@ -48,5 +50,17 @@ export function useWorkflowRun(id: string | undefined) {
       if (!status) return RUN_POLL_INTERVAL_MS;
       return isTerminalRunStatus(status) ? false : RUN_POLL_INTERVAL_MS;
     },
+  });
+}
+
+/**
+ * C4 — dry-run a workflow against a sample grant (`POST /workflow-runs/dry-run`). A PURE preview with
+ * NO side effects (no external call, no ledger rows), so there is no cache to invalidate: callers read
+ * the returned {@link DryRunResult} straight off the mutation and render it in the run-timeline grammar.
+ * Gated `workflow:manage` at the UI; the API guard is the real gate.
+ */
+export function useDryRunWorkflow() {
+  return useMutation({
+    mutationFn: (body: WorkflowDryRunInput) => dryRunWorkflow(body),
   });
 }

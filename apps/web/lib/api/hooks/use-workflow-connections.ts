@@ -5,6 +5,7 @@ import {
   deleteWorkflowConnection,
   getWorkflowConnection,
   getWorkflowConnections,
+  testWorkflowConnection,
   type UpdateWorkflowConnection,
   updateWorkflowConnection,
 } from "../endpoints/workflow-connections";
@@ -66,6 +67,18 @@ export function useUpdateWorkflowConnection() {
         queryKey: workflowConnectionKeys.detail(id),
       });
     },
+  });
+}
+
+/**
+ * C3 — probe a connection's connectivity + credential (`POST /workflow-connections/:id/test`). A
+ * READ-ONLY check with NO side effects, so there is nothing to invalidate: callers read the returned
+ * {@link TestConnectionResult} (`ok` / `message` / `requestId`) straight off the mutation. Gated
+ * `workflow:manage` at the UI; the API guard is the real gate.
+ */
+export function useTestWorkflowConnection() {
+  return useMutation({
+    mutationFn: (id: string) => testWorkflowConnection(id),
   });
 }
 
