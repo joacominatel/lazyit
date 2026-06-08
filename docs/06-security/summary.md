@@ -55,10 +55,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 1 |
-| Medium | 5 |
+| Medium | 4 |
 | Low | 14 |
 | Info | 0 |
-| **Total open** | **20** |
+| **Total open** | **19** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -68,7 +68,6 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | ID | Sev | Module | Title |
 | --- | --- | --- | --- |
 | [[SEC-020-jit-email-link-no-email-verified\|SEC-020]] | 🔴 High | users | JIT email-linking never checks `email_verified` → seeded-ADMIN takeover under BYOI |
-| [[SEC-002-docx-decompression-bomb\|SEC-002]] | 🟠 Medium | articles | `.docx` decompression bomb (compressed size is checked, not expanded) |
 | [[SEC-011-service-account-coarse-meta-permission-escalation\|SEC-011]] | 🟠 Medium | service-accounts | SA granted `settings:manage`/`user:manage` becomes ADMIN-equivalent (self-escalation) |
 | [[SEC-021-last-admin-lockout-via-isactive\|SEC-021]] | 🟠 Medium | users | Last-admin lockout via `PATCH {isActive:false}` (skips `assertNotLastAdmin`) |
 | [[SEC-050-consumable-soft-delete-bypass\|SEC-050]] | 🟠 Medium | consumables | `Consumable`/`ConsumableCategory` missing from `SOFT_DELETABLE_MODELS` → reads/writes archived rows |
@@ -110,8 +109,9 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
    relations, FK guards don't check for a *live* parent, and `SetNull` only fires on hard-delete. One
    architectural fix (filter nested includes + a shared live-parent guard + register all soft-deletable
    models) closes most of them.
-5. **SEC-002 — `.docx` decompression bomb.** A limit-compliant `.docx` can decompress to gigabytes
-   during mammoth parsing on `POST /articles/import`. Still open, deferred to the BullMQ worker.
+5. **SEC-002 — `.docx` decompression bomb.** ✅ Closed 2026-06-07 by ADR-0053's sandboxed worker
+   (PR #251, on `feat/issue-247-async-workers-bullmq-valkey`): the parse runs in a heap-capped forked
+   child, so a bomb OOMs the child, not the API. Moved to `closed/`; closes on promotion to `dev`.
 
 ## Posture context (not a finding — see [[deferred]])
 
