@@ -3,7 +3,20 @@ title: "Workflow Engine — Frontend / Admin Builder UX design"
 tags: [design, frontend, web, workflow-engine, access, ux, builder]
 status: proposed
 created: 2026-06-07
+updated: 2026-06-08
 ---
+
+> **2026-06-08 revision (CEO decision).** The builder is now an **opinionated error-handling DAG**:
+> a visual diagram of boxes (trigger → steps) connected by **first-class success/failure edges**, each
+> box clickable to configure, with a **category-organized** step palette. What was *rejected* for v1 is
+> a **free-form business-condition canvas** (arbitrary if/else conditions on edges, any-box-to-any-box —
+> the n8n trap). The earlier "flat list, not a canvas" recommendation (§3a) is **partially superseded**:
+> the list's anti-n8n instinct was right but its purely *linear* model has no error tolerance — a step
+> that POSTs and gets a `500`/`404` must not be silently "done." We keep the list's data-model and
+> design-system simplicity and add the missing axis: per-step success criteria + retry policy +
+> success/failure transitions, **rendered** as a constrained DAG diagram (not authored by raw
+> edge-drawing). Cites `docs/03-decisions/0054-applications-workflow-engine.md` (the accepted keystone
+> ADR) and `docs/workflow-engine/_synthesis.md` (binding).
 
 # Workflow Engine — Frontend / Admin Builder UX
 
@@ -48,9 +61,15 @@ Restated from the brief so the UX is anchored to it:
 - v1 triggers are **(1) access granted** and **(2) access revoked**. Timer/scheduled triggers are
   later (ride the ADR-0053 repeatable-job capability; the UI reserves a trigger slot for them but
   does not build them now).
-- A workflow is **a connection + an ordered list of steps**. Each step does something against the
-  external app (REST call, webhook, MCP/SDK call later, or a **manual human task**) and **maps lazyit
-  data into the payload**.
+- A workflow is **a connection + a DAG of steps wired by first-class success/failure edges**. Each step
+  does something against the external app (REST call, webhook, MCP/SDK call later, or a **manual human
+  task**), **maps lazyit data into the payload**, **declares how its own success is judged** (e.g. which
+  HTTP status codes count as success), and **declares what happens on failure** (retry, then escalate to
+  a human / run a compensation step / alert+stop). The **common case is still a straight sequence** — a
+  *degenerate* DAG the operator authors top-to-bottom without ever drawing an edge — but the engine is
+  error-handling-first by construction, never blindly linear (ADR-0054). This is the CEO's rule: an HTTP
+  call that returns `500`/`404` is **not** "done"; an automation with no error tolerance or alerting
+  violates the basic norms of automation.
 - A failing external provisioning call **must not roll back or block the local AccessGrant**. This is
   the deliberate **contrast** with the Zitadel write-back (`docs/03-decisions/0043-zitadel-source-of-truth.md`
   / `docs/06-security/INVARIANTS.md` INV-5, which rolls back + 503s on failure). The grant is the
@@ -114,33 +133,72 @@ per-app tab; only the scope filter differs (`?applicationId=` vs all).
 
 ## 3. The builder — trigger, then steps
 
-### 3a. Recommendation: a form/list step editor, NOT a node-graph canvas (v1)
+### 3a. Recommendation: a structured error-handling DAG diagram — opinionated edges, NOT a free-form canvas
 
-**Strong recommendation: v1 is a vertical, ordered list of step cards inside a form — not a
-drag-on-canvas node graph (no React Flow / xyflow).** Justification, weighted to this product:
+**The builder is a visual diagram of boxes (trigger → steps) connected by first-class _success_ and
+_failure_ edges, rendered with the asset-history timeline grammar and authored with opinionated
+controls — _not_ a flat list, and _not_ a free-form node-graph canvas.** This supersedes the prior
+"flat list, NOT a canvas" recommendation, and it is worth being precise about *what changed and what did
+not*, because the old reasoning was half right.
 
-1. **The v1 trigger model is linear.** A grant/revoke trigger fires **one** sequence of steps. There
-   are no branches, no fan-in, no human-drawn edges to express in v1. A node graph's entire value is
-   non-linear topology we do not have. A list *is* the data model.
-2. **Operator profile** (`.claude/skills/lazyit-cto/references/product-vision-tech.md`): an IT
-   generalist who "edits a `.env` file." A node canvas is a power-user tool with its own interaction
-   language (pan/zoom/connect/auto-layout), accessibility cost (keyboard/AT support for a canvas is
-   hard), and mobile failure mode. A list of cards is keyboard-native, screen-reader-friendly, and
-   degrades to a stacked card view exactly like every other lazyit list (ADR-0020 responsive
-   `<ResourceTable>` / `<ResourceCard>`).
-3. **It reuses everything we have.** Step cards are `react-hook-form` field arrays validated by shared
-   zod (ADR-0020 forms convention); the page is a `<DetailPanel>`/`<PageHeader>` composition; reorder
-   is an up/down control (and later a dnd handle) on each card. A canvas would pull in a heavy runtime
-   dep and a bespoke rendering layer that the Activated Restraint token system (ADR-0049) does not
-   cover — we would be hand-styling nodes/edges outside the design system.
-4. **It avoids becoming n8n.** A canvas invites "build any flow" scope; the list keeps the feature
-   honestly scoped to **access provisioning/deprovisioning** (the anti-goal guardrail in the brief).
-5. **Migration path is open.** The persisted shape (an ordered `steps[]` array, ADR-0007 jsonb-style
-   flexible config validated by zod — `docs/03-decisions/0007-flexible-asset-specs-jsonb.md`) is
-   canvas-renderable later *without* a data migration if real branching ever lands. Choosing the list
-   now does not foreclose a graph later; choosing a graph now over-commits.
+**Three options, weighed honestly:**
 
-So: **list now, graph never until branching is a real, validated need** — and even then, reconsider.
+1. **Flat ordered list (the prior recommendation) — _rejected now_.** Its instinct was right (reuse the
+   form stack, stay inside the design system, refuse n8n's open-ended scope), but its model is purely
+   **linear**: a step is "done" the moment it runs. That cannot express the CEO's load-bearing point —
+   *"if we fire an HTTP request and call it done because it returned a response, what if it's a `500` or
+   a `404`? We must have error control; we can't make it linear — that goes against the norms of any
+   automation: no fault tolerance, no alerts."* A provisioning engine with no first-class failure
+   handling is a footgun, so the flat list is out.
+2. **Free-form business-condition canvas (n8n / xyflow / React Flow) — _rejected for v1_.** Arbitrary
+   `if/else` conditions on edges, any-box-to-any-box wiring, user-drawn topology, branch-on-any-field.
+   **This is the n8n trap** the brief and ADR-0054 §6.c explicitly exclude. *The entire anti-n8n
+   argument now points here, not at "a diagram."* A free-form canvas (a) invites "build any flow" scope
+   creep beyond Access-pillar provisioning; (b) is a power-user tool with its own interaction language
+   (pan/zoom/connect/auto-layout) that the IT-generalist operator profile
+   (`.claude/skills/lazyit-cto/references/product-vision-tech.md`, "edits a `.env` file") does not want;
+   (c) has a real accessibility/mobile cost (keyboard and AT support for free edge-drawing is hard); and
+   (d) would force a bespoke node/edge rendering layer outside the Activated Restraint token system
+   (ADR-0049). Rejected.
+3. **Structured error-handling DAG diagram (chosen).** A diagram of connected boxes whose edges are
+   **limited to a closed, opinionated set of outcomes** — *success → next step*, and *failure →* one of
+   `{ continue, escalate-to-human, run a compensation step, alert + stop }`. The operator never draws a
+   raw edge and never writes a business condition; they configure each box's **success criteria**,
+   **retry policy**, and **"on failure →"** choice, and the diagram *renders* the resulting graph. The
+   edge set is fixed by the product, not by the user — that is the whole point of "opinionated."
+
+**Why this lands the middle, and why it does _not_ reintroduce the canvas costs:**
+
+- **The common case stays a sequence.** With every step's `onSuccess` defaulting to "the next step" and
+  `onFailure` defaulting to "stop + alert," a simple workflow is authored exactly like the old list —
+  top-to-bottom, **no edges drawn**. The DAG is *degenerate* (a straight line) until the operator opts a
+  step into escalation/compensation. So the floor is no harder than the list it replaces; the ceiling is
+  error tolerance.
+- **It reuses everything we already have.** The persisted shape is still an ordered, zod-validated
+  `steps[]` discriminated union (ADR-0007 jsonb, ADR-0054 §4) edited via `react-hook-form`
+  `useFieldArray`; each step simply also carries `successCriteria` + `retry` + `onSuccess`/`onFailure`
+  transition fields. The "diagram" is a **read-mostly render** of that array plus its transitions — not
+  a free editing surface. Configuration happens in the same per-step form bodies (§3c) we'd have built
+  anyway.
+- **No heavy node-graph runtime is required — and we should not add one.** React Flow / xyflow exist to
+  solve free-form canvases: pan/zoom, drag-to-connect arbitrary edges, auto-layout of dense graphs,
+  collision routing. **We have none of those problems.** The topology is constrained (mostly linear,
+  bounded fan-out: at most a success edge + one failure edge per step) and authored by controls, not by
+  dragging. A **lightweight bespoke renderer** built on the existing
+  `asset-history-timeline.tsx` vocabulary (vertical connected boxes, a status dot, a connecting line,
+  AA-safe `StatusBadge` tones) draws the success spine as the main column and a **failure edge as a
+  short labelled branch** to the escalation/compensation/stop box. That keeps us inside the design
+  system and the token set, keyboard-native, and responsive — the things a canvas would have cost us.
+  (If genuine *parallel fan-out* ever lands — ADR-0054 reserves BullMQ flows as a latent capability —
+  revisit a richer renderer then; v1 does not need it.)
+- **It stays honestly scoped.** The closed edge set is the guardrail: success/failure *handling* only,
+  never a business condition. You cannot express "if the user's department is Finance, branch here" —
+  there is no condition primitive and no any-to-any wiring. That is the line between an *opinionated
+  error-handling DAG* (what we are building) and a *general flow-automation canvas* (what we are not).
+
+So: **a constrained DAG diagram now — opinionated success/failure edges, authored by per-step controls,
+rendered in the timeline grammar — and a free-form business-condition canvas never, until that is a
+real, validated, separately-decided need.**
 
 ### 3b. Builder layout
 
@@ -150,52 +208,112 @@ page-route forms for the heavy create/edit (ADR-0020 "Page-route forms").
 
 ```
 PageHeader: "Jira — provisioning on access granted"   [Disabled ▢→enabled]  [Save]
-─────────────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────────
 1. Trigger          ── a small fixed section: choose Granted | Revoked (radio cards).
                        (later: + a Timer trigger card, disabled with a "coming soon" hint)
-─────────────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────────
 2. Connection       ── "Uses the Jira connection"  [Edit connection] [Test]
-                       (or: pick/create a connection if none — §5)
-─────────────────────────────────────────────────────────────────────────────
-3. Steps  [+ Add step ▾]   (REST call · Webhook · Manual task · …)
-   ┌───────────────────────────────────────────────────────────┐
-   │ ⋮⋮  ① Create Jira user        [REST] [POST /rest/api/.../user]  ▸ │
-   │     ↳ when expanded: method/url, headers, data-mapping (§6)      │
-   ├───────────────────────────────────────────────────────────┤
-   │ ⋮⋮  ② Assign to team          [Manual] needs a human         ▸ │
-   └───────────────────────────────────────────────────────────┘
-─────────────────────────────────────────────────────────────────────────────
+                       (or: pick/create a connection if none — §4)
+──────────────────────────────────────────────────────────────────────────────────
+3. Steps  [+ Add step ▾]     palette grouped by category (§3c)
+
+       ┌─────────────────────────────────────────────────┐
+       │ ▸ TRIGGER · access granted → Jane Doe           │   (fixed top box)
+       └───────────────────────┬─────────────────────────┘
+                               │ success
+       ┌───────────────────────▼─────────────────────────┐
+       │ ① Create Jira user        [API/HTTP]            │   click → configure
+       │   POST /rest/api/3/user · success = 200,201     │
+       │   on failure: retry ×3, then ──────────────┐    │
+       └───────────────────────┬────────────────────┼────┘
+                               │ success            │ failure (exhausted)
+       ┌───────────────────────▼──────────┐   ┌─────▼──────────────────────────┐
+       │ ② Assign to team   [Human task]  │   │ ⚑ ESCALATE → manual task (§6)  │
+       │   needs a human · on failure:    │   │   "create user failed — do it  │
+       │   alert + stop                   │   │    by hand, then resume"       │
+       └───────────────────────┬──────────┘   └────────────────────────────────┘
+                               │ success
+       ┌───────────────────────▼──────────┐
+       │ ③ Notify in Slack  [Webhook]     │   on failure: alert + stop
+       └──────────────────────────────────┘
+──────────────────────────────────────────────────────────────────────────────────
 [ Test run (dry-run) ]                                  [ Discard ] [ Save ]
 ```
 
-- **Steps are collapsible cards** in a `react-hook-form` `useFieldArray`. Collapsed shows
-  type-icon + name + a one-line summary + status of validation; expanded shows the per-type editor.
-- **Add step** is a dropdown of integration types (§4). Each type renders a different editor body —
-  a discriminated union in the shared zod schema drives both the form and validation.
-- **Reorder** = up/down buttons in v1 (keyboard-accessible, no dep); a drag handle (`⋮⋮`) is a
-  fast-follow if the dnd cost is justified.
+- **Steps are clickable boxes** rendered in the timeline grammar and backed by a `react-hook-form`
+  `useFieldArray`. The box shows type-icon + name + a one-line summary (target, success criteria) + the
+  validation state; **clicking a box opens its per-type config** (method/url, headers, data-mapping §5,
+  success criteria, retry policy, and the **"on failure →"** control §3d). The collapsed/expanded
+  affordance is unchanged from the prior list; what's new is that the boxes are **wired** by their
+  success/failure transitions and drawn as a diagram.
+- **Success edges form the main vertical spine.** Each step's `onSuccess` defaults to "the next step"
+  (the degenerate sequence); the operator only intervenes to point it at a specific step or to `END`.
+- **Failure edges are short labelled branches**, not free-drawn — they are the *render* of the step's
+  "on failure →" choice (§3d). A step with the default `alert + stop` shows no branch (an implicit
+  terminal); a step set to `escalate` or `compensate` draws a branch to the manual/compensation box.
+- **Add step** is the **category-organized palette** (§3c). Each type renders a different config body —
+  a discriminated union in the shared zod schema drives both the form and validation (ADR-0054 §4).
+- **Reorder** = up/down buttons in v1 (keyboard-accessible, no dep) reorder the success spine; a drag
+  handle is a fast-follow only if justified. Reordering never silently rewires a non-default transition
+  (an `onSuccess`/`onFailure` pointed at an explicit step key follows the step, not the position).
 - **Enable/disable** is a top-level switch (a disabled workflow never fires — same affordance the
   Service-accounts `isActive` toggle uses).
 
-### 3c. Step types in the "Add step" menu (the integration-diversity surface)
+### 3c. The "Add step" palette — organized by category
 
-Each integration type the brief lists maps to a **step-type card with its own config body**. v1 ships
-the two that cover the most ground plus the manual escape hatch; the rest are slotted but later:
+The "+ Add step" control is a **category-organized palette**, not a flat dropdown — it groups the
+step types by what they *do* and greys the not-yet-shipped tiers as explicit "coming soon," so the
+operator sees the roadmap without being able to pick a dead option. Each type maps to a step-type box
+with its own config body; the discriminated-union step schema (ADR-0054 §4) makes a later type an
+*additive variant*, not a rewrite:
 
-| Step type | v1? | Config body (frontend form fields) |
-| --- | --- | --- |
-| **REST / HTTP call** | ✅ v1 | method, URL (relative to the connection base), headers (kv), body template + **data mapping** (§6), expected-success codes |
-| **Manual task** | ✅ v1 | title, instructions (markdown), the fields a human must fill (with optional suggestions by role/team — §7), assignee policy |
-| **Outbound webhook** | ✅ v1 (a REST POST with a signature toggle) | URL, signing secret (write-only, §5), payload mapping |
-| **Inbound webhook / callback** | later | the engine exposes a callback URL; UI shows it + a "waiting for callback" step state |
-| **Vendor SDK / prebuilt connector** | later | a connector picker (Jira/GitHub/…) with a typed form instead of raw REST |
-| **MCP server call** | later | server URL + tool picker + arg mapping |
-| **"Build the API ourselves" / self-hosted** | later | same REST card pointed at the internal host |
+| Category | Step type | v1? | Config body (frontend form fields) |
+| --- | --- | --- | --- |
+| **API / HTTP** | REST / HTTP call | ✅ v1 | method, URL (relative to the connection base), headers (kv), body template + **data mapping** (§5), **success criteria** (expected status codes), **retry policy**, **on failure →** (§3d) |
+| **API / HTTP** | Self-hosted / internal host | later | same REST box pointed at an internal host (gated on the per-connector internal-target allowlist — ADR-0054 §6.b) |
+| **Webhooks** | Outbound webhook | ✅ v1 (a REST POST + signature toggle) | URL, signing secret (write-only, §4b), payload mapping, success criteria, retry, on-failure |
+| **Webhooks** | Inbound webhook / callback | later | the engine exposes a callback URL; the box shows it + a "waiting for callback" step state |
+| **Human tasks** | Manual task | ✅ v1 | title, instructions (markdown), the fields a human must fill (typed input + **STATIC admin-typed suggestions** only — §6b), assignee policy |
+| **SDK** *(greyed — coming soon)* | Vendor SDK / prebuilt connector | later | a connector picker (Jira/GitHub/…) with a typed form instead of raw REST |
+| **MCP** *(greyed — coming soon)* | MCP server call | later | server URL + tool picker + arg mapping |
 
-This is **opinionated-where-it-helps, configurable-where-it-must** — the brief's explicit carve-out
-from "opinionated over configurable." The discriminated-union step schema means a later type is an
-additive variant, not a rewrite — the same way the access-level combobox keeps suggestions in `web`
-while the schema stays free-form (`apps/web/components/access-level-combobox.tsx`).
+The palette is the **integration-diversity surface** — "automate any app" lives here — but it is
+**opinionated-where-it-helps, configurable-where-it-must**, the brief's explicit carve-out from
+"opinionated over configurable." The greyed SDK/MCP groups are reserved enum slots with no behavior
+(ADR-0054 §7); they read as "coming soon," never as a broken control. Suggestions for manual fields
+live in `web` and stay **static** — the same lightweight pattern as
+`apps/web/components/access-level-combobox.tsx`, with **no** directory/role/team/AD lookup (the
+anti-IGA guardrail, §5b / ADR-0054 §6.c).
+
+### 3d. The "on failure →" control — first-class error handling per step
+
+Every step carries a small, opinionated **failure-handling block** in its config body — this is the
+feature that makes the engine a DAG rather than a linear list, and it maps 1:1 onto the persisted step
+shape the definition CRUD must carry (contract **C1**, §10):
+
+1. **Success criteria** — *what counts as success for this step.* For an **API/HTTP** step this is the
+   set of **expected success status codes** (e.g. `2xx`, or an explicit `200,201,204` list); anything
+   else is a failure. This is the direct answer to the CEO's `500`/`404` point — a step is **not** "done"
+   just because a response arrived. (Manual steps succeed on human submit; webhook-out steps succeed on
+   accepted delivery.)
+2. **Retry policy** — `maxAttempts` + backoff (the BullMQ per-step retry/backoff the substrate provides,
+   ADR-0053). Default: a couple of attempts with exponential backoff for transient `5xx`/`429`; `4xx` is
+   **never retried** (ADR-0054 §3); non-idempotent creates are single-shot (`retryOnTransient: false`).
+   The UI exposes attempts + backoff as a simple picker, not raw BullMQ options.
+3. **On failure (after retries are exhausted)** — a single-select of a **closed, opinionated set**:
+   - **Continue** — proceed to the next step anyway (for genuinely optional side-effects). Rare; the box
+     warns that the run will still be marked *partially failed*.
+   - **Escalate to a human** — pause the run (`AWAITING_INPUT`) and open a **manual task** (§6) so IT can
+     do the step by hand / decide, then resume. This is the failure-edge form of the manual inbox.
+   - **Run a compensation step** — execute a designated compensation step (e.g. "delete the half-created
+     account") then stop — the saga-compensation concept ADR-0054 borrows from Temporal, surfaced as a
+     pick-a-step control. v1 keeps this to *named existing steps*, no new condition logic.
+   - **Alert + stop** *(default)* — mark the run `FAILED`, emit a `workflow.run_failed` notification
+     (bell/SSE, §6a), stop. Never touches the grant (§1).
+
+The set is fixed by the product. There is **no** "if &lt;field&gt; then &lt;branch&gt;" — that is the
+business-condition primitive we are deliberately not building (§3a, ADR-0054 §6.c). A failure edge is
+*error handling*, not *flow control*.
 
 ---
 
@@ -217,9 +335,11 @@ A dialog or sub-page with:
 
 ### 4b. Secrets are **write-only** — reuse two established patterns
 
-Per `docs/06-security/INVARIANTS.md` INV-6 (secrets never logged/leaked) and the ADR-0052
-`SystemSecret` encrypted-at-rest store (the brief says reuse it), credential entry must be **write-only
-from the UI**:
+Per `docs/06-security/INVARIANTS.md` INV-6 (secrets never logged/leaked) and the engine's **own**
+AES-256-GCM credential store (`WorkflowSecret` — ADR-0054 §5 drops the earlier Settings-`SystemSecret`
+reuse so credential handling is governed by the engine's lifecycle + `workflow:secrets` RBAC; same
+crypto primitive, separate key axis), credential entry must be **write-only from the UI** — the store
+behind the field changed, the UI pattern did not:
 
 - A configured secret renders as a **masked, non-refetchable field** — `••••••••` with a `Replace`
   button, exactly like the SMTP-password field shipped under ADR-0052 (the API returns
@@ -263,7 +383,7 @@ team                   ←      ✋ ask a human  (manual)        [token ▾]
 ```
 
 - The **value source** for each field is one of: a **context token** (a value from the run context),
-  a **literal**, or **ask-a-human-at-runtime** (which promotes a field into a manual sub-task — §7).
+  a **literal**, or **ask-a-human-at-runtime** (which promotes a field into a manual sub-task — §6).
 - The token picker is a **combobox/`<datalist>`** seeded from the available context tokens for the
   current trigger — the same lightweight suggestion pattern as
   `apps/web/components/access-level-combobox.tsx` (suggestions live in `web`, the schema stays
@@ -288,8 +408,9 @@ token picker for v1 therefore **only offers fields that exist** — name/email/i
 Offering `grantee.manager` or `grantee.team` would either dangle (no data) or pressure us to grow the
 User model into an HR/Identity-Governance graph — the explicit anti-goal
 (`.claude/skills/lazyit-cto/references/product-vision-tech.md` "Not an HR system"). The **manual-task**
-path is the v1 answer for "which team?" — a human supplies it, optionally with role-based suggestions —
-**without** modeling org structure. Adding real identity fields is a separate, model-first decision
+path is the v1 answer for "which team?" — a human supplies it, optionally with **static, admin-typed
+suggestions** (never a directory/role/team/AD lookup, ADR-0054 §6.c) — **without** modeling org
+structure. Adding real identity fields is a separate, model-first decision
 (Open question Q4); the mapper UI is forward-compatible (a new token group is additive) but does not
 drive that decision.
 
@@ -297,9 +418,14 @@ drive that decision.
 
 ## 6. The manual-task inbox
 
-Some steps need a human: an app with no API, or a "which team / which manager?" decision. A manual step
-**pauses the run** and creates a **manual task** assigned to IT. The frontend surfaces these as a
-first-class **inbox**.
+A run reaches a human **two ways**, both surfaced through the same inbox: (1) a **Manual-task step** —
+an app with no API, or a "which team?" decision the workflow always routes to a person; and (2) a
+**failure ESCALATE edge** (§3d) — any step whose "on failure →" is set to *escalate-to-human*, so when
+its retries are exhausted the run pauses and a person is asked to do/decide the step by hand. Either
+way the run transitions to `AWAITING_INPUT` (it does **not** hold a worker — ADR-0054 §3 / synthesis
+keystone 3), a **manual task** is created for IT, and the operator resumes the run on submit. The
+frontend surfaces these as a first-class **inbox**; the task simply records whether it arose from a
+manual step or an escalated failure so the action UI (§6b) can show the right context.
 
 ### 6a. Ride the ADR-0052 notification bell + SSE
 
@@ -318,10 +444,13 @@ The brief instructs reusing the ADR-0052 notification/bell/SSE stack — and it 
 
 Opening a task is a focused form:
 
-- **What happened** — "Granting Jira access to Jane Doe paused at step ‹Assign to team›."
+- **What happened** — for a manual *step*: "Granting Jira access to Jane Doe paused at step ‹Assign to
+  team›." For an *escalated failure*: "Step ‹Create Jira user› failed after 3 attempts (`502`) and is
+  set to escalate — please complete it by hand, then resume."
 - **The fields to fill** — exactly the fields the step marked "ask a human," rendered as inputs.
-  Suggestions (e.g. team-by-role) come from a backend `suggestions` payload on the task — the UI is a
-  combobox seeded from it (same datalist pattern). Suggestions are **hints, never enforced**.
+  Suggestions come from a **static, admin-typed** `suggestions` list carried on the task — the UI is a
+  combobox seeded from it (same datalist pattern). Suggestions are **hints, never enforced**, and are
+  **never** computed from a directory/role/team/AD lookup (anti-IGA, ADR-0054 §6.c).
 - **Actions** — `Submit` (provide the data → resume the run), `Skip step` (if optional), `Fail run`
   (give up, with a reason). Each is a mutation that invalidates the task list + the run.
 - Completing/dismissing the task marks the originating notification read (the ADR-0052 delivery model
@@ -352,34 +481,55 @@ badges, relative timestamps, and a request id.
 
 Per-app (Workflows tab → Recent runs) and global (hub → Runs), a `<ResourceTable>` paginated per the
 `Page<T>` contract (`docs/03-decisions/0030-list-pagination-contract.md`): trigger, grantee, started,
-duration, **status** (`StatusBadge`: Queued / Running / **Waiting (manual)** / Succeeded / Failed /
-Partially failed), and a link to the run detail. Server-side sort/filter by status + app + date.
+duration, **status** (`StatusBadge` mapping the ADR-0054 run states: `PENDING` Queued / `RUNNING`
+Running / `AWAITING_INPUT` **Waiting (manual)** / `SUCCEEDED` Succeeded / `FAILED` Failed /
+`COMPENSATED` Compensated, plus a derived **Partially failed** when a step took a `continue`-on-failure
+edge), and a link to the run detail. Server-side sort/filter by status + app + date.
 
 ### 7b. Run detail timeline
 
 A vertical step timeline (reusing the `asset-history-timeline` visual grammar — connecting line, status
-dot, badge, ml-auto timestamp, AA-safe `StatusBadge` tones per ADR-0049 §4):
+dot, badge, ml-auto timestamp, AA-safe `StatusBadge` tones per ADR-0049 §4). Because the engine is now a
+DAG, the timeline is the **executed path through the diagram**: it shows, per step, **which edge was
+taken** (success vs failure), the **attempt count**, and — when a failure edge fired — the
+**escalation** (a nested manual task) or **compensation** step it routed to. The same constrained
+renderer as §3a draws it; the *builder* diagram is the *authored* graph, the *run* timeline is the
+*traversed* graph:
 
 ```
-● Run #1042 · access granted → Jane Doe · Jira          [Succeeded]   2m ago
+● Run #1042 · access granted → Jane Doe · Jira      [Partially failed]   2m ago
 │   request-id: 7f3a…  (copyable)            [Retry failed steps] [Re-run]
 │
-├─● ① Create Jira user           [REST]  POST /rest/api/3/user      ✓ 200   320ms
-│    ↳ request-id 7f3a-1 · 2 retries · ▸ show redacted request/response
+├─● ① Create Jira user        [API/HTTP]  POST /rest/api/3/user
+│ │   attempt 3/3 · ✗ 502 (success = 200,201) · retried 1s,4s · exhausted   1.4s
+│ │   ↳ request-id 7f3a-1 · ▸ show redacted request/response
+│ │
+│ ╰──✗ failure edge → ESCALATE
+│       ⚑ manual task · resolved by Alice                                   12m
+│       ↳ "account created by hand" · run resumed
 │
-├─● ② Assign to team             [Manual] resolved by IT            ✓        15m
-│    ↳ "team = Platform" (provided by Alice)
+├─● ② Assign to team          [Human task]  resolved by IT      ✓           3m
+│ │   ↳ "team = Platform" (provided by Alice)
+│ ╰──✓ success edge → next
 │
-└─● ③ Notify in Slack            [Webhook]                          ✗ 502   ▸ details
-     ↳ retry 3/3 exhausted · ▸ show redacted log · [Retry]
+└─● ③ Notify in Slack         [Webhook]                         ✓ 200      210ms
+      ╰──✓ success edge → END · ▸ show redacted log
 ```
 
-Per step the timeline shows: type, target (method/path), **status**, **retry count**, duration, the
-step's **request id** (ADR-0031, copyable via `RequestIdNote`), and an expandable **redacted**
-request/response log. **Redaction is non-negotiable** (INV-6, ADR-0031 bodies-never-logged) —
-the UI renders whatever the API returns (already redacted), and **never** un-redacts; secret tokens and
-mapped sensitive values appear as `‹redacted›`. Failed steps offer `Retry` (single step) and the run
-offers `Retry failed` / `Re-run` where the backend supports it (BullMQ retries/backoff per ADR-0053).
+Per step the timeline shows: type, target (method/path), **status against the step's success criteria**
+(a `502` is a failure even though a response arrived — the CEO's point made visible), the **attempt
+count** (e.g. `3/3` with the backoff intervals), duration, the step's **request id** (ADR-0031,
+copyable via `RequestIdNote`), an expandable **redacted** request/response log, **and the edge it
+took**: `✓ success edge → next | END | ‹stepKey›`, or `✗ failure edge → continue | escalate |
+compensate | stop`. A **failure edge to ESCALATE** renders the resolved manual task inline (who, when,
+the provided value); a **failure edge to COMPENSATE** renders the compensation step that ran as a
+nested entry (`↻ compensation · delete half-created account · ✓`); a **failure edge to STOP** ends the
+run as `FAILED`. **Redaction is non-negotiable** (INV-6, ADR-0031 bodies-never-logged) — the UI renders
+whatever the API returns (already redacted), and **never** un-redacts; secret tokens and mapped
+sensitive values appear as `‹redacted›`. Failed steps offer `Retry` (single step) and the run offers
+`Retry failed` / `Re-run` where the backend supports it (BullMQ per-step retries/backoff per ADR-0053).
+Each row maps to one `WorkflowStepRun` attempt (ADR-0054 §4); the edge taken + escalation/compensation
+linkage are the contract additions enumerated in **C2** (§10).
 
 ### 7c. The grant ↔ run cross-link
 
@@ -402,7 +552,11 @@ Two distinct test surfaces, both read-only-ish and clearly labelled:
    admin points the connection at. v1 should prefer **(a) payload-resolution dry-run** — it needs no
    sandbox, it is safe by construction, and it directly validates the data mapping (the most
    error-prone part). The dry-run renders into the **same run-timeline component** with a "DRY RUN"
-   banner, so the operator learns one observability surface. (Backend contract C4, §11.)
+   banner, so the operator learns one observability surface, and it draws the **happy-path traversal of
+   the DAG** plus each step's configured `onFailure` handling. Now that error handling is first-class,
+   it also accepts an optional **"simulate this step failing"** toggle (C4) so the operator can preview a
+   failure edge — the escalation / compensation / stop branch — without provoking a real error. (Backend
+   contract C4, §10.)
 
 Both reuse `notifyError` + `RequestIdNote` for failures so every test is traceable.
 
@@ -414,22 +568,26 @@ All workflow surfaces gate render with the live `can('domain:action')` infra
 (`apps/web/lib/hooks/use-permissions.ts`, fails closed) — the API guard is always the real gate
 (ADR-0046 §P6b). This feature needs **new catalog entries**, which is a **`@lazyit/shared` change**
 (the frozen `PermissionSchema` in `packages/shared/src/schemas/permission.ts`) and therefore a
-backend/shared decision the engine's core ADR must own — the frontend only *consumes* them. Proposed
-literals (to be ratified in the engine ADR, extending the ADR-0046 catalog):
+backend/shared decision the engine's core ADR owns — the frontend only *consumes* them. **ADR-0054 §5
+ratifies the verb set** (extending the ADR-0046 catalog); the frontend gates render with them:
 
 | Permission | Gates (frontend) | Suggested default |
 | --- | --- | --- |
-| `workflow:read` | the Workflows tab, run list/detail, connection card (masked) | ADMIN + MEMBER (sensitive — like `accessGrant:read`) |
-| `workflow:manage` | create/edit/enable/delete workflows, connection + **secret** entry, test-connection, dry-run | ADMIN-only by default (coarse verb, like `settings:manage`) |
-| `workflow:task` | act on a **manual task** (submit/skip/fail) | ADMIN + MEMBER (day-to-day ops can resolve tasks) |
+| `workflow:read` | the Workflows tab, run list/detail (incl. the diagram), connection card (masked) | ADMIN + MEMBER (sensitive — like `accessGrant:read`) |
+| `workflow:manage` | create/edit/enable/delete workflows, the builder + DAG edges, connection entry, test-connection, dry-run | ADMIN-only by default (coarse verb, like `settings:manage`) |
+| `workflow:secrets` | the **write-only secret** fields (the `Replace` control) — separation of duties from logic authoring | ADMIN-only (the most sensitive verb) |
+| `workflow:run` | manually re-run a workflow + the **`Retry` / `Retry failed steps` / `Re-run`** run-timeline actions (§7b) | ADMIN + MEMBER (ops re-drives a failed run) |
+| `workflow:task` | act on a **manual task** (submit/skip/fail), incl. escalated-failure tasks | ADMIN + MEMBER (day-to-day ops can resolve tasks) |
 
 Notes & rationale:
 
-- Splitting `manage` (configure the engine — high blast radius, touches secrets) from `task` (resolve
-  a queued human step — routine ops) matches the brief's "workflow management gated by its OWN RBAC"
-  while letting MEMBERs clear the inbox without granting them connection/secret editing.
-- Because secrets ride `workflow:manage`, the **write-only secret fields render only for managers**;
-  a `workflow:read` holder sees `hasSecret: true` but never a Replace control.
+- Splitting `manage` (configure the engine — high blast radius) from `secrets` (hold credentials), from
+  `run` (re-drive a run / retry a failed step), from `task` (resolve a queued human step) matches the
+  brief's "workflow management gated by its OWN RBAC" and ADR-0054's separation of duties — a MEMBER can
+  clear the inbox and retry a stuck run without gaining connection/secret editing.
+- Because the secret fields ride **`workflow:secrets`**, they **render only for that holder**; a
+  `workflow:read`/`workflow:manage` holder sees the `configured` descriptor but never a `Replace`
+  control.
 - Per ADR-0046 the catalog must carry human-readable `PERMISSION_META` + a capability grouping (under
   the **Access** pillar) so the role-editor (`/settings/roles/permissions`) can render the new toggles
   — that copy lives in `@lazyit/shared` next to the catalog (covering-set test guards drift). The
@@ -443,37 +601,105 @@ Notes & rationale:
 
 ## 10. Backend API contracts the frontend needs
 
-The frontend lane needs these contracts defined by the backend lane (shapes are illustrative; the
-engine ADR owns the truth). All list reads follow the `Page<T>` envelope (ADR-0030); all responses
-carry `X-Request-Id` (ADR-0031); all bodies are pre-redacted (INV-6).
+The frontend lane needs these contracts defined by the backend lane (Phase 1b-B). Shapes are
+illustrative; **ADR-0054 owns the persisted truth** (the `WorkflowVersion.steps` jsonb, the
+`WorkflowRun` / `WorkflowStepRun` ledger, `ManualTask`). All list reads follow the `Page<T>` envelope
+(ADR-0030); all responses carry `X-Request-Id` (ADR-0031); all bodies are pre-redacted (INV-6). The
+**DAG decision tightens C1, C2 and C4** specifically: the definition must carry per-step success
+criteria + retry policy + the success/failure transitions, the run-detail must report which edge each
+step took, and the builder must be able to read the graph back to render the diagram.
 
-- **C1 — Workflows & connections CRUD** (`/applications/:id/workflows`, `/applications/:id/connection`,
-  or a flat `/workflows` + `?applicationId=`). Standard CRUD → fits `createCrudEndpoints` +
-  `createQueryKeys` (ADR-0020). Secret fields are **write-only**: reads return `{ hasSecret, prefix? }`,
-  writes accept cleartext once, never echoed back.
-- **C2 — Run status**
-  - `GET /workflow-runs?applicationId=&status=&...` → `Page<RunSummary>` (list, sort/filter per ADR-0030).
-  - `GET /workflow-runs/:id` → run + ordered steps with `{ status, retryCount, durationMs, requestId,
-    redactedRequest?, redactedResponse?, error? }`.
-  - **Realtime:** run/step status changes **should also push over the ADR-0052 SSE channel** as
+- **C1 — Workflow-definition & connection CRUD** (`/applications/:id/workflows`,
+  `/applications/:id/connection`, or a flat `/workflows` + `?applicationId=`). Standard CRUD → fits
+  `createCrudEndpoints` + `createQueryKeys` (ADR-0020). Secret fields are **write-only**: reads return
+  `{ configured, label? }` (the ADR-0054 `WorkflowSecret` redacted descriptor), writes accept cleartext
+  once, never echoed back. **DAG additions — the definition is a graph, not a list:**
+  - A write persists a new immutable `WorkflowVersion` (ADR-0054 §4); a read returns the **latest
+    version's full graph** so the builder can render the diagram and re-open it for editing (this is
+    the "give the builder the graph shape back" requirement).
+  - The `steps[]` payload (the zod discriminated union keyed on `kind`) must carry, **per step**: a
+    stable `stepKey`; the per-`kind` `config`; **`successCriteria`** (REST/webhook: expected status
+    codes — the `200,201` vs `500/404` distinction); a **`retry`** policy (`maxAttempts` + backoff,
+    `retryOnTransient`); an **`onSuccess`** transition `{ NEXT | GOTO(stepKey) | END }` (default
+    `NEXT`); and an **`onFailure`** transition `{ CONTINUE | ESCALATE(manual-task config) |
+    COMPENSATE(stepKey) | STOP }` (default `STOP`). No condition/predicate primitive exists on any
+    transition — the closed set *is* the contract (guardrail: no business-condition edges).
+  - The write must **validate the graph** and return field-addressable errors the builder can attach to
+    a box: every `GOTO`/`COMPENSATE` target must reference an existing `stepKey`; `END` is terminal; no
+    transition may form a non-compensation cycle; every step must be reachable from the trigger.
+  - The trigger (`ACCESS_GRANTED | ACCESS_REVOKED`, ADR-0054 §7) and the `deprovisionPolicy`
+    (`LAST_ACTIVE_GRANT` default) ride the `ApplicationWorkflow` header, not the step list.
+- **C2 — Run status** (the run-detail must report the **traversed graph**, not just a flat step list)
+  - `GET /workflow-runs?applicationId=&status=&...` → `Page<RunSummary>` (list, sort/filter per
+    ADR-0030; `status` ∈ the ADR-0054 enum + derived `PARTIALLY_FAILED`).
+  - `GET /workflow-runs/:id` → the run (`status`, pinned `workflowVersionId`, trigger, grantee, actor
+    attribution) **+ the ordered `WorkflowStepRun` attempts**, each carrying:
+    `{ stepKey, stepIndex, kind, attempt /* e.g. 3 of maxAttempts, with the backoff schedule */,
+    status /* judged against successCriteria */, durationMs, requestId, redactedRequest?,
+    redactedResponse?, error? }` **plus the DAG fields**: **`transitionTaken`** —
+    `{ outcome: SUCCESS|FAILURE, edge: NEXT|GOTO|END|CONTINUE|ESCALATE|COMPENSATE|STOP, targetStepKey? }`
+    — and, when the edge escalated/compensated, the linkage: **`manualTaskId?`** (the task an ESCALATE
+    opened) and **`compensationStepKey?` / `compensationStepRunId?`** (the step a COMPENSATE ran). This
+    is exactly what §7b renders.
+  - **Realtime:** run/step status changes **also push over the ADR-0052 SSE channel** as
     notifications/events the bell + an open run-detail can consume; the run-detail page **subscribes to
     SSE when mounted and falls back to short polling** (`refetchInterval`) while a run is non-terminal,
     stopping once it reaches a terminal status. (Substrate detail — §11.)
 - **C3 — Test connection** — `POST .../connection/test` → `{ ok, status, message, requestId }`.
-  Synchronous, bounded, read-only.
+  Synchronous, bounded, read-only. Unchanged by the DAG.
 - **C4 — Dry-run** — `POST /workflow-runs/dry-run` (or `POST .../workflows/:id/test`) with a sample
-  grant id → resolved payloads + would-be requests, **no side effects**. Returns the same step-shaped
-  data the run timeline renders.
-- **C5 — Manual tasks**
+  grant id → resolved payloads + would-be requests, **no side effects**. Returns the **same step-shaped
+  data the run timeline renders, including the authored transitions**, so the dry-run draws the
+  happy-path traversal of the diagram and shows each step's configured `onFailure` handling. Where cheap,
+  accept an optional `simulate: { stepKey, outcome: FAILURE }` so the operator can **preview a failure
+  edge** (escalation/compensation/stop) without a live error — the single highest-value validation now
+  that error handling is first-class.
+- **C5 — Manual tasks** (reachable from a manual *step* **or** a failure *ESCALATE* edge — §6)
   - `GET /workflow-tasks?status=pending&applicationId=` → `Page<TaskSummary>` (the inbox).
-  - `GET /workflow-tasks/:id` → the task + the fields to fill + optional `suggestions`.
-  - `POST /workflow-tasks/:id/submit` (the field values) → resumes the run;
-    `POST /workflow-tasks/:id/skip`, `POST /workflow-tasks/:id/fail`.
+  - `GET /workflow-tasks/:id` → the task + `origin` (`MANUAL_STEP | ESCALATED_FAILURE`) + the originating
+    `runId`/`stepKey` + the fields to fill + an optional **static, admin-typed** `suggestions` list (no
+    directory/role/team/AD lookup — anti-IGA).
+  - `POST /workflow-tasks/:id/submit` (the field values) → records the input and **resumes the run at
+    the correct next step** (the resume re-enters the DAG); `POST /workflow-tasks/:id/skip`,
+    `POST /workflow-tasks/:id/fail`. Completion is gated by `workflow:task` **and** an assignee/cohort
+    match (the IDOR guard, synthesis §5).
   - New notifications of type `workflow.manual_task` and `workflow.run_failed` flow through the
     ADR-0052 notification + SSE stack (no new transport).
-- **C6 — Context-token catalog** — either a static set the web ships (preferred for v1; it is small and
-  tied to the trigger) or `GET /workflow-context-tokens?trigger=` if it must stay server-authoritative.
-  v1: ship it in `web` next to the mapper (like the access-level suggestions) to avoid a round-trip.
+- **C6 — Context-token catalog** — a **static set the web ships** (preferred for v1; small, tied to the
+  trigger), or `GET /workflow-context-tokens?trigger=` if it must stay server-authoritative. v1 ships it
+  in `web` next to the mapper (like the access-level suggestions) to avoid a round-trip. The catalog
+  offers **only fields that exist** — `grantee.{email,firstName,lastName,id}` + `application.*` +
+  `grant.*` + `context.*` — **no `role`/`team`/`manager`/AD tokens** (anti-IGA, ADR-0054 §6.c).
+  Unchanged by the DAG.
+
+### 10a. The DAG contract refinements for 1b-B (crisp checklist — "apuntar el b")
+
+The exact deltas the Phase 1b-B endpoints must satisfy so the builder/run UI can be aimed at them:
+
+1. **Definition write/read carries the per-step DAG fields** — `stepKey`, `successCriteria`, `retry`
+   (`maxAttempts` + backoff + `retryOnTransient`), `onSuccess { NEXT | GOTO(stepKey) | END }`,
+   `onFailure { CONTINUE | ESCALATE(manual-config) | COMPENSATE(stepKey) | STOP }` — in the shared
+   discriminated-union step schema (an explicit enumeration of ADR-0054 §4's generic `steps` jsonb; **no
+   migration**, it is jsonb). Defaults `onSuccess=NEXT`, `onFailure=STOP` make a linear workflow author
+   with zero edges.
+2. **Definition read returns the latest version's full graph** (header + ordered steps + transitions) so
+   the builder renders the diagram and re-opens it for edit; each run pins its `workflowVersionId`.
+3. **Definition write validates the graph** and returns **field-addressable** errors (bad `GOTO`/
+   `COMPENSATE` target, unreachable step, non-compensation cycle, `END`-only-terminal) the builder can
+   attach to the offending box.
+4. **Run-detail exposes, per `WorkflowStepRun`: `attempt` count + backoff schedule, `status` judged
+   against `successCriteria`, and `transitionTaken { outcome, edge, targetStepKey? }`** — the "which edge
+   was taken" the §7b timeline draws.
+5. **Run-detail exposes escalation/compensation linkage** — `manualTaskId?` for an ESCALATE edge,
+   `compensationStepKey?`/`compensationStepRunId?` for a COMPENSATE edge — so the timeline renders the
+   nested manual task / compensation step inline.
+6. **Manual task carries `origin` (`MANUAL_STEP | ESCALATED_FAILURE`)** + `runId`/`stepKey` so the inbox
+   action UI shows the right context, and `submit` resumes the run at the correct next DAG step.
+7. **Dry-run returns the authored transitions** and optionally accepts `simulate {stepKey, outcome}` to
+   preview a failure edge (escalation/compensation/stop) with no side effects.
+8. **Closed-set guarantee:** no transition type carries a predicate/condition; the four-value
+   `onFailure` set and three-value `onSuccess` set are the entire vocabulary (encodes the
+   no-business-condition-edges guardrail at the contract boundary).
 
 ### Poll vs SSE — the decision
 
@@ -504,11 +730,14 @@ action stay instant?"** From that lens:
   is **BullMQ+Valkey** (ADR-0053) or **pg-boss**, the UI consumes the *same* contracts (C1–C6) and the
   same poll-or-SSE pattern. The FE does not care which broker stores the job.
 - **But three things tilt the FE toward the ADR-0053 BullMQ+Valkey choice that is already accepted:**
-  1. **Multi-step runs with retries are first-class in BullMQ** (flows, per-step retry/backoff). The
-     run timeline (§7) renders per-step status + retry count + step-level `Retry`; BullMQ gives the
-     backend a native model to feed that UI, whereas pg-boss has no first-class parent/child flows
-     (ADR-0053 rejected it for exactly the workflow-engine need). A richer backend run model = a
-     richer, truthful timeline with no FE faking.
+  1. **Multi-step runs with retries map cleanly onto BullMQ** (per-step retry/backoff +
+     step-at-a-time re-enqueue, the synthesis keystone — *not* a held Flow tree; flows stay a latent
+     capability for future parallel fan-out, synthesis conflict #2). The run timeline (§7) renders
+     per-step status + attempt count + the **success/failure edge taken** + step-level `Retry`; the
+     DAG's failure edges (escalate/compensate/stop) are realized as Postgres-remembered next-step
+     re-enqueues, which BullMQ feeds natively, whereas pg-boss does per-step retry/backoff and
+     rate-limiting poorly (ADR-0053 rejected it for exactly the workflow-engine need). A richer backend
+     run model = a richer, truthful timeline with no FE faking.
   2. **It is already decided and already adds the SSE-adjacent plumbing** — ADR-0053 is accepted and
      the article-import pilot establishes the `202 + jobId + watch-status` pattern this UX copies. The
      FE gets to reuse a proven shape rather than invent one.
@@ -530,9 +759,9 @@ overkill here because the workflow engine is precisely the multi-step/retry/flow
 chose it for. Run status reaches the UI via the ADR-0052 SSE channel for live updates (bell + open run
 timeline) with short polling as the dependency-free fallback; the grant action stays synchronous and
 instant, and the run is a decoupled, observable object.** pg-boss would *technically* serve the same
-FE contracts but loses the first-class flows/retries the run timeline wants and would be replaced when
-the engine matures (ADR-0053's own reasoning); synchronous and Temporal/n8n are rejected for the
-reasons above.
+FE contracts but loses the per-step retry/backoff + rate-limiting fidelity the DAG run timeline wants
+and would be replaced when the engine matures (ADR-0053's own reasoning); synchronous and Temporal/n8n
+are rejected for the reasons above.
 
 ---
 
@@ -550,10 +779,15 @@ Concrete shape so the build slots into the existing mold:
   The run-detail hook takes a `refetchInterval` that is **active only while non-terminal**.
 - **Components**: builder + run + connection live in
   `apps/web/app/(app)/applications/[id]/workflows/_components/`; the cross-app hub + inbox in
-  `apps/web/app/(app)/settings/integrations/_components/` (the folder already exists). The run timeline
-  is a shared component if both surfaces use it (promote on genuine reuse, ADR-0020).
-- **Forms**: builder uses `react-hook-form` + a shared zod **discriminated-union step schema**; empty
-  optionals → `undefined` (strict-schema convention). The step list is a `useFieldArray`.
+  `apps/web/app/(app)/settings/integrations/_components/` (the folder already exists). A **lightweight
+  bespoke DAG renderer** (`workflow-graph.tsx`) built on the `asset-history-timeline` grammar draws both
+  the *authored* builder diagram and the *traversed* run timeline — **no React Flow / xyflow** (§3a) —
+  and is promoted to a shared component on genuine reuse (ADR-0020).
+- **Forms**: builder uses `react-hook-form` + a shared zod **discriminated-union step schema** whose
+  every variant carries `stepKey` + `successCriteria` + `retry` + `onSuccess`/`onFailure` transitions
+  (§10 C1); empty optionals → `undefined` (strict-schema convention). The steps are a `useFieldArray`;
+  the diagram renders from that array + its transitions (the array *is* the graph). Reorder mutates the
+  spine; the "on failure →" select mutates a step's `onFailure` — there is no free edge-drawing surface.
 - **Errors**: `notifyError` + `RequestIdNote` everywhere (ADR-0031 request-id correlation).
 - **i18n**: all copy via `next-intl` with en/es parity (ADR-0051), matching the rest of `web`.
 
@@ -569,10 +803,11 @@ de-risked by an early dry-run.
 - **Phase 1 — read-only surfacing.** The Workflows tab (empty/"not configured" state), the run list +
   run-detail timeline (reusing the asset-history grammar), `workflow:read` gating, the grant↔run chip.
   Proves observability before configurability. No ADR-0052 dependency.
-- **Phase 2 — connection + REST step + data mapping + dry-run.** The builder (list editor),
-  write-only secret fields, test-connection, the data-mapper with the token combobox, and the
-  payload-resolution dry-run (the single highest-value test). `workflow:manage` gating. This is the
-  core feature.
+- **Phase 2 — connection + REST step + data mapping + dry-run.** The builder (the **DAG diagram** with
+  per-step success criteria, retry policy and the "on failure →" control — §3), write-only secret
+  fields, test-connection, the data-mapper with the token combobox, and the payload-resolution dry-run
+  (the single highest-value test, now able to preview a failure edge). `workflow:manage` /
+  `workflow:secrets` gating. This is the core feature.
 - **Phase 3 — manual tasks + inbox + bell.** The manual step type, the inbox table, the task action
   form, and the ADR-0052 bell/SSE wiring (`workflow.manual_task`). **Gated on ADR-0052 reaching `dev`**
   — degrades to a polled inbox if not. `workflow:task` gating.
@@ -586,8 +821,11 @@ de-risked by an early dry-run.
 
 ### Risks
 
-- **Scope drift into n8n / a general flow builder.** Mitigation: list-not-canvas (§3), step types
-  scoped to access provisioning, manual tasks framed as provisioning steps not generic approvals.
+- **Scope drift into n8n / a general flow builder.** Mitigation: the **closed edge set** — success/
+  failure *handling* only (`NEXT`/`GOTO`/`END` and `CONTINUE`/`ESCALATE`/`COMPENSATE`/`STOP`), **no
+  business-condition primitive and no any-to-any wiring** (§3a, §3d, ADR-0054 §6.c); a constrained DAG
+  renderer (no React Flow), not a free-form canvas; step types scoped to access provisioning; manual
+  tasks framed as provisioning steps not generic approvals.
 - **Scope drift into HR/Identity Governance** via team/manager/AD identity fields (§5b). Mitigation:
   the v1 token catalog offers only fields that exist; "which team?" is a manual task, not a model
   change.
