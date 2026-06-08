@@ -7,6 +7,7 @@ import {
 import { AccessGrantsService } from './access-grants.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` only for types (erased at runtime), so an empty object is enough.
@@ -92,6 +93,17 @@ describe('AccessGrantsService', () => {
           useValue: { accessGrant, user, application, ...prisma },
         },
         { provide: ActorService, useValue: actor },
+        {
+          // No workflow fires in these tests (planForTrigger → null), so the outbox path is inert and
+          // the grant assertions are unchanged. The dedicated outbox behaviour is in
+          // access-grants.outbox.spec.ts.
+          provide: WorkflowTriggerService,
+          useValue: {
+            planForTrigger: jest.fn().mockResolvedValue(null),
+            buildRunData: jest.fn(),
+            enqueue: jest.fn().mockResolvedValue(true),
+          },
+        },
       ],
     }).compile();
 
