@@ -2,14 +2,14 @@
 # auth-zitadel-sot.md §9 and docs/04-development/setup.md.
 #
 # Plain `docker compose up` (from the repo ROOT) auto-loads compose.yaml + THIS file and brings up
-# ONLY the unprofiled backing services — db, meilisearch, zitadel, zitadel_db — for native
+# ONLY the unprofiled backing services — db, meilisearch, valkey, zitadel, zitadel_db — for native
 # `bun run dev` (api/web run on the host at :3000/:3001, NOT in containers). The prod-only services
 # (api, web, migrate, caddy, backup) carry `profiles: [prod]` in compose.yaml, so they stay down
 # here. This file is COMMITTED and never gitignored — it is the canonical dev experience.
 #
 # What it tunes vs. the canonical compose.yaml (which carries the prod hardening):
 #   - publishes each backing service on 127.0.0.1 (loopback only, never the LAN — SEC-005/ADR-0028)
-#     so the host-native api/web can reach them: Postgres 5432, Meili 7700, Zitadel 8080;
+#     so the host-native api/web can reach them: Postgres 5432, Meili 7700, Valkey 6379, Zitadel 8080;
 #   - flips Zitadel to the dev form: --tlsMode disabled + EXTERNALSECURE=false + EXTERNALPORT 8080
 #     (no Caddy in front of dev — the apps hit http://localhost:8080 directly);
 #   - relaxes prod-only ergonomics for local work: restart policy back to "no", and drops the
@@ -32,6 +32,14 @@ services:
     # Loopback only — the dev search engine must not be reachable from the LAN (SEC-005, ADR-0028).
     ports:
       - "127.0.0.1:7700:7700"
+    mem_limit: 0
+    cpus: 0
+
+  valkey:
+    restart: "no"
+    # Loopback only — the dev BullMQ broker must not be reachable from the LAN (SEC-005, ADR-0028).
+    ports:
+      - "127.0.0.1:6379:6379"
     mem_limit: 0
     cpus: 0
 
