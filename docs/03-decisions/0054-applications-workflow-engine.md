@@ -22,9 +22,12 @@ discipline ([[0006-soft-delete-and-auditing]] / [[0041-soft-delete-reuse-and-res
 id strategy ([[0005-id-strategy]]). It is the deliberate **inverse** of the Zitadel strong-coupling
 ([[0043-zitadel-source-of-truth]] / INV-5).
 
-> **Scope of this ADR (Phase 1a):** the data-model foundation — entities, enums, contracts and the
-> decisions everything else builds on. **No engine runtime, routes, services, worker or connectors**
-> land here; those are Phase 1b. This ADR is the contract the rest of the engine is built against.
+> **Scope of this ADR (Phase 1a + 1a-revision):** the data-model foundation — entities, enums,
+> contracts and the decisions everything else builds on, **including the step-graph topology**
+> (decision §8: the opinionated error-handling DAG, added in the 1a-revision). **No engine runtime,
+> routes, services, worker or connectors** land here; those are Phase 1b. This ADR is the contract the
+> rest of the engine is built against — §8’s "Execution semantics for the orchestrator (1b-B)" is the
+> normative spec the run orchestrator implements.
 
 ## Context
 
@@ -90,6 +93,16 @@ The forces:
   [[0042-article-versioning-and-linking]] precedent: a queryable `WorkflowVersion` header + an
   immutable `steps` jsonb (a discriminated union keyed on step kind), atomically snapshot-able and
   replayable. A `WorkflowStep` is a *logical* node inside the jsonb, not a v1 table.
+- **Graph edges: in-jsonb `onSuccess`/`onFailure` fields vs a normalized edges table** —
+  *in-jsonb chosen* (decision §8). The success/failure transitions are stored as **optional fields on
+  each step object** referencing sibling step **keys** (or a terminal token), not rows in a separate
+  edges table. Rationale: the edges are part of the **same immutable, atomically-snapshot-able
+  definition** as the nodes (one `WorkflowVersion` = one self-contained graph; pinning stays a single
+  jsonb read, no join, no second versioned table); the [[0007-flexible-asset-specs-jsonb]] discipline
+  (zod validates the jsonb on write) already gives us referential + acyclicity checks at the edge with
+  **no migration** when the edge vocabulary grows. An edges table would buy queryable topology we don't
+  need in v1 (the builder reads the whole version anyway) at the cost of a join on every replay and a
+  second append-only table to keep in lockstep.
 
 ### Secret storage
 
@@ -228,6 +241,110 @@ The two AccessGrant-derived **triggers** (`ACCESS_GRANTED` / `ACCESS_REVOKED`) a
 `TIMER_AFTER_GRANT` / `SCHEDULED` / `RECERTIFICATION` are reserved slots for the later timer phase
 (DB-row-as-truth, materialized into BullMQ delayed/repeatable jobs).
 
+### 8. Topology — an opinionated error-handling DAG (Phase 1a-revision)
+
+> **CEO mandate (2026-06-08):** "si enviamos un http request y lo ponemos como cumplido porque espera
+> una respuesta, y si es 500 o 404? hay que tener control de errores, no podemos hacerlo lineal, va en
+> contra de las normas de cualquier automatización: no tiene tolerancia a errores o alertas." The
+> original synthesis modelled v1 as a **linear** step sequence (`docs/workflow-engine/_synthesis.md`
+> §2.4). That is **superseded here**: a flow with no error tolerance is the anti-pattern. The engine is
+> a **directed acyclic graph with first-class success/failure edges** — but a deliberately
+> **opinionated, finite** one, **not** an n8n-style free-form business-condition canvas (rejected as
+> the engine in *Considered options*). The reconciliation: the **degenerate** DAG is exactly the old
+> linear sequence, so the common case stays trivial to author.
+
+The step contract (`@lazyit/shared` `workflow.ts`, the `WorkflowVersion.steps` jsonb) gains three
+additive, **optional** dimensions — **no Prisma migration** (the shape lives inside the existing
+`steps` jsonb, ADR-0007). Each is backward compatible: a version authored before this revision still
+validates and resolves.
+
+**(a) Per-step SUCCESS CRITERIA.** A REST / WEBHOOK_OUT step carries an optional `successCriteria` —
+an explicit set of status codes and/or inclusive ranges. A response **outside** the criteria (e.g.
+`500`, `404`) is a step **FAILURE**, never a silent "succeeded because we got a response". When unset,
+the default success window is **`2xx`** (`DEFAULT_HTTP_SUCCESS_RANGE` = 200–299). The shared pure
+predicate `isHttpStatusSuccess(status, criteria?)` is the single classifier both `api` (executor) and
+`web` (builder preview) use.
+
+**(b) Per-step RETRY POLICY.** A step carries an optional `retry` = `{ maxAttempts (1–10, default 1),
+backoff (fixed | exponential), delayMs (≤ 1h) }`. The **contract only carries the policy**; the BullMQ
+worker (1b-B) executes the attempts (mapping onto its `attempts`/`backoff`). A retry only happens when
+the handler marked the failure `retryable` (transient **and**, for a create, idempotent — the
+`zitadel-management.service.ts` posture): `maxAttempts` caps **how many**, the handler gates
+**whether**. Omitting `retry` ⇒ a single attempt (`DEFAULT_RETRY_POLICY`).
+
+**(c) First-class TRANSITIONS — a finite, opinionated set (NO business-condition edges).** Each step
+carries optional `onSuccess` / `onFailure` edges that reference a sibling step **key** or a **terminal
+token**. There are deliberately **no** arbitrary boolean / expression conditions on an edge in v1 — the
+only branch points are *success* and *failure-after-retries*.
+
+- `onSuccess` → a step **key** | **`END_SUCCESS`** (terminal: run `SUCCEEDED`).
+- `onFailure` (after retries exhausted) → a step **key** (an alert / compensation / error-handler step)
+  | **`ESCALATE_TO_MANUAL`** (spawn a `ManualTask`, run `AWAITING_INPUT`) | **`COMPENSATE`** (run the
+  saga compensations, run `COMPENSATED`) | **`STOP_FAIL`** (run `FAILED` + emit the
+  `workflow.run_failed` alert).
+
+The legacy flat `onError` enum (`fail` / `continue` / `manual`) is **kept on the wire and superseded**
+by the transition model: it is the fallback when `onFailure` is unset, mapped canonically as
+`fail → STOP_FAIL`, `continue → take the success edge (fall through)`, `manual → ESCALATE_TO_MANUAL`.
+
+**The degenerate (linear) case.** A plain ordered `steps` array with **no** explicit edges still
+validates and means: **`onSuccess` → the next step in array order (else `END_SUCCESS`),
+`onFailure` → `STOP_FAIL`**. A simple sequence is just the degenerate DAG; the web builder authors the
+common case without drawing a single edge.
+
+**DAG validity is enforced at the contract edge (zod refinements + tests):** step keys are unique and
+may **not** collide with a reserved terminal token; every explicit `onSuccess`/`onFailure` resolves to
+a known step key or the right *kind* of terminal (a success edge may not target a failure terminal and
+vice-versa); and the **effective** graph (after default + legacy resolution) is **acyclic** (DFS
+three-colour cycle detection). The entry node is **`steps[0]`**.
+
+**Open for richer conditions later — without a migration.** Because the topology is jsonb (ADR-0007),
+a future phase can add edge predicates, parallel fan-out (BullMQ Flows — a latent capability), or extra
+terminals by **extending the zod step shape**, never by altering a table. v1 keeps the edge vocabulary
+finite **on purpose** (scope discipline §6c); the *data model* is already a graph.
+
+#### Execution semantics for the orchestrator (1b-B)
+
+The contract above is what the 1b-B run orchestrator **must** implement; this is the normative walk of
+a run over the pinned `WorkflowVersion.steps`:
+
+1. **Start.** The entry node is `steps[0]`. The run goes `PENDING → RUNNING`; a cursor points at the
+   current step key.
+2. **Execute the current step** via its `StepHandler`, honouring its `retry` policy (the worker's
+   `attempts`/`backoff`); each attempt is one append-only `WorkflowStepRun` row.
+3. **Classify the outcome** into `SUCCEEDED | FAILED | AWAITING_INPUT` (for an HTTP step, SUCCEEDED is
+   `isHttpStatusSuccess(status, step.successCriteria)`; everything else is FAILED).
+4. **Resolve the edge** with the shared `resolveStepTransitions(steps, index)` (the single source of
+   truth — do not re-derive):
+   - **on SUCCEEDED** → follow `onSuccess`. A step **key** ⇒ set the cursor there and loop to (2).
+     `END_SUCCESS` ⇒ terminal: run `SUCCEEDED`, `finishedAt` set.
+   - **on FAILED** (only **after** the retry policy is exhausted and the handler stopped marking the
+     failure `retryable`) → follow `onFailure`:
+     - a step **key** ⇒ set the cursor to that handler/alert/compensation step and loop to (2);
+     - `ESCALATE_TO_MANUAL` ⇒ create a `ManualTask`, transition the run to **`AWAITING_INPUT`**, and
+       **let the BullMQ job complete** (no held worker — the pause costs one Postgres row);
+     - `COMPENSATE` ⇒ run the compensation pass (below), then run **`COMPENSATED`**;
+     - `STOP_FAIL` ⇒ run **`FAILED`** (redacted `error` summary) and emit the `workflow.run_failed`
+       alert.
+   - **on AWAITING_INPUT** (a MANUAL step’s own pause) → identical `AWAITING_INPUT` handling; the
+     manual `onSuccess`/`onFailure` edges are taken on task **completion** / **cancellation**.
+5. **Pause / resume.** While `AWAITING_INPUT` there is **no** BullMQ job in flight. On manual-task
+   completion the typed input is merged into the frozen mapping context (`ctx.steps[<key>]`), a
+   **resume job** is enqueued, the run returns to `RUNNING`, and the walk continues from the manual
+   step’s `onSuccess`; on cancellation it follows the manual step’s `onFailure`.
+6. **Compensation pass (saga).** `COMPENSATE` (or a compensation handler reached via an `onFailure`
+   step key) runs the **already-succeeded** steps’ compensations in **reverse** completion order, each
+   recorded as a `WorkflowStepRun` with status `COMPENSATED`. Compensation is **best-effort** and
+   **never touches the `AccessGrant`** (the decoupling invariant §1 holds: the grant is never rolled
+   back).
+7. **Terminal mapping.** `END_SUCCESS → SUCCEEDED`; `STOP_FAIL → FAILED`; `COMPENSATE → COMPENSATED`;
+   `ESCALATE_TO_MANUAL → AWAITING_INPUT` (then resolves on task completion). Idempotency is unchanged
+   (decision §3): the **run** is the idempotency unit, the **step** is the retry unit; a Valkey flush
+   is a reconcile/replay against Postgres, never a re-fire.
+
+Acyclicity (enforced at author time) guarantees this walk **terminates**: every path reaches a terminal
+token or an `AWAITING_INPUT` pause; it can never loop.
+
 ## Consequences
 
 - **Positive:**
@@ -238,6 +355,10 @@ The two AccessGrant-derived **triggers** (`ACCESS_GRANTED` / `ACCESS_REVOKED`) a
   - One shared contract (`@lazyit/shared`) for the enums, the discriminated connector/step config
     unions and the entity wire shapes — `api` and `web` agree by construction; secrets never appear
     on a wire shape.
+  - **Error tolerance is structural, not optional** (§8): every step has an explicit success criterion,
+    a bounded retry policy and first-class success/failure edges, validated as an acyclic graph at the
+    contract edge. A 500/404 can never masquerade as success, and the orchestrator walks one normative
+    spec (`resolveStepTransitions`) shared with the builder — no per-side drift.
   - The engine is executor-swappable (Postgres-as-truth) and its secret/RBAC governance is its own.
 - **Negative / trade-offs (accepted):**
   - **A second encrypted secret store** (`WorkflowSecret`) alongside the settings `SystemSecret` — two
