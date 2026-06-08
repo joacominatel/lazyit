@@ -7,7 +7,7 @@ import mammoth from 'mammoth';
  * .pdf/.html/.odt are deferred (see docs/03-decisions/0021-knowledge-base-design.md).
  */
 
-const SUPPORTED_EXTENSIONS = ['md', 'txt', 'docx'] as const;
+export const SUPPORTED_EXTENSIONS = ['md', 'txt', 'docx'] as const;
 const DEFAULT_MAX_IMPORT_MB = 5;
 
 /**
