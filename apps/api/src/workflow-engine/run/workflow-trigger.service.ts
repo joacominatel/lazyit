@@ -9,8 +9,10 @@ import type { ActorAttribution } from '../../common/actor.service';
 import {
   WORKFLOW_RUN_QUEUE,
   WORKFLOW_RUN_RESUME_JOB,
+  WORKFLOW_RUN_RETRY_JOB,
   WORKFLOW_RUN_START_JOB,
 } from './workflow-run.constants';
+import type { WorkflowRunJobData } from './workflow-run.types';
 
 /**
  * The matching enabled workflow for a grant event + the version to pin — the result of {@link
@@ -153,14 +155,23 @@ export class WorkflowTriggerService {
    * Enqueue a RESUME job after a manual task resolved (best-effort, same degrade posture as {@link
    * enqueue}). `cursor` is the resolved next target (a step key or a terminal token). The orchestrator's
    * `resume` flips AWAITING_INPUT→RUNNING guarded, so a duplicate resume job is a no-op (idempotent).
+   *
+   * `opts.jobId` overrides the default `resume:<runId>:<cursor>` dedupe key. The sweeper's AWAITING_INPUT
+   * reconciler (CCOR-2) passes a NON-colliding, rotating jobId so a re-enqueue is never swallowed by a
+   * STALE same-cursor resume job that the live path already produced and that still lingers in the queue
+   * (`removeOnComplete.age` keeps a completed — possibly no-op — resume around for up to an hour).
    */
-  async enqueueResume(runId: string, cursor: string): Promise<boolean> {
+  async enqueueResume(
+    runId: string,
+    cursor: string,
+    opts?: { jobId?: string },
+  ): Promise<boolean> {
     try {
       await this.queue.add(
         WORKFLOW_RUN_RESUME_JOB,
         { runId, resumeCursor: cursor },
         {
-          jobId: `resume:${runId}:${cursor}`,
+          jobId: opts?.jobId ?? `resume:${runId}:${cursor}`,
           attempts: 1,
           removeOnComplete: { age: 3600, count: 1000 },
           removeOnFail: { age: 24 * 3600, count: 1000 },
@@ -172,6 +183,78 @@ export class WorkflowTriggerService {
         `workflow-run resume enqueue failed for run ${runId}: ${err instanceof Error ? err.message : String(err)}`,
       );
       return false;
+    }
+  }
+
+  /**
+   * Enqueue a DELAYED retry job (CCOR-3) so a step's per-attempt backoff runs OFF the worker — the slot
+   * is freed for the backoff window (up to 1h) and the delay is durable in Valkey across restarts. The
+   * deterministic `retry:<runId>:<stepKey>:<attempt>` jobId dedupes a double-scheduled attempt; the
+   * orchestrator's `retryStep` re-entry is itself idempotent (it no-ops if the attempt was already run).
+   * Best-effort: a broker-down enqueue returns `false`, and the orchestrator falls back to a SHORT,
+   * lock-bounded in-process backoff so the run still makes progress while Valkey is unreachable.
+   */
+  async enqueueRetry(
+    runId: string,
+    stepKey: string,
+    attempt: number,
+    delayMs: number,
+  ): Promise<boolean> {
+    try {
+      await this.queue.add(
+        WORKFLOW_RUN_RETRY_JOB,
+        { runId, retryStepKey: stepKey, retryAttempt: attempt },
+        {
+          jobId: `retry:${runId}:${stepKey}:${attempt}`,
+          delay: delayMs,
+          attempts: 1,
+          removeOnComplete: { age: 3600, count: 1000 },
+          removeOnFail: { age: 24 * 3600, count: 1000 },
+        },
+      );
+      return true;
+    } catch (err) {
+      if (isQueueUnavailableError(err)) {
+        this.logger.warn(
+          `workflow-run retry enqueue degraded (broker unavailable) for run ${runId} step ${stepKey} attempt ${attempt}; falling back to an in-process backoff.`,
+        );
+      } else {
+        this.logger.error(
+          `workflow-run retry enqueue failed for run ${runId} step ${stepKey} attempt ${attempt}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return false;
+    }
+  }
+
+  /**
+   * The set of run ids that currently have a job NOT-yet-finished on the queue (active / waiting /
+   * delayed / paused). Used by the sweeper's RUNNING-staleness reconciler (CCOR-4) to AVOID failing a
+   * run that is legitimately in-flight or backing off (its delayed retry job counts as in-flight).
+   * Returns `null` when the broker state cannot be read (e.g. Valkey down) so the reconciler can SKIP —
+   * never finalize a possibly-live run as failed on incomplete information.
+   */
+  async inFlightRunIds(): Promise<Set<string> | null> {
+    try {
+      const jobs = await this.queue.getJobs([
+        'active',
+        'waiting',
+        'delayed',
+        'paused',
+      ]);
+      const ids = new Set<string>();
+      for (const job of jobs) {
+        const runId = (job?.data as WorkflowRunJobData | undefined)?.runId;
+        if (runId) {
+          ids.add(runId);
+        }
+      }
+      return ids;
+    } catch (err) {
+      this.logger.warn(
+        `workflow-run in-flight scan failed (broker unavailable?); skipping RUNNING-staleness reconcile this pass: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
     }
   }
 }
