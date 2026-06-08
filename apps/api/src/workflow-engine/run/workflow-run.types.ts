@@ -14,6 +14,14 @@ export interface WorkflowRunJobData {
    * resume job after a manual task is resolved. Absent ⇒ start from the entry node (`steps[0]`).
    */
   resumeCursor?: string;
+  /**
+   * Retry re-entry cursor (CCOR-3): the step key a DELAYED retry job re-enters at to execute its NEXT
+   * attempt, once the per-step backoff elapsed off the worker. Paired with {@link retryAttempt}; set
+   * only on a `run-retry` job. The run stays RUNNING across the backoff (the slot is freed).
+   */
+  retryStepKey?: string;
+  /** The 1-based attempt number a retry re-entry must execute (paired with {@link retryStepKey}). */
+  retryAttempt?: number;
 }
 
 /**
