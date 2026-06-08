@@ -14,6 +14,8 @@ import { WorkflowRunSweeper } from './run/workflow-run.sweeper';
 import { EngineServiceAccountService } from './engine-service-account.service';
 import { WorkflowRunsController } from './runs/workflow-runs.controller';
 import { WorkflowRunsService } from './runs/workflow-runs.service';
+import { WorkflowDryRunController } from './dry-run/workflow-dry-run.controller';
+import { WorkflowDryRunService } from './dry-run/workflow-dry-run.service';
 import { ManualTasksController } from './tasks/manual-tasks.controller';
 import { ManualTasksService } from './tasks/manual-tasks.service';
 import { WorkflowsController } from './definitions/workflows.controller';
@@ -47,6 +49,7 @@ import { WorkflowSecretsService } from './definitions/workflow-secrets.service';
   ],
   controllers: [
     WorkflowRunsController,
+    WorkflowDryRunController,
     ManualTasksController,
     WorkflowsController,
     WorkflowConnectionsController,
@@ -63,6 +66,7 @@ import { WorkflowSecretsService } from './definitions/workflow-secrets.service';
     { provide: WORKFLOW_SLEEPER, useValue: realSleeper },
     // read + CRUD services
     WorkflowRunsService,
+    WorkflowDryRunService,
     ManualTasksService,
     WorkflowsService,
     WorkflowConnectionsService,
