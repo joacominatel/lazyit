@@ -14,7 +14,6 @@ import {
   type ArticleStatus,
   type CreateArticle,
   type CreateArticleLink,
-  type ImportArticle,
   type Page,
   type PageQuery,
   type UpdateArticle,
@@ -26,12 +25,6 @@ import { ActorService } from '../common/actor.service';
 import { isServicePrincipal, type Principal } from '../auth/principal';
 import { SearchService } from '../search/search.service';
 import { projectArticle, type ArticleRow } from '../search/search.documents';
-import {
-  maxImportBytes,
-  maxImportMb,
-  parseImportFile,
-  titleFromFilename,
-} from './article-import';
 
 /**
  * Listing filters for GET /articles. The `categoryId`, `status` and `linkedTo` filters are
@@ -87,13 +80,6 @@ export interface ReverseArticleListFilters {
   status?: ArticleStatus[];
   /** Case-insensitive substring over title/excerpt. */
   q?: string;
-}
-
-/** The subset of a multer file the import needs. The controller passes Express.Multer.File. */
-export interface UploadedImportFile {
-  originalname: string;
-  buffer: Buffer;
-  size: number;
 }
 
 // Lean projection for the LIST (GET /articles, paginated): every Article column EXCEPT `content` —
@@ -504,54 +490,10 @@ export class ArticlesService {
     return unpublished;
   }
 
-  /** Import an article from an uploaded .md/.txt/.docx file. Author = caller. */
-  async importArticle(
-    file: UploadedImportFile | undefined,
-    fields: ImportArticle,
-    principal?: Principal,
-  ) {
-    const authorId = this.requireAuthor(principal);
-    if (!file) {
-      throw new BadRequestException('A file is required');
-    }
-    if (file.size > maxImportBytes()) {
-      throw new BadRequestException(
-        `File exceeds the ${maxImportMb()} MB import limit`,
-      );
-    }
-    await this.assertCategoryUsable(fields.categoryId);
-    const content = await parseImportFile({
-      originalname: file.originalname,
-      buffer: file.buffer,
-    });
-    if (!content.trim()) {
-      throw new BadRequestException('The imported file has no text content');
-    }
-    const title = fields.title ?? titleFromFilename(file.originalname);
-    const slug = fields.slug ?? this.deriveSlug(title);
-    const article = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.article.create({
-        data: {
-          slug,
-          title,
-          content,
-          readingMinutes: this.readingMinutesOf(content),
-          status: fields.status,
-          publishedAt: fields.status === 'PUBLISHED' ? new Date() : null,
-          categoryId: fields.categoryId,
-          authorId,
-        },
-      });
-      // An import is a create — version 1 (ADR-0042).
-      await this.snapshotVersion(tx, created, 1, authorId);
-      return created;
-    });
-    // Same draft-privacy rule as create(): index PUBLISHED only (ADR-0022 / ADR-0035).
-    if (article.status === 'PUBLISHED') {
-      this.search.upsert('articles', projectArticle(article));
-    }
-    return article;
-  }
+  // Article import is now ASYNC (ADR-0053): the synchronous parse-and-create that used to live here
+  // moved to the sandboxed worker (articles/import/) so a hostile .docx is parsed in a heap-capped
+  // child, not the API (SEC-002). The controller enqueues via ArticleImportService; the worker's
+  // create path mirrors create() above (article + version-1 snapshot).
 
   // --- versions (append-only edit history, ADR-0042) -----------------------
 
