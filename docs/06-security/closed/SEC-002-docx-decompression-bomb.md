@@ -2,7 +2,7 @@
 id: SEC-002
 title: .docx import is a decompression-bomb vector (compressed size is checked, not expanded)
 severity: medium
-status: open
+status: closed
 cwe: CWE-409
 discovered: 2026-05-25
 module: articles
@@ -98,3 +98,18 @@ not the API. Until that worker exists, **SEC-001's interceptor cap is the interi
 compressed upload is limited to `MAX_IMPORT_SIZE_MB`, ~5 MB). **SEC-002 stays open** as tracked,
 accepted debt, owned by the async-worker work (the "Async workers — BullMQ + Redis" pending ADR in
 [[03-decisions/_MOC|Decisions]]). No code change now.
+
+## Resolution (2026-06-07)
+
+Closed by the async-worker pilot of [[0053-async-workers-bullmq-valkey|ADR-0053]] (issue #247). `.docx`
+parsing moved off the request path into a **BullMQ sandboxed processor** — a forked Node child launched
+with `--max-old-space-size` (`IMPORT_CHILD_HEAP_MB`, default 256). A decompression bomb now expands past
+the child's heap cap and **OOM-kills the isolated child**; BullMQ marks the job `failed` and the API
+process is never touched. `POST /articles/import` is now async (`202 { jobId }`, polled at
+`GET /articles/import/:jobId`); the permanent-failure path returns a friendly message (never "try again"),
+and the raw `failedReason` is never echoed/logged (ADR-0031).
+
+**Regression test:** `apps/api/src/articles/import/docx-bomb.spec.ts` forks a heap-capped child against a
+structurally-valid ~128 MB WordML bomb and asserts the child is hard-killed (OOM) while the parent (the
+API stand-in) survives; a normal `.docx` parses fine in the same capped child. Implemented in PR #251,
+merged into `feat/issue-247-async-workers-bullmq-valkey` — closes on promotion to `dev`.
