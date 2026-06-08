@@ -1,5 +1,6 @@
 import type {
   CreateWorkflowConnection,
+  Page,
   WorkflowConnection,
   WorkflowConnectionConfig,
 } from "@lazyit/shared";
@@ -43,14 +44,17 @@ export interface TestConnectionResult {
   requestId: string;
 }
 
-/** List connections, optionally scoped to one application. */
+/**
+ * List connections, optionally scoped to one application. Returns the `Page<WorkflowConnection>`
+ * envelope (`{ items, total, limit, offset }`, ADR-0030) — read `.items`, never index the page.
+ */
 export function getWorkflowConnections(
   applicationId?: string,
-): Promise<WorkflowConnection[]> {
+): Promise<Page<WorkflowConnection>> {
   const qs = applicationId
     ? `?${new URLSearchParams({ applicationId }).toString()}`
     : "";
-  return apiFetch<WorkflowConnection[]>(`${BASE}${qs}`);
+  return apiFetch<Page<WorkflowConnection>>(`${BASE}${qs}`);
 }
 
 /** Fetch one connection by id. */

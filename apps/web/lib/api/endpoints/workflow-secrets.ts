@@ -1,4 +1,4 @@
-import type { CreateWorkflowSecret, WorkflowSecret } from "@lazyit/shared";
+import type { CreateWorkflowSecret, Page, WorkflowSecret } from "@lazyit/shared";
 import { apiFetch } from "../client";
 
 /**
@@ -15,14 +15,18 @@ import { apiFetch } from "../client";
 
 const BASE = "/workflow-secrets";
 
-/** List redacted secret descriptors, optionally scoped to one application. Never carries a value. */
+/**
+ * List redacted secret descriptors, optionally scoped to one application. Never carries a value.
+ * Returns the `Page<WorkflowSecret>` envelope (`{ items, total, limit, offset }`, ADR-0030) — read
+ * `.items`, never index the page.
+ */
 export function getWorkflowSecrets(
   applicationId?: string,
-): Promise<WorkflowSecret[]> {
+): Promise<Page<WorkflowSecret>> {
   const qs = applicationId
     ? `?${new URLSearchParams({ applicationId }).toString()}`
     : "";
-  return apiFetch<WorkflowSecret[]>(`${BASE}${qs}`);
+  return apiFetch<Page<WorkflowSecret>>(`${BASE}${qs}`);
 }
 
 /** Fetch one redacted secret descriptor by id. Never carries a value. */

@@ -55,6 +55,7 @@ import {
 } from "@/lib/api/hooks/use-workflow-mutations";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { selectActiveConnection } from "@/lib/workflow/connection-select";
 import { createStep, nextStepKey, type StepKind } from "@/lib/workflow/step-form";
 import { cn } from "@/lib/utils";
 import {
@@ -103,7 +104,7 @@ export function WorkflowBuilder({
   const canManage = useCan("workflow:manage");
 
   const { data: connections } = useWorkflowConnections(applicationId);
-  const connection = connections?.[0];
+  const connection = selectActiveConnection(connections);
 
   const createWorkflow = useCreateWorkflow();
   const updateWorkflow = useUpdateWorkflow();
