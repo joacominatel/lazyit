@@ -10,7 +10,79 @@ import { EgressError } from '../../common/egress';
 export const DEFAULT_OUTBOUND_TIMEOUT_MS = 30_000;
 
 /** Cap on the response bytes we will read to capture a correlation id (a small DoS guard). */
-const MAX_CORRELATION_BODY_BYTES = 64 * 1024;
+export const MAX_CORRELATION_BODY_BYTES = 64 * 1024;
+
+/**
+ * Read at most `maxBytes` of a (possibly untrusted, possibly multi-GB) response body WITHOUT ever
+ * buffering the whole thing (SEC-A2). Two layers:
+ *   1. Short-circuit on a declared `Content-Length` that already exceeds the cap — refuse to read,
+ *      cancelling the stream so the socket is released.
+ *   2. Stream the body chunk-by-chunk with a running byte counter; the moment the total would exceed
+ *      `maxBytes` we ABORT (cancel the stream) and give up — never `Response.text()` on an untrusted
+ *      stream, which would buffer the entire body before any size check.
+ *
+ * Returns the decoded text, or `null` when there is no readable body / it is over the cap / a read
+ * error occurs. NEVER throws and NEVER logs the body.
+ */
+async function readCappedBodyText(
+  res: Response,
+  maxBytes: number,
+): Promise<string | null> {
+  // (1) A declared length over the cap → don't even start reading.
+  const declared = res.headers.get('content-length');
+  if (declared !== null) {
+    const length = Number(declared);
+    if (Number.isFinite(length) && length > maxBytes) {
+      try {
+        await res.body?.cancel();
+      } catch {
+        /* best-effort socket release */
+      }
+      return null;
+    }
+  }
+
+  const body = res.body;
+  if (!body) {
+    return null;
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!value) {
+        continue;
+      }
+      total += value.byteLength;
+      // (2) Over the cap mid-stream → abort the read; never retain the offending chunk.
+      if (total > maxBytes) {
+        try {
+          await reader.cancel();
+        } catch {
+          /* best-effort */
+        }
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  }
+
+  if (chunks.length === 0) {
+    return null;
+  }
+  const buf = Buffer.concat(
+    chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.byteLength)),
+  );
+  return buf.toString('utf8');
+}
 
 /**
  * Allowlisted top-level JSON keys we treat as the external correlation id, in priority order
@@ -70,13 +142,8 @@ export async function extractCorrelationId(
   if (!contentType.toLowerCase().includes('json')) {
     return null;
   }
-  let text: string;
-  try {
-    text = await res.text();
-  } catch {
-    return null;
-  }
-  if (!text || text.length > MAX_CORRELATION_BODY_BYTES) {
+  const text = await readCappedBodyText(res, MAX_CORRELATION_BODY_BYTES);
+  if (!text) {
     return null;
   }
   let parsed: unknown;
