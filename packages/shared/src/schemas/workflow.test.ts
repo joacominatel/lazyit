@@ -5,12 +5,20 @@ import {
   CreateWorkflowConnectionSchema,
   CreateWorkflowSecretSchema,
   DEFAULT_DEPROVISION_POLICY,
+  DEFAULT_RETRY_POLICY,
+  HttpSuccessCriteriaSchema,
+  isHttpStatusSuccess,
   ManualStepSchema,
+  resolveStepTransitions,
   RestStepSchema,
+  RetryPolicySchema,
   UpdateApplicationWorkflowSchema,
   WorkflowConnectionConfigSchema,
   WORKFLOW_CONNECTION_KINDS,
+  WORKFLOW_END_SUCCESS,
+  WORKFLOW_ESCALATE_TO_MANUAL,
   WORKFLOW_RUN_STATUSES,
+  WORKFLOW_STOP_FAIL,
   WORKFLOW_TRIGGERS,
   WORKFLOW_TRIGGERS_V1,
   WorkflowSecretSchema,
@@ -250,5 +258,208 @@ describe("WorkflowSecret contracts — never carry crypto material", () => {
         value: "super-secret-token",
       }).success,
     ).toBe(true);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+// The opinionated error-handling DAG (ADR-0054 §8)
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+
+const rest = (key: string, extra: Record<string, unknown> = {}) => ({
+  kind: "REST" as const,
+  key,
+  connectionId: CUID,
+  method: "POST" as const,
+  path: `/rest/${key}`,
+  ...extra,
+});
+
+describe("HTTP success criteria", () => {
+  test("defaults to 2xx when no criteria is given", () => {
+    expect(isHttpStatusSuccess(200)).toBe(true);
+    expect(isHttpStatusSuccess(204)).toBe(true);
+    expect(isHttpStatusSuccess(404)).toBe(false);
+    expect(isHttpStatusSuccess(500)).toBe(false);
+  });
+
+  test("an explicit status set / range narrows or widens success", () => {
+    expect(isHttpStatusSuccess(404, { statuses: [404] })).toBe(true);
+    expect(isHttpStatusSuccess(201, { ranges: [{ from: 200, to: 299 }] })).toBe(
+      true,
+    );
+    expect(isHttpStatusSuccess(301, { ranges: [{ from: 200, to: 299 }] })).toBe(
+      false,
+    );
+    // 200 is NOT success when the criteria only lists 204 (a strict "no content" contract).
+    expect(isHttpStatusSuccess(200, { statuses: [204] })).toBe(false);
+  });
+
+  test("schema rejects empty criteria and an inverted range", () => {
+    expect(HttpSuccessCriteriaSchema.safeParse({}).success).toBe(false);
+    expect(
+      HttpSuccessCriteriaSchema.safeParse({ statuses: [200] }).success,
+    ).toBe(true);
+    expect(
+      HttpSuccessCriteriaSchema.safeParse({ ranges: [{ from: 299, to: 200 }] })
+        .success,
+    ).toBe(false);
+  });
+
+  test("a REST step carries an optional successCriteria", () => {
+    expect(
+      RestStepSchema.safeParse(rest("create", { successCriteria: { statuses: [200, 201] } }))
+        .success,
+    ).toBe(true);
+  });
+});
+
+describe("retry policy", () => {
+  test("applies sane defaults (single attempt)", () => {
+    const parsed = RetryPolicySchema.parse({});
+    expect(parsed.maxAttempts).toBe(1);
+    expect(parsed.backoff).toBe("exponential");
+    expect(parsed.delayMs).toBe(1000);
+    expect(DEFAULT_RETRY_POLICY.maxAttempts).toBe(1);
+  });
+
+  test("enforces bounds on maxAttempts", () => {
+    expect(RetryPolicySchema.safeParse({ maxAttempts: 0 }).success).toBe(false);
+    expect(RetryPolicySchema.safeParse({ maxAttempts: 11 }).success).toBe(false);
+    expect(
+      RetryPolicySchema.safeParse({ maxAttempts: 3, backoff: "fixed", delayMs: 500 })
+        .success,
+    ).toBe(true);
+  });
+
+  test("a REST step carries an optional retry policy", () => {
+    expect(
+      RestStepSchema.safeParse(rest("create", { retry: { maxAttempts: 3 } }))
+        .success,
+    ).toBe(true);
+  });
+});
+
+describe("WorkflowStepsSchema — opinionated error-handling DAG", () => {
+  // (a) A degenerate linear sequence: no explicit edges. Must validate and mean
+  //     "onSuccess → next step, onFailure → STOP_FAIL".
+  test("(a) a plain linear sequence is the degenerate DAG", () => {
+    const parsed = WorkflowStepsSchema.parse([rest("a"), rest("b")]);
+    const t0 = resolveStepTransitions(parsed, 0);
+    expect(t0.onSuccess).toBe("b");
+    expect(t0.onFailure).toBe(WORKFLOW_STOP_FAIL);
+    const t1 = resolveStepTransitions(parsed, 1);
+    expect(t1.onSuccess).toBe(WORKFLOW_END_SUCCESS);
+    expect(t1.onFailure).toBe(WORKFLOW_STOP_FAIL);
+  });
+
+  // (b) A success/failure branch: a provision step routes its failure to an alert step, success ends.
+  test("(b) a success/failure branch validates", () => {
+    const branched = [
+      rest("provision", { onSuccess: WORKFLOW_END_SUCCESS, onFailure: "alert" }),
+      {
+        kind: "WEBHOOK_OUT" as const,
+        key: "alert",
+        connectionId: CUID,
+        onFailure: WORKFLOW_STOP_FAIL,
+      },
+    ];
+    const result = WorkflowStepsSchema.safeParse(branched);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const t0 = resolveStepTransitions(result.data, 0);
+      expect(t0.onSuccess).toBe(WORKFLOW_END_SUCCESS);
+      expect(t0.onFailure).toBe("alert");
+    }
+  });
+
+  // (c) Acyclicity: a transition cycle is rejected.
+  test("(c) rejects a transition cycle", () => {
+    const cyclic = [
+      rest("a", { onFailure: "b" }),
+      rest("b", { onSuccess: "a" }),
+    ];
+    expect(WorkflowStepsSchema.safeParse(cyclic).success).toBe(false);
+  });
+
+  test("(c') rejects a self-loop", () => {
+    expect(WorkflowStepsSchema.safeParse([rest("a", { onSuccess: "a" })]).success).toBe(
+      false,
+    );
+  });
+
+  // (d) Unknown transition targets are rejected.
+  test("(d) rejects onSuccess targeting an unknown step key", () => {
+    expect(
+      WorkflowStepsSchema.safeParse([rest("a", { onSuccess: "ghost" })]).success,
+    ).toBe(false);
+  });
+
+  test("(d') rejects onFailure targeting an unknown step key / END_SUCCESS / non-terminal", () => {
+    expect(
+      WorkflowStepsSchema.safeParse([rest("a", { onFailure: "ghost" })]).success,
+    ).toBe(false);
+    // onFailure may not resolve to the SUCCESS terminal.
+    expect(
+      WorkflowStepsSchema.safeParse([rest("a", { onFailure: WORKFLOW_END_SUCCESS })])
+        .success,
+    ).toBe(false);
+  });
+
+  test("onSuccess may not target a failure terminal", () => {
+    expect(
+      WorkflowStepsSchema.safeParse([rest("a", { onSuccess: WORKFLOW_STOP_FAIL })])
+        .success,
+    ).toBe(false);
+  });
+
+  test("a step key may not collide with a reserved terminal token", () => {
+    expect(
+      WorkflowStepsSchema.safeParse([rest("END_SUCCESS")]).success,
+    ).toBe(false);
+    expect(WorkflowStepsSchema.safeParse([rest("STOP_FAIL")]).success).toBe(false);
+  });
+
+  test("the valid failure terminals are accepted as onFailure targets", () => {
+    for (const terminal of [
+      WORKFLOW_STOP_FAIL,
+      WORKFLOW_ESCALATE_TO_MANUAL,
+      "COMPENSATE",
+    ]) {
+      expect(
+        WorkflowStepsSchema.safeParse([rest("a", { onFailure: terminal })]).success,
+      ).toBe(true);
+    }
+  });
+});
+
+describe("legacy onError → transition mapping (resolveStepTransitions)", () => {
+  test("fail → STOP_FAIL", () => {
+    const parsed = WorkflowStepsSchema.parse([rest("a", { onError: "fail" })]);
+    expect(resolveStepTransitions(parsed, 0).onFailure).toBe(WORKFLOW_STOP_FAIL);
+  });
+
+  test("manual → ESCALATE_TO_MANUAL", () => {
+    const parsed = WorkflowStepsSchema.parse([rest("a", { onError: "manual" })]);
+    expect(resolveStepTransitions(parsed, 0).onFailure).toBe(
+      WORKFLOW_ESCALATE_TO_MANUAL,
+    );
+  });
+
+  test("continue → take the success edge (fall through to the next step)", () => {
+    const parsed = WorkflowStepsSchema.parse([
+      rest("a", { onError: "continue" }),
+      rest("b"),
+    ]);
+    const t0 = resolveStepTransitions(parsed, 0);
+    expect(t0.onSuccess).toBe("b");
+    expect(t0.onFailure).toBe("b");
+  });
+
+  test("an explicit onFailure overrides the legacy onError", () => {
+    const parsed = WorkflowStepsSchema.parse([
+      rest("a", { onError: "continue", onFailure: WORKFLOW_STOP_FAIL }),
+      rest("b"),
+    ]);
+    expect(resolveStepTransitions(parsed, 0).onFailure).toBe(WORKFLOW_STOP_FAIL);
   });
 });
