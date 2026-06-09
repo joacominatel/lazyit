@@ -182,7 +182,17 @@
   },
   "runs": {
     "title": "Ejecuciones recientes",
-    "empty": "Aún no hay ejecuciones."
+    "empty": "Aún no hay ejecuciones.",
+    "emptyTitle": "Aún no hay ejecuciones",
+    "emptyDescription": "Cuando los flujos de esta app se disparen al otorgar o revocar un acceso, sus ejecuciones aparecerán aquí.",
+    "needsAttention": "Requiere atención",
+    "durationPending": "En curso",
+    "viewAll": "Ver todas ({count})"
+  },
+  "runRetry": {
+    "action": "Reintentar",
+    "toastSuccess": "Ejecución reencolada desde el paso que falló.",
+    "toastError": "No se pudo reintentar esta ejecución."
   },
   "runDetail": {
     "title": "Ejecución",
