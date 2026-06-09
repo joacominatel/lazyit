@@ -526,10 +526,18 @@ the provided value); a **failure edge to COMPENSATE** renders the compensation s
 nested entry (`↻ compensation · delete half-created account · ✓`); a **failure edge to STOP** ends the
 run as `FAILED`. **Redaction is non-negotiable** (INV-6, ADR-0031 bodies-never-logged) — the UI renders
 whatever the API returns (already redacted), and **never** un-redacts; secret tokens and mapped
-sensitive values appear as `‹redacted›`. Failed steps offer `Retry` (single step) and the run offers
-`Retry failed` / `Re-run` where the backend supports it (BullMQ per-step retries/backoff per ADR-0053).
-Each row maps to one `WorkflowStepRun` attempt (ADR-0054 §4); the edge taken + escalation/compensation
-linkage are the contract additions enumerated in **C2** (§10).
+sensitive values appear as `‹redacted›`. Each row maps to one `WorkflowStepRun` attempt (ADR-0054 §4);
+the edge taken + escalation/compensation linkage are the contract additions enumerated in **C2** (§10).
+
+**Retry a FAILED run (wired — issue #308).** A terminal `FAILED` run offers a single **Reintentar**
+action — on the run-detail panel header AND inline on the recent-runs row (`RetryRunButton`, gated on
+`workflow:run`, hidden otherwise). It calls `POST /workflow-runs/:id/retry`, which **resumes from the
+step that failed onward, NOT from the start**: every already-`SUCCEEDED` step is skipped, so a
+non-idempotent create cannot double-provision. The transition is a guarded `FAILED`→`RUNNING`
+compare-and-set and the retried step re-executes as a NEW append-only attempt; only `FAILED` is
+retryable (a `COMPENSATED` run rolled its effects back — re-grant, don't retry → the API returns 409).
+On success the run polls live again; a 409 / 422 / broker hiccup surfaces via `notifyError` with the
+request id. (Per-step single-step `Retry` and a full `Re-run` remain future affordances.)
 
 ### 7c. The grant ↔ run cross-link
 
