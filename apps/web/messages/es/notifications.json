@@ -1,0 +1,8 @@
+{
+  "title": "Notificaciones",
+  "ariaLabel": "{count, plural, =0 {Notificaciones} one {Notificaciones, # sin leer} other {Notificaciones, # sin leer}}",
+  "markAllRead": "Marcar todo como leído",
+  "empty": "Estás al día.",
+  "unreadDot": "Sin leer",
+  "occurredAt": "Ocurrió {datetime}"
+}
