@@ -127,10 +127,15 @@ export class ConsumablesService {
     };
   }
 
-  /** A single non-deleted consumable by id; throws 404 if missing or deleted. */
+  /**
+   * A single non-deleted consumable by id; throws 404 if missing or deleted. `Consumable` is NOT in
+   * the ADR-0032 SOFT_DELETABLE_MODELS set (its service filters `deletedAt` explicitly to serve the
+   * ADMIN archived-view slice), so the read filter does NOT auto-scope it — the `deletedAt: null`
+   * guard is applied here EXPLICITLY (SEC-050).
+   */
   async findOne(id: string) {
     const consumable = await this.prisma.consumable.findFirst({
-      where: { id },
+      where: { id, deletedAt: null },
     });
     if (!consumable) {
       throw new NotFoundException(`Consumable ${id} not found`);
@@ -191,11 +196,13 @@ export class ConsumablesService {
    *
    * The cache write is done with **atomic, conditional SQL** rather than a JS read-modify-write, so
    * two concurrent movements can't lost-update each other under Read Committed:
-   *   - IN          → `increment` (a single `UPDATE ... SET currentStock = currentStock + qty`).
+   *   - IN          → `increment` (a single `UPDATE ... SET currentStock = currentStock + qty`),
+   *                   after a live-scoped pre-read (404s a missing/soft-deleted row; SEC-050).
    *   - OUT         → a **guarded** `updateMany` that decrements only while `currentStock >= qty`
    *                   (and the row is live); if it matches 0 rows the stock is insufficient (or the
    *                   row vanished) → **409**, and the whole transaction rolls back.
-   *   - ADJUSTMENT  → set `currentStock` to the absolute `quantity` (a physical recount).
+   *   - ADJUSTMENT  → set `currentStock` to the absolute `quantity` (a physical recount) via a
+   *                   **guarded** `updateMany` scoped to the live row; no match ⇒ **404** (SEC-050).
    *
    * Overflow guard: an IN whose result would exceed int4 (`> INT4_MAX`) is rejected as a **409**
    * before any write, so the cache can never silently wrap or hit a P2020 mid-transaction. Returns
@@ -211,9 +218,11 @@ export class ConsumablesService {
 
     return this.prisma.$transaction(async (tx) => {
       if (type === 'IN') {
-        // Read only to enforce the int4 ceiling and a clean 404; the write itself is atomic.
+        // Read only to enforce the int4 ceiling and a clean 404; the write itself is atomic. Scoped
+        // to the LIVE row (`deletedAt: null`) so a soft-deleted consumable reads as null → 404 and is
+        // never incremented — `Consumable` is not auto-filtered by the ADR-0032 extension (SEC-050).
         const consumable = await tx.consumable.findFirst({
-          where: { id: consumableId },
+          where: { id: consumableId, deletedAt: null },
           select: { currentStock: true },
         });
         if (!consumable) {
@@ -240,9 +249,11 @@ export class ConsumablesService {
           data: { currentStock: { decrement: quantity } },
         });
         if (result.count === 0) {
-          // Distinguish "no such (live) consumable" (404) from "not enough stock" (409).
+          // Distinguish "no such (live) consumable" (404) from "not enough stock" (409). Live-scoped
+          // (`deletedAt: null`) so a soft-deleted consumable reads as null → 404, never echoing an
+          // archived row's exact stock in the 409 message (info leak; SEC-050).
           const consumable = await tx.consumable.findFirst({
-            where: { id: consumableId },
+            where: { id: consumableId, deletedAt: null },
             select: { currentStock: true },
           });
           if (!consumable) {
@@ -254,11 +265,17 @@ export class ConsumablesService {
         }
       } else {
         // ADJUSTMENT: an absolute recount. quantity is bounded to int4 by the shared schema, so no
-        // overflow is possible here. `update` 404s (P2025) if the row is missing/soft-deleted.
-        await tx.consumable.update({
-          where: { id: consumableId },
+        // overflow is possible here. A guarded `updateMany` scoped to the live row (`deletedAt: null`)
+        // — a plain `update` only 404s (P2025) when the row is truly absent, NOT when it is merely
+        // soft-deleted (the row still exists), which would silently recount an archived consumable
+        // (SEC-050). No matched row ⇒ missing or soft-deleted ⇒ 404 + rollback.
+        const result = await tx.consumable.updateMany({
+          where: { id: consumableId, deletedAt: null },
           data: { currentStock: quantity },
         });
+        if (result.count === 0) {
+          throw new NotFoundException(`Consumable ${consumableId} not found`);
+        }
       }
 
       return tx.consumableMovement.create({
@@ -300,10 +317,14 @@ export class ConsumablesService {
     });
   }
 
-  /** Lightweight 404 guard for writes and nested endpoints (no relation loading). */
+  /**
+   * Lightweight 404 guard for writes and nested endpoints (no relation loading). Live-scoped
+   * (`deletedAt: null`) so `update`/`remove`/`listMovements` refuse a soft-deleted consumable —
+   * `Consumable` is not auto-filtered by the ADR-0032 extension (SEC-050).
+   */
   async assertExists(id: string): Promise<void> {
     const consumable = await this.prisma.consumable.findFirst({
-      where: { id },
+      where: { id, deletedAt: null },
       select: { id: true },
     });
     if (!consumable) {
