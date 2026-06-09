@@ -115,6 +115,11 @@
     "copied": "Code copied",
     "plainText": "text"
   },
+  "mermaid": {
+    "rendering": "Rendering diagram…",
+    "renderError": "Couldn't render this diagram — check the syntax.",
+    "ariaLabel": "Diagram"
+  },
   "filters": {
     "activeFilters": "Active filters",
     "clearFilter": "Clear filter",
@@ -163,6 +168,10 @@
   },
   "editor": {
     "markdownPlaceholder": "Write in Markdown…",
-    "previewHint": "Preview appears here as you type."
+    "previewHint": "Preview appears here as you type.",
+    "viewToggleLabel": "Editor layout",
+    "viewSplit": "Split",
+    "viewWrite": "Write",
+    "viewPreview": "Preview"
   }
 }
