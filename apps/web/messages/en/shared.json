@@ -31,6 +31,23 @@
   },
   "activity": {
     "system": "System",
+    "occurredAt": "Occurred {datetime}",
+    "viewUser": "View {user}",
+    "line": {
+      "granted": "Access to {subject} granted to {user}",
+      "grantedSubject": "Access to {subject} granted",
+      "revoked": "Access to {subject} revoked from {user}",
+      "revokedSubject": "Access to {subject} revoked",
+      "assigned": "{subject} assigned to {user}",
+      "assignedSubject": "{subject} assigned",
+      "released": "{subject} released from {user}",
+      "releasedSubject": "{subject} released",
+      "userUpdated": "{subject}'s profile updated",
+      "userRoleChanged": "{subject}'s role changed",
+      "userCreated": "{subject} created",
+      "userRestored": "{subject} restored",
+      "userPasswordResetSent": "Password reset sent to {subject}"
+    },
     "dateGroup": {
       "today": "Today",
       "yesterday": "Yesterday",
