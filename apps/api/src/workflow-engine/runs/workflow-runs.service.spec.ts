@@ -3,7 +3,16 @@ jest.mock('../../../generated/prisma/client', () => ({
   Prisma: {},
 }));
 
+import {
+  ConflictException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { WorkflowRunsService } from './workflow-runs.service';
+import {
+  RetryNotResolvableError,
+  type WorkflowRunOrchestrator,
+} from '../run/workflow-run.orchestrator';
 import type { PrismaService } from '../../prisma/prisma.service';
 
 /**
@@ -55,7 +64,10 @@ function build(metadata: Record<string, unknown>) {
     workflowRun,
     workflowStepRun,
   } as unknown as PrismaService;
-  return new WorkflowRunsService(prisma);
+  const orchestrator = {
+    retryRun: jest.fn(),
+  } as unknown as WorkflowRunOrchestrator;
+  return new WorkflowRunsService(prisma, orchestrator);
 }
 
 describe('WorkflowRunsService.findOne — CSEC-4 step projection', () => {
@@ -117,5 +129,93 @@ describe('WorkflowRunsService.findOne — CSEC-4 step projection', () => {
     expect(step.errorClass).toBeNull();
     expect(step.transitionTaken).toBeNull();
     expect(step.durationMs).toBeNull();
+  });
+});
+
+/**
+ * Issue #308 — the manual post-terminal RETRY of a FAILED run. The service owns the precondition gates
+ * (exists / terminal-FAILED) and maps the orchestrator's outcomes to HTTP; the guarded CAS + the
+ * resume-from-failed-step walk are the orchestrator's (tested in its own spec).
+ */
+function buildForRetry(
+  runRow: { id: string; status: string } | null,
+  retryResult?:
+    | { retried: true; resumeStepKey: string; attempt: number }
+    | { retried: false }
+    | Error,
+) {
+  const findFirst = jest.fn().mockResolvedValue(runRow);
+  const prisma = {
+    workflowRun: { findFirst },
+    workflowStepRun: { findMany: jest.fn() },
+  } as unknown as PrismaService;
+  const retryRun = jest.fn(() =>
+    retryResult instanceof Error
+      ? Promise.reject(retryResult)
+      : Promise.resolve(retryResult),
+  );
+  const orchestrator = {
+    retryRun,
+  } as unknown as WorkflowRunOrchestrator;
+  const service = new WorkflowRunsService(prisma, orchestrator);
+  return { service, retryRun };
+}
+
+describe('WorkflowRunsService.retry — manual FAILED-run retry (issue #308)', () => {
+  it('404s when the run does not exist (never calls the orchestrator)', async () => {
+    const { service, retryRun } = buildForRetry(null);
+    await expect(service.retry('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(retryRun).not.toHaveBeenCalled();
+  });
+
+  it('409s a non-FAILED run — ONLY terminal FAILED is retryable (no full re-run of SUCCEEDED)', async () => {
+    for (const status of [
+      'PENDING',
+      'RUNNING',
+      'AWAITING_INPUT',
+      'SUCCEEDED',
+      'COMPENSATED',
+    ]) {
+      const { service, retryRun } = buildForRetry({ id: 'r1', status });
+      await expect(service.retry('r1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      // The guard short-circuits BEFORE the orchestrator — a COMPENSATED run is never re-driven.
+      expect(retryRun).not.toHaveBeenCalled();
+    }
+  });
+
+  it('retries a FAILED run and returns the resumed step + the new attempt number', async () => {
+    const { service, retryRun } = buildForRetry(
+      { id: 'r1', status: 'FAILED' },
+      { retried: true, resumeStepKey: 'provision', attempt: 3 },
+    );
+    await expect(service.retry('r1')).resolves.toEqual({
+      ok: true,
+      runId: 'r1',
+      resumeStepKey: 'provision',
+      attempt: 3,
+    });
+    expect(retryRun).toHaveBeenCalledWith('r1');
+  });
+
+  it('409s when the guarded CAS is lost to a concurrent retry (orchestrator returns retried: false)', async () => {
+    const { service } = buildForRetry(
+      { id: 'r1', status: 'FAILED' },
+      { retried: false },
+    );
+    await expect(service.retry('r1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('422s when the FAILED run has no resolvable failed step to resume from', async () => {
+    const { service } = buildForRetry(
+      { id: 'r1', status: 'FAILED' },
+      new RetryNotResolvableError('no failed step'),
+    );
+    await expect(service.retry('r1')).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
   });
 });

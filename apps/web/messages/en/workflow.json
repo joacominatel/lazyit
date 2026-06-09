@@ -182,7 +182,17 @@
   },
   "runs": {
     "title": "Recent runs",
-    "empty": "No runs yet."
+    "empty": "No runs yet.",
+    "emptyTitle": "No runs yet",
+    "emptyDescription": "When this app's workflows fire on a grant or revoke, their runs appear here.",
+    "needsAttention": "Needs attention",
+    "durationPending": "In progress",
+    "viewAll": "View all {count}"
+  },
+  "runRetry": {
+    "action": "Retry",
+    "toastSuccess": "Run re-queued from the failed step.",
+    "toastError": "Could not retry this run."
   },
   "runDetail": {
     "title": "Run",
