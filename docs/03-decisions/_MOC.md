@@ -3,13 +3,16 @@ title: Decisions (ADRs) — MOC
 tags: [moc, adr]
 status: draft
 created: 2026-05-25
-updated: 2026-06-08
+updated: 2026-06-09
 ---
 
 <!-- updated 2026-06-01: ADR-0043 (Zitadel source-of-truth) accepted + validated live end-to-end
      (epic delivered; Phase 4 hardening #92/#93/#94/#95 + INVARIANTS). -->
 <!-- updated 2026-06-08: ADR-0053 (async workers, BullMQ/Valkey) + ADR-0054 (Applications Workflow
      Engine data model) accepted and shipped on master (epic #248, Phase 1). -->
+<!-- updated 2026-06-09: ADR-0055 (on-prem internal-target connectors — proposed, CEO holding the
+     build) + ADR-0056 (in-app notification bell — accepted, #313) added as Phase-2 follow-ups to
+     ADR-0054 (epic #248). -->
 
 # Decisions (ADRs) — Map of Content
 
@@ -79,6 +82,8 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0052-ci-parallel-docker-and-decoupled-verify]] | Parallelize CI Docker builds (matrix) + decouple from `verify`; refines [[0027-ci-pipeline]] | accepted |
 | [[0053-async-workers-bullmq-valkey]] | Async workers — BullMQ on Valkey + sandboxed processors (memory-isolated jobs); first job = async `.docx` import (closes SEC-002) | accepted |
 | [[0054-applications-workflow-engine]] | Applications Workflow Engine (epic #248) — opt-in per-app provisioning data model on BullMQ-transport + Postgres-as-system-of-record; decoupled from the grant (inverse of INV-5), (trigger, accessGrantId) idempotency, own AES-256-GCM secret store; v1 = REST/WEBHOOK_OUT/MANUAL, public-only | accepted |
+| [[0055-on-prem-internal-target-connectors]] | On-prem / internal-target connectors (epic #248, Phase 2) — a per-`WorkflowConnection` audited `host[:port]` allowlist wired to the egress guard's `isInternalTargetAllowed` seam; loopback/IMDS/link-local un-allowlistable by construction; `http`-relax coupled to a non-empty allowlist; gated by a new `workflow:egress`; enables an internal HTTP/REST target, NOT a native LDAP/AD connector | **proposed** (CEO holding the build) |
+| [[0056-in-app-notification-bell]] | In-app notification bell (admin-only, v1; #313) — append-only `Notification` + per-admin `NotificationRead` join (fan-out-on-read), closed shared type enum, best-effort post-commit emitters (critical-app/admin-granted/low-stock/manual-task/run-failed), poll delivery (SSE Phase-2 behind the same API), new `notification:read` seeded ADMIN-only; distinct from the `recent_activity` view | accepted |
 
 ## Pending ADRs (to write when decided)
 - **CD / image publishing** — deferred in [[0027-ci-pipeline]]; define the registry (GHCR) +

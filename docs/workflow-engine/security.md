@@ -202,6 +202,11 @@ integration types. A blanket private-IP block would break the product's own use 
 
 ### 3.3 Resolution — explicit, audited internal-target allowlist
 
+> **Decision (Phase 2):** ratified as a `proposed` ADR — [[0055-on-prem-internal-target-connectors]]
+> (option (A) below, per-`WorkflowConnection` `host[:port]` allowlist wired to the already-built
+> `isInternalTargetAllowed` seam; gated by a new `workflow:egress`; the CEO is holding the build). This
+> section is the design input; the ADR is the binding record.
+
 **Deny-by-default for private/loopback/link-local/metadata, with a per-connector explicit allowlist that
 an admin must consciously add.** An admin configuring a connector that targets `vpn.corp.local:8080` must
 **add that host (and port) to an internal-targets allowlist**, acknowledging a "this target is on your
@@ -225,7 +230,8 @@ Pick the default egress posture:
 - **(B) Allow any non-loopback/non-metadata, block only the engine's own services.** Lower friction,
   materially weaker (the whole LAN stays reachable). Not recommended.
 
-The recommendation is **(A)**, with `localhost`/IMDS permanently un-allowlistable regardless.
+The recommendation is **(A)**, with `localhost`/IMDS permanently un-allowlistable regardless. **Resolved
+in [[0055-on-prem-internal-target-connectors]]** (option (A), `proposed` — CEO holding the build).
 
 ---
 
