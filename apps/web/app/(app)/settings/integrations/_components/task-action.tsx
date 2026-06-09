@@ -215,8 +215,16 @@ function TaskInputField({
   onChange: (value: unknown) => void;
   disabled: boolean;
 }) {
+  const t = useTranslations("workflow");
   const listId = `task-suggestions-${field.name}`;
   const hasSuggestions = (field.suggestions?.length ?? 0) > 0;
+  // A select renders the admin-defined `options` first, then the static `suggestions` as extra choices
+  // (deduped, order-preserving). With NO choices at all it would be a dead empty dropdown, so we fall
+  // back to a free-text input (the same control the other text types use) rather than an unusable select.
+  const selectChoices =
+    field.type === "select"
+      ? [...new Set([...(field.options ?? []), ...(field.suggestions ?? [])])]
+      : [];
 
   return (
     <Field orientation={field.type === "boolean" ? "horizontal" : "vertical"}>
@@ -232,18 +240,19 @@ function TaskInputField({
           onCheckedChange={onChange}
           disabled={disabled}
         />
-      ) : field.type === "select" ? (
+      ) : field.type === "select" && selectChoices.length > 0 ? (
         <Select
           value={typeof value === "string" && value ? value : undefined}
           onValueChange={onChange}
           disabled={disabled}
         >
           <SelectTrigger id={`task-field-${field.name}`}>
-            <SelectValue />
+            <SelectValue placeholder={t("taskAction.selectPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
-            {(field.options ?? []).map((option) => (
+            {selectChoices.map((option) => (
               <SelectItem key={option} value={option}>
+                {/* SEC-A5: admin-typed option rendered as escaped text. */}
                 {option}
               </SelectItem>
             ))}
