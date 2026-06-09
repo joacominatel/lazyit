@@ -148,6 +148,16 @@ Add a first-class **`ServiceAccount`** principal:
     never persisted).
   - No forced expiry in v1 (optional `expiresAt` only) — operational hygiene (rotation cadence) is left
     to the operator for now.
+- **System-managed accounts (issue #304).** The workflow engine auto-provisions a singleton,
+  least-privilege **engine SA** (reserved name `lazyit-workflow-engine`, [[0054-applications-workflow-engine]] §6)
+  that every workflow run **executes as** — it is the audited run actor, so it must always exist and stay
+  live. That row is therefore **locked**: `update` / `rotate` / `revoke` reject it with a **409** (it can't
+  be renamed, re-granted, disabled via `isActive=false`, token-rotated, or soft-deleted), identified by the
+  **reserved name** (single source of truth on `EngineServiceAccountService.ENGINE_SA_NAME`). The wire
+  `ServiceAccountSchema` carries a `systemManaged:boolean` (default `false`) so the admin UI gates the row
+  controls + shows a "system-managed" badge **off the API signal**, never a hardcoded client name. The
+  engine's `getOrCreate()` additionally self-heals the row (un-revoke + re-enable) on next use as defence
+  in depth.
 - **Follow-ups.**
   - ~~**Frontend admin UI** for `/service-accounts`~~ — **delivered** as `/settings/service-accounts`
     (create/list/rotate/edit/revoke/restore; the token is shown once on create/rotate and is never

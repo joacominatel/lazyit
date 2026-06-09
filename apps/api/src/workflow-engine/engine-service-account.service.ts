@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
+import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -25,19 +26,37 @@ export class EngineServiceAccountService {
   /**
    * Return the engine SA id, creating it on first use. Idempotent: a concurrent create is absorbed by
    * re-reading. The result is cached for the process lifetime (the row is never hard-deleted).
+   *
+   * SELF-HEAL (#304): the row is normally locked from human mutation by {@link ServiceAccountsService}
+   * (system-managed), but as defence-in-depth we also re-heal here — if a pre-lock or out-of-band edit
+   * left it soft-deleted (`deletedAt`) or disabled (`isActive=false`), we restore + re-enable it so a run
+   * always has a live actor. The lookup uses `includeSoftDeleted` so a revoked singleton is reused (and
+   * un-revoked) rather than duplicated.
    */
   async getOrCreate(): Promise<string> {
     if (this.cachedId) {
       return this.cachedId;
     }
-    const existing = await this.prisma.serviceAccount.findFirst({
-      where: {
-        name: EngineServiceAccountService.ENGINE_SA_NAME,
-        deletedAt: null,
-      },
-      select: { id: true },
-    });
+    const existing = (await this.prisma.serviceAccount.findFirst({
+      where: { name: EngineServiceAccountService.ENGINE_SA_NAME },
+      select: { id: true, isActive: true, deletedAt: true },
+      includeSoftDeleted: true,
+    } as Prisma.ServiceAccountFindFirstArgs)) as {
+      id: string;
+      isActive: boolean;
+      deletedAt: Date | null;
+    } | null;
     if (existing) {
+      // Re-heal a soft-deleted or disabled singleton back to a usable run actor.
+      if (existing.deletedAt !== null || !existing.isActive) {
+        await this.prisma.serviceAccount.update({
+          where: { id: existing.id },
+          data: { deletedAt: null, isActive: true },
+        });
+        this.logger.warn(
+          'Re-healed the engine service account (it was disabled or soft-deleted).',
+        );
+      }
       this.cachedId = existing.id;
       return existing.id;
     }
