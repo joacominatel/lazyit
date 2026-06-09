@@ -437,6 +437,11 @@ manual step or an escalated failure so the action UI (§6b) can show the right c
 > (ADMIN-only). Read the "ADR-0052 SSE" references below as **ADR-0056, poll-first**: the manual-task
 > inbox + run-failed alerts ride that bell; the live SSE push is the Phase-2 upgrade, so the v1 inbox is
 > a **polled** list until then (dependency D1 below is resolved by ADR-0056, not the dead branch).
+>
+> **Landed (#313, on `dev`):** the bell now exists — the topbar `NotificationBell` (poll v1, gated
+> `notification:read`) + the `workflow.manual_task` emitter fires on ManualTask creation. The
+> `workflow.run_failed` emitter is a noted follow-up (its type + the bell's render path already exist).
+> See [[notification]].
 
 The brief instructs reusing the notification/bell/SSE stack — and it is the right fit:
 
