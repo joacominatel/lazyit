@@ -78,13 +78,19 @@ can be added later without a destructive migration**.
   join table (**done** in [[0042]] — [[article-link]]); content search = projecting `content` into
   Meilisearch (**done** in [[0042]]); tags = a join table (still ⚪ deferred). None reshaped
   `Article`, exactly as designed.
-- **Render enrichment (issue #200), authoring unchanged:** the web renderer (`MarkdownView`)
+- **Render enrichment (issues #200, #310), authoring unchanged:** the web renderer (`MarkdownView`)
   syntax-highlights fenced code blocks (a curated language set: powershell/bash/shell/ts/js/
   json/yaml/sql/diff) with a bespoke warm-bone token theme and a per-block copy button (reusing
-  `CopyButton`). This is **render-only** — authoring stays a raw-Markdown textarea + live preview
-  (no TipTap/WYSIWYG), so the "simple wiki" decision holds. Highlighting is produced by a React
-  `components.code` override that runs **after** [[0029-untrusted-content-sanitization|rehype-sanitize]],
-  so the sanitize allow-list is untouched and the SEC-003 guarantee is preserved by construction.
+  `CopyButton`), and renders a ` ```mermaid ` fenced block as a **sandboxed diagram**
+  (`MermaidDiagram`, mermaid lazy-loaded client-only with `securityLevel: 'strict'`, no
+  click-handlers/HTML labels, each diagram error-bounded so a malformed one degrades to a copyable
+  inline error, never a crash — issue #310). This is **render-only** — authoring stays a raw-Markdown
+  textarea + live preview (no TipTap/WYSIWYG), with a quiet split/write/preview layout toggle to gain
+  room (#310), so the "simple wiki" decision holds. Both the highlighter and the mermaid renderer are
+  React `components.code` overrides that run **after**
+  [[0029-untrusted-content-sanitization|rehype-sanitize]], so the sanitize allow-list is untouched,
+  `rehype-raw` stays off, and the SEC-003 guarantee is preserved by construction (mermaid's own
+  strict-mode SVG sanitization is a second layer, never the boundary).
 - **Trade-offs:** no edit history (an overwrite loses the previous body until versioning lands);
   search is substring-only and excludes `content`; `metadata` is unvalidated (same debt as `specs`).
 - **Deferred import formats:** `.pdf` (ugly text extraction), `.html` (→ `turndown`), `.odt`/`.rtf`
