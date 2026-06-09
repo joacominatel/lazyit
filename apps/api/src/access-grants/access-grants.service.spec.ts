@@ -8,6 +8,7 @@ import { AccessGrantsService } from './access-grants.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` only for types (erased at runtime), so an empty object is enough.
@@ -57,8 +58,8 @@ const SA_PRINCIPAL = {
 describe('AccessGrantsService', () => {
   let service: AccessGrantsService;
   let accessGrant: GrantMock;
-  let user: { findFirst: jest.Mock };
-  let application: { findFirst: jest.Mock };
+  let user: { findFirst: jest.Mock; findUnique: jest.Mock };
+  let application: { findFirst: jest.Mock; findUnique: jest.Mock };
   let prisma: { $transaction: jest.Mock };
   // ActorService is a pure resolver (the guard already validated the principal); the real instance is
   // used so it produces the genuine ActorAttribution from the principal each test passes (ADR-0048).
@@ -72,8 +73,8 @@ describe('AccessGrantsService', () => {
       update: jest.fn(),
       count: jest.fn(),
     };
-    user = { findFirst: jest.fn() };
-    application = { findFirst: jest.fn() };
+    user = { findFirst: jest.fn(), findUnique: jest.fn() };
+    application = { findFirst: jest.fn(), findUnique: jest.fn() };
     // findPage uses the array form of $transaction (a tuple of two queries); batchRevoke uses the
     // callback form with the tx client. The mock supports BOTH: array → await each query; callback →
     // invoke with a tx whose accessGrant is the same mock (so per-item updates are asserted on it).
@@ -103,6 +104,13 @@ describe('AccessGrantsService', () => {
             buildRunData: jest.fn(),
             enqueue: jest.fn().mockResolvedValue(true),
           },
+        },
+        {
+          // The notification emitter is best-effort and post-commit; these grant tests don't assert on
+          // it (the emitter behaviour is covered in notifications.emitters.spec.ts), so a no-op mock
+          // keeps the grant assertions unchanged.
+          provide: NotificationsService,
+          useValue: { emit: jest.fn().mockResolvedValue(null) },
         },
       ],
     }).compile();
