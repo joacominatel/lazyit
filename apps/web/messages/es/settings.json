@@ -10,6 +10,10 @@
       "title": "Taxonomías",
       "description": "Gestiona las categorías que clasifican activos, aplicaciones, consumibles y artículos de la base de conocimiento — además de los modelos de activo."
     },
+    "locations": {
+      "title": "Ubicaciones",
+      "description": "Gestiona los lugares donde residen físicamente tus activos — oficinas, centros de datos, racks y depósitos."
+    },
     "roles": {
       "title": "Roles",
       "description": "Mira quién tiene cada rol RBAC en el equipo. Los cambios de rol se hacen en la sección de Usuarios."

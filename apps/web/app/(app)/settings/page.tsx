@@ -4,6 +4,7 @@ import {
   BoltIcon,
   ChevronRightIcon,
   KeyIcon,
+  MapPinIcon,
   ServerStackIcon,
   TagIcon,
   UsersIcon,
@@ -18,16 +19,26 @@ import { AdminGate } from "./_components/admin-gate";
 interface SettingsSection {
   href: string;
   /** The `hub` subkey holding this section's `title` / `description`. */
-  key: "taxonomies" | "roles" | "serviceAccounts" | "instance" | "integrations";
+  key:
+    | "taxonomies"
+    | "locations"
+    | "roles"
+    | "serviceAccounts"
+    | "instance"
+    | "integrations";
   icon: ComponentType<{ className?: string }>;
 }
 
 /**
- * The Settings index — the discoverable home for the admin surfaces: taxonomy management, the role
- * overview, service accounts and instance config. Each card links into its sub-area.
+ * The Settings index — the discoverable home for the admin surfaces: taxonomy management, the
+ * Locations registry, the role overview, service accounts and instance config. Each card links into
+ * its sub-area. Locations is reached from here (issue #312) rather than from a top-level sidebar
+ * entry — it is a low-traffic registry, so it sits next to Taxonomies under Config. Its card links
+ * out to the full /locations page (the route did not move).
  */
 const SECTIONS: SettingsSection[] = [
   { href: "/settings/taxonomies", key: "taxonomies", icon: TagIcon },
+  { href: "/locations", key: "locations", icon: MapPinIcon },
   { href: "/settings/roles", key: "roles", icon: UsersIcon },
   {
     href: "/settings/service-accounts",

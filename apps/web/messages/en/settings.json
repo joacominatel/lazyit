@@ -10,6 +10,10 @@
       "title": "Taxonomies",
       "description": "Manage the categories that classify assets, applications, consumables and knowledge-base articles — plus asset models."
     },
+    "locations": {
+      "title": "Locations",
+      "description": "Manage the places your assets physically live — offices, datacenters, racks and storage."
+    },
     "roles": {
       "title": "Roles",
       "description": "See who has which RBAC role across the team. Role changes happen in the Users section."
