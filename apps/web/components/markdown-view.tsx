@@ -5,6 +5,7 @@ import Markdown, { type Components } from "react-markdown";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "@/components/markdown-code-block";
+import { MermaidDiagram } from "@/components/markdown-mermaid";
 import { cn } from "@/lib/utils";
 
 /**
@@ -30,10 +31,11 @@ const SANITIZE_SCHEMA = {
 };
 
 /**
- * Custom renderers (issue #200). Fenced code blocks get syntax highlighting + a per-block
- * copy button via `CodeBlock`; inline code stays a plain `<code>`. Highlighting is produced
- * by these React components **after** `rehype-sanitize` runs, so the sanitizer never sees the
- * token markup — `SANITIZE_SCHEMA` needs no widening and the SEC-003 guarantee above is
+ * Custom renderers (issue #200, #310). Fenced code blocks get syntax highlighting + a per-block
+ * copy button via `CodeBlock`; a ` ```mermaid ` block renders as a sandboxed diagram via
+ * `MermaidDiagram`; inline code stays a plain `<code>`. All of these are produced by React
+ * components **after** `rehype-sanitize` runs, so the sanitizer never sees the token markup or
+ * the mermaid SVG — `SANITIZE_SCHEMA` needs no widening and the SEC-003 guarantee above is
  * preserved by construction.
  */
 const MARKDOWN_COMPONENTS: Components = {
@@ -43,7 +45,13 @@ const MARKDOWN_COMPONENTS: Components = {
   code({ node, className, children, ...rest }) {
     void node;
     const match = /language-(\w+)/.exec(className ?? "");
+    const language = match?.[1] ?? "";
     const text = String(children ?? "");
+    // A `mermaid` fence renders as a diagram (strict, sandboxed, error-bounded — issue #310).
+    // It runs after sanitize just like CodeBlock, so SANITIZE_SCHEMA stays untouched.
+    if (language === "mermaid") {
+      return <MermaidDiagram value={text.replace(/\n$/, "")} />;
+    }
     // No language class AND single-line → inline code; keep it as a plain <code>.
     if (!match && !text.includes("\n")) {
       return (
@@ -52,9 +60,7 @@ const MARKDOWN_COMPONENTS: Components = {
         </code>
       );
     }
-    return (
-      <CodeBlock language={match?.[1] ?? ""} value={text.replace(/\n$/, "")} />
-    );
+    return <CodeBlock language={language} value={text.replace(/\n$/, "")} />;
   },
   // `CodeBlock` already renders its own surface; pass the wrapper through so a fenced block
   // isn't double-wrapped in the default <pre> (inline code never reaches this renderer).
@@ -82,7 +88,12 @@ export function MarkdownView({
   return (
     <div
       className={cn(
-        "prose prose-sm max-w-none dark:prose-invert prose-pre:bg-muted prose-pre:text-foreground",
+        // ADR-0049: crisp reads — balanced headings, calm links, no garish pre default (CodeBlock
+        // owns its own surface), and `text-pretty` to avoid orphans in body copy.
+        "prose prose-sm max-w-none text-pretty dark:prose-invert",
+        "prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-pretty",
+        "prose-a:font-medium prose-a:text-primary prose-a:underline-offset-2",
+        "prose-pre:bg-muted prose-pre:text-foreground",
         className,
       )}
     >
