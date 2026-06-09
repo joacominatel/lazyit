@@ -2,7 +2,7 @@
 id: SEC-050
 title: Consumable & ConsumableCategory are not soft-delete filtered — archived rows leak on by-id reads / category list, and writes/movements hit soft-deleted rows
 severity: medium
-status: open
+status: fixed
 cwe: CWE-283
 discovered: 2026-06-06
 module: consumables
@@ -130,3 +130,68 @@ failed the day `Consumable`/`ConsumableCategory` were added. Stop relying on per
 - CWE-283: Unverified Ownership · CWE-200: Exposure of Sensitive Information.
 - ADR-0032 (soft-delete extension; the "must be added to SOFT_DELETABLE_MODELS" rule) ·
   ADR-0034 (consumables design) · ADR-0006 (soft delete / never resurrect) · ADR-0041 (restore).
+
+## Resolution
+
+**Status**: fixed (both halves)
+**Date**: 2026-06-09
+
+The finding had two halves. The two diverge on mechanism: `ConsumableCategory` joined
+`SOFT_DELETABLE_MODELS` (it carries no explicit `deletedAt` guard), but `Consumable` deliberately
+stays OUT of the set — its service filters `deletedAt` explicitly to serve the ADMIN archived-view
+slice (`deletedWhere`) — so its remaining read/write paths were guarded explicitly instead. This
+supersedes the finding's "Preferred" recommendation #1 (which suggested adding `Consumable` to the
+set too); recommendation #2 (explicit per-path guards) is the one that keeps the archived-view slice
+working.
+
+### Category half — closed by #325
+
+`ConsumableCategory` was added to `SOFT_DELETABLE_MODELS`
+(`apps/api/src/prisma/soft-delete.extension.ts`), so `findAll`/`findOne` are now auto-scoped to live
+rows and `GET /consumable-categories` no longer lists archived categories. The ADR-0032 text, the
+extension comment, and `soft-delete.extension.spec.ts` (`size` → 11, with `Consumable` asserted
+`false` and `ConsumableCategory` asserted `true`) were updated in that PR.
+
+### Consumable half — closed by this PR
+
+`apps/api/src/consumables/consumables.service.ts`:
+
+- `findOne` — `findFirst({ where: { id, deletedAt: null } })`; `GET /consumables/:id` now 404s a
+  soft-deleted consumable instead of returning it.
+- `assertExists` — same `deletedAt: null` scope; this gates `update`, `remove`, `createMovement` and
+  `listMovements`, so `PATCH /consumables/:id` and `GET /consumables/:id/movements` 404 a
+  soft-deleted row.
+- `createMovement` `IN` — the pre-read is live-scoped, so a soft-deleted consumable reads as `null`
+  → 404 and is never incremented (no ledger row appended to an archived item).
+- `createMovement` `ADJUSTMENT` — switched the plain `update` to a **live-guarded `updateMany`**
+  (`where: { id, deletedAt: null }`); a plain `update` only P2025s when the row is truly absent, NOT
+  when it is merely soft-deleted (the row still exists), which would silently recount an archived
+  consumable. No matched row ⇒ 404 + rollback.
+- `createMovement` `OUT` — the decrement path was already live-guarded; the 409 disambiguation
+  read is now also live-scoped, so a soft-deleted consumable 404s instead of echoing its exact
+  `currentStock` in the 409 message (the info-leak asymmetry called out in the finding).
+
+### Tests added
+
+`apps/api/src/consumables/consumables.service.spec.ts` — the existing `findOne` / `update` /
+`listMovements` / `IN` / `OUT` assertions were tightened to expect the `deletedAt: null` scope (they
+fail without the fix), plus new cases: `IN` against a soft-deleted consumable 404s via the
+live-scoped pre-read, and `ADJUSTMENT` against a missing/soft-deleted row (guarded `updateMany`
+`count: 0`) 404s and persists nothing. 32/32 green with the fix; 9 failed before it.
+
+### Out of scope / residual
+
+- The optional `deleted=` archived slice on `GET /consumable-categories` (a *parity* nice-to-have,
+  not the leak) was NOT added: no other category-list endpoint (asset-/application-/article-
+  categories) exposes one — they all auto-filter to live rows — so adding a query param here is an
+  API-contract change, not part of closing the leak. The core leak (archived categories listed to
+  everyone) is fully closed by #325.
+- The finding's "Prevention" golden test (assert every `deletedAt` model is in
+  `SOFT_DELETABLE_MODELS`) was intentionally NOT added: it would contradict the deliberate
+  `Consumable`-stays-out carve-out ratified in #325 / ADR-0032.
+
+### Verification
+
+`cd apps/api && bunx prisma generate && bunx tsc --noEmit` clean; `bunx jest src/consumables
+src/consumable-categories src/prisma/soft-delete.extension.spec.ts src/common/deleted-filter.spec.ts`
+→ 57/57 pass.
