@@ -9,6 +9,7 @@ import { PermissionGate } from "@/components/permission-gate";
 import { ErrorState } from "@/components/resource-table";
 import { useApplication } from "@/lib/api/hooks/use-applications";
 import { useWorkflowRun } from "@/lib/api/hooks/use-workflow-runs";
+import { RetryRunButton } from "../../_components/retry-run-button";
 import { RunTimeline } from "../../_components/run-timeline";
 
 /**
@@ -65,7 +66,10 @@ export default function WorkflowRunDetailPage() {
               error={error}
             />
           ) : (
-            <DetailPanel title={t("runDetail.timelineTitle")}>
+            <DetailPanel
+              title={t("runDetail.timelineTitle")}
+              actions={<RetryRunButton runId={run.id} status={run.status} />}
+            >
               <RunTimeline run={run} />
             </DetailPanel>
           )}
