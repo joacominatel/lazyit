@@ -101,6 +101,30 @@ describe("Workflow permissions (Applications Workflow Engine, epic #248)", () =>
   });
 });
 
+describe("Notification permission (in-app notification bell, ADR-0056)", () => {
+  test("the `notification` domain is in the catalog with a single `:read` verb", () => {
+    expect(PERMISSION_DOMAINS).toContain("notification");
+    expect(PERMISSIONS).toContain("notification:read" as Permission);
+    // The bell is read-only — there is no notification:write/:delete (mark-read is a PATCH, not a perm).
+    expect(PERMISSIONS).not.toContain("notification:write" as Permission);
+    expect(PERMISSIONS).not.toContain("notification:delete" as Permission);
+  });
+
+  test("notification:read is an admin-only read (treated like logs:read / workflow:read)", () => {
+    expect(ADMIN_ONLY_READS).toContain("notification:read" as Permission);
+  });
+
+  test("SAFE DEFAULT: notification:read is ADMIN-only — MEMBER/VIEWER hold none", () => {
+    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain("notification:read" as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain(
+      "notification:read" as Permission,
+    );
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain(
+      "notification:read" as Permission,
+    );
+  });
+});
+
 describe("RolePermissionMatrix wire shape", () => {
   test("accepts a Role → Permission[] record for all three roles", () => {
     const matrix = {
@@ -198,11 +222,16 @@ describe("DEFAULT_ROLE_PERMISSIONS (the seed source of truth)", () => {
     }
   });
 
-  test("the admin-only reads are EXACTLY logs:read + workflow:read, and seeded to ADMIN only", () => {
-    // logs:read is the first admin-only read (issue #175); workflow:read joins it (epic #248) with the
-    // same posture — both are strictly more restrictive than the pre-tightening: excluded from BOTH
-    // MEMBER and VIEWER, held only by ADMIN's full catalog.
-    expect([...ADMIN_ONLY_READS]).toEqual(["logs:read", "workflow:read"]);
+  test("the admin-only reads are EXACTLY logs:read + workflow:read + notification:read, and seeded to ADMIN only", () => {
+    // logs:read is the first admin-only read (issue #175); workflow:read joins it (epic #248) and
+    // notification:read joins it (ADR-0056, the bell), all with the same posture — strictly more
+    // restrictive than the pre-tightening: excluded from BOTH MEMBER and VIEWER, held only by ADMIN's
+    // full catalog.
+    expect([...ADMIN_ONLY_READS]).toEqual([
+      "logs:read",
+      "workflow:read",
+      "notification:read",
+    ]);
     for (const p of ADMIN_ONLY_READS) {
       expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain(p);
       expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain(p);
