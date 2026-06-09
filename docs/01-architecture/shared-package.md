@@ -14,10 +14,11 @@ so the package doesn't become a junk drawer.
 
 > Today it exports `APP_NAME`, the per-entity zod schemas/types across the domain (User, Asset,
 > Location, Application, AccessGrant, Consumable, Article, …), the `Page<T>`/`PageQuery` list envelope,
-> the per-entity `clone/` sanitizers, and the **auth/authZ contract**: the frozen `Permission` catalog
+> the per-entity `clone/` sanitizers, the **auth/authZ contract**: the frozen `Permission` catalog
 > + `RolePermissionMatrix` + `DEFAULT_ROLE_PERMISSIONS` ([[role-permission]], [[0046-roles-permissions-v2]])
-> and the `ServiceAccount` schemas ([[service-account]], [[0048-service-accounts]]). The contract below
-> governs what gets added.
+> and the `ServiceAccount` schemas ([[service-account]], [[0048-service-accounts]]), and the
+> **Applications Workflow Engine contract** (`schemas/workflow.ts` — [[0054-applications-workflow-engine]]).
+> The contract below governs what gets added.
 
 ## The boundary rule
 
@@ -61,6 +62,23 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
 >   validated against the same `PermissionSchema`. See [[role-permission]] · [[service-account]] ·
 >   [[authorization]].
 
+> [!note] The Applications Workflow Engine contract
+> `packages/shared/src/schemas/workflow.ts` is the **single front↔back contract** for the engine
+> ([[0054-applications-workflow-engine]]), consumed by `api` (the executor + definition/run/task
+> endpoints) and `web` (the box-diagram DAG builder + run timeline). It holds:
+> - the **enums** — triggers (`ACCESS_GRANTED` / `ACCESS_REVOKED` v1), connector/step `kind`, run /
+>   step / manual-task status, deprovision policy, HTTP method, retry backoff, and the transition
+>   terminals (`END_SUCCESS` / `ESCALATE_TO_MANUAL` / `COMPENSATE` / `STOP_FAIL`);
+> - the **discriminated unions** keyed on `kind` — `WorkflowConnectionConfigSchema` and
+>   `WorkflowStepSchema` (REST / WEBHOOK_OUT / MANUAL), plus the per-step success-criteria, retry and
+>   `onSuccess`/`onFailure` edge dimensions of the opinionated error-handling DAG;
+> - the **pure classifiers** both sides share so the executor and the builder preview can never drift —
+>   `isHttpStatusSuccess(status, criteria?)` and `resolveStepTransitions(steps, index)` (the single
+>   source of truth for the graph walk);
+> - the **entity wire DTOs**. **Secrets never appear on a wire shape** — the read side exposes only a
+>   redacted `configured` descriptor (the [[service-account]] `tokenPrefix` pattern). Like the rest of
+>   `shared` it stays a framework-agnostic leaf: no Prisma, no NestJS, no React.
+
 ## What does NOT belong here
 
 - **Framework code** — React components/hooks, Next-specific code, NestJS providers/decorators.
@@ -85,4 +103,4 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
 
 Related: [[monorepo]] · [[code-conventions]] · [[authorization]] · [[role-permission]] ·
 [[service-account]] · [[0007-flexible-asset-specs-jsonb]] · [[0012-testing-strategy]] ·
-[[0046-roles-permissions-v2]] · [[0048-service-accounts]]
+[[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0054-applications-workflow-engine]]

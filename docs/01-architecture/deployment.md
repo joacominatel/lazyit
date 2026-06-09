@@ -3,7 +3,7 @@ title: Deployment
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-03
+updated: 2026-06-08
 ---
 
 # Deployment
@@ -29,13 +29,16 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
                           │    │ /api/*       ─▶ api :3001 (NestJS, Node)  [prefix stripped]
                           │    │ /api/docs*   ─▶ NOT proxied in prod (SEC-009; internal/dev only)
                           │   api ──▶ db :5432 (Postgres 18)               │
+                          │   api ──▶ valkey :6379 (BullMQ broker, AOF)    │
                           │   migrate (one-shot: prisma migrate deploy + seed)
                           │   internal network — only Caddy publishes ports │
                           └────────────────────────────┘
 ```
 
-- **Components:** Postgres, a one-shot **migrate** job, the **API**, the **web** app, and **Caddy**.
-  (Later: Redis + async workers — [[stack]].)
+- **Components:** Postgres, a one-shot **migrate** job, the **API**, the **web** app, **Caddy**, and
+  **Valkey** (the BullMQ broker for the async `.docx` import + the Applications Workflow Engine —
+  [[stack]]). With the bundled IdP, a **Zitadel** server + DB + one-shot bootstrap sidecar also run
+  ([[auth-zitadel-sot]]).
 - **Images:** multi-stage, built with Bun, run on Node (`node:26-alpine`); the API runs
   `node dist/src/main`, the web runs the Next.js standalone server. The migrate job runs on Bun
   (the seed needs it). Details: [[0025-containerization-strategy]].
@@ -45,12 +48,25 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   build). Details: [[0026-reverse-proxy-tls]].
 - **Migrations in prod:** the `migrate` job runs `prisma migrate deploy` (never `migrate dev`/
   `reset`) then the idempotent seed, before the API starts. → [[prisma-migrations]].
+- **Async substrate (Valkey):** a **Valkey** container (`valkey:8-alpine`, the Redis-compatible BSD
+  fork) is the **BullMQ broker** for background jobs — the async `.docx` import and the Applications
+  Workflow Engine ([[stack]], [[0053-async-workers-bullmq-valkey]]). It runs with **AOF persistence**
+  (`--appendonly yes --appendfsync everysec`) to a **named volume** (`valkey_data`) so queued jobs
+  survive a restart, a `valkey-cli ping` **healthcheck**, and a memory/CPU ceiling; the API gains
+  **`depends_on: valkey { condition: service_healthy }`**. Like the DBs it stays **internal-network
+  only and never publishes its port in prod** (the dev override binds `127.0.0.1:6379`).
 - **Secrets/config:** one `.env` per scope with a committed `.env.example`; the prod
   `infra/env/.env.prod` is gitignored, with `CHANGE_ME` placeholders and host-side protection. No
-  Docker secrets block or external manager (YAGNI). → [[0028-secrets-and-config]].
-- **Exposure:** only Caddy publishes ports; Postgres/API/web stay on the internal network. The dev
-  DB binds loopback only. → [[0028-secrets-and-config]], SEC-005.
-- **Backups:** manual `pg_dump`/`pg_restore` now, automation deferred. → [[backups]].
+  Docker secrets block or external manager (YAGNI). New scoped env: **`REDIS_URL`** (the Valkey URL,
+  e.g. `redis://valkey:6379`) and **`WORKFLOW_SECRET_KEY`** (the AES-256-GCM key for the workflow
+  secret store — 32 bytes / 64 hex via `openssl rand -hex 32`, fail-loud at boot if missing).
+  → [[0028-secrets-and-config]].
+- **Exposure:** only Caddy publishes ports; Postgres, Valkey, the API and web stay on the internal
+  network. The dev DB and Valkey bind loopback only. → [[0028-secrets-and-config]], SEC-005.
+- **Backups:** manual `pg_dump`/`pg_restore` now, automation deferred. **`WORKFLOW_SECRET_KEY` is a
+  third unrotatable DR linchpin** (alongside `POSTGRES_PASSWORD` and `ZITADEL_MASTERKEY`): losing it
+  makes every stored connector credential undecryptable, so back it up off-host with the *matching*
+  DB dump. → [[backups]].
 
 ## Deployment levels
 
@@ -101,9 +117,12 @@ path. See [[authorization]], [[0046-roles-permissions-v2]], [[0048-service-accou
 
 - **CD pipeline** — registry (GHCR) + deploy flow + image tagging, once a target exists.
 - **Backup automation** — scheduled + offsite, when there's a real deployment ([[backups]]).
-- **Async workers** — BullMQ + Redis topology, when adopted ([[stack]]).
+- **Dedicated worker container** — the async worker is co-located in the `api` container for now;
+  splitting it out is a documented follow-up when job volume / CPU-heavy flows warrant it
+  ([[0053-async-workers-bullmq-valkey]]).
 
 Related: [[stack]] · [[monorepo]] · [[setup]] · [[authorization]] · [[auth-zitadel-sot]] ·
-[[05-runbooks/_MOC|Runbooks]] · [[0025-containerization-strategy]] · [[0026-reverse-proxy-tls]] ·
-[[0027-ci-pipeline]] · [[0028-secrets-and-config]] · [[0043-zitadel-source-of-truth]] ·
-[[0047-guided-first-deploy-bootstrap]]
+[[backups]] · [[05-runbooks/_MOC|Runbooks]] · [[0025-containerization-strategy]] ·
+[[0026-reverse-proxy-tls]] · [[0027-ci-pipeline]] · [[0028-secrets-and-config]] ·
+[[0043-zitadel-source-of-truth]] · [[0047-guided-first-deploy-bootstrap]] ·
+[[0053-async-workers-bullmq-valkey]] · [[0054-applications-workflow-engine]]

@@ -3,7 +3,7 @@ title: Problem Space
 tags: [overview]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-08
 ---
 
 # Problem Space
@@ -43,5 +43,9 @@ A focused, IT-native, asset-centric system (see [[asset-centric]]) that unifies 
 access, tickets, consumables and knowledge — with auditability built in — is more valuable
 to a small IT team than any of the generic or narrow alternatives, and far cheaper to run
 than the enterprise suites.
+
+And where the ad-hoc grant/revoke pain above bites hardest, an opt-in
+[[workflow-engine/_MOC|Workflow Engine]] now automates provisioning and deprovisioning into the
+external systems — without ever blocking or rolling back the access record itself.
 
 Related: [[vision]] · [[competitors]] · [[asset-centric]]

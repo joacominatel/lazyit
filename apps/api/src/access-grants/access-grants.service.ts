@@ -387,7 +387,11 @@ export class AccessGrantsService {
     tx: Prisma.TransactionClient,
     grant: { userId: string; applicationId: string },
   ): Promise<boolean> {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${grant.userId}), hashtext(${grant.applicationId}))`;
+    // $executeRaw (NOT $queryRaw): pg_advisory_xact_lock returns `void`, which Prisma 7's pg driver
+    // adapter cannot deserialize as a result column (a $queryRaw here 500s with P2010
+    // "Failed to deserialize column of type 'void'"). $executeRaw runs the statement for its side
+    // effect — acquiring the xact-scoped lock — without deserializing any result column.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${grant.userId}), hashtext(${grant.applicationId}))`;
     const remainingActive = await tx.accessGrant.count({
       where: {
         userId: grant.userId,

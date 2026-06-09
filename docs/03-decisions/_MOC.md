@@ -3,11 +3,13 @@ title: Decisions (ADRs) — MOC
 tags: [moc, adr]
 status: draft
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-06-08
 ---
 
 <!-- updated 2026-06-01: ADR-0043 (Zitadel source-of-truth) accepted + validated live end-to-end
      (epic delivered; Phase 4 hardening #92/#93/#94/#95 + INVARIANTS). -->
+<!-- updated 2026-06-08: ADR-0053 (async workers, BullMQ/Valkey) + ADR-0054 (Applications Workflow
+     Engine data model) accepted and shipped on master (epic #248, Phase 1). -->
 
 # Decisions (ADRs) — Map of Content
 

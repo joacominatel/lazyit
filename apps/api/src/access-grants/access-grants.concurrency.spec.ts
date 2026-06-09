@@ -18,9 +18,9 @@ import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.
  *
  * This harness models that faithfully with a mock Prisma: a COMMITTED-state set of active grants, a
  * real async mutex standing in for `pg_advisory_xact_lock` (engaged ONLY when the code issues the
- * `$queryRaw` lock), and a two-party barrier that forces BOTH revoke UPDATEs to land before either
+ * `$executeRaw` lock), and a two-party barrier that forces BOTH revoke UPDATEs to land before either
  * count — the exact window the write skew needs. The count reads the committed set minus the tx's own
- * (self-visible) revoke; a tx commits its revoke + releases the lock at tx end. Remove the `$queryRaw`
+ * (self-visible) revoke; a tx commits its revoke + releases the lock at tx end. Remove the `$executeRaw`
  * lock from the service and both counts read the same stale snapshot → zero runs → this test fails.
  */
 
@@ -127,10 +127,10 @@ function buildHarness() {
           },
         },
         // The advisory lock. Engaged ONLY because the service issues it before the count.
-        $queryRaw: async () => {
+        $executeRaw: async () => {
           await acquire();
           ctx.holdsLock = true;
-          return [];
+          return 1;
         },
       };
       try {

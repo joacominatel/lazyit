@@ -64,8 +64,8 @@ function build() {
   // The per-(userId, applicationId) advisory lock the LAST_ACTIVE_GRANT decision takes inside the tx
   // (CCOR-1). The mock just records the call; the real serialization semantics are proven in
   // access-grants.concurrency.spec.ts.
-  const queryRaw = jest.fn().mockResolvedValue([]);
-  const tx = { accessGrant, workflowRun, $queryRaw: queryRaw };
+  const executeRaw = jest.fn().mockResolvedValue([]);
+  const tx = { accessGrant, workflowRun, $executeRaw: executeRaw };
   const prisma = {
     accessGrant,
     workflowRun,
@@ -91,7 +91,7 @@ function build() {
     workflowRun,
     applicationWorkflow,
     queue,
-    queryRaw,
+    executeRaw,
   };
 }
 
@@ -114,11 +114,11 @@ describe('AccessGrant outbox — create', () => {
     expect(runData.status).toBe('PENDING');
     expect(runData.workflowVersionId).toBe(5);
     expect(runData.executedAsServiceAccountId).toBe('sa_engine');
-    // Enqueued AFTER commit with a deterministic start jobId (idempotent).
+    // Enqueued AFTER commit with a deterministic, BullMQ-safe start jobId (idempotent; no `:` — #298).
     expect(h.queue.add).toHaveBeenCalledWith(
       'run-start',
       { runId: 'run1' },
-      expect.objectContaining({ jobId: 'start:run1' }),
+      expect.objectContaining({ jobId: 'start-run1' }),
     );
   });
 
@@ -233,8 +233,8 @@ describe('AccessGrant outbox — revoke (LAST_ACTIVE_GRANT)', () => {
 
     // The advisory lock is acquired (the count would race without it) and BEFORE the count, so a
     // waiter re-counts only after the holder commits.
-    expect(h.queryRaw).toHaveBeenCalledTimes(1);
-    expect(h.queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(h.executeRaw).toHaveBeenCalledTimes(1);
+    expect(h.executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
       h.accessGrant.count.mock.invocationCallOrder[0],
     );
   });
@@ -257,7 +257,7 @@ describe('AccessGrant outbox — revoke (LAST_ACTIVE_GRANT)', () => {
     expect(h.workflowRun.create).toHaveBeenCalledTimes(1);
     expect(h.accessGrant.count).not.toHaveBeenCalled();
     // EACH_GRANT needs no last-grant decision, so it never takes the serialization lock.
-    expect(h.queryRaw).not.toHaveBeenCalled();
+    expect(h.executeRaw).not.toHaveBeenCalled();
   });
 });
 

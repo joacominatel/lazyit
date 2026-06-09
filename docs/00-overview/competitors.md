@@ -3,7 +3,7 @@ title: Competitors & Landscape
 tags: [overview]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-08
 ---
 
 # Competitors & Landscape
@@ -24,6 +24,13 @@ How lazyit relates to the tools a small IT team might otherwise reach for.
 lazyit intentionally occupies the gap between **narrow** (Snipe-IT) and **heavy/generic**
 (ServiceNow, Jira): one opinionated, IT-native, self-hosted app that unifies inventory +
 access + tickets + consumables + knowledge, with auditability by default.
+
+One capability usually reserved for the heavy suites it now also has, on its own honest terms:
+**provisioning automation** — an opt-in, per-application [[workflow-engine/_MOC|Workflow Engine]]
+that drives access provisioning/deprovisioning into external systems (Jira, Redmine, any REST or
+webhook target) when access is granted or revoked in lazyit. It is new and deliberately scoped
+(public-HTTPS REST/webhook/manual steps, event triggers) — not a general-purpose no-code automation
+canvas, and apps without a workflow keep behaving exactly as before.
 
 ```mermaid
 quadrantChart

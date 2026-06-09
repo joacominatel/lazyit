@@ -23,3 +23,5 @@ docs/.obsidian/graph.json
 .claude/skills/*
 !.claude/skills/lazyit*
 impeccable/
+
+api_example/

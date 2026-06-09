@@ -2,6 +2,7 @@
 
 import {
   BookOpenIcon,
+  ChevronRightIcon,
   ClockIcon,
   Cog6ToothIcon,
   CubeIcon,
@@ -15,7 +16,9 @@ import type { Permission } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import type { Pillar } from "@/components/pillar-scope";
+import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useMyPermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +43,14 @@ type NavItem = {
    * either, both, or neither. Fails closed: while the permission set is loading the item is hidden.
    */
   permission?: Permission;
+  /**
+   * Mark this item as an expandable nav GROUP (issue #287): the top row still links to/highlights
+   * `href`, but it gains a chevron toggle that reveals the live Applications list, each linking to
+   * that app's Workflows page (`/applications/:id/workflows`). Only the Access → Applications item
+   * carries this. Honoured only on the expanded rail (`!collapsed`); the icon-only rail keeps the
+   * plain link. The sub-list inherits the item's existing gating (no extra `permission`/`adminOnly`).
+   */
+  expandable?: boolean;
 };
 
 type NavSection = {
@@ -108,7 +119,14 @@ const NAV: NavSection[] = [
   {
     headingKey: "access",
     pillar: "access",
-    items: [{ labelKey: "applications", href: "/applications", icon: KeyIcon }],
+    items: [
+      {
+        labelKey: "applications",
+        href: "/applications",
+        icon: KeyIcon,
+        expandable: true,
+      },
+    ],
   },
   {
     headingKey: "knowledge",
@@ -180,9 +198,23 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
           ) : section.headingKey && collapsed ? (
             <div className="mx-2 my-1 border-t border-border" />
           ) : null}
-          {items.map(({ labelKey, href, icon: Icon }) => {
+          {items.map((item) => {
+            const { labelKey, href, icon: Icon } = item;
             // Active for the exact route and any nested route (e.g. /assets/:id).
             const active = pathname === href || pathname.startsWith(`${href}/`);
+            // The Access → Applications item becomes an expandable group on the expanded rail
+            // (issue #287). The icon-only rail keeps the plain link (no room for a sub-tree).
+            if (item.expandable && !collapsed) {
+              return (
+                <ExpandableNavGroup
+                  key={href}
+                  labelKey={labelKey}
+                  href={href}
+                  icon={Icon}
+                  activeIconClass={activeIconClass}
+                />
+              );
+            }
             return (
               <Link
                 key={href}
@@ -211,5 +243,146 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
         );
       })}
     </nav>
+  );
+}
+
+/** DOM id linking the toggle's `aria-controls` to the revealed Applications sub-list. */
+const APPLICATIONS_SUBNAV_ID = "sidebar-applications-subnav";
+
+/**
+ * The Access → Applications item rendered as an expandable group (issue #287). The top row keeps the
+ * link to the Applications list (`/applications`); an adjacent chevron toggles a sub-tree of the live
+ * applications, each routing to that app's Workflows page — letting an admin reach per-app automation
+ * straight from the nav (the CEO's intent). Rendered only on the expanded rail; the icon-only rail
+ * falls back to the plain link.
+ *
+ * Active state is two-tier, mirroring the flat items' tint+weight+hue language without two competing
+ * full tints: the exact list route (`/applications`) gets the full accent tint; being *inside* the
+ * section (an app detail/workflows) keeps the row weighted with the pillar-hued icon (no bg) so the
+ * highlighted leaf stands alone. Openness is pure-derived: `null` follows the route (so the group
+ * auto-opens whenever you're inside the section), and toggling the chevron pins an explicit choice
+ * that sticks until toggled again. A real `<button>` gives Enter/Space and `aria-expanded` for free,
+ * with no effect (no cascading-render lint, no open/close flash).
+ */
+function ExpandableNavGroup({
+  labelKey,
+  href,
+  icon: Icon,
+  activeIconClass,
+}: {
+  labelKey: string;
+  href: string;
+  icon: typeof Squares2X2Icon;
+  activeIconClass: string;
+}) {
+  const pathname = usePathname();
+  const t = useTranslations("nav");
+  const sectionActive = pathname === href || pathname.startsWith(`${href}/`);
+  const topActive = pathname === href;
+  const [userPref, setUserPref] = useState<boolean | null>(null);
+  const expanded = userPref ?? sectionActive;
+
+  return (
+    <div className="space-y-0.5">
+      <div
+        className={cn(
+          "flex min-h-11 items-center rounded-md text-sm transition-colors md:min-h-9",
+          "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          topActive
+            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+            : sectionActive
+              ? "font-medium text-sidebar-accent-foreground"
+              : "text-muted-foreground",
+        )}
+      >
+        <Link
+          href={href}
+          aria-current={topActive ? "page" : undefined}
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 rounded-md py-2 pl-3 md:min-h-9"
+        >
+          <Icon className={cn("size-5 shrink-0", sectionActive && activeIconClass)} />
+          <span className="truncate">{t(labelKey)}</span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => setUserPref(!expanded)}
+          aria-expanded={expanded}
+          aria-controls={APPLICATIONS_SUBNAV_ID}
+          aria-label={t(expanded ? "collapseApplications" : "expandApplications")}
+          className="mr-1 flex size-9 shrink-0 items-center justify-center rounded-md md:size-7"
+        >
+          <ChevronRightIcon
+            className={cn("size-4 transition-transform", expanded && "rotate-90")}
+          />
+        </button>
+      </div>
+      {expanded ? <ApplicationsSubList pathname={pathname} /> : null}
+    </div>
+  );
+}
+
+/**
+ * The revealed Applications sub-tree (issue #287). Mounted only while the group is expanded, so the
+ * apps query is deferred until first open (and stays cached after). Each app links to its Workflows
+ * page (`/applications/:id/workflows`); the active app (its detail OR any nested route, e.g. that
+ * Workflows page) wears the leaf accent tint. Capped with a scroll so a larger directory degrades
+ * gracefully — a small team has few apps, so no search.
+ */
+function ApplicationsSubList({ pathname }: { pathname: string }) {
+  const t = useTranslations("nav");
+  const { data: applications, isLoading } = useApplications();
+
+  const wrapperClass = "ml-[1.4rem] space-y-0.5 border-l border-border/60 pl-2";
+
+  if (isLoading) {
+    return (
+      <ul id={APPLICATIONS_SUBNAV_ID} className={wrapperClass}>
+        {[0, 1, 2].map((row) => (
+          <li key={row} className="px-2 py-2">
+            <div className="h-3.5 w-24 animate-pulse rounded bg-muted" />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  const apps = applications ?? [];
+  if (apps.length === 0) {
+    return (
+      <ul id={APPLICATIONS_SUBNAV_ID} className={wrapperClass}>
+        <li className="px-2 py-2 text-xs text-muted-foreground">
+          {t("noApplications")}
+        </li>
+      </ul>
+    );
+  }
+
+  return (
+    <ul
+      id={APPLICATIONS_SUBNAV_ID}
+      className={cn(wrapperClass, "max-h-64 overflow-y-auto")}
+    >
+      {apps.map((app) => {
+        const base = `/applications/${app.id}`;
+        const active = pathname === base || pathname.startsWith(`${base}/`);
+        return (
+          <li key={app.id}>
+            <Link
+              href={`${base}/workflows`}
+              aria-current={active ? "page" : undefined}
+              title={app.name}
+              className={cn(
+                "flex min-h-9 items-center rounded-md px-2 py-1.5 text-sm transition-colors",
+                active
+                  ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+              )}
+            >
+              <span className="truncate">{app.name}</span>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
