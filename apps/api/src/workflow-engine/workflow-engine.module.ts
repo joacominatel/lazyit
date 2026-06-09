@@ -24,6 +24,7 @@ import { WorkflowConnectionsController } from './definitions/workflow-connection
 import { WorkflowConnectionsService } from './definitions/workflow-connections.service';
 import { WorkflowSecretsController } from './definitions/workflow-secrets.controller';
 import { WorkflowSecretsService } from './definitions/workflow-secrets.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 /**
  * WorkflowEngineModule — the engine CORE (Phase 1b-B, ADR-0054 / epic #248). It imports the outbound
@@ -46,6 +47,9 @@ import { WorkflowSecretsService } from './definitions/workflow-secrets.service';
     WorkflowConnectorsModule,
     // Registers the `workflow-run` queue (and its @Processor worker) on the GLOBAL shared connection.
     BullModule.registerQueue({ name: WORKFLOW_RUN_QUEUE }),
+    // The orchestrator fires the best-effort post-commit `workflow.manual_task` bell nudge when a run
+    // pauses for a human (ADR-0056 §3), via the exported NotificationsService.
+    NotificationsModule,
   ],
   controllers: [
     WorkflowRunsController,
