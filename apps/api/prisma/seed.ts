@@ -4,12 +4,16 @@
  *
  * Since ADR-0041, the natural keys (`User.email`, `*.name`) are NO LONGER full `@unique` columns —
  * uniqueness is a PARTIAL unique index scoped to live rows (`WHERE "deletedAt" IS NULL`), which
- * Prisma can't use as a `where` unique key. So the seed can't `upsert({ where: { name } })` anymore;
- * it does an explicit find-among-LIVE-rows then create. This raw PrismaClient is NOT wrapped by the
- * soft-delete extension, so the find filters `deletedAt: null` explicitly. Idempotent and it never
- * clobbers user edits — all category sets are user-managed, the seed lists are just an initial,
- * non-special starting point (see docs/02-domain/entities/asset-category.md etc.). The seeded user is
- * ADMIN (ADR-0040): a freshly-seeded database must always have at least one administrator.
+ * Prisma can't use as a `where` unique key.
+ *
+ * Category sets are seeded **once, per table**: each reference set is created only when its table is
+ * empty (zero rows, live OR soft-deleted). The earlier per-name `findFirst({ where: { name } })`
+ * then create was NOT rename-safe — renaming a seeded category (e.g. `Adapters` → `Adaptadores`)
+ * made the next `db seed` miss the old name and RE-CREATE it, duplicating the row (#321). Seeding
+ * once off a table-level count is rename-safe and never clobbers user edits: all category sets are
+ * user-managed, the seed lists are just an initial, non-special starting point (see
+ * docs/02-domain/entities/asset-category.md etc.). The seeded user is ADMIN (ADR-0040): a
+ * freshly-seeded database must always have at least one administrator.
  *
  * It also seeds the RolePermission matrix (Roles & Permissions v2 — ADR-0046): each fixed Role mapped
  * to its `domain:action` permissions, taken 1:1 from `DEFAULT_ROLE_PERMISSIONS` in `@lazyit/shared`
@@ -20,6 +24,7 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { DEFAULT_ROLE_PERMISSIONS } from '@lazyit/shared';
 import { PrismaClient, Role } from '../generated/prisma/client';
+import { seedCategoriesOnce } from '../src/prisma/seed-categories';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -113,58 +118,56 @@ async function main() {
   }
   console.log(`Seeded ADMIN user ${adminEmail}.`);
 
-  for (const name of INITIAL_ASSET_CATEGORIES) {
-    const existing = await prisma.assetCategory.findFirst({
-      where: { name, deletedAt: null },
-      select: { id: true },
-    });
-    if (!existing) {
-      await prisma.assetCategory.create({ data: { name } });
-    }
-  }
-  console.log(`Seeded ${INITIAL_ASSET_CATEGORIES.length} asset categories.`);
-
-  for (const [index, { name, icon }] of INITIAL_ARTICLE_CATEGORIES.entries()) {
-    const existing = await prisma.articleCategory.findFirst({
-      where: { name, deletedAt: null },
-      select: { id: true },
-    });
-    if (!existing) {
-      await prisma.articleCategory.create({
-        data: { name, icon, order: index + 1 },
-      });
-    }
-  }
-  console.log(`Seeded ${INITIAL_ARTICLE_CATEGORIES.length} article categories.`);
-
-  for (const [index, { name, icon }] of INITIAL_APPLICATION_CATEGORIES.entries()) {
-    const existing = await prisma.applicationCategory.findFirst({
-      where: { name, deletedAt: null },
-      select: { id: true },
-    });
-    if (!existing) {
-      await prisma.applicationCategory.create({
-        data: { name, icon, order: index + 1 },
-      });
-    }
-  }
+  // Category sets — seed-once per table (rename-safe; never re-creates a renamed row, #321).
+  const assetCreated = await seedCategoriesOnce(
+    prisma.assetCategory,
+    INITIAL_ASSET_CATEGORIES.map((name) => ({ name })),
+  );
   console.log(
-    `Seeded ${INITIAL_APPLICATION_CATEGORIES.length} application categories.`,
+    assetCreated > 0
+      ? `Seeded ${assetCreated} asset categories.`
+      : 'Asset categories already present — skipped (seed-once).',
   );
 
-  for (const [index, name] of INITIAL_CONSUMABLE_CATEGORIES.entries()) {
-    const existing = await prisma.consumableCategory.findFirst({
-      where: { name, deletedAt: null },
-      select: { id: true },
-    });
-    if (!existing) {
-      await prisma.consumableCategory.create({
-        data: { name, order: index + 1 },
-      });
-    }
-  }
+  const articleCreated = await seedCategoriesOnce(
+    prisma.articleCategory,
+    INITIAL_ARTICLE_CATEGORIES.map(({ name, icon }, index) => ({
+      name,
+      icon,
+      order: index + 1,
+    })),
+  );
   console.log(
-    `Seeded ${INITIAL_CONSUMABLE_CATEGORIES.length} consumable categories.`,
+    articleCreated > 0
+      ? `Seeded ${articleCreated} article categories.`
+      : 'Article categories already present — skipped (seed-once).',
+  );
+
+  const applicationCreated = await seedCategoriesOnce(
+    prisma.applicationCategory,
+    INITIAL_APPLICATION_CATEGORIES.map(({ name, icon }, index) => ({
+      name,
+      icon,
+      order: index + 1,
+    })),
+  );
+  console.log(
+    applicationCreated > 0
+      ? `Seeded ${applicationCreated} application categories.`
+      : 'Application categories already present — skipped (seed-once).',
+  );
+
+  const consumableCreated = await seedCategoriesOnce(
+    prisma.consumableCategory,
+    INITIAL_CONSUMABLE_CATEGORIES.map((name, index) => ({
+      name,
+      order: index + 1,
+    })),
+  );
+  console.log(
+    consumableCreated > 0
+      ? `Seeded ${consumableCreated} consumable categories.`
+      : 'Consumable categories already present — skipped (seed-once).',
   );
 
   // RolePermission matrix (ADR-0046). Seed each Role → permission pair from the shared single source
