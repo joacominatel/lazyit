@@ -52,10 +52,18 @@ describe('WorkflowRunSweeper — AWAITING_INPUT reconciler (CCOR-2)', () => {
 
     expect(n).toBe(1);
     // Re-derived cursor = m1's onSuccess = the next step s1; rotating non-colliding jobId so a stale
-    // completed `resume:run1:s1` job can't dedupe the recovery away.
+    // completed `resume-run1-s1` job can't dedupe the recovery away. BullMQ-safe (no `:`).
     expect(trigger.enqueueResume).toHaveBeenCalledWith('run1', 's1', {
-      jobId: 'resume:run1:s1:reconcile:t1',
+      jobId: 'resume-run1-s1-reconcile-t1',
     });
+    // Regression (#298): BullMQ forbids `:` in a custom jobId — the reconcile jobId must carry none.
+    const resumeCalls = trigger.enqueueResume.mock.calls as Array<
+      [string, string, { jobId: string }]
+    >;
+    const reconcileJobId = resumeCalls[0][2].jobId;
+    expect(typeof reconcileJobId).toBe('string');
+    expect(reconcileJobId.length).toBeGreaterThan(0);
+    expect(reconcileJobId).not.toContain(':');
   });
 
   it('re-derives a CANCELLED task down the failure edge (STOP_FAIL for an escalated non-MANUAL step)', async () => {
@@ -75,8 +83,13 @@ describe('WorkflowRunSweeper — AWAITING_INPUT reconciler (CCOR-2)', () => {
 
     expect(n).toBe(1);
     expect(trigger.enqueueResume).toHaveBeenCalledWith('run2', 'STOP_FAIL', {
-      jobId: 'resume:run2:STOP_FAIL:reconcile:t2',
+      jobId: 'resume-run2-STOP_FAIL-reconcile-t2',
     });
+    // Regression (#298): no `:` in the custom jobId.
+    const resumeCalls = trigger.enqueueResume.mock.calls as Array<
+      [string, string, { jobId: string }]
+    >;
+    expect(resumeCalls[0][2].jobId).not.toContain(':');
   });
 
   it('leaves a run whose latest task is still PENDING (genuinely awaiting a human)', async () => {
