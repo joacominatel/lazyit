@@ -16,6 +16,21 @@ export function formatDate(iso: string): string {
 }
 
 /**
+ * ISO timestamp → an absolute, locale-aware date+time (e.g. "May 25, 2026, 3:04 PM"). Used as the
+ * tooltip/aria companion to the activity feed's relative time so an audit-relevant entry always
+ * carries the exact moment it occurred, not just "9h ago" (issue #311).
+ */
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/**
  * ISO timestamp → a short relative label ("just now", "5m ago", "2h ago", "3d ago", "2mo ago",
  * "1y ago"). `now` (epoch ms) is passed in by the caller — snapshot it once with
  * `useState(() => Date.now())` so rendering stays pure (react-hooks/purity), rather than calling
