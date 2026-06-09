@@ -7,6 +7,7 @@ import {
 import { ConsumablesService } from './consumables.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -70,6 +71,7 @@ describe('ConsumablesService', () => {
     $transaction: jest.Mock;
   };
   let actor: ActorService;
+  let notifications: { emit: jest.Mock };
 
   beforeEach(async () => {
     consumable = {
@@ -102,11 +104,14 @@ describe('ConsumablesService', () => {
     // used so it produces the genuine ActorAttribution from the principal each test passes (ADR-0048).
     actor = new ActorService();
 
+    notifications = { emit: jest.fn().mockResolvedValue(null) };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         ConsumablesService,
         { provide: PrismaService, useValue: prisma },
         { provide: ActorService, useValue: actor },
+        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
 
