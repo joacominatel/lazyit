@@ -182,6 +182,10 @@ function harness(
     ),
   };
   const sleeper: Sleeper = { sleep: jest.fn().mockResolvedValue(undefined) };
+  // The orchestrator fires a best-effort post-commit `workflow.manual_task` bell nudge when a run
+  // pauses; these tests assert on the run/step state, not the bell, so a no-op mock keeps them
+  // unchanged (the emit swallows its own errors anyway).
+  const notifications = { emit: jest.fn().mockResolvedValue(null) };
 
   const orchestrator = new WorkflowRunOrchestrator(
     prisma as never,
@@ -190,6 +194,7 @@ function harness(
     contextBuilder as never,
     sleeper,
     trigger as never,
+    notifications as never,
   );
   return { orchestrator, prisma, state, sleeper, trigger };
 }

@@ -23,6 +23,7 @@ import type {
   WorkflowMappingContext,
 } from '../handlers/step-handler';
 import { RunContextBuilder } from './run-context';
+import { NotificationsService } from '../../notifications/notifications.service';
 import {
   classifyFailureEdge,
   classifySuccessEdge,
@@ -92,6 +93,7 @@ export class WorkflowRunOrchestrator {
     private readonly contextBuilder: RunContextBuilder,
     @Inject(WORKFLOW_SLEEPER) private readonly sleeper: Sleeper,
     private readonly trigger: WorkflowTriggerService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // ── public entrypoints ────────────────────────────────────────────────────
@@ -613,7 +615,7 @@ export class WorkflowRunOrchestrator {
       spec?.prompt ??
       `Step "${step.name ?? step.key}" failed and was escalated for manual handling.`;
     const cohort = spec?.cohort ?? null;
-    await this.prisma.$transaction(async (tx) => {
+    const taskId = await this.prisma.$transaction(async (tx) => {
       const task = await tx.manualTask.create({
         data: { runId, stepKey: step.key, prompt, cohort, status: 'PENDING' },
       });
@@ -634,7 +636,44 @@ export class WorkflowRunOrchestrator {
         where: { id: runId },
         data: { status: 'AWAITING_INPUT' },
       });
+      return task.id;
     });
+    // AFTER commit, best-effort: fire the `workflow.manual_task` bell nudge (ADR-0056 §3) — the run
+    // paused for a human. NEVER inside the tx (a notification must not roll back the pause); emit
+    // swallows its own errors. The deep-link points at the run; the bell row links to the inbox task.
+    await this.emitManualTaskNotification(runId, taskId, prompt);
+  }
+
+  /**
+   * Best-effort POST-COMMIT `workflow.manual_task` bell nudge (ADR-0056 §3) — one per created ManualTask
+   * (the dedupe key is `(type, taskId)`, idempotent on a re-fire). Resolves the run's application name
+   * for a human title; the entity link points at the run (entityType `workflowRun`), and the web's bell
+   * routes the manual-task type to the inbox. Every failure is swallowed — the pause already committed.
+   */
+  private async emitManualTaskNotification(
+    runId: string,
+    taskId: string,
+    prompt: string,
+  ): Promise<void> {
+    try {
+      const run = await this.prisma.workflowRun.findUnique({
+        where: { id: runId },
+        select: { application: { select: { name: true } } },
+      });
+      const appName = run?.application?.name ?? 'a workflow';
+      await this.notifications.emit({
+        type: 'workflow.manual_task',
+        dedupeKey: `workflow.manual_task:${taskId}`,
+        severity: 'info',
+        title: `A workflow task needs a human — ${appName}`,
+        summary: prompt,
+        entityType: 'workflowRun',
+        entityId: runId,
+        metadata: { manualTaskId: taskId, applicationName: appName },
+      });
+    } catch {
+      // Best-effort: a failed nudge never affects the already-committed pause.
+    }
   }
 
   // ── ledger + status writes ──────────────────────────────────────────────────

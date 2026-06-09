@@ -92,6 +92,13 @@ model User {
   manualTasksAssigned      ManualTask[]      @relation("ManualTaskAssignee")
   manualTasksCompleted     ManualTask[]      @relation("ManualTaskCompletedBy")
 
+  // In-app notification bell (ADR-0056). Notifications this user is the SUBJECT of (the grantee /
+  // the elevated user — Notification.targetUserId, SetNull so deletion never blocks), and the
+  // per-admin read joins this user owns (NotificationRead.userId, Cascade — deleting the user drops
+  // only their read rows, never the events).
+  notificationsTargeting   Notification[]     @relation("NotificationTargetUser")
+  notificationReads        NotificationRead[] @relation("NotificationReader")
+
   @@map("users")
 }
 
@@ -1297,4 +1304,84 @@ model WorkflowSecret {
   @@index([applicationId])
   @@index([connectionId])
   @@map("workflow_secrets")
+}
+
+/// In-app notification bell (ADR-0056) — an APPEND-ONLY event store of curated operational nudges an
+/// admin should glance at. One immutable row per logical event (createdAt only — NO updatedAt /
+/// deletedAt, per ADR-0006: the AssetHistory / AccessGrant immutable-event precedent). Read state is a
+/// SEPARATE per-admin join (`NotificationRead`), computed fan-out-on-READ — so storage is proportional
+/// to EVENTS, not events × admins, and the audience is always current.
+///
+/// Notifications are operational nudges, NOT the audit system-of-record — the append-only history
+/// tables and ledgers remain that. The bell is allowed to FORGET: a 90-day retention sweep
+/// (NotificationsRetentionSweeper) prunes old rows + their read joins. Anything in `metadata` is
+/// REDACTED (names/ids only, never bodies/secrets/PII — INV-6, ADR-0031).
+///
+/// `entityType` + `entityId` are a SOFT, polymorphic deep-link target (the app / user / consumable /
+/// workflow run the nudge is about) — deliberately NOT a hard FK: the bell must be free to forget and
+/// to point at heterogeneous entities, exactly like the `recent_activity` view's text `entityId`.
+/// `targetUserId` IS a real (optional, SetNull) FK to the person the nudge is about, for a secondary
+/// click-through that survives the user's deletion.
+model Notification {
+  id           String               @id @default(cuid())
+  // The closed catalog type (NotificationType in @lazyit/shared) — drives the bell's icon + copy.
+  // Plain String, mirroring RolePermission.permission: the closed catalog lives as zod in shared, so
+  // adding a type never needs an enum migration.
+  type         String
+  // Presentation severity ramp (info | warning | critical) — a render cue, not a business criticality.
+  severity     String               @default("info")
+  // The dedupe key — `<type>:<entityId>` (+ a coarse time bucket for low_stock). Makes emitters
+  // IDEMPOTENT: a retry / a flapping consumable / a re-fired listener collapses to ONE row per logical
+  // event (ADR-0056 §4). UNIQUE — full unique (this table has no soft delete, so no ghost-row concern).
+  dedupeKey    String               @unique
+  // Soft, polymorphic deep-link target (NOT a FK — see model doc). null entityType ⇒ no click-through.
+  entityType   String?
+  entityId     String?
+  // The person the nudge is ABOUT (grantee / elevated user). Optional FK, SetNull: losing the user
+  // never blocks deletion and the event survives. @db.Uuid to match User.id.
+  targetUserId String?              @db.Uuid
+  targetUser   User?                @relation("NotificationTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  // Server-built human headline + an optional one-line clarifier.
+  title        String
+  summary      String?
+  // REDACTED extra context the web may render (names/ids only — never bodies/secrets/PII; INV-6).
+  metadata     Json?
+  createdAt    DateTime             @default(now())
+
+  // The per-admin read joins for this event (fan-out-on-read). Restrict on that side: an event with
+  // read history is not hard-deletable by a stray cascade — the retention sweep is the ONLY deleter,
+  // and it removes the read joins FIRST, then the event.
+  reads        NotificationRead[]
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). Indexes: the dedupe key (idempotent emit), and
+  // (type, createdAt) / createdAt for the newest-first feed + the retention sweep's age scan.
+  @@index([type, createdAt])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+/// The per-admin READ join for a Notification (ADR-0056 §1) — fan-out-on-read. One row written LAZILY
+/// the first time an admin marks a notification read; its ABSENCE = unread for that admin. `readAt` is
+/// the only mutable field (an idempotent mark-read upsert touches it). Unread-for-admin-A = a
+/// Notification with no NotificationRead row for A (subject to retention); unread COUNT is one anti-join
+/// over the small admin cohort.
+model NotificationRead {
+  // autoincrement: a join row, never exposed externally (ADR-0005).
+  id             Int          @id @default(autoincrement())
+  // The event this read state is for. Restrict: the retention sweep deletes these joins explicitly
+  // before the event, so a notification with read history is never silently cascaded away.
+  notificationId String
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Restrict)
+  // The admin who read it. Cascade: losing a user drops ONLY that user's read rows (never the event).
+  // @db.Uuid to match User.id.
+  userId         String       @db.Uuid
+  user           User         @relation("NotificationReader", fields: [userId], references: [id], onDelete: Cascade)
+  // When the admin marked it read (the lazy first mark; idempotent re-marks keep the original).
+  readAt         DateTime     @default(now())
+
+  // One read row per (notification, admin) — the upsert target + the anti-join's uniqueness guarantee.
+  @@unique([notificationId, userId])
+  // Per-admin unread anti-join scans by user; per-notification cleanup scans by notification.
+  @@index([userId])
+  @@map("notification_reads")
 }

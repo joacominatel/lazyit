@@ -31,6 +31,7 @@ export * from "./schemas/consumable-movement";
 export * from "./schemas/dashboard";
 export * from "./schemas/location";
 export * from "./schemas/location-list";
+export * from "./schemas/notification";
 export * from "./schemas/pagination";
 export * from "./schemas/permission";
 export * from "./schemas/permission-meta";

@@ -41,6 +41,7 @@ export const PERMISSION_DOMAINS = [
   "logs", // the estate-wide activity history (Reports/Informes); read is ADMIN-only by default
   "settings",
   "workflow", // the Applications Workflow Engine (epic #248) — pre-provisioned RBAC; NO routes yet
+  "notification", // the in-app notification bell (ADR-0056) — operational nudges; read is ADMIN-only
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
 
@@ -132,6 +133,12 @@ export const PERMISSIONS = [
   "workflow:run",
   "workflow:task",
   "workflow:secrets",
+  // notification (in-app notification bell, ADR-0056) — a read-only surface. `notification:read` is
+  // ADMIN-only by default (see ADMIN_ONLY_READS, treated like logs:read): notifications surface
+  // sensitive operational state (who got critical-app access, who was made ADMIN), so admin-only is the
+  // safe default. The bell + its four poll endpoints are gated on it. There is no `:write` — admins
+  // mark notifications read via the PATCH endpoints, which is not a catalog mutation permission.
+  "notification:read",
 ] as const;
 
 /**
@@ -203,6 +210,11 @@ export const VIEWER_DENIED_READS = [
  *     (synthesis §5 / security.md §4). The four coarse workflow verbs (`manage`/`run`/`task`/`secrets`)
  *     are ADMIN-only by construction of the seed (they are neither `:read` nor `:write`); only the
  *     `:read` needs listing here to keep it out of the default-open read tier.
+ *   - `notification:read` — the in-app notification bell (ADR-0056). The bell surfaces a curated set of
+ *     sensitive operational nudges (access to a critical app was granted, a user was made ADMIN, a
+ *     consumable crossed below minimum stock, a workflow needs a human / failed). Who-got-what is
+ *     sensitive, so it defaults to ADMIN-only — the same posture as `logs:read` / `workflow:read`. It
+ *     is still admin-grantable from the role matrix; it is just never seeded to MEMBER/VIEWER.
  *
  * Catalog invariant: `ADMIN_ONLY_READS` and `VIEWER_DENIED_READS` are disjoint — a read is either
  * pre-tightened (ADMIN + MEMBER) or admin-only (ADMIN), never both.
@@ -210,6 +222,7 @@ export const VIEWER_DENIED_READS = [
 export const ADMIN_ONLY_READS = [
   "logs:read",
   "workflow:read",
+  "notification:read",
 ] as const satisfies readonly Permission[];
 
 /**

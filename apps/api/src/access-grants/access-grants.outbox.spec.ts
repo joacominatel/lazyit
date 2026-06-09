@@ -79,10 +79,14 @@ function build() {
   };
   const queue = { add: jest.fn().mockResolvedValue({ id: 'job1' }) };
   const trigger = new WorkflowTriggerService(prisma as never, queue as never);
+  // The post-commit notification emit is best-effort and swallows its own errors; these outbox tests
+  // assert on the workflow run, not the bell, so a no-op mock keeps them unchanged.
+  const notifications = { emit: jest.fn().mockResolvedValue(null) };
   const service = new AccessGrantsService(
     prisma as never,
     new ActorService(),
     trigger,
+    notifications as never,
   );
   return {
     service,

@@ -20,6 +20,18 @@ import type { Principal } from '../auth/principal';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
 import type { TriggerPlan } from '../workflow-engine/run/workflow-trigger.service';
 import type { ActorAttribution } from '../common/actor.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+/**
+ * The free-form `accessLevel` values that denote an ADMIN-level grant — the trigger for the
+ * `admin_granted` bell nudge (ADR-0056 §3). `accessLevel` is app-defined and uninterpreted by lazyit,
+ * but "admin" is the established convention (the service tests grant `accessLevel: 'admin'`), so an
+ * admin-level grant is one whose (trimmed, lower-cased) accessLevel is in this set.
+ */
+const ADMIN_ACCESS_LEVELS: ReadonlySet<string> = new Set([
+  'admin',
+  'administrator',
+]);
 
 /** Filters for listing grants. `activeOnly` / `includeExpired` default to true (set at the controller). */
 export interface FindAccessGrantsFilters {
@@ -41,6 +53,7 @@ export class AccessGrantsService {
     private readonly prisma: PrismaService,
     private readonly actor: ActorService,
     private readonly workflowTrigger: WorkflowTriggerService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -170,7 +183,85 @@ export class AccessGrantsService {
     if (runId) {
       await this.enqueueRunSafely(runId);
     }
+    // AFTER commit, best-effort: fire the bell nudges (ADR-0056 §3). NEVER inside the tx — a
+    // notification failure must not roll back the grant; NotificationsService.emit swallows its own
+    // errors, and we guard again here so a thrown emit can never escape into the grant's return path.
+    await this.emitGrantNotifications(grant);
     return grant;
+  }
+
+  /**
+   * Best-effort POST-COMMIT bell nudges for a just-opened grant (ADR-0056 §3) — fired AFTER the grant
+   * tx commits, NEVER inside it (a notification must never roll back the grant). Two curated triggers:
+   *   - `critical_app_access` — the application is flagged `isCritical` (reusing the existing boolean —
+   *     no schema change). The dedupe key `(type, accessGrantId)` makes a re-fire idempotent.
+   *   - `admin_granted`       — the grant is an ADMIN-level grant ({@link ADMIN_ACCESS_LEVELS}).
+   * Both resolve the application name + grantee name for a human title; every failure is swallowed.
+   */
+  private async emitGrantNotifications(grant: {
+    id: string;
+    userId: string;
+    applicationId: string;
+    accessLevel: string | null;
+  }): Promise<void> {
+    try {
+      const isAdminGrant =
+        grant.accessLevel != null &&
+        ADMIN_ACCESS_LEVELS.has(grant.accessLevel.trim().toLowerCase());
+
+      // A single light read for the render context — the app's criticality + name and the grantee name.
+      const [application, user] = await Promise.all([
+        this.prisma.application.findUnique({
+          where: { id: grant.applicationId },
+          select: { name: true, isCritical: true },
+        }),
+        this.prisma.user.findUnique({
+          where: { id: grant.userId },
+          select: { firstName: true, lastName: true },
+        }),
+      ]);
+      if (!application) {
+        return; // app vanished post-commit — nothing meaningful to nudge about.
+      }
+      const userName = user
+        ? `${user.firstName} ${user.lastName}`.trim()
+        : 'a user';
+
+      if (application.isCritical) {
+        await this.notifications.emit({
+          type: 'critical_app_access',
+          // Per-GRANT dedupe: each grant is its own event (a user may re-receive critical access later).
+          dedupeKey: `critical_app_access:${grant.id}`,
+          severity: 'warning',
+          title: `${userName} was granted access to ${application.name}`,
+          summary: `${application.name} is flagged critical.`,
+          entityType: 'application',
+          entityId: grant.applicationId,
+          targetUserId: grant.userId,
+          metadata: { applicationName: application.name, accessGrantId: grant.id },
+        });
+      }
+
+      if (isAdminGrant) {
+        await this.notifications.emit({
+          type: 'admin_granted',
+          dedupeKey: `admin_granted:${grant.id}`,
+          severity: 'warning',
+          title: `${userName} was granted ADMIN access to ${application.name}`,
+          summary: `Admin-level access (${grant.accessLevel}) on ${application.name}.`,
+          entityType: 'application',
+          entityId: grant.applicationId,
+          targetUserId: grant.userId,
+          metadata: {
+            applicationName: application.name,
+            accessGrantId: grant.id,
+            accessLevel: grant.accessLevel,
+          },
+        });
+      }
+    } catch {
+      // Best-effort: a failed nudge never affects the already-committed grant.
+    }
   }
 
   /**

@@ -1,0 +1,8 @@
+{
+  "title": "Notifications",
+  "ariaLabel": "{count, plural, =0 {Notifications} one {Notifications, # unread} other {Notifications, # unread}}",
+  "markAllRead": "Mark all read",
+  "empty": "You're all caught up.",
+  "unreadDot": "Unread",
+  "occurredAt": "Occurred {datetime}"
+}
