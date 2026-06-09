@@ -46,7 +46,7 @@ type NavItem = {
   /**
    * Mark this item as an expandable nav GROUP (issue #287): the top row still links to/highlights
    * `href`, but it gains a chevron toggle that reveals the live Applications list, each linking to
-   * that app's Workflows page (`/applications/:id/workflows`). Only the Access → Applications item
+   * that app's detail page (`/applications/:id`, issue #302). Only the Access → Applications item
    * carries this. Honoured only on the expanded rail (`!collapsed`); the icon-only rail keeps the
    * plain link. The sub-list inherits the item's existing gating (no extra `permission`/`adminOnly`).
    */
@@ -88,14 +88,23 @@ const ACTIVE_ICON_BY_PILLAR: Record<Pillar | "default", string> = {
  * section, instead of a flat 7-item list (which contradicted the three-pillars
  * mental model and split Assets from Consumables).
  *
- *   Inventory → Assets, Consumables   (reunited)
- *   Access    → Applications          (the route stays /applications; the
- *                                      section name "Access" is the pillar — this
- *                                      resolves the Access-vs-Applications split:
- *                                      the *thing* is an Application, the *pillar*
- *                                      is Access)
- *   Knowledge → Knowledge Base
- *   Manage    → Users, Locations, Settings (supporting registries + admin)
+ *   Inventory  → Assets, Consumables   (reunited)
+ *   Access     → Applications          (the route stays /applications; the
+ *                                       section name "Access" is the pillar — this
+ *                                       resolves the Access-vs-Applications split:
+ *                                       the *thing* is an Application, the *pillar*
+ *                                       is Access)
+ *   Knowledge  → Knowledge Base
+ *   Taxonomies → Locations              (low-traffic registries — Locations is too
+ *                                        rarely touched to sit in the top-level Manage
+ *                                        group, issue #312. This is the seam where the
+ *                                        other registries (AssetCategory, ArticleCategory)
+ *                                        will later join; their CRUD already lives under
+ *                                        Settings → Taxonomies (/settings/taxonomies).
+ *                                        The Locations page stays at /locations for now —
+ *                                        only the nav grouping moved, the route move is
+ *                                        deferred.)
+ *   Manage     → Users, Settings        (supporting registries + admin)
  *
  * Every target is an implemented route; dead links (Tickets) stay out per ADR-0016
  * (no ticketing). "Settings" is the ADMIN-only home for instance config, taxonomy
@@ -148,11 +157,22 @@ const NAV: NavSection[] = [
     ],
   },
   {
+    // Taxonomies — the low-traffic registries (issue #312). Locations lives here instead of the
+    // top-level Manage group because it's rarely touched. The page itself stays at /locations (the
+    // route move is deferred); only the nav grouping changed. Future registries (AssetCategory,
+    // ArticleCategory) slot in alongside Locations here — their CRUD already sits under
+    // Settings → Taxonomies (/settings/taxonomies). Wears the `manage` (admin/config) hue.
+    headingKey: "taxonomies",
+    pillar: "manage",
+    items: [
+      { labelKey: "locations", href: "/locations", icon: MapPinIcon },
+    ],
+  },
+  {
     headingKey: "manage",
     pillar: "manage",
     items: [
       { labelKey: "users", href: "/users", icon: UsersIcon },
-      { labelKey: "locations", href: "/locations", icon: MapPinIcon },
       {
         labelKey: "settings",
         href: "/settings",
@@ -252,9 +272,9 @@ const APPLICATIONS_SUBNAV_ID = "sidebar-applications-subnav";
 /**
  * The Access → Applications item rendered as an expandable group (issue #287). The top row keeps the
  * link to the Applications list (`/applications`); an adjacent chevron toggles a sub-tree of the live
- * applications, each routing to that app's Workflows page — letting an admin reach per-app automation
- * straight from the nav (the CEO's intent). Rendered only on the expanded rail; the icon-only rail
- * falls back to the plain link.
+ * applications, each routing to that app's detail page (`/applications/:id`, issue #302) — letting an
+ * admin jump straight to an application from the nav. Rendered only on the expanded rail; the
+ * icon-only rail falls back to the plain link.
  *
  * Active state is two-tier, mirroring the flat items' tint+weight+hue language without two competing
  * full tints: the exact list route (`/applications`) gets the full accent tint; being *inside* the
@@ -323,8 +343,8 @@ function ExpandableNavGroup({
 
 /**
  * The revealed Applications sub-tree (issue #287). Mounted only while the group is expanded, so the
- * apps query is deferred until first open (and stays cached after). Each app links to its Workflows
- * page (`/applications/:id/workflows`); the active app (its detail OR any nested route, e.g. that
+ * apps query is deferred until first open (and stays cached after). Each app links to its detail page
+ * (`/applications/:id`, issue #302); the active app (its detail OR any nested route, e.g. that app's
  * Workflows page) wears the leaf accent tint. Capped with a scroll so a larger directory degrades
  * gracefully — a small team has few apps, so no search.
  */
@@ -368,7 +388,7 @@ function ApplicationsSubList({ pathname }: { pathname: string }) {
         return (
           <li key={app.id}>
             <Link
-              href={`${base}/workflows`}
+              href={base}
               aria-current={active ? "page" : undefined}
               title={app.name}
               className={cn(

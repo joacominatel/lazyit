@@ -192,7 +192,7 @@ export default function ArticleDetailPage() {
       />
 
       {article.excerpt && (
-        <p className="border-l-2 pl-4 text-muted-foreground italic">
+        <p className="border-l-2 border-border pl-4 text-base leading-relaxed text-pretty text-muted-foreground">
           {article.excerpt}
         </p>
       )}

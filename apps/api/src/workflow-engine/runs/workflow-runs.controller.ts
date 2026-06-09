@@ -2,7 +2,9 @@ import {
   BadRequestException,
   Controller,
   Get,
+  HttpCode,
   Param,
+  Post,
   Query,
 } from '@nestjs/common';
 import {
@@ -18,9 +20,11 @@ import { parseCuidQuery } from '../../common/parse-cuid-query';
 import { parsePageQuery } from '../../common/parse-page-query';
 
 /**
- * Run observability endpoints (contract C2, frontend §7 / §10). Read-only; gated by `workflow:read`
- * (admin-only — run history reveals who-gets-provisioned-where, treated like `logs:read`). All bodies
- * are pre-redacted (INV-6).
+ * Run observability endpoints (contract C2, frontend §7 / §10). Reads are gated by `workflow:read`
+ * (admin-only — run history reveals who-gets-provisioned-where, treated like `logs:read`); the manual
+ * RETRY action (issue #308) is gated by `workflow:run` (re-driving a failed run — separated from `read`
+ * per ADR-0054 §10 / frontend §9, so ops can re-drive without seeing every definition). All bodies are
+ * pre-redacted (INV-6).
  */
 @ApiTags('workflow-runs')
 @Controller('workflow-runs')
@@ -72,6 +76,21 @@ export class WorkflowRunsController {
   })
   findOne(@Param('id') id: string) {
     return this.runs.findOne(id);
+  }
+
+  @Post(':id/retry')
+  @HttpCode(200)
+  @RequirePermission('workflow:run')
+  @ApiOperation({
+    summary:
+      'Retry a terminal FAILED run from the step that failed onward (issue #308). Resume-from-failed-step, NOT a full re-run — already-SUCCEEDED steps are not re-executed (no double-provision). 409 if the run is not FAILED; 422 if it has no resolvable failed step.',
+  })
+  @ApiOkResponse({
+    description:
+      'The retry was accepted — the run is re-enqueued from the failed step; returns the resumed step key + the new attempt number.',
+  })
+  retry(@Param('id') id: string) {
+    return this.runs.retry(id);
   }
 }
 

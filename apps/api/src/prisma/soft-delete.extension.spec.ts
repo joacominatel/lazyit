@@ -97,16 +97,40 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     });
   });
 
-  it('SOFT_DELETABLE_MODELS lists exactly the 10 mutable domain entities', () => {
+  it('SOFT_DELETABLE_MODELS lists exactly the 11 mutable domain entities', () => {
     expect(SOFT_DELETABLE_MODELS.has('User')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('Asset')).toBe(true);
     // ServiceAccount is soft-deletable (revoke = soft delete; ADR-0048).
     expect(SOFT_DELETABLE_MODELS.has('ServiceAccount')).toBe(true);
+    // ConsumableCategory is auto-scoped (#321); its service carries no explicit deletedAt guard.
+    expect(SOFT_DELETABLE_MODELS.has('ConsumableCategory')).toBe(true);
+    // Consumable itself stays OUT: its service filters deletedAt explicitly for the archived view.
+    expect(SOFT_DELETABLE_MODELS.has('Consumable')).toBe(false);
     expect(SOFT_DELETABLE_MODELS.has('AssetAssignment')).toBe(false);
     expect(SOFT_DELETABLE_MODELS.has('AccessGrant')).toBe(false);
     // ServiceAccountPermission (join) and ServiceAccountAuditLog (append-only) are NOT soft-deletable.
     expect(SOFT_DELETABLE_MODELS.has('ServiceAccountPermission')).toBe(false);
     expect(SOFT_DELETABLE_MODELS.has('ServiceAccountAuditLog')).toBe(false);
-    expect(SOFT_DELETABLE_MODELS.size).toBe(10);
+    expect(SOFT_DELETABLE_MODELS.size).toBe(11);
+  });
+
+  it('auto-scopes ConsumableCategory reads to live rows (#321)', () => {
+    expect(
+      withSoftDeleteFilter('ConsumableCategory', 'findMany', {
+        orderBy: [{ name: 'asc' }],
+      }),
+    ).toEqual({ orderBy: [{ name: 'asc' }], where: { deletedAt: null } });
+    expect(
+      withSoftDeleteFilter('ConsumableCategory', 'findFirst', {
+        where: { id: 'cc1' },
+      }),
+    ).toEqual({ where: { id: 'cc1', deletedAt: null } });
+    // The restore escape hatch still bypasses the filter.
+    expect(
+      withSoftDeleteFilter('ConsumableCategory', 'findFirst', {
+        where: { id: 'cc1' },
+        includeSoftDeleted: true,
+      }),
+    ).toEqual({ where: { id: 'cc1' } });
   });
 });

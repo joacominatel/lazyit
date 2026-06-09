@@ -138,6 +138,16 @@ describe("ServiceAccountSchema / ServiceAccountWithSecretSchema", () => {
     expect(parsed).not.toHaveProperty("token");
   });
 
+  test("systemManaged defaults to false (a pre-flag payload still parses)", () => {
+    const parsed = ServiceAccountSchema.parse(base);
+    expect(parsed.systemManaged).toBe(false);
+  });
+
+  test("systemManaged is carried through when the API marks an engine-owned account", () => {
+    const parsed = ServiceAccountSchema.parse({ ...base, systemManaged: true });
+    expect(parsed.systemManaged).toBe(true);
+  });
+
   test("the once-only response extends the entity with a cleartext token", () => {
     const parsed = ServiceAccountWithSecretSchema.parse({
       ...base,

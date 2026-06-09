@@ -66,6 +66,12 @@ export const ServiceAccountSchema = z.object({
   // The direct permission grants this service account holds (catalog literals). Authorization is by
   // THIS set, never a role.
   permissions: z.array(PermissionSchema),
+  // System-managed (engine-owned) flag (issue #304). `true` for the auto-provisioned, reserved-name
+  // singleton a workflow run EXECUTES AS (the `lazyit-workflow-engine` SA, ADR-0048/ADR-0054 §6): the
+  // server REJECTS editing/disabling/rotating/revoking it (it must always exist as the run actor) and
+  // the admin UI gates its row controls off THIS signal — never a hardcoded name on the client. `false`
+  // for every operator-created account. Defaults to `false` so a pre-flag payload still parses.
+  systemManaged: z.boolean().default(false),
   // The human (User.id) who created it; null if that user was later deleted (FK SetNull).
   createdById: z.uuid().nullable(),
   createdAt: z.iso.datetime(),

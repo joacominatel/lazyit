@@ -1,5 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Consumable, CreateConsumableMovement } from "@lazyit/shared";
+import type {
+  Consumable,
+  ConsumableListPage,
+  CreateConsumableMovement,
+} from "@lazyit/shared";
 import { createConsumableMovement } from "../endpoints/consumables";
 import { consumableKeys } from "./use-consumables";
 
@@ -56,15 +60,25 @@ export function patchCachedStock(
         ? { ...current, currentStock: current.currentStock + delta }
         : current,
   );
-  // Every list query (filters vary, so patch them all).
-  queryClient.setQueriesData<Consumable[]>(
+  // Every list query (filters vary, so patch them all). The list caches the `Page<Consumable>`
+  // envelope `{ items, total, limit, offset }` (getConsumables → ConsumableListPage), NOT a bare
+  // array — map over `items` and PRESERVE the envelope (#320, the #288 Page<T>-as-array class).
+  queryClient.setQueriesData<ConsumableListPage>(
     { queryKey: consumableKeys.lists() },
     (current) =>
-      current?.map((consumable) =>
-        consumable.id === consumableId
-          ? { ...consumable, currentStock: consumable.currentStock + delta }
-          : consumable,
-      ),
+      current
+        ? {
+            ...current,
+            items: current.items.map((consumable) =>
+              consumable.id === consumableId
+                ? {
+                    ...consumable,
+                    currentStock: consumable.currentStock + delta,
+                  }
+                : consumable,
+            ),
+          }
+        : current,
   );
 }
 
@@ -88,7 +102,7 @@ export function useQuickAdjustStock() {
       const previousDetail = queryClient.getQueryData<Consumable>(
         consumableKeys.detail(consumableId),
       );
-      const previousLists = queryClient.getQueriesData<Consumable[]>({
+      const previousLists = queryClient.getQueriesData<ConsumableListPage>({
         queryKey: consumableKeys.lists(),
       });
       patchCachedStock(queryClient, consumableId, delta);

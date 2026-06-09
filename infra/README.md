@@ -85,8 +85,10 @@ Backups: `docs/05-runbooks/backups.md`.
 - **Migrations are a one-shot job.** `migrate` runs `prisma migrate deploy` + seed after Postgres is
   healthy and before the API starts. The seed needs Bun (`bun prisma/seed.ts`).
 - **Same-origin routing.** Caddy serves the web at `/` and forwards `/api/*` to the API (stripping
-  the prefix; `/api/docs*` is passed through for Swagger). The web image bakes
-  `NEXT_PUBLIC_API_URL=/api`, so one image works on any domain — ADR-0026.
+  the prefix). `/api/docs*` (Swagger) is **not** forwarded on the public origin — it falls through
+  the `/api` strip to `/docs*`, which the API doesn't serve, so a public `/api/docs` returns **404**
+  (SEC-009); the docs stay reachable on the internal Docker network and in local dev. The web image
+  bakes `NEXT_PUBLIC_API_URL=/api`, so one image works on any domain — ADR-0026.
 - **Least exposure.** Only Caddy publishes ports. Postgres/API/Web are on the internal network;
   Postgres is never reachable from the host — ADR-0028 / SEC-005.
 - **Secrets** live in the gitignored `env/.env.prod` (copied from the example). Never committed,

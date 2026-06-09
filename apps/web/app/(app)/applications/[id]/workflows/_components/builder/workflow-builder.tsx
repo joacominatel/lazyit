@@ -421,6 +421,7 @@ export function WorkflowBuilder({
           open={editingIndex != null}
           step={editingStep}
           otherSteps={steps.filter((_, i) => i !== editingIndex)}
+          priorSteps={steps.slice(0, editingIndex ?? 0)}
           onSave={(next) => saveStep(editingIndex as number, next)}
           onClose={() => setEditingIndex(null)}
         />
