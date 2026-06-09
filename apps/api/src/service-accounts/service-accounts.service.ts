@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -16,6 +17,7 @@ import type {
   ServiceAccount,
 } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { EngineServiceAccountService } from '../workflow-engine/engine-service-account.service';
 import { mintToken, randomHash } from './service-account-token';
 
 /** A ServiceAccount row joined with its permission grants — the shape every read/write returns. */
@@ -43,6 +45,15 @@ const WITH_PERMISSIONS = {
  * (ADR-0006). The cleartext secret is NEVER persisted (only its SHA-256 hash) and NEVER logged or
  * audited. The grant set is validated against the frozen `@lazyit/shared` catalog at the edge (zod) and
  * defensively re-filtered here, so a catalog-foreign literal can never be persisted as a grant.
+ *
+ * SYSTEM-MANAGED (issue #304): the singleton, auto-provisioned engine SA (reserved name
+ * {@link EngineServiceAccountService.ENGINE_SA_NAME}) that every workflow run EXECUTES AS (ADR-0048 /
+ * ADR-0054 §6) is LOCKED here: {@link update}, {@link rotate} and {@link revoke} reject it with a 409 so
+ * a human can never rename it, change its grants, disable it (isActive=false), invalidate its token, or
+ * soft-delete it out from under a run. It is identified by the reserved NAME (single source of truth on
+ * {@link EngineServiceAccountService}), never a magic string duplicated here, and surfaced to the UI via
+ * the {@link ServiceAccountWire.systemManaged} flag so the client gates its controls without hardcoding
+ * the name. (Its existence is additionally self-healed by `getOrCreate()` on next engine use.)
  */
 @Injectable()
 export class ServiceAccountsService {
@@ -138,7 +149,9 @@ export class ServiceAccountsService {
     actorId: string | null,
   ): Promise<ServiceAccountWire> {
     // 404 if missing or revoked (the read filter excludes soft-deleted rows).
-    await this.getLiveOr404(id);
+    const account = await this.getLiveOr404(id);
+    // The engine SA is system-managed — its name/grants/isActive/expiry are never human-editable (#304).
+    this.assertNotSystemManaged(account, 'edited');
 
     const data: PrismaTypes.ServiceAccountUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
@@ -215,7 +228,10 @@ export class ServiceAccountsService {
     id: string,
     actorId: string | null,
   ): Promise<ServiceAccountWithSecret> {
-    await this.getLiveOr404(id);
+    const account = await this.getLiveOr404(id);
+    // The engine SA's token is a throwaway it never authenticates with — rotating it is meaningless and
+    // forbidden (#304).
+    this.assertNotSystemManaged(account, 'rotated');
     const minted = mintToken(id);
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -242,7 +258,9 @@ export class ServiceAccountsService {
     id: string,
     actorId: string | null,
   ): Promise<ServiceAccountWire> {
-    await this.getLiveOr404(id);
+    const account = await this.getLiveOr404(id);
+    // The engine SA must always exist as the run actor — soft-deleting it would break every run (#304).
+    this.assertNotSystemManaged(account, 'revoked');
     const updated = await this.prisma.$transaction(async (tx) => {
       const account = await tx.serviceAccount.update({
         where: { id },
@@ -323,11 +341,35 @@ export class ServiceAccountsService {
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
       lastUsedAt: row.lastUsedAt ? row.lastUsedAt.toISOString() : null,
       permissions: this.sortedCatalog(row.permissions.map((p) => p.permission)),
+      // System-managed = the engine-owned singleton (#304). The UI gates its row controls off this.
+      systemManaged: ServiceAccountsService.isSystemManaged(row),
       createdById: row.createdById,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
     };
+  }
+
+  /**
+   * Is this row the system-managed engine SA? Identified by the RESERVED NAME — the single source of
+   * truth on {@link EngineServiceAccountService}, not a magic string duplicated here (#304). The engine
+   * SA is the singleton named row a workflow run executes as; locking it keeps the run actor immutable.
+   */
+  static isSystemManaged(row: { name: string }): boolean {
+    return row.name === EngineServiceAccountService.ENGINE_SA_NAME;
+  }
+
+  /**
+   * Throw a 409 if the row is the system-managed engine SA (#304). `verb` is the attempted operation
+   * (e.g. "edited", "rotated", "revoked") so the error reads naturally for the operator.
+   */
+  private assertNotSystemManaged(row: { name: string }, verb: string): void {
+    if (ServiceAccountsService.isSystemManaged(row)) {
+      throw new ConflictException(
+        `The "${EngineServiceAccountService.ENGINE_SA_NAME}" service account is system-managed ` +
+          `(the workflow engine executes as it) and cannot be ${verb}.`,
+      );
+    }
   }
 
   /**
