@@ -88,14 +88,23 @@ const ACTIVE_ICON_BY_PILLAR: Record<Pillar | "default", string> = {
  * section, instead of a flat 7-item list (which contradicted the three-pillars
  * mental model and split Assets from Consumables).
  *
- *   Inventory → Assets, Consumables   (reunited)
- *   Access    → Applications          (the route stays /applications; the
- *                                      section name "Access" is the pillar — this
- *                                      resolves the Access-vs-Applications split:
- *                                      the *thing* is an Application, the *pillar*
- *                                      is Access)
- *   Knowledge → Knowledge Base
- *   Manage    → Users, Locations, Settings (supporting registries + admin)
+ *   Inventory  → Assets, Consumables   (reunited)
+ *   Access     → Applications          (the route stays /applications; the
+ *                                       section name "Access" is the pillar — this
+ *                                       resolves the Access-vs-Applications split:
+ *                                       the *thing* is an Application, the *pillar*
+ *                                       is Access)
+ *   Knowledge  → Knowledge Base
+ *   Taxonomies → Locations              (low-traffic registries — Locations is too
+ *                                        rarely touched to sit in the top-level Manage
+ *                                        group, issue #312. This is the seam where the
+ *                                        other registries (AssetCategory, ArticleCategory)
+ *                                        will later join; their CRUD already lives under
+ *                                        Settings → Taxonomies (/settings/taxonomies).
+ *                                        The Locations page stays at /locations for now —
+ *                                        only the nav grouping moved, the route move is
+ *                                        deferred.)
+ *   Manage     → Users, Settings        (supporting registries + admin)
  *
  * Every target is an implemented route; dead links (Tickets) stay out per ADR-0016
  * (no ticketing). "Settings" is the ADMIN-only home for instance config, taxonomy
@@ -148,11 +157,22 @@ const NAV: NavSection[] = [
     ],
   },
   {
+    // Taxonomies — the low-traffic registries (issue #312). Locations lives here instead of the
+    // top-level Manage group because it's rarely touched. The page itself stays at /locations (the
+    // route move is deferred); only the nav grouping changed. Future registries (AssetCategory,
+    // ArticleCategory) slot in alongside Locations here — their CRUD already sits under
+    // Settings → Taxonomies (/settings/taxonomies). Wears the `manage` (admin/config) hue.
+    headingKey: "taxonomies",
+    pillar: "manage",
+    items: [
+      { labelKey: "locations", href: "/locations", icon: MapPinIcon },
+    ],
+  },
+  {
     headingKey: "manage",
     pillar: "manage",
     items: [
       { labelKey: "users", href: "/users", icon: UsersIcon },
-      { labelKey: "locations", href: "/locations", icon: MapPinIcon },
       {
         labelKey: "settings",
         href: "/settings",
