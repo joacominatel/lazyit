@@ -10,6 +10,11 @@ import { patchCachedStock } from "./use-consumable-movement-mutations";
  * (`setQueriesData({ queryKey: detail(id) }, …)`) would run the `Consumable` updater against the
  * movements ARRAY and spread it into a plain object — crashing the detail page's `movements.map`
  * with "e.map is not a function". `patchCachedStock` must use the EXACT `setQueryData` instead.
+ *
+ * Regression for #320: the list query caches the `Page<Consumable>` ENVELOPE
+ * `{ items, total, limit, offset }` (getConsumables → ConsumableListPage), NOT a bare array. The
+ * patch must map over `current.items` and preserve the envelope; mapping `current` directly (the
+ * old code) throws "e.map is not a function" on the quick-adjust optimistic update.
  */
 
 const CONSUMABLE_ID = "c_abc123";
@@ -25,11 +30,16 @@ function seededClient() {
     { id: 2, type: "ADJUSTMENT", quantity: 12 },
     { id: 1, type: "IN", quantity: 1 },
   ]);
-  // A list query also caches this consumable's stock.
-  qc.setQueryData(consumableKeys.list({}), [
-    { id: CONSUMABLE_ID, currentStock: 12 },
-    { id: "other", currentStock: 5 },
-  ]);
+  // A list query caches the `Page<Consumable>` envelope (NOT a bare array) — #320.
+  qc.setQueryData(consumableKeys.list({}), {
+    items: [
+      { id: CONSUMABLE_ID, currentStock: 12 },
+      { id: "other", currentStock: 5 },
+    ],
+    total: 2,
+    limit: 20,
+    offset: 0,
+  });
   return qc;
 }
 
@@ -63,16 +73,27 @@ test("quick-adjust still bumps the detail currentStock", () => {
   expect(detailAfterAddBack?.currentStock).toBe(12);
 });
 
-test("quick-adjust still bumps the matching row in every list cache", () => {
+test("quick-adjust patches the matching row in the list ENVELOPE without crashing (#320)", () => {
   const qc = seededClient();
 
-  patchCachedStock(qc, CONSUMABLE_ID, -1);
+  // The old array-map code (`current?.map(...)`) threw "e.map is not a function" here because the
+  // list cache is a `Page<Consumable>` envelope, not an array.
+  expect(() => patchCachedStock(qc, CONSUMABLE_ID, -1)).not.toThrow();
 
-  const list = qc.getQueryData<Array<{ id: string; currentStock: number }>>(
-    consumableKeys.list({}),
-  );
-  expect(list).toEqual([
-    { id: CONSUMABLE_ID, currentStock: 11 },
-    { id: "other", currentStock: 5 },
-  ]);
+  const list = qc.getQueryData<{
+    items: Array<{ id: string; currentStock: number }>;
+    total: number;
+    limit: number;
+    offset: number;
+  }>(consumableKeys.list({}));
+  // The envelope is preserved; only the matching row's currentStock is bumped.
+  expect(list).toEqual({
+    items: [
+      { id: CONSUMABLE_ID, currentStock: 11 },
+      { id: "other", currentStock: 5 },
+    ],
+    total: 2,
+    limit: 20,
+    offset: 0,
+  });
 });
