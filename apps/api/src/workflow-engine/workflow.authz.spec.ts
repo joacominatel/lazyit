@@ -30,6 +30,7 @@ import { ManualTasksService } from './tasks/manual-tasks.service';
  * PermissionResolverService (Prisma mocked to the SEEDED matrix). The workflow verbs are ADMIN-only by
  * default, so a MEMBER is 403 on every gate and an ADMIN passes:
  *   - GET  /workflow-runs            → workflow:read
+ *   - POST /workflow-runs/:id/retry  → workflow:run
  *   - POST /workflows                → workflow:manage
  *   - POST /workflow-secrets         → workflow:secrets
  *   - POST /workflow-tasks/:id/submit→ workflow:task
@@ -50,6 +51,7 @@ class FakeAuthGuard implements CanActivate {
 describe('Workflow engine endpoints — permission gating (ADR-0046)', () => {
   let app: INestApplication;
   const runsFindPage = jest.fn();
+  const runsRetry = jest.fn();
   const workflowsCreate = jest.fn();
   const secretsCreate = jest.fn();
   const tasksSubmit = jest.fn();
@@ -73,7 +75,10 @@ describe('Workflow engine endpoints — permission gating (ADR-0046)', () => {
       ],
       providers: [
         Reflector,
-        { provide: WorkflowRunsService, useValue: { findPage: runsFindPage } },
+        {
+          provide: WorkflowRunsService,
+          useValue: { findPage: runsFindPage, retry: runsRetry },
+        },
         { provide: WorkflowsService, useValue: { create: workflowsCreate } },
         {
           provide: WorkflowSecretsService,
@@ -98,6 +103,7 @@ describe('Workflow engine endpoints — permission gating (ADR-0046)', () => {
     runsFindPage
       .mockReset()
       .mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 });
+    runsRetry.mockReset().mockResolvedValue({ ok: true, runId: 'r1' });
     workflowsCreate.mockReset().mockResolvedValue({ id: 'wf1' });
     secretsCreate.mockReset().mockResolvedValue({ id: 's1', configured: true });
     tasksSubmit.mockReset().mockResolvedValue({ ok: true });
@@ -117,6 +123,23 @@ describe('Workflow engine endpoints — permission gating (ADR-0046)', () => {
         .set('X-Test-Role', 'ADMIN');
       expect(res.status).toBe(200);
       expect(runsFindPage).toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /workflow-runs/:id/retry — workflow:run', () => {
+    it('403 for a MEMBER (never reaches the service — retry is a distinct verb from read)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/workflow-runs/r1/retry')
+        .set('X-Test-Role', 'MEMBER');
+      expect(res.status).toBe(403);
+      expect(runsRetry).not.toHaveBeenCalled();
+    });
+    it('200 for an ADMIN', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/workflow-runs/r1/retry')
+        .set('X-Test-Role', 'ADMIN');
+      expect(res.status).toBe(200);
+      expect(runsRetry).toHaveBeenCalledWith('r1');
     });
   });
 
