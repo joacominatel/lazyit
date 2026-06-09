@@ -16,6 +16,7 @@ import { ActorService } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /**
  * PostgreSQL `int4` upper bound — the max value a Prisma `Int` column (here `currentStock`) can
@@ -58,6 +59,7 @@ export class ConsumablesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly actor: ActorService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -216,7 +218,15 @@ export class ConsumablesService {
     const actor = this.actor.resolveActor(principal);
     const { type, quantity, reason, notes } = data;
 
-    return this.prisma.$transaction(async (tx) => {
+    // BEFORE-snapshot (live row only) for the low-stock crossing check (ADR-0056 §3). A light read
+    // outside the tx; null when the row is missing/soft-deleted (the tx below 404s those). The crossing
+    // is computed from this `before` stock vs the `after` re-read once the tx commits.
+    const before = await this.prisma.consumable.findFirst({
+      where: { id: consumableId, deletedAt: null },
+      select: { currentStock: true, minStock: true, name: true },
+    });
+
+    const movement = await this.prisma.$transaction(async (tx) => {
       if (type === 'IN') {
         // Read only to enforce the int4 ceiling and a clean 404; the write itself is atomic. Scoped
         // to the LIVE row (`deletedAt: null`) so a soft-deleted consumable reads as null → 404 and is
@@ -294,6 +304,62 @@ export class ConsumablesService {
         },
       });
     });
+
+    // AFTER commit, best-effort: a low-stock bell nudge on a DOWNWARD crossing (ADR-0056 §3) — NEVER
+    // inside the tx (a notification must not roll back the movement).
+    await this.emitLowStock(consumableId, before);
+    return movement;
+  }
+
+  /**
+   * Fire a `low_stock` bell nudge (ADR-0056 §3) when a movement transitioned the consumable from ABOVE
+   * its `minStock` to AT/BELOW it — the DOWNWARD crossing only. A consumable that is already low and
+   * merely flaps (out/in/out while still ≤ minStock) does NOT cross down, so it never re-fires (no
+   * spam). Re-reads the post-commit stock and compares to the `before` snapshot:
+   *   crossing ⇔ `before.currentStock > minStock` AND `after.currentStock <= minStock`.
+   * The dedupe key carries a coarse DAILY bucket, so a genuine re-cross on a later day mints a fresh
+   * nudge, while same-day re-crossings collapse to one. Best-effort: every failure is swallowed.
+   */
+  private async emitLowStock(
+    consumableId: string,
+    before: { currentStock: number; minStock: number | null; name: string } | null,
+  ): Promise<void> {
+    try {
+      // No threshold set, or the row was missing pre-commit → nothing to cross.
+      if (!before || before.minStock == null) {
+        return;
+      }
+      const min = before.minStock;
+      // Already at/below before the movement → not a downward CROSSING (anti-flap guard).
+      if (before.currentStock <= min) {
+        return;
+      }
+      const after = await this.prisma.consumable.findFirst({
+        where: { id: consumableId, deletedAt: null },
+        select: { currentStock: true, name: true },
+      });
+      if (!after || after.currentStock > min) {
+        return; // never crossed down (or the row vanished).
+      }
+      // Coarse daily bucket so a real re-cross on another day re-alerts, while same-day collapses to one.
+      const dayBucket = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+      await this.notifications.emit({
+        type: 'low_stock',
+        dedupeKey: `low_stock:${consumableId}:${dayBucket}`,
+        severity: 'warning',
+        title: `${after.name} is low on stock`,
+        summary: `${after.currentStock} left (minimum ${min}).`,
+        entityType: 'consumable',
+        entityId: consumableId,
+        metadata: {
+          name: after.name,
+          currentStock: after.currentStock,
+          minStock: min,
+        },
+      });
+    } catch {
+      // Best-effort: a failed nudge never affects the already-committed movement.
+    }
   }
 
   /** A consumable's movement ledger, newest first. Optional type + createdAt-range filters. */
