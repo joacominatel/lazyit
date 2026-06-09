@@ -31,6 +31,23 @@
   },
   "activity": {
     "system": "Sistema",
+    "occurredAt": "Ocurrió {datetime}",
+    "viewUser": "Ver {user}",
+    "line": {
+      "granted": "Acceso a {subject} otorgado a {user}",
+      "grantedSubject": "Acceso a {subject} otorgado",
+      "revoked": "Acceso a {subject} revocado a {user}",
+      "revokedSubject": "Acceso a {subject} revocado",
+      "assigned": "{subject} asignado a {user}",
+      "assignedSubject": "{subject} asignado",
+      "released": "{subject} liberado de {user}",
+      "releasedSubject": "{subject} liberado",
+      "userUpdated": "Perfil de {subject} actualizado",
+      "userRoleChanged": "Rol de {subject} cambiado",
+      "userCreated": "{subject} creado",
+      "userRestored": "{subject} restaurado",
+      "userPasswordResetSent": "Restablecimiento de contraseña enviado a {subject}"
+    },
     "dateGroup": {
       "today": "Hoy",
       "yesterday": "Ayer",

@@ -16,6 +16,21 @@ export function formatDate(iso: string): string {
 }
 
 /**
+ * ISO timestamp → an absolute, locale-aware date+time (e.g. "May 25, 2026, 3:04 PM"). Used as the
+ * tooltip/aria companion to the activity feed's relative time so an audit-relevant entry always
+ * carries the exact moment it occurred, not just "9h ago" (issue #311).
+ */
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/**
  * A duration in milliseconds → a compact human label ("420ms", "3.2s", "2m 5s", "1h 4m"). Returns null
  * for a null/negative input so callers can omit the field cleanly. Mirrors the run-timeline's per-step
  * duration grammar so a run's wall-clock duration reads consistently with its step durations.

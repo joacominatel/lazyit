@@ -3,7 +3,7 @@ title: RecentActivity
 tags: [domain, entity, view]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-04
+updated: 2026-06-09
 ---
 
 # RecentActivity
@@ -44,7 +44,22 @@ silent no-match. Keep it in sync with the view if a new source verb is added.
   belongs to; `user` added by DEBT-2 — [[0050-user-history-and-activity-user-entity]]).
 - `entityId` — the affected entity's id (a cuid for asset/application/consumable; a uuid for `user`).
 - `action` — a stable machine verb (see the table above).
-- `summary` — a terse, server-built English sentence for the feed line.
+- `summary` — a terse, server-built English sentence for the feed line (the generic fallback).
+- `subjectName` (issue #311) — the AFFECTED entity's resolved display name (`Application.name` /
+  `Asset.name` / `Consumable.name`, or the subject user's `firstName lastName`); `null` when
+  unresolved. Pairs with `entityType` + `entityId` for the primary click-through.
+- `targetUserId` (issue #311) — the user the event is ABOUT (the grant holder / assignment owner /
+  user-history subject), as a uuid; `null` for events with no person subject (asset state changes,
+  consumable movements). DISTINCT from `actorId` (who DID it) — drives a second click-through to that
+  person's detail page. A **soft-deleted** target user resolves to `null` (the view `LEFT JOIN`s the
+  target on `deletedAt IS NULL`), so a soft-deleted person's name is never surfaced.
+- `targetUserName` (issue #311) — that target user's display name (`firstName lastName`), or `null`.
+
+The subject fields turn the generic line ("Access revoked from a user") into a specific, click-through
+headline ("Access to **\<App\>** revoked from **\<User\>**") on both the dashboard panel and the
+Reports/Informes timeline. They are resolved purely from each source's EXISTING relations in the view
+(no new access; the feed itself stays gated on `logs:read`), and the web renders the absolute
+`occurredAt` as a tooltip/aria-label alongside the relative time.
 
 The schema lives in `@lazyit/shared` (`schemas/recent-activity.ts`): `RecentActivityItemSchema` +
 `RecentActivityPageSchema` (a `Page<T>` envelope — [[0030-list-pagination-contract]]). The filterable
