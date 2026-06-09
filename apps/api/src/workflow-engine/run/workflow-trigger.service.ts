@@ -11,6 +11,7 @@ import {
   WORKFLOW_RUN_RESUME_JOB,
   WORKFLOW_RUN_RETRY_JOB,
   WORKFLOW_RUN_START_JOB,
+  workflowJobId,
 } from './workflow-run.constants';
 import type { WorkflowRunJobData } from './workflow-run.types';
 
@@ -130,7 +131,8 @@ export class WorkflowTriggerService {
         WORKFLOW_RUN_START_JOB,
         { runId },
         {
-          jobId: `start:${runId}`,
+          // `start-<runId>` — one per run (BullMQ-safe: no `:`, which it forbids in a custom id).
+          jobId: workflowJobId('start', runId),
           attempts: 1,
           removeOnComplete: { age: 3600, count: 1000 },
           removeOnFail: { age: 24 * 3600, count: 1000 },
@@ -156,7 +158,7 @@ export class WorkflowTriggerService {
    * enqueue}). `cursor` is the resolved next target (a step key or a terminal token). The orchestrator's
    * `resume` flips AWAITING_INPUT→RUNNING guarded, so a duplicate resume job is a no-op (idempotent).
    *
-   * `opts.jobId` overrides the default `resume:<runId>:<cursor>` dedupe key. The sweeper's AWAITING_INPUT
+   * `opts.jobId` overrides the default `resume-<runId>-<cursor>` dedupe key. The sweeper's AWAITING_INPUT
    * reconciler (CCOR-2) passes a NON-colliding, rotating jobId so a re-enqueue is never swallowed by a
    * STALE same-cursor resume job that the live path already produced and that still lingers in the queue
    * (`removeOnComplete.age` keeps a completed — possibly no-op — resume around for up to an hour).
@@ -171,7 +173,8 @@ export class WorkflowTriggerService {
         WORKFLOW_RUN_RESUME_JOB,
         { runId, resumeCursor: cursor },
         {
-          jobId: opts?.jobId ?? `resume:${runId}:${cursor}`,
+          // `resume-<runId>-<cursor>` — one per run+cursor (BullMQ-safe: no `:`).
+          jobId: opts?.jobId ?? workflowJobId('resume', runId, cursor),
           attempts: 1,
           removeOnComplete: { age: 3600, count: 1000 },
           removeOnFail: { age: 24 * 3600, count: 1000 },
@@ -189,7 +192,7 @@ export class WorkflowTriggerService {
   /**
    * Enqueue a DELAYED retry job (CCOR-3) so a step's per-attempt backoff runs OFF the worker — the slot
    * is freed for the backoff window (up to 1h) and the delay is durable in Valkey across restarts. The
-   * deterministic `retry:<runId>:<stepKey>:<attempt>` jobId dedupes a double-scheduled attempt; the
+   * deterministic `retry-<runId>-<stepKey>-<attempt>` jobId dedupes a double-scheduled attempt; the
    * orchestrator's `retryStep` re-entry is itself idempotent (it no-ops if the attempt was already run).
    * Best-effort: a broker-down enqueue returns `false`, and the orchestrator falls back to a SHORT,
    * lock-bounded in-process backoff so the run still makes progress while Valkey is unreachable.
@@ -205,7 +208,8 @@ export class WorkflowTriggerService {
         WORKFLOW_RUN_RETRY_JOB,
         { runId, retryStepKey: stepKey, retryAttempt: attempt },
         {
-          jobId: `retry:${runId}:${stepKey}:${attempt}`,
+          // `retry-<runId>-<stepKey>-<attempt>` — one per run+step+attempt (BullMQ-safe: no `:`).
+          jobId: workflowJobId('retry', runId, stepKey, attempt),
           delay: delayMs,
           attempts: 1,
           removeOnComplete: { age: 3600, count: 1000 },

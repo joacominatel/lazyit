@@ -13,6 +13,7 @@ import {
   PENDING_RUN_SWEEP_AFTER_MS,
   PENDING_RUN_SWEEP_INTERVAL_MS,
   RUNNING_STALE_AFTER_MS,
+  workflowJobId,
 } from './workflow-run.constants';
 
 /** What one full sweep pass recovered, per reconciler (returned for telemetry / tests). */
@@ -179,9 +180,10 @@ export class WorkflowRunSweeper implements OnModuleInit, OnModuleDestroy {
           continue;
         }
         const ok = await this.trigger.enqueueResume(run.id, cursor, {
-          // Rotating, non-colliding jobId: it cannot be deduped away by a stale `resume:<run>:<cursor>`
-          // job the live path already produced (and that lingers per `removeOnComplete.age`).
-          jobId: `resume:${run.id}:${cursor}:reconcile:${task.id}`,
+          // Rotating, non-colliding jobId (keyed by task.id): it cannot be deduped away by a stale
+          // `resume-<run>-<cursor>` job the live path already produced (and that lingers per
+          // `removeOnComplete.age`). BullMQ-safe — built with `workflowJobId` so it carries no `:`.
+          jobId: workflowJobId('resume', run.id, cursor, 'reconcile', task.id),
         });
         if (ok) {
           resumed += 1;

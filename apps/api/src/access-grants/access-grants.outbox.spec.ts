@@ -114,11 +114,11 @@ describe('AccessGrant outbox — create', () => {
     expect(runData.status).toBe('PENDING');
     expect(runData.workflowVersionId).toBe(5);
     expect(runData.executedAsServiceAccountId).toBe('sa_engine');
-    // Enqueued AFTER commit with a deterministic start jobId (idempotent).
+    // Enqueued AFTER commit with a deterministic, BullMQ-safe start jobId (idempotent; no `:` — #298).
     expect(h.queue.add).toHaveBeenCalledWith(
       'run-start',
       { runId: 'run1' },
-      expect.objectContaining({ jobId: 'start:run1' }),
+      expect.objectContaining({ jobId: 'start-run1' }),
     );
   });
 

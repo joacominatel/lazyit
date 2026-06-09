@@ -62,3 +62,14 @@ export const PENDING_RUN_SWEEP_INTERVAL_MS = 60_000;
 
 /** Max steps a single walk will traverse before bailing — a defensive cap (the graph is acyclic). */
 export const MAX_WALK_STEPS = 200;
+
+/**
+ * Build a BullMQ-safe custom jobId from its parts. BullMQ FORBIDS the colon (`:`) in a custom job id —
+ * it is BullMQ's internal Redis key separator, so `queue.add` throws `Custom Id cannot contain :` and
+ * the job never enqueues. We join the parts with `-` AND defensively replace any `:` a part itself
+ * carries (a `cursor` / `stepKey` could contain one) with `-`. Pure + tiny; same parts ⇒ same id, so
+ * the dedupe semantics are preserved. → see fix for #298 / ADR-0053.
+ */
+export function workflowJobId(...parts: Array<string | number>): string {
+  return parts.map((part) => String(part).replace(/:/g, '-')).join('-');
+}
