@@ -1,4 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+import { EngineServiceAccountService } from '../workflow-engine/engine-service-account.service';
 
 // The service imports PrismaService, which loads the generated Prisma client (ESM `.js` re-exports jest
 // can't resolve). The DB is faked here with an in-memory store, so stub the client/adapter.
@@ -391,6 +396,93 @@ describe('ServiceAccountsService (ADR-0048)', () => {
 
       const all = await service.findAll(true);
       expect(all.map((x) => x.name).sort()).toEqual(['a', 'b']);
+    });
+  });
+
+  // The auto-provisioned engine SA (#304) — the singleton a workflow run executes as — is system-managed:
+  // a human can never edit / disable / rotate / revoke it. It is identified by the RESERVED NAME, so we
+  // create a row and rename it to that reserved literal to exercise the lock.
+  describe('system-managed engine SA (#304)', () => {
+    async function seedEngineSa(): Promise<string> {
+      const created = await service.create(
+        { name: 'placeholder', permissions: ['asset:read'] },
+        ADMIN,
+      );
+      // Rename the row to the reserved engine name so the lock recognises it.
+      prisma.accounts.find((a) => a.id === created.id)!.name =
+        EngineServiceAccountService.ENGINE_SA_NAME;
+      return created.id;
+    }
+
+    it('marks the engine SA systemManaged:true on reads (so the UI can gate)', async () => {
+      const id = await seedEngineSa();
+      const read = await service.findOne(id);
+      expect(read.systemManaged).toBe(true);
+    });
+
+    it('a normal account is systemManaged:false', async () => {
+      const created = await service.create(
+        { name: 'ci-runner', permissions: ['asset:read'] },
+        ADMIN,
+      );
+      const read = await service.findOne(created.id);
+      expect(read.systemManaged).toBe(false);
+    });
+
+    it('rejects edit (update) of the engine SA with a 409 and does not mutate it', async () => {
+      const id = await seedEngineSa();
+      await expect(
+        service.update(id, { name: 'hijacked' }, ADMIN),
+      ).rejects.toBeInstanceOf(ConflictException);
+      // Untouched: still the reserved name.
+      expect(prisma.accounts.find((a) => a.id === id)!.name).toBe(
+        EngineServiceAccountService.ENGINE_SA_NAME,
+      );
+    });
+
+    it('rejects disable (isActive=false) of the engine SA with a 409', async () => {
+      const id = await seedEngineSa();
+      await expect(
+        service.update(id, { isActive: false }, ADMIN),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.accounts.find((a) => a.id === id)!.isActive).toBe(true);
+    });
+
+    it('rejects rotate of the engine SA with a 409', async () => {
+      const id = await seedEngineSa();
+      const hashBefore = prisma.accounts.find((a) => a.id === id)!.tokenHash;
+      await expect(service.rotate(id, ADMIN)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      // The throwaway token hash is untouched.
+      expect(prisma.accounts.find((a) => a.id === id)!.tokenHash).toBe(
+        hashBefore,
+      );
+    });
+
+    it('rejects revoke (soft-delete) of the engine SA with a 409', async () => {
+      const id = await seedEngineSa();
+      await expect(service.revoke(id, ADMIN)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      // Still live — it must always exist as the run actor.
+      expect(prisma.accounts.find((a) => a.id === id)!.deletedAt).toBeNull();
+    });
+
+    it('leaves a normal account fully mutable (update/rotate/revoke unaffected)', async () => {
+      const created = await service.create(
+        { name: 'ci-runner', permissions: ['asset:read'] },
+        ADMIN,
+      );
+      await expect(
+        service.update(created.id, { name: 'renamed' }, ADMIN),
+      ).resolves.toMatchObject({ name: 'renamed' });
+      await expect(service.rotate(created.id, ADMIN)).resolves.toHaveProperty(
+        'token',
+      );
+      await expect(service.revoke(created.id, ADMIN)).resolves.toHaveProperty(
+        'deletedAt',
+      );
     });
   });
 });
