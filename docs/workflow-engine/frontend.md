@@ -427,9 +427,18 @@ keystone 3), a **manual task** is created for IT, and the operator resumes the r
 frontend surfaces these as a first-class **inbox**; the task simply records whether it arose from a
 manual step or an escalated failure so the action UI (§6b) can show the right context.
 
-### 6a. Ride the ADR-0052 notification bell + SSE
+### 6a. Ride the notification bell + SSE
 
-The brief instructs reusing the ADR-0052 notification/bell/SSE stack — and it is the right fit:
+> **Decision:** the notification bell this section assumed (from a Settings/Notifications branch that
+> **never landed on `dev`**) is now its own ratified decision — [[0056-in-app-notification-bell]]
+> (`accepted`, #313): an append-only `Notification` + per-admin `NotificationRead` (fan-out-on-read),
+> a closed shared type enum (incl. `workflow.manual_task` / `workflow.run_failed`), **poll delivery in
+> v1 with SSE as a Phase-2 upgrade behind the same API**, gated by a new `notification:read`
+> (ADMIN-only). Read the "ADR-0052 SSE" references below as **ADR-0056, poll-first**: the manual-task
+> inbox + run-failed alerts ride that bell; the live SSE push is the Phase-2 upgrade, so the v1 inbox is
+> a **polled** list until then (dependency D1 below is resolved by ADR-0056, not the dead branch).
+
+The brief instructs reusing the notification/bell/SSE stack — and it is the right fit:
 
 - A new manual task **emits a `Notification`** (a new notification type, e.g. `workflow.manual_task`),
   so it appears in the **topbar bell** with live **SSE** push (the bell already consumes
