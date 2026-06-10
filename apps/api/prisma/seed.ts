@@ -33,10 +33,15 @@ if (!connectionString) {
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
-// The seeded administrator (ADR-0040). Email is overridable via SEED_ADMIN_EMAIL (Bun auto-loads
-// .env); defaults to a clearly-internal address. Idempotent: re-running keeps the row and (re)asserts
-// the ADMIN role so a manual demotion in dev is corrected on the next seed.
-const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? 'admin@lazyit.local';
+// The seeded administrator — DEV CONVENIENCE ONLY, OPT-IN (#333). Seeded ONLY when SEED_ADMIN_EMAIL
+// is explicitly set; there is NO default. In a prod / zero-touch deploy SEED_ADMIN_EMAIL is UNSET, so
+// NO admin is seeded and the in-app /setup wizard — or the first OIDC login, which jwt-auth.guard's
+// jitProvision promotes to ADMIN on an empty DB — owns the first administrator (ADR-0043). A
+// pre-seeded admin otherwise breaks BOTH first-run paths: it trips /setup's `adminCount > 0` gate
+// ("Already set up") AND makes the first real OIDC login default to VIEWER (`userCount !== 0`),
+// because the operator's IdP email never matches the seed's `admin@lazyit.local`. For local dev with
+// the X-User-Id shim, set SEED_ADMIN_EMAIL=admin@lazyit.local in apps/api/.env. Bun auto-loads .env.
+const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL?.trim() || undefined;
 
 // Initial asset categories. Users can add / edit / soft-delete categories afterwards; none of
 // these is special. Icons (heroicon names) are left unset for the frontend to assign.
@@ -92,31 +97,40 @@ const INITIAL_CONSUMABLE_CATEGORIES = [
 ];
 
 async function main() {
-  // The seeded administrator (ADR-0040). ADMIN so a fresh database is never left without anyone able
-  // to administer it. Email is normalized (citext + ADR-0041) to its canonical lowercase form so the
-  // find matches the case-insensitive column. Re-asserts the ADMIN role on re-run (corrects a manual
-  // dev demotion); creates the row only when no LIVE admin with that email exists.
-  const adminEmail = SEED_ADMIN_EMAIL.trim().toLowerCase();
-  const existingAdmin = await prisma.user.findFirst({
-    where: { email: adminEmail, deletedAt: null },
-    select: { id: true },
-  });
-  if (existingAdmin) {
-    await prisma.user.update({
-      where: { id: existingAdmin.id },
-      data: { role: Role.ADMIN },
+  // Seeded administrator — OPT-IN (#333). Only runs when SEED_ADMIN_EMAIL is set (dev convenience for
+  // the X-User-Id shim). In prod / zero-touch the var is UNSET, so the seed creates NO user and the
+  // /setup wizard (or the first OIDC login → ADMIN) owns the first administrator (ADR-0043). When set:
+  // ADMIN so a fresh dev database is never left without anyone able to administer it; the email is
+  // normalized (citext + ADR-0041) to its canonical lowercase form so the find matches the
+  // case-insensitive column; re-asserts the ADMIN role on re-run (corrects a manual dev demotion);
+  // creates the row only when no LIVE admin with that email exists.
+  if (SEED_ADMIN_EMAIL) {
+    const adminEmail = SEED_ADMIN_EMAIL.toLowerCase();
+    const existingAdmin = await prisma.user.findFirst({
+      where: { email: adminEmail, deletedAt: null },
+      select: { id: true },
     });
+    if (existingAdmin) {
+      await prisma.user.update({
+        where: { id: existingAdmin.id },
+        data: { role: Role.ADMIN },
+      });
+    } else {
+      await prisma.user.create({
+        data: {
+          email: adminEmail,
+          firstName: 'Admin',
+          lastName: 'User',
+          role: Role.ADMIN,
+        },
+      });
+    }
+    console.log(`Seeded ADMIN user ${adminEmail} (SEED_ADMIN_EMAIL set).`);
   } else {
-    await prisma.user.create({
-      data: {
-        email: adminEmail,
-        firstName: 'Admin',
-        lastName: 'User',
-        role: Role.ADMIN,
-      },
-    });
+    console.log(
+      'No SEED_ADMIN_EMAIL set — skipping admin seed; the /setup wizard or first OIDC login owns the first ADMIN (ADR-0043).',
+    );
   }
-  console.log(`Seeded ADMIN user ${adminEmail}.`);
 
   // Category sets — seed-once per table (rename-safe; never re-creates a renamed row, #321).
   const assetCreated = await seedCategoriesOnce(
