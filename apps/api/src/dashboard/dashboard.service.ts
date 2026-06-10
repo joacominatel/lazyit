@@ -182,6 +182,13 @@ export class DashboardService {
    * `$transaction`, so the `total` reflects the FILTERED set and cannot drift from the page under
    * concurrent writes to any source.
    *
+   * SUBJECT enrichment (issue #311): the row also carries `subjectName` (the affected entity's resolved
+   * display name) and `targetUserId`/`targetUserName` (the user the event is ABOUT — the grant holder /
+   * assignment owner / user-history subject, distinct from the actor). The view resolves these from each
+   * source's existing relations (so no widened access — the feed is already gated on logs:read), and a
+   * soft-deleted target user resolves to null. The web turns them into a specific headline
+   * ("Access to <App> revoked from <User>") and a click-through to that person's detail.
+   *
    * Filters (issue #181) are OPTIONAL and additive — `entityType`, `entityId`, `actorId`, `action`,
    * a closed-open `[from, to)` window over `occurredAt`, and a free-text `q` over `summary` + the
    * resolved actor name. Each is a PARAMETERIZED `Prisma.sql` fragment (never string concatenation),
@@ -205,7 +212,13 @@ export class DashboardService {
           ra."entityType",
           ra."entityId",
           ra."action",
-          ra."summary"
+          ra."summary",
+          -- Subject enrichment (issue #311): the view resolves these from each source's existing
+          -- relations — the affected entity's name + the target user the event concerns — so the web
+          -- can render a specific, click-through headline instead of "Access revoked from a user".
+          ra."subjectName",
+          ra."targetUserId",
+          ra."targetUserName"
         FROM "recent_activity" ra
         LEFT JOIN "users" u ON u."id" = ra."actorId"
         ${where}
@@ -231,6 +244,10 @@ export class DashboardService {
       entityId: row.entityId,
       action: row.action,
       summary: row.summary,
+      // Subject enrichment (issue #311) — surfaced straight from the view (all nullable).
+      subjectName: row.subjectName,
+      targetUserId: row.targetUserId,
+      targetUserName: row.targetUserName,
     }));
 
     return pageOf(items, total, query);
@@ -299,4 +316,10 @@ interface RecentActivityRow {
   entityId: string;
   action: string;
   summary: string;
+  // Subject enrichment (issue #311): the affected entity's resolved name + the target user the event
+  // concerns (the grant holder / assignment owner / user-history subject). All nullable — a source
+  // with no subject, or a soft-deleted/unresolved relation, yields null.
+  subjectName: string | null;
+  targetUserId: string | null;
+  targetUserName: string | null;
 }

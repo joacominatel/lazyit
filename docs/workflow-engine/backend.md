@@ -282,9 +282,18 @@ Two layers, kept distinct:
   `attempts` + exponential `backoff` with jitter. The handler classifies the failure as `retryable` or
   not; only `retryable` failures consume attempts. Permanent `4xx` (e.g. 400/401/403/422) are **not**
   retried — same policy as the Zitadel client (INV-5 / #196). A `Retry-After` is honoured when present.
-- **Business retry (operator):** once BullMQ attempts are exhausted the run goes `FAILED`; an operator
-  can **re-run from the failed step** via the management API. Because of idempotency keys, a re-run does
-  not repeat already-`SUCCEEDED` steps.
+- **Business retry (operator) — wired (issue #308):** once attempts are exhausted the run goes `FAILED`;
+  an operator with `workflow:run` can **re-run from the failed step** via `POST /workflow-runs/:id/retry`.
+  The orchestrator's `retryRun` reads the run's redacted `error.stepKey`, computes the next append-only
+  attempt for that step (max + 1), flips `FAILED`→`RUNNING` under a **guarded compare-and-set** (only a
+  still-`FAILED` run proceeds — a double-retry / a retry racing the sweeper is idempotent), and
+  re-enqueues a delayed-0 `run-retry` job (reusing the colon-free `workflowJobId`) so the walk re-enters
+  at the failed step OFF the request thread. Because the walk resumes at that step (not the entry node),
+  already-`SUCCEEDED` steps are never re-executed — a non-idempotent create cannot double-provision.
+  **Policy: only `FAILED` is retryable** — a `COMPENSATED` run already rolled its external effects back,
+  so re-driving it would re-provision what compensation just undid; the endpoint rejects non-`FAILED`
+  runs with a 409, and a `FAILED` run with no resolvable failed step with a 422. The grant is never
+  touched (the §2 decoupling rule).
 
 Defaults are conservative (e.g. ≤5 attempts, capped total backoff) and live in step/definition config,
 not hard-coded, but with safe ceilings the operator cannot exceed (DoS/foot-gun guard).

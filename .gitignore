@@ -25,3 +25,11 @@ docs/.obsidian/graph.json
 impeccable/
 
 api_example/
+
+# SonarQube
+.scannerwork/
+coverage.out
+
+# Test coverage output
+apps/*/coverage/
+packages/*/coverage/

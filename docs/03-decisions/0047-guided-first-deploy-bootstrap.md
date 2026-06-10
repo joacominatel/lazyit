@@ -78,9 +78,13 @@ Add **`infra/start.sh`** — an executable, POSIX `sh` (`set -eu`), guided first
 - **GENERATE** `infra/env/.env.prod`, rendered from the `.example` (the secret contract):
   - `ZITADEL_MASTERKEY` = `openssl rand -hex 16` (16 bytes → 32 hex chars), **asserted to be
     exactly 32 chars** before it is written, else abort.
-  - `POSTGRES_PASSWORD`, `ZITADEL_DB_PASSWORD`, `MEILI_MASTER_KEY` = `openssl rand -base64 24`;
-    `AUTH_SECRET` = `openssl rand -base64 33`.
-  - `POSTGRES_PASSWORD` is substituted **identically** into `DATABASE_URL` (internal-DB mode).
+  - `POSTGRES_PASSWORD`, `ZITADEL_DB_PASSWORD` = `openssl rand -hex 24` (**URL-safe** — see below);
+    `MEILI_MASTER_KEY` = `openssl rand -base64 24`; `AUTH_SECRET` = `openssl rand -base64 33`.
+  - `POSTGRES_PASSWORD` is substituted **identically** into `DATABASE_URL` (internal-DB mode), so it
+    **must be URL-safe**: a base64 `/` (or any of `: @ ? #`) terminates the URL authority early and
+    Prisma rejects the string at the migrate step with `P1013: invalid port number in database URL`.
+    Hence `-hex` (not `-base64`) for this secret, plus a `generate_secrets` guard that aborts if the
+    value ever carries a URL-authority delimiter.
   - A Zitadel-complexity console admin password (random, surfaced **once** in the final output).
   - The operator's domain/origin/issuer/port answers. **Every free-text answer is validated**
     before use (newline + control characters rejected outright — they could inject an extra

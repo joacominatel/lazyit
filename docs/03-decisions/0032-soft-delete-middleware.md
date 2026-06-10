@@ -34,9 +34,11 @@ it" as the intended fix.
 
 ## Decision
 
-- A **`$extends` query extension** intercepts `$allOperations` on `$allModels` and, for the **9
-  soft-deletable models** (`User`, `Location`, `AssetCategory`, `AssetModel`, `Asset`,
-  `ArticleCategory`, `Article`, `ApplicationCategory`, `Application`), injects
+- A **`$extends` query extension** intercepts `$allOperations` on `$allModels` and, for the
+  soft-deletable models in `SOFT_DELETABLE_MODELS` (`User`, `Location`, `AssetCategory`, `AssetModel`,
+  `Asset`, `ArticleCategory`, `Article`, `ApplicationCategory`, `Application`, `ConsumableCategory`,
+  `ServiceAccount` — `Consumable` is deliberately OUT, its service filters `deletedAt` explicitly to
+  serve the ADMIN archived-view slice), injects
   `where: { deletedAt: null }` into **read** operations: `findFirst`, `findFirstOrThrow`, `findMany`,
   `count`, `aggregate`, `groupBy`. The pure logic lives in `withSoftDeleteFilter`
   (`apps/api/src/prisma/soft-delete.extension.ts`) and is unit-tested in isolation; the extension is

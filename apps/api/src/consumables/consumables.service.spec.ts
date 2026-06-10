@@ -7,6 +7,7 @@ import {
 import { ConsumablesService } from './consumables.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -70,6 +71,7 @@ describe('ConsumablesService', () => {
     $transaction: jest.Mock;
   };
   let actor: ActorService;
+  let notifications: { emit: jest.Mock };
 
   beforeEach(async () => {
     consumable = {
@@ -102,11 +104,14 @@ describe('ConsumablesService', () => {
     // used so it produces the genuine ActorAttribution from the principal each test passes (ADR-0048).
     actor = new ActorService();
 
+    notifications = { emit: jest.fn().mockResolvedValue(null) };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         ConsumablesService,
         { provide: PrismaService, useValue: prisma },
         { provide: ActorService, useValue: actor },
+        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
 
@@ -242,7 +247,11 @@ describe('ConsumablesService', () => {
     consumable.findFirst.mockResolvedValue(found);
 
     await expect(service.findOne('k1')).resolves.toEqual(found);
-    expect(consumable.findFirst).toHaveBeenCalledWith({ where: { id: 'k1' } });
+    // Consumable is NOT in SOFT_DELETABLE_MODELS, so the by-id read scopes to live rows EXPLICITLY
+    // (SEC-050): a soft-deleted consumable must 404, not leak. The read filter does not auto-scope it.
+    expect(consumable.findFirst).toHaveBeenCalledWith({
+      where: { id: 'k1', deletedAt: null },
+    });
   });
 
   it('throws NotFound when the consumable does not exist', async () => {
@@ -268,6 +277,11 @@ describe('ConsumablesService', () => {
 
     await service.update('k1', { minStock: 3 });
 
+    // The write gate (assertExists) is live-scoped (SEC-050): editing a soft-deleted consumable 404s.
+    expect(consumable.findFirst).toHaveBeenCalledWith({
+      where: { id: 'k1', deletedAt: null },
+      select: { id: true },
+    });
     expect(consumable.update).toHaveBeenCalledWith({
       where: { id: 'k1' },
       data: { minStock: 3 },
@@ -314,7 +328,12 @@ describe('ConsumablesService', () => {
     await service.createMovement('k1', { type: 'IN', quantity: 3 });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    // Atomic increment, not a JS read-modify-write of an absolute value.
+    // The pre-read is live-scoped (SEC-050): a soft-deleted consumable reads as null → 404, never
+    // incremented. Then the write is an atomic increment, not a JS read-modify-write of an absolute.
+    expect(tx.consumable.findFirst).toHaveBeenCalledWith({
+      where: { id: 'k1', deletedAt: null },
+      select: { currentStock: true },
+    });
     expect(tx.consumable.update).toHaveBeenCalledWith({
       where: { id: 'k1' },
       data: { currentStock: { increment: 3 } },
@@ -371,29 +390,52 @@ describe('ConsumablesService', () => {
     await expect(
       service.createMovement('k1', { type: 'OUT', quantity: 2 }),
     ).rejects.toBeInstanceOf(ConflictException);
+    // The disambiguation read scopes to live rows (SEC-050) so it only ever echoes a LIVE row's stock.
+    expect(tx.consumable.findFirst).toHaveBeenCalledWith({
+      where: { id: 'k1', deletedAt: null },
+      select: { currentStock: true },
+    });
     expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
 
   it('OUT with count 0 against a missing/soft-deleted consumable throws 404', async () => {
     tx.consumable.updateMany.mockResolvedValue({ count: 0 });
+    // The disambiguation read is live-scoped, so a soft-deleted row reads as null → 404 (not a stock
+    // leak): the guarded updateMany already carries deletedAt: null, so it never matched it (SEC-050).
     tx.consumable.findFirst.mockResolvedValue(null);
 
     await expect(
       service.createMovement('missing', { type: 'OUT', quantity: 1 }),
     ).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.consumable.findFirst).toHaveBeenCalledWith({
+      where: { id: 'missing', deletedAt: null },
+      select: { currentStock: true },
+    });
     expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
 
-  it('ADJUSTMENT sets currentStock to the absolute quantity (even below current)', async () => {
-    tx.consumable.update.mockResolvedValue({ id: 'k1' });
+  it('ADJUSTMENT sets currentStock to the absolute quantity (even below current) via a live-guarded updateMany', async () => {
+    tx.consumable.updateMany.mockResolvedValue({ count: 1 });
     tx.consumableMovement.create.mockResolvedValue({ id: 4 });
 
     await service.createMovement('k1', { type: 'ADJUSTMENT', quantity: 7 });
 
-    expect(tx.consumable.update).toHaveBeenCalledWith({
-      where: { id: 'k1' },
+    // Guarded updateMany scoped to the live row (SEC-050): an absolute recount can't resurrect a
+    // soft-deleted consumable. The plain `update` would have hit the archived row (it still exists).
+    expect(tx.consumable.updateMany).toHaveBeenCalledWith({
+      where: { id: 'k1', deletedAt: null },
       data: { currentStock: 7 },
     });
+    expect(tx.consumable.update).not.toHaveBeenCalled();
+  });
+
+  it('ADJUSTMENT against a missing/soft-deleted consumable (count 0) throws 404 and persists nothing (SEC-050)', async () => {
+    tx.consumable.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.createMovement('gone', { type: 'ADJUSTMENT', quantity: 7 }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
 
   it('IN whose result would exceed int4 (INT4_MAX) throws 409 and persists nothing', async () => {
@@ -413,6 +455,22 @@ describe('ConsumablesService', () => {
     await expect(
       service.createMovement('missing', { type: 'IN', quantity: 1 }),
     ).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.consumable.update).not.toHaveBeenCalled();
+    expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+  });
+
+  it('IN against a soft-deleted consumable 404s — the live-scoped pre-read returns null (SEC-050)', async () => {
+    // The live-scoped pre-read (`deletedAt: null`) means a soft-deleted row reads as null → 404, so
+    // no increment runs and no ledger row is appended to an archived consumable.
+    tx.consumable.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.createMovement('archived', { type: 'IN', quantity: 100 }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.consumable.findFirst).toHaveBeenCalledWith({
+      where: { id: 'archived', deletedAt: null },
+      select: { currentStock: true },
+    });
     expect(tx.consumable.update).not.toHaveBeenCalled();
     expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
@@ -483,8 +541,9 @@ describe('ConsumablesService', () => {
 
     await service.listMovements('k1', {});
 
+    // assertExists scopes to live rows (SEC-050): listing the ledger of a soft-deleted consumable 404s.
     expect(consumable.findFirst).toHaveBeenCalledWith({
-      where: { id: 'k1' },
+      where: { id: 'k1', deletedAt: null },
       select: { id: true },
     });
     expect(consumableMovement.findMany).toHaveBeenCalledWith({

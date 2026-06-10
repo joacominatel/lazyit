@@ -55,10 +55,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 1 |
-| Medium | 4 |
+| Medium | 3 |
 | Low | 14 |
 | Info | 0 |
-| **Total open** | **19** |
+| **Total open** | **18** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -70,7 +70,6 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-020-jit-email-link-no-email-verified\|SEC-020]] | 🔴 High | users | JIT email-linking never checks `email_verified` → seeded-ADMIN takeover under BYOI |
 | [[SEC-011-service-account-coarse-meta-permission-escalation\|SEC-011]] | 🟠 Medium | service-accounts | SA granted `settings:manage`/`user:manage` becomes ADMIN-equivalent (self-escalation) |
 | [[SEC-021-last-admin-lockout-via-isactive\|SEC-021]] | 🟠 Medium | users | Last-admin lockout via `PATCH {isActive:false}` (skips `assertNotLastAdmin`) |
-| [[SEC-050-consumable-soft-delete-bypass\|SEC-050]] | 🟠 Medium | consumables | `Consumable`/`ConsumableCategory` missing from `SOFT_DELETABLE_MODELS` → reads/writes archived rows |
 | [[SEC-051-application-url-scheme-guard-port-carveout-bypass\|SEC-051]] | 🟠 Medium | applications | URL `host:port` carve-out accepts `javascript:1/…` → re-opens the SEC-008 XSS class |
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
@@ -104,11 +103,14 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
    `settings:manage` or `user:manage` can self-escalate to the full catalog, mint backdoor SAs, rewrite
    the human permission matrix, or create a human ADMIN — diverging from INV-SA-3 ("never
    ADMIN-equivalent").
-4. **Systemic soft-delete / nested-relation class (SEC-030/040/041/050/052/060/071).** A recurring
-   pattern across six modules: top-level soft-delete filtering (ADR-0032) doesn't reach nested
-   relations, FK guards don't check for a *live* parent, and `SetNull` only fires on hard-delete. One
-   architectural fix (filter nested includes + a shared live-parent guard + register all soft-deletable
-   models) closes most of them.
+4. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
+   A recurring pattern across six modules: top-level soft-delete filtering (ADR-0032) doesn't reach
+   nested relations, FK guards don't check for a *live* parent, and `SetNull` only fires on
+   hard-delete. One architectural fix (filter nested includes + a shared live-parent guard + register
+   all soft-deletable models) closes most of them. SEC-050 is now closed: its category half by #325
+   (`ConsumableCategory` registered) and its consumable half by guarding the explicit
+   `findOne`/`assertExists`/movement paths (the model deliberately stays out of the set for its
+   archived-view slice).
 5. **SEC-002 — `.docx` decompression bomb.** ✅ Closed 2026-06-07 by ADR-0053's sandboxed worker
    (PR #251, on `feat/issue-247-async-workers-bullmq-valkey`): the parse runs in a heap-capped forked
    child, so a bomb OOMs the child, not the API. Moved to `closed/`; closes on promotion to `dev`.

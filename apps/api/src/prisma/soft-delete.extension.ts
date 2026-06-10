@@ -24,6 +24,11 @@ export const SOFT_DELETABLE_MODELS: ReadonlySet<string> = new Set([
   'Article',
   'ApplicationCategory',
   'Application',
+  // ConsumableCategory is auto-scoped here (like the other category taxonomies): its service has no
+  // explicit `deletedAt` guard, so without this entry `findAll`/`findOne` leaked soft-deleted rows —
+  // a deleted category kept showing in the list (#321). `Consumable` itself stays OUT on purpose: its
+  // service filters `deletedAt` explicitly (`deletedWhere`) to support the ADMIN archived-view slice.
+  'ConsumableCategory',
   // Service accounts soft-delete = revoke (ADR-0048): the read filter hides revoked accounts from the
   // management list/detail by default; the guard + restore use the includeSoftDeleted escape hatch.
   'ServiceAccount',

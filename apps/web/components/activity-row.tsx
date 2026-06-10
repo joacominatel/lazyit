@@ -16,7 +16,7 @@ import type { ComponentType, CSSProperties } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { avatarColorFor } from "@/lib/avatar-color";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/utils/format";
+import { formatDateTime, formatRelativeTime } from "@/lib/utils/format";
 
 /**
  * Shared timeline-row vocabulary for the unified recent-activity feed — extracted from the
@@ -60,10 +60,52 @@ export const ENTITY_TONE: Record<ActivityEntityType, string> = {
 };
 
 /**
+ * The i18n message key (under `shared.activity.line`) for a specific, subject-aware headline, keyed by
+ * the activity `action` and the entity pillar. Two variants per access/ownership verb: the full
+ * "...to/from {user}" line when the affected user resolved, and a "{subject}"-only line when it didn't
+ * (a soft-deleted/unresolved target). The user-pillar lifecycle verbs map to a single subject line (the
+ * subject IS the person). `null` → no specific template; the row falls back to the server-built
+ * `summary` (issue #311). `restored` is shared by asset-history and user-history, so only the user
+ * pillar gets the person line — the asset variant falls through to the generic summary.
+ */
+function headlineKey(
+  action: string,
+  hasUser: boolean,
+  isUserPillar: boolean,
+): string | null {
+  switch (action) {
+    case "granted":
+      return hasUser ? "granted" : "grantedSubject";
+    case "revoked":
+      return hasUser ? "revoked" : "revokedSubject";
+    case "assigned":
+      return hasUser ? "assigned" : "assignedSubject";
+    case "released":
+      return hasUser ? "released" : "releasedSubject";
+    case "updated":
+      return isUserPillar ? "userUpdated" : null;
+    case "role_changed":
+      return isUserPillar ? "userRoleChanged" : null;
+    case "restored":
+      return isUserPillar ? "userRestored" : null;
+    case "password_reset_sent":
+      return isUserPillar ? "userPasswordResetSent" : null;
+    default:
+      return null;
+  }
+}
+
+/**
  * One timeline row — densified for the narrow rail-adjacent column (Wave 3a): a pillar-tinted
  * icon chip with the timeline connector, a single-line (truncating) summary link, and a compact
  * meta line carrying the actor avatar + name, a dot separator and the relative time. Tighter
  * vertical rhythm than the old two-line layout, while keeping the staggered `rise-in` settle.
+ *
+ * Subject specificity (issue #311): the headline names WHICH entity (and, for access/ownership, WHICH
+ * user) the event concerns — "Access to <App> revoked from <User>" — built from the server-resolved
+ * `subjectName` / `targetUserName`, falling back to the generic `summary` when the data is missing. The
+ * relative time carries the ABSOLUTE date+time as a tooltip + aria-label, and when the event is about a
+ * person the meta line adds a click-through chip to that user's detail page.
  */
 export function ActivityRow({
   item,
@@ -80,6 +122,29 @@ export function ActivityRow({
   const t = useTranslations("shared");
   const meta = ENTITY_META[item.entityType];
   const Icon = meta.icon;
+
+  // Build the specific headline when the subject (and, where relevant, the target user) resolved;
+  // otherwise fall back to the server-built summary.
+  const targetUser = item.targetUserName?.trim() || null;
+  const isUserPillar = item.entityType === "user";
+  const key = item.subjectName
+    ? headlineKey(item.action, Boolean(targetUser), isUserPillar)
+    : null;
+  const headline =
+    key && item.subjectName
+      ? t(`activity.line.${key}`, {
+          subject: item.subjectName,
+          user: targetUser ?? "",
+        })
+      : item.summary;
+
+  // The affected user gets a SECOND click-through (distinct from the primary entity link) — but only
+  // when it isn't already the primary link target (the user pillar links the entity itself).
+  const showTargetUserLink =
+    item.targetUserId !== null && targetUser !== null && !isUserPillar;
+
+  const absolute = formatDateTime(item.occurredAt);
+
   return (
     <li
       className="relative flex animate-rise-in gap-3 pb-3.5 [animation-delay:calc(var(--i)*24ms)] last:pb-0"
@@ -103,10 +168,10 @@ export function ActivityRow({
       <div className="min-w-0 flex-1">
         <Link
           href={meta.href(item.entityId)}
-          className="block truncate text-sm font-medium outline-none hover:underline focus-visible:underline"
-          title={item.summary}
+          className="block truncate text-sm font-medium outline-none transition-colors hover:text-foreground hover:underline focus-visible:underline"
+          title={headline}
         >
-          {item.summary}
+          {headline}
         </Link>
         <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           {item.actorName ? (
@@ -117,12 +182,26 @@ export function ActivityRow({
           ) : (
             <span>{t("activity.system")}</span>
           )}
-          <span
-            className="ml-auto shrink-0 pl-1 tabular-nums"
-            title={new Date(item.occurredAt).toLocaleString()}
+          {showTargetUserLink && (
+            <>
+              <span aria-hidden>→</span>
+              <Link
+                href={`/users/${item.targetUserId}`}
+                className="min-w-0 truncate rounded-sm font-medium text-foreground/80 underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:underline"
+                title={t("activity.viewUser", { user: targetUser })}
+              >
+                {targetUser}
+              </Link>
+            </>
+          )}
+          <time
+            dateTime={item.occurredAt}
+            className="ml-auto shrink-0 cursor-default pl-1 tabular-nums underline decoration-dotted decoration-muted-foreground/40 underline-offset-2 hover:decoration-muted-foreground"
+            title={t("activity.occurredAt", { datetime: absolute })}
+            aria-label={t("activity.occurredAt", { datetime: absolute })}
           >
             {formatRelativeTime(item.occurredAt, now)}
-          </span>
+          </time>
         </div>
       </div>
     </li>

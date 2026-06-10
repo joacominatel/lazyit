@@ -59,8 +59,13 @@ Concretely:
    privileged *writeable* role (not ADMIN). **Default flipped to VIEWER by [[0043-zitadel-source-of-truth]]
    Phase 1** — see the *Addendum — Round 4* below; an omitted role now lands read-only.
 2. **First user is ADMIN** — a fresh install must always have someone able to administer it:
-   - the **seed** (`apps/api/prisma/seed.ts`) upserts an ADMIN user (email overridable via
-     `SEED_ADMIN_EMAIL`, default `admin@lazyit.local`);
+   - the **seed** (`apps/api/prisma/seed.ts`) upserts an ADMIN user **only when `SEED_ADMIN_EMAIL`
+     is explicitly set** — a DEV CONVENIENCE for the `X-User-Id` shim, OPT-IN since #333 (there is no
+     longer a `admin@lazyit.local` default). In prod / zero-touch the var is UNSET, so the seed
+     creates **no** user: a pre-seeded ADMIN would trip the [[0043-zitadel-source-of-truth]] `/setup`
+     wizard's "already configured" gate AND force the first real OIDC login to VIEWER (the JIT
+     first-user path below never fires because `userCount !== 0`). The first administrator is then
+     owned by the `/setup` wizard or the first OIDC login;
    - the **JIT** path (`jwt-auth.guard.ts`) makes the **first user ever provisioned** ADMIN: it
      counts existing users (including soft-deleted, so "ever") and, only when the count is 0, sets
      `role = ADMIN` in the `create` of the existing race-safe `upsert`-on-`externalId`. Every later

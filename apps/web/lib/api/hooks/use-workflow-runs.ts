@@ -1,9 +1,15 @@
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   dryRunWorkflow,
   getWorkflowRun,
   getWorkflowRuns,
   isTerminalRunStatus,
+  retryWorkflowRun,
   type WorkflowDryRunInput,
   type WorkflowRunFilters,
 } from "../endpoints/workflow-runs";
@@ -62,5 +68,25 @@ export function useWorkflowRun(id: string | undefined) {
 export function useDryRunWorkflow() {
   return useMutation({
     mutationFn: (body: WorkflowDryRunInput) => dryRunWorkflow(body),
+  });
+}
+
+/**
+ * Manually retry a terminal FAILED run from the step that failed onward (`POST /workflow-runs/:id/retry`,
+ * issue #308). Gated `workflow:run` at the API (the real gate). On success the run flips back to RUNNING,
+ * so we invalidate BOTH the run detail (whose poll then resumes until it re-terminates) and any run lists
+ * (the recent-runs panel reflects the new status). Errors (409 not-FAILED / 422 no-resolvable-step / a
+ * broker hiccup) bubble to the caller, which surfaces them via `notifyError`.
+ */
+export function useRetryWorkflowRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => retryWorkflowRun(id),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({
+        queryKey: workflowRunKeys.detail(result.runId),
+      });
+      queryClient.invalidateQueries({ queryKey: workflowRunKeys.all });
+    },
   });
 }

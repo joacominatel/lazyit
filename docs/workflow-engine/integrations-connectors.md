@@ -169,6 +169,13 @@ is a **zod discriminated union on `kind`**, so an invalid shape for a type is a 
 Below, each type's config is described as field tables (design intent, *not* a schema). `secretRef`
 fields are **never** the secret itself — they are a key into the ADR-0052 `SystemSecret` store (§ a).
 
+> **Internal / on-prem targets (Phase 2):** the `http`-only / self-signed `tlsVerify` downgrade and the
+> "internal target on the LAN" path below are governed by
+> [[0055-on-prem-internal-target-connectors]] (`proposed`) — a per-`WorkflowConnection` audited
+> `host[:port]` allowlist wired to the egress guard's `isInternalTargetAllowed` seam, with `http://`
+> validating only when a non-empty allowlist is declared. v1 ships **public https only** (ADR-0054 §6b);
+> internal targets are deferred to that ADR (CEO holding the build).
+
 ### 4.1 `rest`
 
 *Connector instance:*

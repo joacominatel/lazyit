@@ -10,6 +10,10 @@
       "title": "Taxonomies",
       "description": "Manage the categories that classify assets, applications, consumables and knowledge-base articles — plus asset models."
     },
+    "locations": {
+      "title": "Locations",
+      "description": "Manage the places your assets physically live — offices, datacenters, racks and storage."
+    },
     "roles": {
       "title": "Roles",
       "description": "See who has which RBAC role across the team. Role changes happen in the Users section."
@@ -176,6 +180,11 @@
       "status": "Status"
     },
     "never": "Never",
+    "systemManaged": {
+      "badge": "System-managed",
+      "hint": "Owned by the workflow engine — every workflow run executes as this account.",
+      "locked": "System-managed — the workflow engine runs as this account, so it can't be edited, rotated or revoked."
+    },
     "empty": {
       "revokedTitle": "No revoked service accounts",
       "title": "No service accounts yet",

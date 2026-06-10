@@ -434,6 +434,17 @@ services:
         condition: service_healthy
       web:
         condition: service_healthy
+    healthcheck:
+      # Caddy is the only public-facing service; without a healthcheck a wedged proxy would still
+      # report "running". BusyBox wget (shipped in caddy:2-alpine) probes the internal-only plain-HTTP
+      # health site the Caddyfile serves on :2021 — chosen because this wget can't skip TLS verification
+      # (internal CA on :443) nor avoid following the :80 -> https 308. A 200 here means the Caddy
+      # process is up and serving its config. :2021 is never published, so it adds no public surface.
+      test: ["CMD-SHELL", "wget -q -O /dev/null -T 3 http://127.0.0.1:2021/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks: [internal]
 
   # --- Backup sidecar (OPT-IN) — cron + pg_dump for BOTH databases (prod) ----------
@@ -481,9 +492,10 @@ services:
         condition: service_healthy
     # Generate a crontab, then run cron in the foreground. Every shell `$` is written as `$$` so
     # Compose's parse-time ${...} interpolation leaves them intact for the container shell at
-    # RUNTIME. PGPASSWORD/POSTGRES_* come from env_file; ZITADEL_* are passed explicitly above. The
-    # job writes timestamped custom-format (-Fc) dumps and prunes by mtime. `crond -f -d 8` keeps
-    # the container alive and logs to stdout (captured by the json-file driver + rotation).
+    # RUNTIME. PGPASSWORD/POSTGRES_* come from env_file; ZITADEL_* are passed explicitly above —
+    # and the cron job inherits all of them directly from `exec crond` (no env-export file; see the
+    # note by the crontab below). The job writes timestamped custom-format (-Fc) dumps and prunes by
+    # mtime. `crond -f -d 8` keeps the container alive and logs to stdout (json-file driver + rotation).
     command:
       - sh
       - -c
@@ -514,9 +526,16 @@ services:
         echo "[lazyit-backup] run $$TS complete"
         SCRIPT
         chmod +x /usr/local/bin/lazyit-backup
-        # Export the runtime env into the cron job's environment (cron runs with a bare env).
-        printenv | sed 's/^/export /' > /etc/lazyit-backup.env
-        echo "$$BACKUP_CRON . /etc/lazyit-backup.env; /usr/local/bin/lazyit-backup >> /proc/1/fd/1 2>&1" > /etc/crontabs/root
+        # The cron JOB inherits this shell's environment directly: BusyBox crond (1.37, the alpine
+        # build) propagates the env it was started with to every job it runs, so we do NOT
+        # materialise a sourced printenv export file. The previous `printenv | sed 's/^/export /'`
+        # approach was metacharacter-UNSAFE — a POSTGRES_PASSWORD containing shell metacharacters
+        # ($, `, ;, &, ', spaces) would be re-parsed/expanded when the cron shell sourced the file,
+        # silently breaking pg_dump. Direct inheritance sidesteps all quoting: each value reaches
+        # `lazyit-backup` verbatim (verified: a hostile password with $`;&"'-space round-trips
+        # byte-for-byte). env_file + the `environment:` block above populate this shell, and
+        # `exec crond` below replaces it while keeping that env.
+        echo "$$BACKUP_CRON /usr/local/bin/lazyit-backup >> /proc/1/fd/1 2>&1" > /etc/crontabs/root
         echo "[lazyit-backup] scheduled: $$BACKUP_CRON (retention $${BACKUP_RETENTION_DAYS}d) -> /backups"
         exec crond -f -d 8
     networks: [internal]

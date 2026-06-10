@@ -5,6 +5,7 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { GlobalSearch } from "@/components/global-search";
 import { MobileNav } from "@/components/mobile-nav";
 import { ModeBanner } from "@/components/mode-banner";
+import { NotificationBell } from "@/components/notification-bell";
 import { SessionTokenSync } from "@/components/session-token-sync";
 import { SidebarShell } from "@/components/sidebar-shell";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -42,6 +43,9 @@ export default async function AppLayout({
           <GlobalSearch />
           <div className="ml-auto flex items-center gap-2">
             <ModeBanner />
+            {/* In-app notification bell (ADR-0056) — self-gates on `notification:read`
+                (ADMIN-only), so it renders nothing for non-admins. */}
+            <NotificationBell />
             <ThemeToggle />
             <UserMenu />
           </div>

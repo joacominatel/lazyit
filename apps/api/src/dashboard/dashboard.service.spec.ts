@@ -280,6 +280,10 @@ describe('DashboardService', () => {
         entityId: 'cconsum000000000000000001',
         action: 'stock_in',
         summary: 'Stock added: +10',
+        // Subject enrichment (issue #311): a consumable movement names the consumable, no target user.
+        subjectName: 'HDMI cables',
+        targetUserId: null,
+        targetUserName: null,
       },
       {
         occurredAt: new Date('2026-05-31T11:00:00.000Z'),
@@ -289,6 +293,10 @@ describe('DashboardService', () => {
         entityId: 'capp00000000000000000001',
         action: 'granted',
         summary: 'Access granted to a user',
+        // The headline case: which app + which user the grant is about.
+        subjectName: 'GitHub',
+        targetUserId: '22222222-2222-4222-8222-222222222222',
+        targetUserName: 'Jane Doe',
       },
       {
         occurredAt: new Date('2026-05-31T10:00:00.000Z'),
@@ -298,6 +306,10 @@ describe('DashboardService', () => {
         entityId: 'casset0000000000000000001',
         action: 'created',
         summary: 'Asset created',
+        // An asset state change names the asset; no person subject.
+        subjectName: 'MacBook Pro 16',
+        targetUserId: null,
+        targetUserName: null,
       },
     ];
 
@@ -328,7 +340,34 @@ describe('DashboardService', () => {
         entityId: 'cconsum000000000000000001',
         action: 'stock_in',
         summary: 'Stock added: +10',
+        subjectName: 'HDMI cables',
+        targetUserId: null,
+        targetUserName: null,
       });
+    });
+
+    it('surfaces the resolved subject (app name) + target user the event concerns (issue #311)', async () => {
+      const page = await service.getActivity({
+        limit: 20,
+        offset: 0,
+        deleted: 'active',
+      });
+      const grantRow = page.items.find((i) => i.action === 'granted');
+      expect(grantRow?.subjectName).toBe('GitHub');
+      expect(grantRow?.targetUserId).toBe(
+        '22222222-2222-4222-8222-222222222222',
+      );
+      expect(grantRow?.targetUserName).toBe('Jane Doe');
+    });
+
+    it('selects the subject columns from the view (subjectName / targetUserId / targetUserName)', async () => {
+      await service.getActivity({ limit: 20, offset: 0, deleted: 'active' });
+      const pageText = (
+        prisma.$queryRaw.mock.calls[0][0] as { text: string }
+      ).text;
+      expect(pageText).toContain('ra."subjectName"');
+      expect(pageText).toContain('ra."targetUserId"');
+      expect(pageText).toContain('ra."targetUserName"');
     });
 
     it('keeps a null actor (system / unknown / deleted actor) as null id + name', async () => {

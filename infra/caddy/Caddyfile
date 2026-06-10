@@ -57,6 +57,17 @@
 	}
 }
 
+# --- Container healthcheck endpoint (internal only) --------------------------------
+# A plain-HTTP liveness site on :2021, reachable ONLY from inside the container (this port is
+# never published in compose, so it is not a public surface). The compose `healthcheck` probes it
+# with BusyBox wget — which the alpine image ships but which CANNOT skip TLS verification
+# (no --no-check-certificate) nor stop following redirects, so it can't usefully probe the real
+# :443 site (internal CA) or :80 (308 -> https). This dedicated http:// listener sidesteps both:
+# it confirms the Caddy process is up and serving config without depending on the api/web upstreams.
+http://:2021 {
+	respond /healthz "ok" 200
+}
+
 # --- Zitadel IdP — auth subdomain (ADR-0037) -------------------------------------
 # Zitadel runs on the internal Docker network without its own TLS (--tlsMode external; Caddy
 # terminates HTTPS here and proxies to Zitadel's internal HTTP listener).

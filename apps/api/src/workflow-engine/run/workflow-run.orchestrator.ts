@@ -12,7 +12,7 @@ import {
   type RetryPolicy,
   type WorkflowStep,
 } from '@lazyit/shared';
-import type { Prisma } from '../../../generated/prisma/client';
+import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ConnectorRegistry } from '../connectors.registry';
 import { SecretService } from '../secrets/secret.service';
@@ -23,6 +23,7 @@ import type {
   WorkflowMappingContext,
 } from '../handlers/step-handler';
 import { RunContextBuilder } from './run-context';
+import { NotificationsService } from '../../notifications/notifications.service';
 import {
   classifyFailureEdge,
   classifySuccessEdge,
@@ -92,6 +93,7 @@ export class WorkflowRunOrchestrator {
     private readonly contextBuilder: RunContextBuilder,
     @Inject(WORKFLOW_SLEEPER) private readonly sleeper: Sleeper,
     private readonly trigger: WorkflowTriggerService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // ── public entrypoints ────────────────────────────────────────────────────
@@ -157,6 +159,85 @@ export class WorkflowRunOrchestrator {
       return;
     }
     await this.walk(runId, stepKey, attempt);
+  }
+
+  /**
+   * Manually retry a TERMINAL `FAILED` run from the step that failed onward (issue #308 — the operator
+   * re-drives a run after, e.g., a transient external outage; NOT the engine's own per-attempt transient
+   * retry, which is {@link retryStep}). RESUME-FROM-FAILED-STEP, never a full re-run: the walk re-enters
+   * at the FAILED step's key, so every already-`SUCCEEDED` step BEFORE it is skipped (a non-idempotent
+   * create cannot double-provision). Steps are append-only — the failed step re-executes as a NEW attempt
+   * (max prior attempt + 1) and downstream steps run their own fresh attempts.
+   *
+   * The transition is a GUARDED compare-and-set: only a run still `FAILED` flips `FAILED`→`RUNNING`
+   * (`updateMany`'s `count` is the gate), so a double-retry — or a retry racing the sweeper — is
+   * idempotent: exactly one proceeds. Default policy: ONLY `FAILED` is retryable. A `COMPENSATED` run
+   * already rolled its external effects back, so re-driving it would re-provision what compensation just
+   * undid — resolve it by re-granting, not retrying (the caller rejects non-`FAILED` runs with a 409).
+   *
+   * The walk runs OFF the request via a delayed-0 retry job (the decoupled posture, §1); the worker's
+   * {@link retryStep} re-enters at this exact step+attempt. A broker-down enqueue leaves the run `RUNNING`
+   * for the RUNNING-staleness reconciler to finalize (the operator simply retries again once Valkey is
+   * back) — never a synchronous external call on the request thread.
+   *
+   * @returns `{ retried: true, resumeStepKey, attempt }` on a successful CAS, or `{ retried: false }`
+   *   when the run was not `FAILED` at claim time (the caller maps that to a 409 conflict).
+   */
+  async retryRun(
+    runId: string,
+  ): Promise<
+    | { retried: true; resumeStepKey: string; attempt: number }
+    | { retried: false }
+  > {
+    const run = await this.prisma.workflowRun.findFirst({
+      where: { id: runId },
+      include: { workflowVersion: true },
+    });
+    if (!run) {
+      throw new Error(`WorkflowRun ${runId} not found`);
+    }
+    // Resolve the failed step BEFORE the CAS so a missing/unknown failed-step record is a clean
+    // precondition failure (caller → 422), never a half-flipped run left RUNNING with nowhere to go.
+    const steps = WorkflowStepsSchema.parse(run.workflowVersion.steps);
+    const failedStepKey = resolveFailedStepKey(run.error, steps);
+    if (!failedStepKey) {
+      throw new RetryNotResolvableError(
+        `WorkflowRun ${runId} has no resolvable failed step to retry from`,
+      );
+    }
+    const nextAttempt = await this.nextAttemptFor(runId, failedStepKey);
+
+    // Guarded CAS: ONLY a run still FAILED flips to RUNNING. A lost race (already RUNNING / re-retried /
+    // swept) yields count 0 — the caller surfaces a clean conflict and we enqueue nothing.
+    const claimed = await this.prisma.workflowRun.updateMany({
+      where: { id: runId, status: 'FAILED' },
+      data: { status: 'RUNNING', finishedAt: null, error: Prisma.DbNull },
+    });
+    if (claimed.count === 0) {
+      return { retried: false };
+    }
+
+    // Advance OFF the request via a delayed-0 retry job (decoupled, §1). A broker-down enqueue is
+    // swallowed by enqueueRetry; the run is RUNNING and the RUNNING-staleness reconciler finalizes it.
+    await this.trigger.enqueueRetry(runId, failedStepKey, nextAttempt, 0);
+    return {
+      retried: true,
+      resumeStepKey: failedStepKey,
+      attempt: nextAttempt,
+    };
+  }
+
+  /** The next append-only attempt number for (runId, stepKey): max recorded attempt + 1 (1 if none). */
+  private async nextAttemptFor(
+    runId: string,
+    stepKey: string,
+  ): Promise<number> {
+    const latest = await this.prisma.workflowStepRun.findFirst({
+      where: { runId, stepKey },
+      orderBy: { attempt: 'desc' },
+      select: { attempt: true },
+    });
+    return (latest?.attempt ?? 0) + 1;
   }
 
   // ── the walk ──────────────────────────────────────────────────────────────
@@ -534,7 +615,7 @@ export class WorkflowRunOrchestrator {
       spec?.prompt ??
       `Step "${step.name ?? step.key}" failed and was escalated for manual handling.`;
     const cohort = spec?.cohort ?? null;
-    await this.prisma.$transaction(async (tx) => {
+    const taskId = await this.prisma.$transaction(async (tx) => {
       const task = await tx.manualTask.create({
         data: { runId, stepKey: step.key, prompt, cohort, status: 'PENDING' },
       });
@@ -555,7 +636,44 @@ export class WorkflowRunOrchestrator {
         where: { id: runId },
         data: { status: 'AWAITING_INPUT' },
       });
+      return task.id;
     });
+    // AFTER commit, best-effort: fire the `workflow.manual_task` bell nudge (ADR-0056 §3) — the run
+    // paused for a human. NEVER inside the tx (a notification must not roll back the pause); emit
+    // swallows its own errors. The deep-link points at the run; the bell row links to the inbox task.
+    await this.emitManualTaskNotification(runId, taskId, prompt);
+  }
+
+  /**
+   * Best-effort POST-COMMIT `workflow.manual_task` bell nudge (ADR-0056 §3) — one per created ManualTask
+   * (the dedupe key is `(type, taskId)`, idempotent on a re-fire). Resolves the run's application name
+   * for a human title; the entity link points at the run (entityType `workflowRun`), and the web's bell
+   * routes the manual-task type to the inbox. Every failure is swallowed — the pause already committed.
+   */
+  private async emitManualTaskNotification(
+    runId: string,
+    taskId: string,
+    prompt: string,
+  ): Promise<void> {
+    try {
+      const run = await this.prisma.workflowRun.findUnique({
+        where: { id: runId },
+        select: { application: { select: { name: true } } },
+      });
+      const appName = run?.application?.name ?? 'a workflow';
+      await this.notifications.emit({
+        type: 'workflow.manual_task',
+        dedupeKey: `workflow.manual_task:${taskId}`,
+        severity: 'info',
+        title: `A workflow task needs a human — ${appName}`,
+        summary: prompt,
+        entityType: 'workflowRun',
+        entityId: runId,
+        metadata: { manualTaskId: taskId, applicationName: appName },
+      });
+    } catch {
+      // Best-effort: a failed nudge never affects the already-committed pause.
+    }
   }
 
   // ── ledger + status writes ──────────────────────────────────────────────────
@@ -640,6 +758,40 @@ export class WorkflowRunOrchestrator {
     // STOP_FAIL / ESCALATE reached directly as a resume cursor — finalize as a redacted failure.
     await this.finalizeFailed(runId, terminal, 'terminal');
   }
+}
+
+/**
+ * Raised by {@link WorkflowRunOrchestrator.retryRun} when a FAILED run carries no usable failed-step
+ * marker (its redacted `error.stepKey` is absent or names a step outside the pinned version). The
+ * controller maps it to a 422 — the run is genuinely not resume-from-step retryable. A framework-free
+ * domain error so the orchestrator keeps no `@nestjs/common` dependency in its core walk.
+ */
+export class RetryNotResolvableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RetryNotResolvableError';
+  }
+}
+
+/**
+ * Resolve the step key a FAILED run should resume from. Prefers the redacted `error.stepKey` the run
+ * carries (set by `finalizeFailed` / the worker's safety-net) when it names a real step in the pinned
+ * version; returns `null` when no such marker exists (e.g. an `engine-error` finalize with no step), so
+ * the caller can reject the retry cleanly rather than guess an entry-from-start re-run (which could
+ * re-execute a non-idempotent SUCCEEDED step). Pure.
+ */
+export function resolveFailedStepKey(
+  error: unknown,
+  steps: readonly WorkflowStep[],
+): string | null {
+  if (typeof error !== 'object' || error === null) {
+    return null;
+  }
+  const stepKey = (error as Record<string, unknown>).stepKey;
+  if (typeof stepKey !== 'string' || stepKey.length === 0) {
+    return null;
+  }
+  return steps.some((s) => s.key === stepKey) ? stepKey : null;
 }
 
 /** Exponential/fixed backoff between attempts, derived from the step's retry policy. */

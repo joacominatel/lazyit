@@ -313,8 +313,20 @@ generate_secrets() {
   fi
   ok "ZITADEL_MASTERKEY generated (exactly 32 chars — verified)"
 
-  POSTGRES_PASSWORD=$(openssl rand -base64 24)
-  ZITADEL_DB_PASSWORD=$(openssl rand -base64 24)
+  # POSTGRES_PASSWORD is substituted VERBATIM into DATABASE_URL (postgresql://lazyit:<pw>@db:5432/...),
+  # so it MUST be URL-safe: a base64 '/' (or any of : @ ? #) terminates the URL authority early and
+  # Prisma rejects it with "P1013: invalid port number in database URL" — failing the migrate job
+  # (~40% of base64 passwords contain a '/'). hex is fully URL-safe and keeps 192 bits of entropy.
+  POSTGRES_PASSWORD=$(openssl rand -hex 24)
+  # ZITADEL_DB_PASSWORD is passed as a discrete Postgres field (never embedded in a URL), so base64
+  # is fine here — but hex keeps the secret recipe uniform and avoids a future URL-embedding footgun.
+  ZITADEL_DB_PASSWORD=$(openssl rand -hex 24)
+  # Guard the invariant for whoever edits the recipe next: POSTGRES_PASSWORD goes inside DATABASE_URL,
+  # so it must carry none of the URL-authority delimiters (/ : @ ? #). Fail loud rather than emit an
+  # env file that only breaks later at the migrate step with an opaque Prisma P1013.
+  case "$POSTGRES_PASSWORD" in
+    *[/:@?\#]*) die "internal error: POSTGRES_PASSWORD contains a URL-unsafe character — it would break DATABASE_URL (Prisma P1013). Use a URL-safe generator (openssl rand -hex)." ;;
+  esac
   MEILI_MASTER_KEY=$(openssl rand -base64 24)
   AUTH_SECRET=$(openssl rand -base64 33)
   ok "POSTGRES_PASSWORD / ZITADEL_DB_PASSWORD / MEILI_MASTER_KEY / AUTH_SECRET generated"

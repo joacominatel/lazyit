@@ -108,6 +108,28 @@ export function getWorkflowRun(id: string): Promise<WorkflowRunDetail> {
   return apiFetch<WorkflowRunDetail>(`${BASE}/${id}`);
 }
 
+/** The result of a manual retry — the resumed run + the step the re-run picked up from. */
+export interface WorkflowRunRetryResult {
+  ok: boolean;
+  runId: string;
+  /** The step key the re-run resumes from (the one that had failed). */
+  resumeStepKey: string;
+  /** The append-only attempt number that failed step re-executes as. */
+  attempt: number;
+}
+
+/**
+ * Manually retry a terminal FAILED run from the step that failed onward (`POST /workflow-runs/:id/retry`,
+ * issue #308). RESUME-FROM-FAILED-STEP, not a full re-run: already-SUCCEEDED steps are NOT re-executed
+ * (no double-provision). Gated `workflow:run`. The API rejects a non-FAILED run with a 409 and a run with
+ * no resolvable failed step with a 422 — the caller surfaces those via `notifyError`.
+ */
+export function retryWorkflowRun(id: string): Promise<WorkflowRunRetryResult> {
+  return apiFetch<WorkflowRunRetryResult>(`${BASE}/${id}/retry`, {
+    method: "POST",
+  });
+}
+
 /**
  * C4 — DRY-RUN contracts (`POST /workflow-runs/dry-run`, frontend.md §8). A dry-run is a PURE
  * payload-resolution preview: the engine walks the pinned version's DAG, resolves each step's data

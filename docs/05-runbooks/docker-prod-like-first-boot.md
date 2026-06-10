@@ -86,12 +86,15 @@ $DC logs -f zitadel-bootstrap  # the zero-touch Zitadel provisioner (ADR-0043 §
 curl -sko /dev/null -w "web:    %{http_code}\n"   https://localhost:8443/
 curl -sko /dev/null -w "health: %{http_code}\n"   https://localhost:8443/api/health/live  # -> 200
 curl -sko /dev/null -w "api:    %{http_code}\n"   https://localhost:8443/api/users         # -> 401
-curl -sko /dev/null -w "docs:   %{http_code}\n"   https://localhost:8443/api/docs          # Swagger
+curl -sko /dev/null -w "docs:   %{http_code}\n"   https://localhost:8443/api/docs          # -> 404 (SEC-009)
 ```
 
-Expected: `web: 200`, `health: 200`, `docs: 200`, and `api: 401`. The **401 is correct**: the
-global OIDC guard is active (ADR-0038), so `/api/users` rejects unauthenticated calls — it is not a
-broken install. With the bundled zero-touch Zitadel (ADR-0043) the OIDC integration is **already
+Expected: `web: 200`, `health: 200`, `api: 401`, and `docs: 404`. Two of these are *intended*, not
+breakage. The **401** is correct: the global OIDC guard is active (ADR-0038), so `/api/users` rejects
+unauthenticated calls. The **404 on `/api/docs`** is also correct: Swagger is deliberately **not**
+served on the public origin (SEC-009) — Caddy no longer forwards `/api/docs*`, so the path strips to
+`/docs*`, which the API doesn't route. The docs remain reachable on the internal Docker network and in
+local dev; they are not a broken install. With the bundled zero-touch Zitadel (ADR-0043) the OIDC integration is **already
 provisioned** by the `zitadel-bootstrap` sidecar — there is no console chore. To see data, log in via
 the web UI; the first login routes you to the in-app **`/setup` wizard** to create the first ADMIN
 ([[auth-bootstrap]] §6b), and JIT provisioning creates your `User` row. In a browser open

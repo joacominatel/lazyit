@@ -42,6 +42,24 @@ export const ActivityEntityTypeSchema = z.enum([
  * actor, or a deleted user whose audit FK was set null. `entityId` is the affected entity's id (a cuid
  * for asset/application/consumable, a uuid for user). `summary` is a short, human-readable, server-built
  * sentence for the feed line.
+ *
+ * SUBJECT enrichment (issue #311): the feed line must name WHICH entity (and, where the event is about
+ * a person, WHICH user) it concerns — not just "Access revoked from a user". The view resolves these
+ * from the relations that already exist on each source, so the web can build a specific headline
+ * ("Access to <App> revoked from <User>") and a click-through to the affected user's detail:
+ *   - `subjectName`    — the AFFECTED entity's display name (the Application / Asset / Consumable name,
+ *                        or the affected user's "First Last"). null when the relation resolves to no
+ *                        name (e.g. a name-less row). Pairs with `entityType` + `entityId` for the
+ *                        primary click-through (already the app/asset/consumable/user detail page).
+ *   - `targetUserId`   — the user the event is ABOUT (the grant holder / assignment owner / the
+ *                        user-history subject), as a uuid. null for events with no person subject
+ *                        (asset state changes, consumable movements). Distinct from `actorId` (who did
+ *                        it) — enables a SECOND click-through to that person's detail page.
+ *   - `targetUserName` — that user's display name ("First Last"), or null when there is no target user.
+ *
+ * Every subject field is NULLABLE: a source that carries no subject (or a soft-deleted/unresolved
+ * relation) yields null, and the web falls back to the generic `summary`. This keeps the row contract
+ * backward-compatible — older `summary`-only rendering still works.
  */
 export const RecentActivityItemSchema = z.object({
   // ISO-8601 timestamp the event occurred at. The feed is ordered by this, newest first.
@@ -58,6 +76,12 @@ export const RecentActivityItemSchema = z.object({
   action: z.string(),
   // A short human-readable description of the event, built server-side.
   summary: z.string(),
+  // The affected entity's resolved display name (app/asset/consumable/user name). null when unresolved.
+  subjectName: z.string().nullable(),
+  // The user the event is ABOUT (grant holder / assignment owner / user-history subject) — a uuid.
+  targetUserId: z.uuid().nullable(),
+  // That target user's display name ("First Last"), or null when the event has no person subject.
+  targetUserName: z.string().nullable(),
 });
 
 /**

@@ -84,4 +84,11 @@ access changes — fired **after** the [[access-grant]] commits, decoupled (the 
 
 - 🟢 [[recent-activity]] — read-only DB **view** unifying asset/access/stock/user activity into one feed.
 
+## Notifications (operational nudges)
+
+The curated, ADMIN-only bell — distinct from the [[recent-activity]] view (which can't address a row).
+See [[0056-in-app-notification-bell]] · issue #313.
+
+- 🟢 [[notification]] — append-only event store of curated nudges + a per-admin read join (fan-out-on-read).
+
 Model overview & order: [[02-domain/_MOC|Domain]]. Conventions: [[conventions]].

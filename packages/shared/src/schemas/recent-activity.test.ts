@@ -25,6 +25,10 @@ const validItem = {
   entityId: "casset0000000000000000001",
   action: "assigned",
   summary: "Admin User assigned an asset",
+  // Subject enrichment (issue #311): the affected entity's name + the target user it concerns.
+  subjectName: "MacBook Pro 16",
+  targetUserId: "22222222-2222-4222-8222-222222222222",
+  targetUserName: "Jane Doe",
 };
 
 describe("RecentActivityItemSchema", () => {
@@ -61,6 +65,24 @@ describe("RecentActivityItemSchema", () => {
     const result = RecentActivityItemSchema.safeParse({
       ...validItem,
       actorId: "nope",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("accepts null subject enrichment (event with no resolved subject / target user)", () => {
+    const result = RecentActivityItemSchema.safeParse({
+      ...validItem,
+      subjectName: null,
+      targetUserId: null,
+      targetUserName: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects a non-uuid targetUserId", () => {
+    const result = RecentActivityItemSchema.safeParse({
+      ...validItem,
+      targetUserId: "nope",
     });
     expect(result.success).toBe(false);
   });

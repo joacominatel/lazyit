@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import {
   offsetOf,
   pageOf,
@@ -7,6 +12,10 @@ import {
 } from '@lazyit/shared';
 import type { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  RetryNotResolvableError,
+  WorkflowRunOrchestrator,
+} from '../run/workflow-run.orchestrator';
 
 /** Filters for the run list (C2). All optional; results are newest-first. */
 export interface FindRunsFilters {
@@ -25,7 +34,10 @@ export interface FindRunsFilters {
  */
 @Injectable()
 export class WorkflowRunsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly orchestrator: WorkflowRunOrchestrator,
+  ) {}
 
   /** A page of runs (newest-first), filtered. Page + count run in one tx so `total` can't drift. */
   async findPage(filters: FindRunsFilters, page: PageQuery) {
@@ -54,6 +66,54 @@ export class WorkflowRunsService {
       orderBy: { id: 'asc' },
     });
     return { ...run, steps: stepRuns.map((s) => projectStepRun(s)) };
+  }
+
+  /**
+   * Manually retry a TERMINAL `FAILED` run from the step that failed onward (issue #308). Gated by
+   * `workflow:run` at the route. Validates the precondition (the run exists and is terminal `FAILED`) and
+   * delegates the guarded `FAILED`→`RUNNING` CAS + the resume-from-failed-step re-enqueue to the
+   * orchestrator. Maps the orchestrator's outcomes to HTTP:
+   *   - 404 if the run is missing;
+   *   - 409 if it is not terminal `FAILED` (a `SUCCEEDED`/`COMPENSATED`/in-flight run is not retryable —
+   *     ONLY `FAILED` is, the §4.9 / issue-308 policy; a COMPENSATED run rolled its effects back and must
+   *     be re-granted, not retried), OR if it lost the CAS race (a concurrent retry already claimed it);
+   *   - 422 if the FAILED run carries no resolvable failed step to resume from.
+   * On success returns the resumed cursor + the new attempt number so the FE can refetch the detail.
+   */
+  async retry(id: string) {
+    const run = await this.prisma.workflowRun.findFirst({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!run) {
+      throw new NotFoundException(`WorkflowRun ${id} not found`);
+    }
+    if (run.status !== 'FAILED') {
+      throw new ConflictException(
+        `Only a terminal FAILED run can be retried (this run is ${run.status})`,
+      );
+    }
+    let result: Awaited<ReturnType<WorkflowRunOrchestrator['retryRun']>>;
+    try {
+      result = await this.orchestrator.retryRun(id);
+    } catch (err) {
+      if (err instanceof RetryNotResolvableError) {
+        throw new UnprocessableEntityException(
+          'This failed run has no resolvable failed step to resume from',
+        );
+      }
+      throw err;
+    }
+    if (!result.retried) {
+      // Lost the guarded CAS to a concurrent retry / the sweeper — surface a clean conflict.
+      throw new ConflictException('This run is no longer in a retryable state');
+    }
+    return {
+      ok: true,
+      runId: id,
+      resumeStepKey: result.resumeStepKey,
+      attempt: result.attempt,
+    };
   }
 
   private buildWhere(filters: FindRunsFilters): Prisma.WorkflowRunWhereInput {

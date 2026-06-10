@@ -40,7 +40,11 @@ const VIEWER_DENIED_READS_EXPECTED: Permission[] = [
  * the role matrix, but never seeded to MEMBER/VIEWER. Hand-listed here ON PURPOSE — this is the golden
  * expectation, independently stated, not derived from the thing under test.
  */
-const ADMIN_ONLY_READS_EXPECTED: Permission[] = ['logs:read', 'workflow:read'];
+const ADMIN_ONLY_READS_EXPECTED: Permission[] = [
+  'logs:read',
+  'workflow:read',
+  'notification:read',
+];
 
 /** Build the documented matrix per the ADR-0040 tiers, sorted to the catalog order. */
 function documentedMatrix(): RolePermissionMatrix {

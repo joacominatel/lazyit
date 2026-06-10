@@ -33,7 +33,11 @@ seed set is an initial, non-special list.
 
 - Deleting a category **detaches** its consumables (FK `onDelete: SetNull`) — **no 409 guard**
   (unlike [[article-category]]; the relation is optional). Mirrors [[application-category]].
-- Seed set: `Cables`, `Adapters`, `Peripherals`, `Office supplies`, `Other`.
+- Soft-deleted categories are hidden from the list/detail by the ADR-0032 read filter:
+  `ConsumableCategory` is in `SOFT_DELETABLE_MODELS` (its service carries no explicit `deletedAt`
+  guard, so the extension must auto-scope it — see [[0032-soft-delete-middleware]]).
+- Seed set: `Cables`, `Adapters`, `Peripherals`, `Office supplies`, `Other` — seeded **once** (only
+  into an empty table), so renaming a seeded category never re-creates it on the next `db seed`.
 
 Related: [[consumable]] · [[consumable-movement]] · [[application-category]] · [[asset-category]] ·
 [[0034-consumables-design]] · [[0006-soft-delete-and-auditing]]

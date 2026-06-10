@@ -427,9 +427,23 @@ keystone 3), a **manual task** is created for IT, and the operator resumes the r
 frontend surfaces these as a first-class **inbox**; the task simply records whether it arose from a
 manual step or an escalated failure so the action UI (§6b) can show the right context.
 
-### 6a. Ride the ADR-0052 notification bell + SSE
+### 6a. Ride the notification bell + SSE
 
-The brief instructs reusing the ADR-0052 notification/bell/SSE stack — and it is the right fit:
+> **Decision:** the notification bell this section assumed (from a Settings/Notifications branch that
+> **never landed on `dev`**) is now its own ratified decision — [[0056-in-app-notification-bell]]
+> (`accepted`, #313): an append-only `Notification` + per-admin `NotificationRead` (fan-out-on-read),
+> a closed shared type enum (incl. `workflow.manual_task` / `workflow.run_failed`), **poll delivery in
+> v1 with SSE as a Phase-2 upgrade behind the same API**, gated by a new `notification:read`
+> (ADMIN-only). Read the "ADR-0052 SSE" references below as **ADR-0056, poll-first**: the manual-task
+> inbox + run-failed alerts ride that bell; the live SSE push is the Phase-2 upgrade, so the v1 inbox is
+> a **polled** list until then (dependency D1 below is resolved by ADR-0056, not the dead branch).
+>
+> **Landed (#313, on `dev`):** the bell now exists — the topbar `NotificationBell` (poll v1, gated
+> `notification:read`) + the `workflow.manual_task` emitter fires on ManualTask creation. The
+> `workflow.run_failed` emitter is a noted follow-up (its type + the bell's render path already exist).
+> See [[notification]].
+
+The brief instructs reusing the notification/bell/SSE stack — and it is the right fit:
 
 - A new manual task **emits a `Notification`** (a new notification type, e.g. `workflow.manual_task`),
   so it appears in the **topbar bell** with live **SSE** push (the bell already consumes
@@ -526,10 +540,18 @@ the provided value); a **failure edge to COMPENSATE** renders the compensation s
 nested entry (`↻ compensation · delete half-created account · ✓`); a **failure edge to STOP** ends the
 run as `FAILED`. **Redaction is non-negotiable** (INV-6, ADR-0031 bodies-never-logged) — the UI renders
 whatever the API returns (already redacted), and **never** un-redacts; secret tokens and mapped
-sensitive values appear as `‹redacted›`. Failed steps offer `Retry` (single step) and the run offers
-`Retry failed` / `Re-run` where the backend supports it (BullMQ per-step retries/backoff per ADR-0053).
-Each row maps to one `WorkflowStepRun` attempt (ADR-0054 §4); the edge taken + escalation/compensation
-linkage are the contract additions enumerated in **C2** (§10).
+sensitive values appear as `‹redacted›`. Each row maps to one `WorkflowStepRun` attempt (ADR-0054 §4);
+the edge taken + escalation/compensation linkage are the contract additions enumerated in **C2** (§10).
+
+**Retry a FAILED run (wired — issue #308).** A terminal `FAILED` run offers a single **Reintentar**
+action — on the run-detail panel header AND inline on the recent-runs row (`RetryRunButton`, gated on
+`workflow:run`, hidden otherwise). It calls `POST /workflow-runs/:id/retry`, which **resumes from the
+step that failed onward, NOT from the start**: every already-`SUCCEEDED` step is skipped, so a
+non-idempotent create cannot double-provision. The transition is a guarded `FAILED`→`RUNNING`
+compare-and-set and the retried step re-executes as a NEW append-only attempt; only `FAILED` is
+retryable (a `COMPENSATED` run rolled its effects back — re-grant, don't retry → the API returns 409).
+On success the run polls live again; a 409 / 422 / broker hiccup surfaces via `notifyError` with the
+request id. (Per-step single-step `Retry` and a full `Re-run` remain future affordances.)
 
 ### 7c. The grant ↔ run cross-link
 

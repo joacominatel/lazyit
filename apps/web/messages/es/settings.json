@@ -10,6 +10,10 @@
       "title": "Taxonomías",
       "description": "Gestiona las categorías que clasifican activos, aplicaciones, consumibles y artículos de la base de conocimiento — además de los modelos de activo."
     },
+    "locations": {
+      "title": "Ubicaciones",
+      "description": "Gestiona los lugares donde residen físicamente tus activos — oficinas, centros de datos, racks y depósitos."
+    },
     "roles": {
       "title": "Roles",
       "description": "Mira quién tiene cada rol RBAC en el equipo. Los cambios de rol se hacen en la sección de Usuarios."
@@ -176,6 +180,11 @@
       "status": "Estado"
     },
     "never": "Nunca",
+    "systemManaged": {
+      "badge": "Gestionada por el sistema",
+      "hint": "Propiedad del motor de workflows — cada ejecución de workflow se ejecuta como esta cuenta.",
+      "locked": "Gestionada por el sistema — el motor de workflows se ejecuta como esta cuenta, así que no se puede editar, rotar ni revocar."
+    },
     "empty": {
       "revokedTitle": "No hay cuentas de servicio revocadas",
       "title": "Aún no hay cuentas de servicio",

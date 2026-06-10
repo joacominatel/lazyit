@@ -150,10 +150,14 @@ function buildHarness() {
 
   const queue = { add: jest.fn().mockResolvedValue({ id: 'job1' }) };
   const trigger = new WorkflowTriggerService(prisma as never, queue as never);
+  // The notification emitter only fires on create() (not the revoke paths these tests exercise); a
+  // no-op mock keeps the concurrency assertions unchanged.
+  const notifications = { emit: jest.fn().mockResolvedValue(null) };
   const service = new AccessGrantsService(
     prisma as never,
     new ActorService(),
     trigger,
+    notifications as never,
   );
   return { service, runRows, committedActive };
 }

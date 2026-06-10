@@ -325,22 +325,28 @@ record is auto-provisioned — no separate "add user to lazyit" step is needed b
 > instance that already had `MEMBER` users before RBAC, where the wizard self-locks because an
 > ADMIN — the seed — already exists) or for BYOI operators who prefer the CLI.
 
-> [!warning] Why this fallback step exists
-> RBAC ([[0040-rbac-roles]]) makes the **first user ever provisioned** an `ADMIN` and everyone else
-> a `MEMBER`. But the `rbac_user_role` migration backfilled every **pre-existing** user to `MEMBER`,
-> and the first-user-ADMIN rule **only fires on a truly empty database**. So on an instance that
-> already had users (the common upgrade case), the *only* `ADMIN` is the seeded `admin@lazyit.local`,
-> and an operator who signs in via OIDC lands as `MEMBER` with **no UI to promote themselves**.
-> You must grant the first real `ADMIN` out-of-band, once. After that, admins manage every role from
-> the Users section.
+> [!note] Default (fresh prod / zero-touch): nothing to do here
+> Since #333 the seed creates **no** ADMIN unless `SEED_ADMIN_EMAIL` is explicitly set (it is UNSET in
+> prod). So a fresh deploy has an **empty** user table, and the first administrator is owned by the
+> in-app **`/setup` wizard** (§6b) — or, equivalently, the **first OIDC login becomes `ADMIN`**
+> automatically (the first-user-ADMIN rule fires on the truly-empty DB). The fallback below is only
+> for the cases noted next; on a clean install you can skip it.
 
-> [!tip] Easiest path — link the seeded admin by email (no script needed)
-> To become the first `ADMIN` without running anything, create a Zitadel user whose **email is the
-> SAME as the seeded admin** (default `admin@lazyit.local`, or your `SEED_ADMIN_EMAIL`). The first
-> login **links the two**: the JIT path ([[0038-jit-user-provisioning]]) binds your IdP `sub` onto
-> the unclaimed seeded row and you **inherit its `ADMIN` role**. From then on, manage every role in
-> the UI. (Linking only happens while the seeded row is still unclaimed — `externalId IS NULL` — and
-> never steals an email already linked to a different identity, which returns a 409.)
+> [!warning] Why this fallback step exists
+> RBAC ([[0040-rbac-roles]]) makes the **first user ever provisioned** an `ADMIN` and everyone else a
+> `VIEWER`. But the `rbac_user_role` migration backfilled every **pre-existing** user, and the
+> first-user-ADMIN rule **only fires on a truly empty database**. So on an instance that already had
+> users (the upgrade case), **or** one where `SEED_ADMIN_EMAIL` seeded an `admin@lazyit.local` whose
+> email you can't sign in as, an operator who signs in via OIDC can land as `VIEWER` with **no UI to
+> promote themselves**. You then grant the first real `ADMIN` out-of-band, once. After that, admins
+> manage every role from the Users section.
+
+> [!tip] If you DID set `SEED_ADMIN_EMAIL` — link the seeded admin by email (no script needed)
+> When a seeded admin exists, become the first `ADMIN` without running anything by creating a Zitadel
+> user whose **email is the SAME as `SEED_ADMIN_EMAIL`**. The first login **links the two**: the JIT
+> path ([[0038-jit-user-provisioning]]) binds your IdP `sub` onto the unclaimed seeded row and you
+> **inherit its `ADMIN` role**. (Linking only happens while the seeded row is still unclaimed —
+> `externalId IS NULL` — and never steals an email already linked to a different identity → 409.)
 
 **Preferred — the `set-role` script.** Run it on the API host (or `docker compose exec api`), from
 `apps/api`. It validates the role enum, matches the email case-insensitively, targets only LIVE

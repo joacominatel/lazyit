@@ -182,7 +182,17 @@
   },
   "runs": {
     "title": "Ejecuciones recientes",
-    "empty": "Aún no hay ejecuciones."
+    "empty": "Aún no hay ejecuciones.",
+    "emptyTitle": "Aún no hay ejecuciones",
+    "emptyDescription": "Cuando los flujos de esta app se disparen al otorgar o revocar un acceso, sus ejecuciones aparecerán aquí.",
+    "needsAttention": "Requiere atención",
+    "durationPending": "En curso",
+    "viewAll": "Ver todas ({count})"
+  },
+  "runRetry": {
+    "action": "Reintentar",
+    "toastSuccess": "Ejecución reencolada desde el paso que falló.",
+    "toastError": "No se pudo reintentar esta ejecución."
   },
   "runDetail": {
     "title": "Ejecución",
@@ -283,7 +293,20 @@
     "fieldLabel": "Campo externo",
     "fieldPlaceholder": "Campo externo",
     "valueLabel": "Origen del valor",
-    "removeAria": "Eliminar mapeo"
+    "valueSourceHint": "Elige un campo de contexto, o cambia a Avanzado para escribir un token.",
+    "removeAria": "Eliminar mapeo",
+    "advanced": "Avanzado",
+    "advancedAria": "Alternar edición de token sin procesar",
+    "pickField": "Elige un campo…",
+    "searchFields": "Buscar campos…",
+    "noFields": "Ningún campo coincide."
+  },
+  "tokenGroup": {
+    "grantee": "Beneficiario",
+    "application": "Aplicación",
+    "grant": "Concesión",
+    "context": "Contexto de ejecución",
+    "steps": "Salidas de pasos"
   },
   "stepEditor": {
     "title": "Configurar paso {kind}",
@@ -302,13 +325,24 @@
     "fieldNamePlaceholder": "clave",
     "fieldLabelLabel": "Etiqueta del campo",
     "fieldLabelPlaceholder": "Etiqueta",
+    "fieldTypeLabel": "Tipo de campo",
     "fieldRequired": "Obligatorio",
     "addField": "Añadir campo",
     "removeFieldAria": "Eliminar campo",
+    "optionsLabel": "Opciones",
+    "optionsEmpty": "Aún no hay opciones — añade los valores que ofrece este desplegable.",
+    "optionPlaceholder": "Valor de opción",
+    "optionAria": "Opción {index}",
+    "optionMoveUpAria": "Subir opción",
+    "optionMoveDownAria": "Bajar opción",
+    "optionRemoveAria": "Eliminar opción",
+    "addOption": "Añadir opción",
     "cohortLabel": "Grupo asignado",
     "cohortPlaceholder": "p. ej. equipo de IT (opcional)",
     "mappingLabel": "Mapeo de datos",
     "mappingHint": "Mapea el contexto de lazyit al payload saliente.",
+    "outcomeLabel": "Éxito y reintentos",
+    "flowLabel": "Flujo",
     "successCriteriaLabel": "Códigos de estado de éxito",
     "successCriteriaHint": "Separados por comas. Vacío para el valor por defecto 2xx.",
     "retryLabel": "Reintentar al fallar",
@@ -358,6 +392,7 @@
       "COMPLETED": "Esta tarea ya se completó.",
       "CANCELLED": "Esta tarea fue cancelada."
     },
+    "selectPlaceholder": "Elige…",
     "submit": "Enviar",
     "skip": "Omitir paso",
     "fail": "Fallar ejecución",

@@ -5,6 +5,7 @@ import {
   BeakerIcon,
   EllipsisVerticalIcon,
   KeyIcon,
+  LockClosedIcon,
   PencilSquareIcon,
   PlusIcon,
   TrashIcon,
@@ -219,7 +220,18 @@ export function ServiceAccountsManager() {
             return (
               <TableRow key={account.id}>
                 <TableCell className="font-medium">
-                  {account.name}
+                  <span className="flex items-center gap-2">
+                    {account.name}
+                    {account.systemManaged ? (
+                      <StatusBadge
+                        tone="info"
+                        title={t("serviceAccounts.systemManaged.hint")}
+                      >
+                        <LockClosedIcon />
+                        {t("serviceAccounts.systemManaged.badge")}
+                      </StatusBadge>
+                    ) : null}
+                  </span>
                   {account.description ? (
                     <p className="truncate text-xs font-normal text-muted-foreground">
                       {account.description}
@@ -248,7 +260,16 @@ export function ServiceAccountsManager() {
                   </StatusBadge>
                 </TableCell>
                 <TableCell className="text-right">
-                  {!canManage ? null : isRevoked ? (
+                  {!canManage ? null : account.systemManaged ? (
+                    // Engine-owned: no edit / rotate / revoke. A locked indicator, not an action menu.
+                    <span
+                      className="inline-flex size-7 items-center justify-center text-muted-foreground"
+                      title={t("serviceAccounts.systemManaged.locked")}
+                      aria-label={t("serviceAccounts.systemManaged.locked")}
+                    >
+                      <LockClosedIcon className="size-4" />
+                    </span>
+                  ) : isRevoked ? (
                     <RestoreRowAction
                       onRestore={() => handleRestore(account)}
                       disabled={

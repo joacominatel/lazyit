@@ -210,6 +210,11 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
   "dashboard:read": { label: "View the dashboard", pillar: "manage", tier: "view" },
   "search:read": { label: "Use global search", pillar: "manage", tier: "view" },
   "logs:read": { label: "View activity logs", pillar: "manage", tier: "view" },
+  "notification:read": {
+    label: "View notifications",
+    pillar: "manage",
+    tier: "view",
+  },
   "settings:read": { label: "View instance settings", pillar: "manage", tier: "view" },
   "settings:manage": {
     label: "Configure the instance",
@@ -288,6 +293,7 @@ export const CAPABILITY_IDS = [
   "user.delete",
   "dashboardSearch.view",
   "logs.view",
+  "notifications.view",
   "settings.view",
   "settings.manage",
   // Automation
@@ -457,6 +463,14 @@ export const CAPABILITIES: readonly Capability[] = [
     description: "See the estate-wide activity history (Reports/Informes).",
     pillar: "manage",
     permissions: ["logs:read"],
+  },
+  {
+    id: "notifications.view",
+    label: "View notifications",
+    description:
+      "See the in-app notification bell — curated operational nudges (critical-app access, admin elevation, low stock, workflow tasks).",
+    pillar: "manage",
+    permissions: ["notification:read"],
   },
   {
     id: "settings.view",
