@@ -86,6 +86,24 @@ type StepOutcome =
 export class WorkflowRunOrchestrator {
   private readonly logger = new Logger(WorkflowRunOrchestrator.name);
 
+  /**
+   * OPTION 2 (ADR-0057) — the TRANSIENT, single-use manual-retry payload override, held IN MEMORY ONLY,
+   * keyed by runId. Set EXCLUSIVELY by {@link retryRun} (the manual operator path) and consumed exactly
+   * ONCE by the next {@link walk} for that run when it re-enters the failed step; then DELETED.
+   *
+   * INV-6 (hard boundary): the operator-typed override NEVER touches Valkey (it does NOT ride the BullMQ
+   * job — the job payload stays `{ runId, retryStepKey, retryAttempt }`, Postgres-is-truth) and NEVER
+   * touches Postgres / the ledger / a log. The in-process BullMQ worker shares this singleton orchestrator
+   * instance, so the delayed-0 retry job re-enters the SAME instance and finds the override. A broker-down
+   * retry (no job scheduled) simply re-renders WITHOUT the override and fails again deterministically — the
+   * operator retries once the broker is back; nothing is persisted to recover, by design. The AUTOMATIC
+   * per-attempt retry ({@link retryStep}) never reads this map — it stays deterministic + pinned.
+   */
+  private readonly pendingOverrides = new Map<
+    string,
+    { stepKey: string; fields: Record<string, string> }
+  >();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: ConnectorRegistry,
@@ -180,11 +198,17 @@ export class WorkflowRunOrchestrator {
    * for the RUNNING-staleness reconciler to finalize (the operator simply retries again once Valkey is
    * back) — never a synchronous external call on the request thread.
    *
+   * OPTION 2 (ADR-0057) — an OPTIONAL `overrides` map (field name → template-or-literal) patches the
+   * FAILED step's data mapping for the NEXT attempt ONLY. It is stored TRANSIENTLY in {@link
+   * pendingOverrides} (in memory, never Valkey/Postgres/logs) and consumed by the next walk's render of
+   * that step; only the field NAMES are ever recorded (INV-6). A no-override retry is unchanged.
+   *
    * @returns `{ retried: true, resumeStepKey, attempt }` on a successful CAS, or `{ retried: false }`
    *   when the run was not `FAILED` at claim time (the caller maps that to a 409 conflict).
    */
   async retryRun(
     runId: string,
+    overrides?: Record<string, string>,
   ): Promise<
     | { retried: true; resumeStepKey: string; attempt: number }
     | { retried: false }
@@ -217,6 +241,15 @@ export class WorkflowRunOrchestrator {
       return { retried: false };
     }
 
+    // Stash the transient override (Option 2) ONLY after winning the CAS, so a lost race leaves no stale
+    // override behind. Scoped to the failed step; consumed once by the next walk's render of that step.
+    if (overrides && Object.keys(overrides).length > 0) {
+      this.pendingOverrides.set(runId, {
+        stepKey: failedStepKey,
+        fields: { ...overrides },
+      });
+    }
+
     // Advance OFF the request via a delayed-0 retry job (decoupled, §1). A broker-down enqueue is
     // swallowed by enqueueRetry; the run is RUNNING and the RUNNING-staleness reconciler finalizes it.
     await this.trigger.enqueueRetry(runId, failedStepKey, nextAttempt, 0);
@@ -224,6 +257,34 @@ export class WorkflowRunOrchestrator {
       retried: true,
       resumeStepKey: failedStepKey,
       attempt: nextAttempt,
+    };
+  }
+
+  /**
+   * OPTION 2 (ADR-0057): if a one-shot manual-retry override is pending for `runId` AND targets this
+   * step, return a step CLONE whose `dataMapping` is merged with the override (the override wins per
+   * field), and DELETE the pending override (single use). Otherwise return the step unchanged. The
+   * override never escapes this in-memory merge — it patches the mapping the handler renders for ONE
+   * attempt, and only the merged field NAMES are recorded downstream (INV-6: no value is persisted).
+   */
+  private applyPendingOverride(
+    runId: string,
+    step: WorkflowStep,
+  ): WorkflowStep {
+    const pending = this.pendingOverrides.get(runId);
+    if (!pending || pending.stepKey !== step.key) {
+      return step;
+    }
+    // Single use: consume it now so a later step / a re-delivery never re-applies it.
+    this.pendingOverrides.delete(runId);
+    // Only REST / WEBHOOK_OUT steps carry a data mapping the override can patch. A MANUAL step has none —
+    // the override is a no-op there (defensive; the schema-level scope is enforced at the controller).
+    if (step.kind !== 'REST' && step.kind !== 'WEBHOOK_OUT') {
+      return step;
+    }
+    return {
+      ...step,
+      dataMapping: { ...(step.dataMapping ?? {}), ...pending.fields },
     };
   }
 
@@ -272,8 +333,12 @@ export class WorkflowRunOrchestrator {
         await this.finalizeFailed(runId, cursor, 'cursor-not-found');
         return;
       }
-      const step = steps[index];
+      const baseStep = steps[index];
       const { onSuccess, onFailure } = resolveStepTransitions(steps, index);
+      // OPTION 2 (ADR-0057): consume a one-shot manual-retry override for THIS step (if any). It patches
+      // the step's data mapping for this single render, then is DELETED — never persisted (INV-6). Only a
+      // REST/WEBHOOK_OUT step carries a `dataMapping`; the override is inert on any other kind.
+      const step = this.applyPendingOverride(runId, baseStep);
       const exec = await this.executeStep(run.id, step, index, ctx, attempt);
 
       // A MANUAL step's own pause (handler returned AWAITING_INPUT): create the task + pause the run
