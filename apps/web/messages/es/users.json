@@ -35,6 +35,15 @@
       "updated": "Actualizado",
       "actions": "Acciones"
     },
+    "columnPicker": {
+      "label": "Columnas",
+      "columns": {
+        "email": "Correo",
+        "role": "Rol",
+        "status": "Estado",
+        "updated": "Actualizado"
+      }
+    },
     "meta": {
       "email": "Correo",
       "role": "Rol",

@@ -5,11 +5,12 @@ import {
   PlusIcon,
   UserPlusIcon,
   UsersIcon,
+  ViewColumnsIcon,
 } from "@heroicons/react/24/outline";
 import type { BatchResult, User } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
@@ -33,6 +34,14 @@ import {
 import { SearchInput } from "@/components/search-input";
 import { Button } from "@/components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -50,6 +59,7 @@ import { notifyError } from "@/lib/api/notify-error";
 import { runPerIdBatch } from "@/lib/api/per-id-batch";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
+import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils/format";
@@ -67,6 +77,22 @@ type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
  * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
  */
 const FILTER_DEFAULTS = { status: "ALL", archived: "ALL" } as const;
+
+/**
+ * The Users-table columns an operator can show/hide via the column picker (#368). Structural columns
+ * (`avatar`, the selection checkbox, row `actions`) and the `name` identity column — the row's
+ * canonical link — are always rendered and intentionally absent here. Keys match the `ResourceColumn`
+ * keys and the per-key body-cell map below, so the header and body never drift. Scoped to this page
+ * by CTO decision (the shared `ResourceTable` stays untouched).
+ */
+const HIDEABLE_COLUMNS = ["email", "role", "status", "updated"] as const;
+type HideableColumn = (typeof HIDEABLE_COLUMNS)[number];
+
+/** localStorage key persisting the visible hideable-column set (per browser). */
+const COLUMNS_STORAGE_KEY = "lazyit:users:columns";
+
+/** All hideable columns are visible by default — the picker only ever subtracts from this. */
+const DEFAULT_VISIBLE_COLUMNS: HideableColumn[] = [...HIDEABLE_COLUMNS];
 
 export default function UsersPage() {
   const t = useTranslations("users");
@@ -131,6 +157,35 @@ export default function UsersPage() {
   const selection = useRowSelection(visibleIds);
   const selectable = archived;
 
+  // Per-browser column-picker state (#368). `mounted` gates the persisted set so SSR/first paint
+  // always shows every column (the server snapshot is `DEFAULT_VISIBLE_COLUMNS`) — no hydration flash.
+  const [storedColumns, setStoredColumns, columnsMounted] = useLocalStorage<
+    HideableColumn[]
+  >(COLUMNS_STORAGE_KEY, DEFAULT_VISIBLE_COLUMNS);
+  // Defend against stale/garbage storage (renamed/removed keys, or a non-array shape from an older
+  // build): only keep known hideable keys.
+  const visibleColumns = useMemo(() => {
+    if (!columnsMounted || !Array.isArray(storedColumns)) {
+      return new Set<HideableColumn>(HIDEABLE_COLUMNS);
+    }
+    return new Set(storedColumns.filter((key) => HIDEABLE_COLUMNS.includes(key)));
+  }, [columnsMounted, storedColumns]);
+  const isColumnVisible = (key: HideableColumn) => visibleColumns.has(key);
+
+  function toggleColumn(key: HideableColumn, visible: boolean) {
+    setStoredColumns((prev) => {
+      const kept = (Array.isArray(prev) ? prev : DEFAULT_VISIBLE_COLUMNS).filter(
+        (k) => HIDEABLE_COLUMNS.includes(k),
+      );
+      if (visible) {
+        if (kept.includes(key)) return kept;
+        // Re-emit in canonical column order so persistence stays stable regardless of toggle order.
+        return HIDEABLE_COLUMNS.filter((k) => k === key || kept.includes(k));
+      }
+      return kept.filter((k) => k !== key);
+    });
+  }
+
   function handleRestoreRow(user: User) {
     const name = `${user.firstName} ${user.lastName}`;
     restoreUserMutation.mutate(user.id, {
@@ -161,71 +216,76 @@ export default function UsersPage() {
     }
   }
 
-  const columns = useMemo<ResourceColumn[]>(
-    () => [
-      {
-        key: "avatar",
-        header: t("list.columns.avatar"),
-        srOnlyHeader: true,
-        headClassName: "w-12",
-        skeleton: <Skeleton className="size-8 rounded-full" />,
-      },
-      {
-        key: "name",
-        header: (
-          <SortableHeader
-            label={t("list.columns.name")}
-            active={sort === "firstName"}
-            direction={dir}
-            onToggle={() => toggleSort("firstName")}
-          />
-        ),
-        skeleton: <Skeleton className="h-4 w-32" />,
-      },
-      {
-        key: "email",
-        header: (
-          <SortableHeader
-            label={t("list.columns.email")}
-            active={sort === "email"}
-            direction={dir}
-            onToggle={() => toggleSort("email")}
-          />
-        ),
-        skeleton: <Skeleton className="h-4 w-48" />,
-      },
-      {
-        key: "role",
-        header: (
-          <SortableHeader
-            label={t("list.columns.role")}
-            active={sort === "role"}
-            direction={dir}
-            onToggle={() => toggleSort("role")}
-          />
-        ),
-        skeleton: <Skeleton className="h-8 w-[7.5rem] rounded-lg" />,
-      },
-      {
-        key: "status",
-        header: t("list.columns.status"),
-        skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
-      },
-      {
-        key: "updated",
-        header: t("list.columns.updated"),
-        skeleton: <Skeleton className="h-4 w-20" />,
-      },
-      {
-        key: "actions",
-        header: t("list.columns.actions"),
-        srOnlyHeader: true,
-        headClassName: "w-12 text-right",
-        skeleton: <Skeleton className="ml-auto size-7" />,
-      },
-    ],
-    [sort, dir, toggleSort, t],
-  );
+  const columns = useMemo<ResourceColumn[]>(() => {
+    // Entries are `ResourceColumn | false`; a hideable column collapses to `false` when toggled off
+    // and is dropped below, so the rendered set always matches the persisted visible-column set.
+    const defs: (ResourceColumn | false)[] = [
+        {
+          key: "avatar",
+          header: t("list.columns.avatar"),
+          srOnlyHeader: true,
+          headClassName: "w-12",
+          skeleton: <Skeleton className="size-8 rounded-full" />,
+        },
+        {
+          key: "name",
+          header: (
+            <SortableHeader
+              label={t("list.columns.name")}
+              active={sort === "firstName"}
+              direction={dir}
+              onToggle={() => toggleSort("firstName")}
+            />
+          ),
+          skeleton: <Skeleton className="h-4 w-32" />,
+        },
+        isColumnVisible("email") && {
+          key: "email",
+          header: (
+            <SortableHeader
+              label={t("list.columns.email")}
+              active={sort === "email"}
+              direction={dir}
+              onToggle={() => toggleSort("email")}
+            />
+          ),
+          skeleton: <Skeleton className="h-4 w-48" />,
+        },
+        isColumnVisible("role") && {
+          key: "role",
+          header: (
+            <SortableHeader
+              label={t("list.columns.role")}
+              active={sort === "role"}
+              direction={dir}
+              onToggle={() => toggleSort("role")}
+            />
+          ),
+          skeleton: <Skeleton className="h-8 w-[7.5rem] rounded-lg" />,
+        },
+        isColumnVisible("status") && {
+          key: "status",
+          header: t("list.columns.status"),
+          skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
+        },
+        isColumnVisible("updated") && {
+          key: "updated",
+          header: t("list.columns.updated"),
+          skeleton: <Skeleton className="h-4 w-20" />,
+        },
+        {
+          key: "actions",
+          header: t("list.columns.actions"),
+          srOnlyHeader: true,
+          headClassName: "w-12 text-right",
+          skeleton: <Skeleton className="ml-auto size-7" />,
+        },
+    ];
+    return defs.filter((column): column is ResourceColumn => column !== false);
+    // `visibleColumns` is the source of truth for which hideable columns appear; `isColumnVisible`
+    // reads it, so depend on the set itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sort, dir, toggleSort, t, visibleColumns]);
 
   const total = page?.total ?? 0;
   const isEmpty = total === 0;
@@ -345,6 +405,36 @@ export default function UsersPage() {
                 </SelectItem>
               </SelectContent>
             </Select>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="sm:ml-auto"
+                  aria-label={t("list.columnPicker.label")}
+                  title={t("list.columnPicker.label")}
+                >
+                  <ViewColumnsIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-44">
+                <DropdownMenuLabel>
+                  {t("list.columnPicker.label")}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {HIDEABLE_COLUMNS.map((key) => (
+                  <DropdownMenuCheckboxItem
+                    key={key}
+                    checked={isColumnVisible(key)}
+                    // Keep the menu open so several columns can be toggled in one pass.
+                    onSelect={(event) => event.preventDefault()}
+                    onCheckedChange={(checked) => toggleColumn(key, checked)}
+                  >
+                    {t(`list.columnPicker.columns.${key}`)}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           <ActiveFilters chips={chips} onClearAll={clearFilters} />
@@ -427,72 +517,103 @@ export default function UsersPage() {
               />
             ))}
           >
-            {rows.map((user) => (
-              <LinkableRow
-                key={user.id}
-                href={`/users/${user.id}`}
-                data-state={
-                  selectable && selection.isSelected(user.id)
-                    ? "selected"
-                    : undefined
-                }
-              >
-                {selectable ? (
-                  <SelectCell
-                    checked={selection.isSelected(user.id)}
-                    onCheckedChange={(on) => selection.setSelected(user.id, on)}
-                    label={t("list.selectLabel", {
-                      name: `${user.firstName} ${user.lastName}`,
-                    })}
-                  />
-                ) : null}
-                <TableCell>
-                  <UserAvatar
-                    firstName={user.firstName}
-                    lastName={user.lastName}
-                    email={user.email}
-                  />
-                </TableCell>
-                <TableCell className="font-medium">
-                  <Link href={`/users/${user.id}`} className="hover:underline">
-                    {user.firstName} {user.lastName}
-                  </Link>
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {user.email}
-                </TableCell>
-                <TableCell>
-                  <UserRoleSelect user={user} size="sm" />
-                </TableCell>
-                <TableCell>
-                  <UserStatusBadge isActive={user.isActive} />
-                </TableCell>
-                <TableCell className="text-muted-foreground tabular-nums">
-                  {formatDate(user.updatedAt)}
-                </TableCell>
-                <TableCell className="text-right">
-                  {archived ? (
-                    canManage ? (
-                      <div className="flex justify-end">
-                        <RestoreRowAction
-                          onRestore={() => handleRestoreRow(user)}
-                          disabled={restoreUserMutation.isPending}
+            {rows.map((user) => {
+              // Per-key body cells, keyed to the same column keys as the `columns` memo above. We
+              // render by iterating `columns`, so a hidden column drops from the header AND the body
+              // in lockstep — they can never drift. Structural keys (avatar/name/actions) are always
+              // present here; the hideable ones simply won't be looked up when their column is off.
+              const cells: Record<string, ReactNode> = {
+                avatar: (
+                  <TableCell key="avatar">
+                    <UserAvatar
+                      firstName={user.firstName}
+                      lastName={user.lastName}
+                      email={user.email}
+                    />
+                  </TableCell>
+                ),
+                name: (
+                  <TableCell key="name" className="font-medium">
+                    <Link
+                      href={`/users/${user.id}`}
+                      className="hover:underline"
+                    >
+                      {user.firstName} {user.lastName}
+                    </Link>
+                  </TableCell>
+                ),
+                email: (
+                  <TableCell key="email" className="text-muted-foreground">
+                    {user.email}
+                  </TableCell>
+                ),
+                role: (
+                  <TableCell key="role">
+                    <UserRoleSelect user={user} size="sm" />
+                  </TableCell>
+                ),
+                status: (
+                  <TableCell key="status">
+                    <UserStatusBadge isActive={user.isActive} />
+                  </TableCell>
+                ),
+                updated: (
+                  <TableCell
+                    key="updated"
+                    className="text-muted-foreground tabular-nums"
+                  >
+                    {formatDate(user.updatedAt)}
+                  </TableCell>
+                ),
+                actions: (
+                  <TableCell key="actions" className="text-right">
+                    {archived ? (
+                      canManage ? (
+                        <div className="flex justify-end">
+                          <RestoreRowAction
+                            onRestore={() => handleRestoreRow(user)}
+                            disabled={restoreUserMutation.isPending}
+                          />
+                        </div>
+                      ) : null
+                    ) : canManage ? (
+                      <div className={cn("flex justify-end", rowActionsReveal)}>
+                        <RowActions
+                          onEdit={() => openEdit(user)}
+                          onClone={() => openClone(user)}
+                          onDelete={() => setDeleting(user)}
+                          deleteLabel={t("list.offboardAction")}
                         />
                       </div>
-                    ) : null
-                  ) : canManage ? (
-                    <div className={cn("flex justify-end", rowActionsReveal)}>
-                      <RowActions
-                        onEdit={() => openEdit(user)}
-                        onClone={() => openClone(user)}
-                        onDelete={() => setDeleting(user)}
-                        deleteLabel={t("list.offboardAction")}
-                      />
-                    </div>
+                    ) : null}
+                  </TableCell>
+                ),
+              };
+              return (
+                <LinkableRow
+                  key={user.id}
+                  href={`/users/${user.id}`}
+                  data-state={
+                    selectable && selection.isSelected(user.id)
+                      ? "selected"
+                      : undefined
+                  }
+                >
+                  {selectable ? (
+                    <SelectCell
+                      checked={selection.isSelected(user.id)}
+                      onCheckedChange={(on) =>
+                        selection.setSelected(user.id, on)
+                      }
+                      label={t("list.selectLabel", {
+                        name: `${user.firstName} ${user.lastName}`,
+                      })}
+                    />
                   ) : null}
-                </TableCell>
-              </LinkableRow>
-            ))}
+                  {columns.map((column) => cells[column.key])}
+                </LinkableRow>
+              );
+            })}
           </ResourceTable>
 
           {archived ? (
