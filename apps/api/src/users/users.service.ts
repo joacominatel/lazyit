@@ -29,6 +29,7 @@ import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import type { ActorAttribution } from '../common/actor.service';
 import { UserHistoryService } from '../user-history/user-history.service';
+import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
 import {
   IDENTITY_PROVIDER,
@@ -102,6 +103,11 @@ export class UsersService {
     // SAME transactional-outbox path as a hand-created grant: plan BEFORE the tx, write a PENDING run
     // row INSIDE the tx, enqueue AFTER commit — but only when fireWorkflowsOnClonedGrants is true.
     private readonly workflowTrigger: WorkflowTriggerService,
+    // Notification-bell emitter (ADR-0056 §3 / ADR-0058 §4 clone, issue #359). The clone writes its
+    // cloned grants directly (to govern the engine toggle), so it reuses AccessGrantsService's bell
+    // emitter post-commit to fire the SAME admin_granted / critical_app_access nudges a hand-created
+    // grant produces. The bell is admin VISIBILITY — independent of the engine fire toggle.
+    private readonly accessGrants: AccessGrantsService,
     // IdP write-back seam (ADR-0043). Zitadel mirrors lazyit's user/role decisions; generic-oidc
     // (BYOI) no-ops every management call. Authorization stays DB-first regardless (decision #1).
     @Inject(IDENTITY_PROVIDER)
@@ -980,6 +986,15 @@ export class UsersService {
     //    all-or-nothing among the cloned local rows. The cloning admin is the actor on every row.
     const actor: ActorAttribution = actorId != null ? { userId: actorId } : {};
     const runIds: string[] = [];
+    // The cloned grants to nudge the bell about AFTER commit (ADR-0056 §3, issue #359). Collected from
+    // the in-tx creates and fired post-commit (best-effort) — never inside the tx (a notification must
+    // not roll back the clone), independent of the engine toggle.
+    const clonedGrants: {
+      id: string;
+      userId: string;
+      applicationId: string;
+      accessLevel: string | null;
+    }[] = [];
     await this.prisma.$transaction(async (tx) => {
       for (const plan of assignmentPlans) {
         await tx.assetAssignment.create({
@@ -1008,6 +1023,14 @@ export class UsersService {
             ...(actor.userId != null ? { grantedById: actor.userId } : {}),
           },
         });
+        // Remember the grant (with its PERSISTED accessLevel) so the bell fires post-commit on the SAME
+        // criteria a hand-created grant uses (ADR-0056 §3, issue #359).
+        clonedGrants.push({
+          id: grant.id,
+          userId: created.id,
+          applicationId: grant.applicationId,
+          accessLevel: grant.accessLevel,
+        });
         // ENGINE TOGGLE: only when ON does a grant carry a workflow plan. The PENDING run row is written
         // atomically with the grant (the same transactional-outbox tradeoff as a hand-created grant);
         // when OFF, `plan.trigger` is null and NO run row is written — the trigger is SUPPRESSED.
@@ -1033,6 +1056,19 @@ export class UsersService {
         await this.workflowTrigger.enqueue(runId);
       } catch {
         // The trigger already swallows broker errors; a final guard so the clone result still returns.
+      }
+    }
+
+    // 6) AFTER commit: fire the in-app notification bell for every cloned grant (ADR-0056 §3, issue
+    //    #359), reusing the SAME emitter a hand-created grant uses (admin_granted / critical_app_access,
+    //    deduped per grant). Best-effort and INDEPENDENT of the engine toggle — the bell is admin
+    //    VISIBILITY, not external provisioning; the emitter already swallows its own errors, and this
+    //    guard ensures a thrown emit can never escape into the clone result.
+    for (const grant of clonedGrants) {
+      try {
+        await this.accessGrants.emitGrantNotifications(grant);
+      } catch {
+        // Best-effort: a failed nudge never affects the already-committed clone.
       }
     }
 
@@ -1077,13 +1113,15 @@ export class UsersService {
         continue;
       }
       if (!liveAssetIds.has(row.assetId)) {
-        skipped.push({ id, reason: 'asset_deleted' });
+        // entityId = the underlying asset id so the web resolves a friendly label (the requested id is
+        // the ASSIGNMENT id, which the web's asset/app catalogs can't name). #361.
+        skipped.push({ id, entityId: row.assetId, reason: 'asset_deleted' });
         continue;
       }
       if (seenAssets.has(row.assetId)) {
         // Two selected assignments on the same asset → one clone row (the second would 409 on the
         // one-active-per-(asset,user) index). Report the duplicate so the result is honest.
-        skipped.push({ id, reason: 'already_in_state' });
+        skipped.push({ id, entityId: row.assetId, reason: 'already_in_state' });
         continue;
       }
       seenAssets.add(row.assetId);
