@@ -12,7 +12,9 @@ import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
+import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { UserHistoryService } from '../user-history/user-history.service';
+import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
 import {
   IDENTITY_PROVIDER,
   PasswordResetUnsupportedError,
@@ -60,7 +62,9 @@ type IdpMock = {
 // service threads the tx client; the emission itself is asserted via the mocked UserHistoryService.
 type TxMock = {
   user: { update: jest.Mock };
-  accessGrant: { updateMany: jest.Mock };
+  accessGrant: { updateMany: jest.Mock; create: jest.Mock };
+  assetAssignment: { create: jest.Mock };
+  workflowRun: { create: jest.Mock };
   userHistory: { create: jest.Mock };
 };
 
@@ -76,6 +80,22 @@ describe('UsersService', () => {
   // DEBT-2 (issue #185): the append-only UserHistory emitter. Mocked so each write-path assertion can
   // check WHICH event was recorded (and with which payload/actor) without a DB.
   let history: { record: jest.Mock; list: jest.Mock };
+  // ADR-0058 clone: the asset-history emitter (ASSIGNED per cloned assignment) and the workflow-engine
+  // trigger (the engine toggle fires/suppresses ACCESS_GRANTED).
+  let assetHistory: { record: jest.Mock };
+  let workflowTrigger: {
+    planForTrigger: jest.Mock;
+    buildRunData: jest.Mock;
+    enqueue: jest.Mock;
+  };
+  // The base prisma mock (lifted so the clone tests can prime assetAssignment/accessGrant/asset reads).
+  let prismaMock: {
+    assetAssignment: { findMany: jest.Mock };
+    accessGrant: { findMany: jest.Mock };
+    asset: { findMany: jest.Mock };
+  };
+  /** Accessor for the lifted prisma mock — keeps the clone tests readable. */
+  const prismaRef = () => prismaMock;
 
   beforeEach(async () => {
     user = {
@@ -94,7 +114,12 @@ describe('UsersService', () => {
       // update and restore paths (which now run user.update through the tx client) return whatever a
       // test configured on `user.update`. Offboard tests override this with their own mockResolvedValue.
       user: { update: jest.fn((args: unknown) => user.update(args) as unknown) },
-      accessGrant: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      accessGrant: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: jest.fn().mockResolvedValue({ id: 'cloned-grant-1' }),
+      },
+      assetAssignment: { create: jest.fn().mockResolvedValue({ id: 'cloned-assign-1' }) },
+      workflowRun: { create: jest.fn().mockResolvedValue({ id: 'cloned-run-1' }) },
       userHistory: { create: jest.fn() },
     };
     const prisma = {
@@ -102,13 +127,19 @@ describe('UsersService', () => {
       // Base-client userHistory.create — present for the non-transactional emission paths (BYOI create,
       // password reset). The emission is asserted via the mocked UserHistoryService below.
       userHistory: { create: jest.fn() },
-      // Handles BOTH forms: callback (offboard / linked-create / update / restore) with the tx client,
-      // and array (findPage's [findMany, count]) which resolves each promise in the array.
+      // ADR-0058 clone plan helpers read the SOURCE's active assignments/grants and live assets here.
+      // Defaults are empty; the clone tests override them per scenario.
+      assetAssignment: { findMany: jest.fn().mockResolvedValue([]) },
+      accessGrant: { findMany: jest.fn().mockResolvedValue([]) },
+      asset: { findMany: jest.fn().mockResolvedValue([]) },
+      // Handles BOTH forms: callback (offboard / linked-create / update / restore / clone) with the tx
+      // client, and array (findPage's [findMany, count]) which resolves each promise in the array.
       $transaction: jest.fn(
         (arg: ((client: TxMock) => unknown) | Promise<unknown>[]) =>
           Array.isArray(arg) ? Promise.all(arg) : arg(tx),
       ),
     };
+    prismaMock = prisma;
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
     // AssetAssignmentsService is mocked; its own logic is covered in its spec. Default: no active
     // assignments to release.
@@ -139,6 +170,16 @@ describe('UsersService', () => {
 
     // UserHistoryService mock (DEBT-2). record() resolves; assertions inspect its call args per path.
     history = { record: jest.fn().mockResolvedValue(undefined), list: jest.fn() };
+    // AssetHistory + WorkflowTrigger (ADR-0058 clone). Default no-op; the clone tests below override
+    // them to assert the ASSIGNED row + the engine-toggle fire/suppress behaviour.
+    assetHistory = { record: jest.fn().mockResolvedValue(undefined) };
+    workflowTrigger = {
+      planForTrigger: jest.fn().mockResolvedValue(null),
+      buildRunData: jest
+        .fn()
+        .mockReturnValue({ idempotencyKey: 'ACCESS_GRANTED:g:0' }),
+      enqueue: jest.fn().mockResolvedValue(true),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -146,7 +187,9 @@ describe('UsersService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: SearchService, useValue: search },
         { provide: AssetAssignmentsService, useValue: assignments },
+        { provide: AssetHistoryService, useValue: assetHistory },
         { provide: UserHistoryService, useValue: history },
+        { provide: WorkflowTriggerService, useValue: workflowTrigger },
         { provide: IDENTITY_PROVIDER, useValue: idp as IdentityProvider },
         { provide: getLoggerToken(UsersService.name), useValue: logger },
       ],
@@ -169,8 +212,13 @@ describe('UsersService', () => {
     user.create.mockResolvedValue(created);
     user.update.mockResolvedValue(linked);
 
-    // The default idp supportsManagement and returns externalId 'zitadel-user-1'.
-    await expect(service.create(dto)).resolves.toEqual(linked);
+    // The default idp supportsManagement and returns externalId 'zitadel-user-1'. The service now
+    // returns the SERIALIZED wire shape (ADR-0058): the manager FK is resolved (null here) and the raw
+    // manager columns are dropped — so the linked row gains `manager: null`.
+    await expect(service.create(dto)).resolves.toEqual({
+      ...linked,
+      manager: null,
+    });
     // ADR-0043: an omitted role defaults to VIEWER (least-privilege), set explicitly by the service.
     expect(user.create).toHaveBeenCalledWith({
       data: { ...dto, role: 'VIEWER' },
@@ -267,8 +315,12 @@ describe('UsersService', () => {
     };
     user.create.mockResolvedValue(created);
 
-    // The local create succeeds and is returned as-is; no externalId-link update; no throw.
-    await expect(service.create(dto)).resolves.toEqual(created);
+    // The local create succeeds and is returned in the SERIALIZED wire shape (manager resolved to null);
+    // no externalId-link update; no throw.
+    await expect(service.create(dto)).resolves.toEqual({
+      ...created,
+      manager: null,
+    });
     expect(user.update).not.toHaveBeenCalled();
     expect(user.delete).not.toHaveBeenCalled();
     expect(search.upsert).toHaveBeenCalledWith('users', {
@@ -607,7 +659,8 @@ describe('UsersService', () => {
         skip: 0,
       });
       expect(page).toEqual({
-        items: [{ id: 'u1' }],
+        // The list items are SERIALIZED (ADR-0058): each gains a resolved `manager` (null here).
+        items: [{ id: 'u1', manager: null }],
         total: 1,
         limit: 50,
         offset: 0,
@@ -685,7 +738,7 @@ describe('UsersService', () => {
         where: { deletedAt: { not: null } },
         includeSoftDeleted: true,
       });
-      expect(page.items).toEqual([{ id: 'gone' }]);
+      expect(page.items).toEqual([{ id: 'gone', manager: null }]);
     });
   });
 
@@ -1308,6 +1361,358 @@ describe('UsersService', () => {
       await expect(
         service.requestPasswordReset('user-1', 'actor-1'),
       ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    });
+  });
+
+  // ADR-0058 — the manager either/or, the self/cycle guard, and the read descriptor.
+  describe('manager (ADR-0058)', () => {
+    const SUBJECT = '00000000-0000-0000-0000-000000000001';
+    const MGR = '00000000-0000-0000-0000-000000000002';
+
+    function liveRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: SUBJECT,
+        email: 'a@b.com',
+        firstName: 'Sub',
+        lastName: 'Ject',
+        role: 'VIEWER',
+        externalId: null,
+        managerId: null,
+        managerName: null,
+        deletedAt: null,
+        ...overrides,
+      };
+    }
+
+    it('rejects setting BOTH managerId and managerName (the XOR) before any write', async () => {
+      // The zod refine normally blocks this at the edge; the service also rejects it defensively.
+      // (Passed here as a raw union to exercise the resolver branch.)
+      user.findFirst.mockResolvedValue(liveRow());
+      await expect(
+        service.update(SUBJECT, {
+          manager: { managerId: MGR, managerName: 'Ana' } as never,
+        }),
+      ).rejects.toBeDefined();
+    });
+
+    it('rejects a SELF-manager (managerId === subject) with 400', async () => {
+      user.findFirst.mockResolvedValue(liveRow());
+      await expect(
+        service.update(SUBJECT, { manager: { managerId: SUBJECT } }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a managerId that is not a live user with 400', async () => {
+      // 1st findFirst = the subject (update's findOne); 2nd = the manager lookup → null (not live).
+      user.findFirst
+        .mockResolvedValueOnce(liveRow())
+        .mockResolvedValueOnce(null);
+      await expect(
+        service.update(SUBJECT, { manager: { managerId: MGR } }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects a CYCLE: linking a manager whose chain reaches back to the subject (400)', async () => {
+      // Subject S wants manager M; M.managerId = S → walking up from M reaches S → cycle.
+      user.findFirst
+        // update() findOne → the subject
+        .mockResolvedValueOnce(liveRow())
+        // assertManagerLinkValid: load the proposed manager M (managerId points back at S)
+        .mockResolvedValueOnce({ id: MGR, managerId: SUBJECT });
+      await expect(
+        service.update(SUBJECT, { manager: { managerId: MGR } }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('accepts a valid manager link and emits MANAGER_CHANGED { from, to }', async () => {
+      user.findFirst
+        // update() findOne → the subject (currently no manager)
+        .mockResolvedValueOnce(liveRow())
+        // assertManagerLinkValid: the proposed manager M is live, its chain ends (no further manager)
+        .mockResolvedValueOnce({ id: MGR, managerId: null });
+      user.update.mockResolvedValue(
+        liveRow({ managerId: MGR, managerName: null }),
+      );
+      // serializeUser (on the update return) resolves the manager descriptor via findMany.
+      user.findMany.mockResolvedValue([
+        { id: MGR, firstName: 'Boss', lastName: 'Person', deletedAt: null },
+      ]);
+
+      await service.update(SUBJECT, { manager: { managerId: MGR } });
+
+      // The manager columns are written (managerId set, managerName cleared).
+      expect(user.update).toHaveBeenCalledWith({
+        where: { id: SUBJECT },
+        data: { managerId: MGR, managerName: null },
+      });
+      // A MANAGER_CHANGED row is emitted: from null → to the new manager id.
+      expect(history.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          userId: SUBJECT,
+          eventType: 'MANAGER_CHANGED',
+          payload: { from: null, to: MGR },
+        }),
+      );
+    });
+
+    it('accepts the free-text fallback (managerName) and clears managerId', async () => {
+      user.findFirst.mockResolvedValueOnce(
+        liveRow({ managerId: MGR, managerName: null }),
+      );
+      user.update.mockResolvedValue(
+        liveRow({ managerId: null, managerName: 'Ana (HR)' }),
+      );
+
+      await service.update(SUBJECT, { manager: { managerName: 'Ana (HR)' } });
+
+      expect(user.update).toHaveBeenCalledWith({
+        where: { id: SUBJECT },
+        data: { managerId: null, managerName: 'Ana (HR)' },
+      });
+      // from the prior linked id → to the external name string.
+      expect(history.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          eventType: 'MANAGER_CHANGED',
+          payload: { from: MGR, to: 'Ana (HR)' },
+        }),
+      );
+    });
+
+    it('resolves the READ descriptor: a LIVE linked manager (isOffboarded false)', async () => {
+      user.findFirst.mockResolvedValue(liveRow({ managerId: MGR }));
+      // serializeUsers loads the manager via findMany (includeSoftDeleted) — here it is LIVE.
+      user.findMany.mockResolvedValue([
+        {
+          id: MGR,
+          firstName: 'Boss',
+          lastName: 'Person',
+          deletedAt: null,
+        },
+      ]);
+
+      const result = await service.findOneSerialized(SUBJECT);
+
+      expect(result.manager).toEqual({
+        type: 'user',
+        id: MGR,
+        firstName: 'Boss',
+        lastName: 'Person',
+        isOffboarded: false,
+      });
+      // The raw FK columns are never exposed on the wire.
+      expect(
+        (result as Record<string, unknown>).managerId,
+      ).toBeUndefined();
+      expect(
+        (result as Record<string, unknown>).managerName,
+      ).toBeUndefined();
+    });
+
+    it('resolves the READ descriptor: a SOFT-DELETED linked manager surfaces isOffboarded=true', async () => {
+      user.findFirst.mockResolvedValue(liveRow({ managerId: MGR }));
+      user.findMany.mockResolvedValue([
+        {
+          id: MGR,
+          firstName: 'Former',
+          lastName: 'Boss',
+          deletedAt: new Date('2026-01-01'),
+        },
+      ]);
+
+      const result = await service.findOneSerialized(SUBJECT);
+
+      expect(result.manager).toEqual({
+        type: 'user',
+        id: MGR,
+        firstName: 'Former',
+        lastName: 'Boss',
+        isOffboarded: true,
+      });
+    });
+
+    it('resolves the READ descriptor: the external fallback → { type: external, name }', async () => {
+      user.findFirst.mockResolvedValue(
+        liveRow({ managerId: null, managerName: 'Ana (HR)' }),
+      );
+
+      const result = await service.findOneSerialized(SUBJECT);
+
+      expect(result.manager).toEqual({ type: 'external', name: 'Ana (HR)' });
+      // No manager lookup needed for the free-text fallback.
+      expect(user.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // ADR-0058 §4 — clone-with-chosen-actions: new (never copied) rows, skip a soft-deleted asset, and
+  // the engine toggle that FIRES vs SUPPRESSES the ACCESS_GRANTED workflow trigger.
+  describe('clone (ADR-0058 §4)', () => {
+    const SOURCE = '00000000-0000-0000-0000-0000000000aa';
+    const NEW_ID = '00000000-0000-0000-0000-0000000000bb';
+    const ADMIN = '00000000-0000-0000-0000-0000000000cc';
+
+    function profile() {
+      return { email: 'new@x.io', firstName: 'New', lastName: 'Hire' };
+    }
+
+    /**
+     * Prime the mocks so `create` (the new-user mint) returns NEW_ID via the BYOI/no-management path
+     * (simplest: supportsManagement=false → no externalId-link tx, CREATED emitted on base client).
+     */
+    function primeCreate() {
+      idp.supportsManagement = false;
+      idp.createUser.mockResolvedValue({ externalId: '' });
+      user.create.mockResolvedValue({
+        id: NEW_ID,
+        ...profile(),
+        role: 'VIEWER',
+        externalId: null,
+        managerId: null,
+        managerName: null,
+        deletedAt: null,
+      });
+      // source findOne (clone) + (no manager link to resolve on the created user)
+      user.findFirst.mockResolvedValue({ id: SOURCE, deletedAt: null });
+    }
+
+    it('mints a NEW user and records clonedFrom + fireWorkflows in the CREATED payload', async () => {
+      primeCreate();
+
+      const result = await service.clone(
+        SOURCE,
+        { profile: profile(), cloneAssetAssignments: [], cloneAccessGrants: [], fireWorkflowsOnClonedGrants: false },
+        ADMIN,
+      );
+
+      expect(result.created.id).toBe(NEW_ID);
+      // The CREATED UserHistory row carries the audited provisioning choice.
+      expect(history.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          eventType: 'CREATED',
+          payload: { clonedFrom: SOURCE, fireWorkflows: false },
+        }),
+      );
+    });
+
+    it('opens NEW assignment rows for the new user, skipping a SOFT-DELETED asset (reported)', async () => {
+      primeCreate();
+      // Two selected source assignments: A1 → a LIVE asset, A2 → a soft-deleted asset (absent from
+      // the live-asset findMany, so it is skipped + reported).
+      const A1 = 'clxassign1aaaaaaaaaaaaaaa';
+      const A2 = 'clxassign2bbbbbbbbbbbbbbb';
+      (prismaRef().assetAssignment.findMany as jest.Mock).mockResolvedValue([
+        { id: A1, assetId: 'asset-live' },
+        { id: A2, assetId: 'asset-gone' },
+      ]);
+      (prismaRef().asset.findMany as jest.Mock).mockResolvedValue([
+        { id: 'asset-live' },
+      ]);
+
+      const result = await service.clone(
+        SOURCE,
+        { profile: profile(), cloneAssetAssignments: [A1, A2], cloneAccessGrants: [], fireWorkflowsOnClonedGrants: false },
+        ADMIN,
+      );
+
+      // Exactly ONE new assignment row was opened (for the live asset), attributed to the cloning admin.
+      expect(tx.assetAssignment.create).toHaveBeenCalledTimes(1);
+      expect(tx.assetAssignment.create).toHaveBeenCalledWith({
+        data: { assetId: 'asset-live', userId: NEW_ID, assignedById: ADMIN },
+      });
+      // An ASSIGNED asset-history row accompanies it.
+      expect(assetHistory.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          assetId: 'asset-live',
+          eventType: 'ASSIGNED',
+          payload: { userId: NEW_ID },
+        }),
+      );
+      // The soft-deleted asset's assignment is reported as skipped, never silently dropped.
+      expect(result.skipped).toContainEqual({ id: A2, reason: 'asset_deleted' });
+    });
+
+    it('engine toggle OFF (default): writes the grant WITHOUT firing ACCESS_GRANTED (suppressed)', async () => {
+      primeCreate();
+      const G1 = 'clxgrant1aaaaaaaaaaaaaaaa';
+      (prismaRef().accessGrant.findMany as jest.Mock).mockResolvedValue([
+        {
+          id: G1,
+          applicationId: 'app-1',
+          accessLevel: 'developer',
+          expiresAt: null,
+        },
+      ]);
+
+      await service.clone(
+        SOURCE,
+        { profile: profile(), cloneAssetAssignments: [], cloneAccessGrants: [G1], fireWorkflowsOnClonedGrants: false },
+        ADMIN,
+      );
+
+      // A NEW grant row is written for the new user, accessLevel copied verbatim, actor = admin.
+      expect(tx.accessGrant.create).toHaveBeenCalledWith({
+        data: {
+          userId: NEW_ID,
+          applicationId: 'app-1',
+          accessLevel: 'developer',
+          grantedById: ADMIN,
+        },
+      });
+      // SUPPRESSED: no workflow plan looked up, no PENDING run written, nothing enqueued.
+      expect(workflowTrigger.planForTrigger).not.toHaveBeenCalled();
+      expect(tx.workflowRun.create).not.toHaveBeenCalled();
+      expect(workflowTrigger.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('engine toggle ON: fires ACCESS_GRANTED — PENDING run written in-tx, enqueued after commit', async () => {
+      primeCreate();
+      const G1 = 'clxgrant1aaaaaaaaaaaaaaaa';
+      (prismaRef().accessGrant.findMany as jest.Mock).mockResolvedValue([
+        {
+          id: G1,
+          applicationId: 'app-1',
+          accessLevel: 'developer',
+          expiresAt: null,
+        },
+      ]);
+      // An enabled workflow exists for app-1 → a non-null plan, so the toggle ACTUALLY fires.
+      workflowTrigger.planForTrigger.mockResolvedValue({
+        workflowId: 'wf1',
+        workflowVersionId: 5,
+        applicationId: 'app-1',
+        trigger: 'ACCESS_GRANTED',
+        executedAsServiceAccountId: null,
+        deprovisionPolicy: 'LAST_ACTIVE_GRANT',
+      });
+
+      await service.clone(
+        SOURCE,
+        { profile: profile(), cloneAssetAssignments: [], cloneAccessGrants: [G1], fireWorkflowsOnClonedGrants: true },
+        ADMIN,
+      );
+
+      // FIRES: the plan is looked up, a PENDING run row is written INSIDE the tx, and enqueued AFTER it.
+      expect(workflowTrigger.planForTrigger).toHaveBeenCalledWith(
+        'ACCESS_GRANTED',
+        'app-1',
+      );
+      expect(tx.workflowRun.create).toHaveBeenCalledTimes(1);
+      expect(workflowTrigger.enqueue).toHaveBeenCalledWith('cloned-run-1');
+    });
+
+    it('404s when the source user is missing or soft-deleted', async () => {
+      idp.supportsManagement = false;
+      user.findFirst.mockResolvedValue(null);
+      await expect(
+        service.clone(SOURCE, { profile: profile(), cloneAssetAssignments: [], cloneAccessGrants: [], fireWorkflowsOnClonedGrants: false }, ADMIN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      // No user was minted.
+      expect(user.create).not.toHaveBeenCalled();
     });
   });
 });
