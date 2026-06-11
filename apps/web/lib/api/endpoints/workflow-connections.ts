@@ -39,6 +39,11 @@ export interface TestConnectionResult {
   ok: boolean;
   /** The probe's HTTP status, when the connection actually made an HTTP call. */
   status?: number;
+  /**
+   * The non-secret PATH the probe targeted (the connection's configured health path, or `/`), present
+   * for an HTTP probe so the UI can show WHICH path was hit (#344). Absent for a "nothing to test" kind.
+   */
+  probedPath?: string;
   /** A human, already-safe summary of the outcome (rendered as escaped text). */
   message: string;
   requestId: string;

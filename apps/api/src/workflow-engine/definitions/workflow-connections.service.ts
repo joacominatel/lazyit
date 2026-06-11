@@ -45,6 +45,11 @@ export interface TestConnectionOutcome {
   ok: boolean;
   /** HTTP status of the probe, when an HTTP call was actually made. */
   status?: number;
+  /**
+   * The non-secret PATH the probe targeted (the connection's configured health path, or `/`), surfaced
+   * for an HTTP probe so the operator sees WHICH path was hit (#344). Absent for a "nothing to test" kind.
+   */
+  probedPath?: string;
   /** A short, non-secret message (success / failure reason / "nothing to test"). */
   message: string;
   /** The originating request id, surfaced for client-side correlation (ADR-0031). */
@@ -212,6 +217,9 @@ export class WorkflowConnectionsService {
     return {
       ok: result.ok,
       ...(result.statusCode !== undefined ? { status: result.statusCode } : {}),
+      ...(result.probedPath !== undefined
+        ? { probedPath: result.probedPath }
+        : {}),
       message: testOutcomeMessage(result),
       requestId,
     };
@@ -333,9 +341,11 @@ function nothingToTestMessage(kind: string): string {
 function testOutcomeMessage(result: TestConnectionResult): string {
   const status =
     result.statusCode !== undefined ? ` (HTTP ${result.statusCode})` : '';
+  // The non-secret path the probe targeted (#344), so the message says WHICH path was hit.
+  const at = result.probedPath ? ` at ${result.probedPath}` : '';
   if (result.ok) {
-    return `Connection succeeded${status}.`;
+    return `Connection succeeded${status}${at}.`;
   }
   const reason = result.reason ? `: ${result.reason}` : '.';
-  return `Connection failed${status}${reason}`;
+  return `Connection failed${status}${at}${reason}`;
 }

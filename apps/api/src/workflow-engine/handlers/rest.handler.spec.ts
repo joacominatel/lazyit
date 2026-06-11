@@ -348,7 +348,7 @@ describe('RestStepHandler.execute', () => {
 });
 
 describe('RestStepHandler.testConnection', () => {
-  it('probes the base URL and returns a redacted diagnostic', async () => {
+  it('probes the base URL and returns a redacted diagnostic (no health path ⇒ GET /)', async () => {
     const handler = new RestStepHandler();
     const { transport, captured } = makeTransport({
       status: 200,
@@ -366,9 +366,100 @@ describe('RestStepHandler.testConnection', () => {
       meta: {},
     });
     expect(captured[0].req.method).toBe('GET');
+    expect(captured[0].url.href).toBe('https://api.example.com/');
     expect(captured[0].req.headers['authorization']).toBe(`Bearer ${SECRET}`);
     expect(result.ok).toBe(true);
     expect(result.statusCode).toBe(200);
+    expect(result.probedPath).toBe('/');
     expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it('targets joinUrl(baseUrl, healthCheckPath) when a health path is configured (#344)', async () => {
+    const handler = new RestStepHandler();
+    const { transport, captured } = makeTransport({ status: 204 });
+    handler.egressOptions = { transport, lookup: publicLookup };
+    const connection: RestConnectionConfig = {
+      kind: 'REST',
+      // A trailing slash on baseUrl + a leading slash on the path must normalize to ONE separator.
+      baseUrl: 'https://api.example.com/',
+      authScheme: 'NONE',
+      healthCheckPath: '/api/healthz',
+    };
+    const result = await handler.testConnection({
+      connection,
+      revealSecret: () => Promise.resolve(null),
+      meta: {},
+    });
+    expect(captured).toHaveLength(1);
+    expect(captured[0].url.href).toBe('https://api.example.com/api/healthz');
+    // The host is fixed by baseUrl — the path can never change the origin.
+    expect(captured[0].url.hostname).toBe('api.example.com');
+    expect(captured[0].req.method).toBe('GET');
+    expect(result.ok).toBe(true);
+    expect(result.statusCode).toBe(204);
+    expect(result.probedPath).toBe('/api/healthz');
+  });
+
+  it('uses the configured READ-ONLY probe method (HEAD) — never a mutation (#344)', async () => {
+    const handler = new RestStepHandler();
+    const { transport, captured } = makeTransport({ status: 200 });
+    handler.egressOptions = { transport, lookup: publicLookup };
+    const connection: RestConnectionConfig = {
+      kind: 'REST',
+      baseUrl: 'https://api.example.com',
+      authScheme: 'NONE',
+      healthCheckPath: '/health',
+      healthCheckMethod: 'HEAD',
+    };
+    await handler.testConnection({
+      connection,
+      revealSecret: () => Promise.resolve(null),
+      meta: {},
+    });
+    expect(captured[0].req.method).toBe('HEAD');
+    expect(['POST', 'PUT', 'PATCH', 'DELETE']).not.toContain(
+      captured[0].req.method,
+    );
+    expect(captured[0].url.href).toBe('https://api.example.com/health');
+  });
+
+  it('a configured health path cannot re-point the host (anti-SSRF) and still rides the egress guard', async () => {
+    const handler = new RestStepHandler();
+    const { transport, captured } = makeTransport({ status: 200 });
+    handler.egressOptions = { transport, lookup: publicLookup };
+    const connection: RestConnectionConfig = {
+      kind: 'REST',
+      baseUrl: 'https://api.example.com',
+      authScheme: 'NONE',
+      // Even a path that LOOKS like an absolute URL stays appended under the fixed baseUrl host.
+      healthCheckPath: 'https://attacker.example.net/steal',
+    };
+    await handler.testConnection({
+      connection,
+      revealSecret: () => Promise.resolve(null),
+      meta: {},
+    });
+    expect(captured[0].url.hostname).toBe('api.example.com');
+    expect(captured[0].url.hostname).not.toBe('attacker.example.net');
+  });
+
+  it('reports a failure (with status + probed path) when the upstream rejects the health path', async () => {
+    const handler = new RestStepHandler();
+    const { transport } = makeTransport({ status: 503 });
+    handler.egressOptions = { transport, lookup: publicLookup };
+    const connection: RestConnectionConfig = {
+      kind: 'REST',
+      baseUrl: 'https://api.example.com',
+      authScheme: 'NONE',
+      healthCheckPath: '/status',
+    };
+    const result = await handler.testConnection({
+      connection,
+      revealSecret: () => Promise.resolve(null),
+      meta: {},
+    });
+    expect(result.ok).toBe(false);
+    expect(result.statusCode).toBe(503);
+    expect(result.probedPath).toBe('/status');
   });
 });

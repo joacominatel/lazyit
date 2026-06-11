@@ -5,11 +5,13 @@ import {
   CreateWorkflowConnectionSchema,
   CreateWorkflowSecretSchema,
   DEFAULT_DEPROVISION_POLICY,
+  DEFAULT_PROBE_METHOD,
   DEFAULT_RETRY_POLICY,
   HttpSuccessCriteriaSchema,
   isHttpStatusSuccess,
   ManualStepSchema,
   resolveStepTransitions,
+  RestConnectionConfigSchema,
   RestStepSchema,
   RetryPolicySchema,
   UpdateApplicationWorkflowSchema,
@@ -17,6 +19,7 @@ import {
   WORKFLOW_CONNECTION_KINDS,
   WORKFLOW_END_SUCCESS,
   WORKFLOW_ESCALATE_TO_MANUAL,
+  WORKFLOW_PROBE_METHODS,
   WORKFLOW_RUN_STATUSES,
   WORKFLOW_STOP_FAIL,
   WORKFLOW_TRIGGERS,
@@ -142,6 +145,76 @@ describe("WorkflowConnectionConfigSchema — discriminated on kind", () => {
       WorkflowConnectionConfigSchema.safeParse({ kind: "SDK", baseUrl: "https://x.dev" })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("RestConnectionConfigSchema — optional test-connection probe path (#344)", () => {
+  test("healthCheckPath + healthCheckMethod are optional (a config without them parses)", () => {
+    const parsed = RestConnectionConfigSchema.safeParse({
+      kind: "REST",
+      baseUrl: "https://api.example.com",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.healthCheckPath).toBeUndefined();
+      expect(parsed.data.healthCheckMethod).toBeUndefined();
+    }
+  });
+
+  test("accepts a relative health path and a READ-ONLY probe method", () => {
+    const parsed = RestConnectionConfigSchema.safeParse({
+      kind: "REST",
+      baseUrl: "https://api.example.com",
+      healthCheckPath: "/api/healthz",
+      healthCheckMethod: "HEAD",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.healthCheckPath).toBe("/api/healthz");
+      expect(parsed.data.healthCheckMethod).toBe("HEAD");
+    }
+  });
+
+  test("trims the health path and rejects an empty / over-long one", () => {
+    const trimmed = RestConnectionConfigSchema.safeParse({
+      kind: "REST",
+      baseUrl: "https://api.example.com",
+      healthCheckPath: "  /status  ",
+    });
+    expect(trimmed.success).toBe(true);
+    if (trimmed.success) {
+      expect(trimmed.data.healthCheckPath).toBe("/status");
+    }
+    expect(
+      RestConnectionConfigSchema.safeParse({
+        kind: "REST",
+        baseUrl: "https://api.example.com",
+        healthCheckPath: "   ",
+      }).success,
+    ).toBe(false);
+    expect(
+      RestConnectionConfigSchema.safeParse({
+        kind: "REST",
+        baseUrl: "https://api.example.com",
+        healthCheckPath: "/".padEnd(2049, "x"),
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects a WRITE probe method (the probe must stay side-effect-free)", () => {
+    expect(
+      WORKFLOW_PROBE_METHODS as readonly string[],
+    ).toEqual(["GET", "HEAD"]);
+    expect(DEFAULT_PROBE_METHOD).toBe("GET");
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(
+        RestConnectionConfigSchema.safeParse({
+          kind: "REST",
+          baseUrl: "https://api.example.com",
+          healthCheckMethod: method,
+        }).success,
+      ).toBe(false);
+    }
   });
 });
 

@@ -130,6 +130,8 @@
     "urlHint": "A public https:// URL.",
     "authLabel": "Auth method",
     "authHeaderLabel": "Header name",
+    "healthPathLabel": "Health check path",
+    "healthPathHint": "Optional. The path \"Test connection\" probes (e.g. /health). Leave empty to probe the base URL.",
     "signatureHeaderLabel": "Signature header",
     "signatureHeaderHint": "The header the HMAC signature is sent in (the signing secret is stored separately).",
     "createButton": "Create connection",
@@ -148,6 +150,7 @@
     "ok": "Reachable",
     "failed": "Failed",
     "httpStatus": "HTTP {status}",
+    "probedPath": "at {path}",
     "error": "Couldn't test the connection."
   },
   "secret": {
@@ -155,6 +158,11 @@
     "add": "Add credential",
     "replace": "Replace",
     "remove": "Remove",
+    "authTypeLabel": "Auth type",
+    "authTypeHint": "How this credential is sent to the system. Set as part of adding the credential.",
+    "authHeaderLabel": "Header name",
+    "authHeaderRequired": "Enter the header name for the API-key header scheme.",
+    "needsSchemeHint": "Set an auth method on the connection before adding a credential.",
     "valueLabel": "Credential value",
     "newValueLabel": "New credential value",
     "valuePlaceholder": "Paste the secret value",

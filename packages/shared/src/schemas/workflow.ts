@@ -127,6 +127,17 @@ export const WorkflowHttpMethodSchema = z.enum(WORKFLOW_HTTP_METHODS);
 export type WorkflowHttpMethod = z.infer<typeof WorkflowHttpMethodSchema>;
 
 /**
+ * The methods the side-effect-free test-connection probe (#344) may use. Restricted to the READ-ONLY
+ * verbs by construction — the probe must never provision / mutate (ADR-0054 §9, frontend.md §4c). GET
+ * is the default; HEAD lets a target that answers a bodiless probe (or rate-limits GET) still be checked.
+ */
+export const WORKFLOW_PROBE_METHODS = ["GET", "HEAD"] as const;
+export const WorkflowProbeMethodSchema = z.enum(WORKFLOW_PROBE_METHODS);
+export type WorkflowProbeMethod = z.infer<typeof WorkflowProbeMethodSchema>;
+/** The default probe method when a REST connection omits `healthCheckMethod`. */
+export const DEFAULT_PROBE_METHOD = "GET" as const;
+
+/**
  * How a REST connector applies its credential. The credential VALUE never lives in `config` — it is a
  * reference into WorkflowSecret (INV-6). This only says HOW to attach it at call time.
  */
@@ -207,6 +218,13 @@ export const RestConnectionConfigSchema = z.strictObject({
   authHeaderName: z.string().trim().min(1).max(100).optional(),
   // Non-secret default headers applied to every call (e.g. Accept). Never carries a credential.
   defaultHeaders: z.record(z.string().min(1).max(100), z.string().max(1000)).optional(),
+  // Optional READ-ONLY health/whoami path the test-connection probe targets (#344) — appended to
+  // `baseUrl` (joinUrl), falling back to `baseUrl` when unset. The HOST is fixed by `baseUrl` and is
+  // NEVER templatable (anti-SSRF, ADR-0054 §6.4); this is a static relative path, not a ctx template.
+  // Many targets only 200 on /health, /status, /api/healthz — hitting the root gives false negatives.
+  healthCheckPath: z.string().trim().min(1).max(2048).optional(),
+  // The probe verb (GET default). Restricted to READ-ONLY methods so the probe stays side-effect-free.
+  healthCheckMethod: WorkflowProbeMethodSchema.optional(),
 });
 export type RestConnectionConfig = z.infer<typeof RestConnectionConfigSchema>;
 

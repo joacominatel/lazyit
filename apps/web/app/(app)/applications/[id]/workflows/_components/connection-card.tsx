@@ -113,7 +113,7 @@ export function ConnectionCard({ applicationId }: { applicationId: string }) {
               </p>
               <WorkflowSecretField
                 applicationId={applicationId}
-                connectionId={connection.id}
+                connection={connection}
                 secret={secretForConnection(connection, secrets?.items)}
                 defaultLabel={connection.name}
               />
