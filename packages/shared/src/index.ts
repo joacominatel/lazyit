@@ -1,6 +1,7 @@
 // Barrel for @lazyit/shared — re-export every public contract from here.
 // Organization: schemas/ (zod + inferred types), constants/, utils/ (pure fns), clone/ (pure fns).
 export * from "./clone/clone-defaults";
+export * from "./clone/clone-user-payload";
 export * from "./constants/app";
 export * from "./schemas/access-grant";
 export * from "./schemas/access-grant-list";
