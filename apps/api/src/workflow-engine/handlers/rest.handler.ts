@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import type { RestConnectionConfig, RestStep } from '@lazyit/shared';
+import {
+  DEFAULT_PROBE_METHOD,
+  type RestConnectionConfig,
+  type RestStep,
+} from '@lazyit/shared';
 import { guardedFetch, type GuardedFetchOptions } from '../../common/egress';
 import { mapData, renderTemplate } from '../mapping/data-mapper';
 import {
@@ -153,9 +157,14 @@ export class RestStepHandler implements StepHandler<
   }
 
   /**
-   * Side-effect-free connectivity probe: a GET to the connection's base URL with auth applied,
-   * through the egress guard. Returns a redacted diagnostic — never a body / secret. (A configurable
-   * health path is a future enhancement.)
+   * Side-effect-free connectivity probe (#344): a READ-ONLY GET/HEAD with auth applied, through the
+   * egress guard. The probe targets `joinUrl(baseUrl, healthCheckPath)` when a `healthCheckPath` is
+   * configured (many targets only 200 on `/health`, `/status`, `/api/healthz` — the root gives false
+   * negatives), falling back to `baseUrl`. The HOST stays fixed by `baseUrl` (joinUrl never changes the
+   * origin, anti-SSRF), the method is `healthCheckMethod` (GET default) which the shared schema bounds
+   * to READ-ONLY verbs so the probe can never provision, and it still rides the same guard (https-only,
+   * private/loopback/metadata denied, DNS-rebinding pinned, bounded deadline). Returns a redacted
+   * diagnostic — never a body / secret — and echoes the probed `path` so the operator sees what was hit.
    */
   async testConnection(
     ctx: TestConnectionContext<RestConnectionConfig>,
@@ -171,11 +180,18 @@ export class RestStepHandler implements StepHandler<
     if (authError) {
       return { ok: false, reason: authError };
     }
+    // The probed target: the configured health path appended to the FIXED-host baseUrl, else baseUrl.
+    // `joinUrl` only appends the path and normalizes slashes — it can never change the origin/host.
+    const healthPath = connection.healthCheckPath?.trim();
+    const url = healthPath
+      ? joinUrl(connection.baseUrl, healthPath)
+      : connection.baseUrl;
+    const method = connection.healthCheckMethod ?? DEFAULT_PROBE_METHOD;
     const startedAt = Date.now();
     try {
       const res = await guardedFetch(
-        connection.baseUrl,
-        { method: 'GET', headers, signal: ctx.signal },
+        url,
+        { method, headers, signal: ctx.signal },
         {
           allowedProtocols: ['https:'],
           ...this.egressOptions,
@@ -186,12 +202,33 @@ export class RestStepHandler implements StepHandler<
         ok: res.ok,
         statusCode: res.status,
         latencyMs: Date.now() - startedAt,
+        probedPath: probedPathOf(url),
         reason: res.ok ? undefined : `upstream returned ${res.status}`,
       };
     } catch (err) {
       const { reason } = classifyThrownError(err);
-      return { ok: false, latencyMs: Date.now() - startedAt, reason };
+      return {
+        ok: false,
+        latencyMs: Date.now() - startedAt,
+        probedPath: probedPathOf(url),
+        reason,
+      };
     }
+  }
+}
+
+/**
+ * The non-secret path the probe targeted, derived for the redacted diagnostic so the operator sees
+ * WHICH path was hit (the test-connection result, #344). Returns the pathname (+ search) of the probed
+ * URL — never the host, never a credential (the path/query are static config, not a resolved ctx
+ * value). Falls back to `/` when the URL can't be parsed.
+ */
+function probedPathOf(probedUrl: string): string {
+  try {
+    const u = new URL(probedUrl);
+    return `${u.pathname}${u.search}` || '/';
+  } catch {
+    return '/';
   }
 }
 
