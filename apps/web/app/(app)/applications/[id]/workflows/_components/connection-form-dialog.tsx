@@ -9,6 +9,7 @@ import {
   type WorkflowConnection,
   type WorkflowConnectionConfig,
   type WorkflowConnectionKind,
+  type WorkflowProbeMethod,
   type WorkflowRestAuthScheme,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
@@ -53,6 +54,13 @@ interface FormState {
   authScheme: WorkflowRestAuthScheme;
   authHeaderName: string;
   signatureHeader: string;
+  /** REST: optional path the "Test connection" probe targets (e.g. /health), else baseUrl (#344). */
+  healthCheckPath: string;
+  /**
+   * REST: the probe method, preserved across an edit so it is not silently dropped. The form does not
+   * expose a method picker yet (GET is the sensible default); the schema bounds it to READ-ONLY verbs.
+   */
+  healthCheckMethod: WorkflowProbeMethod | undefined;
 }
 
 function initialState(connection?: WorkflowConnection): FormState {
@@ -67,6 +75,10 @@ function initialState(connection?: WorkflowConnection): FormState {
         config.kind === "REST" ? (config.authHeaderName ?? "") : "",
       signatureHeader:
         config.kind === "WEBHOOK_OUT" ? (config.signatureHeader ?? "") : "",
+      healthCheckPath:
+        config.kind === "REST" ? (config.healthCheckPath ?? "") : "",
+      healthCheckMethod:
+        config.kind === "REST" ? config.healthCheckMethod : undefined,
     };
   }
   return {
@@ -76,6 +88,8 @@ function initialState(connection?: WorkflowConnection): FormState {
     authScheme: "NONE",
     authHeaderName: "",
     signatureHeader: "",
+    healthCheckPath: "",
+    healthCheckMethod: undefined,
   };
 }
 
@@ -89,6 +103,12 @@ function buildConfig(values: FormState): WorkflowConnectionConfig {
         authScheme: values.authScheme,
         ...(values.authScheme === "HEADER" && values.authHeaderName.trim()
           ? { authHeaderName: values.authHeaderName.trim() }
+          : {}),
+        ...(values.healthCheckPath.trim()
+          ? { healthCheckPath: values.healthCheckPath.trim() }
+          : {}),
+        ...(values.healthCheckMethod
+          ? { healthCheckMethod: values.healthCheckMethod }
           : {}),
       };
     case "WEBHOOK_OUT":
@@ -322,6 +342,21 @@ function ConnectionForm({
                   />
                 </Field>
               ) : null}
+              <Field>
+                <FieldLabel htmlFor="wf-conn-health-path">
+                  {t("connectionForm.healthPathLabel")}
+                </FieldLabel>
+                <Input
+                  id="wf-conn-health-path"
+                  value={values.healthCheckPath}
+                  onChange={(e) => set("healthCheckPath", e.target.value)}
+                  placeholder="/health"
+                  maxLength={2048}
+                />
+                <FieldDescription>
+                  {t("connectionForm.healthPathHint")}
+                </FieldDescription>
+              </Field>
             </>
           ) : null}
 
