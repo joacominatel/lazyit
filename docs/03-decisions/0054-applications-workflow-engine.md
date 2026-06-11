@@ -183,9 +183,9 @@ ID and lifecycle types follow [[0005-id-strategy]] / [[0006-soft-delete-and-audi
   not in the CHECK) — lifecycle timestamps and a **redacted** `error` summary.
 - **`WorkflowStepRun`** — `autoincrement()`, append-only, **one row per attempt** (the
   [[0033-asset-history-event-model]] precedent): `runId`, `stepIndex`/`stepKey`, `attempt`, `status`,
-  the captured `externalCorrelationId`, and **redacted** outcome `metadata` only (status code,
-  duration, error class, mapped field *names* — never bodies / secrets / PII, [[0031-logging-strategy]]
-  / INV-6).
+  the captured `externalCorrelationId`, and **redacted** outcome `metadata` only (HTTP method,
+  target host *(host only)*, status code, duration, error class, mapped field *names* — never bodies /
+  full URLs with query / secrets / PII, [[0031-logging-strategy]] / INV-6).
 - **`ManualTask`** — `cuid()`, **mutable lifecycle, NO soft-delete** (COMPLETED / CANCELLED are
   statuses): `runId`, `stepKey`, `assigneeId`/`cohort`, `prompt`, the human-provided `input`,
   `status`, and completion attribution (human-XOR-SA, at-most-one CHECK). Surfaced through the
