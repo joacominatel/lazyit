@@ -13,6 +13,7 @@ export * from "./schemas/article-import-job";
 export * from "./schemas/article-link";
 export * from "./schemas/article-list";
 export * from "./schemas/article-version";
+export * from "./schemas/clone-user";
 export * from "./schemas/asset";
 export * from "./schemas/asset-assignment";
 export * from "./schemas/asset-category";

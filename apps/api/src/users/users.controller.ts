@@ -22,6 +22,8 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  CloneUserResultSchema,
+  CloneUserSchema,
   CreateUserSchema,
   UpdateUserSchema,
   UserListPageSchema,
@@ -49,6 +51,8 @@ class UserDto extends createZodDto(UserSchema) {}
 class UserListPageDto extends createZodDto(UserListPageSchema) {}
 class CreateUserDto extends createZodDto(CreateUserSchema) {}
 class UpdateUserDto extends createZodDto(UpdateUserSchema) {}
+class CloneUserDto extends createZodDto(CloneUserSchema) {}
+class CloneUserResultDto extends createZodDto(CloneUserResultSchema) {}
 
 @ApiTags('users')
 @Controller('users')
@@ -148,13 +152,14 @@ export class UsersController {
       'show. Any authenticated user may call it; it only ever returns the caller, never another user.',
   })
   @ApiOkResponse({ type: UserDto })
-  me(@CurrentUser() user?: User): User {
+  me(@CurrentUser() user?: User) {
     // The route is non-@Public, so the JwtAuthGuard guarantees a user in OIDC mode. In shim mode an
     // anonymous caller would have no user — surface that as 401 rather than a confusing empty body.
     if (!user) {
       throw new UnauthorizedException('Not authenticated');
     }
-    return user;
+    // Resolve the manager descriptor (ADR-0058) so /me matches the full UserSchema the web consumes.
+    return this.users.serializeUser(user);
   }
 
   // A cross-user DIRECTORY read (identity of another user) — gated on `user:read` (ADR-0046
@@ -164,7 +169,8 @@ export class UsersController {
   @ApiOperation({ summary: 'Get a user by id' })
   @ApiOkResponse({ type: UserDto })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.users.findOne(id);
+    // The serialized read resolves the manager FK to a redaction-safe descriptor (ADR-0058).
+    return this.users.findOneSerialized(id);
   }
 
   // A cross-user DIRECTORY-relational read (which assets a NAMED user holds — enumeration keyed by a
@@ -237,6 +243,32 @@ export class UsersController {
   create(@Body() dto: CreateUserDto, @CurrentUser() actor?: User) {
     // Pass the actor so the service can attribute the IdP write-back audit line (ADR-0043 §3).
     return this.users.create(dto, this.actor.resolve(actor));
+  }
+
+  @Post(':id/clone')
+  @RequirePermission('user:manage')
+  @ApiOperation({
+    summary:
+      'Clone a user with chosen actions — ADMIN only (ADR-0058). Mints a NEW user and mirrors the SOURCE’s selected active assignments + grants.',
+    description:
+      'A clone is a CREATE with extras: `:id` is the SOURCE (must be live). The body’s `profile` is a ' +
+      'normal CreateUser payload (the new identity); the clone NEVER copies the source email/legajo/' +
+      'username or externalId (SEC-006). `cloneAssetAssignments` / `cloneAccessGrants` opt INTO mirroring ' +
+      'the source’s ACTIVE assignments/grants as NEW append-only rows for the new user (actor = the ' +
+      'cloning admin); a soft-deleted asset / a not-active id is skipped and reported. ' +
+      '`fireWorkflowsOnClonedGrants` (default FALSE) is the engine toggle: false = grants recorded ' +
+      'bookkeeping-only (the ACCESS_GRANTED workflow is SUPPRESSED); true = each cloned grant fires the ' +
+      'standard after-commit workflow run (provisioning externally). The choice is audited in the ' +
+      'clone’s CREATED UserHistory. Returns the per-item result `{ created, skipped: [{ id, reason }] }`.',
+  })
+  @ApiCreatedResponse({ type: CloneUserResultDto })
+  clone(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CloneUserDto,
+    @CurrentUser() actor?: User,
+  ) {
+    // The cloning admin is the actor on every cloned assignment/grant + the trigger cause of any run.
+    return this.users.clone(id, dto, this.actor.resolve(actor));
   }
 
   @Patch(':id')
