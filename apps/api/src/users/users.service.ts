@@ -183,9 +183,7 @@ export class UsersService {
   async serializeUsers(rows: User[]): Promise<SerializedUser[]> {
     const managerIds = [
       ...new Set(
-        rows
-          .map((r) => r.managerId)
-          .filter((id): id is string => id != null),
+        rows.map((r) => r.managerId).filter((id): id is string => id != null),
       ),
     ];
     const managers =
@@ -220,7 +218,12 @@ export class UsersService {
     row: ManagerColumns,
     byId: Map<
       string,
-      { id: string; firstName: string; lastName: string; deletedAt: Date | null }
+      {
+        id: string;
+        firstName: string;
+        lastName: string;
+        deletedAt: Date | null;
+      }
     >,
   ): ManagerDescriptor | null {
     if (row.managerId != null) {
@@ -246,9 +249,15 @@ export class UsersService {
    * Drop the raw `managerId` / `managerName` columns from a row's wire shape — the descriptor replaces
    * them, and exposing the raw FK would leak a manager id the client has no descriptor for.
    */
-  private stripManagerColumns(row: User): Omit<User, 'managerId' | 'managerName'> {
-    const { managerId: _id, managerName: _name, ...rest } = row;
-    return rest;
+  private stripManagerColumns(
+    row: User,
+  ): Omit<User, 'managerId' | 'managerName'> {
+    // Drop the raw FK columns from a shallow copy — the resolved descriptor replaces them on the wire,
+    // and leaving `managerId` would leak a manager id the client has no descriptor for.
+    const copy: Partial<User> = { ...row };
+    delete copy.managerId;
+    delete copy.managerName;
+    return copy as Omit<User, 'managerId' | 'managerName'>;
   }
 
   // --- manager write resolution + self/cycle guard (ADR-0058) -------------
@@ -454,10 +463,15 @@ export class UsersService {
     role: Role,
     managerWrite: ManagerWrite,
   ): Prisma.UserUncheckedCreateInput {
-    const { manager: _manager, role: _role, ...rest } = data;
+    // Map only the real columns: `manager` (the input union) and the caller-resolved `role` are NOT
+    // spread from `data` — manager becomes the resolved columns, role is the explicit param.
     return {
-      ...rest,
+      email: data.email,
+      firstName: data.firstName,
+      lastName: data.lastName,
       role,
+      ...(data.legajo !== undefined ? { legajo: data.legajo } : {}),
+      ...(data.username !== undefined ? { username: data.username } : {}),
       ...(managerWrite ?? {}),
     };
   }
@@ -556,9 +570,11 @@ export class UsersService {
       (managerWrite.managerId !== current.managerId ||
         managerWrite.managerName !== current.managerName);
 
-    // The `manager` INPUT union is NOT a column — strip it and substitute the resolved columns.
-    // legajo / username ARE columns (normalized by the schema); they pass through untouched.
-    const { manager: _manager, ...scalarData } = data;
+    // The `manager` INPUT union is NOT a column — separate it out (rest keeps only the real scalar
+    // columns) and substitute the resolved columns. legajo / username ARE columns (normalized by the
+    // schema); they pass through. `manager` is voided so the rest-destructure isn't flagged unused.
+    const { manager, ...scalarData } = data;
+    void manager;
     const user = await this.prisma.user.update({
       where: { id },
       data: { ...scalarData, ...(managerWrite ?? {}) },
@@ -679,7 +695,7 @@ export class UsersService {
           // { from, to }: each side is the manager-user-id, the external-name string, or null (ADR-0058).
           await this.recordHistory(tx, id, 'MANAGER_CHANGED', actorId, {
             from: current.managerId ?? current.managerName ?? null,
-            to: managerWrite!.managerId ?? managerWrite!.managerName ?? null,
+            to: managerWrite.managerId ?? managerWrite.managerName ?? null,
           });
         }
         if (profileChanged) {
@@ -736,12 +752,7 @@ export class UsersService {
     });
     // Append the PASSWORD_RESET_SENT history row (DEBT-2, issue #185) AFTER the IdP call succeeded —
     // a failed/unsupported reset above already threw, so this only ever records a reset that went out.
-    await this.recordHistory(
-      this.prisma,
-      id,
-      'PASSWORD_RESET_SENT',
-      actorId,
-    );
+    await this.recordHistory(this.prisma, id, 'PASSWORD_RESET_SENT', actorId);
   }
 
   /**
@@ -886,7 +897,11 @@ export class UsersService {
         where: { id },
         data: { deletedAt: null },
       });
-      await this.history.record(tx, { userId: id, eventType: 'RESTORED', actor });
+      await this.history.record(tx, {
+        userId: id,
+        eventType: 'RESTORED',
+        actor,
+      });
       return updated;
     });
     // Re-index the restored user (ADR-0035).
@@ -963,8 +978,7 @@ export class UsersService {
 
     // 4) Write the new user's assignments + grants (+ any PENDING workflow run rows) in ONE transaction —
     //    all-or-nothing among the cloned local rows. The cloning admin is the actor on every row.
-    const actor: ActorAttribution =
-      actorId != null ? { userId: actorId } : {};
+    const actor: ActorAttribution = actorId != null ? { userId: actorId } : {};
     const runIds: string[] = [];
     await this.prisma.$transaction(async (tx) => {
       for (const plan of assignmentPlans) {
@@ -1149,7 +1163,9 @@ export class UsersService {
         applicationId: row.applicationId,
         accessLevel: row.accessLevel,
         expiresAt: row.expiresAt,
-        trigger: fireWorkflows ? (planByApp.get(row.applicationId) ?? null) : null,
+        trigger: fireWorkflows
+          ? (planByApp.get(row.applicationId) ?? null)
+          : null,
       });
     }
     return plans;
