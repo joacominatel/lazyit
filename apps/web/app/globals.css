@@ -376,6 +376,35 @@
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Scrollbar — quiet gutter (ADR-0049 «Activated Restraint», issue #367). A small,
+   reusable utility that thins a scroll container's scrollbar so an intentional
+   overflow cap (e.g. the dashboard recent-activity feed's `lg:overflow-y-auto`)
+   keeps its scroll behaviour without the chunky default gutter reading as visual
+   noise. Firefox honours `scrollbar-width: thin`; WebKit (Chrome/Safari) ignores
+   it, so the `::-webkit-scrollbar` pseudo is required there — a thin track with a
+   `--border`-tinted thumb that sits inside the bone system on both themes. No new
+   colour or motion: the thumb reuses the existing `--border` token. Tailwind v4
+   `@utility` so it composes like any other class and the JIT scanner sees it. */
+@utility scrollbar-quiet {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background-color: var(--border);
+  }
+}
+
 /* The single source of truth for reduced-motion. Lands FIRST in the Wave-0 series so
    everything that animates afterwards is opt-out-safe by construction: animations and
    transitions collapse to ~instant and hover translate is neutralized, while the
