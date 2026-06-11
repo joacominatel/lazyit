@@ -28,7 +28,9 @@ jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
  */
 describe('UsersController :id uuid validation (SEC-004)', () => {
   let app: INestApplication;
-  const findOne = jest.fn();
+  // The :id route now returns the SERIALIZED read (manager descriptor resolved, ADR-0058), so the
+  // controller calls findOneSerialized — the uuid-pipe guard is what this suite proves.
+  const findOneSerialized = jest.fn();
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -37,7 +39,9 @@ describe('UsersController :id uuid validation (SEC-004)', () => {
         {
           provide: UsersService,
           useValue: {
-            findOne,
+            findOne: jest.fn(),
+            findOneSerialized,
+            serializeUser: jest.fn((u: unknown) => Promise.resolve(u)),
             findAll: jest.fn(),
             create: jest.fn(),
             update: jest.fn(),
@@ -63,21 +67,21 @@ describe('UsersController :id uuid validation (SEC-004)', () => {
     await app.close();
   });
 
-  beforeEach(() => findOne.mockReset());
+  beforeEach(() => findOneSerialized.mockReset());
 
   it('rejects a malformed :id with 400 and never reaches the service', async () => {
     const res = await request(app.getHttpServer()).get('/users/not-a-uuid');
     expect(res.status).toBe(400);
-    expect(findOne).not.toHaveBeenCalled();
+    expect(findOneSerialized).not.toHaveBeenCalled();
   });
 
   it('passes a well-formed uuid through to the service', async () => {
-    findOne.mockResolvedValue({ id: 'ok' });
+    findOneSerialized.mockResolvedValue({ id: 'ok', manager: null });
     const res = await request(app.getHttpServer()).get(
       '/users/11111111-1111-4111-8111-111111111111',
     );
     expect(res.status).toBe(200);
-    expect(findOne).toHaveBeenCalledTimes(1);
+    expect(findOneSerialized).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -115,6 +119,9 @@ describe('UsersController GET /users/me (ADR-0040)', () => {
           provide: UsersService,
           useValue: {
             findOne: jest.fn(),
+            findOneSerialized: jest.fn(),
+            // /me serializes the @CurrentUser via the service (ADR-0058) — echo it in the mock.
+            serializeUser: jest.fn((u: unknown) => Promise.resolve(u)),
             findAll: jest.fn(),
             create: jest.fn(),
             update: jest.fn(),
@@ -190,6 +197,8 @@ describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
           provide: UsersService,
           useValue: {
             findOne: jest.fn(),
+            findOneSerialized: jest.fn(),
+            serializeUser: jest.fn((u: unknown) => Promise.resolve(u)),
             findAll: jest.fn(),
             create: jest.fn(),
             update: jest.fn(),
