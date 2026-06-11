@@ -1168,8 +1168,18 @@ model WorkflowRun {
   accessGrantId              String?
   accessGrant                AccessGrant?        @relation(fields: [accessGrantId], references: [id], onDelete: Restrict)
   // The dedup key, UNIQUE (full unique — this table has no soft delete, so no ghost-row concern).
-  // "<trigger>:<accessGrantId>" for grant-derived triggers → exactly one run per grant event.
+  // "<trigger>:<accessGrantId>:<replaySeq>" (ADR-0057): the natural grant run is seq 0, each manual
+  // replay-latest increments the suffix → exactly one run per (grant event, replay). Existing pre-0057
+  // rows are backfilled to the `:0` form in the migration so the format is uniform.
   idempotencyKey             String              @unique
+  // The replay sequence within (trigger, accessGrantId) — 0 for the organic grant-derived run, N for the
+  // Nth manual clone-to-new-run (ADR-0057 Option 3). Part of `idempotencyKey`; surfaced for the lineage.
+  replaySeq                  Int                 @default(0)
+  // Lineage (ADR-0057): the parent run a replay-latest cloned FROM. Self-FK, nullable, SetNull (losing the
+  // parent never blocks a hard delete and the clone's own ledger survives). Null for an organic grant run.
+  supersedesRunId            String?
+  supersedesRun              WorkflowRun?        @relation("WorkflowRunReplayLineage", fields: [supersedesRunId], references: [id], onDelete: SetNull)
+  replayedBy                 WorkflowRun[]       @relation("WorkflowRunReplayLineage")
   status                     WorkflowRunStatus   @default(PENDING)
   // THE CAUSE (ADR-0048): inherited from the grant's actor — the human XOR service account who
   // granted/revoked. at-most-one CHECK in the migration. SetNull both; @db.Uuid for the User FK.
