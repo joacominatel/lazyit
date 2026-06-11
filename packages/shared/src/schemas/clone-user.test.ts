@@ -116,6 +116,27 @@ describe("CloneUserResultSchema (ADR-0058)", () => {
     expect(result.success).toBe(true);
   });
 
+  test("accepts a skipped item carrying the underlying entityId (#361)", () => {
+    const result = CloneUserResultSchema.safeParse({
+      created: CREATED,
+      skipped: [
+        { id: ASSIGN_A, entityId: GRANT_A, reason: "already_in_state" },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects a non-cuid entityId", () => {
+    expect(
+      CloneUserResultSchema.safeParse({
+        created: CREATED,
+        skipped: [
+          { id: ASSIGN_A, entityId: "not-a-cuid", reason: "asset_deleted" },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
   test("accepts an empty skipped list", () => {
     expect(
       CloneUserResultSchema.safeParse({ created: CREATED, skipped: [] }).success,
