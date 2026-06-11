@@ -200,7 +200,37 @@
   "runRetry": {
     "action": "Retry",
     "toastSuccess": "Run re-queued from the failed step.",
-    "toastError": "Could not retry this run."
+    "toastError": "Could not retry this run.",
+    "overrideAction": "Retry with overrides…",
+    "overrideTitle": "Retry with field overrides",
+    "overrideDescription": "Supply a one-off value for a field on the failed step, then retry. The retry resumes the same run on its pinned version — overrides patch only this next attempt.",
+    "overrideTransientNote": "These overrides apply to this attempt only and are never saved. They do not edit the workflow or fix future runs — to fix the flow for good, edit the workflow definition.",
+    "overrideFailedStep": "Failed step: {step}",
+    "overrideNoFailedStep": "No failed step was recorded for this run.",
+    "overrideNoMappedFields": "This step recorded no mapped field names.",
+    "overrideUseField": "Use the field \"{field}\"",
+    "overrideFieldLabel": "Field name",
+    "overrideValueLabel": "Value",
+    "overrideFieldPlaceholder": "e.g. lastName",
+    "overrideValuePlaceholder": "e.g. '{{ grantee.lastName }}'",
+    "overrideFieldAria": "Override field name {index}",
+    "overrideValueAria": "Override value {index}",
+    "overrideRemoveAria": "Remove override field",
+    "overrideAddField": "Add field",
+    "overrideValueHint": "Each value is a template over the run's context (e.g. '{{ grantee.lastName }}') or a literal — the same mapping context the step already uses.",
+    "overrideInvalid": "Some fields are too long — shorten the field name (≤ 200) or value (≤ 2000).",
+    "overrideSubmit": "Retry with overrides",
+    "overrideToastSuccess": "Retrying the failed step with your overrides."
+  },
+  "runReplay": {
+    "action": "Replay with latest",
+    "confirmTitle": "Start a fresh run on the latest version?",
+    "confirmDescription": "This leaves this failed run as-is and starts a brand-new run on the current workflow version for the same grant, beginning at the first step. Use this after you've fixed the workflow — the new run picks up your edits (a plain Retry cannot, it replays the old version).",
+    "confirmAction": "Start fresh run",
+    "toastSuccess": "A fresh run started on the latest version.",
+    "toastError": "Could not start a fresh run.",
+    "toastGuardRefused": "Can't replay — this run already provisioned a non-reversible step, so a fresh run would create it twice. Re-grant the access instead.",
+    "toastNotFailed": "This run is no longer failed — it may have already been re-driven."
   },
   "runDetail": {
     "title": "Run",

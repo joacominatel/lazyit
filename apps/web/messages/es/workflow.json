@@ -200,7 +200,37 @@
   "runRetry": {
     "action": "Reintentar",
     "toastSuccess": "Ejecución reencolada desde el paso que falló.",
-    "toastError": "No se pudo reintentar esta ejecución."
+    "toastError": "No se pudo reintentar esta ejecución.",
+    "overrideAction": "Reintentar con ajustes…",
+    "overrideTitle": "Reintentar con ajustes de campos",
+    "overrideDescription": "Indica un valor puntual para un campo del paso que falló y reintenta. El reintento reanuda la misma ejecución sobre su versión fijada: los ajustes solo modifican este próximo intento.",
+    "overrideTransientNote": "Estos ajustes se aplican solo a este intento y nunca se guardan. No editan el flujo ni corrigen ejecuciones futuras: para arreglar el flujo de forma definitiva, edita su definición.",
+    "overrideFailedStep": "Paso que falló: {step}",
+    "overrideNoFailedStep": "No se registró ningún paso fallido para esta ejecución.",
+    "overrideNoMappedFields": "Este paso no registró nombres de campos mapeados.",
+    "overrideUseField": "Usar el campo «{field}»",
+    "overrideFieldLabel": "Nombre del campo",
+    "overrideValueLabel": "Valor",
+    "overrideFieldPlaceholder": "p. ej. lastName",
+    "overrideValuePlaceholder": "p. ej. '{{ grantee.lastName }}'",
+    "overrideFieldAria": "Nombre del campo de ajuste {index}",
+    "overrideValueAria": "Valor del ajuste {index}",
+    "overrideRemoveAria": "Quitar campo de ajuste",
+    "overrideAddField": "Añadir campo",
+    "overrideValueHint": "Cada valor es una plantilla sobre el contexto de la ejecución (p. ej. '{{ grantee.lastName }}') o un literal: el mismo contexto de mapeo que ya usa el paso.",
+    "overrideInvalid": "Algunos campos son demasiado largos: acorta el nombre (≤ 200) o el valor (≤ 2000).",
+    "overrideSubmit": "Reintentar con ajustes",
+    "overrideToastSuccess": "Reintentando el paso que falló con tus ajustes."
+  },
+  "runReplay": {
+    "action": "Repetir con la última versión",
+    "confirmTitle": "¿Iniciar una ejecución nueva sobre la última versión?",
+    "confirmDescription": "Esto deja esta ejecución fallida tal cual e inicia una ejecución totalmente nueva sobre la versión actual del flujo para la misma concesión, comenzando por el primer paso. Úsalo tras corregir el flujo: la nueva ejecución toma tus cambios (un Reintentar normal no puede, repite la versión antigua).",
+    "confirmAction": "Iniciar ejecución nueva",
+    "toastSuccess": "Se inició una ejecución nueva sobre la última versión.",
+    "toastError": "No se pudo iniciar una ejecución nueva.",
+    "toastGuardRefused": "No se puede repetir: esta ejecución ya provisionó un paso no reversible, así que una ejecución nueva lo crearía dos veces. Vuelve a otorgar el acceso en su lugar.",
+    "toastNotFailed": "Esta ejecución ya no está fallida: puede que ya se haya reejecutado."
   },
   "runDetail": {
     "title": "Ejecución",
