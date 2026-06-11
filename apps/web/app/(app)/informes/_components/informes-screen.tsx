@@ -661,7 +661,19 @@ function TimelineView({
           <p className="mb-2 text-xs font-medium text-muted-foreground">
             {tShared(`activity.dateGroup.${group.key}`)}
           </p>
-          <ol>
+          {/*
+            Comfortable inter-row spacing for the Reports timeline only (issue #369). We add bottom
+            PADDING to each connected row's <li> rather than margin: the shared ActivityRow's connector
+            (activity-row.tsx, the absolute span sized `h-[calc(100%-1.25rem)]`) is bound to the <li>
+            box, so padding grows the box AND the connector together, keeping the line continuous
+            between rows — margin (e.g. `space-y-*`) would push the next row away from the box and
+            leave a floating connector. Each ActivityRowWithBadge wraps the <li> in a direct-child
+            <div>, so we target every non-last wrapper's <li> (mirroring the row's own `!isLast`
+            connector gate) and leave the last, connector-less row's tight `last:pb-0` intact. The
+            dashboard rail uses ActivityRow directly without this wrapper, so its dense rhythm is
+            untouched.
+          */}
+          <ol className="[&>div:not(:last-child)_li]:pb-7">
             {group.items.map(({ item, index }, rowInGroup) => (
               <ActivityRowWithBadge
                 key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}-${index}`}
