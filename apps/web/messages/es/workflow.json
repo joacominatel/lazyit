@@ -320,10 +320,10 @@
     "literalPlaceholder": "texto"
   },
   "tokenGroup": {
+    "event": "Evento disparador",
     "grantee": "Beneficiario",
     "application": "Aplicación",
     "grant": "Concesión",
-    "context": "Contexto de ejecución",
     "steps": "Salidas de pasos"
   },
   "stepEditor": {

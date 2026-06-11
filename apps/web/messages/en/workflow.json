@@ -320,10 +320,10 @@
     "literalPlaceholder": "text"
   },
   "tokenGroup": {
+    "event": "Trigger event",
     "grantee": "Grantee",
     "application": "Application",
     "grant": "Grant",
-    "context": "Run context",
     "steps": "Step outputs"
   },
   "stepEditor": {
