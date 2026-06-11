@@ -770,6 +770,11 @@ export const WorkflowRunSchema = z.object({
   trigger: WorkflowTriggerSchema,
   accessGrantId: z.cuid().nullable(),
   idempotencyKey: z.string().min(1),
+  // The replay sequence within (trigger, accessGrantId): 0 = the natural grant-derived run; each manual
+  // replay-latest (ADR-0057) increments it. The full key is `<trigger>:<accessGrantId>:<replaySeq>`.
+  replaySeq: int4({ min: 0 }),
+  // Lineage (ADR-0057): the parent run a replay-latest cloned FROM (null for an organic grant run).
+  supersedesRunId: z.cuid().nullable(),
   status: WorkflowRunStatusSchema,
   triggeredById: z.uuid().nullable(),
   triggeredBySaId: z.cuid().nullable(),
@@ -826,6 +831,69 @@ export const CompleteManualTaskSchema = z.strictObject({
   input: z.record(z.string().min(1).max(100), z.unknown()),
 });
 export type CompleteManualTask = z.infer<typeof CompleteManualTaskSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Retry-after-fix & replay (ADR-0057) — the manual-retry override + the clone-to-new-run contracts
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * OPTION 2 (ADR-0057) — the OPTIONAL, request-scoped payload override for the manual
+ * `POST /workflow-runs/:id/retry`. Each entry overrides ONE mapped field on the FAILED step for the
+ * NEXT attempt ONLY: the value is a template string over the SAME frozen, allowlisted mapping context
+ * the engine already exposes (`{{ grantee.lastName }}`, `application.name`, …) or a literal. It is
+ * merged into the failed step's data mapping for ONE render and then DISCARDED.
+ *
+ * INV-6 HARD BOUNDARY: this is operator-typed input — it is NEVER persisted to `WorkflowStepRun.metadata`
+ * / `WorkflowRun` / any log; only the field NAMES are ever recorded, exactly as today. A field name is
+ * bounded like a data-mapping key (≤ 200) and its template like a data-mapping value (≤ 2000). The body
+ * is OPTIONAL — a no-body retry keeps the unchanged resume-from-failed-step behaviour. `overrides` must
+ * carry at least one field when present (an empty override is a no-op, rejected at the edge).
+ */
+export const RetryRunOverridesSchema = z.record(
+  z.string().min(1).max(200),
+  z.string().max(2000),
+);
+export type RetryRunOverrides = z.infer<typeof RetryRunOverridesSchema>;
+
+export const RetryRunRequestSchema = z.strictObject({
+  overrides: RetryRunOverridesSchema.refine(
+    (o) => Object.keys(o).length > 0,
+    "overrides must contain at least one field (omit the field for a plain retry)",
+  ).optional(),
+});
+export type RetryRunRequest = z.infer<typeof RetryRunRequestSchema>;
+
+/**
+ * The response of `POST /workflow-runs/:id/retry` (issue #308 + ADR-0057 Option 2). On a successful
+ * guarded CAS the FAILED run flips to RUNNING and resumes from the failed step's key at a new attempt;
+ * the FE refetches the run detail off this. NO override value is ever echoed back (INV-6).
+ */
+export const RetryRunResponseSchema = z.strictObject({
+  ok: z.literal(true),
+  runId: z.cuid(),
+  resumeStepKey: z.string().min(1),
+  attempt: int4({ min: 1 }),
+});
+export type RetryRunResponse = z.infer<typeof RetryRunResponseSchema>;
+
+/**
+ * The response of `POST /workflow-runs/:id/replay-latest` (ADR-0057 Option 3 — clone-to-new-run from
+ * the LATEST workflow version). A NEW run is created on the same (application, accessGrant, trigger) at
+ * the latest version, keyed `<trigger>:<accessGrantId>:<replaySeq>` (replaySeq = parent's + 1), with
+ * `supersedesRunId` set to the source FAILED run; it is enqueued via the same normal fire path. The
+ * source run stays FAILED and immutable. The FE navigates to `runId` (the new run).
+ */
+export const ReplayLatestResponseSchema = z.strictObject({
+  ok: z.literal(true),
+  // The id of the NEW run created on the latest version (where the FE should navigate).
+  runId: z.cuid(),
+  // The source FAILED run this clone supersedes (echoed for the lineage breadcrumb).
+  supersedesRunId: z.cuid(),
+  // The version the clone pinned (the latest at replay time) + its sequence number.
+  workflowVersionId: int4({ min: 1 }),
+  replaySeq: int4({ min: 1 }),
+});
+export type ReplayLatestResponse = z.infer<typeof ReplayLatestResponseSchema>;
 
 /**
  * WorkflowSecret — the engine's own encrypted credential store (REDACTED read shape). The ciphertext /
