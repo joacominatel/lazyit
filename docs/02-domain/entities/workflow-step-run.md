@@ -57,6 +57,11 @@ One immutable row per attempt records its terminal classification:
   INV-6, [[0031-logging-strategy]]). The orchestrator also records the **resolved transition edge** it
   took (`onSuccess` / `onFailure` target) and any manual / compensation linkage here, keeping the
   per-run timeline self-describing — all within the same redaction discipline.
+  - **`reason` is a BOUNDED literal, redacted at the write boundary.** A persisted `reason` is always a
+    fixed string (e.g. `'network/transport error'`, `'handler threw unexpectedly'`), never a raw error
+    message — even in the defensive `handler-threw` catch, the verbatim `err.message` (which can carry an
+    internal IP or secret) is dropped before the row is written and surfaced only via the redacted logger
+    ([[0031-logging-strategy]]), never the append-only ledger.
 - **Engine-written, read-only on the wire.** `WorkflowStepRunSchema` is a read shape; there is no
   client create DTO.
 

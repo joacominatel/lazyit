@@ -502,6 +502,36 @@ describe('WorkflowRunOrchestrator — the DAG walk (ADR-0054 §8)', () => {
     await orchestrator.start('run1'); // status is now SUCCEEDED → claim fails → no-op
     expect(state.stepRuns.length).toBe(stepRunsAfterFirst);
   });
+
+  it('INV-6: a handler that THROWS persists a bounded reason, never the raw error (no IP/secret) — issue #352', async () => {
+    // A handler should never throw (the defensive catch), but if it does, its raw message can carry an
+    // internal IP or a secret. The orchestrator must drop it at the write boundary and persist only a
+    // bounded literal into the append-only step-run ledger.
+    const throwing = {
+      kind: 'REST',
+      execute: jest.fn(async () => {
+        throw new Error(
+          'connect ECONNREFUSED 10.0.0.5:443 token=ghp_secretzzz',
+        );
+      }),
+    };
+    const { orchestrator, state } = harness([restStep('s1')], {
+      REST: throwing,
+    });
+
+    await orchestrator.start('run1');
+
+    const failed = state.stepRuns.find((s) => s.status === 'FAILED');
+    expect(failed).toBeDefined();
+    expect((failed!.metadata as Record<string, unknown>).errorClass).toBe(
+      'handler-threw',
+    );
+    // Assert against the SERIALIZED persisted metadata: nothing from the raw message may survive.
+    const persisted = JSON.stringify(failed!.metadata);
+    expect(persisted).not.toContain('10.0.0.5');
+    expect(persisted).not.toContain('ghp_secretzzz');
+    expect(persisted).not.toContain('ECONNREFUSED');
+  });
 });
 
 describe('WorkflowRunOrchestrator.retryRun — manual FAILED-run retry (issue #308)', () => {

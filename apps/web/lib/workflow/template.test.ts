@@ -143,6 +143,24 @@ test("knownRootsFor matches the server mapper's ALLOWED_ROOTS exactly (drift gua
   ).toEqual(["context"]);
 });
 
+test("the catalog offers the ADR-0058 grantee tokens and they resolve (no drift, #357)", () => {
+  // #357: legajo / username / manager.{name,email} were added additively under the existing `grantee`
+  // root — the engine's run-context.ts projectGrantee now resolves them. They must be in the catalog
+  // (the picker offers them) AND validate (no NEW unknown root, since `grantee` was already allowed).
+  const paths = buildContextTokens().map((token) => token.path);
+  for (const path of [
+    "grantee.legajo",
+    "grantee.username",
+    "grantee.manager.name",
+    "grantee.manager.email",
+  ]) {
+    expect(paths).toContain(path);
+    expect(validateTemplate(`{{ ${path} }}`, knownRootsFor()).hasError).toBe(
+      false,
+    );
+  }
+});
+
 test("wrapToken round-trips through parseTemplate to a single token", () => {
   const segments = parseTemplate(wrapToken("application.name"));
   expect(segments).toEqual([

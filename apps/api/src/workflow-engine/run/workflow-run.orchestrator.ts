@@ -507,11 +507,22 @@ export class WorkflowRunOrchestrator {
         meta: { runId, stepKey: step.key, stepIndex: index, attempt },
       });
     } catch (err) {
-      // A handler should never throw for an EXPECTED failure, but be defensive.
+      // A handler should never throw for an EXPECTED failure, but be defensive. The raw message can
+      // carry an internal IP or secret (e.g. `connect ECONNREFUSED 10.0.0.5:443 token=…`), so it must
+      // NOT be persisted into the append-only step-run ledger (INV-6, ADR-0031/ADR-0054). We keep only a
+      // BOUNDED literal in `metadata.reason` and surface the raw error via the logger instead — logs are
+      // governed by ADR-0031 redaction, not the persisted ledger.
+      this.logger.error(
+        `workflow.handler_threw run=${runId} step=${step.key}`,
+        err instanceof Error ? err.stack : String(err),
+      );
       raw = {
         status: 'FAILED',
         retryable: false,
-        metadata: { errorClass: 'handler-threw', reason: messageOf(err) },
+        metadata: {
+          errorClass: 'handler-threw',
+          reason: 'handler threw unexpectedly',
+        },
       };
     }
 
@@ -941,8 +952,4 @@ export function backoffMs(policy: RetryPolicy, attempt: number): number {
   }
   // exponential: delayMs * 2^(attempt-1), capped at 1h (the schema's own delayMs ceiling).
   return Math.min(policy.delayMs * 2 ** (attempt - 1), 3_600_000);
-}
-
-function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

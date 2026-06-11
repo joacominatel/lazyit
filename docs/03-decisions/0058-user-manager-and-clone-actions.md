@@ -254,13 +254,21 @@ coarse capability that already governs create/edit/clone per the web comment in
    written but the after-commit trigger is **suppressed** for these clone-originated grants, so they
    are recorded bookkeeping-only. **Either way the grant row is identical and auditable**; only the
    downstream effect differs. The choice is recorded (a `clonedFrom` / `fireWorkflows` note in the
-   clone's `UserHistory` `CREATED` payload) so the decision is never silent.
+   clone's `UserHistory` `CREATED` payload) so the decision is never silent. The toggle governs **only**
+   the workflow engine: the **notification bell** ([[0056-in-app-notification-bell]] §3 —
+   `admin_granted` / `critical_app_access`) fires post-commit for every cloned grant **regardless** of
+   the toggle (issue #359). The two are separate concerns — the bell is admin **visibility**, the engine
+   is external **provisioning** — so a clone is never silent on the bell even when the engine is
+   suppressed; the clone reuses the same `AccessGrantsService` emitter a hand-created grant uses.
 5. **The clone is best-effort-additive and reports per item.** Local rows (the user + assignments +
    grants) commit in **one transaction**; the engine fires (or not) **after** commit (decoupling
    invariant §1 — a failing provisioning never rolls back the clone). The response is a **per-item
-   result** (`{ created, skipped: [{ id, reason }] }`, the [[0030-list-pagination-contract|batch]]
-   shape already used for per-id batch ops) so a skipped soft-deleted asset or a failed enqueue is
-   visible, not swallowed.
+   result** (`{ created, skipped: [{ id, entityId?, reason }] }`, the
+   [[0030-list-pagination-contract|batch]] shape already used for per-id batch ops) so a skipped
+   soft-deleted asset or a failed enqueue is visible, not swallowed. Each `skipped` entry carries `id`
+   (the requested assignment/grant id) and, when known, `entityId` (the underlying asset/application id
+   the web resolves a friendly label from; absent for `not_found`, which never matched a source row).
+   The reasons the API emits are a closed set: `not_found`, `asset_deleted`, `already_in_state`.
 
 **Web:** a **Clone** row action on `/users` opens a wizard pre-loaded with the source's active
 assignments + grants as checklists and the engine toggle (with a clear warning when on: "this will
@@ -314,8 +322,19 @@ is defensible; we propose safe-by-default and let the CEO flip it.
     `clone-user.ts`, `MANAGER_CHANGED`, `manager_changed` feed verb), and the users service/controller
     (manager XOR + self/cycle guard, the resolved read descriptor with `isOffboarded`, `MANAGER_CHANGED`
     emission, and `POST /users/:id/clone` with the safe-by-default engine toggle) all shipped with Jest
-    coverage. **Still open (separate follow-ups):** the mapper `grantee.manager`/`legajo`/`username`
-    token group + builder catalog.
+    coverage.
+  - **Mapper token slice — LANDED (issues #350 + #357, `feat/issue-357-grantee-mapper-tokens`).** The
+    engine's `grantee` mapping context now additively exposes `grantee.legajo`, `grantee.username` and a
+    redaction-safe `grantee.manager.{name,email}` descriptor (`+ isOffboarded`), projected from the
+    already-loaded grantee `User` by a framework-pure `projectGrantee` shared between the live run
+    (`run-context.ts`) and the dry-run preview (`workflow-dry-run.service.ts`) — **no migration**. INV-6:
+    a soft-deleted (offboarded) linked manager BLANKS the name/email and only flags `isOffboarded`; the
+    free-text fallback yields `name` only; no manager → empty. The builder catalog
+    (`apps/web/lib/workflow/context-tokens.ts`) offers the new tokens (all under the existing `grantee`
+    root, so the drift guard's root set is unchanged), and #350 had already reconciled the catalog with
+    the engine (no `context.*` / `application.vendor` / `url`). **Still open (separate follow-up):** the
+    builder picker leaf labels remain hardcoded English (the existing catalog convention — only the group
+    headings are i18n'd).
   - **Web slice — LANDED (issue #303, `feat/issue-303-users-manager-clone-ui`).** The `@lazyit/shared`
     payload builders (`toManagerInput` — the manager XOR; `managerDescriptorToFormValue`; `dedupeIds`) with
     `bun test` coverage, the `cloneUser` API client + `useCloneUser` hook, the create/edit user form's

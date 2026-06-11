@@ -197,8 +197,12 @@ export class AccessGrantsService {
    *     no schema change). The dedupe key `(type, accessGrantId)` makes a re-fire idempotent.
    *   - `admin_granted`       — the grant is an ADMIN-level grant ({@link ADMIN_ACCESS_LEVELS}).
    * Both resolve the application name + grantee name for a human title; every failure is swallowed.
+   *
+   * PUBLIC because the clone path (UsersService, ADR-0058 §4) writes its cloned grants directly via
+   * `tx.accessGrant.create` (to govern the engine toggle) and so must fire the SAME bell nudges by
+   * reusing THIS emitter — the bell is admin VISIBILITY (ADR-0056), independent of the engine toggle.
    */
-  private async emitGrantNotifications(grant: {
+  async emitGrantNotifications(grant: {
     id: string;
     userId: string;
     applicationId: string;

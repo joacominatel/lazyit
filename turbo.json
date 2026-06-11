@@ -6,6 +6,10 @@
       "cache": false,
       "persistent": true
     },
+    "db:generate": {
+      "inputs": ["prisma/schema.prisma"],
+      "outputs": ["generated/**"]
+    },
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**"]
@@ -13,7 +17,13 @@
     "test": {
       "dependsOn": ["^build"]
     },
-    "lint": {},
+    "lint": {
+      "dependsOn": ["db:generate"]
+    },
+    "lint:fix": {
+      "dependsOn": ["db:generate"],
+      "cache": false
+    },
     "start:dev": {
       "cache": false,
       "persistent": true

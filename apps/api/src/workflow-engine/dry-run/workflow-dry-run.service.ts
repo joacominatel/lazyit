@@ -28,6 +28,7 @@ import {
   classifySuccessEdge,
   isTerminalTarget,
 } from '../run/transitions';
+import { projectGrantee } from '../run/grantee-projection';
 import { MAX_WALK_STEPS } from '../run/workflow-run.constants';
 import type { TransitionTaken } from '../run/workflow-run.types';
 import {
@@ -207,7 +208,25 @@ export class WorkflowDryRunService {
       where: { id: sampleAccessGrantId },
       include: {
         user: {
-          select: { id: true, email: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            legajo: true,
+            username: true,
+            managerName: true,
+            // Nested manager relation — loaded regardless of soft-delete (the read filter only scopes
+            // the top-level op), so the projection can flag an offboarded manager rather than dangle.
+            manager: {
+              select: {
+                firstName: true,
+                lastName: true,
+                email: true,
+                deletedAt: true,
+              },
+            },
+          },
         },
       },
     });
@@ -223,12 +242,7 @@ export class WorkflowDryRunService {
     }
     return freezeMappingContext({
       event: workflow.trigger,
-      grantee: {
-        id: grant.user.id,
-        email: grant.user.email,
-        firstName: grant.user.firstName,
-        lastName: grant.user.lastName,
-      },
+      grantee: projectGrantee(grant.user),
       application: {
         id: workflow.application.id,
         name: workflow.application.name,

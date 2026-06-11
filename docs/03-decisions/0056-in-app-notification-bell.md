@@ -129,7 +129,10 @@ grant). The v1 triggers, each on an existing write path:
   `Application.isCritical` boolean — **no schema change**, confirmed at `apps/api/prisma/schema.prisma`
   `model Application`) emit **`critical_app_access`**; if the grant raises a user to the **ADMIN** role,
   emit **`admin_granted`**. (Access to critical apps + admin elevation are the sensitive events
-  ADR-0046's read-tightening already treats as worth guarding.)
+  ADR-0046's read-tightening already treats as worth guarding.) The **user-clone** path
+  ([[0058-user-manager-and-clone-actions]] §4), which writes its grants directly to govern the engine
+  toggle, **reuses this same emitter** post-commit for every cloned grant (issue #359) — so a clone is
+  never silent on the bell, independent of whether the clone's engine toggle fired the workflow.
 - **`Consumable.createMovement`** → on a transition **from above-threshold to at/below `minStock`** emit
   **`low_stock`**, **DEDUPED** (§4) so a consumable flapping around its threshold does not spam the bell.
   (Stock is the cached value + append-only movements model of [[0034-consumables-design]].)
