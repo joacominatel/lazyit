@@ -130,6 +130,8 @@
     "urlHint": "Una URL pública https://.",
     "authLabel": "Método de autenticación",
     "authHeaderLabel": "Nombre de la cabecera",
+    "healthPathLabel": "Ruta de comprobación",
+    "healthPathHint": "Opcional. La ruta que \"Probar conexión\" consulta (p. ej. /health). Déjalo vacío para consultar la URL base.",
     "signatureHeaderLabel": "Cabecera de firma",
     "signatureHeaderHint": "La cabecera donde se envía la firma HMAC (el secreto de firma se guarda aparte).",
     "createButton": "Crear conexión",
@@ -148,6 +150,7 @@
     "ok": "Accesible",
     "failed": "Fallida",
     "httpStatus": "HTTP {status}",
+    "probedPath": "en {path}",
     "error": "No se pudo probar la conexión."
   },
   "secret": {
@@ -155,6 +158,11 @@
     "add": "Añadir credencial",
     "replace": "Reemplazar",
     "remove": "Eliminar",
+    "authTypeLabel": "Tipo de autenticación",
+    "authTypeHint": "Cómo se envía esta credencial al sistema. Se define al añadir la credencial.",
+    "authHeaderLabel": "Nombre de la cabecera",
+    "authHeaderRequired": "Indica el nombre de la cabecera para el esquema de cabecera de API key.",
+    "needsSchemeHint": "Define un método de autenticación en la conexión antes de añadir una credencial.",
     "valueLabel": "Valor de la credencial",
     "newValueLabel": "Nuevo valor de la credencial",
     "valuePlaceholder": "Pega el valor del secreto",
