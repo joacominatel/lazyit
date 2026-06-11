@@ -57,6 +57,7 @@ export function createStep(
         kind: "WEBHOOK_OUT",
         key,
         connectionId,
+        idempotent: false,
         onError: "fail",
       };
     case "MANUAL":
