@@ -4,6 +4,16 @@ import {
   type WorkflowMappingContext,
 } from '../handlers/step-handler';
 
+/** The ADR-0058 grantee identity fields a ctx override must still carry (legajo/username/manager). */
+const GRANTEE_DEFAULTS = {
+  legajo: null,
+  username: null,
+  manager: { name: null, email: null, isOffboarded: false },
+} satisfies Pick<
+  WorkflowMappingContext['grantee'],
+  'legajo' | 'username' | 'manager'
+>;
+
 function makeCtx(
   overrides: Partial<WorkflowMappingContext> = {},
 ): WorkflowMappingContext {
@@ -14,6 +24,7 @@ function makeCtx(
       email: 'ada@example.com',
       firstName: 'Ada',
       lastName: 'Lovelace',
+      ...GRANTEE_DEFAULTS,
     },
     application: { id: 'app_1', name: 'Jira' },
     grant: {
@@ -117,6 +128,7 @@ describe('data-mapper — prototype-pollution / SSTI guards', () => {
         email: '{{ application.name }}',
         firstName: 'A',
         lastName: 'B',
+        ...GRANTEE_DEFAULTS,
       },
     });
     // The literal "{{ application.name }}" coming FROM a ctx value must NOT be expanded.
@@ -154,6 +166,7 @@ describe('data-mapper — context-aware encoding (downstream injection defense)'
         email: 'evil"}],"isAdmin":true,"x":["',
         firstName: 'A',
         lastName: 'B',
+        ...GRANTEE_DEFAULTS,
       },
     });
     const mapped = mapData(
@@ -174,6 +187,7 @@ describe('data-mapper — context-aware encoding (downstream injection defense)'
         email: 'a@b.c',
         firstName: 'A',
         lastName: 'B',
+        ...GRANTEE_DEFAULTS,
       },
     });
     const rendered = renderTemplate('/v3/user/{{ grantee.id }}', ctx, 'url');
@@ -189,6 +203,7 @@ describe('data-mapper — context-aware encoding (downstream injection defense)'
         email: 'a@b.c\r\nX-Injected: 1\x00',
         firstName: 'A',
         lastName: 'B',
+        ...GRANTEE_DEFAULTS,
       },
     });
     const rendered = renderTemplate('{{ grantee.email }}', ctx, 'header');
