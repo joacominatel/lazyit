@@ -33,6 +33,8 @@ const ALLOWED_KEYS = [
   'externalCorrelationId',
   'durationMs',
   'statusCode',
+  'method',
+  'targetHost',
   'errorClass',
   'mappedFields',
   'transitionTaken',
@@ -75,6 +77,8 @@ describe('WorkflowRunsService.findOne — CSEC-4 step projection', () => {
     const service = build({
       durationMs: 12,
       statusCode: 502,
+      method: 'POST',
+      targetHost: 'api.jira.example.com',
       errorClass: 'http-5xx',
       mappedFields: ['email', 'displayName'],
       transitionTaken: { outcome: 'FAILURE', edge: 'STOP', leak: 'nope' },
@@ -100,11 +104,30 @@ describe('WorkflowRunsService.findOne — CSEC-4 step projection', () => {
     // Allowlisted fields are surfaced.
     expect(step.durationMs).toBe(12);
     expect(step.statusCode).toBe(502);
+    // The request SHAPE (issue #343): bounded method + the host only (never a full URL with query).
+    expect(step.method).toBe('POST');
+    expect(step.targetHost).toBe('api.jira.example.com');
     expect(step.errorClass).toBe('http-5xx');
     expect(step.mappedFields).toEqual(['email', 'displayName']);
     expect(step.manualTaskId).toBe('task_1');
     // transitionTaken is reduced to its closed shape (the foreign `leak` key is dropped).
     expect(step.transitionTaken).toEqual({ outcome: 'FAILURE', edge: 'STOP' });
+  });
+
+  it('bounds the request method to the HTTP-method set — an out-of-vocabulary token collapses to null', async () => {
+    const service = build({
+      method: 'CONNECT secret=ghp_xyz',
+      targetHost: 'api.example.com',
+    });
+
+    const run = await service.findOne('run1');
+    const step = run.steps[0] as Record<string, unknown>;
+
+    // A non-enum method never rides out as a raw string (CSEC-4 defence in depth).
+    expect(step.method).toBeNull();
+    expect(JSON.stringify(step)).not.toContain('ghp_xyz');
+    // …while a legitimate host-only target is surfaced unchanged.
+    expect(step.targetHost).toBe('api.example.com');
   });
 
   it('collapses an unknown / raw error class to OTHER (bounded, never a raw message)', async () => {
@@ -129,6 +152,8 @@ describe('WorkflowRunsService.findOne — CSEC-4 step projection', () => {
     expect(step.errorClass).toBeNull();
     expect(step.transitionTaken).toBeNull();
     expect(step.durationMs).toBeNull();
+    expect(step.method).toBeNull();
+    expect(step.targetHost).toBeNull();
   });
 });
 
