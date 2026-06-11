@@ -11,7 +11,8 @@ import { int4 } from "./primitives";
 
 /**
  * The discrete user-lifecycle events recorded in UserHistory. Mirrors AssetHistoryEventType's
- * CREATED / UPDATED / DELETED / RESTORED set, plus the user-specific ROLE_CHANGED and
+ * CREATED / UPDATED / DELETED / RESTORED set, plus the user-specific ROLE_CHANGED, MANAGER_CHANGED
+ * (ADR-0058 — payload `{ from, to }`, each side a user-id | external-name | null) and
  * PASSWORD_RESET_SENT. Lowercased, these are the `action` verbs the `user` branch of the
  * `recent_activity` view emits (kept in sync with RECENT_ACTIVITY_ACTIONS).
  */
@@ -19,6 +20,7 @@ export const UserHistoryEventTypeSchema = z.enum([
   "CREATED",
   "UPDATED",
   "ROLE_CHANGED",
+  "MANAGER_CHANGED",
   "DELETED",
   "RESTORED",
   "PASSWORD_RESET_SENT",
