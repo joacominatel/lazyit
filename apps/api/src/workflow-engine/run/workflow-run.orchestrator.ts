@@ -839,6 +839,81 @@ export class RetryNotResolvableError extends Error {
 }
 
 /**
+ * Raised by the runs service's `replayLatest` (ADR-0057 Option 3) when the SOURCE run is not terminal
+ * `FAILED` — only a `FAILED` run is clone-to-new-run replayable (a `SUCCEEDED`/`COMPENSATED`/in-flight
+ * run is not; a `COMPENSATED` run already rolled its effects back and must be re-granted). The controller
+ * maps it to a 409. Mirrors {@link RetryNotResolvableError}: a framework-free domain error.
+ */
+export class ReplayNotFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReplayNotFailedError';
+  }
+}
+
+/**
+ * Raised by `replayLatest` when the FAIL-CLOSED double-provision guard refuses: the source run already
+ * SUCCEEDED a NON-idempotent create step on/before the failed step, so a clean re-fire from the entry
+ * node would re-provision that external account (ADR-0057 Decision 3 — no warn-and-proceed). The
+ * controller maps it to a 422 with a "re-grant instead" message (the COMPENSATED-run posture). A
+ * framework-free domain error, mirroring {@link RetryNotResolvableError}.
+ */
+export class ReplayNotIdempotentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReplayNotIdempotentError';
+  }
+}
+
+/**
+ * FAIL-CLOSED double-provision guard for clone-to-new-run (ADR-0057 Decision 3). A replay re-fires the
+ * latest version from the ENTRY node — so any provisioning step the SOURCE run already completed would
+ * run again. That is only safe when every provisioning step the source run SUCCEEDED on/before the failed
+ * step is idempotent (a retried create that cannot double-provision, the `idempotent: true` gate,
+ * ADR-0054 §8b). A "provisioning step" is an outbound HTTP step (REST / WEBHOOK_OUT) — the kinds that
+ * perform an external create/mutation; a MANUAL step has no external side effect to double.
+ *
+ * Throws {@link ReplayNotIdempotentError} the moment it finds a SUCCEEDED step run whose pinned step is a
+ * NON-idempotent (`idempotent !== true`) HTTP step at or before the failed step's index. Allows (returns)
+ * when none exists — i.e. every such completed provisioning step is idempotent, OR the run failed at/before
+ * its first non-idempotent create (no non-idempotent create has SUCCEEDED yet). Pure; no warn path.
+ *
+ * `failedStepKey` bounds the window to "on/before the failed step": a step that SUCCEEDED *after* the
+ * failure point (there is none in a real FAILED walk, but be defensive) is irrelevant to the re-fire risk.
+ * Lookups are by stable `stepKey` (the index in the ledger row mirrors the pinned version anyway).
+ */
+export function assertReplaySafe(
+  steps: readonly WorkflowStep[],
+  failedStepKey: string | null,
+  succeededStepRuns: ReadonlyArray<{ stepKey: string }>,
+): void {
+  const indexByKey = new Map(steps.map((s, i) => [s.key, i]));
+  // The cut-off: the failed step's index. When the failed step is unresolvable (no marker), treat the
+  // whole run as the window — fail-closed (refuse if ANY non-idempotent create succeeded anywhere).
+  const failedIndex =
+    failedStepKey != null ? (indexByKey.get(failedStepKey) ?? null) : null;
+  const cutoff = failedIndex ?? steps.length;
+
+  for (const sr of succeededStepRuns) {
+    const index = indexByKey.get(sr.stepKey);
+    if (index === undefined || index > cutoff) {
+      // A SUCCEEDED row for a step not in the pinned version, or strictly after the failed step — not a
+      // re-fire hazard for this clone.
+      continue;
+    }
+    const step = steps[index];
+    const isHttp = step.kind === 'REST' || step.kind === 'WEBHOOK_OUT';
+    const isIdempotent = 'idempotent' in step && step.idempotent === true;
+    if (isHttp && !isIdempotent) {
+      throw new ReplayNotIdempotentError(
+        `Replay-latest refused: step "${sr.stepKey}" is a non-idempotent provisioning step that already ` +
+          `SUCCEEDED on/before the failed step — re-firing would double-provision. Re-grant to re-run safely.`,
+      );
+    }
+  }
+}
+
+/**
  * Resolve the step key a FAILED run should resume from. Prefers the redacted `error.stepKey` the run
  * carries (set by `finalizeFailed` / the worker's safety-net) when it names a real step in the pinned
  * version; returns `null` when no such marker exists (e.g. an `engine-error` finalize with no step), so
