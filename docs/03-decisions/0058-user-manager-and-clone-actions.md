@@ -322,8 +322,19 @@ is defensible; we propose safe-by-default and let the CEO flip it.
     `clone-user.ts`, `MANAGER_CHANGED`, `manager_changed` feed verb), and the users service/controller
     (manager XOR + self/cycle guard, the resolved read descriptor with `isOffboarded`, `MANAGER_CHANGED`
     emission, and `POST /users/:id/clone` with the safe-by-default engine toggle) all shipped with Jest
-    coverage. **Still open (separate follow-ups):** the mapper `grantee.manager`/`legajo`/`username`
-    token group + builder catalog.
+    coverage.
+  - **Mapper token slice — LANDED (issues #350 + #357, `feat/issue-357-grantee-mapper-tokens`).** The
+    engine's `grantee` mapping context now additively exposes `grantee.legajo`, `grantee.username` and a
+    redaction-safe `grantee.manager.{name,email}` descriptor (`+ isOffboarded`), projected from the
+    already-loaded grantee `User` by a framework-pure `projectGrantee` shared between the live run
+    (`run-context.ts`) and the dry-run preview (`workflow-dry-run.service.ts`) — **no migration**. INV-6:
+    a soft-deleted (offboarded) linked manager BLANKS the name/email and only flags `isOffboarded`; the
+    free-text fallback yields `name` only; no manager → empty. The builder catalog
+    (`apps/web/lib/workflow/context-tokens.ts`) offers the new tokens (all under the existing `grantee`
+    root, so the drift guard's root set is unchanged), and #350 had already reconciled the catalog with
+    the engine (no `context.*` / `application.vendor` / `url`). **Still open (separate follow-up):** the
+    builder picker leaf labels remain hardcoded English (the existing catalog convention — only the group
+    headings are i18n'd).
   - **Web slice — LANDED (issue #303, `feat/issue-303-users-manager-clone-ui`).** The `@lazyit/shared`
     payload builders (`toManagerInput` — the manager XOR; `managerDescriptorToFormValue`; `dedupeIds`) with
     `bun test` coverage, the `cloneUser` API client + `useCloneUser` hook, the create/edit user form's

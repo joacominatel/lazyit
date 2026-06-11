@@ -16,6 +16,9 @@ function makeCtx(
       email: 'ada@example.com',
       firstName: 'Ada',
       lastName: 'Lovelace',
+      legajo: null,
+      username: null,
+      manager: { name: null, email: null, isOffboarded: false },
     },
     application: { id: 'app_1', name: 'Jira' },
     grant: {
@@ -89,6 +92,9 @@ describe('ManualStepHandler.execute', () => {
         email: '{{ application.name }}',
         firstName: 'A',
         lastName: 'B',
+        legajo: null,
+        username: null,
+        manager: { name: null, email: null, isOffboarded: false },
       },
     });
     const result = await handler.execute(ctxFor(STEP, data));

@@ -420,6 +420,15 @@ structure. Adding real identity fields is a separate, model-first decision
 (Open question Q4); the mapper UI is forward-compatible (a new token group is additive) but does not
 drive that decision.
 
+> [!note] Resolved by ADR-0058 (issues #350 + #357) — `manager`/`legajo`/`username` now exist
+> The model-first decision landed: the `User` gained `legajo`, `username` and a `manager` relation
+> (self-FK XOR free-text fallback). Per the forward-compat note above, the mapper additively gained
+> `grantee.legajo`, `grantee.username` and a **redaction-safe** `grantee.manager.{name,email}` (display
+> name + live-manager email only; blank + `isOffboarded`-flagged when none/offboarded, INV-6) — all
+> under the existing `grantee` root, **no migration**. `role`/`team`/AD groups remain OUT (still the
+> anti-goal, ADR-0058 Q3), and the manual-task path is unchanged for "which team?". The catalog↔engine
+> drift guard (`apps/web/lib/workflow/template.test.ts`) pins the new tokens as resolvable.
+
 ### 5c. Templating UX — token-assist, composition & the advanced JSON editor (shipped: #337–#341)
 
 The mapper/step-editor templating affordances are surfaced (issues #337/#338/#339/#341). All of them

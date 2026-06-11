@@ -4,14 +4,15 @@ import {
   type WorkflowMappingContext,
 } from '../handlers/step-handler';
 import { PrismaService } from '../../prisma/prisma.service';
+import { projectGrantee } from './grantee-projection';
 
 /**
  * Assembles the FROZEN, allowlisted mapping context a step's data mapping renders against
  * (`StepContext.data`, ADR-0054 §6c). Built SERVER-SIDE from the run's grant + grantee + application,
  * plus the typed input of any already-completed manual task in this run (so a resumed MANUAL step's
  * input feeds later steps via `ctx.steps[<key>]`). Every value is UNTRUSTED; the mapper context-aware
- * encodes each interpolation. NO `role`/`team`/`manager`/AD fields — those are a future model-first
- * ADR, never this engine.
+ * encodes each interpolation. The grantee projection carries the ADR-0058 identity fields
+ * (`legajo`/`username`/`manager`); `role`/`team`/AD groups stay OUT (Identity-Governance anti-goal).
  */
 @Injectable()
 export class RunContextBuilder {
@@ -31,6 +32,21 @@ export class RunContextBuilder {
                 email: true,
                 firstName: true,
                 lastName: true,
+                legajo: true,
+                username: true,
+                managerName: true,
+                // The linked manager is loaded as a NESTED relation: the soft-delete read filter
+                // (ADR-0032) only scopes the TOP-LEVEL operation, so a soft-deleted (offboarded) manager
+                // is still returned here — we read its `deletedAt` to flag `isOffboarded` and BLANK the
+                // name/email (ADR-0058 §3 / INV-6), never dropping it into a dangle.
+                manager: {
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                    deletedAt: true,
+                  },
+                },
               },
             },
           },
@@ -62,12 +78,7 @@ export class RunContextBuilder {
 
     const ctx: WorkflowMappingContext = {
       event: run.trigger,
-      grantee: {
-        id: grant.user.id,
-        email: grant.user.email,
-        firstName: grant.user.firstName,
-        lastName: grant.user.lastName,
-      },
+      grantee: projectGrantee(grant.user),
       application: {
         id: run.application.id,
         name: run.application.name,
