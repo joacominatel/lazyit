@@ -110,9 +110,10 @@ export type RecentActivityPage = z.infer<typeof RecentActivityPageSchema>;
  *   - AssetAssignment branch: assigned · released (already covered above)
  *   - AccessGrant: granted · revoked
  *   - ConsumableMovement: stock_in · stock_out · stock_adjustment
- *   - UserHistory (lowercased `UserHistoryEventType`, DEBT-2 / issue #185): created · updated ·
- *     role_changed · deleted · restored · password_reset_sent. `created` / `deleted` / `restored` are
- *     already in the list (shared with AssetHistory); only the user-specific verbs are added below.
+ *   - UserHistory (lowercased `UserHistoryEventType`, DEBT-2 / issue #185 + ADR-0058): created ·
+ *     updated · role_changed · manager_changed · deleted · restored · password_reset_sent.
+ *     `created` / `deleted` / `restored` are already in the list (shared with AssetHistory); only the
+ *     user-specific verbs are added below.
  * Keep this in sync with the view if a new source verb is added.
  */
 export const RECENT_ACTIVITY_ACTIONS = [
@@ -133,6 +134,8 @@ export const RECENT_ACTIVITY_ACTIONS = [
   // UserHistory-specific verbs (DEBT-2, issue #185). `created`/`deleted`/`restored` already appear above.
   "updated",
   "role_changed",
+  // Manager change (ADR-0058) — the lowercased MANAGER_CHANGED verb the recent_activity view emits.
+  "manager_changed",
   "password_reset_sent",
 ] as const;
 

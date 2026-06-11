@@ -139,9 +139,11 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       "stock_in",
       "stock_out",
       "stock_adjustment",
-      // UserHistory-specific verbs (DEBT-2, issue #185). created/deleted/restored are shared above.
+      // UserHistory-specific verbs (DEBT-2, issue #185 + ADR-0058). created/deleted/restored are
+      // shared above.
       "updated",
       "role_changed",
+      "manager_changed",
       "password_reset_sent",
     ]);
   });
