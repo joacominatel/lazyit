@@ -254,13 +254,21 @@ coarse capability that already governs create/edit/clone per the web comment in
    written but the after-commit trigger is **suppressed** for these clone-originated grants, so they
    are recorded bookkeeping-only. **Either way the grant row is identical and auditable**; only the
    downstream effect differs. The choice is recorded (a `clonedFrom` / `fireWorkflows` note in the
-   clone's `UserHistory` `CREATED` payload) so the decision is never silent.
+   clone's `UserHistory` `CREATED` payload) so the decision is never silent. The toggle governs **only**
+   the workflow engine: the **notification bell** ([[0056-in-app-notification-bell]] §3 —
+   `admin_granted` / `critical_app_access`) fires post-commit for every cloned grant **regardless** of
+   the toggle (issue #359). The two are separate concerns — the bell is admin **visibility**, the engine
+   is external **provisioning** — so a clone is never silent on the bell even when the engine is
+   suppressed; the clone reuses the same `AccessGrantsService` emitter a hand-created grant uses.
 5. **The clone is best-effort-additive and reports per item.** Local rows (the user + assignments +
    grants) commit in **one transaction**; the engine fires (or not) **after** commit (decoupling
    invariant §1 — a failing provisioning never rolls back the clone). The response is a **per-item
-   result** (`{ created, skipped: [{ id, reason }] }`, the [[0030-list-pagination-contract|batch]]
-   shape already used for per-id batch ops) so a skipped soft-deleted asset or a failed enqueue is
-   visible, not swallowed.
+   result** (`{ created, skipped: [{ id, entityId?, reason }] }`, the
+   [[0030-list-pagination-contract|batch]] shape already used for per-id batch ops) so a skipped
+   soft-deleted asset or a failed enqueue is visible, not swallowed. Each `skipped` entry carries `id`
+   (the requested assignment/grant id) and, when known, `entityId` (the underlying asset/application id
+   the web resolves a friendly label from; absent for `not_found`, which never matched a source row).
+   The reasons the API emits are a closed set: `not_found`, `asset_deleted`, `already_in_state`.
 
 **Web:** a **Clone** row action on `/users` opens a wizard pre-loaded with the source's active
 assignments + grants as checklists and the engine toggle (with a clear warning when on: "this will
