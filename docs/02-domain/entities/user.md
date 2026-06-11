@@ -23,9 +23,12 @@ the reverse.
 - **raises** N [[access-request]]s.
 - **is referenced by** N [[ticket]]s (requester, affected user, or assignee).
 - **has** an append-only [[user-history]] — its own lifecycle log (create / update / role change /
-  offboard / restore / password-reset), the User counterpart of [[asset-history]] (DEBT-2, #185 —
-  [[0050-user-history-and-activity-user-entity]]). A User is also the **actor** on history rows it
-  caused (`performedById`).
+  manager change / offboard / restore / password-reset), the User counterpart of [[asset-history]]
+  (DEBT-2, #185 — [[0050-user-history-and-activity-user-entity]]). A User is also the **actor** on
+  history rows it caused (`performedById`).
+- **reports to** at most one **manager** — either another lazyit User (self-FK `managerId`) or a
+  free-text `managerName` fallback, and **has** N direct `reports` (the inverse self-relation). No
+  cycles, no self-manage ([[0058-user-manager-and-clone-actions]]).
 
 ## Business rules
 
@@ -34,10 +37,12 @@ the reverse.
   deleted (soft delete + lifecycle timestamps).
 - **Auditable lifecycle (DEBT-2, #185):** every User write emits an append-only [[user-history]] row
   **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit,
-  `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `DELETED` on offboard, `RESTORED` on
-  re-onboard, `PASSWORD_RESET_SENT` when a reset link is requested. This supersedes the fire-and-forget
-  IdP write-back log lines for *durability*: those structured logs remain, but the queryable trail now
-  lives in the DB and surfaces in the [[recent-activity]] feed (`entityType = 'user'`).
+  `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `MANAGER_CHANGED` (payload `{ from, to }`,
+  each side a user-id / external-name / null — [[0058-user-manager-and-clone-actions]]) on a manager
+  change, `DELETED` on offboard, `RESTORED` on re-onboard, `PASSWORD_RESET_SENT` when a reset link is
+  requested. This supersedes the fire-and-forget IdP write-back log lines for *durability*: those
+  structured logs remain, but the queryable trail now lives in the DB and surfaces in the
+  [[recent-activity]] feed (`entityType = 'user'`).
 - **Identity / auth:** the local User is the source of truth for the domain. Authentication is
   handled by an external IdP (OIDC) whose `sub` maps to `externalId`; the global guard JIT-provisions
   a User on first login ([[0038-jit-user-provisioning]]) — we do **not** implement our own auth.
@@ -84,9 +89,29 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `isActive` | `boolean` | `@default(true)`. Activation flag — see note below. |
 | `role` | `Role` | `@default(VIEWER)` (flipped from `MEMBER` by [[0043-zitadel-source-of-truth]]). The fixed role `ADMIN` / `MEMBER` / `VIEWER` ([[0040-rbac-roles]]); what each role *grants* is the configurable [[role-permission]] matrix ([[0046-roles-permissions-v2]]). First user ever provisioned = `ADMIN`; all others default to `VIEWER`. |
 | `externalId` | `string?` | `@unique`, nullable. Holds the IdP `sub`; populated on first OIDC login ([[0038-jit-user-provisioning]]); `null` for unlinked users ([[0016-auth-strategy-deferred]]). |
+| `legajo` | `string?` | Employee/file number (LATAM payroll/HR), [[0058-user-manager-and-clone-actions]]. Optional, stored verbatim (trimmed on write). Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so offboarding frees it for reuse/restore (the `email` precedent, [[0041-soft-delete-reuse-and-restore]]). |
+| `username` | `string?` | Directory/display handle distinct from `email`/`externalId`, [[0058-user-manager-and-clone-actions]]. Optional, normalized (trim + lowercase) so `Ana`/`ana` collide. Same live-only partial unique index. **NOT an auth credential** and **never** an account-linking key (that stays `email`/`externalId`, INV-2). |
+| `managerId` | `uuid?` | The manager when they ARE a lazyit user — self-FK → `User`, `onDelete: SetNull` ([[0058-user-manager-and-clone-actions]]). Mutually exclusive with `managerName` (DB CHECK `users_manager_at_most_one`; both-null = no manager). A DB CHECK `users_manager_not_self` forbids self-manage; the service also rejects a **cycle** (DFS up the chain). A soft-deleted linked manager is surfaced as `isOffboarded` on read, never a dangle. |
+| `managerName` | `string?` | Free-text fallback when the manager is **not** a lazyit user, [[0058-user-manager-and-clone-actions]]. Normalized (trim). Mutually exclusive with `managerId`. |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | Soft delete — `null` while live; reads filter `deletedAt: null` ([[0006-soft-delete-and-auditing]]). |
+
+> [!note] Manager identity graph + clone-with-chosen-actions ([[0058-user-manager-and-clone-actions]])
+> The read `UserSchema` resolves the manager FK to a **redaction-safe descriptor** —
+> `{ type:"user"; id; firstName; lastName; isOffboarded } | { type:"external"; name } | null` — never
+> the raw `managerId`/`managerName` columns (so a deleted manager surfaces `isOffboarded:true`, never a
+> leak/dangle). Create/Update accept a `manager` **input union** (`{ managerId }` xor `{ managerName }`
+> xor `null`) mirroring the DB CHECK, plus optional normalized `legajo`/`username`. A manager change
+> emits a **`MANAGER_CHANGED`** [[user-history]] row (payload `{ from, to }`, each side a user-id /
+> external-name / null). **`POST /users/:id/clone`** mints a NEW user (a normal create — never copies the
+> source's email/legajo/username or `externalId`) and mirrors the source's **selected** active
+> [[asset-assignment]]s + [[access-grant]]s as **new** append-only rows for the new user (actor = the
+> cloning admin). The **engine toggle** `fireWorkflowsOnClonedGrants` (default **false**, safe-by-default)
+> decides whether each cloned grant fires the [[0054-applications-workflow-engine|workflow engine]]
+> (`ACCESS_GRANTED`, after commit) or is recorded bookkeeping-only; the choice is audited in the clone's
+> CREATED history. Response is the per-item batch shape `{ created, skipped: [{ id, reason }] }`. **Out of
+> scope (separate follow-up):** the mapper `grantee.manager`/`legajo`/`username` token group.
 
 > [!note] `isActive` vs `deletedAt` — independent concepts
 > `isActive = false` means the person is **offboarded/disabled but retained** (tickets and past
@@ -99,10 +124,11 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 `apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted), `GET /users/me`
 (the current authenticated caller, **including their role** — declared before `:id` so the literal
 `me` isn't parsed as a uuid; the OIDC token doesn't carry the lazyit role, so the web reads it here),
-`GET /users/:id`, `POST /users`, `PATCH /users/:id`, `DELETE /users/:id` (soft delete),
-`POST /users/:id/offboard`, `POST /users/:id/restore` (re-onboard: clears `deletedAt`; does NOT
-re-grant access or re-assign assets — [[0041-soft-delete-reuse-and-restore]]), and
-`POST /users/:id/reset-password` (admin-triggered password reset — see the IdP write-back note below).
+`GET /users/:id`, `POST /users`, `POST /users/:id/clone` (clone-with-chosen-actions —
+[[0058-user-manager-and-clone-actions]]; see the manager/clone note above), `PATCH /users/:id`,
+`DELETE /users/:id` (soft delete), `POST /users/:id/offboard`, `POST /users/:id/restore` (re-onboard:
+clears `deletedAt`; does NOT re-grant access or re-assign assets — [[0041-soft-delete-reuse-and-restore]]),
+and `POST /users/:id/reset-password` (admin-triggered password reset — see the IdP write-back note below).
 All **write** endpoints (create / update incl. name/email/role / delete / offboard / restore /
 reset-password) are gated `@RequirePermission('user:manage')` — ADMIN-only in the seed, **not**
 `user:write` (which MEMBER holds) ([[0046-roles-permissions-v2]] P4). The directory **reads** `GET /users` and `GET /users/:id` (and the

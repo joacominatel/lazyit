@@ -306,6 +306,16 @@ is defensible; we propose safe-by-default and let the CEO flip it.
   test, the mapper `grantee.manager`/`legajo`/`username` token group, the web clone wizard + manager
   picker (user-or-text), and the `users/[id]` detail surfacing manager + reports. An offboard-time
   re-manager prompt and a "who reports to me" view are natural but separable.
+  - **Backend + shared slice — LANDED (issue #303, `feat/issue-303-users-manager-clone-backend`).** The
+    migration (`20260611180848_user_manager_clone`: `legajo`/`username` partial-unique indexes + the
+    `users_manager_at_most_one` / `users_manager_not_self` CHECKs + the `UserManager` self-relation +
+    `MANAGER_CHANGED` enum value + the `recent_activity` view's `MANAGER_CHANGED` branch), the
+    `@lazyit/shared` deltas (`UserSchema` manager descriptor + input union + `legajo`/`username`,
+    `clone-user.ts`, `MANAGER_CHANGED`, `manager_changed` feed verb), and the users service/controller
+    (manager XOR + self/cycle guard, the resolved read descriptor with `isOffboarded`, `MANAGER_CHANGED`
+    emission, and `POST /users/:id/clone` with the safe-by-default engine toggle) all shipped with Jest
+    coverage. **Still open (separate follow-ups):** the mapper `grantee.manager`/`legajo`/`username`
+    token group + builder catalog, and the web clone wizard / manager picker / `users/[id]` detail.
 
 ## Decision (ratified 2026-06-11)
 
