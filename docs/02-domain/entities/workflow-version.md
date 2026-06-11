@@ -46,6 +46,12 @@ dimensions:
   exponential), delayMs (≤ 1h) }`. The contract carries the policy; the BullMQ worker executes the
   attempts. A retry only happens when the handler marked the failure `retryable`; `maxAttempts` caps
   **how many**, the handler gates **whether**. Omitting `retry` ⇒ a single attempt.
+- **Idempotency** — an HTTP step (`REST` / `WEBHOOK_OUT`) carries an `idempotent` boolean (default
+  **`false`** = fail-closed). It gates both `retryable = transient && idempotent` (a non-idempotent
+  delivery is single-shot — a lost-response retry must not double-provision / double-fire) and the
+  replay-latest guard (`assertReplaySafe`, ADR-0057): a non-idempotent provisioning step that already
+  SUCCEEDED refuses replay-latest. Set `true` only when the operation is safe to repeat (the receiver
+  dedupes on a stable key).
 - **Transitions** — optional `onSuccess` / `onFailure` edges to a sibling step **key** or a **terminal
   token**. There are **no** arbitrary boolean / expression edges in v1 — the only branch points are
   *success* and *failure-after-retries*:
