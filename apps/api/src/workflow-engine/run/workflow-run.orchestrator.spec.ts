@@ -39,7 +39,10 @@ function scripted(kind: string, results: StepResult[]) {
  */
 function harness(
   steps: unknown[],
-  handlers: Record<string, ReturnType<typeof scripted>>,
+  // A connector mock map. `scripted()` returns a zero-arg execute; some tests use a custom mock whose
+  // execute reads the rendered { step } (e.g. to prove an override reached the mapping), so the execute
+  // signature is left loose here — the registry is cast to `never` below anyway.
+  handlers: Record<string, { kind: string; execute: jest.Mock }>,
 ) {
   const state = {
     runStatus: 'PENDING' as string,
