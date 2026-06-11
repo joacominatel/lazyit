@@ -114,7 +114,9 @@ describe('AccessGrant outbox — create', () => {
     expect(grant).toMatchObject({ id: 'g1' });
     const runData = (h.workflowRun.create.mock.calls as RunCreateCall[])[0][0]
       .data;
-    expect(runData.idempotencyKey).toBe('ACCESS_GRANTED:g1');
+    // The natural grant run is replaySeq 0 → the uniform key "<trigger>:<grantId>:0" (ADR-0057).
+    expect(runData.idempotencyKey).toBe('ACCESS_GRANTED:g1:0');
+    expect(runData.replaySeq).toBe(0);
     expect(runData.status).toBe('PENDING');
     expect(runData.workflowVersionId).toBe(5);
     expect(runData.executedAsServiceAccountId).toBe('sa_engine');
@@ -218,7 +220,7 @@ describe('AccessGrant outbox — revoke (LAST_ACTIVE_GRANT)', () => {
 
     const runData = (h.workflowRun.create.mock.calls as RunCreateCall[])[0][0]
       .data;
-    expect(runData.idempotencyKey).toBe('ACCESS_REVOKED:g1');
+    expect(runData.idempotencyKey).toBe('ACCESS_REVOKED:g1:0');
     expect(h.queue.add).toHaveBeenCalled();
   });
 
@@ -291,7 +293,8 @@ describe('CCOR-5 — the in-tx PENDING run INSERT is determined-safe by invarian
     const runData = (h.workflowRun.create.mock.calls as RunCreateCall[])[0][0]
       .data;
     // UNIQUE per fresh grant event — the idempotency invariant that makes the INSERT non-conflicting.
-    expect(runData.idempotencyKey).toBe('ACCESS_GRANTED:g1');
+    // The natural grant run is replaySeq 0 → "<trigger>:<grantId>:0" (ADR-0057).
+    expect(runData.idempotencyKey).toBe('ACCESS_GRANTED:g1:0');
     // Every FK the row carries was resolved by the pre-tx plan lookup (so the INSERT cannot dangle).
     expect(runData.accessGrantId).toBe('g1');
     expect(runData.workflowId).toBe('wf1');
@@ -320,7 +323,7 @@ describe('CCOR-5 — the in-tx PENDING run INSERT is determined-safe by invarian
     expect(h.workflowRun.create).toHaveBeenCalledTimes(1);
     const runData = (h.workflowRun.create.mock.calls as RunCreateCall[])[0][0]
       .data;
-    expect(runData.idempotencyKey).toBe('ACCESS_REVOKED:g1');
+    expect(runData.idempotencyKey).toBe('ACCESS_REVOKED:g1:0');
     expect(runData.accessGrantId).toBe('g1');
     expect(runData.workflowVersionId).toBe(5);
   });
