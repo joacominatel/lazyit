@@ -351,6 +351,7 @@ function buildForReplay(opts: ReplayHarnessOpts = {}) {
         creates += 1;
         throw new Prisma.PrismaClientKnownRequestError('unique', {
           code: 'P2002',
+          clientVersion: 'test',
         });
       }
       return {
