@@ -22,6 +22,19 @@ auth lands** — when [[0016-auth-strategy-deferred]] is resolved, this ADR is r
 > source of "who is calling" moved to a verified token. The `X-User-Id` header survives **only**
 > under `AUTH_MODE=shim` (dev/test). See [[0038-jit-user-provisioning]] / [[0039-authjs-v5-frontend-oidc]].
 
+> [!note] A THIRD authZ layer now stacks on top — KB folder access control ([[0060-kb-folder-access-control]])
+> Draft visibility (here) and the `article:read` capability ([[0046-roles-permissions-v2]]) are no longer
+> the whole story. [[0060-kb-folder-access-control]] adds a **folder ACL** as a third authorization layer
+> for the KB, and the three **compose most-restrictive-wins**: an article is reachable only if the caller
+> clears the `article:read` capability **and** can see the article's home **Folder** **and** passes the
+> draft rule below (a `DRAFT` stays author-only). The folder layer deliberately **reuses the 404-not-403
+> existence-hiding pattern** decided here: an article hidden by folder access returns **404, never 403**,
+> exactly as a non-author's `DRAFT` does — the server never leaks the existence of an article you may not
+> see. The UI padlock + tooltip is presentation only; the gate is enforced API-first + DB-first (INV-9 in
+> [[INVARIANTS]]). **No-escalation** rides along: you can never alias/share an article you cannot yourself
+> access. None of the draft-visibility *rules* below change — folder access is an additional, orthogonal
+> filter that runs alongside them.
+
 ## Context
 
 KB articles need authorship rules: a `DRAFT` is private to its author, and **only the author** may
@@ -70,4 +83,5 @@ that when auth arrives it slots in **without rewriting the KB**.
   authorization *rules* (draft privacy, author-only writes, `404`-vs-`403`) survive that change.
 
 Related: [[0016-auth-strategy-deferred]] · [[0021-knowledge-base-design]] · [[article]] ·
-[[user]] · [[0018-api-documentation-swagger]]
+[[user]] · [[0018-api-documentation-swagger]] · [[0046-roles-permissions-v2]] ·
+[[0060-kb-folder-access-control]] · [[INVARIANTS]]

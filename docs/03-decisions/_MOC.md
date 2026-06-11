@@ -22,6 +22,15 @@ updated: 2026-06-11
      5 proposed defaults: clone does NOT fire the engine by default, offboarded-manager link kept
      (isOffboarded), manager-only scope, username is a directory handle (never a credential), legajo
      unique-among-live. -->
+<!-- updated 2026-06-11: ADR-0059/0060/0061 — the Knowledge Base v2 + Secret Manager design session.
+     ACCEPTED 2026-06-11 (the decisions stand), but design-only — NO code is built yet. ADR-0059 (KB v2:
+     folders evolved from flat ArticleCategory + aliases/symlinks + article↔article [[slug]] wiki-links +
+     backlinks + bulk .zip import; #364). ADR-0060 (KB access control: the folder is the permission
+     boundary — a deliberate per-folder CARVE-OUT from the per-domain-only rule of ADR-0040/0046; proposes
+     INV-9; #365). ADR-0061 (Secret Manager: zero-knowledge vaults beside the KB — per-user-keypair
+     envelope, Argon2id, DEK wrapped per member, recovery key shown once; a THIRD secret store distinct
+     from the server-decryptable [[workflow-secret]]; new `secret` capability + the INV-8 crypto-exception;
+     proposes INV-10; #366). -->
 
 # Decisions (ADRs) — Map of Content
 
@@ -87,6 +96,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0047-guided-first-deploy-bootstrap]] | Guided, idempotent, non-destructive first-deploy bootstrap (`infra/start.sh`) — a thin wrapper over the env contract + prod compose | accepted |
 | [[0048-service-accounts]] | Service Accounts — a non-human principal with a lazyit-native token + direct permission grants (fail-closed; never a Role/ADMIN); extends ADR-0040/0043/0046 | accepted |
 | [[0049-activated-restraint-ux-direction]] | «Activated Restraint» — design-system activation: motion vocabulary + warm elevation scale + pillar colour family + the AA rule (pillar hue = tint/border/dot/chip, never small text); extends ADR-0011 | accepted |
+| [[0050-user-history-and-activity-user-entity]] | UserHistory append-only log (mirrors AssetHistory, in-transaction) + the User entity in the recent-activity feed (fifth view branch; widens `ActivityEntityType` to `"user"`) | accepted |
 | [[0051-i18n-next-intl]] | i18n with next-intl, cookie-mode (no `/es/` prefix), en + es; Phase 0 plumbing + the section-fan-out convention ([[i18n]]) | accepted |
 | [[0052-ci-parallel-docker-and-decoupled-verify]] | Parallelize CI Docker builds (matrix) + decouple from `verify`; refines [[0027-ci-pipeline]] | accepted |
 | [[0053-async-workers-bullmq-valkey]] | Async workers — BullMQ on Valkey + sandboxed processors (memory-isolated jobs); first job = async `.docx` import (closes SEC-002) | accepted |
@@ -95,6 +105,9 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0056-in-app-notification-bell]] | In-app notification bell (admin-only, v1; #313) — append-only `Notification` + per-admin `NotificationRead` join (fan-out-on-read), closed shared type enum, best-effort post-commit emitters (critical-app/admin-granted/low-stock/manual-task/run-failed), poll delivery (SSE Phase-2 behind the same API), new `notification:read` seeded ADMIN-only; distinct from the `recent_activity` view | accepted |
 | [[0057-retry-fix-and-replay]] | Retry-after-fix vs pinned-version replay (#340) — root-cause of «fix the flow, then retry» replaying the pinned version; ships a `workflow:run`-gated **clone-to-new-run from latest** (Option 3, idempotency-guarded, append-only-clean) **and** a transient INV-6-safe **payload-override** on retry (Option 2); sequence-suffix idempotency key `<trigger>:<grantId>:<n>`, fail-closed double-provision guard; automatic per-attempt retry stays deterministic | **accepted** (2026-06-11) |
 | [[0058-user-manager-and-clone-actions]] | User identity graph (#303) — new `User` fields `legajo` / `username` (live-only partial unique) + a self-referential `managerId` with a `managerName` free-text fallback (at-most-one CHECK, `SetNull`, cycle-guard); the model-first identity layer ADR-0054 §6c deferred. Plus clone-with-chosen-actions (`POST /users/:id/clone`: opt-in assignments/grants + an explicit, safe-by-default workflow-engine fire toggle). Mapper gains an additive `grantee.manager` token (no migration) | **accepted** (2026-06-11) |
+| [[0059-kb-folders-links-and-import]] | Knowledge Base v2 — folders (evolved from flat ArticleCategory) + aliases/symlinks + article↔article `[[slug]]` wiki-links + backlinks + bulk .zip import (extends [[0021-knowledge-base-design]]/[[0042-article-versioning-and-linking]]) | **accepted** (2026-06-11) — design only, #364 |
+| [[0060-kb-folder-access-control]] | KB access control — the **folder** is the permission boundary (deliberate per-folder CARVE-OUT from the per-domain-only rule of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]); default PUBLIC, additive dynamic rules (user/role/app-grant/asset-assignee), composes with draft visibility, ADMIN god-mode, no-escalation, API+DB enforcement | **accepted** (2026-06-11) — design only, #365 |
+| [[0061-secret-manager-zero-knowledge]] | Secret Manager — zero-knowledge vaults beside the KB (per-user-keypair envelope, Argon2id, DEK wrapped per member, peer-reset, recovery key shown once, soft-revoke v1); a THIRD secret store distinct from server-decryptable [[workflow-secret]]; new `secret` capability + INV-8 crypto-exception | **accepted** (2026-06-11) — design only, #366 |
 
 ## Pending ADRs (to write when decided)
 - **CD / image publishing** — deferred in [[0027-ci-pipeline]]; define the registry (GHCR) +

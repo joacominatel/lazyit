@@ -94,6 +94,20 @@ mirror of exactly three project roles — all untouched). What changes is that a
 (in a later wave) ask **"does the actor's role hold permission `X`?"** instead of **"is the actor's
 role in set `{…}`?"**. The role is still the thing a user *has*; permissions are what a role *grants*.
 
+> [!note] One deliberate, bounded carve-out to "never per-record/per-row ACLs" — the KB folder
+> This ADR keeps ADR-0040's rejection of any per-resource permission matrix **in force** (authorization
+> is per-domain; Option B's per-record/per-row ACL stays rejected). [[0060-kb-folder-access-control]] is
+> a single, **explicit exception** — and a narrow one: KB access attaches to a **Folder** (a bounded,
+> named set), **never to individual article rows**, so the "not per-record" spirit is preserved. It is an
+> orthogonal **data-scoping** axis layered *on top of* this unchanged catalog: the `article:read`
+> capability below still gates whether you may act at all; the folder ACL only narrows **which** articles
+> you see. KB documents are inherently access-tiered in a way assets/consumables are not — which is why
+> the carve-out is bounded to the KB and not generalized. A second new ADR,
+> [[0061-secret-manager-zero-knowledge]], **extends this catalog** with a new `secret` capability domain
+> (`secret:read` / `secret:manage`, ADMIN-only by default — same SoD precedent as `workflow:secrets`);
+> note that per-vault **crypto** membership there is a *second, orthogonal* layer the catalog does not
+> express (a capability lets you ENTER; a wrapped DEK lets you DECRYPT). See INV-9 / INV-10 in [[INVARIANTS]].
+
 ### 2. Catalog-as-code — a frozen `Permission` vocabulary in `@lazyit/shared`
 
 The catalog is a **closed zod enum** of `domain:action` literals (`PermissionSchema` /
@@ -276,4 +290,5 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
   dynamic-custom-roles future ADR (Option B).
 
 Related: [[0040-rbac-roles]] · [[0043-zitadel-source-of-truth]] · [[0038-jit-user-provisioning]] ·
+[[0060-kb-folder-access-control]] · [[0061-secret-manager-zero-knowledge]] ·
 [[INVARIANTS]] · [[user]] · [[shared-package]]

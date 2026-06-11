@@ -10,6 +10,16 @@ updated: 2026-05-25
 
 > 🟢 implemented · Area: Knowledge Base · Implementation order: 7
 
+> [!note] Evolving into [[folder]] (KB v2)
+> [[0059-kb-folders-links-and-import]] evolves this **flat** `ArticleCategory` into the hierarchical
+> [[folder]]: a self-ref `parentId` gives a tree, and the existing **required one-category-per-article
+> FK becomes the one home [[folder]] per article**. Folder-name uniqueness becomes per-parent (a
+> live-only PARTIAL unique index — [[0041-soft-delete-reuse-and-restore]]). The folder is also the
+> **access boundary** ([[0060-kb-folder-access-control]]) — a bounded, named data-scoping axis layered
+> on the unchanged `article:read` capability, a deliberate carve-out from the per-record-ACL rejection
+> of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]. The content below describes the current flat
+> model; see [[folder]] for the evolved entity.
+
 ## Purpose
 
 A grouping for knowledge-base [[article]]s — Networking, Servers, Procedures, Troubleshooting, …
@@ -68,6 +78,7 @@ soft-deleted, ordered by `order` then `name`), `GET /article-categories/:id`, `P
 `POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]). Bodies
 validated against the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).
 
-Related: [[article]] · [[asset-category]] · [[shared-package]] ·
-[[0021-knowledge-base-design]] · [[0019-asset-assignment-integrity]] ·
+Related: [[article]] · [[folder]] · [[asset-category]] · [[shared-package]] ·
+[[0021-knowledge-base-design]] · [[0059-kb-folders-links-and-import]] ·
+[[0060-kb-folder-access-control]] · [[0019-asset-assignment-integrity]] ·
 [[0006-soft-delete-and-auditing]] · [[0018-api-documentation-swagger]]
