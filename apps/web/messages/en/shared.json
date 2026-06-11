@@ -161,6 +161,7 @@
     "startTyping": "Start typing to search…",
     "runError": "Couldn't run the search",
     "runErrorDetail": "Couldn't run the search: {message}",
+    "unavailable": "Search is temporarily unavailable. Please try again in a moment.",
     "searching": "Searching…",
     "noResultsFor": "No results for “{query}”.",
     "clearSearch": "Clear search",
