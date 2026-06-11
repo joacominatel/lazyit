@@ -51,15 +51,29 @@ export const CloneUserSchema = z.strictObject({
 /**
  * The PER-ITEM result of a clone (ADR-0058 §4 / the ADR-0030 batch shape). `created` is the freshly
  * minted user (full UserSchema). `skipped` lists the requested assignment/grant ids that were a no-op,
- * each with a short reason ("not_found" — the id wasn't an active row of the source — or
- * "asset_deleted" — the assignment's asset is soft-deleted) so a partial clone is visible, not
- * swallowed. The new user + its mirrored rows commit in ONE transaction; the engine fires AFTER commit.
+ * so a partial clone is visible, not swallowed. The new user + its mirrored rows commit in ONE
+ * transaction; the engine fires AFTER commit.
+ *
+ * Each entry carries:
+ *  - `id` — the REQUESTED assignment/grant id (the operator selected this; the web keys the row by it).
+ *  - `entityId` — the UNDERLYING asset/application id the id resolved to, when known, so the web can
+ *    look up a friendly label from its asset/application catalogs. ABSENT for `not_found` (the id never
+ *    resolved to an active source row, so there is no underlying entity to name).
+ *  - `reason` — a short, web-translated cause. The CLOSED set the API emits (audited for ADR-0058 §4):
+ *      • `not_found`        — the id wasn't an ACTIVE row of the source (not found / not the source's /
+ *                             already released or revoked).
+ *      • `asset_deleted`    — the assignment's asset is soft-deleted (the live-row guard equivalent).
+ *      • `already_in_state` — two selected assignments resolved to the SAME asset; the duplicate is a
+ *                             no-op (the one-active-per-(asset,user) index would reject it anyway).
  */
 export const CloneUserResultSchema = z.object({
   created: UserSchema,
   skipped: z.array(
     z.object({
       id: z.cuid(),
+      // The underlying asset/application id the skipped item resolved to (when known) — the web resolves
+      // a friendly label from it. Omitted when the requested id never matched an active source row.
+      entityId: z.cuid().optional(),
       reason: z.string(),
     }),
   ),
