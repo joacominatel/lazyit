@@ -315,7 +315,20 @@ is defensible; we propose safe-by-default and let the CEO flip it.
     (manager XOR + self/cycle guard, the resolved read descriptor with `isOffboarded`, `MANAGER_CHANGED`
     emission, and `POST /users/:id/clone` with the safe-by-default engine toggle) all shipped with Jest
     coverage. **Still open (separate follow-ups):** the mapper `grantee.manager`/`legajo`/`username`
-    token group + builder catalog, and the web clone wizard / manager picker / `users/[id]` detail.
+    token group + builder catalog.
+  - **Web slice — LANDED (issue #303, `feat/issue-303-users-manager-clone-ui`).** The `@lazyit/shared`
+    payload builders (`toManagerInput` — the manager XOR; `managerDescriptorToFormValue`; `dedupeIds`) with
+    `bun test` coverage, the `cloneUser` API client + `useCloneUser` hook, the create/edit user form's
+    `legajo`/`username` inputs + manager XOR picker (lazyit user · free-text · none), the `users/[id]` detail
+    surfacing the resolved manager (with the "former manager (offboarded)" treatment) + legajo + username,
+    and the **server-orchestrated clone wizard** (a `user:manage`-gated row/detail action: the new user's
+    profile, opt-in checklists of the source's ACTIVE assignments + grants, the `fireWorkflowsOnClonedGrants`
+    toggle with a clear "this will attempt to provision N applications" warning, and a per-item result view
+    showing `created` + the `skipped` reasons). The clone wizard replaces the User's old lightweight in-form
+    clone-as-create (the `cloneUserDefaults` pre-fill path on `UserFormDialog`) — `cloneUserDefaults` itself
+    stays for now but is no longer wired into the User UI. **Open follow-up:** the `users/[id]` read DTO does
+    not expose a user's `reports` ("who reports to me"), so the detail surfaces the manager only; a reports
+    view is separable and needs a backend read.
 
 ## Decision (ratified 2026-06-11)
 
