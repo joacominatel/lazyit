@@ -39,6 +39,48 @@ export type RoleSource = z.infer<typeof RoleSourceSchema>;
 export const EmailSchema = z.string().trim().toLowerCase().pipe(z.email());
 
 /**
+ * A normalized `legajo` for WRITE payloads (ADR-0058). The employee/file number is stored VERBATIM
+ * (lazyit never parses it) but trimmed of surrounding whitespace so " 12345 " and "12345" are the
+ * same value against the LIVE-only partial unique index. Bounded so it can't be an unbounded blob.
+ */
+export const LegajoSchema = z.string().trim().min(1).max(100);
+
+/**
+ * A normalized `username` for WRITE payloads (ADR-0058). A directory/display handle — NORMALIZED the
+ * same way as email (trim + lowercase) so `Ana` and `ana` collide against the LIVE-only partial unique
+ * index. NOT an auth credential and NEVER an account-linking key (that stays email/externalId, INV-2).
+ */
+export const UsernameSchema = z.string().trim().toLowerCase().min(1).max(100);
+
+/**
+ * The READ projection of a User's manager (ADR-0058) — a thin, redaction-safe descriptor resolved from
+ * the FK, NOT the raw `managerId`/`managerName` columns. A discriminated union over `type`:
+ *   - `{ type: "user", … }`     — the manager is a lazyit user. Carries only display fields (id +
+ *     firstName + lastName) and `isOffboarded`: TRUE when the linked manager is soft-deleted, so a
+ *     report whose manager left surfaces "former manager (offboarded)" rather than a dangle or a leak
+ *     of a deleted person's data (decision (b2) / Q2). No email/PII beyond the display name.
+ *   - `{ type: "external", name }` — the free-text fallback (`managerName`), when the manager is not a
+ *     lazyit user.
+ *   - `null`                     — no manager recorded.
+ */
+export const ManagerDescriptorSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("user"),
+    id: z.uuid(),
+    firstName: z.string(),
+    lastName: z.string(),
+    // TRUE when the linked manager is soft-deleted (offboarded). The read layer resolves the FK
+    // through the soft-delete filter and flags this so the UI shows "former manager (offboarded)".
+    isOffboarded: z.boolean(),
+  }),
+  z.object({
+    type: z.literal("external"),
+    name: z.string(),
+  }),
+]);
+export type ManagerDescriptor = z.infer<typeof ManagerDescriptorSchema>;
+
+/**
  * The full User entity as returned by the API. Date fields are ISO-8601 strings (the wire
  * shape): the API serializes Prisma `DateTime`s to strings, and `z.date()` cannot be
  * represented in JSON Schema / OpenAPI (see docs/03-decisions/0018-api-documentation-swagger.md).
@@ -56,16 +98,47 @@ export const UserSchema = z.object({
   roleSource: RoleSourceSchema.optional(),
   // IdP `sub` mapping; null until auth is integrated (no auth yet). See ADR-0016.
   externalId: z.string().nullable(),
+  // Employee/file number (ADR-0058). Stored verbatim; null when not recorded.
+  legajo: z.string().nullable(),
+  // Directory/display handle (ADR-0058); null when not recorded.
+  username: z.string().nullable(),
+  // The resolved manager descriptor (ADR-0058) — NOT the raw managerId/managerName columns. Always
+  // present (null = no manager recorded); a soft-deleted linked manager surfaces isOffboarded=true.
+  manager: ManagerDescriptorSchema.nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
 });
 
 /**
+ * The `manager` INPUT union for create/update (ADR-0058) — the wire mirror of the DB CHECK
+ * `users_manager_at_most_one`. EITHER a linked lazyit user, OR a free-text name, OR `null` (clear) —
+ * never both. A cross-field zod refine (`refineManagerInput`) rejects sending both at once, the same
+ * belt-and-suspenders posture as the grant `expiresAt >= grantedAt` refine.
+ *   - `{ managerId }`   — link to a lazyit user (uuid).
+ *   - `{ managerName }` — the free-text fallback (trimmed, bounded).
+ *   - `null`            — clear / no manager.
+ * Omitting `manager` entirely leaves it unchanged on update (it's optional on the payload).
+ */
+export const ManagerInputSchema = z
+  .object({
+    managerId: z.uuid().optional(),
+    managerName: z.string().trim().min(1).max(200).optional(),
+  })
+  .refine((m) => !(m.managerId !== undefined && m.managerName !== undefined), {
+    error:
+      "A manager is either a lazyit user (managerId) or a free-text name (managerName), never both.",
+  });
+export type ManagerInput = z.infer<typeof ManagerInputSchema>;
+
+/**
  * Payload to create a User. A new user is always active (DB default). `externalId` is intentionally
  * NOT accepted from the client: it is the IdP `sub` linkage (ADR-0016), provisioned server-side when
  * auth is integrated. Letting a caller set it would allow pre-linking a local row to a future
  * federated identity (SEC-006). The strictObject rejects it (and any other unknown key).
+ *
+ * `legajo` / `username` are optional and normalized (ADR-0058). `manager` is the optional input union
+ * above (or `null`); omit it for "no manager".
  */
 export const CreateUserSchema = z.strictObject({
   // Normalized (trim + lowercase) so the stored value matches the citext column (ADR-0041).
@@ -77,6 +150,13 @@ export const CreateUserSchema = z.strictObject({
   // ADMIN-gated by the RolesGuard: a non-admin never reaches this endpoint, so they cannot set or
   // escalate a role. Privilege management is an ADMIN-only operation.
   role: RoleSchema.optional(),
+  // Employee/file number (ADR-0058). Optional + normalized (trim). Unique among LIVE rows (the partial
+  // unique index); a duplicate among live users surfaces as a 409 via the PrismaExceptionFilter.
+  legajo: LegajoSchema.optional(),
+  // Directory/display handle (ADR-0058). Optional + normalized (trim + lowercase). Same live-unique.
+  username: UsernameSchema.optional(),
+  // The manager input union (or null). Omit for "no manager". Cross-field refined above.
+  manager: ManagerInputSchema.nullable().optional(),
 });
 
 /**
@@ -91,6 +171,9 @@ export const CreateUserSchema = z.strictObject({
  * EXISTING Zitadel user (same `sub`/`externalId`) and sets the new address pre-verified, so the change
  * never forces re-verification or breaks the account link. `externalId` is intentionally absent here —
  * the strictObject rejects it (SEC-006), so an admin can never re-point a row at a different identity.
+ *
+ * `legajo` / `username` / `manager` are the ADR-0058 additions: each optional, each cleared by sending
+ * `null` (legajo/username) or `manager: null`; `manager` carries the same input union as create.
  */
 export const UpdateUserSchema = requireAtLeastOneKey(
   z
@@ -106,6 +189,11 @@ export const UpdateUserSchema = requireAtLeastOneKey(
       // RBAC role (ADR-0040). Same ADMIN-gated safety as CreateUserSchema: only an ADMIN can reach
       // the Users controller, so a non-admin can never escalate their own (or anyone's) role.
       role: RoleSchema,
+      // ADR-0058. `null` clears the value; a string is normalized + checked unique-among-live.
+      legajo: LegajoSchema.nullable(),
+      username: UsernameSchema.nullable(),
+      // The manager input union, or `null` to clear. Cross-field refined (never both id + name).
+      manager: ManagerInputSchema.nullable(),
     })
     .partial(),
 );

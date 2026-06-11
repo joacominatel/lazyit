@@ -136,9 +136,34 @@ describe('WorkflowConnectionsService.test — C3', () => {
       captured[0].req.method,
     );
     expect(captured[0].url.href).toBe('https://api.example.com/');
+    // No health path configured ⇒ the probed path is the root.
+    expect(outcome.probedPath).toBe('/');
+    expect(outcome.message).toMatch(/at \//);
     // The credential was revealed in memory only to authenticate the probe.
     expect(revealById).toHaveBeenCalledWith('sec1');
     expect(captured[0].req.headers['authorization']).toBe(`Bearer ${SECRET}`);
+  });
+
+  it('probes the configured healthCheckPath and surfaces it in the outcome (#344)', async () => {
+    const { service, captured } = buildService({
+      status: 200,
+      connection: {
+        kind: 'REST',
+        config: { ...REST_CONFIG, healthCheckPath: '/api/healthz' },
+        secretId: 'sec1',
+      },
+    });
+
+    const outcome = await service.test('c1', REQUEST_ID);
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.probedPath).toBe('/api/healthz');
+    // The message names the path that was hit.
+    expect(outcome.message).toMatch(/\/api\/healthz/);
+    // Still a single READ-ONLY GET against the configured path under the FIXED host.
+    expect(captured).toHaveLength(1);
+    expect(captured[0].req.method).toBe('GET');
+    expect(captured[0].url.href).toBe('https://api.example.com/api/healthz');
   });
 
   it('NEVER echoes the stored secret in the outcome (INV-6)', async () => {

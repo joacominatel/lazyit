@@ -1,3 +1,4 @@
+import type { RetryRunOverrides } from "@lazyit/shared";
 import {
   keepPreviousData,
   useMutation,
@@ -9,6 +10,7 @@ import {
   getWorkflowRun,
   getWorkflowRuns,
   isTerminalRunStatus,
+  replayLatestWorkflowRun,
   retryWorkflowRun,
   type WorkflowDryRunInput,
   type WorkflowRunFilters,
@@ -77,11 +79,42 @@ export function useDryRunWorkflow() {
  * so we invalidate BOTH the run detail (whose poll then resumes until it re-terminates) and any run lists
  * (the recent-runs panel reflects the new status). Errors (409 not-FAILED / 422 no-resolvable-step / a
  * broker hiccup) bubble to the caller, which surfaces them via `notifyError`.
+ *
+ * The OPTIONAL `overrides` (ADR-0057 Option 2) is a request-scoped, NEVER-persisted payload override for
+ * the failed step's mapping (INV-6) — a plain retry omits it and keeps the unchanged behaviour. The
+ * override applies to the NEXT attempt ONLY; it does not edit the definition or fix future runs.
  */
 export function useRetryWorkflowRun() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => retryWorkflowRun(id),
+    mutationFn: ({
+      id,
+      overrides,
+    }: {
+      id: string;
+      overrides?: RetryRunOverrides;
+    }) => retryWorkflowRun(id, overrides),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({
+        queryKey: workflowRunKeys.detail(result.runId),
+      });
+      queryClient.invalidateQueries({ queryKey: workflowRunKeys.all });
+    },
+  });
+}
+
+/**
+ * Clone-to-new-run from the LATEST workflow version (`POST /workflow-runs/:id/replay-latest`, ADR-0057
+ * Option 3). Gated `workflow:run` at the API (the real gate). A FRESH run is created on the current
+ * version for the same grant; the source FAILED run stays immutable. On success we invalidate the run
+ * lists (the recent-runs panel gains the new run) and the NEW run's detail (so its poll is primed); the
+ * caller navigates to `result.runId`. Errors (409 source not-FAILED / 422 fail-closed double-provision
+ * guard → re-grant / a broker hiccup) bubble to the caller, which surfaces them via `notifyError`.
+ */
+export function useReplayLatestWorkflowRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => replayLatestWorkflowRun(id),
     onSuccess: (result) => {
       queryClient.invalidateQueries({
         queryKey: workflowRunKeys.detail(result.runId),

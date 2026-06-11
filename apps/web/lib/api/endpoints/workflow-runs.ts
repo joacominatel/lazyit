@@ -1,6 +1,9 @@
 import type {
   ManualInputField,
   Page,
+  ReplayLatestResponse,
+  RetryRunOverrides,
+  RetryRunResponse,
   WorkflowRun,
   WorkflowRunStatus,
   WorkflowStepRunStatus,
@@ -47,8 +50,15 @@ export interface WorkflowTransitionTaken {
 /**
  * One step ATTEMPT in a run's traversed graph (`GET /workflow-runs/:id` → `steps[]`), ordered by
  * attempt. Richer than the shared `WorkflowStepRun`: it adds the resolved `durationMs`/`statusCode`/
- * `errorClass`, the `transitionTaken` edge, and the escalation/compensation linkage the run timeline
- * draws. Nullable fields are absent until/unless the engine records them.
+ * `errorClass`, the request SHAPE (`method`/`targetHost`/`mappedFields`), the `transitionTaken` edge,
+ * and the escalation/compensation linkage the run timeline draws. Nullable fields are absent
+ * until/unless the engine records them.
+ *
+ * Every field here is the engine's REDACTED projection (INV-6 / ADR-0031): `targetHost` is the host
+ * ONLY (never the full URL with query), `mappedFields` are the field NAMES only (never their values),
+ * `method` is bounded to the HTTP-method set, and no request/response BODY is ever carried — the API
+ * does not persist or return one by design. The UI renders only what the API returns and NEVER
+ * un-redacts.
  */
 export interface WorkflowRunStep {
   id: number;
@@ -59,14 +69,18 @@ export interface WorkflowRunStep {
   externalCorrelationId: string | null;
   durationMs: number | null;
   statusCode: number | null;
+  /** The request method (bounded to the HTTP-method set), for a REST / WEBHOOK_OUT step. */
+  method: string | null;
+  /** The target HOST only — never the full URL with its query (which could carry a secret). */
+  targetHost: string | null;
   errorClass: string | null;
+  /** The NAMES of the fields the step mapped into its payload — never their values (INV-6). */
+  mappedFields: string[];
   transitionTaken: WorkflowTransitionTaken | null;
   /** The ManualTask an ESCALATE edge opened (link to the inbox), if any. */
   manualTaskId: string | null;
   /** The step a COMPENSATE edge ran, if any. */
   compensationStepKey: string | null;
-  /** Redacted outcome metadata only (never bodies/secrets/PII). */
-  metadata: Record<string, unknown> | null;
   createdAt: string;
 }
 
@@ -108,24 +122,51 @@ export function getWorkflowRun(id: string): Promise<WorkflowRunDetail> {
   return apiFetch<WorkflowRunDetail>(`${BASE}/${id}`);
 }
 
-/** The result of a manual retry — the resumed run + the step the re-run picked up from. */
-export interface WorkflowRunRetryResult {
-  ok: boolean;
-  runId: string;
-  /** The step key the re-run resumes from (the one that had failed). */
-  resumeStepKey: string;
-  /** The append-only attempt number that failed step re-executes as. */
-  attempt: number;
-}
+/**
+ * The result of a manual retry — the resumed run + the step the re-run picked up from. Mirrors the
+ * shared {@link RetryRunResponse} contract (ADR-0057): no override value is ever echoed back (INV-6).
+ */
+export type WorkflowRunRetryResult = RetryRunResponse;
 
 /**
  * Manually retry a terminal FAILED run from the step that failed onward (`POST /workflow-runs/:id/retry`,
  * issue #308). RESUME-FROM-FAILED-STEP, not a full re-run: already-SUCCEEDED steps are NOT re-executed
  * (no double-provision). Gated `workflow:run`. The API rejects a non-FAILED run with a 409 and a run with
  * no resolvable failed step with a 422 — the caller surfaces those via `notifyError`.
+ *
+ * `overrides` (ADR-0057 Option 2) is an OPTIONAL, request-scoped payload override patched into the failed
+ * step's data mapping for the NEXT attempt only — applied for one render and then DISCARDED, NEVER
+ * persisted (INV-6). A plain retry omits it entirely and keeps the unchanged resume-from-failed-step
+ * behaviour. The override does NOT edit the workflow definition and does NOT fix future runs.
  */
-export function retryWorkflowRun(id: string): Promise<WorkflowRunRetryResult> {
+export function retryWorkflowRun(
+  id: string,
+  overrides?: RetryRunOverrides,
+): Promise<WorkflowRunRetryResult> {
+  // A plain retry sends NO body (the bodyless resume-from-failed-step path). Only attach `overrides`
+  // when the operator actually supplied at least one field, matching the shared RetryRunRequestSchema.
+  const hasOverrides = overrides != null && Object.keys(overrides).length > 0;
   return apiFetch<WorkflowRunRetryResult>(`${BASE}/${id}/retry`, {
+    method: "POST",
+    ...(hasOverrides ? { body: { overrides } } : {}),
+  });
+}
+
+/** The result of a replay-latest clone — the NEW run on the latest version + the lineage breadcrumb. */
+export type WorkflowRunReplayResult = ReplayLatestResponse;
+
+/**
+ * Clone-to-new-run from the LATEST workflow version (`POST /workflow-runs/:id/replay-latest`, ADR-0057
+ * Option 3). Leaves the source FAILED run immutable and starts a FRESH run on the current version for the
+ * same grant, beginning at the entry node — it adopts an edited definition the pinned-version retry can
+ * never see. Gated `workflow:run`. The API rejects a non-FAILED source run with a 409 and refuses
+ * (FAIL-CLOSED, 422) when the run already SUCCEEDED a non-idempotent create on/before the failed step —
+ * the operator must RE-GRANT instead. The caller navigates to the returned `runId` (the new run).
+ */
+export function replayLatestWorkflowRun(
+  id: string,
+): Promise<WorkflowRunReplayResult> {
+  return apiFetch<WorkflowRunReplayResult>(`${BASE}/${id}/replay-latest`, {
     method: "POST",
   });
 }

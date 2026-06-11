@@ -65,6 +65,7 @@ describe('ConfigController', () => {
         integrationMode: 'zitadel',
         devMode: true,
         csrfToken: 'tok',
+        requiresAdminPassword: true,
       }),
       issueCsrfToken: jest.fn().mockReturnValue('fresh-token'),
       setup: jest.fn().mockResolvedValue(OUTCOME),

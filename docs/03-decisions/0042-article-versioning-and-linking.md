@@ -219,7 +219,11 @@ request, no filter, no paging. For a large KB linked to one ERP/app that doesn't
   - Storage grows by a full row per edit (fine at this scale; revisit if a hot article churns).
   - The version write doubles each KB mutation into a transaction (negligible at this scale).
   - **No rollback-to-version** and **no UI** yet (frontend KB version/link UI is a later wave).
-  - Linking is asset/application only — no article↔article or article↔location links.
+  - Linking is asset/application only — no article↔article or article↔location links. **Resolved
+    for article↔article (2026-06-11, [[0059-kb-folders-links-and-import]]):** `[[slug]]` wiki-links
+    + backlinks ship as a **separate** materialized edge ([[article-wiki-link]]), distinct from this
+    `ArticleLink` IT-native (article↔asset/application) join — see the open-question resolution below.
+    article↔location remains deferred.
   - `ArticleLink` has no soft delete by design (it is current-state, not auditable history); if an
     audit trail of link changes is ever needed it becomes an append-only ledger (a later ADR).
 
@@ -227,6 +231,11 @@ request, no filter, no paging. For a large KB linked to one ERP/app that doesn't
 
 - **Restore-to-version** — replay a past `ArticleVersion` onto the live article (writes a new
   version)? Deferred.
+- ~~**Article↔article links**~~ **Resolved (2026-06-11, [[0059-kb-folders-links-and-import]]):**
+  this ADR scoped linking to asset/application and explicitly deferred article↔article. [[0059]]
+  ships it as a **distinct** model — materialized [[article-wiki-link]] edges computed from `[[slug]]`
+  on save (powering **backlinks** + fast resolution) plus nav-only [[article-alias]] symlinks — **not**
+  an extension of `ArticleLink` (which stays the IT-native article↔asset/application join). article↔location is still deferred.
 - **Retention** — cap/prune very old versions? Not for now (append-only, keep everything).
 - ~~**Reverse link list for applications** — `GET /applications/:id/articles`~~ **Resolved
   (2026-06-01, ADR-0030 amendment):** the application reverse lookup shipped, symmetric to the asset
@@ -235,7 +244,9 @@ request, no filter, no paging. For a large KB linked to one ERP/app that doesn't
   `categoryId` filters.
 
 Related: [[article]] · [[article-version]] · [[article-link]] · [[asset-history]] ·
-[[0021-knowledge-base-design]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
+[[0021-knowledge-base-design]] · [[0059-kb-folders-links-and-import]] ·
+[[0060-kb-folder-access-control]] · [[article-wiki-link]] · [[article-alias]] · [[folder]] ·
+[[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
 [[0030-list-pagination-contract]] · [[0035-search-architecture]] ·
 [[0022-draft-visibility-auth-shim]] · [[0040-rbac-roles]] ·
 [[0041-soft-delete-reuse-and-restore]]

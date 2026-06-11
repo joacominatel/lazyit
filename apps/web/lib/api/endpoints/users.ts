@@ -1,6 +1,8 @@
 import type {
   AccessGrant,
   AssetAssignment,
+  CloneUser,
+  CloneUserResult,
   CreateUser,
   Page,
   UpdateUser,
@@ -61,6 +63,23 @@ export const getUser = users.get;
 export const createUser = users.create;
 export const updateUser = users.update;
 export const deleteUser = users.remove;
+
+/**
+ * Clone a user with chosen actions (`POST /users/:id/clone`, `user:manage` — ADR-0058). `sourceId` is
+ * the template (must be live); the body mints a NEW user (`profile`) and opt-in mirrors the source's
+ * selected ACTIVE asset assignments + access grants as new append-only rows. `fireWorkflowsOnClonedGrants`
+ * (default false in the schema) decides whether cloned grants fire the workflow engine. Resolves to the
+ * per-item result so the caller can surface the created user + the `skipped` list with reasons.
+ */
+export function cloneUser(
+  sourceId: string,
+  body: CloneUser,
+): Promise<CloneUserResult> {
+  return apiFetch<CloneUserResult>(`${BASE}/${sourceId}/clone`, {
+    method: "POST",
+    body,
+  });
+}
 
 /**
  * What an offboarding reclaimed/revoked — the `POST /users/:id/offboard` (and `DELETE /users/:id`)

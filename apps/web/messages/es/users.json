@@ -65,8 +65,17 @@
       "email": "Correo",
       "status": "Estado",
       "role": "Rol",
+      "legajo": "Legajo",
+      "username": "Nombre de usuario",
+      "manager": "Responsable",
       "joined": "Ingreso",
       "lastUpdated": "Última actualización"
+    },
+    "fieldEmpty": "—",
+    "managerField": {
+      "none": "Sin responsable",
+      "external": "externo",
+      "offboarded": "Exresponsable (dado de baja)"
     },
     "assets": {
       "title": "Activos en posesión",
@@ -107,6 +116,26 @@
     "lastName": "Apellido",
     "email": "Correo",
     "emailHelp": "La clave de vinculación de la cuenta con el proveedor de identidad. Debe ser única; un cambio se refleja en el proveedor de identidad.",
+    "legajo": "Legajo",
+    "legajoPlaceholder": "ej. 10293",
+    "legajoHelp": "Opcional. El número de legajo/ficha de nómina o RR. HH. Debe ser único entre los usuarios activos.",
+    "username": "Nombre de usuario",
+    "usernamePlaceholder": "ej. ada.lovelace",
+    "usernameHelp": "Identificador de directorio opcional, distinto del correo. No es una credencial de inicio de sesión. Debe ser único entre los usuarios activos.",
+    "manager": {
+      "label": "Responsable",
+      "help": "Opcional. Un usuario de lazyit o un nombre libre — no ambos.",
+      "kind": {
+        "none": "Sin responsable",
+        "user": "Un usuario de lazyit",
+        "external": "Un nombre (no es usuario de lazyit)"
+      },
+      "userPlaceholder": "Selecciona al responsable…",
+      "userSearchPlaceholder": "Buscar usuarios…",
+      "userEmpty": "No hay usuarios coincidentes.",
+      "externalLabel": "Nombre del responsable",
+      "externalPlaceholder": "ej. Ana Pérez (RR. HH.)"
+    },
     "active": "Activo",
     "activeHelp": "Los usuarios inactivos se conservan para el historial, pero se tratan como dados de baja — ya no pueden recibir activos asignados.",
     "saveChanges": "Guardar cambios",
@@ -116,6 +145,54 @@
       "created": "Usuario creado",
       "updateError": "No se pudo actualizar el usuario",
       "createError": "No se pudo crear el usuario"
+    }
+  },
+  "clone": {
+    "action": "Clonar",
+    "title": "Clonar a {name}",
+    "description": "Crea un usuario nuevo reflejando el acceso de esta persona. Elige qué activos y aplicaciones se trasladan.",
+    "emailHelp": "Una dirección nueva y única para el usuario nuevo — nunca la del origen.",
+    "role": "Rol",
+    "roleLabels": {
+      "ADMIN": "Administrador",
+      "MEMBER": "Miembro",
+      "VIEWER": "Lector"
+    },
+    "loading": "Cargando…",
+    "sections": {
+      "profile": "Usuario nuevo",
+      "assets": "Activos a trasladar",
+      "access": "Acceso a aplicaciones a trasladar"
+    },
+    "assets": {
+      "empty": "Esta persona no tiene activos para trasladar.",
+      "assetFallback": "Activo",
+      "assignedOn": "Asignado {date}"
+    },
+    "access": {
+      "empty": "Esta persona no tiene acceso activo a aplicaciones para trasladar.",
+      "applicationFallback": "Aplicación"
+    },
+    "fire": {
+      "label": "Aprovisionar al usuario nuevo en estas aplicaciones",
+      "help": "Desactivado por defecto: el acceso clonado solo se registra. Actívalo para ejecutar los flujos de aprovisionamiento.",
+      "warning": "Esto intentará aprovisionar {count, plural, =1 {# aplicación} other {# aplicaciones}} para el usuario nuevo."
+    },
+    "submit": "Clonar usuario",
+    "viewUser": "Abrir usuario nuevo",
+    "toast": {
+      "created": "{name} creado a partir del clon",
+      "error": "No se pudo clonar el usuario"
+    },
+    "result": {
+      "createdTitle": "Usuario nuevo creado",
+      "skippedTitle": "{count, plural, =1 {Se omitió # elemento} other {Se omitieron # elementos}}",
+      "noneSkipped": "Todo lo que seleccionaste se trasladó.",
+      "openLink": "Abrir el perfil del usuario nuevo",
+      "reasons": {
+        "not_found": "Ya no es una fila activa del origen",
+        "asset_deleted": "El activo fue eliminado"
+      }
     }
   },
   "role": {

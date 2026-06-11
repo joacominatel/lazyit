@@ -1,5 +1,9 @@
 import { Test } from '@nestjs/testing';
-import { ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { getLoggerToken, PinoLogger } from 'nestjs-pino';
 import { ConfigService } from './config.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -23,6 +27,7 @@ type PrismaUserMock = {
   count: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  delete: jest.Mock;
 };
 
 type IdpMock = {
@@ -64,6 +69,9 @@ const SETUP_INPUT = {
   email: 'admin@example.com',
   firstName: 'Ada',
   lastName: 'Lovelace',
+  // Bundled-Zitadel posture is the default mock (supportsManagement=true), so the wizard supplies the
+  // initial password (issue #335). The BYOI tests below drop it explicitly.
+  password: 'Abcdef1!',
 };
 
 describe('ConfigService', () => {
@@ -82,6 +90,7 @@ describe('ConfigService', () => {
       count: jest.fn().mockResolvedValue(0),
       create: jest.fn().mockResolvedValue(makeAdminRow()),
       update: jest.fn(),
+      delete: jest.fn().mockResolvedValue(makeAdminRow()),
     };
     const prisma = { user };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
@@ -131,6 +140,16 @@ describe('ConfigService', () => {
       expect(status.csrfToken.length).toBeGreaterThan(0);
     });
 
+    it('requiresAdminPassword mirrors idp.supportsManagement (issue #335)', async () => {
+      // Bundled Zitadel (management supported) → the wizard must collect an initial password.
+      idp.supportsManagement = true;
+      expect((await service.getStatus()).requiresAdminPassword).toBe(true);
+
+      // BYOI / generic-OIDC (no management) → the operator's IdP owns the credential, no password.
+      idp.supportsManagement = false;
+      expect((await service.getStatus()).requiresAdminPassword).toBe(false);
+    });
+
     it('reports configured once an ADMIN exists', async () => {
       user.count.mockResolvedValue(2);
       const status = await service.getStatus();
@@ -176,8 +195,14 @@ describe('ConfigService', () => {
           role: 'ADMIN',
         },
       });
+      // The wizard-chosen password is threaded through to the IdP so Zitadel creates the user active
+      // (changeRequired:false) — issue #335.
       expect(idp.createUser).toHaveBeenCalledWith(
-        expect.objectContaining({ role: 'ADMIN', email: 'admin@example.com' }),
+        expect.objectContaining({
+          role: 'ADMIN',
+          email: 'admin@example.com',
+          password: 'Abcdef1!',
+        }),
       );
       // The mirror landed → the local ADMIN row is UPDATED to LINK the IdP-returned externalId.
       // This is the load-bearing assertion: setup must write the externalId back onto the first
@@ -223,30 +248,46 @@ describe('ConfigService', () => {
       );
     });
 
-    it('degrades to a local-only ADMIN (mirrored=false, not a hard block) when the IdP mirror fails', async () => {
+    it('400s when management is supported but no password is given (before creating any row) — issue #335', async () => {
+      user.count.mockResolvedValue(0);
+      idp.supportsManagement = true;
+      const { password: _password, ...noPassword } = SETUP_INPUT;
+
+      await expect(
+        service.setup(noPassword, '203.0.113.7'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      // The 400 fires BEFORE the DB write and BEFORE any IdP call.
+      expect(user.create).not.toHaveBeenCalled();
+      expect(idp.createUser).not.toHaveBeenCalled();
+    });
+
+    it('compensates (deletes the local row) + 503s when the IdP mirror fails — NO local-only ADMIN (issue #335)', async () => {
       user.count.mockResolvedValue(0);
       idp.createUser.mockRejectedValue(
         new Error('Zitadel management not configured'),
       );
 
-      const outcome = await service.setup(SETUP_INPUT, '203.0.113.7');
+      await expect(
+        service.setup(SETUP_INPUT, '203.0.113.7'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
 
-      // The local ADMIN was kept (no compensation/delete) and reported local-only.
-      expect(outcome.mirrored).toBe(false);
-      expect(outcome.adminId).toBe(makeAdminRow().id);
-      // A warn was logged; no error/throw.
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ op: 'setup', email: 'admin@example.com' }),
-        expect.stringContaining('IdP mirror failed'),
-      );
-      expect(search.upsert).toHaveBeenCalled();
+      // The just-created local ADMIN was rolled back (hard delete) so nothing is left behind — there
+      // is no loggable local-only ADMIN on the bundled path.
+      expect(user.delete).toHaveBeenCalledWith({
+        where: { id: makeAdminRow().id },
+      });
+      // No success-path search sync ran for the (now-deleted) admin.
+      expect(search.upsert).not.toHaveBeenCalled();
     });
 
-    it('creates a local-only ADMIN without an IdP call under BYOI (generic-oidc, no management)', async () => {
+    it('creates a local-only ADMIN without an IdP call (or a password) under BYOI (generic-oidc, no management)', async () => {
       user.count.mockResolvedValue(0);
       idp.supportsManagement = false;
+      // BYOI sends no password — the operator's own IdP owns the credential.
+      const { password: _password, ...noPassword } = SETUP_INPUT;
 
-      const outcome = await service.setup(SETUP_INPUT, '203.0.113.7');
+      const outcome = await service.setup(noPassword, '203.0.113.7');
 
       expect(idp.createUser).not.toHaveBeenCalled();
       expect(outcome.mirrored).toBe(false);

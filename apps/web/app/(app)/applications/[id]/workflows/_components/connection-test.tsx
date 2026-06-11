@@ -63,6 +63,13 @@ export function ConnectionTest({ connectionId }: { connectionId: string }) {
                 {t("connectionTest.httpStatus", { status: result.status })}
               </span>
             ) : null}
+            {/* #344: surface WHICH path the probe hit (the configured health path, or /). SEC-A5:
+                the path comes from the API (already non-secret) and is rendered as escaped text. */}
+            {result.probedPath ? (
+              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                {t("connectionTest.probedPath", { path: result.probedPath })}
+              </code>
+            ) : null}
           </div>
           {/* SEC-A5: the API message is rendered as escaped text only. */}
           <p className="text-sm break-words">{result.message}</p>

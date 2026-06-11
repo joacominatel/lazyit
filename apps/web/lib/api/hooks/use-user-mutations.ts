@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { CreateUser, Role, UpdateUser } from "@lazyit/shared";
+import type { CloneUser, CreateUser, Role, UpdateUser } from "@lazyit/shared";
 import { applicationKeys } from "./use-applications";
 import { assetKeys } from "./use-assets";
 import {
+  cloneUser,
   createUser,
   deleteUser,
   offboardUser,
@@ -24,6 +25,28 @@ export function useCreateUser() {
   return useMutation({
     mutationFn: (data: CreateUser) => createUser(data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: userKeys.all }),
+  });
+}
+
+/**
+ * Clone a user with chosen actions (`POST /users/:id/clone`, `user:manage` — ADR-0058). The heavier,
+ * server-orchestrated sibling of the in-form clone pre-fill: it mints a NEW user AND mirrors the
+ * source's selected active assignments + grants in one transaction, optionally firing the workflow
+ * engine on the cloned grants. Invalidates more than a plain create — besides the users cache (the new
+ * user joins the directory), it invalidates the assets and applications caches because the clone opens
+ * new assignments + grants those screens must reflect. Toasts, the result view and navigation stay with
+ * the calling component; this only keeps the cache coherent.
+ */
+export function useCloneUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sourceId, body }: { sourceId: string; body: CloneUser }) =>
+      cloneUser(sourceId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: userKeys.all });
+      queryClient.invalidateQueries({ queryKey: assetKeys.all });
+      queryClient.invalidateQueries({ queryKey: applicationKeys.all });
+    },
   });
 }
 

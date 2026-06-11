@@ -201,7 +201,9 @@ always leave exactly one administrator.
 the `RolePermission` **database rows**, never from a token claim — the same DB-first rule as roles
 (INV-1). The **ADMIN permission set is immutable/full** (the complete catalog): it is never editable,
 so an ADMIN is always omnipotent and the last-admin / first-admin invariants (INV-7 + the ADR-0040
-last-admin guard) stay intact. Permissions are **lazyit-local** — they are NEVER mirrored to the IdP;
+last-admin guard) stay intact. ADMIN omnipotence is over **authorization / visibility** only — see
+**INV-10** for the deliberate cryptographic exception where even an ADMIN cannot decrypt a zero-knowledge
+[[secret-vault]] they are not a crypto member of (capability ≠ cryptographic access). Permissions are **lazyit-local** — they are NEVER mirrored to the IdP;
 only the three coarse roles keep their `grantRole` write-back ([[0043-zitadel-source-of-truth]] §3).
 
 **Why.** Permissions are an authorization source, so a forged/misconfigured token must not be able to
@@ -359,8 +361,73 @@ never be blamed for a bot's action (or vice-versa). The DB CHECK is the guarante
   `users`; the CHECK + partial-unique index are verified against a throwaway PG18 in the migration's commit
   message.
 
+## INV-9 — KB folder access is enforced at the API + DB layer, never UI-only; no privilege escalation via alias/share
+
+**Rule.** Knowledge-Base access is gated by the article's home **Folder** ([[0060-kb-folder-access-control]]):
+which articles a caller may read is evaluated **DB-first at the API layer** and enforced at the **DB layer**,
+**never UI-only**. The padlock + tooltip in the UI is presentation; the authoritative decision is the
+server's. A folder-hidden article returns **404, not 403** — reusing the [[0022-draft-visibility-auth-shim]]
+existence-hiding pattern, so the server never leaks the existence of an article you may not see. This is a
+**bounded carve-out** to the "never per-record/per-row ACL" rejection ([[0040-rbac-roles]] /
+[[0046-roles-permissions-v2]]): access attaches to a **Folder** (a bounded, named set), **never to individual
+article rows**, and is a **second, orthogonal data-scoping axis** layered on the unchanged role→permission
+catalog — the `article:read` capability still gates whether you may act at all; the folder ACL only narrows
+**which** articles you see. The folder ACL **composes most-restrictive-wins** with draft visibility and
+`article:read`. **No-escalation:** you can **never alias or share** an article you cannot yourself access
+(an [[article-alias]] never widens access; INV-8 ADMIN omnipotence over visibility is consistent and intact).
+
+**Why.** KB documents are inherently access-tiered in a way assets/consumables are not, so the KB needs a
+data-scoping axis the flat per-domain catalog cannot express — but scoping to a **folder** (not a row) keeps
+the per-domain authorization model's spirit. UI-only hiding would be trivially bypassable via the API; 404
+(not 403) keeps a hidden article's existence secret; the no-escalation rule stops a permitted reader from
+laundering access to a folder they cannot see.
+
+**Where enforced.**
+- **Future** `apps/api/src/articles/**` — a folder-ACL guard/filter resolves the caller's visible folders
+  DB-first and 404s a folder-hidden article (existence-hiding), composing most-restrictive-wins with the
+  draft rule ([[0022-draft-visibility-auth-shim]]) and `article:read`; alias/share creation rejects any
+  target the caller cannot itself access (no-escalation).
+- **Future** DB constraints — folder-name uniqueness within a parent as a live-only PARTIAL unique index
+  (ADR-0041); the folder-access membership/scope enforced at the DB layer, not the client.
+- Decision + data model: [[0060-kb-folder-access-control]], [[folder]], [[article-alias]].
+
+## INV-10 — Secret Manager values are zero-knowledge; the server can never decrypt a secret value
+
+**Rule.** Secret Manager values ([[0061-secret-manager-zero-knowledge]]) are **zero-knowledge**: the server
+**never holds a key that decrypts a secret VALUE**. There is **no server-side `reveal()`** and **no env
+master key over values** — a [[secret-item]] persists ONLY ciphertext/iv/authTag/keyVersion encrypted under
+the vault **DEK**, which is itself **never stored in clear** (only per-member copies wrapped to each
+member's public key exist, [[vault-membership]]). Granting access **wraps the DEK to a member's public key**
+([[user-keypair]]) — there is **no grant-what-you-can't-read**. The **recovery key**
+(`XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`) and the unwrapped private key are shown/derived **once** and are **never
+logged or persisted in clear** ([[0031-logging-strategy]]). This is a deliberate, sharp **exception to INV-8**
+(ADMIN-omnipotent): ADMIN god-mode is over **authorization/visibility**, **never cryptographic plaintext** —
+there is no plaintext for a capability to unlock, so no `secret:manage` holder (ADMIN included) can read a
+value they were not cryptographically granted. The new `secret` capability domain (`secret:read` /
+`secret:manage`, [[0046-roles-permissions-v2]]) is the *authorization* layer (lets you ENTER); per-vault
+crypto membership is a **second, orthogonal** layer (a wrapped DEK lets you DECRYPT). This is a distinct
+crypto/threat model from the **server-decryptable** [[workflow-secret]] (ADR-0054), which is decryptable by
+design so connectors authenticate at run time — an accepted extra crypto code path to audit.
+
+**Why.** A self-hosted secret store for credentials must survive a full server/DB compromise without leaking
+plaintext, so the server is deliberately kept incapable of decryption — a stricter bar than the workflow
+connector secrets, which *must* be server-readable to run. Excluding ADMIN from secret values is the price of
+zero-knowledge: capability authorization is not cryptographic access, and there is no plaintext for INV-8 to
+reach.
+
+**Where enforced.**
+- **Future** `apps/api/src/secret-manager/**` — stores ONLY wrapped/encrypted blobs (vault DEK never in
+  clear; values as ciphertext/iv/authTag/keyVersion mirroring the [[workflow-secret]] column shape); exposes
+  **no `reveal()`** and no server-side value decryption. Granting writes a DEK **wrapped to the grantee's
+  public key**; a caller can never grant a vault they are not themselves a crypto member of.
+- **Future** `apps/api/prisma/schema.prisma` — [[secret-vault]] / [[secret-item]] / [[vault-membership]] /
+  [[user-keypair]]: crypto columns are write-only on the API, redacted on read, never returned; plaintext
+  keys/values/passwords/recovery-keys are NEVER persisted or logged ([[0031-logging-strategy]]).
+- Decision + data model: [[0061-secret-manager-zero-knowledge]].
+
 ---
 
 Related: [[0043-zitadel-source-of-truth]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] ·
+[[0060-kb-folder-access-control]] · [[0061-secret-manager-zero-knowledge]] · [[0031-logging-strategy]] ·
 [[auth-zitadel-sot]] · [[0038-jit-user-provisioning]] · [[0040-rbac-roles]] ·
 [[0041-soft-delete-reuse-and-restore]] · [[0028-secrets-and-config]] · [[deferred]] · [[summary]] · [[_MOC]]

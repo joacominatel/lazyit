@@ -36,9 +36,34 @@ model User {
   // Maps to the IdP `sub` once auth is integrated; null until then (no auth yet).
   // Nullable + unique: many users may be unlinked, but a linked sub is 1:1. See ADR-0016.
   externalId String?   @unique
+  // Employee/file number (LATAM payroll/HR) — ADR-0058. Optional; stored verbatim (trim on write).
+  // UNIQUE among LIVE rows only via a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL in the
+  // migration, no `@unique`), so a soft-deleted user frees its legajo for reuse/restore, exactly like
+  // `email` (ADR-0041). lazyit never parses it.
+  legajo      String?
+  // Human-facing directory/display handle distinct from email/externalId — ADR-0058. Optional.
+  // Normalized on write (trim + lowercase, like email) so `Ana`/`ana` collide. Same LIVE-only partial
+  // unique index. NOT an auth credential (auth stays the IdP's job, ADR-0016/0043) and NEVER an
+  // account-linking key (that stays email/externalId, INV-2) — a directory/display field only.
+  username    String?
+  // Manager when they ARE a lazyit user — ADR-0058. Self-FK → User, onDelete: SetNull (a hard delete
+  // never blocks/dangles; soft delete is an UPDATE deletedAt and never fires onDelete, so a report keeps
+  // pointing at a soft-deleted manager — the read layer surfaces that as isOffboarded, never a dangle).
+  // Mutually exclusive with `managerName`: a DB CHECK `users_manager_at_most_one` enforces at-most-one
+  // (both-null = "no manager recorded"), mirroring the at-most-one-actor CHECKs (ADR-0048). A DB CHECK
+  // `users_manager_not_self` forbids managerId = id; the SERVICE additionally rejects a cycle (DFS up).
+  managerId   String?   @db.Uuid
+  manager     User?     @relation("UserManager", fields: [managerId], references: [id], onDelete: SetNull)
+  // Free-text fallback when the manager is NOT a lazyit user — ADR-0058 (the manager is in HR's system,
+  // not IT's). Normalized (trim). Mutually exclusive with `managerId`.
+  managerName String?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   deletedAt  DateTime?
+
+  // Direct reports — the inverse of the `manager` self-relation (ADR-0058). A user has many reports;
+  // each report's `managerId` points back here. No cascade behaviour beyond the FK's SetNull above.
+  reports User[] @relation("UserManager")
 
   // Asset ownership over time (three roles: owner, who-assigned, who-released). See AssetAssignment.
   assignments         AssetAssignment[] @relation("AssignmentOwner")
@@ -550,12 +575,15 @@ model UserHistory {
 
 /// The discrete user-lifecycle events recorded in UserHistory (DEBT-2, issue #185). CREATED on
 /// provisioning, UPDATED on a name/email edit, ROLE_CHANGED on an RBAC role change (payload { from,
-/// to }), DELETED on offboard (soft delete), RESTORED on re-onboard, PASSWORD_RESET_SENT when an
-/// IdP reset link is requested. Mirrors AssetHistoryEventType's CREATED/UPDATED/DELETED/RESTORED set.
+/// to }), MANAGER_CHANGED on a manager change (payload { from, to } — each side a user-id, an
+/// external-name string, or null; ADR-0058), DELETED on offboard (soft delete), RESTORED on
+/// re-onboard, PASSWORD_RESET_SENT when an IdP reset link is requested. Mirrors AssetHistoryEventType's
+/// CREATED/UPDATED/DELETED/RESTORED set.
 enum UserHistoryEventType {
   CREATED
   UPDATED
   ROLE_CHANGED
+  MANAGER_CHANGED
   DELETED
   RESTORED
   PASSWORD_RESET_SENT
@@ -1168,8 +1196,18 @@ model WorkflowRun {
   accessGrantId              String?
   accessGrant                AccessGrant?        @relation(fields: [accessGrantId], references: [id], onDelete: Restrict)
   // The dedup key, UNIQUE (full unique — this table has no soft delete, so no ghost-row concern).
-  // "<trigger>:<accessGrantId>" for grant-derived triggers → exactly one run per grant event.
+  // "<trigger>:<accessGrantId>:<replaySeq>" (ADR-0057): the natural grant run is seq 0, each manual
+  // replay-latest increments the suffix → exactly one run per (grant event, replay). Existing pre-0057
+  // rows are backfilled to the `:0` form in the migration so the format is uniform.
   idempotencyKey             String              @unique
+  // The replay sequence within (trigger, accessGrantId) — 0 for the organic grant-derived run, N for the
+  // Nth manual clone-to-new-run (ADR-0057 Option 3). Part of `idempotencyKey`; surfaced for the lineage.
+  replaySeq                  Int                 @default(0)
+  // Lineage (ADR-0057): the parent run a replay-latest cloned FROM. Self-FK, nullable, SetNull (losing the
+  // parent never blocks a hard delete and the clone's own ledger survives). Null for an organic grant run.
+  supersedesRunId            String?
+  supersedesRun              WorkflowRun?        @relation("WorkflowRunReplayLineage", fields: [supersedesRunId], references: [id], onDelete: SetNull)
+  replayedBy                 WorkflowRun[]       @relation("WorkflowRunReplayLineage")
   status                     WorkflowRunStatus   @default(PENDING)
   // THE CAUSE (ADR-0048): inherited from the grant's actor — the human XOR service account who
   // granted/revoked. at-most-one CHECK in the migration. SetNull both; @db.Uuid for the User FK.

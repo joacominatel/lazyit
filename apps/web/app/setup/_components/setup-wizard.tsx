@@ -198,6 +198,7 @@ export function SetupWizard() {
       {step === "admin" && (
         <StepCreateAdmin
           csrfToken={status.csrfToken}
+          requiresAdminPassword={status.requiresAdminPassword}
           onBack={goBack}
           onCreated={handleAdminCreated}
           onError={(err) => notifyError(err, "Couldn't create the administrator")}

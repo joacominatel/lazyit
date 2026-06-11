@@ -391,10 +391,16 @@ team                   ←      ✋ ask a human  (manual)        [token ▾]
 
   | Token group | Examples (v1) |
   | --- | --- |
+  | `event` | the trigger (`ACCESS_GRANTED` / `ACCESS_REVOKED`) — a scalar |
   | `grantee.*` | `email`, `firstName`, `lastName`, `id` |
-  | `application.*` | `name`, `vendor`, `url` |
-  | `grant.*` | `accessLevel`, `grantedAt`, `expiresAt` |
-  | `context.*` | `actor` (who granted), `now` |
+  | `application.*` | `name`, `id` |
+  | `grant.*` | `accessLevel`, `grantedAt`, `expiresAt`, `id` |
+
+  > The catalog mirrors the engine's frozen mapping context exactly — the server mapper's
+  > `ALLOWED_ROOTS` is `{ event, grantee, application, grant, steps }` (`run-context.ts` /
+  > `data-mapper.ts`). It deliberately omits a `context.*` root and `application.vendor`/`url`
+  > (the engine context carries neither, so they would resolve empty at run time); a drift guard in
+  > `apps/web/lib/workflow/template.test.ts` pins the client allowlist to the server root set.
 
 - **Validation & preview.** The form validates that required external fields are mapped; a **Preview**
   toggle renders the resolved payload using a **sample/last grant** (secrets shown as placeholders).
@@ -413,6 +419,40 @@ suggestions** (never a directory/role/team/AD lookup, ADR-0054 §6.c) — **with
 structure. Adding real identity fields is a separate, model-first decision
 (Open question Q4); the mapper UI is forward-compatible (a new token group is additive) but does not
 drive that decision.
+
+### 5c. Templating UX — token-assist, composition & the advanced JSON editor (shipped: #337–#341)
+
+The mapper/step-editor templating affordances are surfaced (issues #337/#338/#339/#341). All of them
+emit a **plain template string** identical to what `renderTemplate`
+(`apps/api/src/workflow-engine/mapping/data-mapper.ts`) already concatenates server-side — there is **no
+new server syntax** and **no engine change**; this is purely the FE surfacing the existing capability.
+
+- **Shared template helpers** (`apps/web/lib/workflow/template.ts`, `bun test`ed) parse/validate the
+  `{{ path | filter }}` surface form (mirroring the server placeholder grammar + the closed
+  `upper|lower|trim|default` filter set) and round-trip a mapping ↔ pretty JSON. Token roots are derived
+  from `buildContextTokens` (prior-steps-scoped) so client validation stays in lock-step with the picker.
+- **Path token-assist** (#337) — the REST step **Path** field (`path-field.tsx`) gets an inline token
+  picker that inserts `{{ … }}` at the caret, a highlighted preview, and soft validation (unknown root /
+  unbalanced braces / malformed path / unknown filter). The **host stays non-templatable** (only the
+  path is appended to the connection baseUrl) — the SSRF posture (ADR-0054 §6.4) is unchanged.
+- **Per-field composition** (#338) — a single body field can be built from **≥2 tokens + literal text**
+  via a chip/segment composer (`value-composer.tsx`) **without** flipping the whole mapping to advanced;
+  it produces `"{{ a }} {{ b }}"` and round-trips through the field-picker ↔ advanced toggle.
+- **Advanced = a real code editor** (#339) — Advanced mode is now a **CodeMirror 6** editor
+  (`json-template-editor.tsx`) over the whole mapping as JSON: JSON syntax highlighting + inline lint
+  (`@codemirror/lang-json` + `@codemirror/lint`), `{{ }}` autocomplete from the same token source, and
+  distinct `{{ token }}` span highlighting. **Library decision:** CodeMirror 6 via
+  `@uiw/react-codemirror` (evaluated against the existing read-only `react-syntax-highlighter`, which
+  cannot edit/lint/autocomplete). It is **client-only**, loaded with `next/dynamic({ ssr: false })` so it
+  never ships on the initial builder route nor runs during SSR — keeping the bundle impact off the
+  critical path (Next.js 16 / React 19 / Tailwind v4). Output stays a plain string.
+- **Roomier step editor** (#341) — the per-step dialog is a wide (`sm:max-w-3xl lg:max-w-5xl`)
+  **tabbed** layout (General · Data · Retry · Flow) with a pinned header + footer and only the active
+  tab body scrolling, replacing the narrow, very-tall single column. `WorkflowStepSchema`
+  validation-on-save is unchanged.
+- **Redaction (INV-6 / SEC-A5).** Every surface renders only admin-authored template TEXT or a token
+  PATH — never a resolved runtime value — as escaped React text (the `no-unsafe-html.test.ts` guard
+  covers the new files); CodeMirror builds its DOM imperatively (no raw-HTML injection).
 
 ---
 
@@ -551,7 +591,30 @@ non-idempotent create cannot double-provision. The transition is a guarded `FAIL
 compare-and-set and the retried step re-executes as a NEW append-only attempt; only `FAILED` is
 retryable (a `COMPENSATED` run rolled its effects back — re-grant, don't retry → the API returns 409).
 On success the run polls live again; a 409 / 422 / broker hiccup surfaces via `notifyError` with the
-request id. (Per-step single-step `Retry` and a full `Re-run` remain future affordances.)
+request id.
+
+**Retry override + replay-with-latest (wired — ADR-0057, issue #340).** The pinned-version retry above
+replays the failed run's *frozen* mapping, so an edited definition is silently ignored. ADR-0057 adds two
+`workflow:run`-gated answers on the run-detail surface, both alongside the plain one-click Retry:
+
+- **Retry with overrides (Option 2)** — a secondary `RetryOverrideDialog` (opened from `RetryRunButton`
+  only on the run-detail page, where the failed step's mapped field NAMES are known). The operator adds
+  `field name → value` rows (a template over the same run context, e.g. `{{ grantee.lastName }}`, or a
+  literal) and the same `POST …/retry` carries an optional `{ overrides }` body
+  (`RetryRunRequestSchema`). **The override is request-scoped — applied to the NEXT attempt's render only
+  and never persisted (INV-6); it does NOT edit the definition or fix future runs** — the dialog says so
+  in plain copy. A plain Retry sends no body and stays the one-click default (the dialog is never forced,
+  and the recent-runs rows — which lack step detail — render only the plain button). The override record
+  is built by the pure, unit-tested `lib/workflow/retry-overrides.ts` (trim keys, drop blank rows,
+  last-write-wins, bound-check against the shared schema before sending).
+- **Replay with latest (Option 3)** — `ReplayLatestButton` calls `POST …/replay-latest`
+  (`ReplayLatestResponse`): a confirm step explains it starts a **fresh** run on the current version for
+  the same grant (the source `FAILED` run stays immutable), then on success it navigates to the new
+  `runId`. Errors are surfaced honestly: **422** = the fail-closed double-provision guard refused (the run
+  already provisioned a non-idempotent step → the operator must **re-grant**, not replay); **409** = the
+  source run is no longer `FAILED`.
+
+(Per-step single-step `Retry` and a full `Re-run` remain future affordances.)
 
 ### 7c. The grant ↔ run cross-link
 

@@ -38,8 +38,9 @@ export interface TriggerPlan {
  *  1. {@link planForTrigger} (a READ, BEFORE the write tx, best-effort) — does an enabled workflow with
  *     a version exist for this (app, trigger)? If not, nothing else happens (today's behaviour).
  *  2. {@link buildRunData} INSIDE the grant tx — a PENDING `WorkflowRun` committed ATOMICALLY with the
- *     grant, keyed by the unique `idempotencyKey` (`<trigger>:<accessGrantId>`). The only in-tx engine
- *     write, and one that cannot realistically fail (the key is unique per fresh grant event).
+ *     grant, keyed by the unique `idempotencyKey` (`<trigger>:<accessGrantId>:0` — the organic grant run
+ *     is `replaySeq = 0`; manual replays carry a higher suffix, ADR-0057). The only in-tx engine write,
+ *     and one that cannot realistically fail (the key is unique per fresh grant event).
  *  3. {@link enqueue} AFTER commit — best-effort. A broker-down enqueue is swallowed (the run stays
  *     PENDING and the sweeper recovers it); it NEVER rolls back or blocks the grant.
  *
@@ -95,6 +96,10 @@ export class WorkflowTriggerService {
    * Build the PENDING `WorkflowRun` create input — call INSIDE the grant tx with the freshly-created /
    * revoked grant's id. The actor (the human XOR SA who granted/revoked) is inherited as the run's
    * trigger cause (ADR-0048); the engine SA is pinned as the principal it executes AS.
+   *
+   * The natural grant path is `replaySeq = 0`, so the key is `<trigger>:<accessGrantId>:0` (ADR-0057 —
+   * the uniform sequence-suffix form; pre-0057 `<trigger>:<accessGrantId>` rows are backfilled to `:0`
+   * in the migration). A `replaySeq > 0` is the manual clone-to-new-run path ({@link buildReplayRunData}).
    */
   buildRunData(
     plan: TriggerPlan,
@@ -107,7 +112,44 @@ export class WorkflowTriggerService {
       applicationId: plan.applicationId,
       trigger: plan.trigger,
       accessGrantId,
-      idempotencyKey: `${plan.trigger}:${accessGrantId}`,
+      replaySeq: 0,
+      idempotencyKey: buildIdempotencyKey(plan.trigger, accessGrantId, 0),
+      status: 'PENDING',
+      ...(actor.userId != null ? { triggeredById: actor.userId } : {}),
+      ...(actor.serviceAccountId != null
+        ? { triggeredBySaId: actor.serviceAccountId }
+        : {}),
+      ...(plan.executedAsServiceAccountId != null
+        ? { executedAsServiceAccountId: plan.executedAsServiceAccountId }
+        : {}),
+    };
+  }
+
+  /**
+   * Build the PENDING `WorkflowRun` create input for a manual CLONE-TO-NEW-RUN (ADR-0057 Option 3 — the
+   * `replay-latest` action). It is an ordinary fresh run on the LATEST version (resolved by the caller
+   * via {@link planForTrigger}) for the SAME (application, accessGrant, trigger), starting at the entry
+   * node — NOT a resume. The key carries the replay `seq` (`<trigger>:<accessGrantId>:<seq>`, seq ≥ 1),
+   * and `supersedesRunId` records the parent FAILED run for lineage. The old run stays FAILED, immutable.
+   * The caller (the runs service) computes `seq` from the existing runs for (trigger, accessGrantId) and
+   * enqueues the result through the SAME normal fire path ({@link enqueue}).
+   */
+  buildReplayRunData(
+    plan: TriggerPlan,
+    accessGrantId: string,
+    actor: ActorAttribution,
+    seq: number,
+    supersedesRunId: string,
+  ): Prisma.WorkflowRunUncheckedCreateInput {
+    return {
+      workflowId: plan.workflowId,
+      workflowVersionId: plan.workflowVersionId,
+      applicationId: plan.applicationId,
+      trigger: plan.trigger,
+      accessGrantId,
+      replaySeq: seq,
+      idempotencyKey: buildIdempotencyKey(plan.trigger, accessGrantId, seq),
+      supersedesRunId,
       status: 'PENDING',
       ...(actor.userId != null ? { triggeredById: actor.userId } : {}),
       ...(actor.serviceAccountId != null
@@ -261,4 +303,18 @@ export class WorkflowTriggerService {
       return null;
     }
   }
+}
+
+/**
+ * The uniform run idempotency key (ADR-0054 §3 / ADR-0057): `<trigger>:<accessGrantId>:<replaySeq>`.
+ * `replaySeq = 0` is the organic grant-derived run (deduplicates a grant event to one run); each manual
+ * replay-latest clone increments the suffix. Pure; the single place the key string is composed so the
+ * format never drifts between the grant path and the replay path.
+ */
+export function buildIdempotencyKey(
+  trigger: WorkflowTrigger,
+  accessGrantId: string,
+  replaySeq: number,
+): string {
+  return `${trigger}:${accessGrantId}:${replaySeq}`;
 }

@@ -55,6 +55,9 @@ export class ZitadelIdentityProvider implements IdentityProvider {
       firstName: input.firstName,
       lastName: input.lastName,
       role: input.role,
+      // Bundled first-run only (issue #335): the wizard-chosen password is set on the Zitadel user so
+      // the operator can log in immediately. Undefined in BYOI — lazyit never sets a credential there.
+      password: input.password,
     });
     return { externalId };
   }

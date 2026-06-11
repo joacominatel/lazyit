@@ -23,6 +23,18 @@ anticipated. Authorship/visibility rules are split into [[0022-draft-visibility-
 > `content` in search**. Where this ADR says "no versioning" / "no FTS over content", read it as the
 > MVP baseline; [[0042]] is the current state. Tags remain deferred.
 
+> [!note] Further extended by [[0059-kb-folders-links-and-import]] (folders/aliases/wiki-links/.zip import) and [[0060-kb-folder-access-control]] (folder-based access)
+> Two later ADRs deepen the KB again, both still **non-destructive** ([[0021]] "Append-improvable").
+> [[0059-kb-folders-links-and-import]] evolves the flat [[article-category]] into a hierarchical
+> [[folder]] (self-ref `parentId`; the one required category becomes the **one home folder per
+> article**), adds nav-only [[article-alias]] symlinks, materialized article↔article `[[slug]]`
+> [[article-wiki-link]] edges (backlinks + fast resolution), and **bulk `.zip` import** of a markdown
+> tree. [[0060-kb-folder-access-control]] makes the **folder the access boundary** — a bounded,
+> named data-scoping axis layered on the unchanged `article:read` capability (a deliberate, narrow
+> carve-out from the per-record-ACL rejection of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]).
+> Where this ADR and [[0042]] describe a flat category + asset/application-only linking, read them as
+> the prior baseline; [[0059]]/[[0060]] are the current direction.
+
 ## Context
 
 The Knowledge Base is lazyit's internal-documentation pillar. Its users are **small IT teams
@@ -99,11 +111,12 @@ can be added later without a destructive migration**.
 ## Open questions
 
 - **Export** — download an article as `.md` / `.pdf`? (not decided)
-- **Slug auto-suffixing** — on collision, auto-increment `-2`, `-3`? Today a collision is a `409`
-  and the caller picks another slug. (not decided)
+- ~~**Slug auto-suffixing**~~ **Resolved (2026-06-11, [[0059-kb-folders-links-and-import]] §3):** on collision the slug is **auto-suffixed** (`-2`, `-3`, …); bulk import auto-suffixes silently and reports the rename.
 - **Per-category `metadata` schema** — same trajectory as the `specs` debt
   ([[0007-flexible-asset-specs-jsonb]]).
 
 Related: [[article]] · [[article-category]] · [[article-version]] ·
+[[0042-article-versioning-and-linking]] · [[0059-kb-folders-links-and-import]] ·
+[[0060-kb-folder-access-control]] · [[folder]] · [[article-alias]] · [[article-wiki-link]] ·
 [[0022-draft-visibility-auth-shim]] · [[0007-flexible-asset-specs-jsonb]] ·
 [[0006-soft-delete-and-auditing]] · [[0018-api-documentation-swagger]] · [[vision]]

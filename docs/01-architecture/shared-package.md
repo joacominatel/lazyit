@@ -79,6 +79,19 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
 >   redacted `configured` descriptor (the [[service-account]] `tokenPrefix` pattern). Like the rest of
 >   `shared` it stays a framework-agnostic leaf: no Prisma, no NestJS, no React.
 
+> [!note] Planned: Secret Manager shared constants/zod (ADR-0061)
+> [[0061-secret-manager-zero-knowledge]] will add a small amount of **pure** shared material that both
+> `web` and `api` must agree on — consistent with the existing `SLUG_REGEX` / format-constant precedent:
+> - the **recovery-key format** `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX` (5 alphanumeric groups) — a regex/zod
+>   validator so the web's "enter your recovery key" form and the api's redemption endpoint validate the
+>   same shape. The recovery key itself is shown once and **never** crosses a persisted/logged surface
+>   ([[0031-logging-strategy]], INV-10); only the *format* lives here.
+> - the reserved **`{{ lazyit_secret.XXXX }}` reference token** — the syntax for referencing a Secret-Manager
+>   item from elsewhere (e.g. a KB article), parsed/validated identically on both sides.
+> These are pure values/validators only: **no crypto, no Prisma types, no framework code** — the wrapped
+> DEK blobs, ciphertext columns, and keypair material stay an `api`-at-rest concern and never enter
+> `shared` (the boundary rule above). The zero-knowledge contract is recorded in [[0061-secret-manager-zero-knowledge]].
+
 ## What does NOT belong here
 
 - **Framework code** — React components/hooks, Next-specific code, NestJS providers/decorators.

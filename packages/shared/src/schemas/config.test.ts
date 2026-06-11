@@ -3,6 +3,7 @@ import {
   ConfigStatusSchema,
   IntegrationModeSchema,
   SetupAdminSchema,
+  SetupPasswordSchema,
   SetupResultSchema,
 } from "./config";
 
@@ -25,9 +26,11 @@ describe("ConfigStatusSchema", () => {
       integrationMode: "zitadel",
       devMode: true,
       csrfToken: "abc.def",
+      requiresAdminPassword: true,
     });
     expect(parsed.isConfigured).toBe(false);
     expect(parsed.adminCount).toBe(0);
+    expect(parsed.requiresAdminPassword).toBe(true);
   });
 
   test("rejects a negative adminCount and a missing csrfToken", () => {
@@ -38,6 +41,7 @@ describe("ConfigStatusSchema", () => {
         integrationMode: "zitadel",
         devMode: false,
         csrfToken: "x",
+        requiresAdminPassword: false,
       }).success,
     ).toBe(false);
     expect(
@@ -47,8 +51,42 @@ describe("ConfigStatusSchema", () => {
         integrationMode: "zitadel",
         devMode: false,
         csrfToken: "",
+        requiresAdminPassword: false,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("SetupPasswordSchema", () => {
+  test("accepts a password meeting every rule", () => {
+    expect(SetupPasswordSchema.parse("Abcdef1!")).toBe("Abcdef1!");
+  });
+
+  test("rejects when too short (< 8 chars)", () => {
+    expect(SetupPasswordSchema.safeParse("Abc1!").success).toBe(false);
+  });
+
+  test("rejects when missing an uppercase letter", () => {
+    expect(SetupPasswordSchema.safeParse("abcdef1!").success).toBe(false);
+  });
+
+  test("rejects when missing a lowercase letter", () => {
+    expect(SetupPasswordSchema.safeParse("ABCDEF1!").success).toBe(false);
+  });
+
+  test("rejects when missing a digit", () => {
+    expect(SetupPasswordSchema.safeParse("Abcdefg!").success).toBe(false);
+  });
+
+  test("rejects when missing a symbol", () => {
+    expect(SetupPasswordSchema.safeParse("Abcdefg1").success).toBe(false);
+  });
+
+  test("rejects when longer than 70 characters", () => {
+    // 71 chars that otherwise satisfy every complexity rule — the .max(70) cap must still reject it.
+    const tooLong = "A1!" + "a".repeat(68);
+    expect(tooLong.length).toBe(71);
+    expect(SetupPasswordSchema.safeParse(tooLong).success).toBe(false);
   });
 });
 

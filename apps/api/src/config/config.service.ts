@@ -1,4 +1,10 @@
-import { ConflictException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type { ConfigStatus, IntegrationMode, SetupAdmin } from '@lazyit/shared';
 import { Role } from '../../generated/prisma/client';
@@ -29,10 +35,17 @@ export interface SetupOutcome {
  * first-run a pure read of existing state, so the wizard self-locks the instant an ADMIN is created.
  *
  * `setup()` bootstraps the FIRST ADMIN. It is idempotent: 409 once ANY ADMIN exists (the one-time
- * gate, §6 #3). It reuses the same DB-first + IdP-mirror shape as UsersService.create, with ONE
- * deliberate difference — a Management write-back failure here must NOT hard-block first-run bootstrap
- * (an operator can fix Zitadel afterwards), so it DEGRADES to a local-only ADMIN with a warn instead
- * of compensating + 503. Every admin creation is audited (structured Pino: op, email, ip).
+ * gate, §6 #3). It reuses the same DB-first + IdP-mirror shape as UsersService.create, branching on
+ * whether the IdP MANAGES users (issue #335):
+ *   - BUNDLED Zitadel (`supportsManagement`): the wizard supplies an initial PASSWORD (a 400 here if
+ *     it is missing). lazyit sets it on the freshly-created Zitadel user so the operator can log in
+ *     immediately (no SMTP/e-mail-code path). If the mirror fails we COMPENSATE — hard-delete the
+ *     just-created local row and surface a 503 to retry — because a local-only ADMIN with no loggable
+ *     Zitadel user would silently break "setup → ready". NO degrade-to-local-only here.
+ *   - BYOI / generic-OIDC (no management): created LOCAL-ONLY (mirrored=false), no password. The
+ *     ADR-0043 §6 #4 degrade-not-block stance applies only to THIS path now — providers we cannot
+ *     manage never mirror anyway, so there is nothing to fail-and-block on.
+ * Every admin creation is audited (structured Pino: op, email, ip).
  */
 @Injectable()
 export class ConfigService {
@@ -78,6 +91,9 @@ export class ConfigService {
       integrationMode: this.integrationMode(),
       devMode: this.devMode(),
       csrfToken: this.csrf.issue(),
+      // The wizard collects an initial password only when lazyit can SET it on the IdP (bundled Zitadel
+      // with management); BYOI / generic-OIDC own the credential themselves (issue #335).
+      requiresAdminPassword: this.idp.supportsManagement,
     };
   }
 
@@ -111,6 +127,17 @@ export class ConfigService {
       );
     }
 
+    // Bundled Zitadel REQUIRES an initial password (issue #335): the freshly-created Zitadel user has
+    // no credential and there is no SMTP/e-mail-code path, so without a password the operator would be
+    // locked out. Re-check the posture server-side (the schema makes `password` optional on the wire,
+    // required only here) and 400 BEFORE creating any local row. BYOI never reaches this — it owns the
+    // credential and the wizard sends no password.
+    if (this.idp.supportsManagement && !input.password) {
+      throw new BadRequestException(
+        'An initial password is required to create the first administrator for the bundled identity provider.',
+      );
+    }
+
     // DB-first: create the local ADMIN row. This is the authoritative record regardless of the IdP
     // outcome (lazyit is DB-first for authorization — ADR-0043 #1).
     const admin = await this.prisma.user.create({
@@ -122,12 +149,11 @@ export class ConfigService {
       },
     });
 
-    let mirrored = false;
-    // Mirror into the IdP ONLY when management is supported (zitadel + a configured Management
-    // credential). DEGRADE-NOT-BLOCK (the task rule, aligned with §6 #4): unlike UsersService.create
-    // — which compensates + 503 on a mirror failure — first-run bootstrap must NEVER be hard-blocked
-    // by a Zitadel misconfiguration. The operator can wire/repair Zitadel after first login. So on a
-    // mirror failure we keep the local ADMIN, log a warn, and report mirrored=false.
+    // Mirror into the IdP when management is supported (bundled Zitadel). BLOCK-AND-COMPENSATE (issue
+    // #335): unlike the old degrade-to-local-only, a mirror failure here MUST roll the local row back
+    // and surface a 503 to retry — a local-only ADMIN with no loggable Zitadel user silently breaks
+    // "setup → ready" (the operator could never sign in). We thread the wizard-chosen password through
+    // so Zitadel creates the user active (changeRequired:false).
     if (this.idp.supportsManagement) {
       try {
         const ref = await this.idp.createUser({
@@ -135,45 +161,56 @@ export class ConfigService {
           firstName: admin.firstName,
           lastName: admin.lastName,
           role: Role.ADMIN,
+          password: input.password,
         });
-        if (ref.externalId) {
-          const linked = await this.prisma.user.update({
-            where: { id: admin.id },
-            data: { externalId: ref.externalId },
-          });
-          this.search.upsert('users', projectUser(linked));
-          mirrored = true;
-          this.auditSetup('setup', admin.id, admin.email, ip, {
-            mirrored: true,
-          });
-          return {
-            adminId: linked.id,
-            email: linked.email,
-            mirrored,
-            setupCompletedAt: linked.updatedAt,
-          };
-        }
+        const linked = await this.prisma.user.update({
+          where: { id: admin.id },
+          data: { externalId: ref.externalId },
+        });
+        this.search.upsert('users', projectUser(linked));
+        this.auditSetup('setup', admin.id, admin.email, ip, { mirrored: true });
+        return {
+          adminId: linked.id,
+          email: linked.email,
+          mirrored: true,
+          setupCompletedAt: linked.updatedAt,
+        };
       } catch (err) {
-        // Degrade to local-only: keep the ADMIN, warn, continue. NO compensation, NO 503.
-        this.logger.warn(
+        // Compensate: hard-delete the just-created local row so nothing is left behind (best-effort,
+        // same pattern as UsersService.compensateLocalCreate — a delete failure only logs, the 503
+        // still wins), then surface a retry-able 503. We do NOT keep a local-only ADMIN on this path.
+        try {
+          await this.prisma.user.delete({ where: { id: admin.id } });
+        } catch (delErr) {
+          this.logger.error(
+            { op: 'setup', subjectUserId: admin.id, ip: ip ?? 'unknown' },
+            `failed to roll back local ADMIN after IdP provisioning failure (${delErr instanceof Error ? delErr.message : String(delErr)})`,
+          );
+        }
+        this.logger.error(
           {
             op: 'setup',
             email: admin.email,
             ip: ip ?? 'unknown',
             subjectUserId: admin.id,
           },
-          `first-run IdP mirror failed; created local-only ADMIN (operator can fix Zitadel later): ${err instanceof Error ? err.message : String(err)}`,
+          `first-run IdP provisioning failed; rolled back the local ADMIN (nothing created) (${err instanceof Error ? err.message : String(err)})`,
+        );
+        throw new ServiceUnavailableException(
+          "Couldn't provision the administrator in the identity provider; nothing was created — please retry.",
         );
       }
     }
 
-    // Local-only path (BYOI, no management credential, or a degraded mirror failure).
+    // Local-only path: providers we cannot manage (BYOI / generic-OIDC). No password, no mirror — the
+    // operator's own IdP owns the credential. This is the only path the ADR-0043 §6 #4 degrade-not-
+    // block stance still covers (there is no mirror to fail on).
     this.search.upsert('users', projectUser(admin));
     this.auditSetup('setup', admin.id, admin.email, ip, { mirrored: false });
     return {
       adminId: admin.id,
       email: admin.email,
-      mirrored,
+      mirrored: false,
       setupCompletedAt: admin.createdAt,
     };
   }

@@ -45,6 +45,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   applyFailureChoice,
@@ -59,6 +65,7 @@ import {
   successChoiceOf,
 } from "@/lib/workflow/step-form";
 import { DataMappingEditor } from "./data-mapping-editor";
+import { PathField } from "./path-field";
 
 const SUCCESS_CHOICES: SuccessChoice[] = ["NEXT", "END", "GOTO"];
 const FAILURE_CHOICES: FailureChoice[] = [
@@ -128,9 +135,11 @@ function initialState(step: WorkflowStep): EditorState {
  * shared `WorkflowStep`, validates it with the shared zod (early per-step feedback) and hands it back —
  * the whole-graph validation still happens server-side on version authoring.
  *
- * Layout (issue #301, ADR-0049): the body is split into labelled `FieldSet` sections (General · what it
- * sends · success & retry · flow) separated by rules, so a tall form reads as a hierarchy instead of one
- * cramped column; the footer is a pinned `DialogFooter` so Apply/Cancel never scroll out of reach.
+ * Layout (issues #301 + #341, ADR-0049): a roomy, near-full-screen dialog with a TAB rail
+ * (General · Data · Retry · Flow) instead of one cramped, very-tall single column — so the operator
+ * sees each facet of a step at a comfortable width without an awkward vertical scroll. The header and
+ * the Apply/Cancel `DialogFooter` are pinned; only the active tab's body scrolls. `WorkflowStepSchema`
+ * validation-on-save is unchanged.
  */
 export function StepEditor({
   open,
@@ -151,7 +160,7 @@ export function StepEditor({
 }) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="gap-0 p-0 sm:max-w-xl">
+      <DialogContent className="flex max-h-[calc(100svh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl lg:max-w-5xl">
         {open ? (
           <StepForm
             key={step.key}
@@ -300,324 +309,352 @@ function StepForm({
         <DialogDescription>{t("stepEditor.description")}</DialogDescription>
       </DialogHeader>
 
-      <div className="flex flex-col gap-6 px-5 py-5">
-        {/* ── General ─────────────────────────────────────────────────── */}
-        <FieldSet>
-          <Field>
-            <FieldLabel htmlFor="step-name">
-              {t("stepEditor.nameLabel")}
-            </FieldLabel>
-            <Input
-              id="step-name"
-              value={values.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder={t("stepEditor.namePlaceholder")}
-              maxLength={200}
-            />
-          </Field>
+      <Tabs
+        defaultValue="general"
+        className="flex min-h-0 flex-1 flex-col gap-0"
+      >
+        <TabsList className="shrink-0 gap-1 border-b px-5">
+          <TabsTrigger value="general">{t("stepEditor.tab.general")}</TabsTrigger>
+          {isHttp ? (
+            <TabsTrigger value="data">{t("stepEditor.tab.data")}</TabsTrigger>
+          ) : null}
+          {isHttp ? (
+            <TabsTrigger value="retry">{t("stepEditor.tab.retry")}</TabsTrigger>
+          ) : null}
+          <TabsTrigger value="flow">{t("stepEditor.tab.flow")}</TabsTrigger>
+        </TabsList>
 
-          {step.kind === "REST" ? (
-            <div className="flex gap-2">
-              <Field className="w-32 shrink-0">
-                <FieldLabel htmlFor="step-method">
-                  {t("stepEditor.methodLabel")}
-                </FieldLabel>
-                <Select
-                  value={values.method}
-                  onValueChange={(v) => set("method", v as WorkflowHttpMethod)}
-                >
-                  <SelectTrigger id="step-method">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {WORKFLOW_HTTP_METHODS.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {m}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field className="flex-1">
-                <FieldLabel htmlFor="step-path">
-                  {t("stepEditor.pathLabel")}
+        {/* The active tab body scrolls; the header/footer stay pinned (issue #341). */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          {/* ── General ─────────────────────────────────────────────── */}
+          <TabsContent value="general" className="mt-0">
+            <FieldSet>
+              <Field>
+                <FieldLabel htmlFor="step-name">
+                  {t("stepEditor.nameLabel")}
                 </FieldLabel>
                 <Input
-                  id="step-path"
-                  value={values.path}
-                  onChange={(e) => set("path", e.target.value)}
-                  placeholder="/rest/api/3/user"
-                  className="font-mono text-xs"
-                  maxLength={2048}
+                  id="step-name"
+                  value={values.name}
+                  onChange={(e) => set("name", e.target.value)}
+                  placeholder={t("stepEditor.namePlaceholder")}
+                  maxLength={200}
                 />
               </Field>
-            </div>
-          ) : null}
 
-          {step.kind === "REST" ? (
-            <Field orientation="horizontal">
-              <FieldContent>
-                <FieldLabel htmlFor="step-idempotent">
-                  {t("stepEditor.idempotentLabel")}
-                </FieldLabel>
-                <FieldDescription>
-                  {t("stepEditor.idempotentHint")}
-                </FieldDescription>
-              </FieldContent>
-              <Switch
-                id="step-idempotent"
-                checked={values.idempotent}
-                onCheckedChange={(on) => set("idempotent", on)}
-              />
-            </Field>
-          ) : null}
-
-          {step.kind === "MANUAL" ? (
-            <>
-              <Field>
-                <FieldLabel htmlFor="step-prompt">
-                  {t("stepEditor.promptLabel")}
-                </FieldLabel>
-                <Textarea
-                  id="step-prompt"
-                  value={values.prompt}
-                  onChange={(e) => set("prompt", e.target.value)}
-                  placeholder={t("stepEditor.promptPlaceholder")}
-                  rows={2}
-                  maxLength={2000}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="step-cohort">
-                  {t("stepEditor.cohortLabel")}
-                </FieldLabel>
-                <Input
-                  id="step-cohort"
-                  value={values.cohort}
-                  onChange={(e) => set("cohort", e.target.value)}
-                  placeholder={t("stepEditor.cohortPlaceholder")}
-                  maxLength={100}
-                />
-              </Field>
-            </>
-          ) : null}
-        </FieldSet>
-
-        {/* ── Fields to fill (MANUAL) ─────────────────────────────────── */}
-        {step.kind === "MANUAL" ? (
-          <>
-            <FieldSeparator />
-            <FieldSet>
-              <FieldLegend variant="label">
-                {t("stepEditor.inputFieldsLabel")}
-              </FieldLegend>
-              <FieldDescription>
-                {t("stepEditor.inputFieldsHint")}
-              </FieldDescription>
-              <ul className="flex flex-col gap-3">
-                {values.inputFields.map((field, index) => (
-                  <ManualFieldRow
-                    key={`field-${index}`}
-                    field={field}
-                    onChange={(patch) => editField(index, patch)}
-                    onRemove={() => removeField(index)}
-                  />
-                ))}
-              </ul>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={addField}
-                className="w-fit"
-              >
-                <PlusIcon />
-                {t("stepEditor.addField")}
-              </Button>
-            </FieldSet>
-          </>
-        ) : null}
-
-        {/* ── What it sends (HTTP: mapping + success + retry) ─────────── */}
-        {isHttp ? (
-          <>
-            <FieldSeparator />
-            <FieldSet>
-              <FieldLegend variant="label">
-                {t("stepEditor.mappingLabel")}
-              </FieldLegend>
-              <FieldDescription>{t("stepEditor.mappingHint")}</FieldDescription>
-              <DataMappingEditor
-                value={values.dataMapping}
-                onChange={(v) => set("dataMapping", v)}
-                priorSteps={priorSteps}
-              />
-            </FieldSet>
-
-            <FieldSeparator />
-            <FieldSet>
-              <FieldLegend variant="label">
-                {t("stepEditor.outcomeLabel")}
-              </FieldLegend>
-              <Field>
-                <FieldLabel htmlFor="step-status">
-                  {t("stepEditor.successCriteriaLabel")}
-                </FieldLabel>
-                <Input
-                  id="step-status"
-                  value={values.statusCodes}
-                  onChange={(e) => set("statusCodes", e.target.value)}
-                  placeholder="200, 201, 204"
-                  inputMode="numeric"
-                />
-                <FieldDescription>
-                  {t("stepEditor.successCriteriaHint")}
-                </FieldDescription>
-              </Field>
-              <Field orientation="horizontal">
-                <FieldContent>
-                  <FieldLabel htmlFor="step-retry">
-                    {t("stepEditor.retryLabel")}
-                  </FieldLabel>
-                  <FieldDescription>
-                    {t("stepEditor.retryHint")}
-                  </FieldDescription>
-                </FieldContent>
-                <Switch
-                  id="step-retry"
-                  checked={values.retryEnabled}
-                  onCheckedChange={(on) => set("retryEnabled", on)}
-                />
-              </Field>
-              {values.retryEnabled ? (
-                <div className="flex flex-wrap gap-3 rounded-lg border bg-muted/30 p-3">
-                  <Field className="w-24">
-                    <FieldLabel htmlFor="step-attempts">
-                      {t("stepEditor.maxAttemptsLabel")}
-                    </FieldLabel>
-                    <Input
-                      id="step-attempts"
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={values.maxAttempts}
-                      onChange={(e) =>
-                        set("maxAttempts", Number(e.target.value) || 1)
-                      }
-                    />
-                  </Field>
-                  <Field className="w-36">
-                    <FieldLabel htmlFor="step-backoff">
-                      {t("stepEditor.backoffLabel")}
+              {step.kind === "REST" ? (
+                <>
+                  <Field className="w-40">
+                    <FieldLabel htmlFor="step-method">
+                      {t("stepEditor.methodLabel")}
                     </FieldLabel>
                     <Select
-                      value={values.backoff}
+                      value={values.method}
                       onValueChange={(v) =>
-                        set("backoff", v as WorkflowRetryBackoff)
+                        set("method", v as WorkflowHttpMethod)
                       }
                     >
-                      <SelectTrigger id="step-backoff">
+                      <SelectTrigger id="step-method">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {WORKFLOW_RETRY_BACKOFF.map((b) => (
-                          <SelectItem key={b} value={b}>
-                            {t(`backoff.${b}`)}
+                        {WORKFLOW_HTTP_METHODS.map((m) => (
+                          <SelectItem key={m} value={m}>
+                            {m}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </Field>
-                  <Field className="w-28">
-                    <FieldLabel htmlFor="step-delay">
-                      {t("stepEditor.delayLabel")}
+                  <Field>
+                    <FieldLabel htmlFor="step-path">
+                      {t("stepEditor.pathLabel")}
                     </FieldLabel>
-                    <Input
-                      id="step-delay"
-                      type="number"
-                      min={0}
-                      value={values.delayMs}
-                      onChange={(e) =>
-                        set("delayMs", Number(e.target.value) || 0)
-                      }
+                    <PathField
+                      value={values.path}
+                      onChange={(v) => set("path", v)}
+                      priorSteps={priorSteps}
                     />
                   </Field>
-                </div>
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor="step-idempotent">
+                        {t("stepEditor.idempotentLabel")}
+                      </FieldLabel>
+                      <FieldDescription>
+                        {t("stepEditor.idempotentHint")}
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      id="step-idempotent"
+                      checked={values.idempotent}
+                      onCheckedChange={(on) => set("idempotent", on)}
+                    />
+                  </Field>
+                </>
+              ) : null}
+
+              {step.kind === "MANUAL" ? (
+                <>
+                  <Field>
+                    <FieldLabel htmlFor="step-prompt">
+                      {t("stepEditor.promptLabel")}
+                    </FieldLabel>
+                    <Textarea
+                      id="step-prompt"
+                      value={values.prompt}
+                      onChange={(e) => set("prompt", e.target.value)}
+                      placeholder={t("stepEditor.promptPlaceholder")}
+                      rows={3}
+                      maxLength={2000}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="step-cohort">
+                      {t("stepEditor.cohortLabel")}
+                    </FieldLabel>
+                    <Input
+                      id="step-cohort"
+                      value={values.cohort}
+                      onChange={(e) => set("cohort", e.target.value)}
+                      placeholder={t("stepEditor.cohortPlaceholder")}
+                      maxLength={100}
+                    />
+                  </Field>
+                </>
               ) : null}
             </FieldSet>
-          </>
-        ) : null}
 
-        {/* ── Flow (on success / on failure) ──────────────────────────── */}
-        <FieldSeparator />
-        <FieldSet>
-          <FieldLegend variant="label">{t("stepEditor.flowLabel")}</FieldLegend>
-          <Field>
-            <FieldLabel htmlFor="step-onsuccess">
-              {t("stepEditor.onSuccessLabel")}
-            </FieldLabel>
-            <Select
-              value={values.successChoice}
-              onValueChange={(v) => set("successChoice", v as SuccessChoice)}
-            >
-              <SelectTrigger id="step-onsuccess">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SUCCESS_CHOICES.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {t(`onSuccess.${c}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {values.successChoice === "GOTO" ? (
-              <StepKeySelect
-                value={values.gotoKey}
-                onChange={(v) => set("gotoKey", v)}
-                options={otherSteps}
-                placeholder={t("stepEditor.pickStep")}
-              />
+            {/* ── Fields to fill (MANUAL) ──────────────────────────── */}
+            {step.kind === "MANUAL" ? (
+              <>
+                <FieldSeparator className="my-6" />
+                <FieldSet>
+                  <FieldLegend variant="label">
+                    {t("stepEditor.inputFieldsLabel")}
+                  </FieldLegend>
+                  <FieldDescription>
+                    {t("stepEditor.inputFieldsHint")}
+                  </FieldDescription>
+                  <ul className="flex flex-col gap-3">
+                    {values.inputFields.map((field, index) => (
+                      <ManualFieldRow
+                        key={`field-${index}`}
+                        field={field}
+                        onChange={(patch) => editField(index, patch)}
+                        onRemove={() => removeField(index)}
+                      />
+                    ))}
+                  </ul>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={addField}
+                    className="w-fit"
+                  >
+                    <PlusIcon />
+                    {t("stepEditor.addField")}
+                  </Button>
+                </FieldSet>
+              </>
             ) : null}
-          </Field>
+          </TabsContent>
 
-          <Field>
-            <FieldLabel htmlFor="step-onfailure">
-              {t("stepEditor.onFailureLabel")}
-            </FieldLabel>
-            <Select
-              value={values.failureChoice}
-              onValueChange={(v) => set("failureChoice", v as FailureChoice)}
-            >
-              <SelectTrigger id="step-onfailure">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FAILURE_CHOICES.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {t(`onFailure.${c}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <FieldDescription>
-              {t(`onFailureHint.${values.failureChoice}`)}
-            </FieldDescription>
-            {values.failureChoice === "COMPENSATE" ? (
-              <StepKeySelect
-                value={values.compensateKey}
-                onChange={(v) => set("compensateKey", v)}
-                options={otherSteps}
-                placeholder={t("stepEditor.pickStep")}
-              />
-            ) : null}
-          </Field>
-        </FieldSet>
+          {/* ── Data (HTTP: the data mapping — the roomy tab) ───────── */}
+          {isHttp ? (
+            <TabsContent value="data" className="mt-0">
+              <FieldSet>
+                <FieldLegend variant="label">
+                  {t("stepEditor.mappingLabel")}
+                </FieldLegend>
+                <FieldDescription>
+                  {t("stepEditor.mappingHint")}
+                </FieldDescription>
+                <DataMappingEditor
+                  value={values.dataMapping}
+                  onChange={(v) => set("dataMapping", v)}
+                  priorSteps={priorSteps}
+                />
+              </FieldSet>
+            </TabsContent>
+          ) : null}
 
-        {error ? <FieldError errors={[{ message: error }]} /> : null}
-      </div>
+          {/* ── Retry (HTTP: success criteria + retry policy) ───────── */}
+          {isHttp ? (
+            <TabsContent value="retry" className="mt-0">
+              <FieldSet>
+                <FieldLegend variant="label">
+                  {t("stepEditor.outcomeLabel")}
+                </FieldLegend>
+                <Field>
+                  <FieldLabel htmlFor="step-status">
+                    {t("stepEditor.successCriteriaLabel")}
+                  </FieldLabel>
+                  <Input
+                    id="step-status"
+                    value={values.statusCodes}
+                    onChange={(e) => set("statusCodes", e.target.value)}
+                    placeholder="200, 201, 204"
+                    inputMode="numeric"
+                  />
+                  <FieldDescription>
+                    {t("stepEditor.successCriteriaHint")}
+                  </FieldDescription>
+                </Field>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel htmlFor="step-retry">
+                      {t("stepEditor.retryLabel")}
+                    </FieldLabel>
+                    <FieldDescription>
+                      {t("stepEditor.retryHint")}
+                    </FieldDescription>
+                  </FieldContent>
+                  <Switch
+                    id="step-retry"
+                    checked={values.retryEnabled}
+                    onCheckedChange={(on) => set("retryEnabled", on)}
+                  />
+                </Field>
+                {values.retryEnabled ? (
+                  <div className="flex flex-wrap gap-3 rounded-lg border bg-muted/30 p-3">
+                    <Field className="w-24">
+                      <FieldLabel htmlFor="step-attempts">
+                        {t("stepEditor.maxAttemptsLabel")}
+                      </FieldLabel>
+                      <Input
+                        id="step-attempts"
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={values.maxAttempts}
+                        onChange={(e) =>
+                          set("maxAttempts", Number(e.target.value) || 1)
+                        }
+                      />
+                    </Field>
+                    <Field className="w-36">
+                      <FieldLabel htmlFor="step-backoff">
+                        {t("stepEditor.backoffLabel")}
+                      </FieldLabel>
+                      <Select
+                        value={values.backoff}
+                        onValueChange={(v) =>
+                          set("backoff", v as WorkflowRetryBackoff)
+                        }
+                      >
+                        <SelectTrigger id="step-backoff">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {WORKFLOW_RETRY_BACKOFF.map((b) => (
+                            <SelectItem key={b} value={b}>
+                              {t(`backoff.${b}`)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field className="w-28">
+                      <FieldLabel htmlFor="step-delay">
+                        {t("stepEditor.delayLabel")}
+                      </FieldLabel>
+                      <Input
+                        id="step-delay"
+                        type="number"
+                        min={0}
+                        value={values.delayMs}
+                        onChange={(e) =>
+                          set("delayMs", Number(e.target.value) || 0)
+                        }
+                      />
+                    </Field>
+                  </div>
+                ) : null}
+              </FieldSet>
+            </TabsContent>
+          ) : null}
 
-      <DialogFooter className="rounded-b-xl">
+          {/* ── Flow (on success / on failure) ──────────────────────── */}
+          <TabsContent value="flow" className="mt-0">
+            <FieldSet>
+              <FieldLegend variant="label">
+                {t("stepEditor.flowLabel")}
+              </FieldLegend>
+              <Field>
+                <FieldLabel htmlFor="step-onsuccess">
+                  {t("stepEditor.onSuccessLabel")}
+                </FieldLabel>
+                <Select
+                  value={values.successChoice}
+                  onValueChange={(v) => set("successChoice", v as SuccessChoice)}
+                >
+                  <SelectTrigger id="step-onsuccess">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SUCCESS_CHOICES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {t(`onSuccess.${c}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {values.successChoice === "GOTO" ? (
+                  <StepKeySelect
+                    value={values.gotoKey}
+                    onChange={(v) => set("gotoKey", v)}
+                    options={otherSteps}
+                    placeholder={t("stepEditor.pickStep")}
+                  />
+                ) : null}
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="step-onfailure">
+                  {t("stepEditor.onFailureLabel")}
+                </FieldLabel>
+                <Select
+                  value={values.failureChoice}
+                  onValueChange={(v) => set("failureChoice", v as FailureChoice)}
+                >
+                  <SelectTrigger id="step-onfailure">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FAILURE_CHOICES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {t(`onFailure.${c}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldDescription>
+                  {t(`onFailureHint.${values.failureChoice}`)}
+                </FieldDescription>
+                {values.failureChoice === "COMPENSATE" ? (
+                  <StepKeySelect
+                    value={values.compensateKey}
+                    onChange={(v) => set("compensateKey", v)}
+                    options={otherSteps}
+                    placeholder={t("stepEditor.pickStep")}
+                  />
+                ) : null}
+              </Field>
+            </FieldSet>
+          </TabsContent>
+
+        </div>
+      </Tabs>
+
+      {error ? (
+        <div className="shrink-0 border-t px-5 py-2">
+          <FieldError errors={[{ message: error }]} />
+        </div>
+      ) : null}
+
+      <DialogFooter className="shrink-0 rounded-b-xl">
         <Button type="button" variant="outline" onClick={onClose}>
           {tc("cancel")}
         </Button>

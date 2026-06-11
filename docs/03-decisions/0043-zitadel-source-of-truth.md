@@ -239,6 +239,27 @@ The wizard is **BYOI-safe**: a BYOI operator skips the Zitadel step (their `OIDC
 already set) and still creates the first ADMIN; the backend makes **zero** Management-API calls when
 `integrationMode != 'zitadel'`.
 
+> [!important] Update (issue #335) — the bundled `/setup` sets an INITIAL PASSWORD, and mirrors block.
+> The bundled flow has **no SMTP** (and never will), so a Zitadel human user created with only a
+> verified email and **no credential** lands in Zitadel's *initialize-by-emailed-code* state — the
+> operator hits a "Set Password" screen whose code never arrives and is **locked out** (the original
+> bug). Two refinements close this, scoped to the management path (`idp.supportsManagement`, i.e.
+> bundled Zitadel):
+> 1. **The wizard collects an initial password** (validated against Zitadel's default complexity
+>    policy via the shared `SetupPasswordSchema`), and the backend sets it on the new Zitadel user
+>    with `changeRequired:false`, so the operator can sign in **immediately** with email + password —
+>    no email/code round-trip. `GET /config/status` advertises this with a derived
+>    `requiresAdminPassword` flag (= `supportsManagement`); the wizard shows the password fields only
+>    when it is true. This is a **deliberate, narrow carve-out** of the "lazyit never sets a password"
+>    stance (ADR-0016/0037): it applies **only** to the bundled IdP — which IS lazyit's own — and
+>    never to BYOI, where the operator's directory owns the credential and **no password is sent**.
+> 2. **The management mirror now BLOCKS, not degrades.** The old DEGRADE-NOT-BLOCK (§6 #4) left a
+>    *local-only* ADMIN on a mirror failure — but with a password-bearing bundled user that is exactly
+>    the un-loggable state we are fixing, so on the management path a `createUser` failure now
+>    **compensates** (hard-deletes the just-created local row) and surfaces a retry-able **503**,
+>    creating nothing. DEGRADE-NOT-BLOCK still governs the **non-management** path (BYOI /
+>    generic-OIDC), where there is no mirror to fail on and the local ADMIN is the whole story.
+
 ### 5. DEFAULT VIEWER for app-created users
 
 The bootstrap default flips from MEMBER to **VIEWER** for app-created users (CEO directive):

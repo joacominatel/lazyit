@@ -106,6 +106,20 @@ signing key). A leak — at rest, in an API response, in a log line, in the run 
 operator who shouldn't see it — hands an attacker write access to the external system *and* whatever the
 external system protects.
 
+> [!warning] Don't conflate this store with the Secret Manager — opposite crypto models
+> This section's "reuse one at-rest crypto path" is about the engine's **server-decryptable** connector
+> secrets ([[workflow-secret]], AES-256-GCM keyed by `WORKFLOW_SECRET_KEY` per [[0054-applications-workflow-engine]]).
+> They are decryptable **by design** — the server must read them to authenticate the outbound call at run
+> time (§2.1.4). The **Secret Manager** ([[0061-secret-manager-zero-knowledge]]) is a **different entity, a
+> different crypto model, and a different threat model**: it is **zero-knowledge** (proposed **INV-10**) —
+> the server holds **no key that decrypts a secret value**, the DEK is wrapped per member's public key, and
+> there is no server-side `reveal()` and no env master key over values. Do **not** route Secret-Manager
+> values through `SecretEncryptionService`/`WorkflowSecret`, and do **not** assume the §2 "configured:
+> boolean + server can decrypt on demand" shape applies there. Three secret stores now coexist —
+> Zitadel's `ZITADEL_MASTERKEY` store, this server-decryptable connector store, and the zero-knowledge
+> Secret Manager — with deliberately divergent keys and recovery models ([[0061-secret-manager-zero-knowledge]],
+> [[backups]]).
+
 ### 2.1 Controls (v1)
 
 1. **Encrypt at rest with the ADR-0052 pattern, not a bespoke crypto path.** Per-app connector secrets

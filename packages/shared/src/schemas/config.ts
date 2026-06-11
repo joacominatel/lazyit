@@ -43,6 +43,16 @@ export const ConfigStatusSchema = z.object({
   integrationMode: IntegrationModeSchema,
   devMode: z.boolean(),
   csrfToken: z.string().min(1),
+  /**
+   * Whether the first-run wizard must collect an initial PASSWORD for the admin. True only when the
+   * IdP supports management write-back (bundled Zitadel + a configured Management credential): there
+   * the admin's IdP user is created fresh and has NO credential, so the wizard sets the initial
+   * password (no SMTP / e-mail code path — issue #335). False for BYOI / generic OIDC, where the
+   * operator already authenticates against their own IdP (trusted-IdP model, ADR-0037/0038), and for
+   * a zitadel posture whose Management credential is not wired (we cannot set a password, so we don't
+   * ask for one). Derived server-side from `idp.supportsManagement`, never a stored flag.
+   */
+  requiresAdminPassword: z.boolean(),
 });
 export type ConfigStatus = z.infer<typeof ConfigStatusSchema>;
 
@@ -58,11 +68,37 @@ export type CsrfToken = z.infer<typeof CsrfTokenSchema>;
  * from the client. `strictObject` rejects unknown keys (e.g. a smuggled `role`). The CSRF token is
  * carried in the `X-CSRF-Token` header, not the body, mirroring the standard double-submit pattern.
  */
+/**
+ * Initial-password policy for the first ADMIN, mirroring Zitadel's DEFAULT password complexity policy
+ * (min 8, max 70, upper + lower + digit + symbol). lazyit sets this password on the freshly-created
+ * Zitadel user via the Management API in the bundled flow (issue #335); enforcing the SAME rules here —
+ * shared by the wizard's live checklist and the API's validation — guarantees Zitadel never rejects
+ * the password mid-mirror (which would leave a half-provisioned, un-loggable admin). The per-rule
+ * messages match the wizard's checklist copy 1:1. NOT used in BYOI mode (the operator's IdP owns the
+ * credential — ADR-0037/0038). `.max(70)` is a hard cap before the regex checks for a clear error.
+ */
+export const SetupPasswordSchema = z
+  .string()
+  .min(8, "Must be at least 8 characters long.")
+  .max(70, "Must be less than 70 characters long.")
+  .regex(/[A-Z]/, "Must include an uppercase letter.")
+  .regex(/[a-z]/, "Must include a lowercase letter.")
+  .regex(/[0-9]/, "Must include a number.")
+  .regex(/[^A-Za-z0-9]/, "Must include a symbol.");
+export type SetupPassword = z.infer<typeof SetupPasswordSchema>;
+
 export const SetupAdminSchema = z.strictObject({
   // Normalized (trim + lowercase) to match the citext column (ADR-0041), exactly like CreateUserSchema.
   email: EmailSchema,
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
+  /**
+   * Initial password for the first ADMIN. OPTIONAL on the wire: it is REQUIRED only when the server
+   * reports `requiresAdminPassword` (bundled Zitadel with management) — the API re-checks that posture
+   * and 400s a missing password there — and is OMITTED entirely in BYOI / generic-OIDC. See
+   * {@link SetupPasswordSchema} and {@link ConfigStatusSchema.requiresAdminPassword}.
+   */
+  password: SetupPasswordSchema.optional(),
 });
 export type SetupAdmin = z.infer<typeof SetupAdminSchema>;
 
