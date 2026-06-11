@@ -14,7 +14,10 @@ updated: 2026-06-11
      build) + ADR-0056 (in-app notification bell — accepted, #313) added as Phase-2 follow-ups to
      ADR-0054 (epic #248). -->
 <!-- updated 2026-06-11: ADR-0058 (user identity graph: legajo/username/manager + clone-with-actions —
-     proposed, #303) added; this is the model-first identity layer ADR-0054 §6c deferred. Awaiting CEO. -->
+     ACCEPTED 2026-06-11, #303); the model-first identity layer ADR-0054 §6c deferred. CEO ratified all
+     5 proposed defaults: clone does NOT fire the engine by default, offboarded-manager link kept
+     (isOffboarded), manager-only scope, username is a directory handle (never a credential), legajo
+     unique-among-live. -->
 
 # Decisions (ADRs) — Map of Content
 
@@ -86,7 +89,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0054-applications-workflow-engine]] | Applications Workflow Engine (epic #248) — opt-in per-app provisioning data model on BullMQ-transport + Postgres-as-system-of-record; decoupled from the grant (inverse of INV-5), (trigger, accessGrantId) idempotency, own AES-256-GCM secret store; v1 = REST/WEBHOOK_OUT/MANUAL, public-only | accepted |
 | [[0055-on-prem-internal-target-connectors]] | On-prem / internal-target connectors (epic #248, Phase 2) — a per-`WorkflowConnection` audited `host[:port]` allowlist wired to the egress guard's `isInternalTargetAllowed` seam; loopback/IMDS/link-local un-allowlistable by construction; `http`-relax coupled to a non-empty allowlist; gated by a new `workflow:egress`; enables an internal HTTP/REST target, NOT a native LDAP/AD connector | **proposed** (CEO holding the build) |
 | [[0056-in-app-notification-bell]] | In-app notification bell (admin-only, v1; #313) — append-only `Notification` + per-admin `NotificationRead` join (fan-out-on-read), closed shared type enum, best-effort post-commit emitters (critical-app/admin-granted/low-stock/manual-task/run-failed), poll delivery (SSE Phase-2 behind the same API), new `notification:read` seeded ADMIN-only; distinct from the `recent_activity` view | accepted |
-| [[0058-user-manager-and-clone-actions]] | User identity graph (#303) — new `User` fields `legajo` / `username` (live-only partial unique) + a self-referential `managerId` with a `managerName` free-text fallback (at-most-one CHECK, `SetNull`, cycle-guard); the model-first identity layer ADR-0054 §6c deferred. Plus clone-with-chosen-actions (`POST /users/:id/clone`: opt-in assignments/grants + an explicit, safe-by-default workflow-engine fire toggle). Mapper gains an additive `grantee.manager` token (no migration) | **proposed** (awaiting CEO) |
+| [[0058-user-manager-and-clone-actions]] | User identity graph (#303) — new `User` fields `legajo` / `username` (live-only partial unique) + a self-referential `managerId` with a `managerName` free-text fallback (at-most-one CHECK, `SetNull`, cycle-guard); the model-first identity layer ADR-0054 §6c deferred. Plus clone-with-chosen-actions (`POST /users/:id/clone`: opt-in assignments/grants + an explicit, safe-by-default workflow-engine fire toggle). Mapper gains an additive `grantee.manager` token (no migration) | **accepted** (2026-06-11) |
 
 ## Pending ADRs (to write when decided)
 - **CD / image publishing** — deferred in [[0027-ci-pipeline]]; define the registry (GHCR) +

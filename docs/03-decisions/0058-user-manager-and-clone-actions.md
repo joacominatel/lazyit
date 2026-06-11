@@ -1,7 +1,7 @@
 ---
 title: "ADR-0058: User identity graph (legajo / username / manager) + clone-with-chosen-actions"
-tags: [adr, proposed, users, identity, access, workflow-engine, data-model]
-status: proposed
+tags: [adr, users, identity, access, workflow-engine, data-model]
+status: accepted
 created: 2026-06-11
 updated: 2026-06-11
 deciders: [Joaquín Minatel]
@@ -11,12 +11,15 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — awaiting the CEO decision. This is the **identity-graph ADR that
+**accepted** — ratified by the CEO on 2026-06-11 (the answers are recorded in **§ Decision (ratified)**
+below; they confirm every proposed default). This is the **identity-graph ADR that
 [[0054-applications-workflow-engine]] §6c deliberately deferred** ("the future role/team/manager/AD
 identity layer is a **separate, model-first ADR — NOT this engine**"). It is the model-first decision
 the engine's mapper UI was kept forward-compatible for (`docs/workflow-engine/frontend.md` §5b,
 "Open question Q4"). Issue #303, epic #248 (the manager linkage); also a standalone Users-domain
-decision. **Nothing in this ADR is implemented; no schema, migration or code change rides with it.**
+decision. Implementation is now authorized; it lands in follow-up PRs (the Prisma migration, the
+`@lazyit/shared` deltas, the `POST /users/:id/clone` service/controller, the mapper `grantee.manager`
+token, and the web clone wizard + manager picker).
 
 > [!warning] Proposal only — do not build
 > The contracts, fields and semantics below are a **recommendation** for the CEO to ratify, amend or
@@ -304,26 +307,30 @@ is defensible; we propose safe-by-default and let the CEO flip it.
   picker (user-or-text), and the `users/[id]` detail surfacing manager + reports. An offboard-time
   re-manager prompt and a "who reports to me" view are natural but separable.
 
-## Open questions for the CEO
+## Decision (ratified 2026-06-11)
 
-1. **Engine default on clone (Q1).** We propose **clone does NOT fire the workflow engine by default**
-   (safe-by-default; admin opts in per clone). Onboarding could argue the opposite default (a clone is
-   *the* moment to provision). **Which default?**
-2. **Manager offboarding (Q2).** When a manager is offboarded, do we (a) **prompt** the admin to
-   re-assign their direct reports to a new manager (clean, but extra friction), (b) **silently keep**
-   the dangling `managerId` surfaced as "former manager (offboarded)" (proposed default — least
-   friction), or (c) **auto-null** the reports' manager on the manager's offboard? We lean (b).
-3. **Scope hold (Q3).** This ADR models **manager only**. The original brief named `team`, `boss`
-   (vs manager?), and **AD/LDAP group** integration. We propose to **explicitly exclude** team and
-   AD-groups from this ADR (they pull toward Identity-Governance — the anti-goal) and let the
-   **manual-task** path keep answering "which team?". **Confirm manager-only, or expand scope?**
-4. **`username` semantics (Q4).** We define `username` as a **directory/display handle, never an auth
-   credential** (auth stays the IdP's job). Is that the intent, or is `username` meant to feed a
-   connector's account-creation (e.g. the AD `sAMAccountName`)? If the latter, it is a **mapper token
-   only** (still not a lazyit credential) — confirm.
-5. **`legajo` uniqueness (Q5).** We propose `legajo` **optional + unique-among-live**. Some orgs reuse
-   a `legajo` across rehires; should restore reclaim the old number, or is `legajo` allowed to be
-   **non-unique** (just an attribute)? We lean unique-among-live (matches email).
+The CEO ratified all five questions **as proposed** (every safe-by-default option). This authorizes
+implementation.
+
+1. **Engine default on clone (Q1) — clone does NOT fire the workflow engine by default**
+   (`fireWorkflowsOnClonedGrants: false`). A clone records the grants but does not provision; the admin
+   **opts in per clone**, and that opt-in is audited in the clone's `UserHistory` `CREATED` payload.
+2. **Manager offboarding (Q2) — keep the link, surface it honestly.** When a manager is soft-deleted,
+   their direct reports **keep** their `managerId` pointing at the soft-deleted row; the read layer
+   resolves it through the soft-delete filter and surfaces `isOffboarded` ("former manager
+   (offboarded)") — never a dangle or a leak. No auto-null, no forced re-assignment (an offboard-time
+   re-manager prompt is a separable later UX).
+3. **Scope (Q3) — manager only.** This ADR models the `manager` relation (+ the free-text fallback)
+   **only**. `team`, `boss`-vs-manager, and AD/LDAP-group integration are **explicitly excluded** (they
+   pull toward Identity-Governance — the anti-goal); the manual-task path keeps answering "which team?".
+   The mapper stays additive so a future team/AD ADR is non-breaking.
+4. **`username` semantics (Q4) — a directory/display handle, never an auth credential.** Authentication
+   stays the IdP's job; `username` is never an account-linking key (that stays `email`/`externalId`).
+   It may be exposed as a mapper token (e.g. to feed a connector's `sAMAccountName`) but is never a
+   lazyit credential.
+5. **`legajo` uniqueness (Q5) — optional + unique-among-live.** A partial unique index
+   `WHERE "deletedAt" IS NULL` (the email precedent), so offboarding frees the `legajo` for
+   reuse/restore. Normalized (trim) on write.
 
 ## References
 
