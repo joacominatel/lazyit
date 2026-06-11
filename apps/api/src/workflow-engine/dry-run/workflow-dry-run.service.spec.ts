@@ -101,6 +101,10 @@ function makePrisma(opts: {
             email: 'ada@example.com',
             firstName: 'Ada',
             lastName: 'Lovelace',
+            legajo: null,
+            username: null,
+            managerName: null,
+            manager: null,
           },
         };
 
