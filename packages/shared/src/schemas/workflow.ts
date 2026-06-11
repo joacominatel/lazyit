@@ -456,6 +456,10 @@ export const WebhookOutStepSchema = z.strictObject({
   name: z.string().trim().min(1).max(200).optional(),
   connectionId: z.cuid(),
   dataMapping: WorkflowDataMappingSchema.optional(),
+  // Whether the receiver dedupes a redelivered webhook (a retry / replay must not double-provision).
+  // Default `false` = safe/fail-closed: a non-idempotent delivery is single-shot and replay-latest
+  // refuses (ADR-0057 Decision 3). Set `true` only when the receiver dedupes on a stable key.
+  idempotent: z.boolean().default(false),
   // Per-step success window (default 2xx) + retry policy. See {@link httpOutboundShape}.
   ...httpOutboundShape,
   // First-class success/failure edges (default linear; see {@link stepGraphShape}).
