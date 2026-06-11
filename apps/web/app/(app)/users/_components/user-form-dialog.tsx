@@ -3,7 +3,6 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  cloneUserDefaults,
   CreateUserSchema,
   type ManagerFormValue,
   managerDescriptorToFormValue,
@@ -89,13 +88,11 @@ type UserFormValues = {
 const EMPTY_MANAGER: ManagerFormValue = { kind: "none" };
 
 /**
- * Initial form values. Edit → from `user` (manager pre-set from the read descriptor). Clone → from the
- * shared `cloneUserDefaults` sanitizer (SECURITY-SENSITIVE: copies ONLY firstName/lastName; email forced
- * "", role OMITTED → server default VIEWER, externalId never set). The clone NEVER pre-fills the source's
- * unique legajo/username/email — those start blank so the operator supplies fresh values. Manager is NOT
- * carried on a clone either (it is the new hire's own, set deliberately). Otherwise blank.
+ * Initial form values. Edit → from `user` (manager pre-set from the read descriptor; legajo/username from
+ * the row). Create → blank. (Cloning a USER is the dedicated server-orchestrated wizard, not this form —
+ * ADR-0058 — so there is no `cloneSource` path here.)
  */
-function toFormValues(user?: User, cloneSource?: User): UserFormValues {
+function toFormValues(user?: User): UserFormValues {
   if (user) {
     return {
       email: user.email,
@@ -105,18 +102,6 @@ function toFormValues(user?: User, cloneSource?: User): UserFormValues {
       username: user.username ?? "",
       manager: managerDescriptorToFormValue(user.manager),
       isActive: user.isActive,
-    };
-  }
-  if (cloneSource) {
-    const d = cloneUserDefaults(cloneSource);
-    return {
-      email: d.email,
-      firstName: d.firstName,
-      lastName: d.lastName,
-      // Unique fields are NEVER cloned (legajo/username) — fresh start so the create can't 409.
-      legajo: "",
-      username: "",
-      manager: EMPTY_MANAGER,
     };
   }
   return {
@@ -134,29 +119,22 @@ interface UserFormDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Present → edit that user; absent → create a new one. */
   user?: User;
-  /**
-   * Present (and `user` absent) → CREATE pre-filled from this record (issue #125). Distinct from the
-   * edit `user` prop: the dialog stays in create mode (CreateUserSchema + create mutation), and the
-   * shared sanitizer guarantees the privilege-safe reset (no role/externalId, email cleared).
-   */
-  cloneSource?: User;
   /** Called with the created user (create mode) — lets a caller select it inline (#25). */
   onCreated?: (user: User) => void;
 }
 
 /**
- * Create/edit/clone dialog for a User. Unlike Locations (one schema for both modes),
- * the two modes validate against different shared schemas: create uses
- * `CreateUserSchema` (email + names, always active); edit uses `UpdateUserSchema`
- * (adds the `isActive` toggle). The parent remounts this via `key` per mode (edit/clone/create), so
- * `isEdit` — and therefore the resolver — is fixed for the component's lifetime. Clone pre-fills via
- * the privilege-safe `cloneUserDefaults` sanitizer and submits through the normal create flow.
+ * Create/edit dialog for a User. Unlike Locations (one schema for both modes), the two modes validate
+ * against different shared schemas: create uses `CreateUserSchema` (email + names + optional
+ * legajo/username/manager, always active); edit uses `UpdateUserSchema` (adds the `isActive` toggle).
+ * The parent remounts this via `key` per mode (edit/create), so `isEdit` — and therefore the resolver —
+ * is fixed for the component's lifetime. Cloning a user is the dedicated server-orchestrated wizard
+ * ({@link CloneUserWizard}), not this form (ADR-0058).
  */
 export function UserFormDialog({
   open,
   onOpenChange,
   user,
-  cloneSource,
   onCreated,
 }: UserFormDialogProps) {
   const t = useTranslations("users.form");
@@ -168,27 +146,29 @@ export function UserFormDialog({
 
   // The entity schema is the single source of validation truth. We wrap the zodResolver so it sees the
   // wire-shaped payload (manager serialized, empty legajo/username dropped) instead of the loose form
-  // values — keeping field-level errors while never duplicating the legajo/username/manager rules.
-  const baseResolver = zodResolver(
-    isEdit ? UpdateUserSchema : CreateUserSchema,
-  ) as Resolver<UserFormValues>;
+  // values — keeping field-level errors while never duplicating the legajo/username/manager rules. The
+  // wire shape and the form shape genuinely differ on `manager` (input union vs. the picker's discriminated
+  // value), so the wrapped resolver is cast through `unknown` — the runtime contract is what matters.
+  const baseResolver = zodResolver(isEdit ? UpdateUserSchema : CreateUserSchema);
   const resolver: Resolver<UserFormValues> = (values, context, options) =>
-    baseResolver(
-      toResolverInput(values) as UserFormValues,
-      context,
-      options,
-    );
+    (
+      baseResolver as unknown as (
+        v: unknown,
+        c: unknown,
+        o: unknown,
+      ) => ReturnType<Resolver<UserFormValues>>
+    )(toResolverInput(values), context, options);
 
   const form = useForm<UserFormValues>({
     resolver,
-    defaultValues: toFormValues(user, cloneSource),
+    defaultValues: toFormValues(user),
   });
 
   // Refresh the form whenever it reopens, so a reused dialog never shows stale
-  // values from a previous create/edit/clone.
+  // values from a previous create/edit.
   useEffect(() => {
-    if (open) form.reset(toFormValues(user, cloneSource));
-  }, [open, user, cloneSource, form]);
+    if (open) form.reset(toFormValues(user));
+  }, [open, user, form]);
 
   const onSubmit = form.handleSubmit((values) => {
     // Shared serialization: empty legajo/username → null (edit, clears) / omitted (create); manager via
