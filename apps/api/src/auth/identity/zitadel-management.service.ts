@@ -195,14 +195,30 @@ export class ZitadelManagementService {
     firstName: string;
     lastName: string;
     role: Role;
+    /**
+     * The initial password to set on the new Zitadel user (bundled first-run wizard, issue #335).
+     * When present it is set with `changeRequired:false` so the user is ACTIVE and can log in at once.
+     * Absent in BYOI / trusted-IdP, where lazyit never sets a credential (ADR-0016/0037).
+     */
+    password?: string;
   }): Promise<string> {
     this.assertConfigured();
-    const body = {
+    const body: {
+      username: string;
+      profile: { givenName: string; familyName: string };
+      email: { email: string; isVerified: boolean };
+      password?: { password: string; changeRequired: boolean };
+    } = {
       username: input.email,
       profile: { givenName: input.firstName, familyName: input.lastName },
       // Pre-verified: the operator's directory owns the mailbox (trusted-IdP model, ADR-0037/0038).
       email: { email: input.email, isVerified: true },
     };
+    if (input.password) {
+      // With a password + verified email + changeRequired:false the user is ACTIVE immediately and can
+      // log in right away — no e-mail-delivered initialization code (lazyit has no SMTP), issue #335.
+      body.password = { password: input.password, changeRequired: false };
+    }
     // NOT retried on a transient failure: a lost-response retry could create a DUPLICATE Zitadel user
     // (POST /v2/users/human is non-idempotent — no client-supplied id). A transient blip surfaces the
     // friendly 503; the Users service then hard-deletes the just-created local row (INV-5), issue #196.

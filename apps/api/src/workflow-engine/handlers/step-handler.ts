@@ -248,6 +248,11 @@ export interface TestConnectionResult {
   statusCode?: number;
   /** Round-trip latency in ms. */
   latencyMs?: number;
+  /**
+   * The non-secret PATH the probe actually targeted (the configured health path, or `/`) — surfaced so
+   * the operator sees WHICH path was hit (#344). Never the host, never a credential.
+   */
+  probedPath?: string;
   /** A short, non-secret diagnostic reason. */
   reason?: string;
 }

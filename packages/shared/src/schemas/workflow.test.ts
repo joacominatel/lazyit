@@ -5,18 +5,24 @@ import {
   CreateWorkflowConnectionSchema,
   CreateWorkflowSecretSchema,
   DEFAULT_DEPROVISION_POLICY,
+  DEFAULT_PROBE_METHOD,
   DEFAULT_RETRY_POLICY,
   HttpSuccessCriteriaSchema,
   isHttpStatusSuccess,
   ManualStepSchema,
+  ReplayLatestResponseSchema,
   resolveStepTransitions,
+  RestConnectionConfigSchema,
   RestStepSchema,
   RetryPolicySchema,
+  RetryRunRequestSchema,
+  RetryRunResponseSchema,
   UpdateApplicationWorkflowSchema,
   WorkflowConnectionConfigSchema,
   WORKFLOW_CONNECTION_KINDS,
   WORKFLOW_END_SUCCESS,
   WORKFLOW_ESCALATE_TO_MANUAL,
+  WORKFLOW_PROBE_METHODS,
   WORKFLOW_RUN_STATUSES,
   WORKFLOW_STOP_FAIL,
   WORKFLOW_TRIGGERS,
@@ -142,6 +148,76 @@ describe("WorkflowConnectionConfigSchema — discriminated on kind", () => {
       WorkflowConnectionConfigSchema.safeParse({ kind: "SDK", baseUrl: "https://x.dev" })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("RestConnectionConfigSchema — optional test-connection probe path (#344)", () => {
+  test("healthCheckPath + healthCheckMethod are optional (a config without them parses)", () => {
+    const parsed = RestConnectionConfigSchema.safeParse({
+      kind: "REST",
+      baseUrl: "https://api.example.com",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.healthCheckPath).toBeUndefined();
+      expect(parsed.data.healthCheckMethod).toBeUndefined();
+    }
+  });
+
+  test("accepts a relative health path and a READ-ONLY probe method", () => {
+    const parsed = RestConnectionConfigSchema.safeParse({
+      kind: "REST",
+      baseUrl: "https://api.example.com",
+      healthCheckPath: "/api/healthz",
+      healthCheckMethod: "HEAD",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.healthCheckPath).toBe("/api/healthz");
+      expect(parsed.data.healthCheckMethod).toBe("HEAD");
+    }
+  });
+
+  test("trims the health path and rejects an empty / over-long one", () => {
+    const trimmed = RestConnectionConfigSchema.safeParse({
+      kind: "REST",
+      baseUrl: "https://api.example.com",
+      healthCheckPath: "  /status  ",
+    });
+    expect(trimmed.success).toBe(true);
+    if (trimmed.success) {
+      expect(trimmed.data.healthCheckPath).toBe("/status");
+    }
+    expect(
+      RestConnectionConfigSchema.safeParse({
+        kind: "REST",
+        baseUrl: "https://api.example.com",
+        healthCheckPath: "   ",
+      }).success,
+    ).toBe(false);
+    expect(
+      RestConnectionConfigSchema.safeParse({
+        kind: "REST",
+        baseUrl: "https://api.example.com",
+        healthCheckPath: "/".padEnd(2049, "x"),
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects a WRITE probe method (the probe must stay side-effect-free)", () => {
+    expect(
+      WORKFLOW_PROBE_METHODS as readonly string[],
+    ).toEqual(["GET", "HEAD"]);
+    expect(DEFAULT_PROBE_METHOD).toBe("GET");
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(
+        RestConnectionConfigSchema.safeParse({
+          kind: "REST",
+          baseUrl: "https://api.example.com",
+          healthCheckMethod: method,
+        }).success,
+      ).toBe(false);
+    }
   });
 });
 
@@ -461,5 +537,80 @@ describe("legacy onError → transition mapping (resolveStepTransitions)", () =>
       rest("b"),
     ]);
     expect(resolveStepTransitions(parsed, 0).onFailure).toBe(WORKFLOW_STOP_FAIL);
+  });
+});
+
+describe("RetryRunRequestSchema (ADR-0057 Option 2 — payload override)", () => {
+  test("an empty body is valid (the override is OPTIONAL — a plain retry)", () => {
+    expect(RetryRunRequestSchema.parse({})).toEqual({});
+  });
+
+  test("accepts a field→template override map", () => {
+    const parsed = RetryRunRequestSchema.parse({
+      overrides: { lastName: "{{ grantee.lastName }}", note: "literal" },
+    });
+    expect(parsed.overrides).toEqual({
+      lastName: "{{ grantee.lastName }}",
+      note: "literal",
+    });
+  });
+
+  test("rejects an EMPTY overrides object (omit the field instead)", () => {
+    expect(RetryRunRequestSchema.safeParse({ overrides: {} }).success).toBe(
+      false,
+    );
+  });
+
+  test("rejects unknown top-level keys (strict — no mass assignment)", () => {
+    expect(
+      RetryRunRequestSchema.safeParse({
+        overrides: { a: "b" },
+        sneaky: 1,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects an override field name longer than 200 chars", () => {
+    const huge = "x".repeat(201);
+    expect(
+      RetryRunRequestSchema.safeParse({ overrides: { [huge]: "v" } }).success,
+    ).toBe(false);
+  });
+});
+
+describe("RetryRunResponseSchema / ReplayLatestResponseSchema (ADR-0057)", () => {
+  test("retry response carries the resumed cursor + attempt, NO override value", () => {
+    const parsed = RetryRunResponseSchema.parse({
+      ok: true,
+      runId: "cjld2cjxh0000qzrmn831i7rn",
+      resumeStepKey: "create-user",
+      attempt: 2,
+    });
+    expect(parsed.attempt).toBe(2);
+    expect(parsed.resumeStepKey).toBe("create-user");
+  });
+
+  test("replay-latest response carries the new run + lineage + sequence", () => {
+    const parsed = ReplayLatestResponseSchema.parse({
+      ok: true,
+      runId: "cjld2cjxh0000qzrmn831i7rn",
+      supersedesRunId: "cjld2cjxh0001qzrmn831i7rn",
+      workflowVersionId: 3,
+      replaySeq: 1,
+    });
+    expect(parsed.supersedesRunId).toBe("cjld2cjxh0001qzrmn831i7rn");
+    expect(parsed.replaySeq).toBe(1);
+  });
+
+  test("replay-latest replaySeq must be ≥ 1 (a clone is never seq 0)", () => {
+    expect(
+      ReplayLatestResponseSchema.safeParse({
+        ok: true,
+        runId: "cjld2cjxh0000qzrmn831i7rn",
+        supersedesRunId: "cjld2cjxh0001qzrmn831i7rn",
+        workflowVersionId: 3,
+        replaySeq: 0,
+      }).success,
+    ).toBe(false);
   });
 });

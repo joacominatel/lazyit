@@ -185,6 +185,7 @@ fields are **never** the secret itself — they are a key into the ADR-0052 `Sys
 | `baseUrl` | Origin + base path. Validated like `Application.url` (SEC-008): **http(s) only**, reject `javascript:`/`data:`/`file:` (`docs/02-domain/entities/application.md`). The **host is fixed here, never templatable from ctx** (anti-SSRF, §6.4). |
 | `auth` | A nested discriminated union: `none` · `bearer{secretRef}` · `basic{userRef,secretRef}` · `apiKeyHeader{headerName,secretRef}` · `oauth2ClientCreds{tokenUrl,clientIdRef,clientSecretRef,scopes}` (token cached+refreshed, §a). |
 | `defaultHeaders` | Static non-secret headers (e.g. `Accept`). |
+| `healthCheckPath` / `healthCheckMethod` | **Optional** READ-ONLY probe target for `testConnection` (§9, issue #344): the path appended to `baseUrl` (`joinUrl`, host stays fixed — anti-SSRF) so the probe can hit `/health` / `/status` / `/api/healthz` instead of the root, with a method bounded to the read-only verbs (`GET` default / `HEAD`). Unset ⇒ probe `baseUrl`. *(Shipped subset; the `auth` union below is design intent — the implemented `RestConnectionConfigSchema` uses `authScheme` + `authHeaderName`.)* |
 | `timeoutMs` / `tlsVerify` | Bounded timeout; `tlsVerify` default **true**. A self-signed internal target may set it false **with a loud UI warning** (a deliberate, audited downgrade). |
 
 *Step operation:*

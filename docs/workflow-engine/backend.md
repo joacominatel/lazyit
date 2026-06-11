@@ -294,6 +294,30 @@ Two layers, kept distinct:
   so re-driving it would re-provision what compensation just undid; the endpoint rejects non-`FAILED`
   runs with a 409, and a `FAILED` run with no resolvable failed step with a 422. The grant is never
   touched (the §2 decoupling rule).
+- **Retry-after-fix & replay (ADR-0057) — wired (issue #340):** the operator loop *"the flow was wrong, I
+  fixed it, now make this stuck run go through"* is first-class, in two complementary `workflow:run` paths:
+  - **Option 2 — transient payload override on retry.** `POST /workflow-runs/:id/retry` takes an OPTIONAL
+    `overrides` body (a field-name → template/literal map, the shared `RetryRunRequestSchema`). It patches
+    the failed step's data mapping for the **next attempt only**: held in an in-memory, single-use map on
+    the orchestrator (`pendingOverrides`), merged into the frozen context for ONE render, then discarded.
+    **INV-6 hard boundary:** the override never rides the BullMQ job, never touches Postgres / the ledger /
+    a log — only the merged field **names** are recorded (exactly as today). A no-body retry is unchanged,
+    and the **automatic** per-attempt retry (`retryStep`) never reads the map (it stays deterministic +
+    pinned).
+  - **Option 3 — clone-to-new-run from the latest version.** `POST /workflow-runs/:id/replay-latest`
+    leaves the stuck run **`FAILED` and immutable** and creates a **fresh** run on the workflow's *current*
+    version for the same (application, accessGrant, trigger), starting at the entry node and enqueued via
+    the normal fire path (`enqueue`) — not a resume. The latest version is resolved by the same
+    `planForTrigger` a real grant uses (never re-implemented). A **fail-closed double-provision guard**
+    (`assertReplaySafe`) refuses with a **422** when the source run already SUCCEEDED a **non-idempotent**
+    create on/before the failed step (re-firing from the entry node would double-provision) — the operator
+    re-grants instead (the `COMPENSATED` posture); there is **no warn-and-proceed** path. A non-`FAILED`
+    source is a **409**.
+  - **Idempotency-key change (localized ADR-0054 §3).** The unique key is now the uniform
+    `<trigger>:<accessGrantId>:<replaySeq>`; the organic grant run is `replaySeq = 0` (pre-0057 keys are
+    backfilled to `:0` in the migration), each manual replay increments the suffix. A `supersedesRunId`
+    self-FK records the parent → clone lineage. A concurrent-replay seq collision (P2002 on the unique key)
+    is caught and the seq recomputed/retried — never a 500.
 
 Defaults are conservative (e.g. ≤5 attempts, capped total backoff) and live in step/definition config,
 not hard-coded, but with safe ceilings the operator cannot exceed (DoS/foot-gun guard).

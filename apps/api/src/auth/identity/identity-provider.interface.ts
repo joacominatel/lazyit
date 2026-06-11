@@ -99,6 +99,18 @@ export interface CreateIdentityUserInput {
   lastName: string;
   /** The role lazyit assigned locally; mirrored to the IdP when management is supported. */
   role: Role;
+  /**
+   * The initial password to set on the IdP user when the provider MANAGES credentials (the bundled
+   * Zitadel — issue #335). Absent in BYOI / generic-OIDC, where the operator's own IdP owns the
+   * credential and lazyit never touches it.
+   *
+   * This is a NARROW carve-out from lazyit's "never sets passwords" model (ADR-0016/0037): it is
+   * justified only because the bundled Zitadel IS lazyit's own IdP, and the first-run wizard has no
+   * SMTP/e-mail-code path to let the operator initialize the credential otherwise. When set, the
+   * Zitadel adapter creates the user pre-verified with `changeRequired:false`, so the operator can log
+   * in immediately with the password they chose.
+   */
+  password?: string;
 }
 
 /**

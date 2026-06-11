@@ -19,10 +19,10 @@ import type { WorkflowStep } from "@lazyit/shared";
 
 /** A token group key — used as the picker's section heading (i18n `workflow.tokenGroup.<group>`). */
 export type ContextTokenGroup =
+  | "event"
   | "grantee"
   | "application"
   | "grant"
-  | "context"
   | "steps";
 
 /** A single selectable value source. `path` is the dotted token (e.g. `grantee.email`). */
@@ -35,24 +35,28 @@ export interface ContextToken {
 }
 
 /**
- * The STATIC token catalog tied to the trigger. Both v1 triggers (ACCESS_GRANTED / ACCESS_REVOKED)
- * resolve the same grantee/application/grant/context shape, so the static set does not branch on the
- * trigger today — the parameter is kept for forward-compatibility (a timer trigger would offer a
- * different `context.*`). Mirrors the dry-run resolved context (`dry-run-timeline.tsx`) field-for-field.
+ * The STATIC token catalog — a faithful mirror of the engine's frozen mapping context
+ * (`apps/api/src/workflow-engine/run/run-context.ts`, `WorkflowMappingContext`): the trigger `event`
+ * (a scalar — `ACCESS_GRANTED` / `ACCESS_REVOKED`), the `grantee`, the `application` (only `id` + `name`),
+ * and the `grant`. These are exactly the roots the server mapper allows (`ALLOWED_ROOTS` =
+ * `{ event, grantee, application, grant, steps }`); offering anything outside that set would dangle —
+ * it would resolve to an empty string at run time with no error. There is deliberately NO `context`
+ * root and NO `application.vendor`/`url` (the engine context carries neither), and NO
+ * `role`/`team`/`manager` token (anti-IGA, ADR-0054 §6.c). Both v1 triggers resolve the same shape,
+ * so the static set does not branch on the trigger today.
  */
 const STATIC_TOKENS: ContextToken[] = [
+  { group: "event", path: "event", label: "Trigger event" },
   { group: "grantee", path: "grantee.email", label: "Email" },
   { group: "grantee", path: "grantee.firstName", label: "First name" },
   { group: "grantee", path: "grantee.lastName", label: "Last name" },
   { group: "grantee", path: "grantee.id", label: "User id" },
   { group: "application", path: "application.name", label: "Name" },
-  { group: "application", path: "application.vendor", label: "Vendor" },
-  { group: "application", path: "application.url", label: "URL" },
+  { group: "application", path: "application.id", label: "Application id" },
   { group: "grant", path: "grant.accessLevel", label: "Access level" },
   { group: "grant", path: "grant.grantedAt", label: "Granted at" },
   { group: "grant", path: "grant.expiresAt", label: "Expires at" },
-  { group: "context", path: "context.actor", label: "Actor (who triggered)" },
-  { group: "context", path: "context.now", label: "Now" },
+  { group: "grant", path: "grant.id", label: "Grant id" },
 ];
 
 /**
@@ -88,7 +92,7 @@ function priorStepTokens(priorSteps: readonly WorkflowStep[]): ContextToken[] {
 
 /**
  * Build the full, ordered token list available to a step's data mapping: the static
- * grantee/application/grant/context tokens, then the output tokens of every step BEFORE it. `priorSteps`
+ * event/grantee/application/grant tokens, then the output tokens of every step BEFORE it. `priorSteps`
  * are the steps that precede the edited one in array order (the only ones whose output is in scope).
  */
 export function buildContextTokens(
