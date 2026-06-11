@@ -1,8 +1,9 @@
 ---
 title: "ADR-0057: Retry-after-fix vs pinned-version replay — how «fix the flow, then retry» should work"
 tags: [adr, workflow-engine, run, retry, replay, versioning, idempotency]
-status: proposed
+status: accepted
 created: 2026-06-11
+updated: 2026-06-11
 deciders: [Joaquín Minatel]
 ---
 
@@ -10,13 +11,15 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — a Phase-2 follow-up to [[0054-applications-workflow-engine]] (epic #248), raised by the
-bug in **#340** (user report #4). **This ADR does not authorize code** — it frames the root cause and
-the option space so the CEO can pick the behaviour. It builds on the **already-shipped** run
-orchestrator (`apps/api/src/workflow-engine/run/workflow-run.orchestrator.ts`), the manual-retry
-endpoint (#308, `apps/api/src/workflow-engine/runs/workflow-runs.controller.ts`), the append-only
-run/step ledger (ADR-0054 §4 / §8) and the redaction invariant **INV-6** ([[0031-logging-strategy]]).
-It touches no data model in its recommended form; the alternatives that would are called out as such.
+**accepted** — ratified by the CEO on 2026-06-11 (the decision is recorded in
+**§ Decision (ratified)** below; it supersedes the "Open question for the CEO" framing). A Phase-2
+follow-up to [[0054-applications-workflow-engine]] (epic #248), raised by the bug in **#340** (user
+report #4). It builds on the **already-shipped** run orchestrator
+(`apps/api/src/workflow-engine/run/workflow-run.orchestrator.ts`), the manual-retry endpoint
+(#308, `apps/api/src/workflow-engine/runs/workflow-runs.controller.ts`), the append-only run/step
+ledger (ADR-0054 §4 / §8) and the redaction invariant **INV-6** ([[0031-logging-strategy]]). The
+ratified scope ships **both** Option 3 and Option 2 (below) and carries a **localized ADR-0054 §3
+idempotency-key change** (a sequence suffix).
 
 > **Scope of this ADR.** ONE question: when an operator **edits a workflow to fix a broken mapping**
 > (e.g. adds a missing `lastName` field) and then hits **Retry** on a `FAILED` run, the edit is silently
@@ -221,24 +224,33 @@ they already did that under `workflow:manage`). The existing `POST /workflow-run
 **new, distinct action** (e.g. `POST /workflow-runs/:id/replay-latest`) so the two behaviours are never
 conflated in the UI or the audit trail.
 
-## Open question for the CEO
+## Decision (ratified 2026-06-11)
 
-> **Which behaviour ships for «fix the flow, then retry», and under which idempotency model?**
->
-> 1. **Confirm Option 3 (clone-to-new-run from latest)** as the v1 answer — or prefer Option 2
->    (transient payload-override) or a combination? (The build team recommends Option 3; Option 2 is a
->    sharp INV-6 boundary and only fixes the instance, not the broken definition.)
-> 2. **Idempotency-key resolution** for the second run on the same grant event (ADR-0054 §3): sequence
->    suffix · supersede-the-old-key · a distinct `MANUAL_REPLAY` trigger?
-> 3. **Double-provision policy:** restrict clone-to-new-run to runs whose provisioning steps are
->    idempotent (refuse otherwise), or surface a hard warning and let the operator proceed? (The build
->    team recommends *refuse* — fail-closed, the §1 / §3 posture.)
-> 4. Should a **transient payload-override (Option 2)** be built **at all** as a documented break-glass,
->    or deferred until a concrete need appears?
->
-> No behaviour is implemented until this ADR moves to **accepted** with these answered. Until then the
-> existing `/retry` (pinned-version resume) and the «recreate the grant» workaround remain the only
-> paths.
+The CEO ratified the four open questions as follows. This authorizes implementation.
+
+1. **Behaviour — ship BOTH Option 3 and Option 2.** Option 3 (clone-to-new-run from the latest
+   version) is the primary, invariant-clean answer; Option 2 (transient payload-override on retry) is
+   **also built now**, as a documented INV-6-safe **break-glass** for the rare case where editing the
+   definition is not enough for *this* stuck run. (Option 1's in-place re-pin stays rejected.)
+2. **Idempotency-key resolution — sequence suffix.** A clone/replay is modelled as a deliberate new
+   run keyed `<trigger>:<accessGrantId>:<n>` (the natural grant path is `n = 0` / no suffix and keeps
+   deduplicating; each manual replay increments `n`). This preserves the full per-grant run lineage,
+   stays append-only, and never mutates or retires an existing key. It is the localized ADR-0054 §3
+   change this ADR carries; a `supersedesRunId` (or equivalent) lineage link records the parent.
+3. **Double-provision — refuse (fail-closed).** Clone-to-new-run is allowed **only** when every
+   provisioning step up to and including the failed step is `idempotent: true` (or the run failed
+   at/before its first non-idempotent create). Otherwise the operator falls back to re-granting — the
+   same posture as `COMPENSATED` runs. No "warn and proceed" path.
+4. **Option 2 — build now** (not deferred), as the request-scoped, never-persisted override channel
+   described above (INV-6: the override is merged into the frozen context for one render and discarded;
+   only field *names* may ever be recorded).
+
+**Gating & endpoints (ratified).** The automatic per-attempt retry (`retryStep`) is **untouched**
+(deterministic, pinned-version replay). The existing `POST /workflow-runs/:id/retry` stays the
+resume-from-failed-step-on-the-pinned-version action; Option 2's override rides this manual path as an
+optional, transient request body. Option 3 is a **new, distinct** action
+(`POST /workflow-runs/:id/replay-latest`). **Both** new behaviours are gated `workflow:run` (re-driving
+a workflow for a grant — not editing the definition, which already happened under `workflow:manage`).
 
 ## Consequences (of the recommended Option 3, once accepted)
 
