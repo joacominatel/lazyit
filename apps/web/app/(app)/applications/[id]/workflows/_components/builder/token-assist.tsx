@@ -69,10 +69,10 @@ export function TokenHighlight({
 
 /** The i18n group order the picker renders sections in (matches the catalog's natural order). */
 const GROUP_ORDER: ContextTokenGroup[] = [
+  "event",
   "grantee",
   "application",
   "grant",
-  "context",
   "steps",
 ];
 
