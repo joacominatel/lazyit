@@ -27,6 +27,7 @@ import {
   WORKFLOW_STOP_FAIL,
   WORKFLOW_TRIGGERS,
   WORKFLOW_TRIGGERS_V1,
+  WebhookOutStepSchema,
   WorkflowSecretSchema,
   WorkflowStepsSchema,
   WorkflowTriggerSchema,
@@ -280,6 +281,26 @@ describe("WorkflowStepsSchema — discriminated steps + unique keys", () => {
     const parsed = RestStepSchema.parse(restStep);
     expect(parsed.idempotent).toBe(false);
     expect(parsed.onError).toBe("fail");
+  });
+
+  test("WEBHOOK_OUT step defaults idempotent to false (fail-closed, ADR-0057)", () => {
+    const parsed = WebhookOutStepSchema.parse({
+      kind: "WEBHOOK_OUT",
+      key: "notify",
+      connectionId: CUID,
+    });
+    expect(parsed.idempotent).toBe(false);
+    expect(parsed.onError).toBe("fail");
+  });
+
+  test("WEBHOOK_OUT step accepts an explicit idempotent flag (replay-eligible)", () => {
+    const parsed = WebhookOutStepSchema.parse({
+      kind: "WEBHOOK_OUT",
+      key: "notify",
+      connectionId: CUID,
+      idempotent: true,
+    });
+    expect(parsed.idempotent).toBe(true);
   });
 
   test("MANUAL step needs at least one input field", () => {
