@@ -172,7 +172,8 @@ describe('CCOR-1 — concurrent last-grant revokes (write skew)', () => {
     // Without the advisory lock both would compute "one still active" and neither would fire (0 runs);
     // with it, exactly one revoke observes 0 remaining and fires the deprovision.
     expect(h.runRows).toHaveLength(1);
-    expect(h.runRows[0].idempotencyKey).toMatch(/^ACCESS_REVOKED:g[12]$/);
+    // The natural grant run is replaySeq 0 → "<trigger>:<grantId>:0" (ADR-0057).
+    expect(h.runRows[0].idempotencyKey).toMatch(/^ACCESS_REVOKED:g[12]:0$/);
     // Both grants are revoked regardless of which one fired the workflow.
     expect(h.committedActive.size).toBe(0);
   });
