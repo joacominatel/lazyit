@@ -40,8 +40,10 @@ function TabsList({
       data-slot="tabs-list"
       className={cn(
         // A quiet baseline rule the active trigger's underline sits on. Horizontally scrollable
-        // on narrow viewports so a long tab row never clips on mobile.
-        "inline-flex h-9 w-full items-center justify-start gap-1 overflow-x-auto border-b border-border",
+        // on narrow viewports so a long tab row never clips on mobile; the Y axis is pinned
+        // (`overflow-y-hidden`) so the trigger's `border-b-2 -mb-px` overshoot of the tight `h-9`
+        // never makes the cross axis compute to scrollable and surface a stray vertical scrollbar.
+        "inline-flex h-9 w-full items-center justify-start gap-1 overflow-x-auto overflow-y-hidden border-b border-border",
         className
       )}
       {...props}

@@ -93,8 +93,10 @@ export function RecentActivityPanel() {
           // `pr-1` keeps the inner scrollbar off the row content / focus rings; `overscroll-contain`
           // stops the inner scroll from chaining to the page once the feed bottoms out. The
           // "Load more" button rides at the end of this scroll region, so it stays reachable by
-          // pointer and keyboard. No new colour or motion — Tailwind utilities only (ADR-0049).
-          <div className="space-y-4 lg:max-h-[min(36rem,calc(100vh-13rem))] lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
+          // pointer and keyboard. `lg:scrollbar-quiet` thins the gutter so the capped feed's
+          // scrollbar isn't visual noise at rest (issue #367). No new colour or motion — Tailwind
+          // utilities only (ADR-0049).
+          <div className="space-y-4 lg:max-h-[min(36rem,calc(100vh-13rem))] lg:overflow-y-auto lg:overscroll-contain lg:pr-1 lg:scrollbar-quiet">
             {groups.map((group) => (
               <div key={group.key}>
                 <p className="mb-2 text-xs font-medium text-muted-foreground">
