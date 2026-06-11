@@ -47,6 +47,15 @@ erDiagram
     WorkflowRun ||--o{ WorkflowStepRun : logs
     WorkflowRun ||--o{ ManualTask : "pauses on"
     WorkflowConnection ||--o{ WorkflowSecret : "authenticates with"
+    Folder ||--o{ Folder : "nests (parentId)"
+    Folder ||--o{ Article : "home folder of"
+    Folder ||--o{ ArticleAlias : "holds symlinks"
+    Article ||--o{ ArticleAlias : "aliased as"
+    Article ||--o{ ArticleWikiLink : "links out via"
+    SecretVault ||--o{ SecretItem : holds
+    SecretVault ||--o{ VaultMembership : "scoped to"
+    User ||--o{ VaultMembership : "is crypto member via"
+    User ||--|| UserKeypair : "has keypair"
 ```
 
 > [!note] Conceptual ERD. Relationships only — no fields. `Asset ↔ User` via
@@ -67,6 +76,13 @@ The model is organized in loosely-coupled areas:
 7. **Workflow engine** — [[application-workflow]], [[workflow-connection]], [[workflow-version]],
    [[workflow-run]], [[workflow-step-run]], [[manual-task]], [[workflow-secret]] (an opt-in extension
    of **Access** — [[0054-applications-workflow-engine]]).
+8. **Knowledge Base v2** — [[folder]] (the flat [[article-category]] evolved into a hierarchy + one home
+   folder per article), [[article-alias]] (nav-only symlinks), [[article-wiki-link]] (materialized
+   article↔article `[[slug]]` edges → backlinks); the **folder** is also the KB permission boundary
+   ([[0059-kb-folders-links-and-import]], [[0060-kb-folder-access-control]]).
+9. **Secret Manager** — [[secret-vault]], [[secret-item]], [[vault-membership]], [[user-keypair]]: a
+   zero-knowledge vault store beside the KB, the server never decrypting a secret value
+   ([[0061-secret-manager-zero-knowledge]]).
 
 ## Implementation order
 
@@ -82,5 +98,11 @@ The model is built atomic-first (see each entity note for status):
 8. **Workflow engine** (opt-in, after Access) — [[application-workflow]] + [[workflow-connection]] +
    [[workflow-version]] + [[workflow-run]] + [[workflow-step-run]] + [[manual-task]] +
    [[workflow-secret]] ([[0054-applications-workflow-engine]], epic #248).
+9. **Knowledge Base v2** (evolves the KB area) — [[folder]] + [[article-alias]] + [[article-wiki-link]],
+   then folder-based access control ([[0059-kb-folders-links-and-import]] / [[0060-kb-folder-access-control]],
+   #364/#365). *Design only — not yet built.*
+10. **Secret Manager** (beside the KB) — [[user-keypair]] first, then [[secret-vault]] +
+    [[vault-membership]] + [[secret-item]] ([[0061-secret-manager-zero-knowledge]], #366).
+    *Design only — not yet built.*
 
 Why asset-centric? → [[0004-asset-centric-design]].

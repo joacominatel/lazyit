@@ -48,6 +48,32 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > (cron + `pg_dump` for both DBs to a host-mounted `./backups`, with retention). Item #1 is **your
 > responsibility** — `.env.prod` must be copied off-host manually and access-controlled.
 
+> [!warning] The Secret Manager BREAKS the "restore DB + matching env key ⇒ everything readable" model
+> Everything above assumes the recovery rule "**a DB dump + the matching `.env.prod` key makes the data
+> readable again**" — true for the app DB, for Zitadel (`ZITADEL_MASTERKEY`), and for the workflow engine's
+> connector secrets (`WORKFLOW_SECRET_KEY`). The **Secret Manager** ([[0061-secret-manager-zero-knowledge]])
+> is the deliberate exception: it is **zero-knowledge** (**INV-10**), so its decryption keys are
+> **USER-held — a member's vault passphrase plus their one-time recovery key — and are NEVER in `.env.prod`** (no
+> server-side master key exists over secret *values*). Consequences for DR:
+> - A perfect **DB + `.env.prod` restore does NOT make zero-knowledge vaults readable.** The restored rows
+>   hold only ciphertext and per-member DEK copies wrapped to each member's public key; the server cannot
+>   unwrap any of them. Vault values come back only when a surviving member logs in (decrypts their wrapped
+>   DEK with their vault passphrase) **or** a surviving member redeems **their own** recovery key (which
+>   unlocks **their** private key → the vault DEK).
+> - The **recovery key is the user's personal, off-host, shown-once DR artifact** — the Secret-Manager
+>   analogue of `ZITADEL_MASTERKEY`, but **per user, not in any backup the operator controls**. It is shown
+>   once at keypair creation, never logged, never persisted in clear ([[0031-logging-strategy]]); the
+>   operator cannot back it up *for* the user. Document the "store your recovery key off-host" duty as part
+>   of onboarding, not as an operator backup item.
+> - **A single-member vault that loses BOTH the member's vault passphrase AND their recovery key is permanent loss
+>   — by design.** No DB restore, no env key, and no ADMIN can recover the plaintext (INV-8 ADMIN-omnipotence
+>   is over authorization/visibility, never cryptographic plaintext). Mitigation is organizational: keep
+>   sensitive vaults **multi-member** so a peer can re-wrap the DEK to a reset member.
+>
+> This sits **beside**, not inside, the env-key model: contrast the server-decryptable [[workflow-secret]]
+> store (recoverable with `WORKFLOW_SECRET_KEY`) against the Secret Manager (no operator-recoverable key at
+> all). See [[0061-secret-manager-zero-knowledge]].
+
 All commands run from the repo root, against the prod-like / self-hosted stack (the consolidated
 `compose.yaml` + `infra/docker-compose.prod.yaml` + `--profile prod`; the old
 `-f infra/docker-compose.prod.yml` form is superseded — [[deploy-self-hosted]]). Postgres is not
@@ -201,4 +227,4 @@ $ZPG psql -U "$ZITADEL_DB_USER" -d "$ZITADEL_DB_NAME" -c "\dn"
   migrations mean rollback = restore the pre-upgrade dump + redeploy the previous image).
 
 Related: [[deploy-self-hosted]] · [[docker-prod-like-first-boot]] · [[prisma-migrations]] ·
-[[auth-bootstrap]] · [[0028-secrets-and-config]] · [[0015-deployment-model]] · [[0037-idp-choice-zitadel-byoi]]
+[[auth-bootstrap]] · [[0028-secrets-and-config]] · [[0015-deployment-model]] · [[0037-idp-choice-zitadel-byoi]] · [[0061-secret-manager-zero-knowledge]] · [[0031-logging-strategy]]

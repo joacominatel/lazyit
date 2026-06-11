@@ -79,6 +79,9 @@ access changes — fired **after** the [[access-grant]] commits, decoupled (the 
 - 🟢 [[article-category]] — user-managed grouping of articles.
 - 🟢 [[article-version]] — append-only historical version of an article ([[0042-article-versioning-and-linking]]).
 - 🟢 [[article-link]] — links an article to an asset or application ([[0042-article-versioning-and-linking]]).
+- ⚪ [[folder]] — the flat [[article-category]] evolved: a self-referential hierarchy (`parentId`) that is an article's **one home folder**; live-only partial-unique name within a parent. [[0059-kb-folders-links-and-import]]
+- ⚪ [[article-alias]] — a nav-only symlink to an article living elsewhere (`createdAt`-only, hard-delete; never widens access). [[0059-kb-folders-links-and-import]]
+- ⚪ [[article-wiki-link]] — a materialized article↔article `[[slug]]` edge computed on save (powers backlinks + fast resolution; hard-rebuilt). [[0059-kb-folders-links-and-import]]
 
 ## Dashboard (derived)
 
@@ -90,5 +93,18 @@ The curated, ADMIN-only bell — distinct from the [[recent-activity]] view (whi
 See [[0056-in-app-notification-bell]] · issue #313.
 
 - 🟢 [[notification]] — append-only event store of curated nudges + a per-admin read join (fan-out-on-read).
+
+## Secret Manager
+
+Zero-knowledge vaults living beside the Knowledge Base — the server never holds a key that decrypts a
+secret **value** (a sharp exception to INV-8 ADMIN-omnipotence; proposes INV-10). A per-user keypair
+envelope wraps a per-vault DEK to each member; capability `secret:read`/`secret:manage` lets you *enter*,
+a wrapped DEK lets you *decrypt*. Distinct from the server-decryptable [[workflow-secret]]. See
+[[0061-secret-manager-zero-knowledge]] · issue #366.
+
+- ⚪ [[secret-vault]] — a folder vault = the crypto boundary; server-visible name + members, a random DEK never stored in clear. [[0061-secret-manager-zero-knowledge]]
+- ⚪ [[secret-item]] — a secret value inside a vault; stores only ciphertext/iv/authTag/keyVersion under the vault DEK. [[0061-secret-manager-zero-knowledge]]
+- ⚪ [[vault-membership]] — a crypto member of a vault; the row carries the DEK wrapped to the member's public key (soft-revoke v1 = drop the row). [[0061-secret-manager-zero-knowledge]]
+- ⚪ [[user-keypair]] — one keypair per User; public key in clear + private key wrapped under Argon2id(password) and again under the recovery key. [[0061-secret-manager-zero-knowledge]]
 
 Model overview & order: [[02-domain/_MOC|Domain]]. Conventions: [[conventions]].

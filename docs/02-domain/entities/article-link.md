@@ -16,6 +16,14 @@ Associates an [[article]] with **either** an [[asset]] **or** an [[application]]
 target — making the KB IT-native: "the runbook for THIS server", "the access procedure for THIS
 app". Introduced in [[0042-article-versioning-and-linking]].
 
+> [!note] Not the same as article↔article wiki-links
+> `ArticleLink` is the IT-native article↔**asset/application** link. The article↔**article** `[[slug]]`
+> wiki-links + folder aliases introduced by [[0059-kb-folders-links-and-import]] are a **separate**
+> model — [[article-wiki-link]] (a materialized `[[slug]]` edge, rebuilt on save, powering backlinks)
+> and [[article-alias]] (a nav-only symlink into another [[folder]]) — **not** an extension of this
+> entity. Different endpoints (`assetId` XOR `applicationId`) vs. different targets (another article /
+> another folder), different lifecycle, different threat model.
+
 ## Relationships
 
 - **belongs to** one [[article]] (`articleId`, **required** FK, `onDelete: Cascade`).
@@ -91,7 +99,9 @@ unique indexes (one per target); `@@index` on `articleId`, `assetId`, `applicati
 - `GET /applications/:id/articles` — the application reverse lookup, symmetric to the asset one
   (PUBLISHED only, lean list shape). Shipped in the ADR-0030 amendment (2026-06-01).
 
-Related: [[article]] · [[article-version]] · [[asset]] · [[application]] · [[user]] ·
+Related: [[article]] · [[article-version]] · [[article-wiki-link]] · [[article-alias]] · [[folder]] ·
+[[asset]] · [[application]] · [[user]] ·
 [[service-account]] · [[0042-article-versioning-and-linking]] · [[0021-knowledge-base-design]] ·
+[[0059-kb-folders-links-and-import]] · [[0060-kb-folder-access-control]] ·
 [[0005-id-strategy]] · [[0006-soft-delete-and-auditing]] · [[0040-rbac-roles]] ·
 [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0041-soft-delete-reuse-and-restore]] · [[INVARIANTS]]

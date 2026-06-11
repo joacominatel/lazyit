@@ -102,6 +102,20 @@ All open questions from the initial briefing are now decided (2026-05-25):
 
 - Entity **field tables** — added once a model lands in Prisma (most now have them); still conceptual-only
   for the not-yet-built entities (Ticket, AccessRequest — see [[entities/_MOC|Entities]]).
+- **Knowledge Base v2 — DECIDED, not yet built.** Three ADRs were ratified 2026-06-11 in a design
+  session; each `accepted` (the decision stands), with implementation still ahead:
+  - **KB v2 structure** — folders (the flat [[article-category]] evolved into a hierarchy + one home
+    folder per article), nav-only aliases/symlinks, article↔article `[[slug]]` wiki-links + backlinks,
+    and bulk `.zip` import ([[0059-kb-folders-links-and-import]], #364).
+  - **Folder-based KB access** — the **folder** becomes the permission boundary (a deliberate per-folder
+    carve-out from the per-domain-only rule of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]); default
+    PUBLIC, additive dynamic rules, API+DB enforcement, no-escalation; proposes **INV-9**
+    ([[0060-kb-folder-access-control]], #365).
+  - **Zero-knowledge Secret Manager** — vaults beside the KB where the server can never decrypt a secret
+    *value* (per-user keypair envelope, Argon2id, DEK wrapped per member, recovery key shown once); a
+    **third** secret store distinct from the server-decryptable [[workflow-secret]]; new `secret`
+    capability + the INV-8 crypto-exception; proposes **INV-10**
+    ([[0061-secret-manager-zero-knowledge]], #366).
 - **Async workers + the Workflow Engine are now built and shipped** (on `master`), no longer stubs.
   BullMQ on self-hosted Valkey with sandboxed processors ([[0053-async-workers-bullmq-valkey]])
   powers both the async `.docx` KB import (which closed SEC-002) and the opt-in
