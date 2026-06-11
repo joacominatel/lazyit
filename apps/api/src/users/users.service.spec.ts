@@ -14,6 +14,7 @@ import { SearchService } from '../search/search.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { UserHistoryService } from '../user-history/user-history.service';
+import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
 import {
   IDENTITY_PROVIDER,
@@ -88,6 +89,9 @@ describe('UsersService', () => {
     buildRunData: jest.Mock;
     enqueue: jest.Mock;
   };
+  // ADR-0058 §4 / ADR-0056 §3 (issue #359): the bell emitter the clone reuses post-commit for every
+  // cloned grant. Mocked so the clone tests assert WHICH grants nudged the bell, without a DB.
+  let accessGrants: { emitGrantNotifications: jest.Mock };
   // The base prisma mock (lifted so the clone tests can prime assetAssignment/accessGrant/asset reads).
   let prismaMock: {
     assetAssignment: { findMany: jest.Mock };
@@ -118,7 +122,16 @@ describe('UsersService', () => {
       },
       accessGrant: {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-        create: jest.fn().mockResolvedValue({ id: 'cloned-grant-1' }),
+        // Echo the persisted shape the clone reads back (id + applicationId + accessLevel) so the
+        // post-commit bell emitter (issue #359) receives a realistic grant. accessLevel defaults to
+        // null when the create omits it (mirrors the column default).
+        create: jest.fn((args: { data: Record<string, unknown> }) =>
+          Promise.resolve({
+            id: 'cloned-grant-1',
+            applicationId: args.data.applicationId,
+            accessLevel: args.data.accessLevel ?? null,
+          }),
+        ),
       },
       assetAssignment: {
         create: jest.fn().mockResolvedValue({ id: 'cloned-assign-1' }),
@@ -189,6 +202,11 @@ describe('UsersService', () => {
         .mockReturnValue({ idempotencyKey: 'ACCESS_GRANTED:g:0' }),
       enqueue: jest.fn().mockResolvedValue(true),
     };
+    // AccessGrantsService bell emitter (ADR-0056 §3 / issue #359). Default resolves; the clone tests
+    // assert it is called once per cloned grant, independent of the engine toggle.
+    accessGrants = {
+      emitGrantNotifications: jest.fn().mockResolvedValue(undefined),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -199,6 +217,7 @@ describe('UsersService', () => {
         { provide: AssetHistoryService, useValue: assetHistory },
         { provide: UserHistoryService, useValue: history },
         { provide: WorkflowTriggerService, useValue: workflowTrigger },
+        { provide: AccessGrantsService, useValue: accessGrants },
         { provide: IDENTITY_PROVIDER, useValue: idp as IdentityProvider },
         { provide: getLoggerToken(UsersService.name), useValue: logger },
       ],
@@ -1645,9 +1664,11 @@ describe('UsersService', () => {
           payload: { userId: NEW_ID },
         }),
       );
-      // The soft-deleted asset's assignment is reported as skipped, never silently dropped.
+      // The soft-deleted asset's assignment is reported as skipped, never silently dropped — carrying
+      // the underlying asset id so the web can resolve a friendly label (issue #361).
       expect(result.skipped).toContainEqual({
         id: A2,
+        entityId: 'asset-gone',
         reason: 'asset_deleted',
       });
     });
@@ -1688,6 +1709,15 @@ describe('UsersService', () => {
       expect(workflowTrigger.planForTrigger).not.toHaveBeenCalled();
       expect(tx.workflowRun.create).not.toHaveBeenCalled();
       expect(workflowTrigger.enqueue).not.toHaveBeenCalled();
+      // …but the BELL still fires for the cloned grant (issue #359): the notification bell is admin
+      // VISIBILITY, INDEPENDENT of the suppressed engine toggle. Same emitter a hand-created grant uses.
+      expect(accessGrants.emitGrantNotifications).toHaveBeenCalledTimes(1);
+      expect(accessGrants.emitGrantNotifications).toHaveBeenCalledWith({
+        id: 'cloned-grant-1',
+        userId: NEW_ID,
+        applicationId: 'app-1',
+        accessLevel: 'developer',
+      });
     });
 
     it('engine toggle ON: fires ACCESS_GRANTED — PENDING run written in-tx, enqueued after commit', async () => {
@@ -1748,6 +1778,120 @@ describe('UsersService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
       // No user was minted.
       expect(user.create).not.toHaveBeenCalled();
+    });
+
+    // --- issue #359: the cloned grants must fire the bell, like a hand-created grant ----------------
+    it('fires the bell once per cloned grant — even with the engine toggle ON (independent concerns)', async () => {
+      primeCreate();
+      const G1 = 'clxgrant1aaaaaaaaaaaaaaaa';
+      const G2 = 'clxgrant2bbbbbbbbbbbbbbbb';
+      prismaRef().accessGrant.findMany.mockResolvedValue([
+        { id: G1, applicationId: 'app-1', accessLevel: 'admin', expiresAt: null },
+        { id: G2, applicationId: 'app-2', accessLevel: null, expiresAt: null },
+      ]);
+
+      await service.clone(
+        SOURCE,
+        {
+          profile: profile(),
+          cloneAssetAssignments: [],
+          cloneAccessGrants: [G1, G2],
+          fireWorkflowsOnClonedGrants: true,
+        },
+        ADMIN,
+      );
+
+      // Two cloned grants → two bell emissions, each carrying the PERSISTED grant shape (the emitter
+      // decides admin_granted / critical_app_access from it). The bell fires regardless of the toggle.
+      expect(accessGrants.emitGrantNotifications).toHaveBeenCalledTimes(2);
+      expect(accessGrants.emitGrantNotifications).toHaveBeenCalledWith({
+        id: 'cloned-grant-1',
+        userId: NEW_ID,
+        applicationId: 'app-1',
+        accessLevel: 'admin',
+      });
+      expect(accessGrants.emitGrantNotifications).toHaveBeenCalledWith({
+        id: 'cloned-grant-1',
+        userId: NEW_ID,
+        applicationId: 'app-2',
+        accessLevel: null,
+      });
+    });
+
+    it('never fires the bell when no grants are cloned', async () => {
+      primeCreate();
+      await service.clone(
+        SOURCE,
+        {
+          profile: profile(),
+          cloneAssetAssignments: [],
+          cloneAccessGrants: [],
+          fireWorkflowsOnClonedGrants: false,
+        },
+        ADMIN,
+      );
+      expect(accessGrants.emitGrantNotifications).not.toHaveBeenCalled();
+    });
+
+    it('a failing bell emit never breaks the clone (best-effort, post-commit)', async () => {
+      primeCreate();
+      const G1 = 'clxgrant1aaaaaaaaaaaaaaaa';
+      prismaRef().accessGrant.findMany.mockResolvedValue([
+        {
+          id: G1,
+          applicationId: 'app-1',
+          accessLevel: 'developer',
+          expiresAt: null,
+        },
+      ]);
+      accessGrants.emitGrantNotifications.mockRejectedValue(
+        new Error('bell down'),
+      );
+
+      // The clone still resolves with the created user — a notification failure is swallowed (#359).
+      const result = await service.clone(
+        SOURCE,
+        {
+          profile: profile(),
+          cloneAssetAssignments: [],
+          cloneAccessGrants: [G1],
+          fireWorkflowsOnClonedGrants: false,
+        },
+        ADMIN,
+      );
+      expect(result.created.id).toBe(NEW_ID);
+    });
+
+    // --- issue #361: a duplicate-asset skip carries the underlying asset id for label resolution -----
+    it('reports a duplicate-asset assignment as already_in_state, carrying the underlying entityId', async () => {
+      primeCreate();
+      // Two selected assignments on the SAME live asset → the second is a no-op (already_in_state).
+      const A1 = 'clxassign1aaaaaaaaaaaaaaa';
+      const A2 = 'clxassign2bbbbbbbbbbbbbbb';
+      prismaRef().assetAssignment.findMany.mockResolvedValue([
+        { id: A1, assetId: 'asset-live' },
+        { id: A2, assetId: 'asset-live' },
+      ]);
+      prismaRef().asset.findMany.mockResolvedValue([{ id: 'asset-live' }]);
+
+      const result = await service.clone(
+        SOURCE,
+        {
+          profile: profile(),
+          cloneAssetAssignments: [A1, A2],
+          cloneAccessGrants: [],
+          fireWorkflowsOnClonedGrants: false,
+        },
+        ADMIN,
+      );
+
+      // Exactly one new assignment row; the duplicate is reported with the asset id the web can label.
+      expect(tx.assetAssignment.create).toHaveBeenCalledTimes(1);
+      expect(result.skipped).toContainEqual({
+        id: A2,
+        entityId: 'asset-live',
+        reason: 'already_in_state',
+      });
     });
   });
 });

@@ -35,6 +35,15 @@
       "updated": "Actualizado",
       "actions": "Acciones"
     },
+    "columnPicker": {
+      "label": "Columnas",
+      "columns": {
+        "email": "Correo",
+        "role": "Rol",
+        "status": "Estado",
+        "updated": "Actualizado"
+      }
+    },
     "meta": {
       "email": "Correo",
       "role": "Rol",
@@ -191,7 +200,8 @@
       "openLink": "Abrir el perfil del usuario nuevo",
       "reasons": {
         "not_found": "Ya no es una fila activa del origen",
-        "asset_deleted": "El activo fue eliminado"
+        "asset_deleted": "El activo fue eliminado",
+        "already_in_state": "Ya se trasladó para este activo"
       }
     }
   },

@@ -101,6 +101,9 @@ export function GlobalSearch() {
   }
 
   const hasQuery = debouncedQuery.length > 0;
+  // `degraded` (issue #370): the API is fail-soft, so a Meili outage returns an empty 200 — we surface
+  // it as the error state ("search unavailable") instead of silently rendering "no results".
+  const isDegraded = data?.degraded === true;
   const totalHits = data
     ? SEARCH_ENTITIES.reduce((sum, key) => sum + (data[key]?.hits.length ?? 0), 0)
     : 0;
@@ -173,6 +176,10 @@ export function GlobalSearch() {
                     ? t("search.runErrorDetail", { message: error.message })
                     : `${t("search.runError")}.`}
                 </StatusRow>
+              ) : isDegraded ? (
+                // The request succeeded (HTTP 200) but Meili was down — distinguish an outage from a
+                // genuine empty result so the user retries rather than trusting "no results".
+                <StatusRow tone="error">{t("search.unavailable")}</StatusRow>
               ) : (
                 <>
                   <ResultGroup

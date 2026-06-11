@@ -63,6 +63,9 @@ function makeCtx(): Readonly<WorkflowMappingContext> {
       email: 'ada@example.com',
       firstName: 'Ada',
       lastName: 'Lovelace',
+      legajo: null,
+      username: null,
+      manager: { name: null, email: null, isOffboarded: false },
     },
     application: { id: 'app_1', name: 'Jira' },
     grant: {
@@ -84,6 +87,8 @@ function makeStep(overrides: Partial<WebhookOutStep> = {}): WebhookOutStep {
       event: '{{ event }}',
       email: '{{ grantee.email }}',
     },
+    // Default fail-closed: a non-idempotent delivery is single-shot (a transient failure is NOT retried).
+    idempotent: false,
     onError: 'fail',
     ...overrides,
   };
@@ -168,21 +173,39 @@ describe('WebhookOutStepHandler.execute', () => {
     expect(result.metadata?.errorClass).toBe('config');
   });
 
-  it('classifies a 5xx receiver response as a transient (retryable) failure', async () => {
-    const handler = new WebhookOutStepHandler();
-    const { transport } = makeTransport({ status: 502 });
-    handler.egressOptions = { transport, lookup: publicLookup };
+  it('classifies a 5xx receiver response as transient — retryable ONLY when the step is idempotent', async () => {
     const connection: WebhookOutConnectionConfig = {
       kind: 'WEBHOOK_OUT',
       url: 'https://hooks.example.com/abc',
     };
-    const result = await handler.execute(ctxFor(connection, makeStep()));
-    expect(result.status).toBe('FAILED');
-    expect(result.retryable).toBe(true);
-    expect(result.metadata).toMatchObject({
+
+    // Idempotent delivery: a 5xx is a transient, RETRYABLE failure.
+    const idempotent = new WebhookOutStepHandler();
+    idempotent.egressOptions = {
+      transport: makeTransport({ status: 502 }).transport,
+      lookup: publicLookup,
+    };
+    const r1 = await idempotent.execute(
+      ctxFor(connection, makeStep({ idempotent: true })),
+    );
+    expect(r1.status).toBe('FAILED');
+    expect(r1.retryable).toBe(true);
+    expect(r1.metadata).toMatchObject({
       statusCode: 502,
       errorClass: 'http-5xx',
     });
+
+    // Non-idempotent delivery (the default): the same 5xx is single-shot — a redelivery could double-fire.
+    const nonIdempotent = new WebhookOutStepHandler();
+    nonIdempotent.egressOptions = {
+      transport: makeTransport({ status: 502 }).transport,
+      lookup: publicLookup,
+    };
+    const r2 = await nonIdempotent.execute(
+      ctxFor(connection, makeStep({ idempotent: false })),
+    );
+    expect(r2.status).toBe('FAILED');
+    expect(r2.retryable).toBe(false);
   });
 
   it('classifies a 4xx receiver response as a permanent (non-retryable) failure', async () => {

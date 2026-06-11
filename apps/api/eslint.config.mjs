@@ -6,7 +6,12 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['eslint.config.mjs'],
+    // Machine-generated and compiled output is never hand-authored: the Prisma client
+    // (`prisma generate` → generated/prisma) and the Nest build (`dist`). Linting it floods
+    // the report with thousands of false positives on a clean checkout — exclude both so
+    // `eslint .` reports only authored source. The `.cjs` test helper is a CommonJS child
+    // process deliberately outside the TS project, so the type-checked parser can't read it.
+    ignores: ['eslint.config.mjs', 'generated/**', 'dist/**', '**/*.cjs'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

@@ -35,6 +35,15 @@
       "updated": "Updated",
       "actions": "Actions"
     },
+    "columnPicker": {
+      "label": "Columns",
+      "columns": {
+        "email": "Email",
+        "role": "Role",
+        "status": "Status",
+        "updated": "Updated"
+      }
+    },
     "meta": {
       "email": "Email",
       "role": "Role",
@@ -191,7 +200,8 @@
       "openLink": "Open the new user's profile",
       "reasons": {
         "not_found": "No longer an active row of the source",
-        "asset_deleted": "The asset has been removed"
+        "asset_deleted": "The asset has been removed",
+        "already_in_state": "Already carried over for this asset"
       }
     }
   },

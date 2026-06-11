@@ -108,7 +108,10 @@ function initialState(step: WorkflowStep): EditorState {
     name: step.name ?? "",
     method: step.kind === "REST" ? step.method : "POST",
     path: step.kind === "REST" ? step.path : "/",
-    idempotent: step.kind === "REST" ? step.idempotent : false,
+    idempotent:
+      step.kind === "REST" || step.kind === "WEBHOOK_OUT"
+        ? step.idempotent
+        : false,
     dataMapping: isHttp ? step.dataMapping : undefined,
     statusCodes: isHttp ? formatStatusCodes(step.successCriteria) : "",
     retryEnabled: (retry?.maxAttempts ?? 1) > 1,
@@ -240,6 +243,7 @@ function StepForm({
         key: step.key,
         connectionId: step.connectionId,
         name,
+        idempotent: values.idempotent,
         dataMapping: values.dataMapping,
         successCriteria: buildSuccessCriteria(values.statusCodes),
         retry: values.retryEnabled
@@ -392,6 +396,24 @@ function StepForm({
                     />
                   </Field>
                 </>
+              ) : null}
+
+              {step.kind === "WEBHOOK_OUT" ? (
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel htmlFor="step-idempotent">
+                      {t("stepEditor.idempotentLabel")}
+                    </FieldLabel>
+                    <FieldDescription>
+                      {t("stepEditor.idempotentHint")}
+                    </FieldDescription>
+                  </FieldContent>
+                  <Switch
+                    id="step-idempotent"
+                    checked={values.idempotent}
+                    onCheckedChange={(on) => set("idempotent", on)}
+                  />
+                </Field>
               ) : null}
 
               {step.kind === "MANUAL" ? (

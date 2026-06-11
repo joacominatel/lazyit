@@ -17,6 +17,7 @@ type IndexMock = {
 type ClientMock = {
   index: jest.Mock;
   multiSearch: jest.Mock;
+  getStats: jest.Mock;
 };
 
 const MeilisearchMock = Meilisearch as unknown as jest.Mock;
@@ -117,6 +118,7 @@ describe('SearchService', () => {
       client = {
         index: jest.fn().mockReturnValue(index),
         multiSearch: jest.fn(),
+        getStats: jest.fn(),
       };
       MeilisearchMock.mockImplementation(() => client);
       logger = loggerMock();
@@ -319,7 +321,7 @@ describe('SearchService', () => {
     });
 
     // --- fail-soft reads (ADR-0035): configured-but-unhealthy engine ---------
-    it('search returns empty blocks (not a throw) when multiSearch rejects, and logs it', async () => {
+    it('search returns empty blocks marked degraded (not a throw) when multiSearch rejects, and logs it', async () => {
       const boom = new Error('meili unreachable');
       client.multiSearch.mockRejectedValueOnce(boom);
 
@@ -329,29 +331,89 @@ describe('SearchService', () => {
         limit: 20,
       });
 
-      // Fail-soft: empty blocks for every requested entity, no exception bubbles to the controller.
+      // Fail-soft (issue #370): empty blocks for every requested entity PLUS degraded:true, so the
+      // client can tell an outage from a genuine empty result. No exception bubbles to the controller.
       expect(result).toEqual({
         assets: { hits: [], total: 0 },
         users: { hits: [], total: 0 },
+        degraded: true,
       });
       expect(logger.error).toHaveBeenCalledTimes(1);
       const [meta] = logger.error.mock.calls[0] as [{ err: unknown }];
       expect(meta.err).toBe(boom);
     });
 
-    it('search fail-soft defaults to empty blocks for all five indexes when entities omitted', async () => {
+    it('a healthy search never sets degraded', async () => {
+      client.multiSearch.mockResolvedValue({
+        results: [{ indexUid: 'assets', hits: [], estimatedTotalHits: 0 }],
+      });
+
+      const result = await service.search({
+        q: 'x',
+        entities: ['assets'],
+        limit: 20,
+      });
+
+      expect(result.degraded).toBeUndefined();
+    });
+
+    it('search fail-soft defaults to empty (degraded) blocks for all five indexes when entities omitted', async () => {
       client.multiSearch.mockRejectedValueOnce(new Error('meili down'));
 
       const result = await service.search({ q: 'x', limit: 20 });
 
+      expect(result.degraded).toBe(true);
       expect(Object.keys(result).sort()).toEqual([
         'applications',
         'articles',
         'assets',
+        'degraded',
         'locations',
         'users',
       ]);
       expect(result.assets).toEqual({ hits: [], total: 0 });
+    });
+
+    // --- self-heal probing (issue #370) --------------------------------------
+    describe('emptyOrMissingIndexes', () => {
+      it('reports indexes that are absent from stats or have zero documents', async () => {
+        client.getStats.mockResolvedValue({
+          indexes: {
+            assets: { numberOfDocuments: 12 },
+            articles: { numberOfDocuments: 0 }, // empty -> needs rebuild
+            users: { numberOfDocuments: 3 },
+            // locations + applications absent from the map -> never created -> need rebuild
+          },
+        });
+
+        const stale = await service.emptyOrMissingIndexes();
+
+        expect(stale.sort()).toEqual(['applications', 'articles', 'locations']);
+      });
+
+      it('reports nothing when every index has documents', async () => {
+        client.getStats.mockResolvedValue({
+          indexes: {
+            assets: { numberOfDocuments: 1 },
+            articles: { numberOfDocuments: 1 },
+            users: { numberOfDocuments: 1 },
+            locations: { numberOfDocuments: 1 },
+            applications: { numberOfDocuments: 1 },
+          },
+        });
+
+        expect(await service.emptyOrMissingIndexes()).toEqual([]);
+      });
+    });
+  });
+
+  // --- disabled-mode self-heal probing (no client) ---------------------------
+  describe('emptyOrMissingIndexes in disabled mode', () => {
+    it('returns [] without calling the engine', async () => {
+      delete process.env.MEILI_HOST;
+      const logger = loggerMock();
+      const service = await buildService(logger);
+      expect(await service.emptyOrMissingIndexes()).toEqual([]);
     });
   });
 

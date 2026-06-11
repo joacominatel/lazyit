@@ -3,7 +3,7 @@ title: "ADR-0035: Cross-cutting search architecture (Meilisearch)"
 tags: [adr]
 status: accepted
 created: 2026-05-26
-updated: 2026-05-26
+updated: 2026-06-11
 deciders: [Joaquín Minatel]
 ---
 
@@ -61,11 +61,39 @@ logged (CRITICAL) and swallowed. If Meili is down, writes still succeed and sear
 - **Positive:** fast, typo-tolerant, unified search; the app is resilient to Meili being down
   (fail-soft); reindex repairs any drift.
 - **Eventual consistency:** a dropped sync leaves the index stale until the next update or a
-  `reindex:all` — acceptable, and observable via the error logs.
+  `reindex:all` — acceptable, and observable via the error logs (the `upsert`/`remove` `.catch`
+  logs at ERROR with `{ index, id, op }`, amendment 2026-06-11).
 - **New operational dependency:** Meilisearch must run in every environment; the master key is a
   secret ([[0028-secrets-and-config]]). **DevOps owns the prod service + secret.**
 - **No authorization on search yet** (no auth, [[0016-auth-strategy-deferred]]); results exclude
   soft-deleted rows but are otherwise unfiltered by caller.
+
+## Amendment (2026-06-11) — degraded signal + boot self-heal (issue #370)
+
+The original fail-soft posture made an **outage indistinguishable from an empty result** (any Meili
+read failure returned an empty `{ hits, total }` 200, which the palette rendered as "Sin resultados"),
+and a **freshly-seeded DB left every index empty** (the seed never indexes; `reindex:all` is manual),
+so search silently returned nothing until someone reindexed by hand. Two targeted changes, no posture
+change:
+
+- **`degraded` flag (shared contract).** `SearchResultsSchema` (@lazyit/shared) gains an optional
+  `degraded: boolean` (default `false`). The endpoint stays fail-soft — on a `multiSearch` rejection it
+  still returns empty blocks with HTTP 200 — **but** sets `degraded: true`. The ⌘K palette
+  (`global-search.tsx`) renders the existing error `StatusRow` ("search unavailable") when `degraded`,
+  so a transient outage no longer masquerades as a genuine empty result. A healthy response omits the
+  flag.
+- **Boot self-heal (`SearchBootstrapService`).** `onApplicationBootstrap` asks Meili for per-index doc
+  counts (`getStats`) and, for any **missing or empty** index, kicks off a **background, un-awaited**
+  rebuild reusing the zero-downtime `reindexIndex` swap. It **never blocks boot/readiness** and is a
+  strict **no-op when every index already has documents** — so it is safe on a large prod DB (it only
+  ever fires when there is nothing to lose) and disabled under `NODE_ENV=test` / search-disabled mode.
+  This makes the manual-reindex step self-healing for a fresh DB without removing it as a recovery tool.
+
+Still **out of scope (follow-up):** full incremental-sync reconciliation for a dropped fire-and-forget
+write while the DB stays up (i.e. a row whose `upsert`/`remove` was dropped and which is not empty
+enough to trigger the boot self-heal). For now the dropped write is at least **diagnosable** — the
+`.catch` logs at ERROR with `{ index, id, op }` — and repairable via `reindex:all`. Pinning explicit
+index settings (`searchableAttributes` / typo tolerance) remains an open question (engine defaults kept).
 
 ## Deferred (explicit)
 

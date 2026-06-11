@@ -7,7 +7,6 @@ import {
   WORKFLOW_CONNECTION_KINDS_V1,
   WORKFLOW_REST_AUTH_SCHEMES,
   type WorkflowConnection,
-  type WorkflowConnectionConfig,
   type WorkflowConnectionKind,
   type WorkflowProbeMethod,
   type WorkflowRestAuthScheme,
@@ -43,6 +42,7 @@ import {
   useCreateWorkflowConnection,
   useUpdateWorkflowConnection,
 } from "@/lib/api/hooks/use-workflow-connections";
+import { buildConnectionConfig } from "@/lib/workflow/connection-config";
 
 const FORM_ID = "workflow-connection-form";
 
@@ -91,37 +91,6 @@ function initialState(connection?: WorkflowConnection): FormState {
     healthCheckPath: "",
     healthCheckMethod: undefined,
   };
-}
-
-/** Build the per-kind config object from the flat form state. */
-function buildConfig(values: FormState): WorkflowConnectionConfig {
-  switch (values.kind) {
-    case "REST":
-      return {
-        kind: "REST",
-        baseUrl: values.url.trim(),
-        authScheme: values.authScheme,
-        ...(values.authScheme === "HEADER" && values.authHeaderName.trim()
-          ? { authHeaderName: values.authHeaderName.trim() }
-          : {}),
-        ...(values.healthCheckPath.trim()
-          ? { healthCheckPath: values.healthCheckPath.trim() }
-          : {}),
-        ...(values.healthCheckMethod
-          ? { healthCheckMethod: values.healthCheckMethod }
-          : {}),
-      };
-    case "WEBHOOK_OUT":
-      return {
-        kind: "WEBHOOK_OUT",
-        url: values.url.trim(),
-        ...(values.signatureHeader.trim()
-          ? { signatureHeader: values.signatureHeader.trim() }
-          : {}),
-      };
-    case "MANUAL":
-      return { kind: "MANUAL" };
-  }
 }
 
 export function ConnectionFormDialog({
@@ -185,7 +154,9 @@ function ConnectionForm({
       setError(t("connectionForm.errors.nameRequired"));
       return;
     }
-    const config = buildConfig(values);
+    // On edit, merge onto the existing config so keys the form does not expose (e.g. REST
+    // `defaultHeaders`) survive the PATCH instead of being wiped (issue #351).
+    const config = buildConnectionConfig(values, connection?.config);
     setError(undefined);
 
     if (connection) {

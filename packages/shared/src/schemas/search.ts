@@ -82,6 +82,12 @@ function entityResult<Hit extends z.ZodType>(hit: Hit) {
  * The `GET /search` response. Each entity key is **optional**: the endpoint returns only the
  * requested `entities` (all five when the param is omitted), so a scoped query yields a subset of
  * these keys.
+ *
+ * `degraded` is the **outage signal** (issue #370): the API is fail-soft — when Meilisearch rejects a
+ * read it still returns empty `{ hits, total }` blocks with HTTP 200 so the endpoint stays resilient,
+ * but it sets `degraded: true` so a transient engine outage is distinguishable from a genuine empty
+ * result. It is **optional** and defaults to `false`; a healthy response omits it (or sends `false`),
+ * and the UI shows "search unavailable" only when it is `true`.
  */
 export const SearchResultsSchema = z
   .object({
@@ -91,7 +97,10 @@ export const SearchResultsSchema = z
     locations: entityResult(LocationHitSchema),
     applications: entityResult(ApplicationHitSchema),
   })
-  .partial();
+  .partial()
+  .extend({
+    degraded: z.boolean().optional().default(false),
+  });
 
 export type SearchResults = z.infer<typeof SearchResultsSchema>;
 

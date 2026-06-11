@@ -237,7 +237,7 @@ export function CloneUserWizard({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-lg">
+      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
             {t("title", { name: `${source.firstName} ${source.lastName}` })}
@@ -569,10 +569,14 @@ function CloneResult({
           </p>
           <ul className="divide-y rounded-lg border text-sm">
             {skipped.map((item) => {
-              // The skipped id may be an assignment or a grant; resolve a friendly label if we can.
+              // Resolve a friendly label from the UNDERLYING asset/app id the API resolved the skipped
+              // item to (`entityId`); the catalog maps are keyed by asset/app id, not the requested
+              // assignment/grant id. Falls back to the raw id when there is nothing to resolve (e.g. a
+              // `not_found` item never matched an active source row, so it carries no entityId).
               const label =
-                assetNameById.get(item.id) ??
-                appNameById.get(item.id) ??
+                (item.entityId &&
+                  (assetNameById.get(item.entityId) ??
+                    appNameById.get(item.entityId))) ??
                 item.id;
               return (
                 <li

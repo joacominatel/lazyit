@@ -41,21 +41,46 @@ import type {
  * ({@link freezeMappingContext}) before constructing a {@link StepContext}. The mapper can read ONLY
  * from here — there is no path to `process`, env, the DB or globals.
  *
- * SCOPE GUARDRAIL (ADR-0054 §6c): v1 exposes ONLY `grantee.{id,email,firstName,lastName}` +
- * `application` + grant context + prior step outputs. There are deliberately **no** `role` / `team` /
- * `manager` / AD fields — those are a future model-first ADR, NOT this engine. Every value here is
- * UNTRUSTED (a display name / free-form accessLevel / manual input is user-influenced), so the mapper
+ * SCOPE GUARDRAIL (ADR-0054 §6c → resolved by ADR-0058): exposes `grantee.{id,email,firstName,lastName}`
+ * + the ADR-0058 identity fields (`legajo`, `username`, and a redaction-safe `manager` descriptor) +
+ * `application` + grant context + prior step outputs. `role` / `team` / AD groups remain OUT — they pull
+ * toward Identity-Governance (the anti-goal, ADR-0058 §Decision Q3). Every value here is UNTRUSTED (a
+ * display name / free-form accessLevel / manual input is user-influenced), so the mapper
  * context-aware-encodes every interpolation.
  */
 export interface WorkflowMappingContext {
   /** The access-lifecycle event that started the run (ACCESS_GRANTED | ACCESS_REVOKED in v1). */
   event: WorkflowTrigger;
-  /** The granted user — the only identity fields v1 surfaces. All untrusted strings. */
+  /**
+   * The granted user — the identity fields the mapper surfaces (ADR-0058 §3). All untrusted strings.
+   * `legajo` / `username` are the ADR-0058 directory fields (null when not recorded); `manager` is a
+   * redaction-safe descriptor (display name + offboarded flag only — never a manager's PII beyond the
+   * display name + email, INV-6).
+   */
   grantee: {
     id: string;
     email: string;
     firstName: string;
     lastName: string;
+    /** Employee/file number (ADR-0058), or null when not recorded. */
+    legajo: string | null;
+    /** Directory/display handle (ADR-0058), or null when not recorded. */
+    username: string | null;
+    /**
+     * The grantee's manager, projected to SCALAR display leaves so a connector can map e.g.
+     * `{{ grantee.manager.name }}` / `{{ grantee.manager.email }}` (the dotted path resolves a scalar;
+     * the object itself is never interpolated). INV-6 / ADR-0058 §3:
+     *  - linked & LIVE manager  → `name` = "firstName lastName", `email` = the manager's email;
+     *  - free-text fallback     → `name` = the `managerName` string, `email` = null;
+     *  - no manager recorded OR the linked manager is soft-deleted (offboarded) → `name`/`email` empty
+     *    (null) — never a dangling/secret leak — and `isOffboarded` flags the soft-deleted case so the
+     *    builder can warn the token will render blank.
+     */
+    manager: {
+      name: string | null;
+      email: string | null;
+      isOffboarded: boolean;
+    };
   };
   /** The application the access is for. */
   application: {

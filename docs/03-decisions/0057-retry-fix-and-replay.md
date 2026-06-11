@@ -241,6 +241,12 @@ The CEO ratified the four open questions as follows. This authorizes implementat
    provisioning step up to and including the failed step is `idempotent: true` (or the run failed
    at/before its first non-idempotent create). Otherwise the operator falls back to re-granting — the
    same posture as `COMPENSATED` runs. No "warn and proceed" path.
+   - **Both provisioning kinds carry the flag (#355).** `idempotent` lives on **REST and WEBHOOK_OUT**
+     steps alike (default `false` = fail-closed). It gates two things identically: the handler's
+     `retryable = transient && step.idempotent` (a non-idempotent delivery is single-shot — a
+     lost-response retry must not double-fire), and `assertReplaySafe` above. A WEBHOOK_OUT marked
+     `idempotent: true` (its receiver dedupes on a stable key) is therefore replay-eligible; left at the
+     default it stays single-shot and replay-refused, exactly like a non-idempotent REST create.
 4. **Option 2 — build now** (not deferred), as the request-scoped, never-persisted override channel
    described above (INV-6: the override is merged into the frozen context for one render and discarded;
    only field *names* may ever be recorded).

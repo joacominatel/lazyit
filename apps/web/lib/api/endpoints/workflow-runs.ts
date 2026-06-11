@@ -230,7 +230,17 @@ export interface DryRunRequestPreview {
  */
 export interface DryRunMappingContext {
   event: WorkflowTrigger;
-  grantee: { id: string; email: string; firstName: string; lastName: string };
+  grantee: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    // ADR-0058 identity fields (null when not recorded). `manager` is a redaction-safe descriptor —
+    // display name + live-manager email only — blank (null name/email) when none / offboarded.
+    legajo: string | null;
+    username: string | null;
+    manager: { name: string | null; email: string | null; isOffboarded: boolean };
+  };
   application: { id: string; name: string };
   grant: {
     id: string;
