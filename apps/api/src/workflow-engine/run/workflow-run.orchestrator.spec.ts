@@ -821,6 +821,35 @@ describe('assertReplaySafe — the FAIL-CLOSED double-provision guard (ADR-0057 
       assertReplaySafe(steps, null, [{ stepKey: 'finalize' }]),
     ).toThrow(ReplayNotIdempotentError);
   });
+
+  // A WEBHOOK_OUT step is a provisioning kind too (signed outbound delivery) — it carries the same
+  // `idempotent` flag and is gated identically (issue #355).
+  const webhookStep = (key: string, idempotent: boolean) => ({
+    kind: 'WEBHOOK_OUT',
+    key,
+    connectionId: CONN,
+    idempotent,
+  });
+
+  it('REFUSES a non-idempotent WEBHOOK_OUT that already SUCCEEDED on/before the failed step', () => {
+    const withWebhook = [
+      webhookStep('deliver', false),
+      restStep('finalize', { idempotent: false }),
+    ] as unknown as ReadonlyArray<WorkflowStep>;
+    expect(() =>
+      assertReplaySafe(withWebhook, 'finalize', [{ stepKey: 'deliver' }]),
+    ).toThrow(ReplayNotIdempotentError);
+  });
+
+  it('ALLOWS an idempotent WEBHOOK_OUT that SUCCEEDED on/before the failed step (replay-eligible)', () => {
+    const withWebhook = [
+      webhookStep('deliver', true),
+      restStep('finalize', { idempotent: false }),
+    ] as unknown as ReadonlyArray<WorkflowStep>;
+    expect(() =>
+      assertReplaySafe(withWebhook, 'finalize', [{ stepKey: 'deliver' }]),
+    ).not.toThrow();
+  });
 });
 
 describe('backoffMs', () => {
