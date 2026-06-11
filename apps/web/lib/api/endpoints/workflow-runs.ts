@@ -47,8 +47,15 @@ export interface WorkflowTransitionTaken {
 /**
  * One step ATTEMPT in a run's traversed graph (`GET /workflow-runs/:id` → `steps[]`), ordered by
  * attempt. Richer than the shared `WorkflowStepRun`: it adds the resolved `durationMs`/`statusCode`/
- * `errorClass`, the `transitionTaken` edge, and the escalation/compensation linkage the run timeline
- * draws. Nullable fields are absent until/unless the engine records them.
+ * `errorClass`, the request SHAPE (`method`/`targetHost`/`mappedFields`), the `transitionTaken` edge,
+ * and the escalation/compensation linkage the run timeline draws. Nullable fields are absent
+ * until/unless the engine records them.
+ *
+ * Every field here is the engine's REDACTED projection (INV-6 / ADR-0031): `targetHost` is the host
+ * ONLY (never the full URL with query), `mappedFields` are the field NAMES only (never their values),
+ * `method` is bounded to the HTTP-method set, and no request/response BODY is ever carried — the API
+ * does not persist or return one by design. The UI renders only what the API returns and NEVER
+ * un-redacts.
  */
 export interface WorkflowRunStep {
   id: number;
@@ -59,14 +66,18 @@ export interface WorkflowRunStep {
   externalCorrelationId: string | null;
   durationMs: number | null;
   statusCode: number | null;
+  /** The request method (bounded to the HTTP-method set), for a REST / WEBHOOK_OUT step. */
+  method: string | null;
+  /** The target HOST only — never the full URL with its query (which could carry a secret). */
+  targetHost: string | null;
   errorClass: string | null;
+  /** The NAMES of the fields the step mapped into its payload — never their values (INV-6). */
+  mappedFields: string[];
   transitionTaken: WorkflowTransitionTaken | null;
   /** The ManualTask an ESCALATE edge opened (link to the inbox), if any. */
   manualTaskId: string | null;
   /** The step a COMPENSATE edge ran, if any. */
   compensationStepKey: string | null;
-  /** Redacted outcome metadata only (never bodies/secrets/PII). */
-  metadata: Record<string, unknown> | null;
   createdAt: string;
 }
 

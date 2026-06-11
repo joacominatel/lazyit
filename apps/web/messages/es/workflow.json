@@ -205,6 +205,10 @@
     "openManualTask": "Abrir la tarea manual",
     "successEdge": "éxito → {edge} {target}",
     "failureEdge": "fallo → {edge} {target}",
+    "requestDetails": "Detalles de la solicitud",
+    "request": "Solicitud",
+    "mappedFields": "Campos mapeados",
+    "noPayloadsByDesign": "Los cuerpos de solicitud y respuesta no se capturan por diseño: solo se registran el método, el host de destino y los nombres de los campos mapeados.",
     "notFoundTitle": "Ejecución no encontrada",
     "notFoundDescription": "Puede que se haya eliminado o que no tengas acceso a ella."
   },

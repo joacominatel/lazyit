@@ -205,6 +205,10 @@
     "openManualTask": "Open the manual task",
     "successEdge": "success → {edge} {target}",
     "failureEdge": "failure → {edge} {target}",
+    "requestDetails": "Request details",
+    "request": "Request",
+    "mappedFields": "Mapped fields",
+    "noPayloadsByDesign": "Request and response bodies are not captured by design — only the method, target host and mapped field names are recorded.",
     "notFoundTitle": "Run not found",
     "notFoundDescription": "This run may have been removed, or you don't have access to it."
   },
