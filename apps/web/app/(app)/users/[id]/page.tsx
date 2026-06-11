@@ -29,6 +29,7 @@ import {
 } from "@/lib/api/hooks/use-users";
 import { formatDate } from "@/lib/utils/format";
 import { ArticleStatusBadge } from "../../kb/_components/article-status-badge";
+import { ManagerDisplay } from "../_components/manager-display";
 import { OffboardingSheet } from "../_components/offboarding-sheet";
 import { UserFormDialog } from "../_components/user-form-dialog";
 import { UserPasswordResetButton } from "../_components/user-password-reset-button";
@@ -162,6 +163,23 @@ export default function UserDetailPage() {
           </DetailField>
           <DetailField label={t("detail.fields.role")}>
             <UserRoleSelect user={user} />
+          </DetailField>
+          <DetailField label={t("detail.fields.manager")}>
+            <ManagerDisplay manager={user.manager} />
+          </DetailField>
+          <DetailField label={t("detail.fields.legajo")}>
+            {user.legajo ?? (
+              <span className="text-muted-foreground">
+                {t("detail.fieldEmpty")}
+              </span>
+            )}
+          </DetailField>
+          <DetailField label={t("detail.fields.username")}>
+            {user.username ?? (
+              <span className="text-muted-foreground">
+                {t("detail.fieldEmpty")}
+              </span>
+            )}
           </DetailField>
           <DetailField label={t("detail.fields.joined")}>
             {formatDate(user.createdAt)}
