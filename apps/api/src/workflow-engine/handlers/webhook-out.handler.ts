@@ -28,7 +28,9 @@ import {
  * Builds a JSON payload from the step's data mapping, optionally signs the raw body with HMAC-SHA256
  * (a `WorkflowSecret` signing key → a `<signatureHeader>: sha256=<hex>` header the receiver verifies),
  * and POSTs it through the egress guard (public-only v1). Never logs the secret or the body (INV-6).
- * Status classification mirrors the REST handler (4xx permanent, 5xx/429/408/network transient).
+ * Retry posture mirrors the REST handler: a 4xx (other than 408/429) is PERMANENT; a 5xx/429/408 or a
+ * network/timeout error is TRANSIENT — but only retryable when the step is declared `idempotent`, so a
+ * non-idempotent delivery is single-shot (a lost-response retry must not double-fire the receiver).
  */
 @Injectable()
 export class WebhookOutStepHandler implements StepHandler<
@@ -94,7 +96,7 @@ export class WebhookOutStepHandler implements StepHandler<
       const { errorClass, reason, transient } = classifyThrownError(err);
       return {
         status: 'FAILED',
-        retryable: transient,
+        retryable: transient && step.idempotent,
         metadata: {
           method: 'POST',
           targetHost,
@@ -126,7 +128,7 @@ export class WebhookOutStepHandler implements StepHandler<
 
     return {
       status: 'FAILED',
-      retryable: isTransientStatus(res.status),
+      retryable: isTransientStatus(res.status) && step.idempotent,
       metadata: {
         method: 'POST',
         targetHost,
