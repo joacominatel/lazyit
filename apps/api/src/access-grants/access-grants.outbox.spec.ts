@@ -29,6 +29,8 @@ type RunCreateCall = [
       applicationId: string;
       accessGrantId: string;
       executedAsServiceAccountId?: string;
+      replaySeq: number;
+      supersedesRunId?: string | null;
     };
   },
 ];
