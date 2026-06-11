@@ -7,6 +7,7 @@ import {
 import {
   offsetOf,
   pageOf,
+  WORKFLOW_HTTP_METHODS,
   type PageQuery,
   type WorkflowRunStatus,
 } from '@lazyit/shared';
@@ -172,6 +173,21 @@ function boundErrorClass(value: unknown): string | null {
   return KNOWN_ERROR_CLASSES.has(value) ? value : 'OTHER';
 }
 
+/** The closed HTTP-method vocabulary the handlers record (`GET`…`DELETE`). */
+const KNOWN_HTTP_METHODS: ReadonlySet<string> = new Set(WORKFLOW_HTTP_METHODS);
+
+/**
+ * Bound the recorded request method to the closed HTTP-method set — same CSEC-4 discipline as
+ * `boundErrorClass`: a handler only ever writes a value from the enum, but the read still refuses any
+ * out-of-vocabulary token (defence in depth) rather than surface a raw string. `null` when absent.
+ */
+function boundMethod(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0) {
+    return null;
+  }
+  return KNOWN_HTTP_METHODS.has(value) ? value : null;
+}
+
 /** The closed projected transition shape — fixed-vocabulary outcome/edge + an optional target key. */
 export interface ProjectedTransition {
   outcome: string | null;
@@ -215,6 +231,11 @@ function projectTransition(value: unknown): ProjectedTransition | null {
  * jsonb (e.g. a verbatim `reason` error string on a handler throw); the run-detail read is gated only
  * by `workflow:read`, so it must surface ONLY the bounded DAG/observability fields the §7b timeline
  * needs and a BOUNDED error class — no raw error message, no unexpected key, escapes.
+ *
+ * The REQUEST SHAPE (issue #343) is part of that allowlist: the bounded `method` + the `targetHost`
+ * (host only, never the full URL with query) + the `mappedFields` NAMES (never their values) — enough
+ * to answer "which method + host did this hit, and which fields did it map?" while honouring INV-6. The
+ * verbatim `reason` stays OUT (its bounded twin `errorClass` is surfaced instead).
  */
 function projectStepRun(s: {
   id: number;
@@ -238,6 +259,12 @@ function projectStepRun(s: {
     externalCorrelationId: s.externalCorrelationId,
     durationMs: typeof meta.durationMs === 'number' ? meta.durationMs : null,
     statusCode: typeof meta.statusCode === 'number' ? meta.statusCode : null,
+    // The request SHAPE — the bounded HTTP method + the target HOST only (never the full URL with its
+    // query, which can carry a secret; the handlers record `redactHost(url)`, INV-6). `reason` is
+    // deliberately NOT surfaced: it can be a verbatim handler error (`messageOf(err)`) carrying an
+    // IP/secret — the BOUNDED `errorClass` is its safe stand-in (CSEC-4).
+    method: boundMethod(meta.method),
+    targetHost: typeof meta.targetHost === 'string' ? meta.targetHost : null,
     errorClass: boundErrorClass(meta.errorClass),
     // The NAMES of the mapped fields that were sent — never their values (the handler only records
     // keys, INV-6). Filtered to strings so no foreign jsonb rides along.
