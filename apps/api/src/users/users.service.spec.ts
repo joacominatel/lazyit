@@ -113,13 +113,19 @@ describe('UsersService', () => {
       // keep working — but it DELEGATES to the base `user.update` by default, so the linked-create,
       // update and restore paths (which now run user.update through the tx client) return whatever a
       // test configured on `user.update`. Offboard tests override this with their own mockResolvedValue.
-      user: { update: jest.fn((args: unknown) => user.update(args) as unknown) },
+      user: {
+        update: jest.fn((args: unknown) => user.update(args) as unknown),
+      },
       accessGrant: {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         create: jest.fn().mockResolvedValue({ id: 'cloned-grant-1' }),
       },
-      assetAssignment: { create: jest.fn().mockResolvedValue({ id: 'cloned-assign-1' }) },
-      workflowRun: { create: jest.fn().mockResolvedValue({ id: 'cloned-run-1' }) },
+      assetAssignment: {
+        create: jest.fn().mockResolvedValue({ id: 'cloned-assign-1' }),
+      },
+      workflowRun: {
+        create: jest.fn().mockResolvedValue({ id: 'cloned-run-1' }),
+      },
       userHistory: { create: jest.fn() },
     };
     const prisma = {
@@ -169,7 +175,10 @@ describe('UsersService', () => {
     } as unknown as PinoLogger;
 
     // UserHistoryService mock (DEBT-2). record() resolves; assertions inspect its call args per path.
-    history = { record: jest.fn().mockResolvedValue(undefined), list: jest.fn() };
+    history = {
+      record: jest.fn().mockResolvedValue(undefined),
+      list: jest.fn(),
+    };
     // AssetHistory + WorkflowTrigger (ADR-0058 clone). Default no-op; the clone tests below override
     // them to assert the ASSIGNED row + the engine-toggle fire/suppress behaviour.
     assetHistory = { record: jest.fn().mockResolvedValue(undefined) };
@@ -1390,7 +1399,7 @@ describe('UsersService', () => {
       user.findFirst.mockResolvedValue(liveRow());
       await expect(
         service.update(SUBJECT, {
-          manager: { managerId: MGR, managerName: 'Ana' } as never,
+          manager: { managerId: MGR, managerName: 'Ana' },
         }),
       ).rejects.toBeDefined();
     });
@@ -1504,12 +1513,8 @@ describe('UsersService', () => {
         isOffboarded: false,
       });
       // The raw FK columns are never exposed on the wire.
-      expect(
-        (result as Record<string, unknown>).managerId,
-      ).toBeUndefined();
-      expect(
-        (result as Record<string, unknown>).managerName,
-      ).toBeUndefined();
+      expect((result as Record<string, unknown>).managerId).toBeUndefined();
+      expect((result as Record<string, unknown>).managerName).toBeUndefined();
     });
 
     it('resolves the READ descriptor: a SOFT-DELETED linked manager surfaces isOffboarded=true', async () => {
@@ -1583,7 +1588,12 @@ describe('UsersService', () => {
 
       const result = await service.clone(
         SOURCE,
-        { profile: profile(), cloneAssetAssignments: [], cloneAccessGrants: [], fireWorkflowsOnClonedGrants: false },
+        {
+          profile: profile(),
+          cloneAssetAssignments: [],
+          cloneAccessGrants: [],
+          fireWorkflowsOnClonedGrants: false,
+        },
         ADMIN,
       );
 
@@ -1604,17 +1614,20 @@ describe('UsersService', () => {
       // the live-asset findMany, so it is skipped + reported).
       const A1 = 'clxassign1aaaaaaaaaaaaaaa';
       const A2 = 'clxassign2bbbbbbbbbbbbbbb';
-      (prismaRef().assetAssignment.findMany as jest.Mock).mockResolvedValue([
+      prismaRef().assetAssignment.findMany.mockResolvedValue([
         { id: A1, assetId: 'asset-live' },
         { id: A2, assetId: 'asset-gone' },
       ]);
-      (prismaRef().asset.findMany as jest.Mock).mockResolvedValue([
-        { id: 'asset-live' },
-      ]);
+      prismaRef().asset.findMany.mockResolvedValue([{ id: 'asset-live' }]);
 
       const result = await service.clone(
         SOURCE,
-        { profile: profile(), cloneAssetAssignments: [A1, A2], cloneAccessGrants: [], fireWorkflowsOnClonedGrants: false },
+        {
+          profile: profile(),
+          cloneAssetAssignments: [A1, A2],
+          cloneAccessGrants: [],
+          fireWorkflowsOnClonedGrants: false,
+        },
         ADMIN,
       );
 
@@ -1633,13 +1646,16 @@ describe('UsersService', () => {
         }),
       );
       // The soft-deleted asset's assignment is reported as skipped, never silently dropped.
-      expect(result.skipped).toContainEqual({ id: A2, reason: 'asset_deleted' });
+      expect(result.skipped).toContainEqual({
+        id: A2,
+        reason: 'asset_deleted',
+      });
     });
 
     it('engine toggle OFF (default): writes the grant WITHOUT firing ACCESS_GRANTED (suppressed)', async () => {
       primeCreate();
       const G1 = 'clxgrant1aaaaaaaaaaaaaaaa';
-      (prismaRef().accessGrant.findMany as jest.Mock).mockResolvedValue([
+      prismaRef().accessGrant.findMany.mockResolvedValue([
         {
           id: G1,
           applicationId: 'app-1',
@@ -1650,7 +1666,12 @@ describe('UsersService', () => {
 
       await service.clone(
         SOURCE,
-        { profile: profile(), cloneAssetAssignments: [], cloneAccessGrants: [G1], fireWorkflowsOnClonedGrants: false },
+        {
+          profile: profile(),
+          cloneAssetAssignments: [],
+          cloneAccessGrants: [G1],
+          fireWorkflowsOnClonedGrants: false,
+        },
         ADMIN,
       );
 
@@ -1672,7 +1693,7 @@ describe('UsersService', () => {
     it('engine toggle ON: fires ACCESS_GRANTED — PENDING run written in-tx, enqueued after commit', async () => {
       primeCreate();
       const G1 = 'clxgrant1aaaaaaaaaaaaaaaa';
-      (prismaRef().accessGrant.findMany as jest.Mock).mockResolvedValue([
+      prismaRef().accessGrant.findMany.mockResolvedValue([
         {
           id: G1,
           applicationId: 'app-1',
@@ -1692,7 +1713,12 @@ describe('UsersService', () => {
 
       await service.clone(
         SOURCE,
-        { profile: profile(), cloneAssetAssignments: [], cloneAccessGrants: [G1], fireWorkflowsOnClonedGrants: true },
+        {
+          profile: profile(),
+          cloneAssetAssignments: [],
+          cloneAccessGrants: [G1],
+          fireWorkflowsOnClonedGrants: true,
+        },
         ADMIN,
       );
 
@@ -1709,7 +1735,16 @@ describe('UsersService', () => {
       idp.supportsManagement = false;
       user.findFirst.mockResolvedValue(null);
       await expect(
-        service.clone(SOURCE, { profile: profile(), cloneAssetAssignments: [], cloneAccessGrants: [], fireWorkflowsOnClonedGrants: false }, ADMIN),
+        service.clone(
+          SOURCE,
+          {
+            profile: profile(),
+            cloneAssetAssignments: [],
+            cloneAccessGrants: [],
+            fireWorkflowsOnClonedGrants: false,
+          },
+          ADMIN,
+        ),
       ).rejects.toBeInstanceOf(NotFoundException);
       // No user was minted.
       expect(user.create).not.toHaveBeenCalled();
