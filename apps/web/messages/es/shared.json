@@ -161,6 +161,7 @@
     "startTyping": "Empieza a escribir para buscar…",
     "runError": "No se pudo ejecutar la búsqueda",
     "runErrorDetail": "No se pudo ejecutar la búsqueda: {message}",
+    "unavailable": "La búsqueda no está disponible temporalmente. Inténtalo de nuevo en un momento.",
     "searching": "Buscando…",
     "noResultsFor": "Sin resultados para “{query}”.",
     "clearSearch": "Limpiar búsqueda",
