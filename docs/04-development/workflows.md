@@ -17,9 +17,17 @@ Day-to-day commands. Root scripts delegate to Turborepo ([[monorepo]]).
 | Everything (web + api) | `bun run dev` | `turbo dev`; persistent, uncached |
 | Database up / down | `bun run db:up` / `bun run db:down` | Docker Compose |
 | Build all | `bun run build` | `turbo build`; outputs `dist/**`, `.next/**` |
-| Lint all | `bun run lint` | `turbo lint` |
+| Lint all (report only) | `bun run lint` | `turbo lint`; **never mutates** the tree |
+| Lint + autofix | `bun run lint:fix` | `turbo lint:fix`; rewrites fixable findings in place |
 | Web only | `bun run dev` in `apps/web` | `next dev` on `:3000` |
 | API only | `bun run dev` in `apps/api` | `nest start --watch` on `:3001` |
+
+> [!note] `lint` is report-only and self-bootstraps Prisma
+> The canonical `lint` task **never rewrites files** — run `bun run lint:fix` when you want
+> the auto-fixes applied. The api lint is **type-aware**, so it needs the generated Prisma
+> client; `turbo.json` wires `lint` to `dependsOn: ["db:generate"]` (`prisma generate`, cached
+> on the schema), so a **clean checkout lints cleanly** without a manual generate step. The api
+> eslint config ignores `generated/**` and `dist/**` (machine output is not hand-authored).
 
 ## Prisma (in `apps/api`)
 
@@ -29,6 +37,7 @@ Day-to-day commands. Root scripts delegate to Turborepo ([[monorepo]]).
 | Apply migrations (prod) | `bunx prisma migrate deploy` |
 | Seed initial data | `bunx prisma db seed` (asset categories; idempotent — config in `prisma.config.ts`) |
 | Regenerate client | `bunx prisma generate` (→ `apps/api/generated/prisma`) |
+| Regenerate client (via Turbo, cached) | `bunx turbo db:generate --filter=@lazyit/api` (lint depends on this) |
 | Inspect data | `bunx prisma studio` |
 
 Follow the domain implementation order when adding models — see [[02-domain/_MOC|Domain]].

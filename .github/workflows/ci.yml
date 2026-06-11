@@ -75,9 +75,11 @@ jobs:
           bunx tsc --noEmit -p apps/api/tsconfig.json
           bunx tsc --noEmit -p apps/web/tsconfig.json
 
-      # Lint WITHOUT --fix: CI must report, never rewrite (the repo's lint script uses --fix).
-      # Non-blocking for now: the codebase is not yet eslint-clean without --fix (pre-existing
-      # prettier/type-lint findings). Promote to blocking once it is clean (drop continue-on-error).
+      # Lint is report-only here (`eslint .`, no --fix) — same as the repo's `lint` script;
+      # `lint:fix` is the separate mutating fixer (#353). Both need the generated Prisma client,
+      # produced by the "Generate Prisma client" step above. Non-blocking for now: the codebase
+      # is not yet eslint-clean (pre-existing prettier/type-lint findings). Promote to blocking
+      # once it is clean (drop continue-on-error).
       - name: Lint API
         working-directory: apps/api
         continue-on-error: true
