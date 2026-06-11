@@ -10,10 +10,13 @@ import {
   HttpSuccessCriteriaSchema,
   isHttpStatusSuccess,
   ManualStepSchema,
+  ReplayLatestResponseSchema,
   resolveStepTransitions,
   RestConnectionConfigSchema,
   RestStepSchema,
   RetryPolicySchema,
+  RetryRunRequestSchema,
+  RetryRunResponseSchema,
   UpdateApplicationWorkflowSchema,
   WorkflowConnectionConfigSchema,
   WORKFLOW_CONNECTION_KINDS,
@@ -534,5 +537,80 @@ describe("legacy onError → transition mapping (resolveStepTransitions)", () =>
       rest("b"),
     ]);
     expect(resolveStepTransitions(parsed, 0).onFailure).toBe(WORKFLOW_STOP_FAIL);
+  });
+});
+
+describe("RetryRunRequestSchema (ADR-0057 Option 2 — payload override)", () => {
+  test("an empty body is valid (the override is OPTIONAL — a plain retry)", () => {
+    expect(RetryRunRequestSchema.parse({})).toEqual({});
+  });
+
+  test("accepts a field→template override map", () => {
+    const parsed = RetryRunRequestSchema.parse({
+      overrides: { lastName: "{{ grantee.lastName }}", note: "literal" },
+    });
+    expect(parsed.overrides).toEqual({
+      lastName: "{{ grantee.lastName }}",
+      note: "literal",
+    });
+  });
+
+  test("rejects an EMPTY overrides object (omit the field instead)", () => {
+    expect(RetryRunRequestSchema.safeParse({ overrides: {} }).success).toBe(
+      false,
+    );
+  });
+
+  test("rejects unknown top-level keys (strict — no mass assignment)", () => {
+    expect(
+      RetryRunRequestSchema.safeParse({
+        overrides: { a: "b" },
+        sneaky: 1,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects an override field name longer than 200 chars", () => {
+    const huge = "x".repeat(201);
+    expect(
+      RetryRunRequestSchema.safeParse({ overrides: { [huge]: "v" } }).success,
+    ).toBe(false);
+  });
+});
+
+describe("RetryRunResponseSchema / ReplayLatestResponseSchema (ADR-0057)", () => {
+  test("retry response carries the resumed cursor + attempt, NO override value", () => {
+    const parsed = RetryRunResponseSchema.parse({
+      ok: true,
+      runId: "cjld2cjxh0000qzrmn831i7rn",
+      resumeStepKey: "create-user",
+      attempt: 2,
+    });
+    expect(parsed.attempt).toBe(2);
+    expect(parsed.resumeStepKey).toBe("create-user");
+  });
+
+  test("replay-latest response carries the new run + lineage + sequence", () => {
+    const parsed = ReplayLatestResponseSchema.parse({
+      ok: true,
+      runId: "cjld2cjxh0000qzrmn831i7rn",
+      supersedesRunId: "cjld2cjxh0001qzrmn831i7rn",
+      workflowVersionId: 3,
+      replaySeq: 1,
+    });
+    expect(parsed.supersedesRunId).toBe("cjld2cjxh0001qzrmn831i7rn");
+    expect(parsed.replaySeq).toBe(1);
+  });
+
+  test("replay-latest replaySeq must be ≥ 1 (a clone is never seq 0)", () => {
+    expect(
+      ReplayLatestResponseSchema.safeParse({
+        ok: true,
+        runId: "cjld2cjxh0000qzrmn831i7rn",
+        supersedesRunId: "cjld2cjxh0001qzrmn831i7rn",
+        workflowVersionId: 3,
+        replaySeq: 0,
+      }).success,
+    ).toBe(false);
   });
 });

@@ -52,6 +52,7 @@ describe('Workflow engine endpoints — permission gating (ADR-0046)', () => {
   let app: INestApplication;
   const runsFindPage = jest.fn();
   const runsRetry = jest.fn();
+  const runsReplayLatest = jest.fn();
   const workflowsCreate = jest.fn();
   const secretsCreate = jest.fn();
   const tasksSubmit = jest.fn();
@@ -77,7 +78,11 @@ describe('Workflow engine endpoints — permission gating (ADR-0046)', () => {
         Reflector,
         {
           provide: WorkflowRunsService,
-          useValue: { findPage: runsFindPage, retry: runsRetry },
+          useValue: {
+            findPage: runsFindPage,
+            retry: runsRetry,
+            replayLatest: runsReplayLatest,
+          },
         },
         { provide: WorkflowsService, useValue: { create: workflowsCreate } },
         {
@@ -104,6 +109,9 @@ describe('Workflow engine endpoints — permission gating (ADR-0046)', () => {
       .mockReset()
       .mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 });
     runsRetry.mockReset().mockResolvedValue({ ok: true, runId: 'r1' });
+    runsReplayLatest
+      .mockReset()
+      .mockResolvedValue({ ok: true, runId: 'new-run', supersedesRunId: 'r1' });
     workflowsCreate.mockReset().mockResolvedValue({ id: 'wf1' });
     secretsCreate.mockReset().mockResolvedValue({ id: 's1', configured: true });
     tasksSubmit.mockReset().mockResolvedValue({ ok: true });
@@ -134,12 +142,30 @@ describe('Workflow engine endpoints — permission gating (ADR-0046)', () => {
       expect(res.status).toBe(403);
       expect(runsRetry).not.toHaveBeenCalled();
     });
-    it('200 for an ADMIN', async () => {
+    it('200 for an ADMIN (no body → a plain resume-from-failed-step retry, no override)', async () => {
       const res = await request(app.getHttpServer())
         .post('/workflow-runs/r1/retry')
         .set('X-Test-Role', 'ADMIN');
       expect(res.status).toBe(200);
-      expect(runsRetry).toHaveBeenCalledWith('r1');
+      // The controller passes the optional overrides through; with no body it is undefined.
+      expect(runsRetry).toHaveBeenCalledWith('r1', undefined);
+    });
+  });
+
+  describe('POST /workflow-runs/:id/replay-latest — workflow:run (ADR-0057)', () => {
+    it('403 for a MEMBER (never reaches the service — replay is a re-drive verb, not read)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/workflow-runs/r1/replay-latest')
+        .set('X-Test-Role', 'MEMBER');
+      expect(res.status).toBe(403);
+      expect(runsReplayLatest).not.toHaveBeenCalled();
+    });
+    it('200 for an ADMIN', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/workflow-runs/r1/replay-latest')
+        .set('X-Test-Role', 'ADMIN');
+      expect(res.status).toBe(200);
+      expect(runsReplayLatest).toHaveBeenCalled();
     });
   });
 

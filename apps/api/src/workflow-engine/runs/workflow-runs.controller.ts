@@ -1,11 +1,14 @@
 import {
   BadRequestException,
+  Body,
+  ConflictException,
   Controller,
   Get,
   HttpCode,
   Param,
   Post,
   Query,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   ApiOkResponse,
@@ -13,11 +16,29 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
-import { WORKFLOW_RUN_STATUSES, type WorkflowRunStatus } from '@lazyit/shared';
+import { createZodDto } from 'nestjs-zod';
+import {
+  RetryRunRequestSchema,
+  WORKFLOW_RUN_STATUSES,
+  type WorkflowRunStatus,
+} from '@lazyit/shared';
 import { WorkflowRunsService } from './workflow-runs.service';
+import {
+  ReplayNotFailedError,
+  ReplayNotIdempotentError,
+} from '../run/workflow-run.orchestrator';
 import { RequirePermission } from '../../auth/require-permission.decorator';
+import { CurrentPrincipal } from '../../auth/current-principal.decorator';
+import type { Principal } from '../../auth/principal';
 import { parseCuidQuery } from '../../common/parse-cuid-query';
 import { parsePageQuery } from '../../common/parse-page-query';
+
+/**
+ * The OPTIONAL retry body (ADR-0057 Option 2). Validated by the global ZodValidationPipe; `overrides` is
+ * a request-scoped, never-persisted payload override merged into the failed step's mapping for one render
+ * (INV-6). Absent body ⇒ the unchanged resume-from-failed-step retry.
+ */
+export class RetryRunDto extends createZodDto(RetryRunRequestSchema) {}
 
 /**
  * Run observability endpoints (contract C2, frontend §7 / §10). Reads are gated by `workflow:read`
@@ -83,14 +104,43 @@ export class WorkflowRunsController {
   @RequirePermission('workflow:run')
   @ApiOperation({
     summary:
-      'Retry a terminal FAILED run from the step that failed onward (issue #308). Resume-from-failed-step, NOT a full re-run — already-SUCCEEDED steps are not re-executed (no double-provision). 409 if the run is not FAILED; 422 if it has no resolvable failed step.',
+      'Retry a terminal FAILED run from the step that failed onward (issue #308). Resume-from-failed-step, NOT a full re-run — already-SUCCEEDED steps are not re-executed (no double-provision). An OPTIONAL `overrides` body (ADR-0057 Option 2) patches the failed step mapping for the next attempt only (request-scoped, never persisted — INV-6). 409 if the run is not FAILED; 422 if it has no resolvable failed step.',
   })
   @ApiOkResponse({
     description:
       'The retry was accepted — the run is re-enqueued from the failed step; returns the resumed step key + the new attempt number.',
   })
-  retry(@Param('id') id: string) {
-    return this.runs.retry(id);
+  retry(@Param('id') id: string, @Body() body?: RetryRunDto) {
+    return this.runs.retry(id, body?.overrides);
+  }
+
+  @Post(':id/replay-latest')
+  @HttpCode(200)
+  @RequirePermission('workflow:run')
+  @ApiOperation({
+    summary:
+      'Clone-to-new-run from the LATEST workflow version (ADR-0057 Option 3). Leaves the source FAILED run immutable and creates a FRESH run on the current version for the same grant, starting at the entry node. 409 if the source run is not FAILED; 422 (FAIL-CLOSED guard) if it already SUCCEEDED a non-idempotent create on/before the failed step (re-grant instead).',
+  })
+  @ApiOkResponse({
+    description:
+      'A new run was created on the latest version and enqueued; returns the new runId, the superseded source run, the pinned version and the replay sequence.',
+  })
+  async replayLatest(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    try {
+      return await this.runs.replayLatest(id, principal);
+    } catch (err) {
+      // Map the framework-free domain errors the service raises to HTTP (mirrors the retry mapping).
+      if (err instanceof ReplayNotFailedError) {
+        throw new ConflictException(err.message);
+      }
+      if (err instanceof ReplayNotIdempotentError) {
+        throw new UnprocessableEntityException(err.message);
+      }
+      throw err;
+    }
   }
 }
 
