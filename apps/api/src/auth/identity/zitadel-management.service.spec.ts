@@ -206,6 +206,7 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
       username: string;
       profile: { givenName: string; familyName: string };
       email: { email: string; isVerified: boolean };
+      password?: unknown;
     };
     expect(createBody.username).toBe('a@b.com');
     expect(createBody.profile).toEqual({
@@ -213,6 +214,8 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
       familyName: 'Lovelace',
     });
     expect(createBody.email).toEqual({ email: 'a@b.com', isVerified: true });
+    // No password was passed → the body omits the password key entirely (trusted-IdP create).
+    expect('password' in createBody).toBe(false);
 
     // The grant search hits the v1 Management API filtering by userId AND projectId.
     const searchCall = callAt(2);
@@ -238,6 +241,35 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
       roleKeys: string[];
     };
     expect(grantBody).toEqual({ projectId: 'project-1', roleKeys: ['MEMBER'] });
+  });
+
+  it('createUser sets the password (changeRequired:false) when one is supplied — bundled first-run, issue #335', async () => {
+    const svc = configure();
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse()) // token
+      .mockResolvedValueOnce(jsonResponse({ userId: 'zitadel-user-7' })) // create
+      .mockResolvedValueOnce(jsonResponse({ result: [] })) // grantRole → search
+      .mockResolvedValueOnce(jsonResponse({ userGrantId: 'g-1' })); // grantRole → ADD
+
+    await svc.createUser({
+      email: 'a@b.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'ADMIN',
+      password: 'Abcdef1!',
+    });
+
+    const createBody = JSON.parse(bodyOf(callAt(1))) as {
+      email: { email: string; isVerified: boolean };
+      password?: { password: string; changeRequired: boolean };
+    };
+    // Email stays pre-verified, and the password is set with changeRequired:false so the user is
+    // ACTIVE immediately and can log in without an e-mailed initialization code.
+    expect(createBody.email).toEqual({ email: 'a@b.com', isVerified: true });
+    expect(createBody.password).toEqual({
+      password: 'Abcdef1!',
+      changeRequired: false,
+    });
   });
 
   it('deactivateUser POSTs /v2/users/{id}/deactivate', async () => {
