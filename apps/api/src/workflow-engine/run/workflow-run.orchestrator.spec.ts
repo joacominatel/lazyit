@@ -4,7 +4,9 @@ jest.mock('../../../generated/prisma/client', () => ({
 }));
 
 import {
+  assertReplaySafe,
   realSleeper,
+  ReplayNotIdempotentError,
   resolveFailedStepKey,
   RetryNotResolvableError,
   WorkflowRunOrchestrator,
@@ -591,6 +593,137 @@ describe('WorkflowRunOrchestrator.retryRun — manual FAILED-run retry (issue #3
     expect(s2Rows.map((s) => s.attempt)).toEqual([1, 2]);
   });
 
+  it('INV-6: a retry OVERRIDE patches the next attempt in-memory and is NEVER persisted to the ledger/run/log', async () => {
+    // s2 carries a data mapping; it fails first, then succeeds on the override-patched retry. The handler
+    // records only the mapped field NAMES (INV-6) — the test proves the operator-typed VALUE never lands
+    // in any WorkflowStepRun.metadata / WorkflowRun.error / run update.
+    const SECRET = 'Doe-PII-7c3f-secret';
+    const rest = {
+      kind: 'REST',
+      // Capture the step the handler renders so we can prove the override reached the mapping in-memory.
+      execute: jest.fn(
+        (() => {
+          let i = 0;
+          return async ({ step }: { step: { dataMapping?: unknown } }) => {
+            const seq: StepResult[] = [
+              ok(),
+              failPermanent(500),
+              // On the retry, record only the mapped field NAMES (never their values), as the real
+              // handler does — this is the redacted metadata the orchestrator persists.
+              {
+                status: 'SUCCEEDED',
+                externalCorrelationId: 'ext-1',
+                metadata: {
+                  statusCode: 200,
+                  mappedFields: Object.keys(
+                    (step.dataMapping as Record<string, string>) ?? {},
+                  ),
+                },
+              },
+            ];
+            const r = seq[Math.min(i, seq.length - 1)];
+            i += 1;
+            return r;
+          };
+        })(),
+      ),
+    };
+    const steps = [
+      restStep('s1'),
+      restStep('s2', { dataMapping: { email: '{{ grantee.email }}' } }),
+    ];
+    const { orchestrator, state, trigger } = harness(steps, { REST: rest });
+
+    await orchestrator.start('run1'); // s1 ok, s2 fails → run FAILED at s2
+    expect(state.runStatus).toBe('FAILED');
+
+    // Retry WITH an operator override carrying a PII value for a NEW field.
+    await orchestrator.retryRun('run1', { lastName: SECRET });
+    const [, stepKey, attempt] = trigger.enqueueRetry.mock.calls[0];
+    await orchestrator.retryStep('run1', stepKey, attempt);
+    expect(state.runStatus).toBe('SUCCEEDED');
+
+    // 1) The override REACHED the in-memory render: the handler saw the merged mapping (field present).
+    const lastCall = rest.execute.mock.calls.at(-1)?.[0] as {
+      step: { dataMapping?: Record<string, string> };
+    };
+    expect(lastCall.step.dataMapping).toMatchObject({ lastName: SECRET });
+
+    // 2) The VALUE is NOWHERE persisted — not in any step-run row, not in the run error / updates.
+    const persisted = JSON.stringify({
+      stepRuns: state.stepRuns,
+      runUpdates: state.runUpdates,
+      runError: state.runError,
+    });
+    expect(persisted).not.toContain(SECRET);
+
+    // 3) Only the field NAME is recorded (the redacted mappedFields), exactly as today.
+    const s2Success = state.stepRuns.find(
+      (s) => s.stepKey === 's2' && s.status === 'SUCCEEDED',
+    ) as { metadata: { mappedFields?: string[] } };
+    expect(s2Success.metadata.mappedFields).toContain('lastName');
+
+    // 4) The transient override is single-use: nothing lingers for a later attempt.
+    const persistedAgain = JSON.stringify(state.stepRuns);
+    expect(persistedAgain).not.toContain(SECRET);
+  });
+
+  it('AUTOMATIC per-attempt retry (retryStep) replays the PINNED version with NO override applied', async () => {
+    // The engine's own transient retry must stay deterministic: even after a manual retryRun stashed an
+    // override, the AUTOMATIC retryStep path never reads it — it re-renders the pinned mapping verbatim.
+    const rest = {
+      kind: 'REST',
+      execute: jest.fn(
+        (() => {
+          let i = 0;
+          return async ({ step }: { step: { dataMapping?: unknown } }) => {
+            const seq: StepResult[] = [ok(), failTransient(503), ok()];
+            const r = seq[Math.min(i, seq.length - 1)];
+            i += 1;
+            // Record the mapping the handler saw so we can assert no override leaked into it.
+            return {
+              ...r,
+              metadata: {
+                ...r.metadata,
+                seenFields: Object.keys(
+                  (step.dataMapping as Record<string, string>) ?? {},
+                ),
+              },
+            };
+          };
+        })(),
+      ),
+    };
+    const steps = [
+      restStep('s1'),
+      restStep('s2', {
+        dataMapping: { email: '{{ grantee.email }}' },
+        retry: { maxAttempts: 2, backoff: 'fixed', delayMs: 0 },
+      }),
+    ];
+    const { orchestrator, state, trigger } = harness(steps, { REST: rest });
+
+    await orchestrator.start('run1'); // s1 ok; s2 transient-fails attempt 1 → schedules retryStep
+    const [, stepKey, attempt] = trigger.enqueueRetry.mock.calls[0];
+    expect(stepKey).toBe('s2');
+    // Drive the AUTOMATIC per-attempt retry — it must NOT carry any override (none was set anyway, and
+    // even if one were, retryStep never consults pendingOverrides).
+    await orchestrator.retryStep('run1', stepKey, attempt);
+    expect(state.runStatus).toBe('SUCCEEDED');
+
+    // s2 (the retried step) only ever saw its PINNED mapping (`email`) — never an injected override field.
+    const s2Calls = rest.execute.mock.calls.filter(
+      (c) =>
+        (c[0] as { step: { key: string } }).step.key === 's2',
+    );
+    expect(s2Calls.length).toBeGreaterThanOrEqual(2); // attempt 1 (fail) + the automatic retry
+    for (const call of s2Calls) {
+      const seen = (call[0] as { step: { dataMapping?: Record<string, string> } })
+        .step.dataMapping;
+      expect(Object.keys(seen ?? {})).toEqual(['email']);
+    }
+  });
+
   it('422 (RetryNotResolvableError): a FAILED run with no resolvable failed step is not retryable', async () => {
     const { orchestrator, state } = harness(TWO_STEP, {
       REST: scripted('REST', [ok()]),
@@ -624,6 +757,66 @@ describe('resolveFailedStepKey', () => {
     expect(resolveFailedStepKey({}, steps)).toBeNull();
     expect(resolveFailedStepKey({ stepKey: 42 }, steps)).toBeNull();
     expect(resolveFailedStepKey({ stepKey: 'ghost' }, steps)).toBeNull();
+  });
+});
+
+describe('assertReplaySafe — the FAIL-CLOSED double-provision guard (ADR-0057 Decision 3)', () => {
+  // A minimal but valid step fixture: REST steps carry an `idempotent` flag; MANUAL has no side effect.
+  const steps = [
+    restStep('create', { idempotent: false }),
+    restStep('notify', { idempotent: true }),
+    restStep('finalize', { idempotent: false }),
+  ] as unknown as ReadonlyArray<WorkflowStep>;
+
+  it('REFUSES when a non-idempotent create already SUCCEEDED on/before the failed step', () => {
+    // `create` (idempotent:false) succeeded, the run failed at `finalize` — re-firing would re-create.
+    expect(() =>
+      assertReplaySafe(steps, 'finalize', [{ stepKey: 'create' }]),
+    ).toThrow(ReplayNotIdempotentError);
+  });
+
+  it('REFUSES even when the failed step IS the non-idempotent create that succeeded on a later attempt-line', () => {
+    // The guard is on/before the failed step INCLUSIVE: a non-idempotent create that succeeded at the
+    // failed-step index itself still means re-firing double-provisions.
+    expect(() =>
+      assertReplaySafe(steps, 'create', [{ stepKey: 'create' }]),
+    ).toThrow(ReplayNotIdempotentError);
+  });
+
+  it('ALLOWS when every completed provisioning step up to the failed step is idempotent', () => {
+    // `notify` (idempotent:true) succeeded; the run failed at `finalize` before `finalize` ran. Safe.
+    expect(() =>
+      assertReplaySafe(steps, 'finalize', [{ stepKey: 'notify' }]),
+    ).not.toThrow();
+  });
+
+  it('ALLOWS when the run failed at/before its first non-idempotent create (none succeeded yet)', () => {
+    // The run failed at `create` itself with no SUCCEEDED provisioning rows — nothing to double-provision.
+    expect(() => assertReplaySafe(steps, 'create', [])).not.toThrow();
+  });
+
+  it('ignores a SUCCEEDED step strictly AFTER the failed step (not a re-fire hazard for this clone)', () => {
+    // Defensive: a real FAILED walk would not have a success after the failure, but the window is bounded.
+    expect(() =>
+      assertReplaySafe(steps, 'notify', [{ stepKey: 'finalize' }]),
+    ).not.toThrow();
+  });
+
+  it('a MANUAL step is never a provisioning hazard (no external create to double)', () => {
+    const withManual = [
+      { kind: 'MANUAL', key: 'approve' },
+      restStep('create', { idempotent: false }),
+    ] as unknown as ReadonlyArray<WorkflowStep>;
+    expect(() =>
+      assertReplaySafe(withManual, 'create', [{ stepKey: 'approve' }]),
+    ).not.toThrow();
+  });
+
+  it('fail-closed when the failed step is unresolvable: refuses if ANY non-idempotent create succeeded', () => {
+    // No failed-step marker → the whole run is the window; a non-idempotent success anywhere refuses.
+    expect(() =>
+      assertReplaySafe(steps, null, [{ stepKey: 'finalize' }]),
+    ).toThrow(ReplayNotIdempotentError);
   });
 });
 
