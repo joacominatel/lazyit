@@ -591,7 +591,30 @@ non-idempotent create cannot double-provision. The transition is a guarded `FAIL
 compare-and-set and the retried step re-executes as a NEW append-only attempt; only `FAILED` is
 retryable (a `COMPENSATED` run rolled its effects back — re-grant, don't retry → the API returns 409).
 On success the run polls live again; a 409 / 422 / broker hiccup surfaces via `notifyError` with the
-request id. (Per-step single-step `Retry` and a full `Re-run` remain future affordances.)
+request id.
+
+**Retry override + replay-with-latest (wired — ADR-0057, issue #340).** The pinned-version retry above
+replays the failed run's *frozen* mapping, so an edited definition is silently ignored. ADR-0057 adds two
+`workflow:run`-gated answers on the run-detail surface, both alongside the plain one-click Retry:
+
+- **Retry with overrides (Option 2)** — a secondary `RetryOverrideDialog` (opened from `RetryRunButton`
+  only on the run-detail page, where the failed step's mapped field NAMES are known). The operator adds
+  `field name → value` rows (a template over the same run context, e.g. `{{ grantee.lastName }}`, or a
+  literal) and the same `POST …/retry` carries an optional `{ overrides }` body
+  (`RetryRunRequestSchema`). **The override is request-scoped — applied to the NEXT attempt's render only
+  and never persisted (INV-6); it does NOT edit the definition or fix future runs** — the dialog says so
+  in plain copy. A plain Retry sends no body and stays the one-click default (the dialog is never forced,
+  and the recent-runs rows — which lack step detail — render only the plain button). The override record
+  is built by the pure, unit-tested `lib/workflow/retry-overrides.ts` (trim keys, drop blank rows,
+  last-write-wins, bound-check against the shared schema before sending).
+- **Replay with latest (Option 3)** — `ReplayLatestButton` calls `POST …/replay-latest`
+  (`ReplayLatestResponse`): a confirm step explains it starts a **fresh** run on the current version for
+  the same grant (the source `FAILED` run stays immutable), then on success it navigates to the new
+  `runId`. Errors are surfaced honestly: **422** = the fail-closed double-provision guard refused (the run
+  already provisioned a non-idempotent step → the operator must **re-grant**, not replay); **409** = the
+  source run is no longer `FAILED`.
+
+(Per-step single-step `Retry` and a full `Re-run` remain future affordances.)
 
 ### 7c. The grant ↔ run cross-link
 
