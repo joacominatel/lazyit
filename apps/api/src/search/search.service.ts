@@ -3,6 +3,7 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Meilisearch } from 'meilisearch';
 import type { MultiSearchParams } from 'meilisearch';
 import type { SearchDocument } from './search.documents';
+import { reindexIndex, type ReindexClient } from './reindex';
 
 /** The five Meili indexes (one per searchable entity). Primary key on every index is `id`. */
 export const SEARCH_INDEXES = [
@@ -46,8 +47,15 @@ export interface SearchArgs {
   limit: number;
 }
 
-/** The cross-entity search response: one `{ hits, total }` block per requested entity. */
-export type SearchResults = Record<SearchIndex, SearchEntityResult>;
+/**
+ * The cross-entity search response: one `{ hits, total }` block per requested entity, plus an
+ * optional `degraded` outage flag (issue #370). `degraded` is `true` only when Meili was configured
+ * but the read failed and we fell back to empty blocks — it lets the client tell a transient engine
+ * outage apart from a genuine "no results". Omitted (= not degraded) on every healthy response.
+ */
+export type SearchResults = Partial<Record<SearchIndex, SearchEntityResult>> & {
+  degraded?: boolean;
+};
 
 /**
  * Cross-cutting search backed by Meilisearch (ADR-0035).
@@ -95,9 +103,11 @@ export class SearchService {
       .index(index)
       .addDocuments([doc], { primaryKey: 'id' })
       .catch((err: unknown) => {
+        // A dropped sync leaves this row stale/unsearchable until its next write or a `reindex:all`
+        // (issue #370). Log it loudly with index + id so the gap is diagnosable from the logs.
         this.logger.error(
-          { err, index, id: doc.id },
-          'Failed to index document in Meilisearch',
+          { err, index, id: doc.id, op: 'upsert' },
+          'Dropped Meilisearch sync: failed to index document (row stale until next write or reindex)',
         );
       });
   }
@@ -112,9 +122,11 @@ export class SearchService {
       .index(index)
       .deleteDocument(id)
       .catch((err: unknown) => {
+        // A dropped removal leaves a GHOST document searchable until a `reindex:all` evicts it
+        // (issue #370 / ghost-doc note in reindex.ts). Log it loudly with index + id.
         this.logger.error(
-          { err, index, id },
-          'Failed to remove document from Meilisearch',
+          { err, index, id, op: 'remove' },
+          'Dropped Meilisearch sync: failed to remove document (ghost remains until reindex)',
         );
       });
   }
@@ -167,12 +179,43 @@ export class SearchService {
       return results;
     } catch (err: unknown) {
       // Fail-soft (ADR-0035): a configured-but-unhealthy engine returns empty results, never a 500.
+      // But mark the envelope `degraded: true` (issue #370) so the client can tell a transient outage
+      // apart from a genuine empty result and show "search unavailable" instead of "no results".
       this.logger.error(
         { err, entities: requested, q, limit },
-        'Meilisearch multiSearch failed — returning empty search results (fail-soft)',
+        'Meilisearch multiSearch failed — returning empty search results (degraded, fail-soft)',
       );
-      return this.emptyResults(requested);
+      const degraded = this.emptyResults(requested);
+      degraded.degraded = true;
+      return degraded;
     }
+  }
+
+  /**
+   * The indexes that are **missing or empty** right now (issue #370 self-heal). Asks Meili once for
+   * its per-index stats: an index absent from the stats map has never been created, and one with
+   * `numberOfDocuments === 0` is empty — both need a (re)build. Returns `[]` in disabled mode or if the
+   * stats call fails (we never want index-health probing to crash boot — the caller logs and moves on).
+   */
+  async emptyOrMissingIndexes(): Promise<SearchIndex[]> {
+    if (!this.client) return [];
+    const stats = await this.client.getStats();
+    const byIndex = stats.indexes ?? {};
+    return SEARCH_INDEXES.filter((index) => {
+      const indexStats = byIndex[index];
+      // Missing from the map = never created; present with 0 docs = empty. Either way, rebuild it.
+      return indexStats === undefined || indexStats.numberOfDocuments === 0;
+    });
+  }
+
+  /**
+   * Authoritatively (re)build one index from its full live `docs` set (issue #370 self-heal), reusing
+   * the zero-downtime temp-index-swap of {@link reindexIndex}. No-op in disabled mode. The Meili client
+   * structurally satisfies the small {@link ReindexClient} surface the rebuild needs.
+   */
+  async rebuildIndex(index: SearchIndex, docs: SearchDocument[]): Promise<void> {
+    if (!this.client) return;
+    await reindexIndex(this.client as unknown as ReindexClient, index, docs);
   }
 
   /** A `{ hits: [], total: 0 }` block for each requested index (disabled mode / seed for search). */
