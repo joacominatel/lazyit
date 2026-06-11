@@ -54,6 +54,7 @@ import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils/format";
 import { ByoiBanner } from "./_components/byoi-banner";
+import { CloneUserWizard } from "./_components/clone-user-wizard";
 import { OffboardingSheet } from "./_components/offboarding-sheet";
 import { UserFormDialog } from "./_components/user-form-dialog";
 import { UserRoleSelect } from "./_components/user-role-select";
@@ -112,6 +113,7 @@ export default function UsersPage() {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<User | undefined>(undefined);
+  // The server-orchestrated clone wizard (ADR-0058) — distinct from the create/edit form dialog.
   const [cloning, setCloning] = useState<User | undefined>(undefined);
   const [deleting, setDeleting] = useState<User | undefined>(undefined);
   const [bulkRestoring, setBulkRestoring] = useState(false);
@@ -230,20 +232,17 @@ export default function UsersPage() {
 
   function openCreate() {
     setEditing(undefined);
-    setCloning(undefined);
     setFormOpen(true);
   }
 
   function openEdit(user: User) {
-    setCloning(undefined);
     setEditing(user);
     setFormOpen(true);
   }
 
+  /** Opens the clone wizard (its own dialog), not the create/edit form. */
   function openClone(user: User) {
-    setEditing(undefined);
     setCloning(user);
-    setFormOpen(true);
   }
 
   const chips = [
@@ -525,18 +524,21 @@ export default function UsersPage() {
       )}
 
       <UserFormDialog
-        key={
-          editing
-            ? `edit-${editing.id}`
-            : cloning
-              ? `clone-${cloning.id}`
-              : "create"
-        }
+        key={editing ? `edit-${editing.id}` : "create"}
         open={formOpen}
         onOpenChange={setFormOpen}
         user={editing}
-        cloneSource={cloning}
       />
+      {cloning ? (
+        <CloneUserWizard
+          key={`clone-${cloning.id}`}
+          open
+          onOpenChange={(open) => {
+            if (!open) setCloning(undefined);
+          }}
+          source={cloning}
+        />
+      ) : null}
       {deleting ? (
         <OffboardingSheet
           open

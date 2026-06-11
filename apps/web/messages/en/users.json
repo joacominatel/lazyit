@@ -65,8 +65,17 @@
       "email": "Email",
       "status": "Status",
       "role": "Role",
+      "legajo": "Employee number",
+      "username": "Username",
+      "manager": "Manager",
       "joined": "Joined",
       "lastUpdated": "Last updated"
+    },
+    "fieldEmpty": "—",
+    "managerField": {
+      "none": "No manager",
+      "external": "external",
+      "offboarded": "Former manager (offboarded)"
     },
     "assets": {
       "title": "Assets held",
@@ -107,6 +116,26 @@
     "lastName": "Last name",
     "email": "Email",
     "emailHelp": "The account-linking key for the identity provider. Must be unique; a change is mirrored to the IdP.",
+    "legajo": "Employee number",
+    "legajoPlaceholder": "e.g. 10293",
+    "legajoHelp": "Optional. The employee/file number from payroll or HR. Must be unique among active users.",
+    "username": "Username",
+    "usernamePlaceholder": "e.g. ada.lovelace",
+    "usernameHelp": "Optional directory handle, distinct from the email. Not a login credential. Must be unique among active users.",
+    "manager": {
+      "label": "Manager",
+      "help": "Optional. Either a lazyit user or a free-text name — not both.",
+      "kind": {
+        "none": "No manager",
+        "user": "A lazyit user",
+        "external": "A name (not a lazyit user)"
+      },
+      "userPlaceholder": "Select the manager…",
+      "userSearchPlaceholder": "Search users…",
+      "userEmpty": "No matching users.",
+      "externalLabel": "Manager name",
+      "externalPlaceholder": "e.g. Ana Pérez (HR)"
+    },
     "active": "Active",
     "activeHelp": "Inactive users are kept for history but treated as offboarded — they can no longer be assigned assets.",
     "saveChanges": "Save changes",
@@ -116,6 +145,54 @@
       "created": "User created",
       "updateError": "Couldn't update user",
       "createError": "Couldn't create user"
+    }
+  },
+  "clone": {
+    "action": "Clone",
+    "title": "Clone {name}",
+    "description": "Create a new user mirroring this person's access. Pick which assets and applications carry over.",
+    "emailHelp": "A fresh, unique address for the new user — never the source's.",
+    "role": "Role",
+    "roleLabels": {
+      "ADMIN": "Admin",
+      "MEMBER": "Member",
+      "VIEWER": "Viewer"
+    },
+    "loading": "Loading…",
+    "sections": {
+      "profile": "New user",
+      "assets": "Assets to carry over",
+      "access": "Application access to carry over"
+    },
+    "assets": {
+      "empty": "This person holds no assets to carry over.",
+      "assetFallback": "Asset",
+      "assignedOn": "Assigned {date}"
+    },
+    "access": {
+      "empty": "This person has no active application access to carry over.",
+      "applicationFallback": "Application"
+    },
+    "fire": {
+      "label": "Provision the new user in these applications",
+      "help": "Off by default: cloned access is recorded only. Turn on to run the provisioning workflows.",
+      "warning": "This will attempt to provision {count, plural, =1 {# application} other {# applications}} for the new user."
+    },
+    "submit": "Clone user",
+    "viewUser": "Open new user",
+    "toast": {
+      "created": "{name} created from the clone",
+      "error": "Couldn't clone the user"
+    },
+    "result": {
+      "createdTitle": "New user created",
+      "skippedTitle": "{count, plural, =1 {# item was skipped} other {# items were skipped}}",
+      "noneSkipped": "Everything you selected carried over.",
+      "openLink": "Open the new user's profile",
+      "reasons": {
+        "not_found": "No longer an active row of the source",
+        "asset_deleted": "The asset has been removed"
+      }
     }
   },
   "role": {
