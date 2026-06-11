@@ -115,6 +115,34 @@ test("knownRootsFor includes prior-step outputs (steps.<key>)", () => {
   ).toBe(false);
 });
 
+test("knownRootsFor matches the server mapper's ALLOWED_ROOTS exactly (drift guard, #350)", () => {
+  // The client validation allowlist MUST equal the engine's resolvable roots
+  // (apps/api/src/workflow-engine/mapping/data-mapper.ts ALLOWED_ROOTS + run-context.ts):
+  // { event, grantee, application, grant, steps }. Any drift makes the builder mis-report
+  // what will resolve at run time — flagging a valid token, or passing one that renders empty.
+  const prior: WorkflowStep[] = [
+    {
+      kind: "REST",
+      key: "step-1",
+      connectionId: CONN,
+      method: "POST",
+      path: "/",
+      idempotent: false,
+      onError: "fail",
+    },
+  ];
+  const roots = knownRootsFor(prior);
+  expect([...roots].sort()).toEqual(
+    ["application", "event", "grant", "grantee", "steps"].sort(),
+  );
+  // No false positive: the scalar `event` root (the trigger) resolves, so it must pass.
+  expect(validateTemplate("{{ event }}", roots).hasError).toBe(false);
+  // No false negative: there is no `context` root on the engine, so it must flag.
+  expect(
+    validateTemplate("{{ context.actor }}", roots).unknownRoots,
+  ).toEqual(["context"]);
+});
+
 test("wrapToken round-trips through parseTemplate to a single token", () => {
   const segments = parseTemplate(wrapToken("application.name"));
   expect(segments).toEqual([
