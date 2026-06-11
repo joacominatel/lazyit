@@ -391,10 +391,16 @@ team                   ←      ✋ ask a human  (manual)        [token ▾]
 
   | Token group | Examples (v1) |
   | --- | --- |
+  | `event` | the trigger (`ACCESS_GRANTED` / `ACCESS_REVOKED`) — a scalar |
   | `grantee.*` | `email`, `firstName`, `lastName`, `id` |
-  | `application.*` | `name`, `vendor`, `url` |
-  | `grant.*` | `accessLevel`, `grantedAt`, `expiresAt` |
-  | `context.*` | `actor` (who granted), `now` |
+  | `application.*` | `name`, `id` |
+  | `grant.*` | `accessLevel`, `grantedAt`, `expiresAt`, `id` |
+
+  > The catalog mirrors the engine's frozen mapping context exactly — the server mapper's
+  > `ALLOWED_ROOTS` is `{ event, grantee, application, grant, steps }` (`run-context.ts` /
+  > `data-mapper.ts`). It deliberately omits a `context.*` root and `application.vendor`/`url`
+  > (the engine context carries neither, so they would resolve empty at run time); a drift guard in
+  > `apps/web/lib/workflow/template.test.ts` pins the client allowlist to the server root set.
 
 - **Validation & preview.** The form validates that required external fields are mapped; a **Preview**
   toggle renders the resolved payload using a **sample/last grant** (secrets shown as placeholders).
