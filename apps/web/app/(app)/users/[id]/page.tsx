@@ -2,6 +2,7 @@
 
 import {
   ArrowTopRightOnSquareIcon,
+  DocumentDuplicateIcon,
   PencilSquareIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
@@ -29,6 +30,7 @@ import {
 } from "@/lib/api/hooks/use-users";
 import { formatDate } from "@/lib/utils/format";
 import { ArticleStatusBadge } from "../../kb/_components/article-status-badge";
+import { CloneUserWizard } from "../_components/clone-user-wizard";
 import { ManagerDisplay } from "../_components/manager-display";
 import { OffboardingSheet } from "../_components/offboarding-sheet";
 import { UserFormDialog } from "../_components/user-form-dialog";
@@ -65,6 +67,7 @@ export default function UserDetailPage() {
   const [now] = useState(() => Date.now());
 
   const [editOpen, setEditOpen] = useState(false);
+  const [cloneOpen, setCloneOpen] = useState(false);
   const [offboardOpen, setOffboardOpen] = useState(false);
 
   const assetNameById = useMemo(
@@ -138,6 +141,14 @@ export default function UserDetailPage() {
               <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
                 <PencilSquareIcon />
                 {t("detail.edit")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCloneOpen(true)}
+              >
+                <DocumentDuplicateIcon />
+                {t("clone.action")}
               </Button>
               <UserPasswordResetButton user={user} />
               <Button
@@ -386,6 +397,18 @@ export default function UserDetailPage() {
         onOpenChange={setEditOpen}
         user={user}
       />
+      {cloneOpen ? (
+        <CloneUserWizard
+          key={`clone-${user.id}`}
+          open
+          onOpenChange={setCloneOpen}
+          source={{
+            id: user.id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+          }}
+        />
+      ) : null}
       <OffboardingSheet
         key={`offboard-${user.id}`}
         open={offboardOpen}
