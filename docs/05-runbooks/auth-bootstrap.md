@@ -325,6 +325,18 @@ record is auto-provisioned — no separate "add user to lazyit" step is needed b
 > instance that already had `MEMBER` users before RBAC, where the wizard self-locks because an
 > ADMIN — the seed — already exists) or for BYOI operators who prefer the CLI.
 
+> [!important] Bundled Zitadel — the wizard asks for an INITIAL PASSWORD (issue #335)
+> In the **bundled** flow the wizard collects an initial password for the first ADMIN (next to email +
+> name), validated against Zitadel's default complexity policy (8–70 chars, upper + lower + digit +
+> symbol). The backend sets it on the new Zitadel user (`changeRequired:false`), so you **sign in
+> immediately** with your email + that password — there is **no "Set Password" e-mail/code** (the
+> bundled stack ships no SMTP, so an emailed initialization code would never arrive and would lock you
+> out). The console admin (`ZITADEL_ADMIN_USERNAME` / `ZITADEL_ADMIN_PASSWORD`, §3) remains only for
+> emergency IdP administration. In **BYOI** the wizard shows **no** password field — your own IdP owns
+> the credential (you create the user there, §6, with a password or initialization email of your own).
+> If Zitadel provisioning fails mid-setup, the wizard creates **nothing** (it rolls back and returns a
+> retry-able error) rather than leaving a local-only ADMIN you could never sign in as.
+
 > [!note] Default (fresh prod / zero-touch): nothing to do here
 > Since #333 the seed creates **no** ADMIN unless `SEED_ADMIN_EMAIL` is explicitly set (it is UNSET in
 > prod). So a fresh deploy has an **empty** user table, and the first administrator is owned by the

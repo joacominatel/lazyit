@@ -465,9 +465,20 @@ body: { email, firstName, lastName }     // role locked to ADMIN
 Guards: (1) the idempotent any-ADMIN gate (409 once configured), (2) a required CSRF token
 (`SetupCsrfService`, stateless HMAC), (3) a per-IP rate limit (`SetupRateLimitGuard`). Every admin
 creation is audited (structured Pino: op, email, ip). When `integrationMode='zitadel'` and a
-Management credential is present the new ADMIN is mirrored into Zitadel (`mirrored: true`); a
-Management failure **degrades to a local-only ADMIN** (`mirrored: false`, a warn is logged) rather
-than hard-blocking first-run — the operator can repair Zitadel afterwards (per §6 #4).
+Management credential is present the new ADMIN is mirrored into Zitadel (`mirrored: true`) **with the
+wizard-chosen initial password** (issue #335 — see §5b note below); on this management path a
+Management failure now **blocks and compensates** (hard-deletes the just-created local row, returns a
+retry-able 503), creating nothing. The old DEGRADE-NOT-BLOCK (`mirrored: false`, warn, keep a
+local-only ADMIN) now applies **only** to the non-management path (BYOI / generic-OIDC), where there
+is no mirror to fail and no password is set.
+
+> [!important] §5b — bundled `/setup` collects an initial password (issue #335)
+> `GET /config/status` carries a derived `requiresAdminPassword` (= `idp.supportsManagement`). When
+> true (bundled Zitadel) the wizard also collects an initial password (shared `SetupPasswordSchema`,
+> Zitadel's default complexity) and the backend sets it on the new Zitadel user (`changeRequired:false`)
+> so the operator signs in immediately — there is **no SMTP / emailed "Set Password" code** that would
+> otherwise lock them out. A narrow carve-out of "lazyit never sets a password" (ADR-0016/0037), scoped
+> to the bundled IdP; **BYOI shows/sends no password** (its directory owns the credential).
 
 Idempotency-gated on "any ADMIN exists"; CSRF token required; rate-limited (security §6.3). Creates the
 first ADMIN local row (and, if `integrationMode='zitadel'` and a Management credential is present,
@@ -486,7 +497,8 @@ operator to the dashboard); else show the adaptive wizard:
 2. **Configure** (BYOI ONLY) — re-shows the three OIDC env vars to confirm. The bundled-Zitadel path
    **drops this step entirely** (the sidecar already provisioned everything), so its happy path is
    Welcome → Administrator → Done. The step indicator adapts to the active path.
-3. **Create first ADMIN** — email + first/last name (role fixed to ADMIN here, by definition).
+3. **Create first ADMIN** — email + first/last name, plus an **initial password** in the bundled path
+   (`requiresAdminPassword`; hidden in BYOI). Role fixed to ADMIN here, by definition.
 4. **Done** — invalidate `GET /users/me` so the new ADMIN role is picked up, then a "Go to sign in"
    CTA to `/login` (closes the loop: the new ADMIN has no session yet and must authenticate first).
 
@@ -558,7 +570,8 @@ points that bind *this* epic:
   2. **Configure** — BYOI ONLY (re-show the three OIDC env vars to confirm). The bundled-Zitadel path
      **drops this step** because the `zitadel-bootstrap` sidecar already did the plumbing, so its
      happy path is Welcome → Administrator → Done. The step indicator adapts.
-  3. **Create first ADMIN** — email + first/last name; role is fixed to ADMIN here by definition.
+  3. **Create first ADMIN** — email + first/last name; in the bundled path also an **initial password**
+     (`requiresAdminPassword`, live complexity checklist), hidden in BYOI. Role fixed to ADMIN here.
   4. **Done** — confirmation; invalidates `GET /users/me` so the new ADMIN's controls light up
      immediately, then a "Go to sign in" CTA to **`/login`** (the new ADMIN must authenticate through
      the IdP first — it has no session yet).
@@ -657,8 +670,9 @@ M2  (optional) add_config_settings   CREATE TABLE config_settings        ← Pha
 - **PR 3.2 (backend) — ✅ DONE:** `ConfigModule` — `GET /config/status` + `GET /config/csrf`
   (`@Public()`) + `POST /config/setup` (`@Public()` gated by the idempotent any-ADMIN check + a CSRF
   token + a per-IP rate limit + audit). NO `config_settings` table / migration — "configured" is
-  derived from whether any ADMIN exists, integrationMode/devMode from env. The Management mirror on
-  setup **degrades to local-only** (never hard-blocks first-run). **Depends on:** 1.x.
+  derived from whether any ADMIN exists, integrationMode/devMode from env. On the bundled (management)
+  path the setup mirror now **blocks + compensates** with a wizard-chosen initial password (issue #335);
+  DEGRADE-NOT-BLOCK survives only for the BYOI/non-management path. **Depends on:** 1.x.
 - **PR 3.3 (frontend) — ✅ DONE:** public `/setup` route (outside the `(app)` auth group) + the 4-step
   wizard + `config` endpoints/hooks (ADR-0020) + the dev-mode topbar banner + the Users-page BYOI
   graceful-degradation banner. **Depends on:** 3.2.
