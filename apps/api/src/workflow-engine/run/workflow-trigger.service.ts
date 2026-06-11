@@ -38,8 +38,9 @@ export interface TriggerPlan {
  *  1. {@link planForTrigger} (a READ, BEFORE the write tx, best-effort) — does an enabled workflow with
  *     a version exist for this (app, trigger)? If not, nothing else happens (today's behaviour).
  *  2. {@link buildRunData} INSIDE the grant tx — a PENDING `WorkflowRun` committed ATOMICALLY with the
- *     grant, keyed by the unique `idempotencyKey` (`<trigger>:<accessGrantId>`). The only in-tx engine
- *     write, and one that cannot realistically fail (the key is unique per fresh grant event).
+ *     grant, keyed by the unique `idempotencyKey` (`<trigger>:<accessGrantId>:0` — the organic grant run
+ *     is `replaySeq = 0`; manual replays carry a higher suffix, ADR-0057). The only in-tx engine write,
+ *     and one that cannot realistically fail (the key is unique per fresh grant event).
  *  3. {@link enqueue} AFTER commit — best-effort. A broker-down enqueue is swallowed (the run stays
  *     PENDING and the sweeper recovers it); it NEVER rolls back or blocks the grant.
  *
