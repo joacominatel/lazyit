@@ -151,8 +151,9 @@ export function validateTemplate(
 export function knownRootsFor(
   priorSteps: readonly WorkflowStep[] = [],
 ): Set<string> {
-  // Every token path's first segment is a valid root (`grantee`, `application`, `grant`, `context`,
-  // `steps`). Deriving from the catalog keeps the allowlist in lock-step with what the picker offers.
+  // Every token path's first segment is a valid root (`event`, `grantee`, `application`, `grant`,
+  // `steps`) — exactly the server mapper's ALLOWED_ROOTS. Deriving from the catalog keeps the
+  // allowlist in lock-step with what the picker offers (the drift guard in template.test.ts pins it).
   const roots = new Set<string>();
   for (const token of buildContextTokens(priorSteps)) {
     const root = token.path.split(".")[0];
