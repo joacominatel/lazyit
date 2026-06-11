@@ -410,8 +410,9 @@ function projectStepRun(s: {
     statusCode: typeof meta.statusCode === 'number' ? meta.statusCode : null,
     // The request SHAPE — the bounded HTTP method + the target HOST only (never the full URL with its
     // query, which can carry a secret; the handlers record `redactHost(url)`, INV-6). `reason` is
-    // deliberately NOT surfaced: it can be a verbatim handler error (`messageOf(err)`) carrying an
-    // IP/secret — the BOUNDED `errorClass` is its safe stand-in (CSEC-4).
+    // deliberately NOT surfaced: persisted `reason` values are bounded literals (the orchestrator drops
+    // any raw handler-throw message at the write boundary, INV-6), but the BOUNDED `errorClass` is its
+    // safe stand-in here regardless (CSEC-4).
     method: boundMethod(meta.method),
     targetHost: typeof meta.targetHost === 'string' ? meta.targetHost : null,
     errorClass: boundErrorClass(meta.errorClass),
