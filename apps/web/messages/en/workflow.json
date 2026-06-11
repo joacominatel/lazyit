@@ -305,28 +305,58 @@
     "fieldLabel": "External field",
     "fieldPlaceholder": "External field",
     "valueLabel": "Value source",
-    "valueSourceHint": "Pick a context field, or switch to Advanced to write a raw token.",
+    "valueSourceHint": "Pick a context field, compose one from several, or switch to Advanced to edit the raw JSON.",
     "removeAria": "Remove mapping",
     "advanced": "Advanced",
-    "advancedAria": "Toggle raw token editing",
+    "advancedAria": "Toggle the advanced JSON editor",
     "pickField": "Pick a field…",
     "searchFields": "Search fields…",
-    "noFields": "No matching field."
+    "noFields": "No matching field.",
+    "jsonHint": "Edit the whole mapping as JSON. Type a token opener to insert a context token.",
+    "jsonError": "Invalid JSON: {error}"
+  },
+  "token": {
+    "insert": "Insert token",
+    "search": "Search tokens…",
+    "empty": "No matching token."
+  },
+  "compose": {
+    "open": "Compose from multiple values",
+    "empty": "Add a token or some text to compose this value.",
+    "addToken": "Token",
+    "addText": "Text",
+    "done": "Done",
+    "removeToken": "Remove token",
+    "removeLiteral": "Remove text",
+    "literalLabel": "Literal text",
+    "literalPlaceholder": "text"
   },
   "tokenGroup": {
+    "event": "Trigger event",
     "grantee": "Grantee",
     "application": "Application",
     "grant": "Grant",
-    "context": "Run context",
     "steps": "Step outputs"
   },
   "stepEditor": {
     "title": "Configure {kind} step",
     "description": "How this step runs, what counts as success, and what happens on failure.",
+    "tab": {
+      "general": "General",
+      "data": "Data",
+      "retry": "Retry",
+      "flow": "Flow"
+    },
     "nameLabel": "Name",
     "namePlaceholder": "e.g. Create Jira user",
     "methodLabel": "Method",
     "pathLabel": "Path",
+    "pathTokenHint": "Relative to the connection's base URL. Insert a token to put a value in the route, e.g. a user id in /users/…/deactivate.",
+    "pathPreview": "Preview",
+    "tokenUnbalanced": "Unbalanced braces — a token was opened but not closed.",
+    "tokenMalformed": "Invalid token: {tokens}",
+    "tokenUnknownRoot": "Unknown token source: {roots}. It won't resolve at run time.",
+    "tokenUnknownFilter": "Unknown filter: {filters}. It will be ignored at run time.",
     "idempotentLabel": "Idempotent",
     "idempotentHint": "Safe to retry without double-provisioning.",
     "promptLabel": "Instructions",

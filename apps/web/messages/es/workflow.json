@@ -305,28 +305,58 @@
     "fieldLabel": "Campo externo",
     "fieldPlaceholder": "Campo externo",
     "valueLabel": "Origen del valor",
-    "valueSourceHint": "Elige un campo de contexto, o cambia a Avanzado para escribir un token.",
+    "valueSourceHint": "Elige un campo de contexto, compón uno con varios, o cambia a Avanzado para editar el JSON.",
     "removeAria": "Eliminar mapeo",
     "advanced": "Avanzado",
-    "advancedAria": "Alternar edición de token sin procesar",
+    "advancedAria": "Alternar el editor JSON avanzado",
     "pickField": "Elige un campo…",
     "searchFields": "Buscar campos…",
-    "noFields": "Ningún campo coincide."
+    "noFields": "Ningún campo coincide.",
+    "jsonHint": "Edita todo el mapeo como JSON. Escribe un abridor de token para insertar un token de contexto.",
+    "jsonError": "JSON no válido: {error}"
+  },
+  "token": {
+    "insert": "Insertar token",
+    "search": "Buscar tokens…",
+    "empty": "Ningún token coincide."
+  },
+  "compose": {
+    "open": "Componer con varios valores",
+    "empty": "Añade un token o algo de texto para componer este valor.",
+    "addToken": "Token",
+    "addText": "Texto",
+    "done": "Listo",
+    "removeToken": "Eliminar token",
+    "removeLiteral": "Eliminar texto",
+    "literalLabel": "Texto literal",
+    "literalPlaceholder": "texto"
   },
   "tokenGroup": {
+    "event": "Evento disparador",
     "grantee": "Beneficiario",
     "application": "Aplicación",
     "grant": "Concesión",
-    "context": "Contexto de ejecución",
     "steps": "Salidas de pasos"
   },
   "stepEditor": {
     "title": "Configurar paso {kind}",
     "description": "Cómo se ejecuta este paso, qué cuenta como éxito y qué pasa al fallar.",
+    "tab": {
+      "general": "General",
+      "data": "Datos",
+      "retry": "Reintentos",
+      "flow": "Flujo"
+    },
     "nameLabel": "Nombre",
     "namePlaceholder": "p. ej. Crear usuario en Jira",
     "methodLabel": "Método",
     "pathLabel": "Ruta",
+    "pathTokenHint": "Relativa a la URL base de la conexión. Inserta un token para poner un valor en la ruta, p. ej. un id de usuario en /users/…/deactivate.",
+    "pathPreview": "Vista previa",
+    "tokenUnbalanced": "Llaves sin cerrar — se abrió un token pero no se cerró.",
+    "tokenMalformed": "Token no válido: {tokens}",
+    "tokenUnknownRoot": "Origen de token desconocido: {roots}. No se resolverá en ejecución.",
+    "tokenUnknownFilter": "Filtro desconocido: {filters}. Se ignorará en ejecución.",
     "idempotentLabel": "Idempotente",
     "idempotentHint": "Seguro de reintentar sin aprovisionar dos veces.",
     "promptLabel": "Instrucciones",
