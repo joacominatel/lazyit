@@ -489,6 +489,39 @@ backend/crypto coding begins**:
 
 ---
 
+## 10. CTO ratification (2026-06-12)
+
+All seven §9 open questions are **ratified** for the #366 build — the primitives below are FROZEN; a
+build agent implements against them without re-opening them:
+
+1. **Argon2id `m=64 MiB, t=3, p=1`, 16-byte salt, 32-byte out — ACCEPTED** as the `@lazyit/shared`
+   constant (OWASP/RFC 9106 interactive baseline; sub-second client unlock).
+2. **X25519 via `@noble/curves` — ACCEPTED** over WebCrypto P-256 (one audited vocabulary, tiny keys,
+   no padding/curve footguns).
+3. **Recovery key 125-bit Crockford-base32 `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX` — ACCEPTED.** Do **not**
+   change the format (ADR-0061 §3 pins 5×5 groups); 125 bits exceeds the 122-bit UUIDv4 entropy already
+   trusted repo-wide, and the high-entropy input correctly uses fast HKDF, never Argon2id.
+4. **Util split — ACCEPTED:** pure crypto primitives + envelope shapes + recovery-key zod validator in
+   `@lazyit/shared` (framework-agnostic leaf — **no `window`/`.wasm`**); WASM bootstrap + React
+   unlock/reveal flows in `apps/web`. The #366 build MUST verify no DOM/`window` reference leaks into
+   the shared leaf.
+5. **Next 16 / React 19 WASM delivery — SPIKE REQUIRED:** #366 budgets a build spike to confirm
+   `hash-wasm`'s `.wasm` loads in a Client Component and never enters the RSC/server graph **before**
+   building flows on top. If the spike shows the Argon2id wrapper cannot live cleanly in the shared
+   leaf, the wrapper moves to `apps/web` (the Q4 split still holds for the pure noble primitives).
+6. **No AAD on the GCM envelopes in v1 — ACCEPTED** (envelope stays byte-identical to `WorkflowSecret`;
+   the per-vault DEK + GCM tag carry integrity). `vaultId|itemId` AAD is a contained Phase-2 option.
+7. **No server-side `reveal()` — HARD REQUIREMENT (elevated from a recommendation):** the #366 backend
+   slice MUST ship an architectural test/lint guard asserting (a) no Secret Manager service method
+   returns a plaintext value / DEK / private key, and (b) no `SECRET_MANAGER_KEY`-style env is read.
+   This guard is a **merge gate** for the #366 backend PR — INV-10 must not be allowed to rot silently.
+
+Highest-risk implementation detail (per §3): split the `@noble/ciphers` GCM output into `ciphertext` +
+`authTag` (trailing 16 bytes) on write and re-concatenate on read, so the `SecretItem` envelope stays
+wire-identical to `WorkflowSecret`.
+
+---
+
 Related: [[0061-secret-manager-zero-knowledge]] · [[workflow-secret]] · [[secret-vault]] ·
 [[secret-item]] · [[vault-membership]] · [[user-keypair]] · [[0048-service-accounts]] ·
 [[0031-logging-strategy]] · [[0029-untrusted-content-sanitization]] · [[0046-roles-permissions-v2]] ·
