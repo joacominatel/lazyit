@@ -423,6 +423,12 @@ export class JwtAuthGuard implements CanActivate {
     firstName = this.coerceName(firstName, fallback);
     lastName = this.coerceName(lastName, fallback);
 
+    // SEC-020: derive whether the IdP has verified this email (OIDC Core §5.7, ADR-0038).
+    // Some IdPs emit the boolean true; others emit the string "true". Only those two values are
+    // treated as verified — anything else (false, "false", absent) is unverified.
+    const emailVerified =
+      profile['email_verified'] === true || profile['email_verified'] === 'true';
+
     // Account linking by verified email (ADR-0038 addendum, trusted-IdP model). The externalId
     // lookup above missed, so this `sub` has never logged in. Before minting a fresh row, check
     // whether a LIVE user already holds this email — the common case being the seeded ADMIN
@@ -432,8 +438,10 @@ export class JwtAuthGuard implements CanActivate {
     //
     // SECURITY: linking by email is sound ONLY because the IdP is trusted to own/verify the email
     // (ADR-0037/0038). We therefore (a) CLAIM a row only when its externalId IS NULL (an account no
-    // identity has bound yet) and (b) NEVER re-bind a row already linked to a different `sub` —
-    // re-binding would be account takeover. The claim is a race-safe `updateMany` guarded by
+    // identity has bound yet), (b) NEVER re-bind a row already linked to a different `sub` —
+    // re-binding would be account takeover — and (c) NEVER claim an existing row on an UNVERIFIED
+    // email (SEC-020: emailVerified must be true, or we refuse with 403 rather than silently
+    // inheriting the existing row's role). The claim is a race-safe `updateMany` guarded by
     // `{ id, externalId: null }`: a concurrent first-login wins the row exactly once; the loser's
     // updateMany matches 0 rows and it refetches the now-linked row, so the flow stays idempotent.
     const emailOwner = await this.prisma.user.findFirst({ where: { email } });
@@ -446,6 +454,13 @@ export class JwtAuthGuard implements CanActivate {
         // Already bound to a DIFFERENT identity — refuse rather than steal it.
         throw new ConflictException(
           'This email is already linked to a different identity',
+        );
+      }
+      // SEC-020: linking by email is only sound when the IdP VERIFIED the email (OIDC Core §5.7,
+      // ADR-0038). Never inherit an existing row's role on an unverified email — refuse the link.
+      if (!emailVerified) {
+        throw new ForbiddenException(
+          'Your identity provider has not verified this email address, so it cannot be linked to an existing account.',
         );
       }
       // externalId IS NULL → claim it for this sub. Preserve the existing role (this is how the

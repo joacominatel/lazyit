@@ -2,7 +2,7 @@
 id: SEC-020
 title: JIT email account-linking never checks email_verified → ADMIN/account takeover under BYOI
 severity: high
-status: open
+status: fixed
 cwe: CWE-287
 discovered: 2026-06-06
 module: users
@@ -124,3 +124,37 @@ verified-email requirement in INV-2 and DEF-002 as a *code-enforced* invariant, 
   use `email` as a key unless verified).
 - ADR-0038 (JIT provisioning / email linking) · ADR-0037 (Zitadel + BYOI) · INVARIANTS INV-2 ·
   deferred DEF-002 · SEC-006 (server-owned identity linkage).
+
+## Resolution
+
+- **Status:** fixed
+- **Fixed in branch:** `fix/issue-387-sec020-email-verified-jit`
+- **Date:** 2026-06-12
+
+### Changes
+
+- `apps/api/src/auth/jwt-auth.guard.ts` — In `jitProvision`, derive `emailVerified` from
+  `profile['email_verified']` (accepts `true` or `'true'`). Inside the `emailOwner` block, on the
+  `externalId IS NULL` claimable branch, throw `ForbiddenException` when `emailVerified` is not true
+  — before any `updateMany` call. The fresh-create path (no `emailOwner`) is unchanged, as a brand-new
+  self-owned row never inherits anyone's role and gating it would lock out legitimate BYOI users.
+- `apps/api/src/auth/jwt-auth.guard.spec.ts` — Added four SEC-020 tests:
+  - unverified (`email_verified: false`) does NOT claim + throws `ForbiddenException` (regression guard).
+  - absent `email_verified` does NOT claim + throws `ForbiddenException`.
+  - verified (`email_verified: true`) still claims and inherits role (over-correction guard).
+  - verified as string `'true'` is accepted (IdP compat).
+  - Updated two pre-existing account-linking tests to include `email_verified: true` so they reflect
+    the correct real-world scenario (a verified-email operator linking the seeded ADMIN).
+
+### Verification
+
+- `grep -n "email_verified" apps/api/src/auth/jwt-auth.guard.ts` → line 430 (≥1 match).
+- `cd apps/api && bun test src/auth/jwt-auth.guard.spec.ts` → 35 pass, 0 fail (including all new tests).
+- `bunx tsc --noEmit -p apps/api/tsconfig.json` → exit 0.
+
+### Residual risk
+
+The BYOI pre-condition (every app-created user has `externalId = null`, `users.service.ts:164-175`) is
+unchanged — it is the linking *surface*, not the bug. The verified-email gate is what makes that surface
+safe. A future SSO config UI could expose the `emailVerified` derivation as a toggle; keep
+`=== true || === 'true'` as the single source of truth.
