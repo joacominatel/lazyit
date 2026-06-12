@@ -77,12 +77,28 @@ type ArticleLinkMock = {
   findFirst: jest.Mock;
   findMany: jest.Mock;
 };
+// ArticleWikiLink (ADR-0059 §3/§4): a derived projection — the service only ever
+// deleteMany/createMany (the rebuild) and findMany (the backlinks read).
+type ArticleWikiLinkMock = {
+  deleteMany: jest.Mock;
+  createMany: jest.Mock;
+  findMany: jest.Mock;
+};
+// ArticleAlias (ADR-0059 §2): current-state join — create / delete / findFirst / findMany.
+type ArticleAliasMock = {
+  create: jest.Mock;
+  delete: jest.Mock;
+  findFirst: jest.Mock;
+  findMany: jest.Mock;
+};
 
 describe('ArticlesService', () => {
   let service: ArticlesService;
   let article: ArticleMock;
   let articleVersion: ArticleVersionMock;
   let articleLink: ArticleLinkMock;
+  let articleWikiLink: ArticleWikiLinkMock;
+  let articleAlias: ArticleAliasMock;
   let articleCategory: { findFirst: jest.Mock };
   let asset: { findFirst: jest.Mock };
   let application: { findFirst: jest.Mock };
@@ -129,11 +145,28 @@ describe('ArticlesService', () => {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
     };
+    articleWikiLink = {
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      findMany: jest.fn().mockResolvedValue([]),
+    };
+    articleAlias = {
+      create: jest
+        .fn()
+        .mockImplementation((args: { data: Record<string, unknown> }) => ({
+          id: 'alias1',
+          ...args.data,
+        })),
+      delete: jest.fn().mockResolvedValue({ id: 'alias1' }),
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    };
     // $transaction supports BOTH shapes the service uses:
     //   - array form (findPage / listVersions): await the tuple of promises;
     //   - interactive callback form (create/update/publish/unpublish/import): invoke the callback
-    //     with a `tx` exposing the same model mocks, so the snapshot write hits articleVersion.
-    const tx = { article, articleVersion, articleLink };
+    //     with a `tx` exposing the same model mocks, so the snapshot write hits articleVersion and
+    //     the wiki-link rebuild hits articleWikiLink (ADR-0059 §3).
+    const tx = { article, articleVersion, articleLink, articleWikiLink };
     prisma = {
       $transaction: jest.fn(
         (
@@ -161,6 +194,8 @@ describe('ArticlesService', () => {
             article,
             articleVersion,
             articleLink,
+            articleWikiLink,
+            articleAlias,
             articleCategory,
             asset,
             application,
@@ -357,7 +392,11 @@ describe('ArticlesService', () => {
     });
 
     it('multi-value status → `status: { in: [...] }` (OR within the filter, #198)', async () => {
-      await service.findPage({ status: ['DRAFT', 'PUBLISHED'] }, PAGE, undefined);
+      await service.findPage(
+        { status: ['DRAFT', 'PUBLISHED'] },
+        PAGE,
+        undefined,
+      );
       expect(listWhere().AND).toContainEqual({
         status: { in: ['DRAFT', 'PUBLISHED'] },
       });
@@ -377,10 +416,8 @@ describe('ArticlesService', () => {
       const and = listWhere().AND;
       const hasInClause = (key: 'categoryId' | 'status') =>
         and.some((c) => {
-          const v = (c as Record<string, unknown>)[key];
-          return (
-            typeof v === 'object' && v !== null && 'in' in (v as object)
-          );
+          const v = c[key];
+          return typeof v === 'object' && v !== null && 'in' in v;
         });
       expect(hasInClause('categoryId')).toBe(false);
       expect(hasInClause('status')).toBe(false);
@@ -1205,7 +1242,9 @@ describe('ArticlesService', () => {
           ]
         >
       ).at(-1)![0];
-      expect((call.where as { AND: Array<Record<string, unknown>> }).AND).toEqual(
+      expect(
+        (call.where as { AND: Array<Record<string, unknown>> }).AND,
+      ).toEqual(
         expect.arrayContaining([
           { status: 'PUBLISHED' },
           { links: { some: { applicationId: 'app1' } } },
@@ -1225,11 +1264,15 @@ describe('ArticlesService', () => {
       ]);
       article.count.mockResolvedValueOnce(42);
 
-      const result = await service.findArticlesForAsset('as1', {}, {
-        limit: 10,
-        offset: 20,
-        deleted: 'active' as const,
-      });
+      const result = await service.findArticlesForAsset(
+        'as1',
+        {},
+        {
+          limit: 10,
+          offset: 20,
+          deleted: 'active' as const,
+        },
+      );
 
       // The total comes from the paired count over the same where — not the page length (1 row here).
       expect(result.total).toBe(42);
@@ -1250,7 +1293,11 @@ describe('ArticlesService', () => {
 
     it('reverse list filters by q (case-insensitive substring over title/excerpt) (#220)', async () => {
       article.findMany.mockResolvedValueOnce([]);
-      await service.findArticlesForApplication('app1', { q: 'vpn' }, REVERSE_PAGE);
+      await service.findArticlesForApplication(
+        'app1',
+        { q: 'vpn' },
+        REVERSE_PAGE,
+      );
       expect(lastReverseWhere().AND).toContainEqual({
         OR: [
           { title: { contains: 'vpn', mode: 'insensitive' } },
@@ -1282,6 +1329,289 @@ describe('ArticlesService', () => {
       const and = lastReverseWhere().AND;
       expect(and).toContainEqual({ status: 'PUBLISHED' });
       expect(and).toContainEqual({ status: { in: ['DRAFT'] } });
+    });
+  });
+
+  // --- wiki-links: rebuild on save (ADR-0059 §3) ---------------------------
+
+  describe('wiki-link rebuild on save', () => {
+    // The data passed to the last articleWikiLink.createMany.
+    const lastCreateMany = (): Array<{
+      sourceArticleId: string;
+      targetSlug: string;
+      resolvedTargetId: string | null;
+    }> =>
+      (
+        articleWikiLink.createMany.mock.calls as Array<
+          [{ data: Array<Record<string, unknown>> }]
+        >
+      ).at(-1)![0].data as never;
+
+    it('rebuilds edges on create: deletes then inserts one per distinct [[slug]], in the txn', async () => {
+      // The body resolves [[network-setup]] (live) and [[not-yet]] (unresolved).
+      article.findMany.mockResolvedValueOnce([
+        { id: 'tgt1', slug: 'network-setup' },
+      ]);
+      await service.create(
+        {
+          title: 'Runbook',
+          content:
+            'See [[network-setup]] and [[not-yet]] and [[network-setup]] again',
+          categoryId: 'c1',
+          status: 'DRAFT',
+        },
+        AUTHOR_PRINCIPAL,
+      );
+      // Delete-then-insert, both via the SAME tx (one $transaction, ADR-0042 discipline).
+      expect(articleWikiLink.deleteMany).toHaveBeenCalledWith({
+        where: { sourceArticleId: 'art1' },
+      });
+      const rows = lastCreateMany();
+      // Distinct slugs only; the repeated [[network-setup]] collapses to one edge.
+      expect(rows).toEqual([
+        {
+          sourceArticleId: 'art1',
+          targetSlug: 'network-setup',
+          resolvedTargetId: 'tgt1', // resolved to the live article
+        },
+        {
+          sourceArticleId: 'art1',
+          targetSlug: 'not-yet',
+          resolvedTargetId: null, // unresolved forward reference — never blocks the save
+        },
+      ]);
+    });
+
+    it('clears edges (deleteMany) but inserts nothing when the body has no [[slug]] tokens', async () => {
+      await service.create(
+        {
+          title: 'Plain',
+          content: 'no links here',
+          categoryId: 'c1',
+          status: 'DRAFT',
+        },
+        AUTHOR_PRINCIPAL,
+      );
+      expect(articleWikiLink.deleteMany).toHaveBeenCalledWith({
+        where: { sourceArticleId: 'art1' },
+      });
+      expect(articleWikiLink.createMany).not.toHaveBeenCalled();
+    });
+
+    it('rebuilds on an update that CHANGES content', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'DRAFT',
+        authorId: AUTHOR,
+        title: 't',
+        content: 'old [[gone]]',
+        excerpt: null,
+      });
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 's',
+        title: 't',
+        content: 'new [[fresh]]',
+        excerpt: null,
+        status: 'DRAFT',
+      });
+      article.findMany.mockResolvedValueOnce([]); // [[fresh]] unresolved
+      await service.update('a', { content: 'new [[fresh]]' }, AUTHOR_PRINCIPAL);
+      expect(articleWikiLink.deleteMany).toHaveBeenCalledWith({
+        where: { sourceArticleId: 'a' },
+      });
+      expect(lastCreateMany()).toEqual([
+        { sourceArticleId: 'a', targetSlug: 'fresh', resolvedTargetId: null },
+      ]);
+    });
+
+    it('does NOT rebuild on a metadata/title-only update (content unchanged)', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'DRAFT',
+        authorId: AUTHOR,
+        title: 'old',
+        content: 'body [[x]]',
+        excerpt: null,
+      });
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 's',
+        title: 'new',
+        content: 'body [[x]]', // unchanged
+        excerpt: null,
+        status: 'DRAFT',
+      });
+      await service.update('a', { title: 'new' }, AUTHOR_PRINCIPAL);
+      expect(articleWikiLink.deleteMany).not.toHaveBeenCalled();
+      expect(articleWikiLink.createMany).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent: re-saving the same body yields the same edge set', async () => {
+      article.findMany.mockResolvedValue([{ id: 'tgt1', slug: 'a' }]);
+      const body = 'link [[a]] and [[a]]';
+      await service.create(
+        { title: 'One', content: body, categoryId: 'c1', status: 'DRAFT' },
+        AUTHOR_PRINCIPAL,
+      );
+      const first = lastCreateMany();
+      await service.create(
+        { title: 'Two', content: body, categoryId: 'c1', status: 'DRAFT' },
+        AUTHOR_PRINCIPAL,
+      );
+      const second = lastCreateMany();
+      // Same distinct target set both times (idempotent rebuild).
+      expect(first.map((r) => r.targetSlug)).toEqual(['a']);
+      expect(second.map((r) => r.targetSlug)).toEqual(['a']);
+    });
+  });
+
+  // --- backlinks ("References") read (ADR-0059 §4) -------------------------
+
+  describe('backlinks', () => {
+    it('returns incoming wiki-links whose resolved target is this article, with source slug/title', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+      });
+      articleWikiLink.findMany.mockResolvedValueOnce([
+        {
+          id: 'wl1',
+          sourceArticleId: 'src1',
+          createdAt: new Date('2026-06-12T00:00:00.000Z'),
+          source: { slug: 'src-slug', title: 'Source One' },
+        },
+      ]);
+      const result = await service.backlinks('a', AUTHOR_USER as never);
+      expect(result).toEqual([
+        {
+          id: 'wl1',
+          sourceArticleId: 'src1',
+          sourceSlug: 'src-slug',
+          sourceTitle: 'Source One',
+          createdAt: '2026-06-12T00:00:00.000Z',
+        },
+      ]);
+      // The query keys on resolvedTargetId = the article id (the reverse of the edge).
+      const where = (
+        articleWikiLink.findMany.mock.calls as Array<
+          [{ where: Record<string, unknown> }]
+        >
+      )[0][0].where;
+      expect(where.resolvedTargetId).toBe('a');
+    });
+
+    it('ANDs the SOURCE visibility gate so a draft backlink never leaks to a non-author', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+      });
+      await service.backlinks('a', OTHER_USER as never);
+      const where = (
+        articleWikiLink.findMany.mock.calls as Array<
+          [{ where: { source: unknown } }]
+        >
+      )[0][0].where;
+      // A non-author sees PUBLISHED sources plus their OWN drafts — not the target author's drafts.
+      expect(where.source).toEqual({
+        OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: OTHER }],
+      });
+    });
+
+    it('404s when the TARGET itself is a draft the caller cannot read (no leak of its backlinks)', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'DRAFT',
+        authorId: AUTHOR,
+      });
+      await expect(
+        service.backlinks('a', OTHER_USER as never),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(articleWikiLink.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- aliases (nav-only folder symlinks, ADR-0059 §2) --------------------
+
+  describe('aliases', () => {
+    const OWNED = {
+      id: 'a',
+      status: 'PUBLISHED',
+      authorId: AUTHOR,
+      categoryId: 'home',
+    };
+
+    it('creates an alias into a live folder other than the home (author only)', async () => {
+      article.findFirst.mockResolvedValue(OWNED);
+      articleCategory.findFirst.mockResolvedValueOnce({ id: 'other' });
+      const alias = await service.addAlias(
+        'a',
+        { folderId: 'other' },
+        AUTHOR_PRINCIPAL,
+      );
+      expect(articleAlias.create).toHaveBeenCalledWith({
+        data: { articleId: 'a', folderId: 'other' },
+      });
+      expect(alias).toMatchObject({ articleId: 'a', folderId: 'other' });
+    });
+
+    it('rejects (400) an alias into a missing / soft-deleted folder', async () => {
+      article.findFirst.mockResolvedValue(OWNED);
+      articleCategory.findFirst.mockResolvedValueOnce(null);
+      await expect(
+        service.addAlias('a', { folderId: 'gone' }, AUTHOR_PRINCIPAL),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(articleAlias.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects (400) an alias into the article OWN home folder', async () => {
+      article.findFirst.mockResolvedValue(OWNED);
+      articleCategory.findFirst.mockResolvedValueOnce({ id: 'home' });
+      await expect(
+        service.addAlias('a', { folderId: 'home' }, AUTHOR_PRINCIPAL),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(articleAlias.create).not.toHaveBeenCalled();
+    });
+
+    it('blocks a non-author from aliasing a PUBLISHED article (403)', async () => {
+      article.findFirst.mockResolvedValue(OWNED);
+      await expect(
+        service.addAlias('a', { folderId: 'other' }, OTHER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(articleAlias.create).not.toHaveBeenCalled();
+    });
+
+    it('removes an alias the article owns via hard delete (author only)', async () => {
+      article.findFirst.mockResolvedValue(OWNED);
+      articleAlias.findFirst.mockResolvedValueOnce({
+        id: 'alias1',
+        articleId: 'a',
+      });
+      await service.removeAlias('a', 'alias1', AUTHOR_PRINCIPAL);
+      expect(articleAlias.delete).toHaveBeenCalledWith({
+        where: { id: 'alias1' },
+      });
+    });
+
+    it('404s removing an alias that does not belong to the article', async () => {
+      article.findFirst.mockResolvedValue(OWNED);
+      articleAlias.findFirst.mockResolvedValueOnce(null);
+      await expect(
+        service.removeAlias('a', 'nope', AUTHOR_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(articleAlias.delete).not.toHaveBeenCalled();
+    });
+
+    it('lists aliases to any reader of the article', async () => {
+      article.findFirst.mockResolvedValue(OWNED);
+      articleAlias.findMany.mockResolvedValueOnce([
+        { id: 'alias1', articleId: 'a', folderId: 'other' },
+      ]);
+      await expect(
+        service.findAliases('a', AUTHOR_USER as never),
+      ).resolves.toEqual([{ id: 'alias1', articleId: 'a', folderId: 'other' }]);
     });
   });
 

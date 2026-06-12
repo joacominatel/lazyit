@@ -1,4 +1,4 @@
-import { slugify, type ArticleStatus } from '@lazyit/shared';
+import { parseWikiLinks, slugify, type ArticleStatus } from '@lazyit/shared';
 import { parseImportFile, titleFromFilename } from '../article-import';
 import type { ArticleRow } from '../../search/search.documents';
 import type { ImportJobData, ImportJobResult } from './import-job.types';
@@ -48,10 +48,27 @@ interface ArticleVersionCreateArgs {
   };
 }
 
+interface ArticleWikiLinkCreateManyArgs {
+  data: Array<{
+    sourceArticleId: string;
+    targetSlug: string;
+    resolvedTargetId: string | null;
+  }>;
+}
+
 /** The transaction-scoped slice of Prisma the create path uses. */
 export interface ImportTx {
-  article: { create(args: ArticleCreateArgs): Promise<ImportedArticleRow> };
+  article: {
+    create(args: ArticleCreateArgs): Promise<ImportedArticleRow>;
+    findMany(args: {
+      where: { slug: { in: string[] } };
+      select: { id: true; slug: true };
+    }): Promise<Array<{ id: string; slug: string }>>;
+  };
   articleVersion: { create(args: ArticleVersionCreateArgs): Promise<unknown> };
+  articleWikiLink: {
+    createMany(args: ArticleWikiLinkCreateManyArgs): Promise<unknown>;
+  };
 }
 
 /** The minimal Prisma client the worker needs — satisfied structurally by a real PrismaClient. */
@@ -139,6 +156,25 @@ export async function runImportJob(
         editedById: data.authorId,
       },
     });
+    // Materialize the outgoing `[[slug]]` wiki-link edges (ADR-0059 §3), in the SAME transaction as
+    // the article + version write. A fresh import has no prior edges, so this is a pure insert (the
+    // service's rebuild deletes-then-inserts; here delete is a no-op). Each slug resolves best-effort
+    // to a LIVE article — an unresolved forward reference stays null (never blocks the import).
+    const slugs = parseWikiLinks(content);
+    if (slugs.length > 0) {
+      const matches = await tx.article.findMany({
+        where: { slug: { in: slugs } },
+        select: { id: true, slug: true },
+      });
+      const idBySlug = new Map(matches.map((m) => [m.slug, m.id]));
+      await tx.articleWikiLink.createMany({
+        data: slugs.map((targetSlug) => ({
+          sourceArticleId: created.id,
+          targetSlug,
+          resolvedTargetId: idBySlug.get(targetSlug) ?? null,
+        })),
+      });
+    }
     return created;
   });
 

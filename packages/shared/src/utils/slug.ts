@@ -30,3 +30,38 @@ export function slugify(input: string): string {
     .slice(0, SLUG_MAX_LENGTH)
     .replace(/-+$/g, "");
 }
+
+/**
+ * Find the first free slug for `base`, auto-suffixing `-2`, `-3`, … on collision until one is
+ * available. Resolves the [[0021-knowledge-base-design]] open question (settled by ADR-0059 §3): a
+ * slug collision no longer returns a bare 409 — both an interactive create and a bulk import mint a
+ * frictionless suffixed slug. PURE: the caller supplies `isTaken` (a closure over the set of live
+ * slugs, e.g. a DB lookup's results pre-loaded into a `Set`, or an async existence check the caller
+ * resolved first), so this stays framework-agnostic and shared by api and web.
+ *
+ * - `base` is assumed already valid ({@link SLUG_REGEX}) and ≤ {@link SLUG_MAX_LENGTH} — derive it
+ *   with {@link slugify} first. If `base` itself is free it is returned unchanged (no suffix).
+ * - On collision the suffix is appended as `-N` (N starting at 2). To stay within
+ *   {@link SLUG_MAX_LENGTH} the base is **truncated** to make room for the suffix (re-trimming any
+ *   trailing hyphen the cut leaves), so the result is always a valid slug ≤ the cap. A base that is
+ *   already at/near the cap therefore yields e.g. `…aaa-2` of the bounded length.
+ * - `isTaken` is consulted for the base and every candidate; the first `false` wins. The candidate
+ *   is checked against the SAME predicate the caller used for `base`, so a freshly-minted slug in a
+ *   batch must be recorded by the caller (added to its `Set`) before the next call to avoid a
+ *   within-batch duplicate.
+ */
+export function nextAvailableSlug(
+  base: string,
+  isTaken: (candidate: string) => boolean,
+): string {
+  if (!isTaken(base)) return base;
+  for (let n = 2; ; n++) {
+    const suffix = `-${n}`;
+    // Truncate the base so `base + suffix` never exceeds the cap; re-trim a hyphen the cut may
+    // expose so the candidate stays a valid slug (no trailing/doubled hyphen).
+    const room = SLUG_MAX_LENGTH - suffix.length;
+    const trimmedBase = base.slice(0, room).replace(/-+$/g, "");
+    const candidate = `${trimmedBase}${suffix}`;
+    if (!isTaken(candidate)) return candidate;
+  }
+}

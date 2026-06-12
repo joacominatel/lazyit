@@ -25,6 +25,8 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ArticleAliasSchema,
+  ArticleBacklinkSchema,
   ArticleLinkedFilterSchema,
   ArticleLinkedToSchema,
   ArticleLinkSchema,
@@ -33,6 +35,7 @@ import {
   ArticleStatusSchema,
   ArticleVersionPageSchema,
   ArticleVersionSchema,
+  CreateArticleAliasSchema,
   CreateArticleLinkSchema,
   CreateArticleSchema,
   ImportArticleSchema,
@@ -69,6 +72,10 @@ class ArticleVersionDto extends createZodDto(ArticleVersionSchema) {}
 class ArticleVersionPageDto extends createZodDto(ArticleVersionPageSchema) {}
 class ArticleLinkDto extends createZodDto(ArticleLinkSchema) {}
 class CreateArticleLinkDto extends createZodDto(CreateArticleLinkSchema) {}
+// Wiki-links / backlinks (ADR-0059 §4) + aliases (ADR-0059 §2).
+class ArticleBacklinkDto extends createZodDto(ArticleBacklinkSchema) {}
+class ArticleAliasDto extends createZodDto(ArticleAliasSchema) {}
+class CreateArticleAliasDto extends createZodDto(CreateArticleAliasSchema) {}
 
 @ApiTags('articles')
 @Controller('articles')
@@ -284,6 +291,28 @@ export class ArticlesController {
     return this.articles.findLinks(id, user);
   }
 
+  @Get(':id/backlinks')
+  @RequirePermission('article:read')
+  @ApiOperation({
+    summary:
+      'List the "References" (incoming article↔article wiki-links) of an article (ADR-0059 §4). Each readable article whose body [[slug]]-references this one. Draft sources are hidden from non-authors; 404 if the target itself isn\'t readable. DISTINCT from the asset/application links panel (ADR-0042).',
+  })
+  @ApiOkResponse({ type: [ArticleBacklinkDto] })
+  backlinks(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.backlinks(id, user);
+  }
+
+  @Get(':id/aliases')
+  @RequirePermission('article:read')
+  @ApiOperation({
+    summary:
+      "List an article's nav-only folder aliases (symlinks) — readable by any reader of the article. (ADR-0059 §2)",
+  })
+  @ApiOkResponse({ type: [ArticleAliasDto] })
+  findAliases(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.articles.findAliases(id, user);
+  }
+
   @Post()
   @RequirePermission('article:write')
   @ApiOperation({
@@ -390,6 +419,36 @@ export class ArticlesController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.articles.removeLink(id, linkId, principal);
+  }
+
+  @Post(':id/aliases')
+  @RequirePermission('article:write')
+  @ApiOperation({
+    summary:
+      'Alias an article into another folder — a nav-only symlink (author only). The folder must be live and not the home folder; a duplicate is 409. Aliases NEVER widen access. (ADMIN or MEMBER) (ADR-0059 §2)',
+  })
+  @ApiCreatedResponse({ type: ArticleAliasDto })
+  addAlias(
+    @Param('id') id: string,
+    @Body() dto: CreateArticleAliasDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.articles.addAlias(id, dto, principal);
+  }
+
+  @Delete(':id/aliases/:aliasId')
+  @RequirePermission('article:write')
+  @ApiOperation({
+    summary:
+      'Remove a folder alias from an article — hard delete (author only). (ADMIN or MEMBER) (ADR-0059 §2)',
+  })
+  @ApiOkResponse({ type: ArticleAliasDto })
+  removeAlias(
+    @Param('id') id: string,
+    @Param('aliasId') aliasId: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.articles.removeAlias(id, aliasId, principal);
   }
 
   @Post(':id/publish')

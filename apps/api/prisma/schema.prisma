@@ -589,26 +589,42 @@ enum UserHistoryEventType {
   PASSWORD_RESET_SENT
 }
 
-/// User-managed grouping for knowledge-base Articles (Networking, Servers, Procedures, …). Like
-/// AssetCategory: created/edited/soft-deleted from the app; the seed set is an initial, non-special
-/// list. See docs/02-domain/entities/article-category.md
+/// User-managed grouping for knowledge-base Articles, EVOLVED into a hierarchical Folder (ADR-0059
+/// §1): a self-ref `parentId` (null = a root folder) makes the flat set the root level of a tree.
+/// The model/table stay `ArticleCategory` / `article_categories` (the rename to Folder/folders is a
+/// deliberate follow-up); Article.categoryId becomes the "one home folder per article" FK, unchanged
+/// in shape. Created/edited/soft-deleted from the app; the seed set is an initial, non-special list.
+/// NO access semantics here — ADR-0060 attaches the per-folder permission boundary later.
+/// See docs/02-domain/entities/folder.md and docs/02-domain/entities/article-category.md
 model ArticleCategory {
   id          String    @id @default(cuid())
-  // Unique among LIVE rows only: a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
-  // migration). A soft-deleted category frees its name for reuse; Restore reclaims it. No `@unique`
-  // (that re-introduces the ghost-row collision). See ADR-0041.
+  // Unique among LIVE rows only, scoped to the PARENT (ADR-0059 §1): a PARTIAL unique index on
+  // (parentId, name) WHERE "deletedAt" IS NULL (raw SQL in the migration), so `Servers/Linux` and
+  // `Workstations/Linux` coexist and a soft-deleted folder frees its name within its parent. No
+  // `@unique` (that re-introduces the ghost-row collision). See ADR-0041.
   name        String
   description String?
   // Free string: a heroicon name for the web UI (e.g. "ServerStackIcon"). Not validated.
   icon        String?
   // Optional sort key for sidebar/listings (lower first); null sorts last.
   order       Int?
+  // Self-ref parent folder (ADR-0059 §1): null = a ROOT folder. SetNull on delete is a hard-delete
+  // safety net only — our delete is a SOFT delete (UPDATE deletedAt) which never fires the FK, and
+  // the service refuses to soft-delete a folder with live child folders (no silent orphaning, 409).
+  // A cycle (a folder being its own ancestor) is rejected by the service's DFS guard.
+  parentId    String?
+  parent      ArticleCategory?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    ArticleCategory[] @relation("FolderTree")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
   articles Article[]
+  // Nav-only "symlink" placements: this folder also surfaces these articles (ADR-0059 §2).
+  aliases  ArticleAlias[]
 
+  // Speeds the per-parent child listing and the name-uniqueness/cycle walks.
+  @@index([parentId])
   @@map("article_categories")
 }
 
@@ -656,9 +672,17 @@ model Article {
   deletedAt      DateTime?
 
   // Append-only edit history (ADR-0042): every create/edit snapshots a new ArticleVersion.
-  versions ArticleVersion[]
+  versions     ArticleVersion[]
   // Article<->Asset/Application associations (ADR-0042): "the runbook for THIS server/app".
-  links    ArticleLink[]
+  links        ArticleLink[]
+  // Nav-only "symlink" placements of THIS article into other folders (ADR-0059 §2). Cascade.
+  aliases      ArticleAlias[]
+  // Outgoing `[[slug]]` wiki-link edges authored in THIS article's body (ADR-0059 §3), hard-rebuilt
+  // on every content-changing save. Cascade from the source.
+  outgoingLinks ArticleWikiLink[] @relation("WikiLinkSource")
+  // Incoming wiki-link edges whose RESOLVED target is this article (ADR-0059 §4) — the backlink
+  // ("References") read. resolvedTargetId is SetNull on a hard delete of this article.
+  incomingLinks ArticleWikiLink[] @relation("WikiLinkResolvedTarget")
 
   // (categoryId, status): per-category filtered listings. (status, publishedAt): "latest published".
   @@index([categoryId, status])
@@ -743,6 +767,62 @@ model ArticleLink {
   @@index([assetId])
   @@index([applicationId])
   @@map("article_links")
+}
+
+/// A nav-only "symlink" that makes one Article appear inside a Folder OTHER than its home, without
+/// moving its home or widening its access (ADR-0059 §2). A pure current-state placement (NOT
+/// soft-deletable and NOT an audit log): created via POST, removed via hard DELETE. No access
+/// column — an alias is presentation only; ADR-0060 owns any future alias-as-share. A folder that
+/// equals the article's home is rejected by the service. UNIQUE(folderId, articleId) — at most one
+/// alias per placement. See docs/02-domain/entities/article-alias.md
+model ArticleAlias {
+  id        String          @id @default(cuid())
+  // The folder this alias places the article into (NOT the home folder). Cascade: the alias is
+  // meaningless without its folder and carries no audit value (the ArticleLink posture exactly).
+  folderId  String
+  folder    ArticleCategory @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  // The aliased article. Cascade for the same reason.
+  articleId String
+  article   Article         @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now())
+
+  // No updatedAt / deletedAt: current-state, created or removed (hard delete), never soft-deleted
+  // (ADR-0006). At most one alias per (folder, article).
+  @@unique([folderId, articleId])
+  @@index([articleId])
+  @@map("article_aliases")
+}
+
+/// A materialized article↔article edge — one row per `[[slug]]` reference found in a source
+/// Article's body (ADR-0059 §3/§4). Powers backlinks ("References") and fast resolution. A DERIVED
+/// projection: hard-rebuilt on every content-changing save (delete-then-insert IN the article-write
+/// transaction, alongside the version snapshot — so the edge can never drift from the body). Distinct
+/// from ArticleLink (article↔asset/application). `targetSlug` is the source of truth; resolvedTargetId
+/// is a best-effort CACHE of "the slug matched a live article at rebuild time", nullable (an
+/// unresolved forward reference is render-time state, never an error). See
+/// docs/02-domain/entities/article-wiki-link.md
+model ArticleWikiLink {
+  id               String   @id @default(cuid())
+  // The article whose body contains this `[[slug]]`. Cascade: the edge is meaningless without its
+  // source and carries no audit value. On a normal SOFT delete (UPDATE deletedAt) the FK never
+  // fires; the rebuild-on-save pass and the soft-delete read filter keep backlinks honest.
+  sourceArticleId  String
+  source           Article  @relation("WikiLinkSource", fields: [sourceArticleId], references: [id], onDelete: Cascade)
+  // The verbatim `[[slug]]` target text — the resolution key. Lowercase slug shape (parsed/normalized
+  // in @lazyit/shared). Not an FK: an unresolved slug is allowed (a forward reference).
+  targetSlug       String
+  // The matched live article when the slug currently resolves, else null. SetNull is a HARD-delete
+  // safety net (a normal soft delete leaves it stale — harmless, re-resolved on the next rebuild).
+  resolvedTargetId String?
+  resolvedTarget   Article? @relation("WikiLinkResolvedTarget", fields: [resolvedTargetId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+
+  // No updatedAt / deletedAt: current-state, hard-rebuilt on save, never edited or soft-deleted
+  // (ADR-0006). Indexed on the source (the rebuild's delete-by-source) and the resolved target (the
+  // backlink lookup `WHERE resolvedTargetId = :id`).
+  @@index([sourceArticleId])
+  @@index([resolvedTargetId])
+  @@map("article_wiki_links")
 }
 
 /// User-managed grouping for Applications (SaaS, Internal, Service, …). Like AssetCategory /
