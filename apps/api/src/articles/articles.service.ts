@@ -7,12 +7,15 @@ import {
 import {
   offsetOf,
   pageOf,
+  parseWikiLinks,
   slugify,
+  type ArticleBacklink,
   type ArticleLinkedFilter,
   type ArticleLinkedTo,
   type ArticleListItem,
   type ArticleStatus,
   type CreateArticle,
+  type CreateArticleAlias,
   type CreateArticleLink,
   type Page,
   type PageQuery,
@@ -341,6 +344,9 @@ export class ArticlesService {
       // Version 1 — the initial snapshot. Same transaction so the article and its first version
       // commit atomically (ADR-0042).
       await this.snapshotVersion(tx, created, 1, authorId);
+      // Materialize the outgoing `[[slug]]` wiki-link edges from the body (ADR-0059 §3), in the SAME
+      // transaction as the article + version write so the edge can never drift from the content.
+      await this.rebuildWikiLinks(tx, created.id, created.content);
       return created;
     });
     // Index PUBLISHED only; a DRAFT is author-private (ADR-0022) so it must never be searchable —
@@ -387,6 +393,12 @@ export class ArticlesService {
           await this.nextVersion(tx, id),
           cu,
         );
+      }
+      // Hard-rebuild the outgoing wiki-link edges ONLY when the body changed (ADR-0059 §3), in the
+      // SAME transaction as the article + version write. A metadata/title-only PATCH leaves `content`
+      // untouched, so the edges are left as-is (the `[[slug]]`s in the body didn't move).
+      if (data.content !== undefined && current.content !== updated.content) {
+        await this.rebuildWikiLinks(tx, id, updated.content);
       }
       return updated;
     });
@@ -590,6 +602,101 @@ export class ArticlesService {
   async findLinks(articleId: string, currentUser?: User) {
     await this.findOne(articleId, currentUser);
     return this.prisma.articleLink.findMany({
+      where: { articleId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  // --- wiki-links: backlinks ("References") read (ADR-0059 §4) --------------
+
+  /**
+   * Backlinks ("References") for an article: every readable article whose body `[[slug]]`-references
+   * this one (ADR-0059 §4). The reverse of the materialized edge — `ArticleWikiLink.resolvedTargetId
+   * = :id`. The article-read visibility gate is ANDed ON TOP (the target must be readable by the
+   * caller — `findOne` 404s a draft the caller can't see) AND each SOURCE is filtered by the same
+   * visibility rule, so a draft's backlink never leaks (ADR-0022). Soft-deleted sources are excluded
+   * by the automatic read filter (ADR-0032). Returns a denormalized {@link ArticleBacklink} list
+   * (source id/slug/title) so the "References" UI needs no extra round-trip.
+   */
+  async backlinks(id: string, currentUser?: User): Promise<ArticleBacklink[]> {
+    // 404 if the target itself isn't readable (missing, soft-deleted, or a draft the caller can't
+    // see) — the backlinks of an article you can't read must not be revealed.
+    await this.findOne(id, currentUser);
+    const cu = this.resolveCurrentUser(currentUser);
+    const edges = await this.prisma.articleWikiLink.findMany({
+      where: {
+        resolvedTargetId: id,
+        // The SOURCE must also be readable by the caller (PUBLISHED for all; own DRAFTs) — a draft
+        // that references this article must not surface its existence to a non-author.
+        source: this.visibilityWhere(cu),
+      },
+      select: {
+        id: true,
+        sourceArticleId: true,
+        createdAt: true,
+        source: { select: { slug: true, title: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    return edges.map((e) => ({
+      id: e.id,
+      sourceArticleId: e.sourceArticleId,
+      sourceSlug: e.source.slug,
+      sourceTitle: e.source.title,
+      createdAt: e.createdAt.toISOString(),
+    }));
+  }
+
+  // --- aliases (nav-only folder symlinks, ADR-0059 §2) ---------------------
+
+  /**
+   * Create a nav-only alias placing an article into a folder OTHER than its home (ADR-0059 §2).
+   * Author-only (same write gate as edits). The target folder must be live (400 otherwise) and must
+   * NOT equal the article's home folder (400 — you cannot alias an article into its own home). A
+   * duplicate `(folderId, articleId)` is rejected (409 via the unique index, mapped by the global
+   * PrismaExceptionFilter). No access column — an alias is presentation only and never widens access.
+   */
+  async addAlias(
+    articleId: string,
+    data: CreateArticleAlias,
+    principal?: Principal,
+  ) {
+    const cu = this.requireAuthor(principal);
+    const article = await this.loadOwned(articleId, cu);
+    await this.assertFolderUsable(data.folderId);
+    if (data.folderId === article.categoryId) {
+      throw new BadRequestException(
+        'Cannot alias an article into its own home folder',
+      );
+    }
+    return this.prisma.articleAlias.create({
+      data: { articleId, folderId: data.folderId },
+    });
+  }
+
+  /**
+   * Remove an alias from an article via hard DELETE (ADR-0059 §2 — a current-state placement, never
+   * soft-deleted). Author-only (same gate as edits). 404 if the alias doesn't exist or doesn't belong
+   * to this article (so an actor can't probe another article's aliases).
+   */
+  async removeAlias(articleId: string, aliasId: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
+    await this.loadOwned(articleId, cu);
+    const alias = await this.prisma.articleAlias.findFirst({
+      where: { id: aliasId, articleId },
+    });
+    if (!alias) {
+      throw new NotFoundException(
+        `Alias ${aliasId} not found on article ${articleId}`,
+      );
+    }
+    return this.prisma.articleAlias.delete({ where: { id: alias.id } });
+  }
+
+  /** All aliases of an article (readable by any caller who can read the article). */
+  async findAliases(articleId: string, currentUser?: User) {
+    await this.findOne(articleId, currentUser);
+    return this.prisma.articleAlias.findMany({
       where: { articleId },
       orderBy: { createdAt: 'asc' },
     });
@@ -803,6 +910,58 @@ export class ArticlesService {
         `categoryId ${categoryId} does not reference a live category`,
       );
     }
+  }
+
+  /** 400 if folderId doesn't reference a live (non-soft-deleted) folder (ADR-0059 §2 aliasing). */
+  private async assertFolderUsable(folderId: string): Promise<void> {
+    const folder = await this.prisma.articleCategory.findFirst({
+      where: { id: folderId },
+      select: { id: true },
+    });
+    if (!folder) {
+      throw new BadRequestException(
+        `folderId ${folderId} does not reference a live folder`,
+      );
+    }
+  }
+
+  /**
+   * Hard-rebuild the outgoing `[[slug]]` wiki-link edges for one source article (ADR-0059 §3). Called
+   * INSIDE the article-write transaction (create / a content-changing update / import) so the edge can
+   * never drift from the body it describes — the in-transaction discipline ADR-0042 uses for the
+   * version snapshot.
+   *
+   * Strategy: delete every existing edge for this source, then insert one per DISTINCT parsed
+   * `[[slug]]`. Each target slug is resolved best-effort to a LIVE article id (`resolvedTargetId`,
+   * else null for a forward reference — never an error, never a save-blocker). The self-reference
+   * (`[[own-slug]]`) is allowed and resolves to the article itself. Idempotent: re-running on the same
+   * body produces the same edge set. Deterministic delete-then-insert (not a diff) keeps it simple and
+   * crash-safe; the edge table is tiny per article.
+   */
+  private async rebuildWikiLinks(
+    tx: Prisma.TransactionClient,
+    sourceArticleId: string,
+    content: string,
+  ): Promise<void> {
+    // Clear the source's current edges — the body is the source of truth, recomputed from scratch.
+    await tx.articleWikiLink.deleteMany({ where: { sourceArticleId } });
+    const slugs = parseWikiLinks(content);
+    if (slugs.length === 0) return;
+    // Resolve each distinct slug to a live article id in ONE query, then map back. findMany is
+    // soft-delete-aware (ADR-0032), so only LIVE articles resolve — an unresolved/soft-deleted target
+    // stays null (render-time tooltip, ADR-0059 §3).
+    const matches = await tx.article.findMany({
+      where: { slug: { in: slugs } },
+      select: { id: true, slug: true },
+    });
+    const idBySlug = new Map(matches.map((m) => [m.slug, m.id]));
+    await tx.articleWikiLink.createMany({
+      data: slugs.map((targetSlug) => ({
+        sourceArticleId,
+        targetSlug,
+        resolvedTargetId: idBySlug.get(targetSlug) ?? null,
+      })),
+    });
   }
 
   /** 400 if assetId doesn't reference a live (non-soft-deleted) asset (ADR-0042 linking). */
