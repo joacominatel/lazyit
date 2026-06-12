@@ -32,17 +32,44 @@ import { PermissionSchema } from "./permission";
 export const SERVICE_ACCOUNT_TOKEN_PREFIX = "lzit_sa_" as const;
 
 /**
+ * Catalog permissions a SERVICE ACCOUNT may never hold (INV-SA-3, ADR-0048 Fork #3): the coarse
+ * principal/authz-management verbs. Holding either makes a bot ADMIN-equivalent — `settings:manage`
+ * gates the ENTIRE Service-Accounts API (self-escalate, mint backdoor bots, persist the foothold) AND
+ * `PUT /config/permissions` (rewrite the human MEMBER/VIEWER matrix); `user:manage` gates `POST /users`
+ * (create a human ADMIN). Code-enforced here as the source of truth so no non-human principal can ever
+ * be granted them — Layer 1 of the SEC-011 fix. Layer 2 (ServicePrincipalForbiddenGuard) is the runtime
+ * backstop that neutralises any pre-existing grant.
+ *
+ * Deliberately limited to these two: `accessGrant:grant` and the `:delete` family are legitimate for
+ * automation bots (a CI bot revoking app access, a cleanup bot) and do not enable self-escalation.
+ * Widening the set is a separate product call — add literals here and to the golden test if the team
+ * later decides otherwise.
+ */
+export const SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS = [
+  "settings:manage",
+  "user:manage",
+] as const;
+
+const UNGRANTABLE = new Set<string>(SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS);
+
+/**
  * A non-empty, deduplicated array of catalog `Permission` literals for a service account's direct
  * grants. Every entry is validated against the FROZEN `@lazyit/shared` catalog (`PermissionSchema`),
  * so an unknown literal → 400 and a service account can never be granted a capability the code does
  * not know about. `.min(1)`: a service account with NO permissions could authenticate but pass nothing
  * (fail-closed) — almost always a mistake, so we reject it at the edge rather than mint a useless token.
  * Duplicates are squashed so the persisted grant set and any audit diff are computed against a clean set.
+ * The `.refine` enforces INV-SA-3: the coarse principal/authz-management verbs are never grantable to a
+ * non-human principal (SEC-011 Layer 1 ceiling).
  */
 const ServiceAccountPermissionsSchema = z
   .array(PermissionSchema)
   .min(1, "A service account must be granted at least one permission")
-  .transform((perms) => [...new Set(perms)]);
+  .transform((perms) => [...new Set(perms)])
+  .refine((perms) => !perms.some((p) => UNGRANTABLE.has(p)), {
+    message:
+      "A service account cannot be granted settings:manage or user:manage (INV-SA-3: never ADMIN-equivalent).",
+  });
 
 /**
  * The full ServiceAccount entity as returned by the API (the management list / detail reads). Date
