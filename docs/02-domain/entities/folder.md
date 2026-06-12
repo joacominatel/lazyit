@@ -8,14 +8,18 @@ updated: 2026-06-11
 
 # Folder
 
-> ⚪ planned · Area: Knowledge Base · Implementation order: tbd
+> 🟢 implemented (structure) · Area: Knowledge Base · Implementation order: tbd
 
 > [!note] The flat [[article-category]] evolved
 > `Folder` is the hierarchical successor to the flat [[article-category]]
 > ([[0059-kb-folders-links-and-import]]): it adds a self-ref `parentId` (a tree) and the existing
 > required one-category-per-article FK becomes the **one home folder per article**. It is also the
-> KB **access boundary** ([[0060-kb-folder-access-control]]). See [[article-category]] for the
-> current flat model; the ADRs hold the full detail.
+> KB **access boundary** ([[0060-kb-folder-access-control]]). The **structure** — the tree, the
+> per-parent name uniqueness, the cycle/orphan guards — shipped in #392; **access semantics** remain
+> #365's job. The Prisma **model and table keep the names `ArticleCategory` / `article_categories`**
+> and the endpoints stay `/article-categories` — only a self-FK column was added; the rename to
+> `Folder` / `folders` is a deliberate follow-up. See [[article-category]] for the (now hierarchical)
+> model; the ADRs hold the full detail.
 
 ## Purpose
 
@@ -36,9 +40,21 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
 
 ## Business rules
 
-- **Folder-name uniqueness is per parent** — a live-only **PARTIAL** unique index
-  `WHERE "deletedAt" IS NULL` (raw SQL, never a PSL `@unique` — [[0041-soft-delete-reuse-and-restore]]),
-  so a soft-deleted name is freed for reuse/restore.
+- **Folder-name uniqueness is per parent** — a live-only **PARTIAL** unique index on
+  `(parentId, name) WHERE "deletedAt" IS NULL` (raw SQL, never a PSL `@unique` —
+  [[0041-soft-delete-reuse-and-restore]]; it `DROP`s the old flat `name` partial unique and recreates
+  it scoped to the parent), so `Servers/Linux` and `Workstations/Linux` coexist and a soft-deleted
+  folder frees its name **within its parent** for reuse/restore. The index is `NULLS NOT DISTINCT`, so
+  the **root** level (parentId NULL) still rejects two folders sharing a name — matching the prior flat
+  behaviour.
+- **No cycles** — a folder may not be its own ancestor. On create/reparent the service runs a **DFS
+  walk up the chain** from the proposed parent (the same pattern the manager chain — [[0058-user-manager-and-clone-actions]]
+  — and the workflow step graph — [[0054-applications-workflow-engine]] §8 — use); reaching the subject
+  is a **400**. A new folder has no children, so a create can't cycle.
+- **No silent orphaning on delete** — soft-deleting a folder that still has live **child folders** is a
+  **409** (same posture as the existing live-articles 409). Reparent or delete the children first. Both
+  guards are application logic: the soft delete (UPDATE deletedAt) never fires the FK referential
+  action, so the schema FKs are only hard-delete safety nets.
 - **One home folder per article** (the evolved required FK); aliases provide additional, nav-only
   appearances.
 - **Access attaches to the folder, not to article rows** — a deliberate, bounded carve-out from the
@@ -53,10 +69,21 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
 - **ID:** `cuid()` ([[0005-id-strategy]]).
 - **Timestamps / soft delete:** `createdAt`, `updatedAt`, `deletedAt` (mutable domain entity).
 
-## Not yet implemented
+## Endpoints
 
-- Planned — not yet built; tracked by issue #364 ([[0059-kb-folders-links-and-import]]). The access
-  layer is #365 ([[0060-kb-folder-access-control]]).
+The endpoints stay `/article-categories` (`ArticleCategoriesModule`) — see [[article-category]] — with
+`parentId` now accepted on create (optional; absent = root) and update (nullable; `null` = move to
+root, a cuid = reparent). A reparent that would create a cycle is **400**; a delete of a folder with
+live sub-folders is **409**.
+
+## Implemented in #392; still deferred
+
+- **Built (#392, ADR-0059 §1):** the `parentId` self-FK, the per-parent partial-unique name, the DFS
+  cycle guard, the no-silent-orphan child-folder 409, and `parentId` on the create/update/read wire
+  shape (`@lazyit/shared` `Folder*` aliases over `ArticleCategory*`).
+- **Still deferred:** the per-folder **access** layer is #365 ([[0060-kb-folder-access-control]]); the
+  `ArticleCategory` → `Folder` model/table **rename** is a follow-up (a separate migration); a
+  guided-reparent UX on delete (the rule is "no silent orphaning"; the mechanism is the 409 today).
 
 Related: [[0059-kb-folders-links-and-import]] · [[0060-kb-folder-access-control]] · [[article]] ·
 [[article-category]] · [[article-alias]] · [[article-wiki-link]] · [[0041-soft-delete-reuse-and-restore]] ·
