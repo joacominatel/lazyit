@@ -3,7 +3,7 @@ title: "ADR-0038: JIT user provisioning on first OIDC login"
 tags: [adr, auth, oidc]
 status: accepted
 created: 2026-05-27
-updated: 2026-06-01
+updated: 2026-06-12
 deciders: [Joaquín Minatel]
 ---
 
@@ -139,12 +139,16 @@ the loser's `updateMany` matches 0 rows, it refetches the now-linked row, and th
 
 > [!warning] Security — why email linking is safe here, and only here
 > Linking by email is sound **only** under the trusted-IdP assumption (ADR-0037/0038): the admin
-> controls the IdP and the IdP owns/verifies the email. Two invariants keep it from becoming an
+> controls the IdP and the IdP owns/verifies the email. **Three invariants** keep it from becoming an
 > account-takeover primitive: **(1)** a row is claimed **only** when its `externalId IS NULL` (no
-> identity has bound it yet), and **(2)** a row already linked to a different `sub` is **never**
-> re-bound — the guard 409s. The email lookup runs through the soft-delete-filtered client, so a
-> soft-deleted / offboarded user with the same email is invisible and can never be linked or
-> resurrected (the no-resurrect posture of the `externalId` path is preserved end-to-end).
+> identity has bound it yet), **(2)** a row already linked to a different `sub` is **never** re-bound
+> — the guard 409s, and **(3) the IdP must have verified the email** (`email_verified === true` or
+> `=== 'true'`) — the guard **code-enforces** this (SEC-020, `jwt-auth.guard.ts` `jitProvision`): an
+> unverified email throws `ForbiddenException (403)` and the claim is refused, so no attacker can
+> inherit a row's role by self-registering with an unverified address at a permissive IdP. The
+> email lookup runs through the soft-delete-filtered client, so a soft-deleted / offboarded user
+> with the same email is invisible and can never be linked or resurrected (the no-resurrect posture
+> of the `externalId` path is preserved end-to-end).
 
 **Library**: `jose` (standard OIDC / JWKS; no Passport, no NestJS-passport). userinfo + discovery
 use the runtime's `fetch` directly — no additional dependency.
