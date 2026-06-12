@@ -42,6 +42,7 @@ export const PERMISSION_DOMAINS = [
   "settings",
   "workflow", // the Applications Workflow Engine (epic #248) — pre-provisioned RBAC; NO routes yet
   "notification", // the in-app notification bell (ADR-0056) — operational nudges; read is ADMIN-only
+  "secret", // the human Secret Manager (ADR-0061) — zero-knowledge vaults; ALL ADMIN-only by default
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
 
@@ -139,6 +140,14 @@ export const PERMISSIONS = [
   // safe default. The bell + its four poll endpoints are gated on it. There is no `:write` — admins
   // mark notifications read via the PATCH endpoints, which is not a catalog mutation permission.
   "notification:read",
+  // secret (human Secret Manager, ADR-0061) — zero-knowledge vaults beside the Knowledge Base.
+  // `secret:read` is ADMIN-only (see ADMIN_ONLY_READS, same posture as logs:read / workflow:read):
+  // even list/metadata access to vaults and items is sensitive. `secret:manage` is the coarse ADMIN
+  // capability (create/edit/delete vaults, manage memberships). Deliberately distinct: `secret:read`
+  // and `secret:manage` are kept separate for separation of duties — mirroring `workflow:secrets` vs
+  // `workflow:manage` (ADR-0061 §7). Neither is ever seeded to MEMBER or VIEWER.
+  "secret:read",
+  "secret:manage",
 ] as const;
 
 /**
@@ -215,6 +224,12 @@ export const VIEWER_DENIED_READS = [
  *     consumable crossed below minimum stock, a workflow needs a human / failed). Who-got-what is
  *     sensitive, so it defaults to ADMIN-only — the same posture as `logs:read` / `workflow:read`. It
  *     is still admin-grantable from the role matrix; it is just never seeded to MEMBER/VIEWER.
+ *   - `secret:read` — the human Secret Manager (ADR-0061 §7). Even list/metadata access to vaults and
+ *     items is sensitive (vault names, member lists, handles are server-visible metadata). Defaults to
+ *     ADMIN-only, same posture as `logs:read` / `workflow:read`. The coarse `secret:manage` verb is
+ *     ADMIN-only automatically (it is neither `:read` nor `:write`), mirroring `workflow:secrets` vs
+ *     `workflow:read` — only the `:read` needs listing here to keep it out of the default-open read tier.
+ *     Still admin-grantable from the role matrix, but never seeded to MEMBER/VIEWER.
  *
  * Catalog invariant: `ADMIN_ONLY_READS` and `VIEWER_DENIED_READS` are disjoint — a read is either
  * pre-tightened (ADMIN + MEMBER) or admin-only (ADMIN), never both.
@@ -223,6 +238,7 @@ export const ADMIN_ONLY_READS = [
   "logs:read",
   "workflow:read",
   "notification:read",
+  "secret:read",
 ] as const satisfies readonly Permission[];
 
 /**
@@ -237,13 +253,15 @@ export const ADMIN_ONLY_READS = [
  *   - VIEWER = all `:read` EXCEPT the pre-tightened reads ({@link VIEWER_DENIED_READS}) AND the
  *     admin-only reads ({@link ADMIN_ONLY_READS}).
  *
- *   - {@link ADMIN_ONLY_READS} (`logs:read`, `workflow:read`) are excluded from BOTH MEMBER and VIEWER —
- *     strictly more restrictive than the pre-tightening: only ADMIN holds them by default (still
- *     admin-grantable).
+ *   - {@link ADMIN_ONLY_READS} (`logs:read`, `workflow:read`, `notification:read`, `secret:read`) are
+ *     excluded from BOTH MEMBER and VIEWER — strictly more restrictive than the pre-tightening: only
+ *     ADMIN holds them by default (still admin-grantable).
  *   - The `workflow` verbs (epic #248) follow a SAFE DEFAULT of ADMIN-only: `workflow:read` via
  *     {@link ADMIN_ONLY_READS}, and the coarse `workflow:manage`/`run`/`task`/`secrets` automatically,
  *     since they are neither `:read` nor `:write` and so never enter the MEMBER/VIEWER seed sets. They
  *     remain admin-grantable from the role matrix (with the ⚠ delegation UX), like the other coarse verbs.
+ *   - The `secret` verbs (ADR-0061) follow the same SAFE DEFAULT: `secret:read` via {@link ADMIN_ONLY_READS},
+ *     and `secret:manage` automatically (coarse verb — neither `:read` nor `:write`). Both ADMIN-only.
  *
  * Permissions are sorted by their catalog order for a stable, reviewable shape.
  */

@@ -54,7 +54,8 @@ export const PILLAR_META: Record<
   },
   knowledge: {
     label: "Knowledge",
-    description: "The Knowledge Base — articles and their categories.",
+    description:
+      "The Knowledge Base — articles and their categories — and the human Secret Manager (zero-knowledge vaults beside the KB, ADR-0061).",
   },
   manage: {
     label: "Manage",
@@ -221,6 +222,20 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
     pillar: "manage",
     tier: "coarse",
   },
+  // ── Secret Manager (ADR-0061) — zero-knowledge vaults beside the KB ──────────
+  "secret:read": {
+    label: "View the Secret Manager",
+    pillar: "knowledge",
+    tier: "view",
+  },
+  "secret:manage": {
+    // Coarse capability: create / edit / delete vaults, manage memberships.
+    // Kept distinct from `secret:read` for separation of duties (ADR-0061 §7) — mirroring
+    // `workflow:secrets` vs `workflow:manage`. Both are ADMIN-only by seed default.
+    label: "Manage vaults & memberships",
+    pillar: "knowledge",
+    tier: "coarse",
+  },
   // ── Automation (Applications Workflow Engine, epic #248) ─────────────────────
   "workflow:read": {
     label: "View workflows & runs",
@@ -287,6 +302,9 @@ export const CAPABILITY_IDS = [
   "article.view",
   "article.edit",
   "article.delete",
+  // Secret Manager (ADR-0061)
+  "secret.view",
+  "secret.manage",
   // Manage
   "user.view",
   "user.manage",
@@ -427,6 +445,26 @@ export const CAPABILITIES: readonly Capability[] = [
     description: "Archive Knowledge Base articles.",
     pillar: "knowledge",
     permissions: ["article:delete"],
+  },
+  // Secret Manager (ADR-0061) — `read` and `manage` are kept as separate toggles for separation
+  // of duties (who can view vault metadata ≠ who can administer vaults), mirroring the
+  // `workflow.view` / `workflow.manage` split. Both are above-default tier for MEMBER/VIEWER
+  // (`manage` is coarse; `read` is an admin-only read seeded only to ADMIN).
+  {
+    id: "secret.view",
+    label: "View the Secret Manager",
+    description:
+      "See that vaults and secret items exist (names, handles, member lists) — zero-knowledge metadata only; no values are revealed (ADR-0061 §9).",
+    pillar: "knowledge",
+    permissions: ["secret:read"],
+  },
+  {
+    id: "secret.manage",
+    label: "Manage vaults & memberships",
+    description:
+      "Create, edit and delete vaults; manage vault memberships (grant/revoke wrapped DEKs) — the full Secret Manager administration surface.",
+    pillar: "knowledge",
+    permissions: ["secret:manage"],
   },
   // ── Manage ─────────────────────────────────────────────────────────────────
   {
