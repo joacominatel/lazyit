@@ -49,6 +49,11 @@ the accepted baseline.
 - **Trigger to revisit:** when auth lands, `currentUser` must come from the verified token (`sub` →
   `User.externalId`), and the same rules must hold. Track [[SEC-006|SEC-006]]: `externalId` should be
   server-set by then, not client-set.
+- **Note (SEC-020, 2026-06-12):** The trusted-IdP + verified-email framing in this entry ("sound ONLY
+  because the IdP is trusted to own/verify the email") is now **partially code-enforced**: the JIT
+  email-link claim gate in `jwt-auth.guard.ts` (`jitProvision`) now requires `email_verified === true`
+  before claiming any existing row (SEC-020 closed). The trusted-IdP half remains an operational
+  assumption; the verified-email half is no longer IdP-trust-only.
 
 ## DEF-003 — Swagger docs are public ✅ RESOLVED (2026-06-02)
 

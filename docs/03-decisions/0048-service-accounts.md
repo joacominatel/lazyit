@@ -3,7 +3,7 @@ title: "ADR-0048: Service Accounts — a non-human principal with a lazyit-nativ
 tags: [adr, auth, authz, service-accounts, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-06-02
+updated: 2026-06-12
 deciders: [Joaquín Minatel]
 ---
 
@@ -86,6 +86,25 @@ The CEO's framing (quoted, do not re-litigate):
   whose `@RequirePermission(...)` it *fully* holds. It does NOT inherit the human **open-by-default**
   for unannotated routes (INV-8). This is the single most important authZ difference from a human: a bot
   that hits an unannotated, non-`@Public` route gets **403**, not a pass.
+- **Ungrantable ceiling (SEC-011, code-enforced — added 2026-06-12):** The two coarse
+  principal/authz-management verbs `settings:manage` and `user:manage` are **never grantable to a
+  service account**. Holding either makes a bot ADMIN-equivalent: `settings:manage` gates the entire
+  Service-Accounts API (self-escalate, mint backdoor bots, persist) AND `PUT /config/permissions`
+  (rewrite the human MEMBER/VIEWER matrix); `user:manage` gates `POST /users` (create a human ADMIN).
+  Enforcement is two-layer:
+  - **Layer 1 — schema ceiling (source of truth):** `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS` exported
+    from `@lazyit/shared` drives a `.refine` on `ServiceAccountPermissionsSchema` that rejects the meta
+    verbs with `400` at the DTO edge for both create and update. `ServiceAccountsService.cleanPermissions`
+    also strips them defensively for any non-DTO path.
+  - **Layer 2 — runtime principal guard (backstop):** `ServicePrincipalForbiddenGuard` (`apps/api/src/auth/`)
+    refuses a service principal outright (`403`) on all `ServiceAccountsController` routes (class-level)
+    and on `GET`/`PUT /config/permissions` (method-level). This neutralises any pre-existing grant: Layer 1
+    only blocks *new* grants; Layer 2 stops *use* of a grant that may have existed before Layer 1 was added.
+  - `accessGrant:grant` and the `:delete` family are **not** in the ceiling — they are legitimate for
+    automation bots and do not enable self-escalation. Widening the set is a separate product call.
+  - If a new principal/authz-management endpoint is ever added (a new SA-management route, a new authz
+    config surface), it **must also carry `@UseGuards(ServicePrincipalForbiddenGuard)`** — treat this as
+    a mandatory checklist item for any PR that adds such an endpoint.
 
 ### Fork #4 — How are service-account actions audited?
 

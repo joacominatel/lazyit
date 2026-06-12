@@ -21,6 +21,8 @@ jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 // generated client. (Dynamic import() is unavailable under this CommonJS jest config.)
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { ServicePrincipalForbiddenGuard } from '../auth/service-principal-forbidden.guard';
+import type { Principal } from '../auth/principal';
 
 import { ConfigController } from './config.controller';
 import { ConfigService, type SetupOutcome } from './config.service';
@@ -360,5 +362,110 @@ describe('ConfigController — permission gates (e2e pipeline, ADR-0046 P5)', ()
   it('GET /config/my-permissions: anonymous (no user) → 403', async () => {
     const res = await request(app.getHttpServer()).get('/config/my-permissions');
     expect(res.status).toBe(403);
+  });
+});
+
+/**
+ * Layer-2 principal-kind guard (INV-SA-3 / SEC-011): a service principal MUST be refused on
+ * GET/PUT /config/permissions regardless of its grants. The ServicePrincipalForbiddenGuard is wired
+ * method-level on these two handlers; this block verifies it fires in the real HTTP pipeline.
+ *
+ * A human ADMIN still passes (no regression).
+ */
+describe('ConfigController — service-principal blocked on permissions routes (INV-SA-3 Layer 2)', () => {
+  let app: INestApplication;
+
+  const adminSet = new Set<string>(['settings:manage', 'asset:read']);
+  const resolverStub = {
+    resolve: (role: string) =>
+      Promise.resolve(role === 'ADMIN' ? adminSet : new Set<string>()),
+    hasAll: (role: string, required: string[]) =>
+      Promise.resolve(role === 'ADMIN' || required.every((p) => adminSet.has(p))),
+    invalidate: jest.fn(),
+  };
+
+  const permissionsStub = {
+    getMatrix: jest.fn().mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
+    updateMatrix: jest.fn().mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
+    resolveFor: jest.fn().mockResolvedValue({ role: 'ADMIN', permissions: [] }),
+  };
+
+  beforeAll(async () => {
+    // A fake auth guard that sets req.principal from X-Test-Kind.
+    // 'service' → a service principal holding settings:manage (the exact pre-existing-grant scenario).
+    // 'human'   → a human ADMIN.
+    const fakeAuthGuard = {
+      canActivate: (ctx: {
+        switchToHttp: () => { getRequest: () => Record<string, unknown> };
+      }) => {
+        const req = ctx.switchToHttp().getRequest();
+        const kind = (req.headers as Record<string, string>)['x-test-kind'];
+        if (kind === 'service') {
+          const principal: Principal = {
+            kind: 'service',
+            serviceAccount: { id: 'sa_evil' } as never,
+            permissions: new Set(['settings:manage']),
+          };
+          req.principal = principal;
+        } else if (kind === 'human') {
+          const principal: Principal = {
+            kind: 'human',
+            user: { id: 'u-admin', role: 'ADMIN' } as never,
+          };
+          req.principal = principal;
+          req.user = { id: 'u-admin', role: 'ADMIN' };
+        }
+        return true;
+      },
+    };
+
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      controllers: [ConfigController],
+      providers: [
+        { provide: ConfigService, useValue: {} },
+        { provide: SetupCsrfService, useValue: {} },
+        { provide: PermissionsConfigService, useValue: permissionsStub },
+        { provide: PermissionResolverService, useValue: resolverStub },
+        ServicePrincipalForbiddenGuard,
+        { provide: APP_GUARD, useValue: fakeAuthGuard },
+        { provide: APP_GUARD, useClass: RolesGuard },
+      ],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('GET /config/permissions: service principal → 403 even when holding settings:manage', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/config/permissions')
+      .set('X-Test-Kind', 'service');
+    expect(res.status).toBe(403);
+  });
+
+  it('PUT /config/permissions: service principal → 403 even when holding settings:manage', async () => {
+    const res = await request(app.getHttpServer())
+      .put('/config/permissions')
+      .set('X-Test-Kind', 'service')
+      .send({ MEMBER: ['asset:read'], VIEWER: ['asset:read'] });
+    expect(res.status).toBe(403);
+  });
+
+  it('GET /config/permissions: human ADMIN → 200 (no regression)', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/config/permissions')
+      .set('X-Test-Kind', 'human');
+    expect(res.status).toBe(200);
+  });
+
+  it('PUT /config/permissions: human ADMIN → 200 (no regression)', async () => {
+    const res = await request(app.getHttpServer())
+      .put('/config/permissions')
+      .set('X-Test-Kind', 'human')
+      .send({ MEMBER: ['asset:read'], VIEWER: ['asset:read'] });
+    expect(res.status).toBe(200);
   });
 });

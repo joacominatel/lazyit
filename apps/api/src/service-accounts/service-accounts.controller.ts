@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
@@ -25,6 +26,7 @@ import {
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
+import { ServicePrincipalForbiddenGuard } from '../auth/service-principal-forbidden.guard';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
 import { ServiceAccountsService } from './service-accounts.service';
 
@@ -63,9 +65,15 @@ class UpdateServiceAccountDto extends createZodDto(
  * SECRETS: `POST /` and `POST /:id/rotate` are the ONLY routes that ever return the cleartext token, and
  * each returns it EXACTLY ONCE (it is never persisted in cleartext and never recoverable). Every other
  * route returns the plain entity (tokenPrefix only — never the secret or the hash).
+ *
+ * SECURITY (INV-SA-3 / SEC-011 Layer 2): `@UseGuards(ServicePrincipalForbiddenGuard)` at the class
+ * level ensures a service principal is ALWAYS refused here (403) regardless of its grants. Layer 1
+ * (the schema refinement) stops new meta-verb grants; Layer 2 (this guard) neutralises any pre-existing
+ * grant so it can never be exercised on these management surfaces.
  */
 @ApiTags('service-accounts')
 @Controller('service-accounts')
+@UseGuards(ServicePrincipalForbiddenGuard)
 export class ServiceAccountsController {
   constructor(private readonly serviceAccounts: ServiceAccountsService) {}
 

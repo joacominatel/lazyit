@@ -638,6 +638,7 @@ describe('JwtAuthGuard', () => {
           payload: {
             sub: 'zitadel-sub-operator',
             email: 'admin@lazyit.local',
+            email_verified: true, // SEC-020: verified email required for account linking
             given_name: 'Real',
             family_name: 'Operator',
           },
@@ -705,6 +706,7 @@ describe('JwtAuthGuard', () => {
           payload: {
             sub: 'zitadel-sub-jordan',
             email: 'jordan@corp.com',
+            email_verified: true, // SEC-020: verified email required for account linking
             given_name: 'J',
             family_name: 'V',
           },
@@ -796,6 +798,163 @@ describe('JwtAuthGuard', () => {
           'zitadel-sub-self',
         );
         expect(prismaUser.updateMany).not.toHaveBeenCalled();
+        expect(prismaUser.upsert).not.toHaveBeenCalled();
+      });
+
+      // -------------------------------------------------------------------
+      // SEC-020: email_verified gate on the claim branch
+      // -------------------------------------------------------------------
+
+      it('SEC-020: throws ForbiddenException and does NOT claim the row when email_verified is false', async () => {
+        // An attacker registers at the IdP with admin@lazyit.local but the IdP does NOT verify
+        // the email (email_verified: false). Without the SEC-020 gate, the guard would claim the
+        // seeded ADMIN row and the attacker would inherit the ADMIN role.
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: {
+            sub: 'attacker-new-sub',
+            email: 'admin@lazyit.local',
+            email_verified: false,
+            given_name: 'Evil',
+            family_name: 'Attacker',
+          },
+        });
+        // externalId lookup misses; email lookup finds the unclaimed seeded admin (the claim target).
+        prismaUser.findFirst.mockImplementation(
+          routeFindFirst({
+            byExternalId: () => null,
+            byEmail: () => ({ ...SEED_ADMIN, externalId: null }),
+          }),
+        );
+
+        const req: Record<string, unknown> = {
+          headers: { authorization: 'Bearer attacker.token.here' },
+        };
+
+        // Must reject — never claim the ADMIN row on an unverified email.
+        await expect(guard.canActivate(makeCtx(req))).rejects.toBeInstanceOf(
+          ForbiddenException,
+        );
+        // The claim (updateMany) must NOT have been called.
+        expect(prismaUser.updateMany).not.toHaveBeenCalled();
+        expect(prismaUser.upsert).not.toHaveBeenCalled();
+      });
+
+      it('SEC-020: throws ForbiddenException and does NOT claim the row when email_verified is absent', async () => {
+        // Some IdPs omit the email_verified claim entirely (treated as unverified per OIDC Core §5.7).
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: {
+            sub: 'attacker-no-verified-claim',
+            email: 'admin@lazyit.local',
+            // email_verified intentionally absent
+            given_name: 'Evil',
+            family_name: 'Attacker',
+          },
+        });
+        prismaUser.findFirst.mockImplementation(
+          routeFindFirst({
+            byExternalId: () => null,
+            byEmail: () => ({ ...SEED_ADMIN, externalId: null }),
+          }),
+        );
+
+        const req: Record<string, unknown> = {
+          headers: { authorization: 'Bearer attacker.token.here' },
+        };
+
+        await expect(guard.canActivate(makeCtx(req))).rejects.toBeInstanceOf(
+          ForbiddenException,
+        );
+        expect(prismaUser.updateMany).not.toHaveBeenCalled();
+        expect(prismaUser.upsert).not.toHaveBeenCalled();
+      });
+
+      it('SEC-020: claims the row when email_verified is true (boolean) — legitimate operator login still works', async () => {
+        // The positive path: the IdP has verified the email → the claim is permitted.
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: {
+            sub: 'legit-operator-sub',
+            email: 'admin@lazyit.local',
+            email_verified: true,
+            given_name: 'Real',
+            family_name: 'Operator',
+          },
+        });
+        const claimedRow = {
+          ...SEED_ADMIN,
+          externalId: 'legit-operator-sub',
+          firstName: 'Real',
+          lastName: 'Operator',
+        };
+        let claimed = false;
+        prismaUser.findFirst.mockImplementation(
+          routeFindFirst({
+            byExternalId: () => null,
+            byEmail: () => ({ ...SEED_ADMIN, externalId: null }),
+            byId: () => (claimed ? claimedRow : { ...SEED_ADMIN, externalId: null }),
+          }),
+        );
+        prismaUser.updateMany.mockImplementation(() => {
+          claimed = true;
+          return Promise.resolve({ count: 1 });
+        });
+
+        const req: Record<string, unknown> = {
+          headers: { authorization: 'Bearer valid.token.here' },
+        };
+
+        const result = await guard.canActivate(makeCtx(req));
+
+        expect(result).toBe(true);
+        // The claim must have fired.
+        expect(prismaUser.updateMany).toHaveBeenCalledWith({
+          where: { id: SEED_ADMIN.id, externalId: null },
+          data: {
+            externalId: 'legit-operator-sub',
+            firstName: 'Real',
+            lastName: 'Operator',
+          },
+        });
+        expect(prismaUser.upsert).not.toHaveBeenCalled();
+        expect((req.user as { role?: string }).role).toBe('ADMIN');
+      });
+
+      it('SEC-020: claims the row when email_verified is the string "true" (some IdPs emit it as a string)', async () => {
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: {
+            sub: 'string-true-sub',
+            email: 'admin@lazyit.local',
+            email_verified: 'true',
+            given_name: 'String',
+            family_name: 'True',
+          },
+        });
+        const claimedRow = {
+          ...SEED_ADMIN,
+          externalId: 'string-true-sub',
+          firstName: 'String',
+          lastName: 'True',
+        };
+        let claimed = false;
+        prismaUser.findFirst.mockImplementation(
+          routeFindFirst({
+            byExternalId: () => null,
+            byEmail: () => ({ ...SEED_ADMIN, externalId: null }),
+            byId: () => (claimed ? claimedRow : { ...SEED_ADMIN, externalId: null }),
+          }),
+        );
+        prismaUser.updateMany.mockImplementation(() => {
+          claimed = true;
+          return Promise.resolve({ count: 1 });
+        });
+
+        const req: Record<string, unknown> = {
+          headers: { authorization: 'Bearer valid.token.here' },
+        };
+
+        const result = await guard.canActivate(makeCtx(req));
+
+        expect(result).toBe(true);
+        expect(prismaUser.updateMany).toHaveBeenCalled();
         expect(prismaUser.upsert).not.toHaveBeenCalled();
       });
 

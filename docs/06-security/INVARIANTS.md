@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-12
 ---
 
 # Security invariants — auth & authorization
@@ -44,23 +44,31 @@ and BYOI-safe (a generic IdP need not emit a role claim at all).
 > the "mismatch → warn" log is a *future* guard for if/when a role claim is surfaced as provenance — not
 > a present-day code path.
 
-## INV-2 — Account-linking by email is claim-only, race-safe, and never steals
+## INV-2 — Account-linking by email is claim-only, race-safe, never steals, and requires a verified email
 
 **Rule.** First-login email linking claims **only** rows with `externalId IS NULL` that are **live**
 (`deletedAt IS NULL`). It NEVER re-binds an email already linked to a different `sub` (returns/keeps a
 409-style rejection), and soft-deleted rows are invisible — an offboarded user's email is never
-resurrected by a returning `sub`.
+resurrected by a returning `sub`. **Additionally (SEC-020, code-enforced):** linking is only permitted
+when `email_verified === true` (boolean) or `=== 'true'` (string, as some IdPs emit). An unverified
+email throws `ForbiddenException (403)` — no existing row is ever claimed on an unverified email, so
+a BYOI attacker who self-registers with an arbitrary address cannot inherit another user's role.
 
 **Why.** Linking is the mechanism by which a real operator inherits a seeded ADMIN row; a sloppy link
-would be an account-takeover or a resurrection of an offboarded identity.
+would be an account-takeover or a resurrection of an offboarded identity. The verified-email gate was
+the missing third guard: the trusted-IdP assumption (ADR-0037/0038) is necessary but not sufficient —
+the email itself must also be verified (OIDC Core §5.7).
 
 **Where enforced.**
 - `apps/api/src/auth/jwt-auth.guard.ts` — the link is a race-safe `updateMany` guarded by
   `externalId: null` (+ the soft-delete read filter); a row already bound to a different `sub` is not
-  re-bound, and `externalId` stays **fully `@unique`** (ADR-0038/0041) so a returning `sub` cannot
-  resurrect a soft-deleted row.
-- Carried unchanged from [[0038-jit-user-provisioning]] / [[0041-soft-delete-reuse-and-restore]]; see
-  [[deferred]] DEF-002 for the trusted-IdP framing.
+  re-bound; `email_verified` is code-checked before any claim (SEC-020: unverified → 403,
+  `updateMany` never called); and `externalId` stays **fully `@unique`** (ADR-0038/0041) so a
+  returning `sub` cannot resurrect a soft-deleted row.
+- `apps/api/src/auth/jwt-auth.guard.spec.ts` — tests: unverified/absent `email_verified` does NOT
+  claim + throws `ForbiddenException`; verified (`true` / `'true'`) still claims (regression guard).
+- Carried from [[0038-jit-user-provisioning]] / [[0041-soft-delete-reuse-and-restore]]; SEC-020 closed
+  the verified-email gap; see [[deferred]] DEF-002 for the broader trusted-IdP framing.
 
 ## INV-3 — First-run setup is one-time gated, CSRF-protected, rate-limited, and audited
 
@@ -316,6 +324,23 @@ by a service account, and no bot can accidentally become an administrator.
   authorization source is `ServiceAccountPermission`, never `Role`/`RolePermission`.
 - `apps/api/src/auth/principal.ts` + `roles.guard.ts` — a service principal is authorized by its grant
   Set; the role resolver (`PermissionResolverService`) is **never** consulted for it.
+- **(Code-enforced from 2026-06-12, SEC-011 — two complementary layers):**
+  - **Layer 1 — schema ceiling (source of truth):** `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS` (exported
+    from `packages/shared/src/schemas/service-account.ts`) names the two coarse principal/authz-management
+    verbs that a service account may **never** hold: `settings:manage` and `user:manage`. A `.refine` on
+    `ServiceAccountPermissionsSchema` rejects them with `400` at the DTO edge (create + update); the
+    persistence-time `cleanPermissions` also strips them defensively. Golden test:
+    `packages/shared/src/schemas/service-account.test.ts`.
+  - **Layer 2 — runtime principal guard (backstop):** `ServicePrincipalForbiddenGuard`
+    (`apps/api/src/auth/service-principal-forbidden.guard.ts`) throws `403` when `isServicePrincipal(request.principal)`
+    is true. Applied at the **class level** of `ServiceAccountsController` (every management route) and
+    at the **method level** of `GET /config/permissions` and `PUT /config/permissions`. This closes the
+    class for pre-existing rows: Layer 1 stops *new* grants; Layer 2 stops *use* of any pre-existing
+    meta-verb grant. Guard tests: `apps/api/src/auth/service-principal-forbidden.guard.spec.ts` and the
+    e2e block in `apps/api/src/config/config.controller.spec.ts`.
+  - **Residual risk (unchanged):** the SA-actor audit gap (`actorId = null` for SA-performed management
+    actions, issue #141) is narrowed by Layer 2 — SAs can no longer perform those management actions at
+    all — but the `actorSaId` column is still the clean long-term fix; tracked separately.
 
 ## INV-SA-4 — Service-account actions are audited to the service account, never a fake human; at most one actor per audited row
 

@@ -11,6 +11,7 @@ import {
   type ServiceAccountWithSecret,
   type UpdateServiceAccount,
   PERMISSIONS,
+  SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS,
 } from '@lazyit/shared';
 import type {
   Prisma as PrismaTypes,
@@ -385,9 +386,18 @@ export class ServiceAccountsService {
     return [...new Set(valid)].sort((a, b) => order(a) - order(b));
   }
 
-  /** Dedupe + catalog-filter the desired grant set before persisting (the zod DTO already validated). */
+  /**
+   * Dedupe + catalog-filter the desired grant set before persisting (the zod DTO already validated).
+   * Also defensively strips the INV-SA-3 ungrantable verbs (belt-and-suspenders for any non-DTO code
+   * path — the schema refinement is Layer 1; this is the persistence-time backstop). SEC-011.
+   */
   private cleanPermissions(perms: readonly string[]): Permission[] {
-    return this.sortedCatalog(perms);
+    return this.sortedCatalog(perms).filter(
+      (p) =>
+        !(SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS as readonly string[]).includes(
+          p,
+        ),
+    );
   }
 
   /** Parse an ISO expiry string and reject a past instant (400). */
