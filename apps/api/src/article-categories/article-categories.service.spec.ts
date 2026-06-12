@@ -208,10 +208,14 @@ describe('ArticleCategoriesService', () => {
 
     it('allows reparenting under an unrelated folder (no cycle)', async () => {
       // A is the subject; move under C whose chain is C -> B -> (root). Never reaches A.
-      wireWalk({ id: 'A', deletedAt: null }, { id: 'C' }, {
-        C: 'B',
-        B: null,
-      });
+      wireWalk(
+        { id: 'A', deletedAt: null },
+        { id: 'C' },
+        {
+          C: 'B',
+          B: null,
+        },
+      );
       articleCategory.update.mockResolvedValue({ id: 'A', parentId: 'C' });
 
       await service.update('A', { parentId: 'C' });
@@ -220,10 +224,14 @@ describe('ArticleCategoriesService', () => {
 
     it('rejects (400) a move that makes the folder its own ancestor', async () => {
       // Subject A; proposed parent C whose chain is C -> B -> A → closing a cycle.
-      wireWalk({ id: 'A', deletedAt: null }, { id: 'C' }, {
-        C: 'B',
-        B: 'A',
-      });
+      wireWalk(
+        { id: 'A', deletedAt: null },
+        { id: 'C' },
+        {
+          C: 'B',
+          B: 'A',
+        },
+      );
 
       await expect(
         service.update('A', { parentId: 'C' }),
