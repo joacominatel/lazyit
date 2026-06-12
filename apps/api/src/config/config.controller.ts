@@ -33,6 +33,7 @@ import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Public } from '../auth/public.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
+import { ServicePrincipalForbiddenGuard } from '../auth/service-principal-forbidden.guard';
 import { ConfigService } from './config.service';
 import { PermissionsConfigService } from './permissions-config.service';
 import { SetupCsrfService } from './setup-csrf.service';
@@ -130,7 +131,11 @@ export class ConfigController {
 
   // ── Roles & Permissions v2 — P5: the configurable matrix (ADR-0046) ──────────────────────────────
 
+  // SECURITY (INV-SA-3 / SEC-011 Layer 2): ServicePrincipalForbiddenGuard on both permissions
+  // handlers so a bot can never read or rewrite the human MEMBER/VIEWER authorization matrix,
+  // even if it somehow holds settings:manage (e.g. a pre-existing grant before Layer 1 was added).
   @RequirePermission('settings:manage')
+  @UseGuards(ServicePrincipalForbiddenGuard)
   @Get('permissions')
   @ApiOperation({
     summary: 'Read the role→permission matrix (ADMIN — settings:manage)',
@@ -145,6 +150,7 @@ export class ConfigController {
   }
 
   @RequirePermission('settings:manage')
+  @UseGuards(ServicePrincipalForbiddenGuard)
   @Put('permissions')
   @ApiOperation({
     summary: 'Replace the MEMBER + VIEWER permission sets (ADMIN — settings:manage)',
