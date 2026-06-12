@@ -102,7 +102,7 @@ describe("Above-default-tier markers", () => {
     }
   });
 
-  test("the coarse verbs are exactly the above-default capability verbs (core + workflow)", () => {
+  test("the coarse verbs are exactly the above-default capability verbs (core + workflow + secret)", () => {
     const coarse = PERMISSIONS.filter((p) => PERMISSION_META[p].tier === "coarse");
     expect([...coarse].sort()).toEqual(
       [
@@ -114,6 +114,8 @@ describe("Above-default-tier markers", () => {
         "workflow:run",
         "workflow:task",
         "workflow:secrets",
+        // secret coarse verb (ADR-0061 §7) — `read` is a view tier (admin-only); `manage` is coarse
+        "secret:manage",
       ].sort(),
     );
   });
