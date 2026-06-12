@@ -2,9 +2,10 @@
 id: SEC-011
 title: A service account can be granted coarse meta-permissions (settings:manage / user:manage) → ADMIN-equivalent self-escalation
 severity: medium
-status: open
+status: closed
 cwe: CWE-269
 discovered: 2026-06-06
+closed: 2026-06-12
 module: service-accounts / auth (authz)
 tags: [privilege-escalation, authz, service-accounts, rbac, persistence]
 ---
@@ -144,3 +145,31 @@ principals" as capabilities that, by construction, no non-human principal may ho
 - OWASP ASVS V4 (access control) — least privilege + no self-grant.
 - ADR-0048 (Service Accounts, Fork #3) · ADR-0046 (Roles & Permissions v2) ·
   `docs/06-security/INVARIANTS.md` INV-SA-2 / INV-SA-3 · issue #141 (SA-actor audit column).
+
+## Resolution
+
+**Closed 2026-06-12** — branch `fix/issue-388-sec011-sa-permission-ceiling`, issue #388.
+
+INV-SA-3 ("never ADMIN-equivalent") is now **code-enforced** via two complementary layers:
+
+**Layer 1 — schema ceiling (source of truth, prevents new grants).**
+`SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS = ["settings:manage", "user:manage"]` is exported from
+`@lazyit/shared`. A `.refine` on `ServiceAccountPermissionsSchema` rejects either verb with `400`
+at the DTO edge for both `CreateServiceAccountSchema` and `UpdateServiceAccountSchema`. The
+`ServiceAccountsService.cleanPermissions` method also strips them defensively for any non-DTO path.
+Golden test in `packages/shared/src/schemas/service-account.test.ts` confirms rejection (create + update)
+and that a normal grant set still succeeds.
+
+**Layer 2 — runtime principal guard (backstop, neutralises pre-existing grants).**
+`ServicePrincipalForbiddenGuard` (`apps/api/src/auth/service-principal-forbidden.guard.ts`) throws
+`403` unconditionally when `isServicePrincipal(request.principal)` is true. Applied at the **class
+level** of `ServiceAccountsController` (every management route) and at the **method level** of
+`GET /config/permissions` and `PUT /config/permissions`. A human principal is never affected.
+
+The two layers are complementary: Layer 1 stops a meta-verb grant from being created; Layer 2 stops it
+from being *exercised* if it already existed (e.g. a row granted before this fix). Neither alone fully
+closes the class.
+
+**Residual risk (out of scope, unchanged):** the SA-actor audit gap (`actorId = null` for SA-performed
+management, issue #141) is narrowed by Layer 2 — SAs can no longer perform those management actions at
+all — but the `actorSaId` column is still the clean long-term fix and is tracked separately.

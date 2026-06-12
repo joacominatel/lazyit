@@ -485,4 +485,39 @@ describe('ServiceAccountsService (ADR-0048)', () => {
       );
     });
   });
+
+  // ── INV-SA-3: cleanPermissions defensive strip (SEC-011 belt-and-suspenders) ─────────────────────
+  // The schema refinement (Layer 1) rejects new grants at the DTO edge. cleanPermissions is the
+  // persistence-time backstop: it must silently drop ungrantable verbs for any non-DTO internal path
+  // (e.g. a direct service call in tests or a future admin command) so they are never persisted.
+  describe('cleanPermissions — INV-SA-3 defensive strip (SEC-011)', () => {
+    it('strips settings:manage from a permission set before persisting', async () => {
+      // Bypass the schema by calling create with a raw payload that includes the ungrantable verb.
+      // In production the DTO would reject it; here we confirm the service itself never persists it.
+      const res = await (service as unknown as { cleanPermissions: (p: string[]) => string[] })['cleanPermissions'](
+        ['asset:read', 'settings:manage', 'asset:write'],
+      );
+      expect(res).not.toContain('settings:manage');
+      expect(res).toContain('asset:read');
+      expect(res).toContain('asset:write');
+    });
+
+    it('strips user:manage from a permission set before persisting', async () => {
+      const res = await (service as unknown as { cleanPermissions: (p: string[]) => string[] })['cleanPermissions'](
+        ['user:manage', 'asset:read'],
+      );
+      expect(res).not.toContain('user:manage');
+      expect(res).toContain('asset:read');
+    });
+
+    it('returns a clean set unchanged (no false-positive strips)', async () => {
+      const input = ['asset:read', 'asset:write', 'asset:delete'];
+      const res = await (service as unknown as { cleanPermissions: (p: string[]) => string[] })['cleanPermissions'](
+        input,
+      );
+      expect(res).toContain('asset:read');
+      expect(res).toContain('asset:write');
+      expect(res).toContain('asset:delete');
+    });
+  });
 });

@@ -117,6 +117,67 @@ describe("UpdateServiceAccountSchema", () => {
   });
 });
 
+// ── INV-SA-3: never ADMIN-equivalent ─────────────────────────────────────────────────────────────
+// SEC-011 golden test: the schema must REJECT the two coarse principal/authz-management verbs for
+// both create and update (Layer 1 ceiling — the schema is the source of truth). If either test
+// passes BEFORE the fix the remediation plan is stale — stop and check.
+
+describe("CreateServiceAccountSchema — INV-SA-3 ceiling (SEC-011)", () => {
+  test("rejects settings:manage (would give a bot ADMIN-equivalent self-escalation/persistence)", () => {
+    expect(
+      CreateServiceAccountSchema.safeParse({
+        name: "evil-bot",
+        permissions: ["settings:manage"],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects user:manage (would let a bot mint human ADMIN accounts)", () => {
+    expect(
+      CreateServiceAccountSchema.safeParse({
+        name: "evil-bot",
+        permissions: ["user:manage"],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects a grant set that includes settings:manage mixed with legitimate permissions", () => {
+    expect(
+      CreateServiceAccountSchema.safeParse({
+        name: "evil-bot",
+        permissions: ["asset:read", "settings:manage"],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("still accepts a normal (non-meta) grant set — guard against over-blocking", () => {
+    expect(
+      CreateServiceAccountSchema.safeParse({
+        name: "ci-runner",
+        permissions: ["asset:read", "asset:write"],
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe("UpdateServiceAccountSchema — INV-SA-3 ceiling (SEC-011)", () => {
+  test("rejects user:manage on update (must not allow escalation via a permission-set replacement)", () => {
+    expect(
+      UpdateServiceAccountSchema.safeParse({
+        permissions: ["user:manage"],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects settings:manage on update", () => {
+    expect(
+      UpdateServiceAccountSchema.safeParse({
+        permissions: ["settings:manage"],
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe("ServiceAccountSchema / ServiceAccountWithSecretSchema", () => {
   const base = {
     id: "ckg9z1a2b0000qzrmn831k4d8",
