@@ -1,8 +1,4 @@
-import {
-  parseWikiLinks,
-  slugify,
-  type ArticleStatus,
-} from '@lazyit/shared';
+import { parseWikiLinks, slugify, type ArticleStatus } from '@lazyit/shared';
 import { parseImportFile, titleFromFilename } from '../article-import';
 import type { ArticleRow } from '../../search/search.documents';
 import type { ImportJobData, ImportJobResult } from './import-job.types';
