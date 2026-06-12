@@ -2,11 +2,14 @@ name: CI
 
 # Quality gate for the integration (dev) and production (master) branches, and every PR
 # targeting them. No deploy (CD is deferred — ADR-0027).
+# `feat/kb-secrets` is a temporary epic-integration branch (KB v2 + Secret Manager): it is
+# CI-gated like dev so sub-PRs into it and the integrated branch are verified before the
+# eventual feat/kb-secrets → dev PR. Remove these entries when the epic branch is merged & deleted.
 on:
   push:
-    branches: [master, dev]
+    branches: [master, dev, feat/kb-secrets]
   pull_request:
-    branches: [master, dev]
+    branches: [master, dev, feat/kb-secrets]
 
 concurrency:
   group: ci-${{ github.ref }}
