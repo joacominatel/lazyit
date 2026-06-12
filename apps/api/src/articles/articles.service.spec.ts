@@ -392,7 +392,11 @@ describe('ArticlesService', () => {
     });
 
     it('multi-value status → `status: { in: [...] }` (OR within the filter, #198)', async () => {
-      await service.findPage({ status: ['DRAFT', 'PUBLISHED'] }, PAGE, undefined);
+      await service.findPage(
+        { status: ['DRAFT', 'PUBLISHED'] },
+        PAGE,
+        undefined,
+      );
       expect(listWhere().AND).toContainEqual({
         status: { in: ['DRAFT', 'PUBLISHED'] },
       });
@@ -412,10 +416,8 @@ describe('ArticlesService', () => {
       const and = listWhere().AND;
       const hasInClause = (key: 'categoryId' | 'status') =>
         and.some((c) => {
-          const v = (c as Record<string, unknown>)[key];
-          return (
-            typeof v === 'object' && v !== null && 'in' in (v as object)
-          );
+          const v = c[key];
+          return typeof v === 'object' && v !== null && 'in' in v;
         });
       expect(hasInClause('categoryId')).toBe(false);
       expect(hasInClause('status')).toBe(false);
@@ -1240,7 +1242,9 @@ describe('ArticlesService', () => {
           ]
         >
       ).at(-1)![0];
-      expect((call.where as { AND: Array<Record<string, unknown>> }).AND).toEqual(
+      expect(
+        (call.where as { AND: Array<Record<string, unknown>> }).AND,
+      ).toEqual(
         expect.arrayContaining([
           { status: 'PUBLISHED' },
           { links: { some: { applicationId: 'app1' } } },
@@ -1260,11 +1264,15 @@ describe('ArticlesService', () => {
       ]);
       article.count.mockResolvedValueOnce(42);
 
-      const result = await service.findArticlesForAsset('as1', {}, {
-        limit: 10,
-        offset: 20,
-        deleted: 'active' as const,
-      });
+      const result = await service.findArticlesForAsset(
+        'as1',
+        {},
+        {
+          limit: 10,
+          offset: 20,
+          deleted: 'active' as const,
+        },
+      );
 
       // The total comes from the paired count over the same where — not the page length (1 row here).
       expect(result.total).toBe(42);
@@ -1285,7 +1293,11 @@ describe('ArticlesService', () => {
 
     it('reverse list filters by q (case-insensitive substring over title/excerpt) (#220)', async () => {
       article.findMany.mockResolvedValueOnce([]);
-      await service.findArticlesForApplication('app1', { q: 'vpn' }, REVERSE_PAGE);
+      await service.findArticlesForApplication(
+        'app1',
+        { q: 'vpn' },
+        REVERSE_PAGE,
+      );
       expect(lastReverseWhere().AND).toContainEqual({
         OR: [
           { title: { contains: 'vpn', mode: 'insensitive' } },
@@ -1343,7 +1355,8 @@ describe('ArticlesService', () => {
       await service.create(
         {
           title: 'Runbook',
-          content: 'See [[network-setup]] and [[not-yet]] and [[network-setup]] again',
+          content:
+            'See [[network-setup]] and [[not-yet]] and [[network-setup]] again',
           categoryId: 'c1',
           status: 'DRAFT',
         },
@@ -1371,7 +1384,12 @@ describe('ArticlesService', () => {
 
     it('clears edges (deleteMany) but inserts nothing when the body has no [[slug]] tokens', async () => {
       await service.create(
-        { title: 'Plain', content: 'no links here', categoryId: 'c1', status: 'DRAFT' },
+        {
+          title: 'Plain',
+          content: 'no links here',
+          categoryId: 'c1',
+          status: 'DRAFT',
+        },
         AUTHOR_PRINCIPAL,
       );
       expect(articleWikiLink.deleteMany).toHaveBeenCalledWith({
@@ -1498,10 +1516,7 @@ describe('ArticlesService', () => {
       )[0][0].where;
       // A non-author sees PUBLISHED sources plus their OWN drafts — not the target author's drafts.
       expect(where.source).toEqual({
-        OR: [
-          { status: 'PUBLISHED' },
-          { status: 'DRAFT', authorId: OTHER },
-        ],
+        OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: OTHER }],
       });
     });
 
@@ -1521,7 +1536,12 @@ describe('ArticlesService', () => {
   // --- aliases (nav-only folder symlinks, ADR-0059 §2) --------------------
 
   describe('aliases', () => {
-    const OWNED = { id: 'a', status: 'PUBLISHED', authorId: AUTHOR, categoryId: 'home' };
+    const OWNED = {
+      id: 'a',
+      status: 'PUBLISHED',
+      authorId: AUTHOR,
+      categoryId: 'home',
+    };
 
     it('creates an alias into a live folder other than the home (author only)', async () => {
       article.findFirst.mockResolvedValue(OWNED);
