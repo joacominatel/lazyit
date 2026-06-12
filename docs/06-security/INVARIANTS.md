@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-12
 ---
 
 # Security invariants — auth & authorization
@@ -316,6 +316,23 @@ by a service account, and no bot can accidentally become an administrator.
   authorization source is `ServiceAccountPermission`, never `Role`/`RolePermission`.
 - `apps/api/src/auth/principal.ts` + `roles.guard.ts` — a service principal is authorized by its grant
   Set; the role resolver (`PermissionResolverService`) is **never** consulted for it.
+- **(Code-enforced from 2026-06-12, SEC-011 — two complementary layers):**
+  - **Layer 1 — schema ceiling (source of truth):** `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS` (exported
+    from `packages/shared/src/schemas/service-account.ts`) names the two coarse principal/authz-management
+    verbs that a service account may **never** hold: `settings:manage` and `user:manage`. A `.refine` on
+    `ServiceAccountPermissionsSchema` rejects them with `400` at the DTO edge (create + update); the
+    persistence-time `cleanPermissions` also strips them defensively. Golden test:
+    `packages/shared/src/schemas/service-account.test.ts`.
+  - **Layer 2 — runtime principal guard (backstop):** `ServicePrincipalForbiddenGuard`
+    (`apps/api/src/auth/service-principal-forbidden.guard.ts`) throws `403` when `isServicePrincipal(request.principal)`
+    is true. Applied at the **class level** of `ServiceAccountsController` (every management route) and
+    at the **method level** of `GET /config/permissions` and `PUT /config/permissions`. This closes the
+    class for pre-existing rows: Layer 1 stops *new* grants; Layer 2 stops *use* of any pre-existing
+    meta-verb grant. Guard tests: `apps/api/src/auth/service-principal-forbidden.guard.spec.ts` and the
+    e2e block in `apps/api/src/config/config.controller.spec.ts`.
+  - **Residual risk (unchanged):** the SA-actor audit gap (`actorId = null` for SA-performed management
+    actions, issue #141) is narrowed by Layer 2 — SAs can no longer perform those management actions at
+    all — but the `actorSaId` column is still the clean long-term fix; tracked separately.
 
 ## INV-SA-4 — Service-account actions are audited to the service account, never a fake human; at most one actor per audited row
 
