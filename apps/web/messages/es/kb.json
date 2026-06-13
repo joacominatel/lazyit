@@ -127,22 +127,44 @@
   },
   "import": {
     "title": "Importar un artículo",
-    "description": "Sube un archivo Markdown, de texto plano o Word (.docx). Solo se importa el texto: el archivo original no se almacena.",
+    "description": "Sube un archivo Markdown, de texto plano, Word (.docx) o ZIP (.zip). Solo se importa el texto: el archivo original no se almacena.",
     "fileLabel": "Archivo",
-    "fileHint": "Acepta .md, .txt y .docx.",
+    "fileHint": "Acepta .md, .txt, .docx y .zip (importación en lote).",
     "categoryLabel": "Categoría",
     "categorySelect": "Selecciona una categoría",
     "categoryNone": "Aún no hay categorías",
     "statusLabel": "Estado",
     "submit": "Importar",
     "importing": "Importando…",
-    "processingHint": "Importando tu archivo. Los documentos de Word grandes pueden tardar un momento.",
+    "processingHint": "Importando tu archivo. Los archivos grandes y los ZIP pueden tardar un momento.",
     "toast": {
       "signInRequired": "Debes iniciar sesión para importar artículos",
       "chooseFile": "Elige un archivo para importar",
       "chooseCategory": "Elige una categoría",
       "imported": "Artículo importado",
-      "importError": "No se pudo importar el archivo"
+      "importError": "No se pudo importar el archivo",
+      "batchImported": "{count, plural, one {# artículo importado} other {# artículos importados}}"
+    },
+    "batch": {
+      "title": "Importación completada",
+      "summary": "{created, plural, one {# artículo creado} other {# artículos creados}}{renamed, plural, =0 {} one {, # renombrado} other {, # renombrados}}{skipped, plural, =0 {} one {, # omitido} other {, # omitidos}}",
+      "foldersCreated": "{count, plural, one {# carpeta creada} other {# carpetas creadas}}",
+      "linksResolved": "{count, plural, one {# enlace wiki resuelto} other {# enlaces wiki resueltos}}",
+      "createdHeading": "Creados",
+      "renamedHeading": "Renombrados",
+      "skippedHeading": "Omitidos",
+      "renamedNote": "Slug ya ocupado — se añadió un sufijo automático para evitar conflictos.",
+      "originalSlug": "Solicitado: {slug}",
+      "skipReason": {
+        "directory": "Entrada de carpeta (sin contenido)",
+        "dotfile": "Archivo oculto (dotfile)",
+        "unsupported-type": "Tipo de archivo no compatible",
+        "empty": "Archivo vacío"
+      },
+      "showAll": "Mostrar todos ({count})",
+      "collapse": "Contraer",
+      "closeAriaLabel": "Cerrar resultados de importación",
+      "done": "Hecho"
     }
   },
   "folders": {
