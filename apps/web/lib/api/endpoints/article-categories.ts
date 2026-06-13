@@ -40,3 +40,23 @@ export function deleteArticleCategory(id: string): Promise<ArticleCategory> {
     method: "DELETE",
   });
 }
+
+/** The counts returned by a cascade folder delete (#415): folders + articles soft-deleted. */
+export interface FolderCascadeDeleteResult {
+  deletedFolders: number;
+  deletedArticles: number;
+}
+
+/**
+ * Cascade soft-delete a folder AND all its descendant folders + their articles in one transaction
+ * (#415). `?cascade=true` is REQUIRED — without it the endpoint 409s when the folder has live
+ * children/articles (the no-silent-orphan guard). Returns the deleted counts for the confirmation.
+ */
+export function deleteArticleCategoryCascade(
+  id: string,
+): Promise<FolderCascadeDeleteResult> {
+  return apiFetch<FolderCascadeDeleteResult>(
+    `/article-categories/${id}?cascade=true`,
+    { method: "DELETE" },
+  );
+}
