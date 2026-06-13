@@ -7,6 +7,7 @@ import {
   Cog6ToothIcon,
   CubeIcon,
   KeyIcon,
+  LockClosedIcon,
   ServerStackIcon,
   Squares2X2Icon,
   UsersIcon,
@@ -133,7 +134,10 @@ const NAV: NavSection[] = [
   {
     headingKey: "knowledge",
     pillar: "knowledge",
-    items: [{ labelKey: "knowledgeBase", href: "/kb", icon: BookOpenIcon }],
+    items: [
+      { labelKey: "knowledgeBase", href: "/kb", icon: BookOpenIcon },
+      { labelKey: "secrets", href: "/secrets", icon: LockClosedIcon },
+    ],
   },
   {
     // Reports — the estate-wide activity history (issue #177). `pillar` is omitted so the active
