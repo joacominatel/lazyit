@@ -127,22 +127,44 @@
   },
   "import": {
     "title": "Import an article",
-    "description": "Upload a Markdown, plain-text or Word (.docx) file. Only the text is imported — the original file is not stored.",
+    "description": "Upload a Markdown, plain-text, Word (.docx) or ZIP (.zip) file. Only the text is imported — the original file is not stored.",
     "fileLabel": "File",
-    "fileHint": "Accepts .md, .txt and .docx.",
+    "fileHint": "Accepts .md, .txt, .docx and .zip (bulk import).",
     "categoryLabel": "Category",
     "categorySelect": "Select a category",
     "categoryNone": "No categories yet",
     "statusLabel": "Status",
     "submit": "Import",
     "importing": "Importing…",
-    "processingHint": "Importing your file. Larger Word documents can take a moment.",
+    "processingHint": "Importing your file. Larger files and ZIP archives can take a moment.",
     "toast": {
       "signInRequired": "You must be signed in to import articles",
       "chooseFile": "Choose a file to import",
       "chooseCategory": "Choose a category",
       "imported": "Article imported",
-      "importError": "Couldn't import the file"
+      "importError": "Couldn't import the file",
+      "batchImported": "{count, plural, one {# article imported} other {# articles imported}}"
+    },
+    "batch": {
+      "title": "Import complete",
+      "summary": "{created, plural, one {# article created} other {# articles created}}{renamed, plural, =0 {} one {, # renamed} other {, # renamed}}{skipped, plural, =0 {} one {, # skipped} other {, # skipped}}",
+      "foldersCreated": "{count, plural, one {# folder created} other {# folders created}}",
+      "linksResolved": "{count, plural, one {# wiki-link resolved} other {# wiki-links resolved}}",
+      "createdHeading": "Created",
+      "renamedHeading": "Renamed",
+      "skippedHeading": "Skipped",
+      "renamedNote": "Slug already taken — auto-suffixed to avoid a conflict.",
+      "originalSlug": "Requested: {slug}",
+      "skipReason": {
+        "directory": "Folder entry (no content)",
+        "dotfile": "Hidden file (dotfile)",
+        "unsupported-type": "Unsupported file type",
+        "empty": "Empty file"
+      },
+      "showAll": "Show all {count}",
+      "collapse": "Collapse",
+      "closeAriaLabel": "Close import results",
+      "done": "Done"
     }
   },
   "folders": {
