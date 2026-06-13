@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-12
+updated: 2026-06-13
 ---
 
 # Security invariants — auth & authorization
@@ -459,15 +459,20 @@ connector secrets, which *must* be server-readable to run. Excluding ADMIN from 
 zero-knowledge: capability authorization is not cryptographic access, and there is no plaintext for INV-8 to
 reach.
 
-**Where enforced.**
-- **Future** `apps/api/src/secret-manager/**` — stores ONLY wrapped/encrypted blobs (vault DEK never in
-  clear; values as ciphertext/iv/authTag/keyVersion mirroring the [[workflow-secret]] column shape); exposes
-  **no `reveal()`** and no server-side value decryption. Granting writes a DEK **wrapped to the grantee's
-  public key**; a caller can never grant a vault they are not themselves a crypto member of.
-- **Future** `apps/api/prisma/schema.prisma` — [[secret-vault]] / [[secret-item]] / [[vault-membership]] /
-  [[user-keypair]]: crypto columns are write-only on the API, redacted on read, never returned; plaintext
-  keys/values/passwords/recovery-keys are NEVER persisted or logged ([[0031-logging-strategy]]).
-- Decision + data model: [[0061-secret-manager-zero-knowledge]].
+**Where enforced (as-built, #366).**
+- `apps/api/src/secret-manager/` — the ciphertext-custodian module. Stores ONLY wrapped/encrypted blobs
+  (vault DEK never in clear; values as `ciphertext`/`iv`/`authTag`/`keyVersion` mirroring the
+  [[workflow-secret]] column shape); exposes **no `reveal()`** and no server-side value decryption.
+  Granting writes a DEK **wrapped to the grantee's public key**; a caller can never grant a vault they
+  are not themselves a crypto member of. Human-only (`human-only.guard.ts` rejects service principals).
+- **INV-10 architectural guard test** (`apps/api/src/secret-manager/inv-10.guard.spec.ts`) — a **merge
+  gate** that asserts: (a) no Secret Manager service imports `@noble/*` or any crypto library, (b) no
+  `SECRET_MANAGER_KEY`-style env variable is read, and (c) no method in the module returns a plaintext
+  value or unwrapped key. INV-10 cannot rot silently — CI fails if the guard is broken.
+- `apps/api/prisma/schema.prisma` — [[secret-vault]] / [[secret-item]] / [[vault-membership]] /
+  [[user-keypair]] / [[secret-audit-log]]: crypto columns are write-only on the API, never returned in
+  clear; plaintext keys/values/passwords/recovery-keys are NEVER persisted or logged ([[0031-logging-strategy]]).
+- Decision + data model: [[0061-secret-manager-zero-knowledge]] · [[secret-manager-crypto-design]].
 
 ---
 
