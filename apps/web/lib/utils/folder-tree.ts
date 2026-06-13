@@ -46,22 +46,24 @@ export function buildFolderTree(folders: Folder[]): FolderNode[] {
 
 /** Recursively sort a node list and its descendants by (order asc, nulls last) then name. */
 function sortNodes(nodes: FolderNode[]): void {
-  nodes.sort(compareFolders);
+  nodes.sort((a, b) => compareFolderOrder(a.folder, b.folder));
   for (const node of nodes) sortNodes(node.children);
 }
 
-/** Order asc (nulls last) then name, case-insensitive locale compare — the listing sort intent. */
-function compareFolders(a: FolderNode, b: FolderNode): number {
-  const ao = a.folder.order;
-  const bo = b.folder.order;
+/**
+ * Comparator over two `Folder`s: `order` ascending (nulls last) then `name` (case-insensitive,
+ * locale-aware) — the listing/sidebar sort intent (ADR-0059 §1). Exported so the KB content-area
+ * child-folder cards (#413) order sub-folders identically to the tree, from one definition.
+ */
+export function compareFolderOrder(a: Folder, b: Folder): number {
+  const ao = a.order;
+  const bo = b.order;
   if (ao !== bo) {
     if (ao === null) return 1;
     if (bo === null) return -1;
     return ao - bo;
   }
-  return a.folder.name.localeCompare(b.folder.name, undefined, {
-    sensitivity: "base",
-  });
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
 }
 
 /**
@@ -107,4 +109,58 @@ export function ancestorFolderIds(
     current = parentById.get(current) ?? null;
   }
   return ancestors;
+}
+
+/**
+ * Count how many folders are descendants of `folderId` (its sub-folders, transitively) in the flat
+ * `folders` list — for the cascade-delete warning's "and N sub-folders" pre-count (#415). Pure; a
+ * malformed cycle is bounded by a visited set so it always terminates. Excludes the folder itself.
+ */
+export function descendantFolderCount(
+  folders: Folder[],
+  folderId: string,
+): number {
+  const childrenByParent = new Map<string, string[]>();
+  for (const f of folders) {
+    if (!f.parentId) continue;
+    const list = childrenByParent.get(f.parentId) ?? [];
+    list.push(f.id);
+    childrenByParent.set(f.parentId, list);
+  }
+  let count = 0;
+  const seen = new Set<string>([folderId]);
+  const stack = [...(childrenByParent.get(folderId) ?? [])];
+  while (stack.length > 0) {
+    const id = stack.pop() as string;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    count += 1;
+    stack.push(...(childrenByParent.get(id) ?? []));
+  }
+  return count;
+}
+
+/**
+ * Walk a folder's `parentId` chain (via the `parentById` lookup) and return the id of its NEAREST
+ * ancestor that is restricted (its id is in `restrictedFolderIds`), or `null` when no ancestor is
+ * restricted. Pure and framework-agnostic — shared by the tree's inherited-restriction padlock and
+ * the rule editor's headline so both read inheritance the same way (#414).
+ *
+ * PRESENTATION ONLY: inheritance is computed client-side from the parentId chain + the set of folders
+ * carrying an OWN rule. It mirrors (never asserts) the backend's INV-9 enforcement — the server is the
+ * sole authority on access. A malformed cycle is bounded by a visited set so it always terminates.
+ */
+export function restrictedAncestorOf(
+  folderId: string,
+  parentById: Map<string, string | null>,
+  restrictedFolderIds: ReadonlySet<string>,
+): string | null {
+  let cursor = parentById.get(folderId) ?? null;
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    if (restrictedFolderIds.has(cursor)) return cursor;
+    cursor = parentById.get(cursor) ?? null;
+  }
+  return null;
 }
