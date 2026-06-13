@@ -3,7 +3,7 @@ title: The @lazyit/shared Package
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-03
+updated: 2026-06-13
 ---
 
 # The `@lazyit/shared` Package
@@ -79,18 +79,32 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
 >   redacted `configured` descriptor (the [[service-account]] `tokenPrefix` pattern). Like the rest of
 >   `shared` it stays a framework-agnostic leaf: no Prisma, no NestJS, no React.
 
-> [!note] Planned: Secret Manager shared constants/zod (ADR-0061)
-> [[0061-secret-manager-zero-knowledge]] will add a small amount of **pure** shared material that both
-> `web` and `api` must agree on — consistent with the existing `SLUG_REGEX` / format-constant precedent:
-> - the **recovery-key format** `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX` (5 alphanumeric groups) — a regex/zod
->   validator so the web's "enter your recovery key" form and the api's redemption endpoint validate the
->   same shape. The recovery key itself is shown once and **never** crosses a persisted/logged surface
->   ([[0031-logging-strategy]], INV-10); only the *format* lives here.
-> - the reserved **`{{ lazyit_secret.XXXX }}` reference token** — the syntax for referencing a Secret-Manager
->   item from elsewhere (e.g. a KB article), parsed/validated identically on both sides.
-> These are pure values/validators only: **no crypto, no Prisma types, no framework code** — the wrapped
-> DEK blobs, ciphertext columns, and keypair material stay an `api`-at-rest concern and never enter
-> `shared` (the boundary rule above). The zero-knowledge contract is recorded in [[0061-secret-manager-zero-knowledge]].
+> [!note] Secret Manager shared material — as-built (#366, ADR-0061)
+> [[0061-secret-manager-zero-knowledge]] added two layers of shared Secret Manager material, both
+> consistent with the boundary rule above:
+>
+> **Main barrel (`@lazyit/shared`)** — pure zod schemas and inferred types, no crypto:
+> - `schemas/secret-vault.ts`, `schemas/secret-item.ts`, `schemas/vault-membership.ts`,
+>   `schemas/user-keypair.ts` — the wire-shape DTOs (base64 string blobs + metadata). No `@noble/*`.
+>   Safe for `apps/api`'s CommonJS Jest to load via the main barrel.
+> - The **recovery-key zod validator** (Crockford-base32 format `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`) and
+>   the `{{ lazyit_secret.HANDLE }}` chip reference format are validated via schemas in this main barrel.
+>
+> **Subpath (`@lazyit/shared/crypto`)** — pure, framework-agnostic crypto primitives:
+> - `packages/shared/src/crypto/` exports X25519/ECDH key generation, HKDF-SHA-256, AES-256-GCM
+>   envelope split/join (the `WorkflowSecret`-identical ciphertext+authTag layout), Argon2id parameter
+>   constants, and Crockford-base32 recovery-key encode/decode.
+> - Imported as `@lazyit/shared/crypto` (a `package.json` subpath export — `dist/crypto/index.js`).
+> - **No `window`, no DOM, no `.wasm`** — the WASM boundary is in `apps/web` (the Argon2id WASM
+>   wrapper `hash-wasm` is a `apps/web`-only dependency). The subpath is intentionally **excluded from
+>   the main barrel** (`src/index.ts` does NOT re-export it) because `@noble/*` is ESM-only: pulling it
+>   into the main barrel would break `apps/api`'s CommonJS Jest across every suite that touches the barrel.
+>   `apps/api` is a ciphertext custodian and never needs these primitives.
+> - Follow-up **#429** tracks formally shipping the subpath as an ESM module type.
+>
+> The wrapped DEK blobs, keypair crypto, and all decrypt/unwrap operations stay client-side in
+> `apps/web` — they never enter `shared` beyond the pure-function primitives above. The zero-knowledge
+> contract is in [[0061-secret-manager-zero-knowledge]] and [[secret-manager-crypto-design]].
 
 ## What does NOT belong here
 
