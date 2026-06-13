@@ -2,11 +2,16 @@ name: CI
 
 # Quality gate for the integration (dev) and production (master) branches, and every PR
 # targeting them. No deploy (CD is deferred — ADR-0027).
+#
+# TEMPORARY (#366 Secret Manager epic): `feat/secret-manager` is the integration branch for the
+# zero-knowledge Secret Manager epic; it is listed here so every sub-slice PR targeting it runs the
+# full CI matrix (crypto correctness warrants per-PR CI, not just local checks). REMOVE this branch
+# from both filters before opening the `feat/secret-manager → dev` promotion PR.
 on:
   push:
-    branches: [master, dev]
+    branches: [master, dev, feat/secret-manager]
   pull_request:
-    branches: [master, dev]
+    branches: [master, dev, feat/secret-manager]
 
 concurrency:
   group: ci-${{ github.ref }}
