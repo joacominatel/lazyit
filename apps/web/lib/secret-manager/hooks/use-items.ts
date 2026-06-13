@@ -7,6 +7,7 @@ import {
   updateItem,
 } from "../endpoints/items";
 import { itemKeys } from "../query-keys";
+import { skip4xxRetry } from "./retry";
 
 /**
  * Read + write hooks for `SecretItem` (ADR-0061 §2, crypto-design §3). Lists carry the at-rest ciphertext
@@ -21,6 +22,9 @@ export function useItems(vaultId: string | undefined) {
     queryKey: itemKeys.list(vaultId ?? ""),
     queryFn: () => getItems(vaultId as string),
     enabled: Boolean(vaultId),
+    // A 403 (non-member) is terminal — the vault isn't unlocked, so the list is inaccessible.
+    // Skip 4xx immediately rather than burning 4 GET retries with backoff (fix #444).
+    retry: skip4xxRetry,
   });
 }
 
