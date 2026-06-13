@@ -9,6 +9,7 @@ import {
   updateVault,
 } from "../endpoints/vaults";
 import { membershipKeys, vaultKeys } from "../query-keys";
+import { skip4xxRetry } from "./retry";
 
 /**
  * Read + write hooks for `SecretVault` (ADR-0061 §2). Vaults carry only metadata (name + members); the
@@ -21,6 +22,8 @@ export function useVaults() {
   return useQuery({
     queryKey: vaultKeys.list(),
     queryFn: getVaults,
+    // A 403 mid-session (permissions revoked) is terminal. Skip 4xx immediately (fix #444).
+    retry: skip4xxRetry,
   });
 }
 
@@ -30,6 +33,8 @@ export function useVault(vaultId: string | undefined) {
     queryKey: vaultKeys.detail(vaultId ?? ""),
     queryFn: () => getVault(vaultId as string),
     enabled: Boolean(vaultId),
+    // A 403 (non-member) or 404 (deleted vault) is terminal for the detail view. Skip 4xx (fix #444).
+    retry: skip4xxRetry,
   });
 }
 
