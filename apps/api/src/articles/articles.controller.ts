@@ -331,7 +331,7 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Import an article from a .md, .txt or .docx file — ASYNC (ADMIN or MEMBER). Validates type + size synchronously, enqueues a job and returns 202 + a jobId; poll GET /articles/import/:jobId for the result. The .docx parse runs in a sandboxed worker (ADR-0053 / SEC-002).',
+      'Import from a .md, .txt or .docx file (one article), or a .zip archive (BULK: many .md/.txt entries + their nested folders mirrored into the Folder tree) — ASYNC (ADMIN or MEMBER). Validates type + size synchronously, enqueues a job and returns 202 + a jobId; poll GET /articles/import/:jobId for the result. The .docx/.zip unpack runs in a sandboxed worker behind an entry-count/uncompressed-size bomb guard (ADR-0053 / ADR-0059 §5 / SEC-002). For a .zip, categoryId is the ROOT home folder; title/slug are ignored (each entry derives its own).',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -369,7 +369,7 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Poll the status of an async article import (ADR-0053). state ∈ queued|active|completed|failed; articleId is set once completed; error is a short, permanent-failure message once failed. 404 for an unknown jobId.',
+      'Poll the status of an async article import (ADR-0053 / ADR-0059 §5). state ∈ queued|active|completed|failed. On a completed SINGLE-file import articleId is set; on a completed .zip import batch carries the per-item outcome (created/renamed/skipped + counts + foldersCreated + linksResolved) and articleId is null. error is a short, permanent-failure message once failed. 404 for an unknown jobId.',
   })
   @ApiOkResponse({ type: ImportJobStatusDto })
   importStatus(@Param('jobId') jobId: string) {

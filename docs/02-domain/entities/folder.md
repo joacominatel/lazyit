@@ -57,6 +57,12 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
   action, so the schema FKs are only hard-delete safety nets.
 - **One home folder per article** (the evolved required FK); aliases provide additional, nav-only
   appearances.
+- **Bulk `.zip` import mirrors the archive's tree into folders** (#398, [[0059-kb-folders-links-and-import]]
+  §5). A `.zip`'s nested directories are **find-or-created** as folders under the chosen root home
+  folder — walking segment by segment, find-or-create by `(parentId, name)` among live rows (honouring
+  the per-parent partial-unique), so the same name under two parents (`Servers/Linux` vs
+  `Workstations/Linux`) yields two distinct folders. A folder created mid-import is reused for sibling
+  entries (a path cache), so the tree is built once per job inside the sandboxed worker child.
 - **Access attaches to the folder, not to article rows** — a deliberate, bounded carve-out from the
   per-record-ACL rejection of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]. Evaluated **DB-first
   at the API**, enforced at the **DB**, never UI-only; a folder-hidden article returns **404, not

@@ -70,8 +70,16 @@ deferred.
 - **Author-only writes.** Only the author may edit, delete, publish or unpublish. The caller is
   identified by the `X-User-Id` shim until real auth lands ([[0022-draft-visibility-auth-shim]]);
   on create, `authorId` is taken from the caller, **never** the body.
-- **Import** (`POST /articles/import`) accepts `.md`, `.txt`, `.docx`, extracts **markdown only**,
-  and does **not** store the original file. `.pdf`/`.html`/`.odt` are deferred.
+- **Import** (`POST /articles/import`) accepts `.md`, `.txt`, `.docx` (one article each), extracts
+  **markdown only**, and does **not** store the original file. `.pdf`/`.html`/`.odt` are deferred.
+  A **`.zip`** bulk-imports many `.md`/`.txt` entries at once (#398, [[0059-kb-folders-links-and-import]]
+  §5): the archive's **nested folders are mirrored into the [[folder|Folder]] tree** under the
+  chosen home folder, slug collisions are **auto-suffixed** (silently, but every rename is reported),
+  and `[[link]]`s are **best-effort rewired** to the freshly-created batch articles. Everything else
+  in the archive (images, binaries, a nested `.docx` in v1, dotfiles) is **reported as skipped, never
+  an error**. The result is a **per-item batch** (created / renamed / skipped) polled via the same
+  `GET /articles/import/:jobId`; `title`/`slug` form fields are ignored for a `.zip` (each entry
+  derives its own).
 - **Versioning** ([[0042-article-versioning-and-linking]]): create/import write [[article-version]]
   **v1**; an edit that changes `title`/`content`/`excerpt` and a `publish`/`unpublish` (status
   change) append the next version — all **in the same transaction** as the article write, so the
@@ -145,8 +153,14 @@ listings), `@@index([status, publishedAt])` (latest published).
 - `GET /articles/by-slug/:slug` · `GET /articles/:id` — a draft requested by a non-author returns
   `404` (never `403`, so existence isn't leaked).
 - `POST /articles` — create (author = `X-User-Id`).
-- `POST /articles/import` — multipart `.md`/`.txt`/`.docx` import (`MAX_IMPORT_SIZE_MB`, default 5;
-  oversize/parse error → `400`).
+- `POST /articles/import` — multipart `.md`/`.txt`/`.docx` (one article) or `.zip` (bulk, #398;
+  selective extraction + folder mirroring + slug auto-suffix + best-effort link rewire,
+  [[0059-kb-folders-links-and-import]] §5). Async: validates type+size, returns `202 + jobId`;
+  `GET /articles/import/:jobId` polls — a single-file job yields `articleId`, a `.zip` yields a
+  per-item `batch` (created/renamed/skipped + counts + `foldersCreated` + `linksResolved`).
+  `MAX_IMPORT_SIZE_MB` caps the **upload**; a separate entry-count/uncompressed-size quota in the
+  sandboxed child bounds the `.zip`'s expansion. Oversize/parse/over-quota → `failed` with a short,
+  permanent message.
 - `PATCH /articles/:id` — partial update (author only; never changes status).
 - `POST /articles/:id/publish` · `POST /articles/:id/unpublish` — status transitions (author only).
 - `DELETE /articles/:id` — soft delete (author only).
@@ -171,9 +185,10 @@ For a non-author write on a **published** article the API returns `403`; on a **
 - ~~**Slug auto-suffixing** on collision~~ — the `nextAvailableSlug` **util shipped** (#392,
   [[0059-kb-folders-links-and-import]] §3); wiring it into the **interactive single-create** path
   (currently still `409`) is a small follow-up. **per-category `metadata`** validation still deferred.
-- Deferred import formats: `.pdf`, `.html` (→ turndown), `.odt`/`.rtf`. *(Bulk `.zip` import of a
-  markdown tree is the next [[0059-kb-folders-links-and-import]] slice — `jszip` was promoted to a
-  runtime dependency in #392 as its prerequisite.)*
+- Deferred import formats: `.pdf`, `.html` (→ turndown), `.odt`/`.rtf`, and **`.docx`-inside-`.zip`**
+  (v1 skips a nested `.docx`, never errors). *(Bulk `.zip` import of a markdown tree **shipped (#398,
+  [[0059-kb-folders-links-and-import]] §5)** — `jszip`, promoted to a runtime dependency in #392,
+  powers the selective extraction in the sandboxed worker.)*
 - ~~Article↔article links~~ **Shipped (#392, [[0059-kb-folders-links-and-import]] §3/§4)** as
   `[[slug]]` wiki-links + backlinks ([[article-wiki-link]]) and nav-only [[article-alias]] symlinks —
   a separate model from the asset/application [[article-link]]. Article↔location links remain deferred.

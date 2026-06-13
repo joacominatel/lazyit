@@ -38,6 +38,14 @@ function mdFile(): UploadedImportFile {
   };
 }
 
+function zipFile(): UploadedImportFile {
+  return {
+    originalname: 'vault.zip',
+    buffer: Buffer.from('PK fake-zip-bytes'),
+    size: 20,
+  };
+}
+
 function makeService(queueAdd: jest.Mock, getJob?: jest.Mock) {
   const queue = {
     add: queueAdd,
@@ -116,5 +124,112 @@ describe('ArticleImportService.getStatus — stalled job surfacing (issue #257)'
     expect(status.state).toBe('failed');
     expect(status.error).toMatch(/timed out/i);
     expect(status.error).not.toContain('stalled'); // never echo the raw reason
+  });
+});
+
+describe('ArticleImportService — .zip bulk import (ADR-0059 §5)', () => {
+  it('enqueues a .zip with kind=zip and returns 202 + jobId', async () => {
+    const add = jest.fn().mockResolvedValue({ id: 'zip-job-1' });
+    const service = makeService(add);
+    await expect(service.enqueue(zipFile(), FIELDS, HUMAN)).resolves.toEqual({
+      jobId: 'zip-job-1',
+    });
+    // The enqueued payload is tagged kind:'zip' so the worker takes the bulk fan-out path.
+    expect(add.mock.calls[0][1]).toMatchObject({ kind: 'zip' });
+  });
+
+  it('does NOT tag a single .md as kind:zip', async () => {
+    const add = jest.fn().mockResolvedValue({ id: 'md-job-1' });
+    const service = makeService(add);
+    await service.enqueue(mdFile(), FIELDS, HUMAN);
+    expect(add.mock.calls[0][1].kind).toBeUndefined();
+  });
+
+  it('rejects an unsupported extension, listing .zip among the supported types', async () => {
+    const add = jest.fn();
+    const service = makeService(add);
+    const bad: UploadedImportFile = {
+      originalname: 'data.csv',
+      buffer: Buffer.from('a,b,c'),
+      size: 5,
+    };
+    await expect(service.enqueue(bad, FIELDS, HUMAN)).rejects.toThrow(/\.zip/);
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the per-item batch on a completed .zip job (articleId stays null)', async () => {
+    const batch = {
+      foldersCreated: 2,
+      items: [
+        {
+          path: 'a/guide.md',
+          outcome: 'created',
+          articleId: 'art-1',
+          slug: 'guide',
+          requestedSlug: null,
+          reason: null,
+        },
+        {
+          path: 'image.png',
+          outcome: 'skipped',
+          articleId: null,
+          slug: null,
+          requestedSlug: null,
+          reason: 'unsupported-type',
+        },
+      ],
+      createdCount: 1,
+      renamedCount: 0,
+      skippedCount: 1,
+      linksResolved: 0,
+    };
+    const getJob = jest.fn().mockResolvedValue({
+      getState: jest.fn().mockResolvedValue('completed'),
+      failedReason: undefined,
+      returnvalue: { kind: 'zip', batch },
+    });
+    const service = makeService(jest.fn(), getJob);
+    const status = await service.getStatus('zip-job-1');
+    expect(status.state).toBe('completed');
+    expect(status.articleId).toBeNull(); // a bulk import has no single id
+    expect(status.batch).toEqual(batch);
+    expect(status.error).toBeNull();
+  });
+
+  it('a completed single-file job sets articleId and leaves batch null', async () => {
+    const getJob = jest.fn().mockResolvedValue({
+      getState: jest.fn().mockResolvedValue('completed'),
+      failedReason: undefined,
+      returnvalue: { kind: 'single', articleId: 'art-42' },
+    });
+    const service = makeService(jest.fn(), getJob);
+    const status = await service.getStatus('md-job-1');
+    expect(status.articleId).toBe('art-42');
+    expect(status.batch).toBeNull();
+  });
+
+  it('treats a legacy result without kind as a single-file result (back-compat)', async () => {
+    const getJob = jest.fn().mockResolvedValue({
+      getState: jest.fn().mockResolvedValue('completed'),
+      failedReason: undefined,
+      returnvalue: { articleId: 'legacy-1' },
+    });
+    const service = makeService(jest.fn(), getJob);
+    const status = await service.getStatus('legacy-job');
+    expect(status.articleId).toBe('legacy-1');
+    expect(status.batch).toBeNull();
+  });
+
+  it('maps an over-quota .zip failure to a friendly, permanent message', async () => {
+    const getJob = jest.fn().mockResolvedValue({
+      getState: jest.fn().mockResolvedValue('failed'),
+      failedReason:
+        "The archive has 900 entries, over the 500-entry import limit",
+      returnvalue: undefined,
+    });
+    const service = makeService(jest.fn(), getJob);
+    const status = await service.getStatus('zip-fail');
+    expect(status.error).toMatch(/too many files|too large/i);
+    expect(status.error).not.toContain('500'); // never echo the raw internals
   });
 });
