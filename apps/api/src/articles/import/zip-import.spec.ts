@@ -89,6 +89,7 @@ function makePrisma(seedSlugs: string[] = []) {
           content: args.data.content,
           excerpt: null,
           status: args.data.status as ImportedArticleRow['status'],
+          categoryId: args.data.categoryId,
         };
         articles.push(row);
         existingBySlug.set(row.slug, row.id);

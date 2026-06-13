@@ -28,7 +28,15 @@ const baseData = (overrides: Partial<ImportJobData> = {}): ImportJobData => ({
 function makePrisma() {
   const articleCreate = jest.fn(
     (args: {
-      data: { slug: string; title: string; content: string; status: string };
+      data: {
+        slug: string;
+        title: string;
+        content: string;
+        status: string;
+        categoryId: string;
+        authorId: string;
+        publishedAt: Date | null;
+      };
     }): Promise<ImportedArticleRow> =>
       Promise.resolve({
         id: 'art1',
@@ -37,6 +45,7 @@ function makePrisma() {
         content: args.data.content,
         excerpt: null,
         status: args.data.status as ImportedArticleRow['status'],
+        categoryId: args.data.categoryId,
       }),
   );
   const versionCreate = jest.fn((args: { data: Record<string, unknown> }) =>
