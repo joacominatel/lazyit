@@ -17,6 +17,7 @@ import { CreatableField } from "@/components/creatable-field";
 import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { useArticleSlugSuggestions } from "@/lib/api/hooks/use-article-slug-suggestions";
+import { useHandleSuggestions } from "@/lib/secret-manager/hooks/use-chip";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -87,7 +88,13 @@ export function ArticleForm({ article }: { article?: Article }) {
   // articles for matching slugs and feed the suggestions back. Reuses the standard article search —
   // there is no dedicated slug-search endpoint (see the issue findings).
   const [wikiLinkQuery, setWikiLinkQuery] = useState("");
+
+  // `{{ lazyit_secret.HANDLE }}` chip autocomplete (ADR-0061 §8): the editor reports the partial handle,
+  // we fetch matching handles (metadata only — never values) from the backend, scoped to the author's
+  // vault memberships. Omit if the author has no memberships (the query returns [] gracefully).
+  const [chipQuery, setChipQuery] = useState<string | undefined>(undefined);
   const wikiLinkSuggestions = useArticleSlugSuggestions(wikiLinkQuery);
+  const { data: chipSuggestions } = useHandleSuggestions(chipQuery);
 
   const form = useForm<ArticleFormValues>({
     resolver: zodResolver(
@@ -253,6 +260,10 @@ export function ArticleForm({ article }: { article?: Article }) {
                 wikiLink={{
                   onQueryChange: setWikiLinkQuery,
                   suggestions: wikiLinkSuggestions,
+                }}
+                secretChip={{
+                  onQueryChange: (q) => setChipQuery(q || undefined),
+                  suggestions: chipSuggestions ?? [],
                 }}
               />
               <FieldError errors={[fieldState.error]} />

@@ -3,7 +3,7 @@ title: "Secret Manager — crypto design note (build-time primitives)"
 tags: [development, security, secrets, crypto, secret-manager, knowledge-base]
 status: accepted
 created: 2026-06-12
-updated: 2026-06-12
+updated: 2026-06-13
 ---
 
 # Secret Manager — crypto design note (build-time primitives)
@@ -18,6 +18,16 @@ updated: 2026-06-12
 > **Scope:** documentation only. No code, schema, migration, endpoint, or UI is produced here. Library
 > versions and APIs in this note were grounded against current docs (Context7, June 2026) and pinned
 > below.
+>
+> **Implementation status (2026-06-13):** the §10-ratified primitives are now implemented. The pure
+> crypto functions (X25519/ECDH, HKDF-SHA256, AES-256-GCM envelope, Crockford-base32 recovery key,
+> Argon2id params/constants) ship as the `@lazyit/shared/crypto` subpath (`packages/shared/src/crypto/`
+> — no `window`/`.wasm`). The Argon2id WASM wrapper (`hash-wasm`) and the React unlock/reveal/grant/
+> peer-reset flows live in `apps/web`. The KB masked-chip render plugin (`{{ lazyit_secret.HANDLE }}`)
+> is implemented post-sanitize in `apps/web`, with the double gate (article ACL INV-9 + crypto vault
+> membership). ESM/CommonJS split is live — the subpath is excluded from the main barrel so
+> `apps/api`'s CommonJS Jest never encounters the ESM-only `@noble/*` packages (follow-up #429 tracks
+> shipping the subpath as ESM module type).
 
 This is lazyit's **first** Argon2id / asymmetric / envelope crypto path — the riskiest code in the
 repo. It is the deliberate **crypto-model inverse** of the engine's server-decryptable

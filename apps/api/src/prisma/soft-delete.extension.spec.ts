@@ -97,13 +97,17 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     });
   });
 
-  it('SOFT_DELETABLE_MODELS lists exactly the 11 mutable domain entities', () => {
+  it('SOFT_DELETABLE_MODELS lists exactly the 14 mutable domain entities', () => {
     expect(SOFT_DELETABLE_MODELS.has('User')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('Asset')).toBe(true);
     // ServiceAccount is soft-deletable (revoke = soft delete; ADR-0048).
     expect(SOFT_DELETABLE_MODELS.has('ServiceAccount')).toBe(true);
     // ConsumableCategory is auto-scoped (#321); its service carries no explicit deletedAt guard.
     expect(SOFT_DELETABLE_MODELS.has('ConsumableCategory')).toBe(true);
+    // Secret Manager (ADR-0061, #366): the three MUTABLE entities are soft-deletable.
+    expect(SOFT_DELETABLE_MODELS.has('SecretVault')).toBe(true);
+    expect(SOFT_DELETABLE_MODELS.has('SecretItem')).toBe(true);
+    expect(SOFT_DELETABLE_MODELS.has('UserKeypair')).toBe(true);
     // Consumable itself stays OUT: its service filters deletedAt explicitly for the archived view.
     expect(SOFT_DELETABLE_MODELS.has('Consumable')).toBe(false);
     expect(SOFT_DELETABLE_MODELS.has('AssetAssignment')).toBe(false);
@@ -111,7 +115,11 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     // ServiceAccountPermission (join) and ServiceAccountAuditLog (append-only) are NOT soft-deletable.
     expect(SOFT_DELETABLE_MODELS.has('ServiceAccountPermission')).toBe(false);
     expect(SOFT_DELETABLE_MODELS.has('ServiceAccountAuditLog')).toBe(false);
-    expect(SOFT_DELETABLE_MODELS.size).toBe(11);
+    // VaultMembership (v1 hard-drop revoke — a current-state join) and SecretAuditLog (append-only) are
+    // DELIBERATELY excluded from the soft-delete set (ADR-0061 §4/§10).
+    expect(SOFT_DELETABLE_MODELS.has('VaultMembership')).toBe(false);
+    expect(SOFT_DELETABLE_MODELS.has('SecretAuditLog')).toBe(false);
+    expect(SOFT_DELETABLE_MODELS.size).toBe(14);
   });
 
   it('auto-scopes ConsumableCategory reads to live rows (#321)', () => {

@@ -3,12 +3,12 @@ title: SecretItem
 tags: [domain, entity, secret-manager, security, secrets, crypto]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-06-13
 ---
 
 # SecretItem
 
-> ⚪ planned · Area: Secret Manager · Implementation order: tbd
+> ✅ built (#366) · Area: Secret Manager · Under the "Conocimiento" pillar
 
 ## Purpose
 
@@ -50,10 +50,29 @@ disambiguation in [[0061-secret-manager-zero-knowledge]]).
 - **Crypto columns** mirror [[workflow-secret]]: `ciphertext` / `iv` / `authTag` / `keyVersion` as base64
   text — at-rest only, never on a wire shape, never logged ([[0031-logging-strategy]], INV-10).
 
-## Not yet implemented
+## Columns (as built)
 
-Planned, not built. Full detail — the exact envelope, client-side decrypt flow, and item lifecycle —
-lives in [[0061-secret-manager-zero-knowledge]].
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `String` — cuid() | Primary key ([[0005-id-strategy]]). |
+| `vaultId` | `String` | FK → `SecretVault.id`, `onDelete: Restrict` — a vault with items cannot be hard-purged. |
+| `handle` | `String` | The KB-chip reference token (`{{ lazyit_secret.HANDLE }}`). **Globally unique** among live rows via a raw-SQL partial unique index `WHERE "deletedAt" IS NULL`. Server-visible metadata, never the value. |
+| `label` | `String` | Human-recognizable display title (e.g. "Production DB root password"). Server-visible, never the value. |
+| `ciphertext` | `String` (base64) | AES-256-GCM ciphertext of the value, under the vault DEK. |
+| `iv` | `String` (base64) | 12-byte random GCM nonce, fresh per value. |
+| `authTag` | `String` (base64) | 16-byte GCM authentication tag. |
+| `keyVersion` | `Int` (default 1) | Which DEK version produced this envelope — forward-compat seam for the deferred DEK rotation (Phase 2). v1 always writes 1. |
+| `createdAt` | `DateTime` | Set on insert. |
+| `updatedAt` | `DateTime` | Updated by Prisma on every write. |
+| `deletedAt` | `DateTime?` | Soft delete ([[0006-soft-delete-and-auditing]]). |
+
+DB table: `secret_items`. Indexed on `vaultId`.
+
+## Implementation status
+
+**Fully built (#366).** The custodian backend (`apps/api/src/secret-manager/`) stores and serves the
+at-rest blobs; the client-side decrypt chain runs in `apps/web` using the primitives from
+`@lazyit/shared/crypto`. Full detail: [[secret-manager-crypto-design]] §3 + §5.
 
 Related: [[secret-vault]] · [[vault-membership]] · [[user-keypair]] · [[workflow-secret]] ·
 [[0061-secret-manager-zero-knowledge]] · [[0005-id-strategy]] · [[0006-soft-delete-and-auditing]] ·

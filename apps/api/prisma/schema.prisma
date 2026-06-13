@@ -17,25 +17,25 @@ datasource db {
 /// A person in the organization. Central to access, peripheral to assets:
 /// users come and go while assets persist. See docs/02-domain/entities/user.md
 model User {
-  id         String    @id @default(uuid()) @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
   // Case-insensitive (citext, ADR-0041): "Bob@x" and "bob@x" are the same address, so OIDC/JIT can
   // never mint two users from one mailbox. UNIQUENESS is a PARTIAL unique index WHERE "deletedAt" IS
   // NULL (raw SQL in the migration — Prisma can't express partial uniques), so a soft-deleted user
   // frees its email for reuse and Restore can reclaim it. No `@unique` here: that would emit a FULL
   // unique index, re-introducing the ghost-row collision. Follows the AssetAssignment precedent.
-  email      String    @db.Citext
-  firstName  String
-  lastName   String
-  isActive   Boolean   @default(true)
+  email       String    @db.Citext
+  firstName   String
+  lastName    String
+  isActive    Boolean   @default(true)
   // RBAC role (ADR-0040, default flipped by ADR-0043). Default VIEWER (least-privilege): app-created
   // users AND non-first JIT users land read-only until an ADMIN promotes them. The first JIT user /
   // seed still becomes ADMIN so a fresh install is never un-administrable. The RolesGuard gates
   // Access-grant writes, Users administration and destructive deletes to ADMIN; VIEWER is read-only.
   // Only an ADMIN (via the ADMIN-gated Users controller) can change a role.
-  role       Role      @default(VIEWER)
+  role        Role      @default(VIEWER)
   // Maps to the IdP `sub` once auth is integrated; null until then (no auth yet).
   // Nullable + unique: many users may be unlinked, but a linked sub is 1:1. See ADR-0016.
-  externalId String?   @unique
+  externalId  String?   @unique
   // Employee/file number (LATAM payroll/HR) — ADR-0058. Optional; stored verbatim (trim on write).
   // UNIQUE among LIVE rows only via a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL in the
   // migration, no `@unique`), so a soft-deleted user frees its legajo for reuse/restore, exactly like
@@ -57,9 +57,9 @@ model User {
   // Free-text fallback when the manager is NOT a lazyit user — ADR-0058 (the manager is in HR's system,
   // not IT's). Normalized (trim). Mutually exclusive with `managerId`.
   managerName String?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  deletedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
 
   // Direct reports — the inverse of the `manager` self-relation (ADR-0058). A user has many reports;
   // each report's `managerId` points back here. No cascade behaviour beyond the FK's SetNull above.
@@ -121,8 +121,18 @@ model User {
   // the elevated user — Notification.targetUserId, SetNull so deletion never blocks), and the
   // per-admin read joins this user owns (NotificationRead.userId, Cascade — deleting the user drops
   // only their read rows, never the events).
-  notificationsTargeting   Notification[]     @relation("NotificationTargetUser")
-  notificationReads        NotificationRead[] @relation("NotificationReader")
+  notificationsTargeting Notification[]     @relation("NotificationTargetUser")
+  notificationReads      NotificationRead[] @relation("NotificationReader")
+
+  // Secret Manager — zero-knowledge vaults (ADR-0061, #366). This user's single keypair (1:1,
+  // UserKeypair.userId Cascade — drop the keypair when the user is hard-deleted), the vault
+  // memberships carrying a DEK wrapped to this user's public key (VaultMembership.userId Cascade —
+  // a wrapped-DEK copy is meaningless without its owner), and the append-only audit rows this user
+  // ACTED on (SecretAuditLog.actorId, SetNull — the metadata row survives the actor's deletion). The
+  // server holds wrapped blobs + ciphertext only; it can NEVER decrypt a value (INV-10).
+  keypair          UserKeypair?
+  vaultMemberships VaultMembership[] @relation("VaultMembershipUser")
+  secretAuditActed SecretAuditLog[]  @relation("SecretAuditActor")
 
   @@map("users")
 }
@@ -597,7 +607,7 @@ enum UserHistoryEventType {
 /// NO access semantics here — ADR-0060 attaches the per-folder permission boundary later.
 /// See docs/02-domain/entities/folder.md and docs/02-domain/entities/article-category.md
 model ArticleCategory {
-  id          String    @id @default(cuid())
+  id          String            @id @default(cuid())
   // Unique among LIVE rows only, scoped to the PARENT (ADR-0059 §1): a PARTIAL unique index on
   // (parentId, name) WHERE "deletedAt" IS NULL (raw SQL in the migration), so `Servers/Linux` and
   // `Workstations/Linux` coexist and a soft-deleted folder frees its name within its parent. No
@@ -624,8 +634,8 @@ model ArticleCategory {
   // policy. Evaluated DB-first at read time (EXISTS over the live AccessGrant/AssetAssignment joins for
   // the dynamic kinds), never materialised — so access follows offboarding automatically.
   accessRules Json?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
   deletedAt   DateTime?
 
   articles Article[]
@@ -681,11 +691,11 @@ model Article {
   deletedAt      DateTime?
 
   // Append-only edit history (ADR-0042): every create/edit snapshots a new ArticleVersion.
-  versions     ArticleVersion[]
+  versions      ArticleVersion[]
   // Article<->Asset/Application associations (ADR-0042): "the runbook for THIS server/app".
-  links        ArticleLink[]
+  links         ArticleLink[]
   // Nav-only "symlink" placements of THIS article into other folders (ADR-0059 §2). Cascade.
-  aliases      ArticleAlias[]
+  aliases       ArticleAlias[]
   // Outgoing `[[slug]]` wiki-link edges authored in THIS article's body (ADR-0059 §3), hard-rebuilt
   // on every content-changing save. Cascade from the source.
   outgoingLinks ArticleWikiLink[] @relation("WikiLinkSource")
@@ -1450,35 +1460,35 @@ model WorkflowSecret {
 /// `targetUserId` IS a real (optional, SetNull) FK to the person the nudge is about, for a secondary
 /// click-through that survives the user's deletion.
 model Notification {
-  id           String               @id @default(cuid())
+  id           String   @id @default(cuid())
   // The closed catalog type (NotificationType in @lazyit/shared) — drives the bell's icon + copy.
   // Plain String, mirroring RolePermission.permission: the closed catalog lives as zod in shared, so
   // adding a type never needs an enum migration.
   type         String
   // Presentation severity ramp (info | warning | critical) — a render cue, not a business criticality.
-  severity     String               @default("info")
+  severity     String   @default("info")
   // The dedupe key — `<type>:<entityId>` (+ a coarse time bucket for low_stock). Makes emitters
   // IDEMPOTENT: a retry / a flapping consumable / a re-fired listener collapses to ONE row per logical
   // event (ADR-0056 §4). UNIQUE — full unique (this table has no soft delete, so no ghost-row concern).
-  dedupeKey    String               @unique
+  dedupeKey    String   @unique
   // Soft, polymorphic deep-link target (NOT a FK — see model doc). null entityType ⇒ no click-through.
   entityType   String?
   entityId     String?
   // The person the nudge is ABOUT (grantee / elevated user). Optional FK, SetNull: losing the user
   // never blocks deletion and the event survives. @db.Uuid to match User.id.
-  targetUserId String?              @db.Uuid
-  targetUser   User?                @relation("NotificationTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  targetUserId String?  @db.Uuid
+  targetUser   User?    @relation("NotificationTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
   // Server-built human headline + an optional one-line clarifier.
   title        String
   summary      String?
   // REDACTED extra context the web may render (names/ids only — never bodies/secrets/PII; INV-6).
   metadata     Json?
-  createdAt    DateTime             @default(now())
+  createdAt    DateTime @default(now())
 
   // The per-admin read joins for this event (fan-out-on-read). Restrict on that side: an event with
   // read history is not hard-deletable by a stray cascade — the retention sweep is the ONLY deleter,
   // and it removes the read joins FIRST, then the event.
-  reads        NotificationRead[]
+  reads NotificationRead[]
 
   // No updatedAt / deletedAt: append-only (ADR-0006). Indexes: the dedupe key (idempotent emit), and
   // (type, createdAt) / createdAt for the newest-first feed + the retention sweep's age scan.
@@ -1511,4 +1521,212 @@ model NotificationRead {
   // Per-admin unread anti-join scans by user; per-notification cleanup scans by notification.
   @@index([userId])
   @@map("notification_reads")
+}
+
+// =====================================================================================================
+// Secret Manager — zero-knowledge vaults (ADR-0061, crypto design note, #366 / sub-issue #421).
+//
+// The DELIBERATE crypto-model INVERSE of WorkflowSecret: WorkflowSecret is server-decryptable by design
+// (a connector authenticates at run time → reveal() + WORKFLOW_SECRET_KEY exist); the Secret Manager is
+// NEVER server-decryptable. The server stores ONLY public material, wrapped blobs, and ciphertext — it
+// holds NO key over any value (INV-10). There is no server-side reveal() and no env master key over
+// values; decryption is entirely client-side. NEVER log/return a value, a private key (wrapped or not),
+// a DEK (wrapped or not), a vault passphrase, or a recovery key (ADR-0031, crypto note §8).
+//
+// SLICE 2a (#421) = data foundation ONLY: these tables, the migration (incl. the two raw-SQL partial
+// unique indexes), the soft-delete registration, and the shared DTOs. NO controllers/services/endpoints/
+// authz — those are slice 2b.
+// =====================================================================================================
+
+/// A folder vault — the CRYPTO BOUNDARY of the Secret Manager (ADR-0061 §2). Each vault owns a single
+/// random DEK under which every SecretItem in it is encrypted; the DEK is NEVER stored in clear — the
+/// only copies that exist are the per-member VaultMembership rows (the DEK wrapped to each member's
+/// public key). The server sees only the non-secret `name` and the member list — it can NEVER decrypt
+/// the vault (INV-10). NO folder FK in v1: the KB↔Secret link is purely the §8 chip handle
+/// ({{ lazyit_secret.HANDLE }}), resolved render-time, not a DB FK. Mutable domain entity → cuid() +
+/// soft delete (ADR-0005/0006). Vault-name uniqueness is a LIVE-only PARTIAL unique index `WHERE
+/// "deletedAt" IS NULL` (raw SQL in the migration — Prisma can't express it; never a PSL @unique, which
+/// would re-introduce the ghost-row collision — ADR-0041). See docs/02-domain/entities/secret-vault.md.
+model SecretVault {
+  id   String @id @default(cuid())
+  // Server-visible, NON-secret name (metadata — left of the §9 zero-knowledge line). Global uniqueness
+  // among LIVE rows is the raw-SQL partial unique index in the migration (NOT @unique here).
+  name String
+
+  // The encrypted values stored under this vault's DEK. onDelete Restrict on the item side: a vault
+  // with items cannot be hard-purged (history/ciphertext is preserved). Vaults normally soft-delete.
+  items       SecretItem[]
+  // One row per crypto member, each carrying the DEK wrapped to that member's public key. onDelete
+  // Cascade on the membership side: a membership is a current-state join, meaningless without its vault.
+  memberships VaultMembership[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("secret_vaults")
+}
+
+/// A single secret VALUE inside a SecretVault (ADR-0061 §2, crypto note §3) — a password, API key, or
+/// note. It stores ONLY the ciphertext of the value, encrypted under the vault DEK, in columns that
+/// MIRROR WorkflowSecret byte-for-byte: ciphertext / iv / authTag / keyVersion (base64 text, at-rest
+/// only, never on a wire-read that the SERVER decrypts, never logged). The decisive difference from
+/// WorkflowSecret: the key that decrypts these columns is the DEK, which the server never holds in clear
+/// — so there is NO server-side reveal(); decryption is client-side under the unwrapped vault DEK
+/// (INV-10). `handle` is the §8 chip reference (machine token, e.g. {{ lazyit_secret.HANDLE }}); `label`
+/// is the human display title — both are server-visible metadata, never the value. Mutable domain entity
+/// → cuid() + soft delete (ADR-0005/0006). `handle` is GLOBALLY unique among LIVE rows via a raw-SQL
+/// PARTIAL unique index `WHERE "deletedAt" IS NULL` (the §8 chip must resolve to exactly one item — the
+/// deliberate contract for slice 4; never a PSL @unique). See docs/02-domain/entities/secret-item.md.
+model SecretItem {
+  id         String      @id @default(cuid())
+  // Scope: every item belongs to a vault. Restrict — a vault with items can't be hard-purged (matches
+  // WorkflowSecret.applicationId Restrict). Vaults soft-delete (UPDATE deletedAt), which bypasses the FK.
+  vaultId    String
+  vault      SecretVault @relation(fields: [vaultId], references: [id], onDelete: Restrict)
+  // The §8 KB-chip reference ({{ lazyit_secret.HANDLE }}) — server-visible metadata, never the value.
+  // GLOBALLY unique among LIVE rows via the raw-SQL partial unique index in the migration (NOT @unique).
+  handle     String
+  // Human-recognizable display title (e.g. "Production DB root password") — server-visible, never value.
+  label      String
+  // AES-256-GCM envelope of the value under the vault DEK (at-rest only; never cleartext; never logged).
+  // base64 text columns — mirrors WorkflowSecret EXACTLY (ciphertext excludes the 16-byte tag; authTag
+  // holds the trailing 16 bytes; iv is the 12-byte nonce). The client splits the @noble/ciphers gcm()
+  // output into ciphertext + authTag on write and re-concatenates on read (crypto note §3).
+  ciphertext String
+  iv         String
+  authTag    String
+  // Which DEK VERSION produced this envelope (crypto note §3). Unlike WorkflowSecret (server env-key
+  // version), here it tracks the per-vault DEK version. v1 writes 1 and never rotates; it is the
+  // forward-compat seam for the deferred hard-revoke / DEK-rotation (ADR-0061 §5, Phase 2).
+  keyVersion Int         @default(1)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  deletedAt  DateTime?
+
+  @@index([vaultId])
+  @@map("secret_items")
+}
+
+/// Records that a User is a CRYPTO MEMBER of a SecretVault (ADR-0061 §4, crypto note §2). The row's
+/// load-bearing payload is the vault DEK WRAPPED to that member's public key (ECIES-style over X25519:
+/// ephemeralPublicKey + wrapNonce + wrappedDek) — the only form in which a copy of the DEK exists. The
+/// server stores the wrapped blob and can NEVER unwrap it. Granting = wrapping the existing DEK to a new
+/// member's public key, which requires the granter to ALREADY be able to unwrap it ("no
+/// grant-what-you-can't-read" — the crypto twin of INV-9). A CURRENT-STATE JOIN (like ArticleLink):
+/// cuid(), createdAt + updatedAt (the wrapped blob is RE-WRITTEN on a peer-reset, §6). NO `deletedAt` —
+/// v1 revoke is a HARD DROP of the row (the wrapped-DEK copy ceases to exist); not soft-deletable. The
+/// (vaultId, userId) uniqueness is a PLAIN PSL @@unique precisely because there is no soft-delete to work
+/// around (no ghost rows). See docs/02-domain/entities/vault-membership.md.
+model VaultMembership {
+  id                 String      @id @default(cuid())
+  // The vault this membership grants crypto access to. Cascade: a wrapped-DEK copy is a current-state
+  // join, meaningless without its vault — a (rare) hard-delete of the vault drops its memberships.
+  vaultId            String
+  vault              SecretVault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  // The member. FK → the uuid User. Cascade: a wrapped-DEK copy is meaningless without its owner, so a
+  // hard-delete of the user drops it. @db.Uuid to match User.id.
+  userId             String      @db.Uuid
+  user               User        @relation("VaultMembershipUser", fields: [userId], references: [id], onDelete: Cascade)
+  // The wrapped-DEK blob (crypto note §2). ephemeralPublicKey/wrapNonce/wrappedDek are base64 text; none
+  // discloses the DEK without the member's private key. The server stores them in clear (they are
+  // public/ciphertext, left of the §9 line) and NEVER unwraps them.
+  ephemeralPublicKey String
+  wrapNonce          String
+  wrappedDek         String
+  // Which wrap VERSION produced this blob — forward-compat seam mirroring SecretItem.keyVersion.
+  wrapVersion        Int         @default(1)
+  createdAt          DateTime    @default(now())
+  // Re-wrap on peer-reset (§6): a surviving member re-wraps the DEK to the member's NEW public key,
+  // updating this row in place — hence updatedAt. NO deletedAt: v1 revoke HARD-DROPs the row.
+  updatedAt          DateTime    @updatedAt
+
+  // At most one membership per (vault, member). A PLAIN @@unique (not a partial index): this row HARD-
+  // deletes, so there is no soft-delete ghost row to exclude — the full unique index is correct here.
+  @@unique([vaultId, userId])
+  @@index([userId])
+  @@map("vault_memberships")
+}
+
+/// One keypair per User (1:1 with the uuid User) — the identity the Secret Manager wraps vault DEKs TO
+/// (ADR-0061 §3, crypto note §2/§4). The `publicKey` is stored in CLEAR (it is public — anyone may wrap
+/// a DEK to it; that is how granting works). The X25519 private key is NEVER stored raw — only TWO
+/// independent AES-256-GCM-wrapped copies exist, so loss of one unlock path is survivable: copy A under
+/// Argon2id(vault passphrase) — the first Argon2 path in the repo — and copy B under the recovery key
+/// (HKDF; the recovery key is high-entropy random, shown ONCE, never persisted/logged in clear). The
+/// vault passphrase is a Secret-Manager unlock secret, DISTINCT from the OIDC login password (lazyit
+/// never receives the login credential). The server holds public material + wrapped blobs only, NEVER a
+/// plaintext private key, passphrase, or recovery key (INV-10). Mutable domain entity → cuid() + soft
+/// delete (ADR-0005/0006); a peer-reset replaces the keypair in place. See
+/// docs/02-domain/entities/user-keypair.md.
+model UserKeypair {
+  id                        String    @id @default(cuid())
+  // 1:1 with the uuid User. Cascade: the keypair is meaningless without its user, so a hard-delete of
+  // the user drops it. @unique enforces the 1:1 (there is no soft-delete-reuse concern: one user → one
+  // live keypair; a peer-reset REPLACES the row in place rather than minting a second). @db.Uuid to
+  // match User.id.
+  userId                    String    @unique @db.Uuid
+  user                      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // The X25519 public key (base64, 32 raw bytes) — the ONLY clear column. DEKs are wrapped to it.
+  publicKey                 String
+  // Copy A — private key wrapped under Argon2id(vault passphrase). The wrapped blob + its KDF inputs.
+  // `kdfParams` records { alg, m, t, p, v } so a future Argon2 parameter bump is detectable/recoverable
+  // (crypto note §4). All base64 text except kdfParams (jsonb). NEVER the unwrapped private key.
+  privateKeyEncByPassphrase String
+  passphraseSalt            String
+  passphraseIv              String
+  kdfParams                 Json
+  // Copy B — private key wrapped under the recovery key (HKDF). The wrapped blob + its HKDF salt + IV.
+  // The recovery key itself is shown ONCE client-side and NEVER stored (only this wrapped copy exists).
+  privateKeyEncByRecovery   String
+  recoverySalt              String
+  recoveryIv                String
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  deletedAt                 DateTime?
+
+  @@map("user_keypairs")
+}
+
+/// The discrete actions recorded in SecretAuditLog (ADR-0061 §10). Metadata-only: these name WHO acted
+/// on WHICH vault/item/target — NEVER a secret value, key, or blob.
+enum SecretAuditAction {
+  VAULT_CREATED
+  VAULT_DELETED
+  ITEM_CREATED
+  ITEM_UPDATED
+  ITEM_DELETED
+  MEMBERSHIP_GRANTED
+  MEMBERSHIP_REVOKED
+  KEYPAIR_CREATED
+  KEYPAIR_RESET
+}
+
+/// An APPEND-ONLY audit log of Secret Manager actions (ADR-0061 §10, crypto note §8) — records WHO acted
+/// on WHICH vault/item, METADATA ONLY: NEVER a secret value, a key (wrapped or unwrapped), a DEK, a
+/// passphrase, or a recovery key. Append-only (ADR-0006): rows are only ever INSERTed — autoincrement id
+/// (a log table, never exposed externally — ADR-0005), `createdAt` ONLY, no updatedAt/deletedAt.
+/// `actorId` is the only FK (→ uuid User, SetNull — the metadata row survives the actor's deletion;
+/// null = system/unknown). `vaultId`/`itemId`/`targetUserId` are PLAIN STRING columns with NO FK on
+/// purpose: the audit trail must survive even if the vault/item/target is later removed (the
+/// notification-bell soft-target precedent). See docs/02-domain/entities/secret-vault.md.
+model SecretAuditLog {
+  // autoincrement: a log table, never exposed externally (ADR-0005).
+  id           Int               @id @default(autoincrement())
+  action       SecretAuditAction
+  // Who acted — the authenticated human actor (ADR-0022). SetNull: losing the actor never blocks
+  // deleting them and the log row survives. null = system/unknown. @db.Uuid to match User.id.
+  actorId      String?           @db.Uuid
+  actor        User?             @relation("SecretAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  // Soft metadata references (NO FK) — the row must survive even if the vault/item/target is removed.
+  vaultId      String?
+  itemId       String?
+  targetUserId String?
+  createdAt    DateTime          @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). Indexes: the per-vault audit timeline and the
+  // newest-first / retention age scan.
+  @@index([vaultId])
+  @@index([createdAt])
+  @@map("secret_audit_logs")
 }

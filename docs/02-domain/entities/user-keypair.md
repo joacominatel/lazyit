@@ -3,12 +3,12 @@ title: UserKeypair
 tags: [domain, entity, secret-manager, security, secrets, crypto]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-06-13
 ---
 
 # UserKeypair
 
-> ⚪ planned · Area: Secret Manager · Implementation order: tbd
+> ✅ built (#366) · Area: Secret Manager · Under the "Conocimiento" pillar
 
 ## Purpose
 
@@ -47,18 +47,41 @@ private key, password, or recovery key.
 
 ## Conventions
 
-- **ID / attachment:** attaches **1:1 to [[user]]** (the uuid `User`, [[0005-id-strategy]]); a mutable
-  entity.
+- **ID / attachment:** attaches **1:1 to [[user]]** via `userId @unique @db.Uuid`. FK `onDelete:
+  Cascade` — a hard-deleted user drops their keypair. A **peer-reset replaces the row in place**
+  (never a second row per user — the `@unique` enforces this). [[0005-id-strategy]].
 - **Timestamps / soft delete:** `createdAt`, `updatedAt`, `deletedAt` (mutable domain,
-  [[0006-soft-delete-and-auditing]]); a peer-reset replaces the keypair.
-- **Crypto columns** mirror [[workflow-secret]] discipline: wrapped/encrypted blobs as base64 text,
-  write-only, **never returned, never logged** ([[0031-logging-strategy]]); `publicKey` is the only
-  clear material.
+  [[0006-soft-delete-and-auditing]]).
+- **Crypto columns:** all blobs as base64 text — **never returned on a read shape, never logged**
+  ([[0031-logging-strategy]]). `publicKey` is the only clear column.
 
-## Not yet implemented
+## Columns (as built)
 
-Planned, not built. Full detail — Argon2id parameters, the recovery-key derivation/wrapping, and the
-peer-reset protocol — lives in [[0061-secret-manager-zero-knowledge]].
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `String` — cuid() | Primary key ([[0005-id-strategy]]). |
+| `userId` | `String` (`@unique @db.Uuid`) | 1:1 FK → `User.id`, `onDelete: Cascade`. |
+| `publicKey` | `String` (base64) | 32-byte X25519 public key — the ONLY clear column. DEKs are wrapped to it. |
+| `privateKeyEncByPassphrase` | `String` (base64) | X25519 private key wrapped under `Argon2id(vault passphrase)` (AES-256-GCM). Copy A. |
+| `passphraseSalt` | `String` (base64) | 16-byte random Argon2id salt for the passphrase wrap. |
+| `passphraseIv` | `String` (base64) | 12-byte AES-GCM nonce for the passphrase wrap. |
+| `kdfParams` | `Json` | Records `{ alg, m, t, p, v }` so a future Argon2id parameter bump is detectable and recoverable. |
+| `privateKeyEncByRecovery` | `String` (base64) | X25519 private key wrapped under HKDF(recovery key) (AES-256-GCM). Copy B. |
+| `recoverySalt` | `String` (base64) | 16-byte random HKDF salt for the recovery-key wrap. |
+| `recoveryIv` | `String` (base64) | 12-byte AES-GCM nonce for the recovery-key wrap. |
+| `createdAt` | `DateTime` | Set on insert. |
+| `updatedAt` | `DateTime` | Updated on a peer-reset re-wrap. |
+| `deletedAt` | `DateTime?` | Soft delete ([[0006-soft-delete-and-auditing]]). |
+
+DB table: `user_keypairs`.
+
+## Implementation status
+
+**Fully built (#366).** Keypair creation (passphrase → Argon2id → wrap private key × 2, recovery key
+shown once), unlock (Argon2id or HKDF), and peer-reset are all implemented. The Argon2id WASM wrapper
+(`hash-wasm`) runs in `apps/web` client components only. Pure primitives (X25519, HKDF, AES-GCM,
+recovery-key encode/decode, Argon2id params) ship in `@lazyit/shared/crypto`. Full detail:
+[[secret-manager-crypto-design]] §1–§4.
 
 Related: [[user]] · [[secret-vault]] · [[vault-membership]] · [[secret-item]] · [[workflow-secret]] ·
 [[shared-package]] · [[backups]] · [[0061-secret-manager-zero-knowledge]] · [[0005-id-strategy]] ·

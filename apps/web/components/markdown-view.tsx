@@ -11,6 +11,11 @@ import {
   WIKI_LINK_TAG,
 } from "@/components/markdown-wiki-link";
 import { WikiLink } from "@/components/markdown-wiki-link-view";
+import {
+  rehypeSecretChips,
+  SECRET_CHIP_TAG,
+} from "@/components/markdown-secret-chip";
+import { SecretChip } from "@/components/markdown-secret-chip-view";
 import { cn } from "@/lib/utils";
 
 /**
@@ -86,9 +91,22 @@ const WIKI_LINK_COMPONENTS = {
   ),
 } as Components;
 
+/**
+ * The `{{ lazyit_secret.HANDLE }}` chip element minted by `rehypeSecretChips` AFTER sanitize
+ * (ADR-0061 §8) — same post-sanitize slot as wiki-links and code renderers. The component handles
+ * all three chip states (locked / broken / revealed) and drives the session unlock gate when
+ * needed. `handle` is the only data carried; no value is ever embedded in the Markdown source.
+ */
+const SECRET_CHIP_COMPONENTS = {
+  [SECRET_CHIP_TAG]: ({ handle }: { handle?: string }) => (
+    <SecretChip handle={handle} />
+  ),
+} as Components;
+
 const ALL_COMPONENTS: Components = {
   ...MARKDOWN_COMPONENTS,
   ...WIKI_LINK_COMPONENTS,
+  ...SECRET_CHIP_COMPONENTS,
 };
 
 /**
@@ -124,7 +142,7 @@ export function MarkdownView({
         // `rehypeWikiLinks` runs AFTER `rehypeSanitize` (ADR-0029 / ADR-0059 §3): the sanitizer first
         // strips all untrusted HTML, then the trusted wiki-link pass adds `[[slug]]` link markup the
         // schema never has to allow — the same post-sanitize slot the mermaid/code renderers use.
-        rehypePlugins={[[rehypeSanitize, SANITIZE_SCHEMA], rehypeWikiLinks]}
+        rehypePlugins={[[rehypeSanitize, SANITIZE_SCHEMA], rehypeWikiLinks, rehypeSecretChips]}
         components={ALL_COMPONENTS}
       >
         {content}

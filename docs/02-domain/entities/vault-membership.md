@@ -3,12 +3,12 @@ title: VaultMembership
 tags: [domain, entity, secret-manager, security, secrets, crypto]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-06-13
 ---
 
 # VaultMembership
 
-> ⚪ planned · Area: Secret Manager · Implementation order: tbd
+> ✅ built (#366) · Area: Secret Manager · Under the "Conocimiento" pillar
 
 ## Purpose
 
@@ -41,16 +41,35 @@ merely lets a user *enter* the Secret Manager ([[0061-secret-manager-zero-knowle
 ## Conventions
 
 - **ID:** `cuid()` — a current-state join ([[0005-id-strategy]]).
-- **Timestamps:** `createdAt` (a current-state join, not append-only audit, not soft-deletable);
-  **`updatedAt` only if** the row is re-wrapped on peer-reset ([[0006-soft-delete-and-auditing]]).
-- **Uniqueness:** at most one live membership per `(vaultId, userId)` — a raw-SQL **PARTIAL** unique
-  index ([[0041-soft-delete-reuse-and-restore]] pattern), never a PSL `@unique`.
-- **Soft-revoke v1 = hard DROP** of the row (above); no `deletedAt` in v1.
+- **Timestamps:** `createdAt` + `updatedAt` (re-wrap on peer-reset updates the row in place —
+  [[0006-soft-delete-and-auditing]]). **NO `deletedAt`** — v1 revoke is a HARD DROP of the row.
+- **Uniqueness:** a **PLAIN PSL `@@unique([vaultId, userId])`** — correct here because there is no
+  soft-delete to ghost-row-exclude ([[0041-soft-delete-reuse-and-restore]]). This is the deliberate
+  exception to the partial-index pattern used by `SecretVault` and `SecretItem`.
+- **Soft-revoke v1 = hard DROP** of the row — the wrapped-DEK copy ceases to exist.
+  Hard revoke (DEK rotation) is deferred to Phase 2 (accepted debt, ADR-0061 §5).
 
-## Not yet implemented
+## Columns (as built)
 
-Planned, not built. Full detail — wrap/unwrap mechanics, peer-reset re-wrapping, and the revoke model —
-lives in [[0061-secret-manager-zero-knowledge]].
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `String` — cuid() | Primary key. |
+| `vaultId` | `String` | FK → `SecretVault.id`, `onDelete: Cascade` — a (hard-deleted) vault drops its memberships. |
+| `userId` | `String` (`@db.Uuid`) | FK → `User.id`, `onDelete: Cascade` — a hard-deleted user drops their wrapped-DEK copy. |
+| `ephemeralPublicKey` | `String` (base64) | The ephemeral X25519 public key from the wrap operation. |
+| `wrapNonce` | `String` (base64) | 12-byte AES-GCM nonce used to wrap the DEK. |
+| `wrappedDek` | `String` (base64) | The vault DEK wrapped (ECIES-style over X25519 + HKDF + AES-256-GCM) to this member's public key. |
+| `wrapVersion` | `Int` (default 1) | Forward-compat seam mirroring `SecretItem.keyVersion` — for the deferred DEK rotation. |
+| `createdAt` | `DateTime` | Set on insert (when member was granted). |
+| `updatedAt` | `DateTime` | Updated in place on a peer-reset re-wrap. |
+
+DB table: `vault_memberships`. Indexed on `userId`. Plain `@@unique([vaultId, userId])`.
+
+## Implementation status
+
+**Fully built (#366).** Grant (client-side re-wrap → POST membership row) and revoke (DELETE membership
+row, hard) are implemented in the custodian backend. Peer-reset re-wrap (PUT membership row) is wired
+in the frontend. Full crypto detail: [[secret-manager-crypto-design]] §2.
 
 Related: [[secret-vault]] · [[secret-item]] · [[user-keypair]] · [[user]] · [[workflow-secret]] ·
 [[0061-secret-manager-zero-knowledge]] · [[0005-id-strategy]] · [[0006-soft-delete-and-auditing]] ·
