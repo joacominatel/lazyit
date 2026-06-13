@@ -3,7 +3,7 @@ title: Backups & Disaster Recovery
 tags: [runbook, database, backups, disaster-recovery]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-30
+updated: 2026-06-13
 ---
 
 # Runbook — backups & disaster recovery
@@ -29,6 +29,7 @@ right order. lazyit holds sensitive inventory/access data on a single host
 | 3 | **Zitadel database** | `zitadel_db` (Postgres 16, `zitadel_db_data` volume) | **YES — `pg_dump`** | Restore from dump **+ the same `ZITADEL_MASTERKEY`**. |
 | 4 | Meilisearch index | `meili_data` volume | No (rebuildable) | Re-run `reindex:all` — it rebuilds the index from the DBs ([[0035-search-architecture]]). |
 | 5 | Caddy TLS state | `caddy_data` / `caddy_config` volumes | No (re-issuable) | Caddy re-obtains certs from Let's Encrypt (or re-mints its internal CA) automatically. |
+| 6 | **Secret Manager vault values** | App database (rows in `secret_vaults` / `secret_items` / `vault_memberships` / `user_keypairs`) | Covered by item #2 (**no extra backup needed**) | Zero-knowledge: a DB restore brings back ciphertext + wrapped DEKs. Values are readable only by a surviving member's vault passphrase or off-host recovery key — the server cannot re-enter them, unlike `WORKFLOW_SECRET_KEY`. See below. |
 
 > [!warning] `ZITADEL_MASTERKEY` is unrotatable and irreplaceable
 > It decrypts Zitadel's store. Losing it = losing all logins, even with a perfect DB dump. Keep a
