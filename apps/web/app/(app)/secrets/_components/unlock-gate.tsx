@@ -37,8 +37,17 @@ import { useSecretSession } from "./secret-session";
  * boundary). The passphrase, the recovery key, and the derived private key are EPHEMERAL: the private
  * key goes straight into the in-memory session and the local string state is dropped; nothing secret is
  * cached, logged, or sent.
+ *
+ * When `embedded` is true, the inner card shell (bg-card, p-8, ring) is suppressed so the flow
+ * renders cleanly inside an existing Dialog or card container without double-wrapping.
  */
-export function UnlockGate({ children }: { children: React.ReactNode }) {
+export function UnlockGate({
+  children,
+  embedded = false,
+}: {
+  children: React.ReactNode;
+  embedded?: boolean;
+}) {
   const { isUnlocked } = useSecretSession();
   const { data: keypair, isLoading, isError, error } = useMyKeypair();
 
@@ -47,7 +56,7 @@ export function UnlockGate({ children }: { children: React.ReactNode }) {
   const isMissing = isError && error instanceof ApiError && error.status === 404;
 
   if (isLoading) {
-    return <UnlockSkeleton />;
+    return <UnlockSkeleton embedded={embedded} />;
   }
 
   if (isUnlocked) {
@@ -55,28 +64,34 @@ export function UnlockGate({ children }: { children: React.ReactNode }) {
   }
 
   if (isMissing) {
-    return <BootstrapFlow />;
+    return <BootstrapFlow embedded={embedded} />;
   }
 
   if (isError || !keypair) {
-    return <UnlockError />;
+    return <UnlockError embedded={embedded} />;
   }
 
-  return <UnlockFlow keypair={keypair} />;
+  return <UnlockFlow keypair={keypair} embedded={embedded} />;
 }
 
-function UnlockSkeleton() {
+function cardCn(embedded: boolean) {
+  return embedded
+    ? "flex flex-col items-center gap-4 text-center"
+    : "mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl bg-card p-8 text-center ring-1 ring-foreground/10";
+}
+
+function UnlockSkeleton({ embedded = false }: { embedded?: boolean }) {
   return (
-    <div className="mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl bg-card p-8 text-center ring-1 ring-foreground/10">
+    <div className={cardCn(embedded)}>
       <ArrowPathIcon className="size-6 animate-spin text-muted-foreground" aria-hidden />
     </div>
   );
 }
 
-function UnlockError() {
+function UnlockError({ embedded = false }: { embedded?: boolean }) {
   const t = useTranslations("secrets");
   return (
-    <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-xl bg-card p-8 text-center ring-1 ring-foreground/10">
+    <div className={embedded ? "flex flex-col items-center gap-3 text-center" : "mx-auto flex max-w-md flex-col items-center gap-3 rounded-xl bg-card p-8 text-center ring-1 ring-foreground/10"}>
       <ExclamationTriangleIcon className="size-8 text-destructive" aria-hidden />
       <p className="text-sm text-muted-foreground">{t("unlock.loadError")}</p>
     </div>
@@ -88,7 +103,7 @@ function UnlockError() {
  * key into the in-memory session. A secondary "I lost my passphrase" toggle swaps to the recovery-key
  * input; a "I lost both" link starts a peer-reset.
  */
-function UnlockFlow({ keypair }: { keypair: UserKeypair }) {
+function UnlockFlow({ keypair, embedded = false }: { keypair: UserKeypair; embedded?: boolean }) {
   const t = useTranslations("secrets");
   const tc = useTranslations("common");
   const { setPrivateKey } = useSecretSession();
@@ -120,13 +135,13 @@ function UnlockFlow({ keypair }: { keypair: UserKeypair }) {
   }
 
   if (mode === "reset") {
-    return <PeerResetFlow onCancel={() => setMode("passphrase")} />;
+    return <PeerResetFlow onCancel={() => setMode("passphrase")} embedded={embedded} />;
   }
 
   const isRecovery = mode === "recovery";
 
   return (
-    <div className="mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10">
+    <div className={embedded ? "space-y-5" : "mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10"}>
       <div className="flex flex-col items-center gap-2 text-center">
         <span className="flex size-12 items-center justify-center rounded-full bg-pillar-knowledge/10">
           <LockClosedIcon className="size-6 text-pillar-knowledge" aria-hidden />
@@ -198,7 +213,7 @@ function UnlockFlow({ keypair }: { keypair: UserKeypair }) {
  * created keypair straight into the session (re-deriving from the passphrase the user just typed) so they
  * land inside the manager already unlocked.
  */
-function BootstrapFlow() {
+function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
   const t = useTranslations("secrets");
   const { setPrivateKey } = useSecretSession();
   const createKeypair = useCreateKeypair();
@@ -247,7 +262,7 @@ function BootstrapFlow() {
   }
 
   return (
-    <div className="mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10">
+    <div className={embedded ? "space-y-5" : "mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10"}>
       <div className="flex flex-col items-center gap-2 text-center">
         <span className="flex size-12 items-center justify-center rounded-full bg-pillar-knowledge/10">
           <LockClosedIcon className="size-6 text-pillar-knowledge" aria-hidden />
@@ -316,7 +331,7 @@ function BootstrapFlow() {
  * reset gives them a fresh identity with NO vault access — a surviving vault member must re-grant each
  * vault to the new public key. We surface that loudly.
  */
-function PeerResetFlow({ onCancel }: { onCancel: () => void }) {
+function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; embedded?: boolean }) {
   const t = useTranslations("secrets");
   const tc = useTranslations("common");
   const { setPrivateKey } = useSecretSession();
@@ -363,7 +378,7 @@ function PeerResetFlow({ onCancel }: { onCancel: () => void }) {
   }
 
   return (
-    <div className="mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10">
+    <div className={embedded ? "space-y-5" : "mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10"}>
       <div className="flex flex-col items-center gap-2 text-center">
         <span className="flex size-12 items-center justify-center rounded-full bg-amber-500/10">
           <ExclamationTriangleIcon className="size-6 text-amber-600 dark:text-amber-400" aria-hidden />
