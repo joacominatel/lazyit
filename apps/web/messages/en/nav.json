@@ -14,5 +14,6 @@
   "settings": "Settings",
   "expandApplications": "Expand applications",
   "collapseApplications": "Collapse applications",
-  "noApplications": "No applications"
+  "noApplications": "No applications",
+  "secrets": "Secrets"
 }

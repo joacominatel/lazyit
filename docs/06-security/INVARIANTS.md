@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-12
+updated: 2026-06-13
 ---
 
 # Security invariants — auth & authorization
@@ -407,13 +407,32 @@ the per-domain authorization model's spirit. UI-only hiding would be trivially b
 (not 403) keeps a hidden article's existence secret; the no-escalation rule stops a permitted reader from
 laundering access to a folder they cannot see.
 
-**Where enforced.**
-- **Future** `apps/api/src/articles/**` — a folder-ACL guard/filter resolves the caller's visible folders
-  DB-first and 404s a folder-hidden article (existence-hiding), composing most-restrictive-wins with the
-  draft rule ([[0022-draft-visibility-auth-shim]]) and `article:read`; alias/share creation rejects any
-  target the caller cannot itself access (no-escalation).
-- **Future** DB constraints — folder-name uniqueness within a parent as a live-only PARTIAL unique index
-  (ADR-0041); the folder-access membership/scope enforced at the DB layer, not the client.
+**Where enforced (as-built, #404).**
+- `apps/api/src/article-categories/folder-access.service.ts` — `FolderAccessService` is the DB-first §4
+  read evaluator: it resolves the caller's visible folders honouring the §2 PUBLIC fast-path, the §3 OR
+  rules over the **live** [[access-grant]] (`revokedAt IS NULL`) / [[asset-assignment]] (`releasedAt IS
+  NULL`) joins (so access follows offboarding automatically), §1 inherit-and-narrow (a child never widens
+  past a restricted ancestor), §5 ADMIN god-mode (`'ALL'`) and §8 service-account fail-closed. A
+  malformed stored rule fails CLOSED (hidden from non-admins), never silently PUBLIC.
+- `apps/api/src/articles/articles.service.ts` — the read path (`findOne`/`findBySlug`/`findPage` +
+  versions/links/backlinks/aliases) composes the folder gate most-restrictive-wins with the draft rule
+  ([[0022-draft-visibility-auth-shim]]) and `article:read`, **404-ing** a folder-hidden article
+  (existence-hiding, never 403). `addAlias` re-checks the actor's §4 read access to the TARGET before
+  writing the alias row (no-escalation, §6).
+- `apps/api/src/search/search.service.ts` — `/search` post-filters article hits per caller (the
+  search-leak fix): the home folder is carried into the Meili doc (`projectArticle` → `categoryId`,
+  a filterable attribute set by `reindex.ts`), then any hit whose folder the caller can't see is dropped
+  (ADMIN bypasses; SA/anonymous → PUBLIC only); the internal `categoryId` is stripped before the hit
+  ships.
+- DB / storage — the rule set is a zod-validated jsonb `accessRules` column on `ArticleCategory`
+  (`FolderAccessRulesSchema` in `@lazyit/shared`, a CLOSED `users`/`role`/`appGrant`/`assetAssignment`
+  vocabulary), set via `PUT /article-categories/:id/access-rules` (`settings:manage`, ADMIN-only). The
+  dynamic rules resolve through `EXISTS`-style reads against the live joins (the soft-delete read filter
+  applies); folder-name uniqueness within a parent stays a live-only PARTIAL unique index (ADR-0041).
+- Tests: `folder-access.service.spec.ts` (ADMIN-sees-all, SA fail-closed, inherit-narrow-never-widen,
+  revoked-grant/released-assignment drops access, malformed-fails-closed), `articles.service.spec.ts`
+  (folder-hidden → 404, no-escalation alias), `search.service.spec.ts` (restricted hit excluded for a
+  non-matching caller — the leak is closed), `folder.test.ts` (the closed rule vocabulary).
 - Decision + data model: [[0060-kb-folder-access-control]], [[folder]], [[article-alias]].
 
 ## INV-10 — Secret Manager values are zero-knowledge; the server can never decrypt a secret value
@@ -440,15 +459,20 @@ connector secrets, which *must* be server-readable to run. Excluding ADMIN from 
 zero-knowledge: capability authorization is not cryptographic access, and there is no plaintext for INV-8 to
 reach.
 
-**Where enforced.**
-- **Future** `apps/api/src/secret-manager/**` — stores ONLY wrapped/encrypted blobs (vault DEK never in
-  clear; values as ciphertext/iv/authTag/keyVersion mirroring the [[workflow-secret]] column shape); exposes
-  **no `reveal()`** and no server-side value decryption. Granting writes a DEK **wrapped to the grantee's
-  public key**; a caller can never grant a vault they are not themselves a crypto member of.
-- **Future** `apps/api/prisma/schema.prisma` — [[secret-vault]] / [[secret-item]] / [[vault-membership]] /
-  [[user-keypair]]: crypto columns are write-only on the API, redacted on read, never returned; plaintext
-  keys/values/passwords/recovery-keys are NEVER persisted or logged ([[0031-logging-strategy]]).
-- Decision + data model: [[0061-secret-manager-zero-knowledge]].
+**Where enforced (as-built, #366).**
+- `apps/api/src/secret-manager/` — the ciphertext-custodian module. Stores ONLY wrapped/encrypted blobs
+  (vault DEK never in clear; values as `ciphertext`/`iv`/`authTag`/`keyVersion` mirroring the
+  [[workflow-secret]] column shape); exposes **no `reveal()`** and no server-side value decryption.
+  Granting writes a DEK **wrapped to the grantee's public key**; a caller can never grant a vault they
+  are not themselves a crypto member of. Human-only (`human-only.guard.ts` rejects service principals).
+- **INV-10 architectural guard test** (`apps/api/src/secret-manager/inv-10.guard.spec.ts`) — a **merge
+  gate** that asserts: (a) no Secret Manager service imports `@noble/*` or any crypto library, (b) no
+  `SECRET_MANAGER_KEY`-style env variable is read, and (c) no method in the module returns a plaintext
+  value or unwrapped key. INV-10 cannot rot silently — CI fails if the guard is broken.
+- `apps/api/prisma/schema.prisma` — [[secret-vault]] / [[secret-item]] / [[vault-membership]] /
+  [[user-keypair]] / [[secret-audit-log]]: crypto columns are write-only on the API, never returned in
+  clear; plaintext keys/values/passwords/recovery-keys are NEVER persisted or logged ([[0031-logging-strategy]]).
+- Decision + data model: [[0061-secret-manager-zero-knowledge]] · [[secret-manager-crypto-design]].
 
 ---
 

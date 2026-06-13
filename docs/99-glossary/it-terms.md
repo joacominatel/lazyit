@@ -3,7 +3,7 @@ title: IT Terms
 tags: [glossary]
 status: draft
 created: 2026-05-25
-updated: 2026-06-08
+updated: 2026-06-13
 ---
 
 # IT Terms
@@ -62,8 +62,8 @@ gloss and link to their note in [[entities/_MOC|Entities]]; the design depth liv
 ## Knowledge Base v2 vocabulary
 
 Terms for the [[0059-kb-folders-links-and-import|Knowledge Base v2]] design (folders, aliases,
-wiki-links, bulk import — accepted 2026-06-11, **not yet built**, #364). Folder-based access control is
-[[0060-kb-folder-access-control]].
+wiki-links, bulk import — accepted 2026-06-11, **built in #364**, merged `feat/kb-secrets`). Folder-based
+access control is [[0060-kb-folder-access-control]].
 
 | Term | Meaning in lazyit's context |
 | --- | --- |
@@ -77,9 +77,9 @@ wiki-links, bulk import — accepted 2026-06-11, **not yet built**, #364). Folde
 
 ## Secret Manager vocabulary
 
-Terms for the [[0061-secret-manager-zero-knowledge|Secret Manager]] design — zero-knowledge vaults beside
-the KB (accepted 2026-06-11, **not yet built**, #366). Distinct from the server-decryptable
-[[workflow-secret]] of the Workflow Engine.
+Terms for the [[0061-secret-manager-zero-knowledge|Secret Manager]] — zero-knowledge vaults beside the
+KB (accepted 2026-06-11, **built in #366**, merged `feat/secret-manager`). Distinct from the
+server-decryptable [[workflow-secret]] of the Workflow Engine.
 
 | Term | Meaning in lazyit's context |
 | --- | --- |

@@ -8,6 +8,7 @@
     "searchPlaceholder": "Search by title…",
     "errorTitle": "Could not load articles",
     "noMatchFilters": "No articles match your filters.",
+    "noArticlesInFolder": "No articles in this folder yet — open a sub-folder above to keep browsing.",
     "emptyTitle": "No articles yet",
     "emptyDescription": "Capture what your team knows — runbooks, how-tos, onboarding notes. Write your first article or import one from a file.",
     "emptyAction": "Write your first article",
@@ -19,7 +20,6 @@
   },
   "filters": {
     "statusLabelName": "Status",
-    "categoryLabelName": "Category",
     "linkedToLabelName": "Target",
     "assetLabelName": "Assets",
     "applicationLabelName": "Applications",
@@ -127,22 +127,139 @@
   },
   "import": {
     "title": "Import an article",
-    "description": "Upload a Markdown, plain-text or Word (.docx) file. Only the text is imported — the original file is not stored.",
+    "description": "Upload a Markdown, plain-text, Word (.docx) or ZIP (.zip) file. Only the text is imported — the original file is not stored.",
     "fileLabel": "File",
-    "fileHint": "Accepts .md, .txt and .docx.",
+    "fileHint": "Accepts .md, .txt, .docx and .zip (bulk import).",
     "categoryLabel": "Category",
     "categorySelect": "Select a category",
     "categoryNone": "No categories yet",
     "statusLabel": "Status",
     "submit": "Import",
     "importing": "Importing…",
-    "processingHint": "Importing your file. Larger Word documents can take a moment.",
+    "processingHint": "Importing your file. Larger files and ZIP archives can take a moment.",
     "toast": {
       "signInRequired": "You must be signed in to import articles",
       "chooseFile": "Choose a file to import",
       "chooseCategory": "Choose a category",
       "imported": "Article imported",
-      "importError": "Couldn't import the file"
+      "importError": "Couldn't import the file",
+      "batchImported": "{count, plural, one {# article imported} other {# articles imported}}"
+    },
+    "batch": {
+      "title": "Import complete",
+      "summary": "{created, plural, one {# article created} other {# articles created}}{renamed, plural, =0 {} one {, # renamed} other {, # renamed}}{skipped, plural, =0 {} one {, # skipped} other {, # skipped}}",
+      "foldersCreated": "{count, plural, one {# folder created} other {# folders created}}",
+      "linksResolved": "{count, plural, one {# wiki-link resolved} other {# wiki-links resolved}}",
+      "createdHeading": "Created",
+      "renamedHeading": "Renamed",
+      "skippedHeading": "Skipped",
+      "renamedNote": "Slug already taken — auto-suffixed to avoid a conflict.",
+      "originalSlug": "Requested: {slug}",
+      "skipReason": {
+        "directory": "Folder entry (no content)",
+        "dotfile": "Hidden file (dotfile)",
+        "unsupported-type": "Unsupported file type",
+        "empty": "Empty file"
+      },
+      "showAll": "Show all {count}",
+      "collapse": "Collapse",
+      "closeAriaLabel": "Close import results",
+      "done": "Done"
+    }
+  },
+  "folders": {
+    "treeLabel": "Browse folders",
+    "allArticles": "All articles",
+    "empty": "No folders yet",
+    "expand": "Expand {name}",
+    "collapse": "Collapse {name}",
+    "subfoldersLabel": "Sub-folders",
+    "childFolderCount": "{count, plural, one {# sub-folder} other {# sub-folders}}",
+    "articleCount": "{count, plural, one {# article} other {# articles}}",
+    "emptyFolder": "Empty folder",
+    "delete": {
+      "menuTitle": "Folder actions",
+      "menuAriaLabel": "Actions for {name}",
+      "action": "Delete folder",
+      "title": "Delete this folder?",
+      "warning": "<b>{name}</b> and everything inside it will be removed from the Knowledge Base.",
+      "subfolderWarning": "This also deletes {count, plural, one {# sub-folder} other {# sub-folders}} and all of their articles.",
+      "irreversibleNote": "Articles in these folders are removed from the KB. This can only be undone by an administrator restoring them in the database.",
+      "confirm": "Delete folder",
+      "cancel": "Cancel",
+      "toast": {
+        "deleted": "Deleted {folders, plural, one {# folder} other {# folders}} and {articles, plural, one {# article} other {# articles}}",
+        "error": "Couldn't delete the folder"
+      }
+    }
+  },
+  "references": {
+    "panelTitle": "References",
+    "loading": "Loading references…",
+    "empty": "No other articles reference this one yet. Mention it as a [[slug]] wiki-link from another article to surface it here."
+  },
+  "aliases": {
+    "panelTitle": "Also in",
+    "add": "Add to folder",
+    "loading": "Loading folders…",
+    "empty": "This article only lives in its home folder. Add it to another folder to surface it there too — an alias never changes its home or who can see it.",
+    "removeAriaLabel": "Remove from folder",
+    "unknownFolder": "Unknown folder",
+    "dialogTitle": "Add to a folder",
+    "dialogDescription": "Place this article in another folder so it also shows up there when browsing. An alias is navigation only — it doesn't move the article's home or change who can see it.",
+    "folderLabel": "Folder",
+    "folderSelect": "Select a folder",
+    "folderNone": "No other folders available",
+    "chooseFolderError": "Choose a folder.",
+    "submit": "Add",
+    "toast": {
+      "added": "Added to folder",
+      "addError": "Couldn't add to the folder",
+      "removed": "Removed from folder",
+      "removeError": "Couldn't remove from the folder"
+    }
+  },
+  "wikiLinks": {
+    "unresolvedTooltip": "Document not created yet"
+  },
+  "access": {
+    "statePublic": "Public",
+    "stateRestricted": "Restricted",
+    "stateInheritedRestricted": "Restricted (inherited from {name})",
+    "makePublic": "Make public",
+    "publicHint": "Visible to all authenticated team members.",
+    "inheritedRestrictedHint": "This folder is restricted because it inherits a restriction from {name}. Add a rule below to narrow access further.",
+    "restrictedTooltip": "Restricted — only specific users may read this folder",
+    "restrictedAriaLabel": "Restricted folder",
+    "inheritedRestrictedTooltip": "Restricted — inherited from {name}",
+    "inheritedRestrictedAriaLabel": "Restricted folder (inherited from {name})",
+    "editRulesAriaLabel": "Edit access rules for {name}",
+    "editRulesTitle": "Edit access rules",
+    "editorTitle": "Access rules",
+    "addRuleKindLabel": "Rule type",
+    "addRulePlaceholder": "Add a rule…",
+    "addRule": "Add rule",
+    "removeRuleAriaLabel": "Remove rule",
+    "kindUsers": "Users",
+    "kindRole": "Role",
+    "kindAppGrant": "App grant",
+    "kindAssetAssignment": "Asset assignees",
+    "roleLabel": {
+      "ADMIN": "Admins",
+      "MEMBER": "Members",
+      "VIEWER": "Viewers"
+    },
+    "selectRole": "Select a role",
+    "selectApplication": "Select an application",
+    "selectAsset": "Select an asset",
+    "noUsers": "No users yet.",
+    "noApplications": "No applications yet.",
+    "noAssets": "No assets yet.",
+    "save": "Save",
+    "discard": "Discard",
+    "toast": {
+      "saved": "Access rules saved",
+      "saveError": "Could not save access rules"
     }
   }
 }

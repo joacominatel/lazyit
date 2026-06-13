@@ -6,9 +6,11 @@ import type {
 import {
   createArticleCategory,
   deleteArticleCategory,
+  deleteArticleCategoryCascade,
   getArticleCategories,
   updateArticleCategory,
 } from "../endpoints/article-categories";
+import { articleKeys } from "./use-articles";
 
 /** Query keys for Article categories. */
 export const articleCategoryKeys = {
@@ -52,5 +54,21 @@ export function useDeleteArticleCategory() {
     mutationFn: (id: string) => deleteArticleCategory(id),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: articleCategoryKeys.all }),
+  });
+}
+
+/**
+ * Cascade soft-delete a folder + all its descendant folders and their articles (#415). Invalidates
+ * BOTH the folder list (tree/filters refresh) and the article lists (a deleted folder's articles
+ * must drop out of the grid). Returns the `{ deletedFolders, deletedArticles }` counts.
+ */
+export function useDeleteArticleCategoryCascade() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteArticleCategoryCascade(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: articleCategoryKeys.all });
+      queryClient.invalidateQueries({ queryKey: articleKeys.all });
+    },
   });
 }

@@ -4,6 +4,11 @@ import { Meilisearch } from 'meilisearch';
 import type { MultiSearchParams } from 'meilisearch';
 import type { SearchDocument } from './search.documents';
 import { reindexIndex, type ReindexClient } from './reindex';
+import {
+  FolderAccessService,
+  folderVisible,
+} from '../article-categories/folder-access.service';
+import type { Principal } from '../auth/principal';
 
 /** The five Meili indexes (one per searchable entity). Primary key on every index is `id`. */
 export const SEARCH_INDEXES = [
@@ -25,11 +30,17 @@ export type SearchIndex = (typeof SEARCH_INDEXES)[number];
  */
 const RETRIEVE: Record<SearchIndex, string[]> = {
   assets: ['id', 'name', 'serial', 'assetTag', 'status', 'notes'],
-  articles: ['id', 'slug', 'title', 'excerpt', 'status'], // content indexed, never returned
+  // `categoryId` (the home folder) is retrieved INTERNALLY for the ADR-0060 §5 folder-access
+  // post-filter, then STRIPPED from the hit before it ships (it is access metadata, not a hit field —
+  // the wire ArticleHit has no categoryId). `content` is indexed but never returned (SEC-061).
+  articles: ['id', 'slug', 'title', 'excerpt', 'status', 'categoryId'],
   users: ['id', 'firstName', 'lastName', 'email'],
   locations: ['id', 'name', 'type', 'address', 'floor'],
   applications: ['id', 'name', 'vendor', 'description'],
 };
+
+/** The internal-only article-hit field stripped before a hit ships (the post-filter's folder key). */
+const ARTICLE_INTERNAL_FIELD = 'categoryId';
 
 /** Per-index result block returned to the caller: the raw hits and Meili's total estimate. */
 export interface SearchEntityResult {
@@ -45,6 +56,12 @@ export interface SearchArgs {
   entities?: SearchIndex[];
   /** Per-index hit cap (1..50, defaulted by the controller). */
   limit: number;
+  /**
+   * The caller's unified PRINCIPAL (ADR-0060 §5). Drives the article folder-access post-filter: ADMIN
+   * sees every hit (§5), a non-admin only hits whose home folder they may see, a service account fails
+   * closed on restricted folders (§8). Omitted = anonymous → only PUBLIC-folder article hits.
+   */
+  principal?: Principal;
 }
 
 /**
@@ -75,6 +92,9 @@ export class SearchService {
   constructor(
     @InjectPinoLogger(SearchService.name)
     private readonly logger: PinoLogger,
+    // ADR-0060 §5: the read-path folder-access evaluator, used to post-filter article hits so a
+    // restricted article never surfaces to a non-matching caller (INV-9, the search-leak fix).
+    private readonly folderAccess: FolderAccessService,
   ) {
     const host = process.env.MEILI_HOST;
     const apiKey = process.env.MEILI_MASTER_KEY;
@@ -142,7 +162,12 @@ export class SearchService {
    * empty blocks instead of bubbling a 500. A search outage degrades search; it never takes the app
    * down.
    */
-  async search({ q, entities, limit }: SearchArgs): Promise<SearchResults> {
+  async search({
+    q,
+    entities,
+    limit,
+    principal,
+  }: SearchArgs): Promise<SearchResults> {
     const requested: SearchIndex[] =
       entities && entities.length > 0 ? entities : [...SEARCH_INDEXES];
 
@@ -155,7 +180,8 @@ export class SearchService {
         indexUid,
         q,
         limit,
-        // cap the per-hit payload to the documented hit fields (SEC-061)
+        // cap the per-hit payload to the documented hit fields (SEC-061). For articles this includes
+        // the internal `categoryId` (the folder-access post-filter key), stripped before shipping.
         attributesToRetrieve: RETRIEVE[indexUid],
       })),
     };
@@ -175,6 +201,14 @@ export class SearchService {
           // back to the number of returned hits if the engine omits it.
           total: result.estimatedTotalHits ?? result.hits.length,
         };
+      }
+      // ADR-0060 §5 (INV-9): the search-leak fix. Re-run the §4 folder-access evaluator and DROP any
+      // article hit whose home folder the caller may not see, so a restricted article NEVER surfaces to
+      // a non-matching caller (ADMIN sees all; SA fails closed; anonymous → PUBLIC only). Done AFTER the
+      // Meili read because access is DB-first (the index is a denormalized cache that can lag a just-
+      // revoked grant; the live evaluator is authoritative).
+      if (requested.includes('articles')) {
+        await this.applyArticleFolderFilter(results, principal);
       }
       return results;
     } catch (err: unknown) {
@@ -216,6 +250,41 @@ export class SearchService {
   async rebuildIndex(index: SearchIndex, docs: SearchDocument[]): Promise<void> {
     if (!this.client) return;
     await reindexIndex(this.client as unknown as ReindexClient, index, docs);
+  }
+
+  /**
+   * The ADR-0060 §5 article folder-access post-filter (INV-9 — closes the search leak). Mutates the
+   * `articles` block in place: resolve the caller's visible folders DB-first, DROP every hit whose
+   * `categoryId` (home folder) is not visible, and STRIP the internal `categoryId` from each surviving
+   * hit so it never ships to the client. `total` is re-counted to the kept hits so the UI count matches
+   * what it can see. ADMIN ('ALL') keeps every hit; an SA / anonymous keeps only PUBLIC-folder hits.
+   *
+   * A hit missing its `categoryId` (a stale doc indexed before this field landed) is DROPPED for a
+   * non-admin — fail closed: better to under-return than leak a restricted article whose folder we
+   * can't resolve.
+   */
+  private async applyArticleFolderFilter(
+    results: SearchResults,
+    principal?: Principal,
+  ): Promise<void> {
+    const block = results.articles;
+    if (block === undefined || block.hits.length === 0) return;
+
+    const visible = await this.folderAccess.visibleFolderIds(principal);
+    const kept: unknown[] = [];
+    for (const hit of block.hits) {
+      const record = hit as Record<string, unknown>;
+      const categoryId = record[ARTICLE_INTERNAL_FIELD];
+      const allowed =
+        visible === 'ALL' ||
+        (typeof categoryId === 'string' && folderVisible(visible, categoryId));
+      if (!allowed) continue;
+      // Strip the internal folder key — the wire ArticleHit carries no categoryId.
+      const { [ARTICLE_INTERNAL_FIELD]: _omit, ...shipped } = record;
+      void _omit;
+      kept.push(shipped);
+    }
+    results.articles = { hits: kept, total: kept.length };
   }
 
   /** A `{ hits: [], total: 0 }` block for each requested index (disabled mode / seed for search). */

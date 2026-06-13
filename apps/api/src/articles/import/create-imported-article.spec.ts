@@ -28,7 +28,15 @@ const baseData = (overrides: Partial<ImportJobData> = {}): ImportJobData => ({
 function makePrisma() {
   const articleCreate = jest.fn(
     (args: {
-      data: { slug: string; title: string; content: string; status: string };
+      data: {
+        slug: string;
+        title: string;
+        content: string;
+        status: string;
+        categoryId: string;
+        authorId: string;
+        publishedAt: Date | null;
+      };
     }): Promise<ImportedArticleRow> =>
       Promise.resolve({
         id: 'art1',
@@ -37,6 +45,7 @@ function makePrisma() {
         content: args.data.content,
         excerpt: null,
         status: args.data.status as ImportedArticleRow['status'],
+        categoryId: args.data.categoryId,
       }),
   );
   const versionCreate = jest.fn((args: { data: Record<string, unknown> }) =>
@@ -60,7 +69,9 @@ describe('runImportJob (the async import worker create path, ADR-0053)', () => {
       prisma,
     );
 
-    expect(result).toEqual({ articleId: 'art1' });
+    // The single-file path now returns a discriminated result (`kind: 'single'`) so getStatus can
+    // tell it from a `.zip` batch result without re-reading the job data (ADR-0059 §5).
+    expect(result).toEqual({ kind: 'single', articleId: 'art1' });
     const data = articleCreate.mock.calls[0][0].data as {
       title: string;
       slug: string;
@@ -132,7 +143,7 @@ describe('runImportJob (the async import worker create path, ADR-0053)', () => {
       }),
       prisma,
     );
-    expect(result).toEqual({ articleId: 'art1' });
+    expect(result).toEqual({ kind: 'single', articleId: 'art1' });
     const data = articleCreate.mock.calls[0][0].data as { content: string };
     expect(data.content).toContain('Datacenter Runbook');
   });

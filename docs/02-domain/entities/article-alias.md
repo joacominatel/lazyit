@@ -8,7 +8,7 @@ updated: 2026-06-11
 
 # ArticleAlias
 
-> ⚪ planned · Area: Knowledge Base · Implementation order: tbd
+> 🟢 implemented · Area: Knowledge Base · Implementation order: tbd
 
 ## Purpose
 
@@ -28,11 +28,17 @@ so a single runbook can be browsed from several places without copying it. Intro
 
 - **No access-granting column in MVP** — an alias is purely navigational and can never grant access
   to an article the aliasing user can't already reach (**no-escalation**, proposed **INV-9** —
-  [[0060-kb-folder-access-control]]).
-- **At most one alias per (folder, article)** — a `(folderId, articleId)` **partial-unique** index
-  ([[0041-soft-delete-reuse-and-restore]] pattern); a duplicate is rejected.
-- **Current-state, not auditable history** — created and **hard-DELETE**d (never edited, never
-  soft-deleted), exactly like [[article-link]].
+  [[0060-kb-folder-access-control]]). The table has only `(id, folderId, articleId, createdAt)`.
+- **At most one alias per (folder, article)** — a `UNIQUE(folderId, articleId)` index (the join has no
+  `deletedAt`, so a plain unique, not the partial form); a duplicate is a **409**.
+- **No alias into the home folder** — the service rejects (**400**) an alias whose `folderId` equals the
+  article's home `categoryId` (you cannot alias an article into its own home).
+- **Author-only writes** — only the article's author may add/remove an alias (the same write gate as an
+  edit, [[0022-draft-visibility-auth-shim]]).
+- **Both FKs `Cascade`** — an alias is meaningless without its article or its folder and carries no
+  audit value (the [[article-link]] posture exactly); a hard delete of either endpoint removes it.
+- **Current-state, not auditable history** — created (`POST /articles/:id/aliases`) and
+  **hard-DELETE**d (`DELETE /articles/:id/aliases/:aliasId`), never edited, never soft-deleted.
 
 ## Conventions
 
@@ -40,10 +46,20 @@ so a single runbook can be browsed from several places without copying it. Intro
 - **Timestamps:** `createdAt` **only** — a current-state join, hard-deleted, not soft-deletable and
   not an append-only audit log ([[0006-soft-delete-and-auditing]]).
 
-## Not yet implemented
+## Endpoints
 
-- Planned — not yet built; tracked by issue #364 ([[0059-kb-folders-links-and-import]]). An
-  access-granting alias variant is explicitly **out of MVP scope** (aliases never widen access).
+`apps/api/src/articles/` (on [[article]]'s controller): `POST /articles/:id/aliases` (author only;
+400 if the folder is missing or the home folder; 409 on a duplicate), `DELETE
+/articles/:id/aliases/:aliasId` (author only; hard delete; 404 if it isn't this article's alias),
+`GET /articles/:id/aliases` (any reader of the article). Schemas (`ArticleAliasSchema`,
+`CreateArticleAliasSchema`) in `@lazyit/shared`.
+
+## Implemented in #392; still deferred
+
+- **Built (#392, ADR-0059 §2):** the `article_aliases` table, the unique + reject-own-home + cascade
+  semantics, and the create/delete/list endpoints + shared schemas.
+- **Still deferred:** an access-granting alias variant is explicitly **out of scope** and reserved to
+  [[0060-kb-folder-access-control]] (#365) — aliases never widen access.
 
 Related: [[0059-kb-folders-links-and-import]] · [[0060-kb-folder-access-control]] · [[article]] ·
 [[folder]] · [[article-link]] · [[article-wiki-link]] · [[0041-soft-delete-reuse-and-restore]] ·

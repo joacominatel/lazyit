@@ -10,11 +10,14 @@ import {
 import { useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { MarkdownEditor } from "@/components/markdown-editor";
+import { useArticleSlugSuggestions } from "@/lib/api/hooks/use-article-slug-suggestions";
+import { useHandleSuggestions } from "@/lib/secret-manager/hooks/use-chip";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -80,6 +83,18 @@ export function ArticleForm({ article }: { article?: Article }) {
   const updateArticle = useUpdateArticle();
   const isPending = createArticle.isPending || updateArticle.isPending;
   const isAuthenticated = session != null;
+
+  // `[[slug]]` autocomplete (ADR-0059 §3): the editor reports the open-token query, we search existing
+  // articles for matching slugs and feed the suggestions back. Reuses the standard article search —
+  // there is no dedicated slug-search endpoint (see the issue findings).
+  const [wikiLinkQuery, setWikiLinkQuery] = useState("");
+
+  // `{{ lazyit_secret.HANDLE }}` chip autocomplete (ADR-0061 §8): the editor reports the partial handle,
+  // we fetch matching handles (metadata only — never values) from the backend, scoped to the author's
+  // vault memberships. Omit if the author has no memberships (the query returns [] gracefully).
+  const [chipQuery, setChipQuery] = useState<string | undefined>(undefined);
+  const wikiLinkSuggestions = useArticleSlugSuggestions(wikiLinkQuery);
+  const { data: chipSuggestions } = useHandleSuggestions(chipQuery);
 
   const form = useForm<ArticleFormValues>({
     resolver: zodResolver(
@@ -242,6 +257,14 @@ export function ArticleForm({ article }: { article?: Article }) {
                 value={field.value ?? ""}
                 onChange={field.onChange}
                 invalid={fieldState.invalid}
+                wikiLink={{
+                  onQueryChange: setWikiLinkQuery,
+                  suggestions: wikiLinkSuggestions,
+                }}
+                secretChip={{
+                  onQueryChange: (q) => setChipQuery(q || undefined),
+                  suggestions: chipSuggestions ?? [],
+                }}
               />
               <FieldError errors={[fieldState.error]} />
             </Field>

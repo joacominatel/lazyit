@@ -55,7 +55,7 @@ describe('search document projectors', () => {
     });
   });
 
-  it('projectArticle keeps id/slug/title/excerpt/status/content (content searchable — ADR-0042)', () => {
+  it('projectArticle keeps id/slug/title/excerpt/status/content/categoryId (content searchable — ADR-0042; categoryId filterable — ADR-0060)', () => {
     expect(
       projectArticle({
         id: 'art1',
@@ -64,6 +64,7 @@ describe('search document projectors', () => {
         excerpt: 'how to vpn',
         status: 'PUBLISHED',
         content: '## Step 1\nOpen the VPN client and connect to the gateway.',
+        categoryId: 'folder1',
       }),
     ).toEqual({
       id: 'art1',
@@ -72,6 +73,7 @@ describe('search document projectors', () => {
       excerpt: 'how to vpn',
       status: 'PUBLISHED',
       content: '## Step 1\nOpen the VPN client and connect to the gateway.',
+      categoryId: 'folder1',
     });
   });
 

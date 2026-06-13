@@ -3,7 +3,7 @@ title: "ADR-0061: Secret Manager — zero-knowledge vaults beside the Knowledge 
 tags: [adr, secrets, security, crypto, knowledge-base]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-06-13
 deciders: [Joaquín Minatel]
 ---
 
@@ -13,8 +13,8 @@ deciders: [Joaquín Minatel]
 
 accepted
 
-> [!note] Decided — not yet integrated
-> Ratified 2026-06-11 in a CTO/CEO design session; this ADR records the decision. **No code is built yet** — implementation is tracked by #366. Status is `accepted` (the decision stands), not `proposed`.
+> [!note] Decided and implemented in #366
+> Ratified 2026-06-11 in a CTO/CEO design session. **Implemented in #366** (merged on `feat/secret-manager`): the five Prisma models (`SecretVault`, `SecretItem`, `VaultMembership`, `UserKeypair`, `SecretAuditLog`), the custodian backend (`apps/api/src/secret-manager/`), the `@lazyit/shared/crypto` subpath, the `apps/web` unlock/grant/peer-reset UI, and the KB masked-chip render path are all shipped. Entity notes: [[secret-vault]] · [[secret-item]] · [[vault-membership]] · [[user-keypair]] · [[secret-audit-log]].
 
 This is the **keystone ADR for the human Secret Manager** that sits beside the Knowledge Base v2
 ([[0059-kb-folders-links-and-import]] / [[0060-kb-folder-access-control]]). It is the deliberate

@@ -3,12 +3,12 @@ title: SecretVault
 tags: [domain, entity, secret-manager, security, secrets, crypto]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-06-13
 ---
 
 # SecretVault
 
-> ⚪ planned · Area: Secret Manager · Implementation order: tbd
+> ✅ built (#366, #421/#422/#423) · Area: Secret Manager · Under the "Conocimiento" pillar
 
 ## Purpose
 
@@ -26,7 +26,7 @@ rows, each holding the DEK **wrapped to that member's public key**. The server t
 - **has many** [[vault-membership]] rows — one per crypto member, each carrying the DEK wrapped to that
   member's [[user-keypair]] public key.
 - conceptually sits **beside** a Knowledge Base [[folder]] (the Secret Manager lives next to the KB,
-  [[0061-secret-manager-zero-knowledge]]); access to *enter* is gated by the planned `secret:read` /
+  [[0061-secret-manager-zero-knowledge]]); access to *enter* is gated by the `secret:read` /
   `secret:manage` capability, while the wrapped DEK is the **second, orthogonal** layer that lets a member
   *decrypt*.
 
@@ -42,7 +42,7 @@ rows, each holding the DEK **wrapped to that member's public key**. The server t
 - **Soft-revoke v1 = drop the membership.** Removing a member **DROPs** their [[vault-membership]] row so
   their wrapped DEK copy ceases to exist (forward secrecy of *new* writes is organizational, not
   retroactive — note it in the ADR).
-- **Two capability + crypto layers.** `secret:read` / `secret:manage` (planned, ADMIN-only by default —
+- **Two capability + crypto layers.** `secret:read` / `secret:manage` (ADMIN-only by default —
   the same separation-of-duties precedent as `workflow:secrets`) lets a user **enter** the Secret Manager;
   a wrapped DEK lets them **decrypt a given vault**. Both are required.
 
@@ -57,12 +57,46 @@ rows, each holding the DEK **wrapped to that member's public key**. The server t
 - The vault row **never** carries the DEK; the wrapped DEK lives on [[vault-membership]] (mirroring how
   [[workflow-secret]] keeps crypto material off any wire shape).
 
-## Not yet implemented
+## Columns (as built)
 
-Planned, not built. Full detail — crypto envelope, member-add/peer-reset flows, capability catalog
-addition (`secret:read` / `secret:manage`), and the exact column shape — lives in
-[[0061-secret-manager-zero-knowledge]].
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `String` — cuid() | Primary key ([[0005-id-strategy]]). |
+| `name` | `String` | Server-visible, non-secret vault name. Uniqueness among **live** rows is enforced by a raw-SQL partial unique index `WHERE "deletedAt" IS NULL` in the migration — **NOT** a PSL `@unique` ([[0041-soft-delete-reuse-and-restore]]). |
+| `createdAt` | `DateTime` | Set on insert. |
+| `updatedAt` | `DateTime` | Updated by Prisma on every write. |
+| `deletedAt` | `DateTime?` | Soft delete ([[0006-soft-delete-and-auditing]]). |
 
-Related: [[secret-item]] · [[vault-membership]] · [[user-keypair]] · [[workflow-secret]] · [[folder]] ·
-[[0061-secret-manager-zero-knowledge]] · [[0005-id-strategy]] · [[0006-soft-delete-and-auditing]] ·
-[[0041-soft-delete-reuse-and-restore]] · [[0031-logging-strategy]] · [[INVARIANTS]]
+DB table: `secret_vaults`.
+
+## Implementation status
+
+**Fully built (#366).**
+
+- **Data model (#421/#422):** the five tables (`SecretVault`, `SecretItem`, `VaultMembership`,
+  `UserKeypair`, `SecretAuditLog`), the live-only partial-unique indexes, and the `secret:read` /
+  `secret:manage` capability catalog addition.
+- **Custodian backend (#423, `apps/api/src/secret-manager/`):** the ciphertext-custodian REST surface
+  (`/secret-vaults` vault/item/member CRUD, `/secret-manager/keypair`, `/secret-manager/items` chip
+  resolution). Enforces the **two orthogonal authz layers** (RBAC `secret:read`/`secret:manage` ⟂
+  per-vault crypto membership); **human-only** (service principal rejected, `human-only.guard.ts`);
+  writes metadata-only `SecretAuditLog` rows on every mutation. Ships the **INV-10 architectural guard
+  test** (`inv-10.guard.spec.ts`) as a merge gate — asserts no `@noble`/crypto import, no
+  `SECRET_MANAGER_KEY`, no server-side reveal in the secret-manager module.
+- **Client-side crypto (`@lazyit/shared/crypto` + `apps/web`):** pure crypto primitives (X25519,
+  HKDF-SHA256, AES-256-GCM envelope, Crockford-base32 recovery key, Argon2id params) ship as the
+  `@lazyit/shared/crypto` subpath (ESM, no DOM/WASM — those stay in `apps/web`). The Argon2id WASM
+  wrapper (`hash-wasm`) and the React unlock/reveal/grant/peer-reset UI flows live in `apps/web`.
+- **Frontend (`apps/web/app/(app)/secrets/`):** vault list/create, unlock gate (passphrase → Argon2id),
+  items click-to-reveal (client decrypt, auto-mask), members grant/revoke, recovery-key shown-once,
+  peer-reset. Secret material kept in an in-memory session (`SecretManagerProvider` in the `(app)`
+  layout — **never persisted**).
+- **KB chip:** `{{ lazyit_secret.HANDLE }}` render plugin (post-sanitize, mirrors `[[slug]]`); double
+  gate (article ACL INV-9 AND crypto vault membership); handle autocomplete (metadata only).
+
+Full crypto detail: [[secret-manager-crypto-design]].
+
+Related: [[secret-item]] · [[vault-membership]] · [[user-keypair]] · [[secret-audit-log]] ·
+[[workflow-secret]] · [[folder]] · [[0061-secret-manager-zero-knowledge]] · [[0005-id-strategy]] ·
+[[0006-soft-delete-and-auditing]] · [[0041-soft-delete-reuse-and-restore]] · [[0031-logging-strategy]] ·
+[[INVARIANTS]]

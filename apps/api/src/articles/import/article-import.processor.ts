@@ -3,18 +3,19 @@ import type { SandboxedJob } from 'bullmq';
 import { PrismaClient } from '../../../generated/prisma/client';
 import type { ArticleRow } from '../../search/search.documents';
 import {
-  runImportJob,
-  type ImportPrismaClient,
+  runAnyImportJob,
+  type ZipImportPrismaClient,
 } from './create-imported-article';
 import type { ImportJobData, ImportJobResult } from './import-job.types';
 
 /**
  * BullMQ SANDBOXED processor for the `article-import` queue (ADR-0053). BullMQ forks this file into
  * a SEPARATE Node child process, launched with `--max-old-space-size` (see import-job.constants.ts /
- * articles.module.ts). A `.docx` decompression bomb expands far past the cap and OOMs THIS child —
- * BullMQ records the job as `failed` and respawns a fresh child; the API process is never touched
- * (SEC-002). md/txt are read verbatim and need no isolation, but flow through the same queue for a
- * uniform UX.
+ * articles.module.ts). A `.docx` OR `.zip` decompression bomb expands far past the cap and OOMs THIS
+ * child — BullMQ records the job as `failed` and respawns a fresh child; the API process is never
+ * touched (SEC-002). A `.zip` is the SAME ZIP threat class, with an extra entry-count/uncompressed-
+ * size quota in front of the heap cap (ADR-0059 §5). md/txt are read verbatim and need no isolation,
+ * but flow through the same queue for a uniform UX.
  *
  * The child has no Nest DI container, so it owns its own PrismaClient (the system of record stays
  * PostgreSQL) and a best-effort Meili indexer built from env. It must export the processor via
@@ -55,8 +56,10 @@ async function indexArticle(doc: ArticleRow): Promise<void> {
 const processor = async (
   job: SandboxedJob<ImportJobData>,
 ): Promise<ImportJobResult> => {
-  const prisma = getPrisma() as unknown as ImportPrismaClient;
-  return runImportJob(job.data, prisma, indexArticle);
+  const prisma = getPrisma() as unknown as ZipImportPrismaClient;
+  // Dispatch by job kind: a single file (.md/.txt/.docx) → one Article, a .zip → the bulk fan-out
+  // (selective extraction, folder mirroring, slug auto-suffix, link rewire — ADR-0059 §5).
+  return runAnyImportJob(job.data, prisma, indexArticle);
 };
 
 // A BullMQ sandboxed processor file must export the handler as the module's value. `export =` emits a

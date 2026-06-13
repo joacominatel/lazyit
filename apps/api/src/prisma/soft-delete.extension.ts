@@ -32,6 +32,14 @@ export const SOFT_DELETABLE_MODELS: ReadonlySet<string> = new Set([
   // Service accounts soft-delete = revoke (ADR-0048): the read filter hides revoked accounts from the
   // management list/detail by default; the guard + restore use the includeSoftDeleted escape hatch.
   'ServiceAccount',
+  // Secret Manager — zero-knowledge vaults (ADR-0061, #366). The three MUTABLE domain entities carry a
+  // `deletedAt` and soft-delete (vault/item delete = soft delete + name/handle freed for reuse via the
+  // live-only partial unique index; a keypair peer-reset replaces in place). DELIBERATELY EXCLUDED:
+  // `VaultMembership` (v1 revoke is a HARD DROP — a current-state join with no `deletedAt`) and
+  // `SecretAuditLog` (append-only — never updated or deleted). See docs/02-domain/entities/secret-*.md.
+  'SecretVault',
+  'SecretItem',
+  'UserKeypair',
 ]);
 
 // Read operations whose results must hide soft-deleted rows. `findUnique`/`findUniqueOrThrow` are

@@ -27,13 +27,27 @@ interface AwaitableTask {
   waitTask(): Promise<unknown>;
 }
 
-/** The single index surface the rebuild needs: batched adds (each awaited to completion). */
+/** The single index surface the rebuild needs: batched adds + filterable-attribute settings. */
 interface ReindexIndex {
   addDocuments(
     documents: SearchDocument[],
     options: { primaryKey: 'id' },
   ): AwaitableTask;
+  // ADR-0060 §5: declares which attributes can be FILTERED on (must be set before a `filter` query can
+  // use them; setting requires a re-index, which is exactly what this rebuild does). Used to make the
+  // article `categoryId` (home folder) a filterable attribute for folder-access scoping.
+  updateFilterableAttributes(attributes: string[]): AwaitableTask;
 }
+
+/**
+ * Per-index FILTERABLE attributes (ADR-0060 §5). Only `articles` declares one today: `categoryId`, the
+ * home folder the folder-access post-filter scopes on. The other indexes need none (empty = no
+ * filterable attribute). Applied on the freshly-built temp index before the swap so the live index
+ * always carries the right settings.
+ */
+const FILTERABLE_ATTRIBUTES: Partial<Record<SearchIndex, string[]>> = {
+  articles: ['categoryId'],
+};
 
 /**
  * The minimal Meilisearch client surface {@link reindexIndex} depends on — a structural subset of
@@ -119,6 +133,14 @@ export async function reindexIndex(
   await client.deleteIndexIfExists(tempUid);
   try {
     await client.createIndex(tempUid, { primaryKey: 'id' }).waitTask();
+
+    // Apply the per-index filterable attributes (ADR-0060 §5) on the temp index BEFORE the swap, so the
+    // live index always carries the right settings after a rebuild (the article `categoryId` becomes
+    // filterable for folder-access scoping).
+    const filterable = FILTERABLE_ATTRIBUTES[index];
+    if (filterable !== undefined) {
+      await client.index(tempUid).updateFilterableAttributes(filterable).waitTask();
+    }
 
     for (const batch of chunk(docs, REINDEX_BATCH_SIZE)) {
       await client

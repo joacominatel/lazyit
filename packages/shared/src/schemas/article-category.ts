@@ -19,20 +19,34 @@ export const ArticleCategorySchema = z.object({
   icon: z.string().nullable(),
   // Optional sort key for the sidebar/listings (lower first); null sorts last.
   order: int4().nullable(),
+  // Self-ref parent folder (ADR-0059 §1): null = a ROOT folder. The flat category became the root
+  // level of a tree. The model/table stay ArticleCategory / `article_categories` (the rename to
+  // Folder is a follow-up); only the tree column is added. See docs/02-domain/entities/folder.md.
+  parentId: z.cuid().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
 });
 
-/** Payload to create an ArticleCategory. `name` is unique (enforced by the DB). */
+/**
+ * Payload to create an ArticleCategory. `name` is unique PER PARENT among live rows (a partial
+ * unique index — ADR-0059 §1). `parentId` is optional: omitted → a root folder; a cuid nests this
+ * folder under another. A non-existent or soft-deleted parent is rejected by the service.
+ */
 export const CreateArticleCategorySchema = z.strictObject({
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().min(1).max(1000).optional(),
   icon: z.string().trim().min(1).max(100).optional(),
   order: int4({ example: 0 }).optional(),
+  // Optional parent folder (ADR-0059 §1). Absent = a root folder.
+  parentId: z.cuid().optional(),
 });
 
-/** Partial update; any subset of the editable fields (an empty body is rejected). */
+/**
+ * Partial update; any subset of the editable fields (an empty body is rejected). `parentId` is
+ * nullable here (unlike create): pass `null` to MOVE this folder to the root, or a cuid to reparent
+ * it. The service rejects a move that would create a cycle (a folder may not be its own ancestor).
+ */
 export const UpdateArticleCategorySchema = requireAtLeastOneKey(
   z
     .strictObject({
@@ -40,6 +54,7 @@ export const UpdateArticleCategorySchema = requireAtLeastOneKey(
       description: z.string().trim().min(1).max(1000),
       icon: z.string().trim().min(1).max(100),
       order: int4({ example: 0 }),
+      parentId: z.cuid().nullable(),
     })
     .partial(),
 );

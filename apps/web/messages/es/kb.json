@@ -8,6 +8,7 @@
     "searchPlaceholder": "Buscar por título…",
     "errorTitle": "No se pudieron cargar los artículos",
     "noMatchFilters": "Ningún artículo coincide con tus filtros.",
+    "noArticlesInFolder": "Aún no hay artículos en esta carpeta — abre una subcarpeta de arriba para seguir explorando.",
     "emptyTitle": "Aún no hay artículos",
     "emptyDescription": "Documenta lo que sabe tu equipo: runbooks, guías paso a paso, notas de onboarding. Escribe tu primer artículo o importa uno desde un archivo.",
     "emptyAction": "Escribe tu primer artículo",
@@ -19,7 +20,6 @@
   },
   "filters": {
     "statusLabelName": "Estado",
-    "categoryLabelName": "Categoría",
     "linkedToLabelName": "Destino",
     "assetLabelName": "Activos",
     "applicationLabelName": "Aplicaciones",
@@ -127,22 +127,139 @@
   },
   "import": {
     "title": "Importar un artículo",
-    "description": "Sube un archivo Markdown, de texto plano o Word (.docx). Solo se importa el texto: el archivo original no se almacena.",
+    "description": "Sube un archivo Markdown, de texto plano, Word (.docx) o ZIP (.zip). Solo se importa el texto: el archivo original no se almacena.",
     "fileLabel": "Archivo",
-    "fileHint": "Acepta .md, .txt y .docx.",
+    "fileHint": "Acepta .md, .txt, .docx y .zip (importación en lote).",
     "categoryLabel": "Categoría",
     "categorySelect": "Selecciona una categoría",
     "categoryNone": "Aún no hay categorías",
     "statusLabel": "Estado",
     "submit": "Importar",
     "importing": "Importando…",
-    "processingHint": "Importando tu archivo. Los documentos de Word grandes pueden tardar un momento.",
+    "processingHint": "Importando tu archivo. Los archivos grandes y los ZIP pueden tardar un momento.",
     "toast": {
       "signInRequired": "Debes iniciar sesión para importar artículos",
       "chooseFile": "Elige un archivo para importar",
       "chooseCategory": "Elige una categoría",
       "imported": "Artículo importado",
-      "importError": "No se pudo importar el archivo"
+      "importError": "No se pudo importar el archivo",
+      "batchImported": "{count, plural, one {# artículo importado} other {# artículos importados}}"
+    },
+    "batch": {
+      "title": "Importación completada",
+      "summary": "{created, plural, one {# artículo creado} other {# artículos creados}}{renamed, plural, =0 {} one {, # renombrado} other {, # renombrados}}{skipped, plural, =0 {} one {, # omitido} other {, # omitidos}}",
+      "foldersCreated": "{count, plural, one {# carpeta creada} other {# carpetas creadas}}",
+      "linksResolved": "{count, plural, one {# enlace wiki resuelto} other {# enlaces wiki resueltos}}",
+      "createdHeading": "Creados",
+      "renamedHeading": "Renombrados",
+      "skippedHeading": "Omitidos",
+      "renamedNote": "Slug ya ocupado — se añadió un sufijo automático para evitar conflictos.",
+      "originalSlug": "Solicitado: {slug}",
+      "skipReason": {
+        "directory": "Entrada de carpeta (sin contenido)",
+        "dotfile": "Archivo oculto (dotfile)",
+        "unsupported-type": "Tipo de archivo no compatible",
+        "empty": "Archivo vacío"
+      },
+      "showAll": "Mostrar todos ({count})",
+      "collapse": "Contraer",
+      "closeAriaLabel": "Cerrar resultados de importación",
+      "done": "Hecho"
+    }
+  },
+  "folders": {
+    "treeLabel": "Explorar carpetas",
+    "allArticles": "Todos los artículos",
+    "empty": "Aún no hay carpetas",
+    "expand": "Expandir {name}",
+    "collapse": "Contraer {name}",
+    "subfoldersLabel": "Subcarpetas",
+    "childFolderCount": "{count, plural, one {# subcarpeta} other {# subcarpetas}}",
+    "articleCount": "{count, plural, one {# artículo} other {# artículos}}",
+    "emptyFolder": "Carpeta vacía",
+    "delete": {
+      "menuTitle": "Acciones de carpeta",
+      "menuAriaLabel": "Acciones para {name}",
+      "action": "Eliminar carpeta",
+      "title": "¿Eliminar esta carpeta?",
+      "warning": "<b>{name}</b> y todo lo que contiene se eliminará de la base de conocimiento.",
+      "subfolderWarning": "Esto también elimina {count, plural, one {# subcarpeta} other {# subcarpetas}} y todos sus artículos.",
+      "irreversibleNote": "Los artículos de estas carpetas se eliminan de la base de conocimiento. Solo un administrador puede deshacerlo restaurándolos en la base de datos.",
+      "confirm": "Eliminar carpeta",
+      "cancel": "Cancelar",
+      "toast": {
+        "deleted": "Se eliminaron {folders, plural, one {# carpeta} other {# carpetas}} y {articles, plural, one {# artículo} other {# artículos}}",
+        "error": "No se pudo eliminar la carpeta"
+      }
+    }
+  },
+  "references": {
+    "panelTitle": "Referencias",
+    "loading": "Cargando referencias…",
+    "empty": "Aún ningún otro artículo referencia a este. Menciónalo como un enlace wiki [[slug]] desde otro artículo para que aparezca aquí."
+  },
+  "aliases": {
+    "panelTitle": "También en",
+    "add": "Añadir a carpeta",
+    "loading": "Cargando carpetas…",
+    "empty": "Este artículo solo vive en su carpeta principal. Añádelo a otra carpeta para que también aparezca allí — un alias nunca cambia su carpeta principal ni quién puede verlo.",
+    "removeAriaLabel": "Quitar de la carpeta",
+    "unknownFolder": "Carpeta desconocida",
+    "dialogTitle": "Añadir a una carpeta",
+    "dialogDescription": "Coloca este artículo en otra carpeta para que también aparezca allí al explorar. Un alias es solo de navegación: no mueve la carpeta principal del artículo ni cambia quién puede verlo.",
+    "folderLabel": "Carpeta",
+    "folderSelect": "Selecciona una carpeta",
+    "folderNone": "No hay otras carpetas disponibles",
+    "chooseFolderError": "Elige una carpeta.",
+    "submit": "Añadir",
+    "toast": {
+      "added": "Añadido a la carpeta",
+      "addError": "No se pudo añadir a la carpeta",
+      "removed": "Quitado de la carpeta",
+      "removeError": "No se pudo quitar de la carpeta"
+    }
+  },
+  "wikiLinks": {
+    "unresolvedTooltip": "Documento aún no creado"
+  },
+  "access": {
+    "statePublic": "Público",
+    "stateRestricted": "Restringido",
+    "stateInheritedRestricted": "Restringido (heredado de {name})",
+    "makePublic": "Hacer público",
+    "publicHint": "Visible para todos los miembros del equipo autenticados.",
+    "inheritedRestrictedHint": "Esta carpeta está restringida porque hereda una restricción de {name}. Añade una regla abajo para restringir aún más el acceso.",
+    "restrictedTooltip": "Restringido — solo usuarios específicos pueden leer esta carpeta",
+    "restrictedAriaLabel": "Carpeta restringida",
+    "inheritedRestrictedTooltip": "Restringido — heredado de {name}",
+    "inheritedRestrictedAriaLabel": "Carpeta restringida (heredada de {name})",
+    "editRulesAriaLabel": "Editar reglas de acceso para {name}",
+    "editRulesTitle": "Editar reglas de acceso",
+    "editorTitle": "Reglas de acceso",
+    "addRuleKindLabel": "Tipo de regla",
+    "addRulePlaceholder": "Añadir una regla…",
+    "addRule": "Añadir regla",
+    "removeRuleAriaLabel": "Eliminar regla",
+    "kindUsers": "Usuarios",
+    "kindRole": "Rol",
+    "kindAppGrant": "Acceso a aplicación",
+    "kindAssetAssignment": "Asignados al activo",
+    "roleLabel": {
+      "ADMIN": "Administradores",
+      "MEMBER": "Miembros",
+      "VIEWER": "Lectores"
+    },
+    "selectRole": "Selecciona un rol",
+    "selectApplication": "Selecciona una aplicación",
+    "selectAsset": "Selecciona un activo",
+    "noUsers": "Aún no hay usuarios.",
+    "noApplications": "Aún no hay aplicaciones.",
+    "noAssets": "Aún no hay activos.",
+    "save": "Guardar",
+    "discard": "Descartar",
+    "toast": {
+      "saved": "Reglas de acceso guardadas",
+      "saveError": "No se pudieron guardar las reglas de acceso"
     }
   }
 }

@@ -17,6 +17,7 @@ import notifications from "./notifications.json";
 import settings from "./settings.json";
 import shared from "./shared.json";
 import users from "./users.json";
+import secrets from "./secrets.json";
 import workflow from "./workflow.json";
 
 const messages = {
@@ -35,6 +36,7 @@ const messages = {
   auth,
   workflow,
   notifications,
+  secrets,
 };
 
 export default messages;

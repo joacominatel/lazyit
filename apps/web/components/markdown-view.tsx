@@ -6,6 +6,16 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "@/components/markdown-code-block";
 import { MermaidDiagram } from "@/components/markdown-mermaid";
+import {
+  rehypeWikiLinks,
+  WIKI_LINK_TAG,
+} from "@/components/markdown-wiki-link";
+import { WikiLink } from "@/components/markdown-wiki-link-view";
+import {
+  rehypeSecretChips,
+  SECRET_CHIP_TAG,
+} from "@/components/markdown-secret-chip";
+import { SecretChip } from "@/components/markdown-secret-chip-view";
 import { cn } from "@/lib/utils";
 
 /**
@@ -70,6 +80,36 @@ const MARKDOWN_COMPONENTS: Components = {
 };
 
 /**
+ * The `[[slug]]` wiki-link element minted by `rehypeWikiLinks` AFTER sanitize (ADR-0059 §3) — added
+ * to the components map separately because react-markdown's `Components` type only knows HTML tags.
+ * It runs in the same post-sanitize slot as the mermaid/code renderers, so the schema stays untouched;
+ * react-markdown passes the element's hast properties (`slug`, `label`) through as props at runtime.
+ */
+const WIKI_LINK_COMPONENTS = {
+  [WIKI_LINK_TAG]: ({ slug, label }: { slug?: string; label?: string }) => (
+    <WikiLink slug={slug} label={label} />
+  ),
+} as Components;
+
+/**
+ * The `{{ lazyit_secret.HANDLE }}` chip element minted by `rehypeSecretChips` AFTER sanitize
+ * (ADR-0061 §8) — same post-sanitize slot as wiki-links and code renderers. The component handles
+ * all three chip states (locked / broken / revealed) and drives the session unlock gate when
+ * needed. `handle` is the only data carried; no value is ever embedded in the Markdown source.
+ */
+const SECRET_CHIP_COMPONENTS = {
+  [SECRET_CHIP_TAG]: ({ handle }: { handle?: string }) => (
+    <SecretChip handle={handle} />
+  ),
+} as Components;
+
+const ALL_COMPONENTS: Components = {
+  ...MARKDOWN_COMPONENTS,
+  ...WIKI_LINK_COMPONENTS,
+  ...SECRET_CHIP_COMPONENTS,
+};
+
+/**
  * Renders Markdown (GFM: tables, task lists, strikethrough, autolinks) as styled
  * HTML via the Tailwind typography `prose` classes. Any raw/embedded HTML is run
  * through `rehype-sanitize` with the strict allow-list above, so the output is
@@ -99,8 +139,11 @@ export function MarkdownView({
     >
       <Markdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeSanitize, SANITIZE_SCHEMA]]}
-        components={MARKDOWN_COMPONENTS}
+        // `rehypeWikiLinks` runs AFTER `rehypeSanitize` (ADR-0029 / ADR-0059 §3): the sanitizer first
+        // strips all untrusted HTML, then the trusted wiki-link pass adds `[[slug]]` link markup the
+        // schema never has to allow — the same post-sanitize slot the mermaid/code renderers use.
+        rehypePlugins={[[rehypeSanitize, SANITIZE_SCHEMA], rehypeWikiLinks, rehypeSecretChips]}
+        components={ALL_COMPONENTS}
       >
         {content}
       </Markdown>

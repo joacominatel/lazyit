@@ -3,22 +3,26 @@ title: ArticleCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-13
 ---
 
 # ArticleCategory
 
 > 🟢 implemented · Area: Knowledge Base · Implementation order: 7
 
-> [!note] Evolving into [[folder]] (KB v2)
-> [[0059-kb-folders-links-and-import]] evolves this **flat** `ArticleCategory` into the hierarchical
-> [[folder]]: a self-ref `parentId` gives a tree, and the existing **required one-category-per-article
-> FK becomes the one home [[folder]] per article**. Folder-name uniqueness becomes per-parent (a
-> live-only PARTIAL unique index — [[0041-soft-delete-reuse-and-restore]]). The folder is also the
-> **access boundary** ([[0060-kb-folder-access-control]]) — a bounded, named data-scoping axis layered
+> [!note] Now hierarchical — the [[folder]] (KB v2)
+> [[0059-kb-folders-links-and-import]] evolved this category into the hierarchical [[folder]]
+> (shipped #392): a self-ref `parentId` gives a tree, and the existing **required
+> one-category-per-article FK is the one home [[folder]] per article**. Folder-name uniqueness is now
+> per-parent (a live-only PARTIAL unique index on `(parentId, name)` — [[0041-soft-delete-reuse-and-restore]]),
+> with a DFS **cycle guard** and a **no-silent-orphan** child-folder 409. The **model and table keep
+> the names `ArticleCategory` / `article_categories`** and the endpoints stay `/article-categories`
+> (the rename to `Folder` / `folders` is a follow-up). The folder is also the **access boundary**
+> ([[0060-kb-folder-access-control]], shipped #404) — a bounded, named data-scoping axis layered
 > on the unchanged `article:read` capability, a deliberate carve-out from the per-record-ACL rejection
-> of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]. The content below describes the current flat
-> model; see [[folder]] for the evolved entity.
+> of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]. #404 added a jsonb `accessRules` column (the
+> OR-combined closed rule vocabulary) + the DB-first read evaluator. The fields/rules below add the
+> `parentId` tree and `accessRules`; see [[folder]] for the full hierarchical entity.
 
 ## Purpose
 
@@ -29,16 +33,29 @@ and soft-deleted from the app; the seed set is just an initial, non-special list
 ## Relationships
 
 - **groups** N [[article]]s — via `Article.categoryId`, a **required** FK with `onDelete: Restrict`.
+- **parent of / child of** other categories (folders) via the self-ref `parentId` (#392; nullable, a
+  root has none; `onDelete: SetNull` hard-delete safety net).
 
 ## Business rules
 
-- `name` is unique among **live** rows only; a soft-deleted name is freed for reuse / restore
-  ([[0041-soft-delete-reuse-and-restore]]).
+- `name` is unique among **live** rows only, scoped to the **parent** (#392) — a live-only PARTIAL
+  unique index on `(parentId, name) WHERE "deletedAt" IS NULL`, `NULLS NOT DISTINCT` so the root level
+  still rejects duplicate names ([[0041-soft-delete-reuse-and-restore]]). A soft-deleted name is freed
+  for reuse / restore within its parent.
+- **No cycles** (#392) — a folder may not be its own ancestor; a reparent that would close a loop is a
+  **400** (a DFS walk up the chain, like the manager chain — [[0058-user-manager-and-clone-actions]]).
 - Seeded with eight starter categories (Networking, Servers, Access Management, Datacenter,
   Procedures, Troubleshooting, Onboarding, Tools) with heroicon `icon`s and a `order`. The seed is
   idempotent (find-among-live-then-create, never clobbers edits) — see `apps/api/prisma/seed.ts`.
 - **Deleting a category that still has live articles is refused with `409`.** `categoryId` is a
   required FK, so orphaning is impossible; reassign or delete those articles first.
+- **Deleting a category that still has live CHILD folders is refused with `409`** (#392) — a non-empty
+  subtree is never silently orphaned; reparent or delete the children first.
+- **Cascade delete** (`DELETE /:id?cascade=true`, #415, `category:delete` ADMIN-only) — soft-deletes
+  the folder, **all descendant folders** (full BFS subtree), and **all articles** in the subtree in a
+  single `$transaction`. Hard-deletes all [[article-alias]] rows in the subtree (folder-side) and any
+  article-side aliases whose article was just deleted. Returns `{ deletedFolders, deletedArticles }`.
+  The author-only article gate is bypassed (ADMIN folder operation). See [[folder]] for full rules.
 - Soft delete ([[0006-soft-delete-and-auditing]]).
 
 > [!note] The delete guard is application logic, not the FK
@@ -62,7 +79,9 @@ Prisma model `ArticleCategory` → table `article_categories`. Validation schema
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `cuid` | `@default(cuid())`. |
-| `name` | `string` | Required. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted name is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
+| `name` | `string` | Required. Unique among **live** rows only, **per parent** (#392) — a PARTIAL unique index on `(parentId, name) WHERE "deletedAt" IS NULL`, `NULLS NOT DISTINCT` (raw SQL; no `@unique`), so a soft-deleted name is freed within its parent ([[0041-soft-delete-reuse-and-restore]]). |
+| `parentId` | `cuid?` | self-ref FK → ArticleCategory (#392). `null` = a **root** folder. `onDelete: SetNull` (hard-delete safety net). `@@index([parentId])`. |
+| `accessRules` | `jsonb?` | Folder access boundary (#404, [[0060-kb-folder-access-control]] §3). `null`/empty = **PUBLIC**; else an OR-combined list of the CLOSED rule vocabulary (`users`/`role`/`appGrant`/`assetAssignment`, validated by `FolderAccessRulesSchema`). NOT a per-article ACL — articles inherit their home folder's rule. Set via `PUT /:id/access-rules` (`settings:manage`). |
 | `description` | `string?` | optional. |
 | `icon` | `string?` | a heroicon name for the web UI (e.g. "ServerStackIcon"). Not validated. |
 | `order` | `int?` | optional sort key for sidebar/listings; nulls sort last. |
@@ -73,10 +92,15 @@ Prisma model `ArticleCategory` → table `article_categories`. Validation schema
 ## Endpoints
 
 `apps/api/src/article-categories/` (`ArticleCategoriesModule`): `GET /article-categories` (excludes
-soft-deleted, ordered by `order` then `name`), `GET /article-categories/:id`, `POST`,
-`PATCH /:id`, `DELETE /:id` (soft delete; `409` if the category still has live articles),
-`POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]). Bodies
-validated against the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).
+soft-deleted, ordered by `order` then `name`), `GET /article-categories/:id`, `POST` (optional
+`parentId` → nest; absent = root; `400` if the parent isn't live), `PATCH /:id` (`parentId` nullable —
+`null` moves to root, a cuid reparents; `400` on a cycle), `DELETE /:id` (soft delete; `409` if the
+folder still has live articles **or** live child folders; add `?cascade=true` for the full subtree
+cascade returning `{ deletedFolders, deletedArticles }` — `category:delete` ADMIN-only, #415),
+`POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]), and
+`PUT /:id/access-rules` (#404, `settings:manage` ADMIN-only — set/clear the folder's access rules;
+body `{ accessRules: <list> | null }`, [[0060-kb-folder-access-control]]). Bodies validated against
+the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).
 
 Related: [[article]] · [[folder]] · [[asset-category]] · [[shared-package]] ·
 [[0021-knowledge-base-design]] · [[0059-kb-folders-links-and-import]] ·
