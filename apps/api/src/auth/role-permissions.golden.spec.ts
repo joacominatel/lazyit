@@ -44,6 +44,7 @@ const ADMIN_ONLY_READS_EXPECTED: Permission[] = [
   'logs:read',
   'workflow:read',
   'notification:read',
+  'secret:read', // human Secret Manager (ADR-0061 §7) — zero-knowledge vaults; vault metadata access is sensitive
 ];
 
 /** Build the documented matrix per the ADR-0040 tiers, sorted to the catalog order. */
@@ -137,6 +138,18 @@ describe('RolePermission golden matrix (ADR-0046)', () => {
     expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain('logs:read' as Permission);
     expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain('logs:read' as Permission);
     expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('logs:read' as Permission);
+  });
+
+  it('secret domain (ADR-0061 §7): secret:read and secret:manage are ADMIN-only — MEMBER and VIEWER hold neither', () => {
+    // secret:read is an admin-only read (listed in ADMIN_ONLY_READS_EXPECTED, same posture as logs:read).
+    // secret:manage is a coarse verb — neither :read nor :write — so it is ADMIN-only automatically.
+    // Both are NEVER seeded to MEMBER or VIEWER (the two-layer authorization model, ADR-0061 §7).
+    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain('secret:read' as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain('secret:manage' as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain('secret:read' as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain('secret:manage' as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('secret:read' as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('secret:manage' as Permission);
   });
 
   it('MEMBER never holds a :delete or a coarse capability verb', () => {

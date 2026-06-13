@@ -12,14 +12,16 @@ import type {
   ImportJobAccepted,
   ImportJobState,
   ImportJobStatus,
+  ZipImportResult,
 } from '@lazyit/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isServicePrincipal, type Principal } from '../../auth/principal';
 import {
+  ALL_IMPORT_EXTENSIONS,
   extensionOf,
+  isZipImport,
   maxImportBytes,
   maxImportMb,
-  SUPPORTED_EXTENSIONS,
 } from '../article-import';
 import {
   ARTICLE_IMPORT_JOB_NAME,
@@ -33,11 +35,13 @@ import type {
 } from './import-job.types';
 
 /**
- * Async article import (ADR-0053). The HTTP request does only fast, safe validation
+ * Async article import (ADR-0053 / ADR-0059 §5). The HTTP request does only fast, safe validation
  * (author/type/size/category) and then enqueues a job, returning 202 + a `jobId`; the heavy,
- * potentially hostile `.docx` parse and the Article create happen later in the sandboxed worker
- * child (SEC-002). The web client polls {@link getStatus}. PostgreSQL is the system of record; the
- * queue is only transport, so the polling state is read straight from BullMQ.
+ * potentially hostile `.docx`/`.zip` parse and the Article create(s) happen later in the sandboxed
+ * worker child (SEC-002). A `.zip` rides the SAME queue + child + bomb-guard class but FANS OUT to
+ * many articles (selective extraction + folder mirroring); its per-item outcome is surfaced under
+ * `ImportJobStatus.batch`. The web client polls {@link getStatus}. PostgreSQL is the system of
+ * record; the queue is only transport, so the polling state is read straight from BullMQ.
  */
 @Injectable()
 export class ArticleImportService {
@@ -49,8 +53,9 @@ export class ArticleImportService {
   /**
    * Validate the upload SYNCHRONOUSLY (a human author, a supported extension, the size cap, a live
    * category), then enqueue an `article-import` job. Returns the `jobId` the client polls. The file
-   * bytes ride along base64-encoded — already ≤ MAX_IMPORT_SIZE_MB; the dangerous expansion happens
-   * in the child.
+   * bytes ride along base64-encoded — already ≤ MAX_IMPORT_SIZE_MB; the dangerous expansion (a
+   * `.docx` decompression OR a `.zip` unpack) happens in the child. A `.zip` is tagged `kind: 'zip'`
+   * so the worker takes the bulk fan-out path (ADR-0059 §5).
    */
   async enqueue(
     file: UploadedImportFile | undefined,
@@ -62,20 +67,24 @@ export class ArticleImportService {
       throw new BadRequestException('A file is required');
     }
     // Defense in depth behind the interceptor's hard cap (SEC-001): a limit-compliant upload only.
+    // This bounds the COMPRESSED upload; a `.zip`'s uncompressed expansion is bounded separately by
+    // the worker's entry-count/uncompressed-size quota inside the sandboxed child (ADR-0059 §5).
     if (file.size > maxImportBytes()) {
       throw new BadRequestException(
         `File exceeds the ${maxImportMb()} MB import limit`,
       );
     }
     const ext = extensionOf(file.originalname);
-    if (!(SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) {
+    if (!(ALL_IMPORT_EXTENSIONS as readonly string[]).includes(ext)) {
       throw new BadRequestException(
-        `Unsupported file type "${ext ? '.' + ext : '(none)'}". Supported: ${SUPPORTED_EXTENSIONS.map(
+        `Unsupported file type "${ext ? '.' + ext : '(none)'}". Supported: ${ALL_IMPORT_EXTENSIONS.map(
           (e) => '.' + e,
         ).join(', ')}.`,
       );
     }
-    // Fail fast on a bad category — the worker would otherwise fail the job on the FK.
+    const isZip = isZipImport(file.originalname);
+    // Fail fast on a bad category — the worker would otherwise fail the job on the FK. For a `.zip`
+    // this is the ROOT home folder under which the mirrored tree is grafted.
     await this.assertCategoryUsable(fields.categoryId);
 
     const data: ImportJobData = {
@@ -83,9 +92,12 @@ export class ArticleImportService {
       contentBase64: file.buffer.toString('base64'),
       categoryId: fields.categoryId,
       status: fields.status,
-      ...(fields.title !== undefined ? { title: fields.title } : {}),
-      ...(fields.slug !== undefined ? { slug: fields.slug } : {}),
+      // title/slug apply only to a single-file import; a `.zip` derives each per entry, so they are
+      // dropped for the bulk path.
+      ...(!isZip && fields.title !== undefined ? { title: fields.title } : {}),
+      ...(!isZip && fields.slug !== undefined ? { slug: fields.slug } : {}),
       authorId,
+      ...(isZip ? { kind: 'zip' as const } : {}),
     };
 
     // Enqueue. With `enableOfflineQueue: false` on the broker connection (issue #257), a queue.add
@@ -118,9 +130,11 @@ export class ArticleImportService {
   }
 
   /**
-   * Poll an import job. 404 for an unknown id. `articleId` is set only once completed; `error` is a
-   * short, PERMANENT-failure message only once failed (never "try again" — a parse/bomb failure
-   * won't succeed on a retry).
+   * Poll an import job. 404 for an unknown id. On a completed SINGLE-file import `articleId` is set;
+   * on a completed `.zip` import `batch` carries the per-item outcome (created/renamed/skipped) while
+   * `articleId` stays null (a bulk import has no single id). `error` is a short, PERMANENT-failure
+   * message only once failed (never "try again" — a parse/bomb/over-quota failure won't succeed on a
+   * retry). (ADR-0059 §5)
    */
   async getStatus(jobId: string): Promise<ImportJobStatus> {
     const job = await this.queue.getJob(jobId);
@@ -128,13 +142,19 @@ export class ArticleImportService {
       throw new NotFoundException(`Import job ${jobId} not found`);
     }
     const state = this.mapState(await job.getState());
-    const articleId =
+    const result =
       state === 'completed'
-        ? ((job.returnvalue as ImportJobResult | undefined)?.articleId ?? null)
-        : null;
+        ? (job.returnvalue as ImportJobResult | undefined)
+        : undefined;
+    // Discriminate the result by `kind`. A legacy single result has no `kind` ⇒ treat as single.
+    const isZipResult = result?.kind === 'zip';
+    const articleId =
+      result && !isZipResult ? (result.articleId ?? null) : null;
+    const batch: ZipImportResult | null =
+      result && isZipResult ? result.batch : null;
     const error =
       state === 'failed' ? this.friendlyError(job.failedReason) : null;
-    return { jobId, state, articleId, error };
+    return { jobId, state, articleId, batch, error };
   }
 
   /** Collapse BullMQ's internal states to the four the client observes. */
@@ -170,7 +190,15 @@ export class ArticleImportService {
       return 'The file has no readable text content.';
     }
     if (r.includes('Unsupported file type')) {
-      return 'That file type is not supported. Use a .md, .txt or .docx file.';
+      return 'That file type is not supported. Use a .md, .txt, .docx or .zip file.';
+    }
+    // The `.zip` bomb-guard QUOTA arm (ADR-0059 §5): too many entries or too much uncompressed text.
+    // Permanent — the archive itself is over the limit, not a transient hiccup.
+    if (r.includes('import limit') && (r.includes('entries') || r.includes('uncompressed'))) {
+      return 'The .zip archive is too large to import — it has too many files or too much uncompressed content.';
+    }
+    if (r.includes('not a zip file') || r.includes('read the .zip')) {
+      return 'We could not read this .zip archive. It may be corrupt or not a valid zip file.';
     }
     // Everything else — a corrupt/malformed .docx, a decompression bomb that OOM-killed the child,
     // or any other parse failure — is permanent and not safe to detail.

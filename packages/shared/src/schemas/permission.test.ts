@@ -125,6 +125,42 @@ describe("Notification permission (in-app notification bell, ADR-0056)", () => {
   });
 });
 
+describe("Secret permissions (human Secret Manager, ADR-0061)", () => {
+  const SECRET_PERMISSIONS = [
+    "secret:read",
+    "secret:manage",
+  ] as const satisfies readonly Permission[];
+
+  test("the `secret` domain is in the catalog with exactly two verbs: read + manage", () => {
+    expect(PERMISSION_DOMAINS).toContain("secret");
+    for (const p of SECRET_PERMISSIONS) {
+      expect(PERMISSIONS).toContain(p);
+    }
+    // No :write or :delete — vault and item mutation flows through :manage (coarse verb),
+    // mirroring the workflow domain's coarse-verb model.
+    expect(PERMISSIONS).not.toContain("secret:write" as Permission);
+    expect(PERMISSIONS).not.toContain("secret:delete" as Permission);
+  });
+
+  test("secret:manage is DISTINCT from secret:read (separation of duties, ADR-0061 §7)", () => {
+    expect(PERMISSIONS).toContain("secret:manage" as Permission);
+    expect(PERMISSIONS).toContain("secret:read" as Permission);
+    expect("secret:manage").not.toBe("secret:read");
+  });
+
+  test("secret:read is an admin-only read (same posture as logs:read / workflow:read)", () => {
+    expect(ADMIN_ONLY_READS).toContain("secret:read" as Permission);
+  });
+
+  test("SAFE DEFAULT: every secret verb is ADMIN-only — MEMBER/VIEWER hold none", () => {
+    for (const p of SECRET_PERMISSIONS) {
+      expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain(p);
+      expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain(p);
+      expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain(p);
+    }
+  });
+});
+
 describe("RolePermissionMatrix wire shape", () => {
   test("accepts a Role → Permission[] record for all three roles", () => {
     const matrix = {
@@ -222,15 +258,16 @@ describe("DEFAULT_ROLE_PERMISSIONS (the seed source of truth)", () => {
     }
   });
 
-  test("the admin-only reads are EXACTLY logs:read + workflow:read + notification:read, and seeded to ADMIN only", () => {
-    // logs:read is the first admin-only read (issue #175); workflow:read joins it (epic #248) and
-    // notification:read joins it (ADR-0056, the bell), all with the same posture — strictly more
-    // restrictive than the pre-tightening: excluded from BOTH MEMBER and VIEWER, held only by ADMIN's
-    // full catalog.
+  test("the admin-only reads are EXACTLY logs:read + workflow:read + notification:read + secret:read, and seeded to ADMIN only", () => {
+    // logs:read is the first admin-only read (issue #175); workflow:read joins it (epic #248),
+    // notification:read joins it (ADR-0056, the bell), and secret:read joins it (ADR-0061 §7, the
+    // human Secret Manager) — all with the same posture: strictly more restrictive than the
+    // pre-tightening: excluded from BOTH MEMBER and VIEWER, held only by ADMIN's full catalog.
     expect([...ADMIN_ONLY_READS]).toEqual([
       "logs:read",
       "workflow:read",
       "notification:read",
+      "secret:read",
     ]);
     for (const p of ADMIN_ONLY_READS) {
       expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain(p);

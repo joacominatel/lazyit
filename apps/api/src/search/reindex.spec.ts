@@ -8,6 +8,7 @@ import type { SearchDocument } from './search.documents';
 type Op =
   | { kind: 'createIndex'; uid: string }
   | { kind: 'addDocuments'; uid: string; ids: string[] }
+  | { kind: 'updateFilterableAttributes'; uid: string; attributes: string[] }
   | { kind: 'swap'; indexes: [string, string] }
   | { kind: 'deleteIndexIfExists'; uid: string };
 
@@ -48,6 +49,10 @@ function fakeClient(opts: FakeOptions = {}): {
           });
           if (opts.failAddDocuments) throw new Error('meili add failed');
         }),
+      updateFilterableAttributes: (attributes: string[]) =>
+        task(() => {
+          ops.push({ kind: 'updateFilterableAttributes', uid, attributes });
+        }),
     }),
     swapIndexes: (params) =>
       task(() => {
@@ -79,6 +84,38 @@ describe('reindexIndex (authoritative rebuild)', () => {
       { kind: 'swap', indexes: ['users', TEMP] }, // atomic, zero-downtime
       { kind: 'deleteIndexIfExists', uid: TEMP }, // dispose temp (now holds the stale docs)
     ]);
+  });
+
+  it('declares categoryId filterable on the ARTICLES temp index before the swap (ADR-0060 §5)', async () => {
+    const { client, ops } = fakeClient();
+    const ARTICLES_TEMP = 'articles__reindex_tmp';
+
+    await reindexIndex(client, 'articles', docs('art1'));
+
+    const filterableOp = ops.find(
+      (op) => op.kind === 'updateFilterableAttributes',
+    );
+    expect(filterableOp).toEqual({
+      kind: 'updateFilterableAttributes',
+      uid: ARTICLES_TEMP,
+      attributes: ['categoryId'],
+    });
+    // Settings are applied on the TEMP index, and BEFORE its docs are added and BEFORE the swap.
+    const filterableIdx = ops.findIndex(
+      (op) => op.kind === 'updateFilterableAttributes',
+    );
+    const addIdx = ops.findIndex((op) => op.kind === 'addDocuments');
+    const swapIdx = ops.findIndex((op) => op.kind === 'swap');
+    expect(filterableIdx).toBeLessThan(addIdx);
+    expect(filterableIdx).toBeLessThan(swapIdx);
+  });
+
+  it('does NOT set filterable attributes on an index that declares none (users)', async () => {
+    const { client, ops } = fakeClient();
+    await reindexIndex(client, 'users', docs('u1'));
+    expect(ops.some((op) => op.kind === 'updateFilterableAttributes')).toBe(
+      false,
+    );
   });
 
   it('adds documents only to the temp index, never directly to the live index (ghost eviction)', async () => {

@@ -2,11 +2,20 @@ import { Test } from '@nestjs/testing';
 import { getLoggerToken, PinoLogger } from 'nestjs-pino';
 import { Meilisearch } from 'meilisearch';
 import { SearchService } from './search.service';
+import { FolderAccessService } from '../article-categories/folder-access.service';
+import type { VisibleFolders } from '../article-categories/folder-access.service';
 
 // Mock the Meili client with an explicit factory: jest can't transform the ESM `meilisearch`
 // package, so we must never load the real module. The constructor is a jest mock whose
 // implementation each test sets to return a fake client (index()/multiSearch()).
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
+// SearchService now transitively imports the generated Prisma client (via FolderAccessService →
+// PrismaService for the ADR-0060 §5 post-filter); jest can't transform its ESM `.js` imports.
+// FolderAccessService is replaced by a mock below; this stub stops the real client from loading.
+jest.mock('../../generated/prisma/client', () => ({
+  PrismaClient: class {},
+  Prisma: {},
+}));
 
 // Typed handles for the mocked index methods (addDocuments/deleteDocument return a thenable in the
 // real client; here they're plain jest mocks whose resolved/rejected value we control per test).
@@ -28,14 +37,24 @@ const loggerMock = (): { info: jest.Mock; error: jest.Mock } => ({
   error: jest.fn(),
 });
 
-async function buildService(logger: {
-  info: jest.Mock;
-  error: jest.Mock;
-}): Promise<SearchService> {
+// The folder-access evaluator is mocked; the ADR-0060 §5 article search post-filter calls
+// visibleFolderIds(principal). Defaults to 'ALL' (ADMIN-equivalent: every hit kept) so the pre-0060
+// search tests are unchanged; the dedicated leak test overrides it to a Set.
+function folderAccessMock(visible: VisibleFolders = 'ALL'): {
+  visibleFolderIds: jest.Mock;
+} {
+  return { visibleFolderIds: jest.fn().mockResolvedValue(visible) };
+}
+
+async function buildService(
+  logger: { info: jest.Mock; error: jest.Mock },
+  folderAccess: { visibleFolderIds: jest.Mock } = folderAccessMock(),
+): Promise<SearchService> {
   const moduleRef = await Test.createTestingModule({
     providers: [
       SearchService,
       { provide: getLoggerToken(SearchService.name), useValue: logger },
+      { provide: FolderAccessService, useValue: folderAccess },
     ],
   }).compile();
   return moduleRef.get(SearchService);
@@ -228,6 +247,109 @@ describe('SearchService', () => {
       });
     });
 
+    // --- ADR-0060 §5: the search-leak fix (INV-9) ----------------------------
+
+    it('drops a restricted article hit from a non-matching caller and strips the internal categoryId', async () => {
+      // Two article hits: one in a PUBLIC folder, one in a folder the caller cannot see. The post-filter
+      // must drop the restricted one entirely AND strip `categoryId` from the surviving (public) hit.
+      const folderAccess = folderAccessMock(new Set(['public-folder']));
+      const scopedService = await buildService(logger, folderAccess);
+      // Re-point the (already-constructed) mocked client onto the new instance: buildService reuses the
+      // same Meilisearch mock factory, so `client` (set in beforeEach) is the live double here too.
+      client.multiSearch.mockResolvedValue({
+        results: [
+          {
+            indexUid: 'articles',
+            hits: [
+              {
+                id: 'pub1',
+                slug: 'public',
+                title: 'Public',
+                categoryId: 'public-folder',
+              },
+              {
+                id: 'sec1',
+                slug: 'secret',
+                title: 'Secret runbook',
+                categoryId: 'secret-folder',
+              },
+            ],
+            estimatedTotalHits: 2,
+          },
+        ],
+      });
+
+      const result = await scopedService.search({
+        q: 'runbook',
+        entities: ['articles'],
+        limit: 10,
+        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+      });
+
+      // Only the public-folder article survives; the restricted one NEVER surfaces.
+      expect(result.articles?.hits).toEqual([
+        { id: 'pub1', slug: 'public', title: 'Public' },
+      ]);
+      // The internal folder key is stripped from the shipped hit (wire ArticleHit has no categoryId).
+      expect(result.articles?.hits[0]).not.toHaveProperty('categoryId');
+      // total is re-counted to what the caller can actually see.
+      expect(result.articles?.total).toBe(1);
+      expect(folderAccess.visibleFolderIds).toHaveBeenCalledTimes(1);
+    });
+
+    it('an ADMIN (visibleFolderIds = ALL) keeps every article hit (categoryId still stripped)', async () => {
+      const folderAccess = folderAccessMock('ALL');
+      const scopedService = await buildService(logger, folderAccess);
+      client.multiSearch.mockResolvedValue({
+        results: [
+          {
+            indexUid: 'articles',
+            hits: [
+              { id: 'sec1', slug: 'secret', title: 'Secret', categoryId: 'secret-folder' },
+            ],
+            estimatedTotalHits: 1,
+          },
+        ],
+      });
+
+      const result = await scopedService.search({
+        q: 'secret',
+        entities: ['articles'],
+        limit: 10,
+        principal: { kind: 'human', user: { id: 'admin', role: 'ADMIN' } } as never,
+      });
+
+      expect(result.articles?.hits).toEqual([
+        { id: 'sec1', slug: 'secret', title: 'Secret' },
+      ]);
+      expect(result.articles?.hits[0]).not.toHaveProperty('categoryId');
+    });
+
+    it('drops an article hit MISSING its categoryId for a non-admin (fail closed)', async () => {
+      const folderAccess = folderAccessMock(new Set(['public-folder']));
+      const scopedService = await buildService(logger, folderAccess);
+      client.multiSearch.mockResolvedValue({
+        results: [
+          {
+            indexUid: 'articles',
+            // A stale doc indexed before categoryId landed — no folder key. Fail closed: drop it.
+            hits: [{ id: 'stale', slug: 'stale', title: 'Stale' }],
+            estimatedTotalHits: 1,
+          },
+        ],
+      });
+
+      const result = await scopedService.search({
+        q: 'stale',
+        entities: ['articles'],
+        limit: 10,
+        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+      });
+
+      expect(result.articles?.hits).toEqual([]);
+      expect(result.articles?.total).toBe(0);
+    });
+
     // SEC-061: every per-index query must pin attributesToRetrieve to the shared *HitSchema fields,
     // so Meili never ships large/searchable-only blobs (article `content`) back in a hit.
     it('restricts retrieved attributes per index and never returns article content', async () => {
@@ -251,13 +373,15 @@ describe('SearchService', () => {
         params.queries.map((query) => [query.indexUid, query]),
       );
 
-      // articles: content is indexed (searchable) but must not be retrievable
+      // articles: content is indexed (searchable) but must not be retrievable. `categoryId` IS retrieved
+      // internally for the ADR-0060 §5 folder-access post-filter, then stripped from the shipped hit.
       expect(byIndex.get('articles')?.attributesToRetrieve).toEqual([
         'id',
         'slug',
         'title',
         'excerpt',
         'status',
+        'categoryId',
       ]);
       expect(byIndex.get('articles')?.attributesToRetrieve).not.toContain(
         'content',

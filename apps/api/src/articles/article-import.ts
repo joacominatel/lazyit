@@ -3,12 +3,31 @@ import mammoth from 'mammoth';
 
 /**
  * Helpers for the article import endpoint (POST /articles/import): supported-format detection,
- * filename→title, light sanitization, and extraction to markdown. Supports .md, .txt and .docx;
- * .pdf/.html/.odt are deferred (see docs/03-decisions/0021-knowledge-base-design.md).
+ * filename→title, light sanitization, and extraction to markdown. Single-file imports are .md, .txt
+ * and .docx; a `.zip` bulk-imports many of those (ADR-0059 §5). .pdf/.html/.odt are deferred (see
+ * docs/03-decisions/0021-knowledge-base-design.md).
  */
 
+/** Single-file import extensions (each yields exactly one Article). */
 export const SUPPORTED_EXTENSIONS = ['md', 'txt', 'docx'] as const;
+/**
+ * The bulk-archive extension (ADR-0059 §5). A `.zip` is the SAME ZIP threat class as a `.docx` (both
+ * are ZIP containers) — it rides the same sandboxed worker + bomb guard — but FANS OUT to many
+ * articles. Kept apart from {@link SUPPORTED_EXTENSIONS} because the worker paths diverge (one parse
+ * vs selective extraction + folder mirroring).
+ */
+export const ZIP_EXTENSION = 'zip' as const;
+/** Every extension `POST /articles/import` accepts: the single-file set plus the `.zip` archive. */
+export const ALL_IMPORT_EXTENSIONS = [
+  ...SUPPORTED_EXTENSIONS,
+  ZIP_EXTENSION,
+] as const;
 const DEFAULT_MAX_IMPORT_MB = 5;
+
+/** True when the upload is a `.zip` bulk archive (vs a single `.md`/`.txt`/`.docx`). */
+export function isZipImport(filename: string): boolean {
+  return extensionOf(filename) === ZIP_EXTENSION;
+}
 
 /**
  * mammoth@1.x still ships a markdown writer and exposes `convertToMarkdown` at runtime, but it is

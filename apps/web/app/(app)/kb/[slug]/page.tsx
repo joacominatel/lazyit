@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailSkeleton } from "@/components/detail-panel";
 import { MarkdownView } from "@/components/markdown-view";
+import { WikiLinkProvider } from "@/components/markdown-wiki-link-view";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { Badge } from "@/components/ui/badge";
@@ -28,10 +29,13 @@ import {
   useUnpublishArticle,
 } from "@/lib/api/hooks/use-article-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
+import { useWikiLinkResolver } from "@/lib/api/hooks/use-wiki-link-resolver";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 import { formatDate } from "@/lib/utils/format";
+import { ArticleAliasesPanel } from "../_components/article-aliases-panel";
 import { ArticleLinksPanel } from "../_components/article-links-panel";
+import { ArticleReferencesPanel } from "../_components/article-references-panel";
 import { ArticleStatusBadge } from "../_components/article-status-badge";
 
 export default function ArticleDetailPage() {
@@ -53,6 +57,8 @@ export default function ArticleDetailPage() {
   const publishArticle = usePublishArticle();
   const unpublishArticle = useUnpublishArticle();
   const deleteArticle = useDeleteArticle();
+  // Render-time `[[slug]]` resolver (ADR-0059 §3): resolved → KB link, unresolved → tooltip.
+  const resolveWikiLink = useWikiLinkResolver();
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   if (isLoading) {
@@ -197,7 +203,20 @@ export default function ArticleDetailPage() {
         </p>
       )}
 
-      <MarkdownView content={article.content} />
+      <WikiLinkProvider resolve={resolveWikiLink}>
+        <MarkdownView content={article.content} />
+      </WikiLinkProvider>
+
+      {/* References (article↔article backlinks, ADR-0059 §4) — DISTINCT from the asset/application
+          "Linked to" panel below (article↔asset/application, ADR-0042). */}
+      <ArticleReferencesPanel articleId={article.id} />
+
+      {/* Nav-only folder aliases (ADR-0059 §2) — where this article ALSO surfaces, beyond its home. */}
+      <ArticleAliasesPanel
+        articleId={article.id}
+        homeFolderId={article.categoryId}
+        canWrite={canWrite}
+      />
 
       <ArticleLinksPanel articleId={article.id} canWrite={canWrite} />
 

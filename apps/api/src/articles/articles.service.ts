@@ -7,12 +7,15 @@ import {
 import {
   offsetOf,
   pageOf,
+  parseWikiLinks,
   slugify,
+  type ArticleBacklink,
   type ArticleLinkedFilter,
   type ArticleLinkedTo,
   type ArticleListItem,
   type ArticleStatus,
   type CreateArticle,
+  type CreateArticleAlias,
   type CreateArticleLink,
   type Page,
   type PageQuery,
@@ -25,6 +28,11 @@ import { ActorService } from '../common/actor.service';
 import { isServicePrincipal, type Principal } from '../auth/principal';
 import { SearchService } from '../search/search.service';
 import { projectArticle, type ArticleRow } from '../search/search.documents';
+import {
+  FolderAccessService,
+  folderVisible,
+  type VisibleFolders,
+} from '../article-categories/folder-access.service';
 
 /**
  * Listing filters for GET /articles. The `categoryId`, `status` and `linkedTo` filters are
@@ -119,6 +127,7 @@ export class ArticlesService {
     private readonly prisma: PrismaService,
     private readonly actor: ActorService,
     private readonly search: SearchService,
+    private readonly folderAccess: FolderAccessService,
   ) {}
 
   /**
@@ -136,8 +145,12 @@ export class ArticlesService {
     filters: ArticleListFilters,
     page: PageQuery,
     currentUser?: User,
+    principal?: Principal,
   ) {
-    const where = this.buildWhere(filters, currentUser);
+    // Folder access (ADR-0060 §4): pin the list to the folders the caller may see, so a folder-hidden
+    // article never even appears in the list (existence-hiding). ADMIN ('ALL') gets no folder pin.
+    const visible = await this.folderAccess.visibleFolderIds(principal);
+    const where = this.buildWhere(filters, currentUser, visible);
     const { take, skip } = offsetOf(page);
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.article.findMany({
@@ -166,9 +179,14 @@ export class ArticlesService {
   private buildWhere(
     filters: ArticleListFilters,
     currentUser?: User,
+    visibleFolders?: VisibleFolders,
   ): Prisma.ArticleWhereInput {
     const cu = this.resolveCurrentUser(currentUser);
     const and: Prisma.ArticleWhereInput[] = [this.visibilityWhere(cu)];
+    // Folder access (ADR-0060 §4): unless ADMIN ('ALL'), restrict to the caller's visible home folders
+    // (categoryId IN <visible>). An empty visible set yields `categoryId: { in: [] }` → no rows.
+    const folderClause = this.folderWhere(visibleFolders);
+    if (folderClause) and.push(folderClause);
     // Multi-select (#198): categoryId / status are `{ in: [...] }` (OR within the filter). The
     // controller never passes an empty array — an empty selection omits the filter entirely.
     if (filters.categoryId?.length) {
@@ -288,8 +306,14 @@ export class ArticlesService {
     return Math.max(1, Math.ceil(words / 200));
   }
 
-  /** A readable article by id (404 if missing, deleted, or a draft the caller doesn't own). */
-  async findOne(id: string, currentUser?: User) {
+  /**
+   * A readable article by id. 404 if missing, soft-deleted, a draft the caller doesn't own (ADR-0022),
+   * OR in a home folder the caller can't see (ADR-0060 §4 — folder-hidden → 404, NOT 403, so the
+   * server never leaks the existence of a restricted article). The three layers compose
+   * most-restrictive-wins (folder access AND draft visibility, both 404 on failure). `article:read`
+   * (the frozen capability) is enforced upstream by the route guard.
+   */
+  async findOne(id: string, currentUser?: User, principal?: Principal) {
     const cu = this.resolveCurrentUser(currentUser);
     const article = await this.prisma.article.findFirst({
       where: { id },
@@ -297,11 +321,14 @@ export class ArticlesService {
     if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
       throw new NotFoundException(`Article ${id} not found`);
     }
+    await this.assertFolderVisible(article.categoryId, principal, () => {
+      throw new NotFoundException(`Article ${id} not found`);
+    });
     return article;
   }
 
-  /** Same visibility rules as findOne, looked up by slug. */
-  async findBySlug(slug: string, currentUser?: User) {
+  /** Same visibility rules as findOne (draft + folder access — ADR-0022/0060), looked up by slug. */
+  async findBySlug(slug: string, currentUser?: User, principal?: Principal) {
     const cu = this.resolveCurrentUser(currentUser);
     const article = await this.prisma.article.findFirst({
       where: { slug },
@@ -309,6 +336,9 @@ export class ArticlesService {
     if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
       throw new NotFoundException(`Article with slug "${slug}" not found`);
     }
+    await this.assertFolderVisible(article.categoryId, principal, () => {
+      throw new NotFoundException(`Article with slug "${slug}" not found`);
+    });
     return article;
   }
 
@@ -341,6 +371,9 @@ export class ArticlesService {
       // Version 1 — the initial snapshot. Same transaction so the article and its first version
       // commit atomically (ADR-0042).
       await this.snapshotVersion(tx, created, 1, authorId);
+      // Materialize the outgoing `[[slug]]` wiki-link edges from the body (ADR-0059 §3), in the SAME
+      // transaction as the article + version write so the edge can never drift from the content.
+      await this.rebuildWikiLinks(tx, created.id, created.content);
       return created;
     });
     // Index PUBLISHED only; a DRAFT is author-private (ADR-0022) so it must never be searchable —
@@ -387,6 +420,12 @@ export class ArticlesService {
           await this.nextVersion(tx, id),
           cu,
         );
+      }
+      // Hard-rebuild the outgoing wiki-link edges ONLY when the body changed (ADR-0059 §3), in the
+      // SAME transaction as the article + version write. A metadata/title-only PATCH leaves `content`
+      // untouched, so the edges are left as-is (the `[[slug]]`s in the body didn't move).
+      if (data.content !== undefined && current.content !== updated.content) {
+        await this.rebuildWikiLinks(tx, id, updated.content);
       }
       return updated;
     });
@@ -503,9 +542,15 @@ export class ArticlesService {
    * snapshots never leak a private draft's content. Runs the page `findMany(take/skip)` and the
    * `count` over the same `where` inside one `$transaction` so `total` can't drift from the page.
    */
-  async listVersions(articleId: string, page: PageQuery, currentUser?: User) {
-    // Reuse findOne's visibility gate (404 if missing, soft-deleted, or a draft the caller can't see).
-    await this.findOne(articleId, currentUser);
+  async listVersions(
+    articleId: string,
+    page: PageQuery,
+    currentUser?: User,
+    principal?: Principal,
+  ) {
+    // Reuse findOne's visibility gate (404 if missing, soft-deleted, a draft the caller can't see, or
+    // a home folder the caller can't see — ADR-0022/0060).
+    await this.findOne(articleId, currentUser, principal);
     const { take, skip } = offsetOf(page);
     const where: Prisma.ArticleVersionWhereInput = { articleId };
     const [items, total] = await this.prisma.$transaction([
@@ -524,8 +569,13 @@ export class ArticlesService {
    * A single version of an article by its per-article version number (404 if the article is not
    * readable by the caller, or that version doesn't exist). Same visibility gate as {@link listVersions}.
    */
-  async findVersion(articleId: string, version: number, currentUser?: User) {
-    await this.findOne(articleId, currentUser);
+  async findVersion(
+    articleId: string,
+    version: number,
+    currentUser?: User,
+    principal?: Principal,
+  ) {
+    await this.findOne(articleId, currentUser, principal);
     const snapshot = await this.prisma.articleVersion.findFirst({
       where: { articleId, version },
     });
@@ -587,9 +637,127 @@ export class ArticlesService {
   }
 
   /** All links of an article (readable by any caller who can read the article). */
-  async findLinks(articleId: string, currentUser?: User) {
-    await this.findOne(articleId, currentUser);
+  async findLinks(articleId: string, currentUser?: User, principal?: Principal) {
+    await this.findOne(articleId, currentUser, principal);
     return this.prisma.articleLink.findMany({
+      where: { articleId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  // --- wiki-links: backlinks ("References") read (ADR-0059 §4) --------------
+
+  /**
+   * Backlinks ("References") for an article: every readable article whose body `[[slug]]`-references
+   * this one (ADR-0059 §4). The reverse of the materialized edge — `ArticleWikiLink.resolvedTargetId
+   * = :id`. The article-read visibility gate is ANDed ON TOP (the target must be readable by the
+   * caller — `findOne` 404s a draft the caller can't see) AND each SOURCE is filtered by the same
+   * visibility rule, so a draft's backlink never leaks (ADR-0022). Soft-deleted sources are excluded
+   * by the automatic read filter (ADR-0032). Returns a denormalized {@link ArticleBacklink} list
+   * (source id/slug/title) so the "References" UI needs no extra round-trip.
+   */
+  async backlinks(
+    id: string,
+    currentUser?: User,
+    principal?: Principal,
+  ): Promise<ArticleBacklink[]> {
+    // 404 if the target itself isn't readable (missing, soft-deleted, a draft the caller can't see, or
+    // a home folder the caller can't see — ADR-0022/0060) — the backlinks of an article you can't read
+    // must not be revealed.
+    await this.findOne(id, currentUser, principal);
+    const cu = this.resolveCurrentUser(currentUser);
+    // The SOURCE must also be readable by the caller — both its draft visibility (PUBLISHED for all;
+    // own DRAFTs) AND its home folder (ADR-0060 §4): a source in a folder the caller can't see must not
+    // surface its slug/title. ADMIN ('ALL') gets no folder pin.
+    const visible = await this.folderAccess.visibleFolderIds(principal);
+    const folderClause = this.folderWhere(visible);
+    const sourceWhere: Prisma.ArticleWhereInput = folderClause
+      ? { AND: [this.visibilityWhere(cu), folderClause] }
+      : this.visibilityWhere(cu);
+    const edges = await this.prisma.articleWikiLink.findMany({
+      where: {
+        resolvedTargetId: id,
+        source: sourceWhere,
+      },
+      select: {
+        id: true,
+        sourceArticleId: true,
+        createdAt: true,
+        source: { select: { slug: true, title: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    return edges.map((e) => ({
+      id: e.id,
+      sourceArticleId: e.sourceArticleId,
+      sourceSlug: e.source.slug,
+      sourceTitle: e.source.title,
+      createdAt: e.createdAt.toISOString(),
+    }));
+  }
+
+  // --- aliases (nav-only folder symlinks, ADR-0059 §2) ---------------------
+
+  /**
+   * Create a nav-only alias placing an article into a folder OTHER than its home (ADR-0059 §2).
+   * Author-only (same write gate as edits). The target folder must be live (400 otherwise) and must
+   * NOT equal the article's home folder (400 — you cannot alias an article into its own home). A
+   * duplicate `(folderId, articleId)` is rejected (409 via the unique index, mapped by the global
+   * PrismaExceptionFilter). No access column — an alias is presentation only and never widens access.
+   */
+  async addAlias(
+    articleId: string,
+    data: CreateArticleAlias,
+    principal?: Principal,
+  ) {
+    const cu = this.requireAuthor(principal);
+    const article = await this.loadOwned(articleId, cu);
+    // No-escalation (ADR-0060 §6 / INV-9): the actor must pass §4 READ access to the TARGET article
+    // before aliasing it — you can never surface an article you cannot yourself read. The author owns
+    // it (loadOwned), but the home folder's rule still binds: re-check the actor can see the target's
+    // home folder. Belt-and-suspenders with the service-layer author gate. Folder-hidden → 404 (the
+    // article is invisible to this actor, so aliasing it is "not found", never an info-leaking 403).
+    await this.assertFolderVisible(article.categoryId, principal, () => {
+      throw new NotFoundException(`Article ${articleId} not found`);
+    });
+    await this.assertFolderUsable(data.folderId);
+    if (data.folderId === article.categoryId) {
+      throw new BadRequestException(
+        'Cannot alias an article into its own home folder',
+      );
+    }
+    return this.prisma.articleAlias.create({
+      data: { articleId, folderId: data.folderId },
+    });
+  }
+
+  /**
+   * Remove an alias from an article via hard DELETE (ADR-0059 §2 — a current-state placement, never
+   * soft-deleted). Author-only (same gate as edits). 404 if the alias doesn't exist or doesn't belong
+   * to this article (so an actor can't probe another article's aliases).
+   */
+  async removeAlias(articleId: string, aliasId: string, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
+    await this.loadOwned(articleId, cu);
+    const alias = await this.prisma.articleAlias.findFirst({
+      where: { id: aliasId, articleId },
+    });
+    if (!alias) {
+      throw new NotFoundException(
+        `Alias ${aliasId} not found on article ${articleId}`,
+      );
+    }
+    return this.prisma.articleAlias.delete({ where: { id: alias.id } });
+  }
+
+  /** All aliases of an article (readable by any caller who can read the article). */
+  async findAliases(
+    articleId: string,
+    currentUser?: User,
+    principal?: Principal,
+  ) {
+    await this.findOne(articleId, currentUser, principal);
+    return this.prisma.articleAlias.findMany({
       where: { articleId },
       orderBy: { createdAt: 'asc' },
     });
@@ -713,6 +881,35 @@ export class ArticlesService {
     }
   }
 
+  /**
+   * The folder-access `where` clause (ADR-0060 §4): `categoryId IN <visible folder ids>`. Returns
+   * `undefined` for an ADMIN ('ALL' — no folder pin, sees everything §5). For a non-admin it pins the
+   * list to the caller's visible home folders; an empty visible set yields `{ in: [] }` (no rows).
+   */
+  private folderWhere(
+    visible?: VisibleFolders,
+  ): Prisma.ArticleWhereInput | undefined {
+    if (visible === undefined || visible === 'ALL') return undefined;
+    return { categoryId: { in: [...visible] } };
+  }
+
+  /**
+   * Enforce ADR-0060 §4 folder access for a SINGLE article's home folder: if the caller can't see the
+   * folder, invoke `onHidden` (the caller throws a 404 with its own message — folder-hidden is
+   * existence-hiding, never a 403). ADMIN ('ALL') always passes. Resolved DB-first per call (never
+   * cached) so a revoked grant / released assignment drops access on the next read.
+   */
+  private async assertFolderVisible(
+    folderId: string,
+    principal: Principal | undefined,
+    onHidden: () => never,
+  ): Promise<void> {
+    const visible = await this.folderAccess.visibleFolderIds(principal);
+    if (!folderVisible(visible, folderId)) {
+      onHidden();
+    }
+  }
+
   /** PUBLISHED for everyone; plus the caller's own DRAFTs when there is a current user. */
   private visibilityWhere(currentUserId?: string): Prisma.ArticleWhereInput {
     return currentUserId
@@ -803,6 +1000,58 @@ export class ArticlesService {
         `categoryId ${categoryId} does not reference a live category`,
       );
     }
+  }
+
+  /** 400 if folderId doesn't reference a live (non-soft-deleted) folder (ADR-0059 §2 aliasing). */
+  private async assertFolderUsable(folderId: string): Promise<void> {
+    const folder = await this.prisma.articleCategory.findFirst({
+      where: { id: folderId },
+      select: { id: true },
+    });
+    if (!folder) {
+      throw new BadRequestException(
+        `folderId ${folderId} does not reference a live folder`,
+      );
+    }
+  }
+
+  /**
+   * Hard-rebuild the outgoing `[[slug]]` wiki-link edges for one source article (ADR-0059 §3). Called
+   * INSIDE the article-write transaction (create / a content-changing update / import) so the edge can
+   * never drift from the body it describes — the in-transaction discipline ADR-0042 uses for the
+   * version snapshot.
+   *
+   * Strategy: delete every existing edge for this source, then insert one per DISTINCT parsed
+   * `[[slug]]`. Each target slug is resolved best-effort to a LIVE article id (`resolvedTargetId`,
+   * else null for a forward reference — never an error, never a save-blocker). The self-reference
+   * (`[[own-slug]]`) is allowed and resolves to the article itself. Idempotent: re-running on the same
+   * body produces the same edge set. Deterministic delete-then-insert (not a diff) keeps it simple and
+   * crash-safe; the edge table is tiny per article.
+   */
+  private async rebuildWikiLinks(
+    tx: Prisma.TransactionClient,
+    sourceArticleId: string,
+    content: string,
+  ): Promise<void> {
+    // Clear the source's current edges — the body is the source of truth, recomputed from scratch.
+    await tx.articleWikiLink.deleteMany({ where: { sourceArticleId } });
+    const slugs = parseWikiLinks(content);
+    if (slugs.length === 0) return;
+    // Resolve each distinct slug to a live article id in ONE query, then map back. findMany is
+    // soft-delete-aware (ADR-0032), so only LIVE articles resolve — an unresolved/soft-deleted target
+    // stays null (render-time tooltip, ADR-0059 §3).
+    const matches = await tx.article.findMany({
+      where: { slug: { in: slugs } },
+      select: { id: true, slug: true },
+    });
+    const idBySlug = new Map(matches.map((m) => [m.slug, m.id]));
+    await tx.articleWikiLink.createMany({
+      data: slugs.map((targetSlug) => ({
+        sourceArticleId,
+        targetSlug,
+        resolvedTargetId: idBySlug.get(targetSlug) ?? null,
+      })),
+    });
   }
 
   /** 400 if assetId doesn't reference a live (non-soft-deleted) asset (ADR-0042 linking). */

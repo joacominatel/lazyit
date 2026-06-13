@@ -111,6 +111,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
       expect.objectContaining({ linked: 'only' }),
       expect.anything(),
       undefined,
+      undefined,
     );
   });
 
@@ -127,6 +128,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
     expect(findPage).toHaveBeenCalledWith(
       expect.objectContaining({ linkedTo: ['asset'] }),
       expect.anything(),
+      undefined,
       undefined,
     );
   });
@@ -145,6 +147,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
       expect.objectContaining({ linkedTo: ['asset', 'application'] }),
       expect.anything(),
       undefined,
+      undefined,
     );
   });
 
@@ -159,6 +162,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
       expect.objectContaining({ status: ['DRAFT', 'PUBLISHED'] }),
       expect.anything(),
       undefined,
+      undefined,
     );
   });
 
@@ -172,6 +176,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
     expect(findPage).toHaveBeenCalledWith(
       expect.objectContaining({ status: ['DRAFT', 'PUBLISHED'] }),
       expect.anything(),
+      undefined,
       undefined,
     );
   });
@@ -225,6 +230,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
       expect.objectContaining({ linked: undefined, linkedTo: undefined }),
       expect.anything(),
       undefined,
+      undefined,
     );
   });
 
@@ -249,6 +255,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
       expect.objectContaining({ assetId: [CUID_A, CUID_B] }),
       expect.anything(),
       undefined,
+      undefined,
     );
   });
 
@@ -268,6 +275,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
       expect.objectContaining({ applicationId: [CUID_A] }),
       expect.anything(),
       undefined,
+      undefined,
     );
   });
 
@@ -285,6 +293,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
     expect(findPage).toHaveBeenCalledWith(
       expect.objectContaining({ assetId: [CUID_A, CUID_B] }),
       expect.anything(),
+      undefined,
       undefined,
     );
   });
@@ -327,6 +336,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
     expect(findPage).toHaveBeenCalledWith(
       expect.objectContaining({ assetId: undefined, applicationId: undefined }),
       expect.anything(),
+      undefined,
       undefined,
     );
   });

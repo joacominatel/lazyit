@@ -14,8 +14,10 @@ import {
   type SearchResults,
 } from './search.service';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import type { Principal } from '../auth/principal';
 import type { User } from '../../generated/prisma/client';
 
 const DEFAULT_LIMIT = 20;
@@ -67,6 +69,7 @@ export class SearchController {
   @ApiOkResponse({ type: SearchResultsDto })
   async find(
     @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
     @Query('q') q?: string,
     @Query('entities') entities?: string,
     @Query('limit') limit?: string,
@@ -82,6 +85,9 @@ export class SearchController {
       q: q ?? '',
       entities: allowed,
       limit: parseLimit(limit),
+      // ADR-0060 §5: the principal drives the article folder-access post-filter (ADMIN sees all; SA
+      // fails closed; anonymous → PUBLIC-folder hits only) so a restricted article never leaks here.
+      principal,
     });
   }
 
