@@ -44,6 +44,11 @@ import { useSecretSession } from "./secret-session";
  * replaced by the bootstrap flow via `<UnlockGate>` until they set a passphrase and are unlocked.
  * For a returning-but-locked user, the "Locked" badge becomes a button that opens an unlock dialog,
  * and "Create vault" routes through the same dialog so they are never stuck with a disabled button.
+ *
+ * STABILITY (#442): <UnlockGate> and <CreateVaultDialog> are always rendered at the SAME tree position
+ * regardless of `isMissing`. This prevents mount/unmount churn from toggling the keypair observer,
+ * which was the structural amplifier of the infinite-GET loop fixed in use-keypair.ts. The `isMissing`
+ * flag now only controls INNER content (what <UnlockGate> shows), not which top-level tree is mounted.
  */
 export default function VaultListContent() {
   const t = useTranslations("secrets");
@@ -93,50 +98,20 @@ export default function VaultListContent() {
     }
   }, [isUnlocked, unlockOpen, pendingCreate]);
 
-  // FIRST-RUN: no keypair at all → show the bootstrap flow as the page body (replaces the list
-  // surface entirely). UnlockGate renders the bootstrap form; once done isUnlocked becomes true
-  // and the keypair query re-fetches, so the gate naturally renders the vault list.
-  if (isMissing) {
-    return (
-      <div className="space-y-6">
-        <PageHeader
-          title={t("list.title")}
-          pillar="knowledge"
-          icon={ShieldCheckIcon}
-          subtitle={t("list.subtitle")}
-        />
-        <UnlockGate>
-          {/* UnlockGate shows the bootstrap form when there is no keypair.
-              After the user finishes bootstrapping and is unlocked, this fragment renders
-              and we fall through to the normal vault surface on the next render. */}
-          <VaultListBody
-            isLoading={isLoading}
-            isError={isError}
-            error={error}
-            isEmpty={isEmpty}
-            vaults={vaults}
-            canManage={canManage}
-            onCreateVault={handleCreateVault}
-            onRetry={refetch}
-            t={t}
-          />
-        </UnlockGate>
-        {canManage ? (
-          <CreateVaultDialog open={createOpen} onOpenChange={setCreateOpen} />
-        ) : null}
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
+      {/*
+       * PageHeader: in first-run mode we omit the lock badge / create button because the user
+       * has no keypair yet and those actions require one. The bootstrap form (rendered by
+       * <UnlockGate> below) replaces the vault list body.
+       */}
       <PageHeader
         title={t("list.title")}
         pillar="knowledge"
         icon={ShieldCheckIcon}
         subtitle={t("list.subtitle")}
         badge={
-          isUnlocked ? (
+          !isMissing && isUnlocked ? (
             <button
               type="button"
               onClick={lock}
@@ -146,7 +121,7 @@ export default function VaultListContent() {
               <LockOpenIcon className="size-3.5" aria-hidden />
               {t("session.unlocked")}
             </button>
-          ) : (
+          ) : !isMissing ? (
             <button
               type="button"
               onClick={() => setUnlockOpen(true)}
@@ -156,10 +131,10 @@ export default function VaultListContent() {
               <LockClosedIcon className="size-3.5" aria-hidden />
               {t("session.locked")}
             </button>
-          )
+          ) : undefined
         }
         actions={
-          canManage ? (
+          canManage && !isMissing ? (
             <Button onClick={handleCreateVault}>
               <PlusIcon />
               {t("vaults.createSubmit")}
@@ -168,34 +143,62 @@ export default function VaultListContent() {
         }
       />
 
-      <VaultListBody
-        isLoading={isLoading}
-        isError={isError}
-        error={error}
-        isEmpty={isEmpty}
-        vaults={vaults}
-        canManage={canManage}
-        onCreateVault={handleCreateVault}
-        onRetry={refetch}
-        t={t}
-      />
+      {/*
+       * STABLE GATE: <UnlockGate> is always mounted at this position in the tree (never
+       * moved between two different return branches). It decides internally what to show:
+       *   - First-run (no keypair / isMissing): renders the BootstrapFlow.
+       *   - Session locked (keypair exists): renders the UnlockFlow inline (not embedded,
+       *     so it has its own card chrome that fills the page body instead of the vault list).
+       *   - Session unlocked: renders children = <VaultListBody>.
+       *
+       * Because this element never unmounts/remounts as a function of `isMissing`, the
+       * useMyKeypair observer inside <UnlockGate> stays stable and the retryOnMount guard
+       * in use-keypair.ts never has a chance to trigger — defense-in-depth against #442.
+       */}
+      <UnlockGate>
+        {/* Session unlocked — show the vault list body. */}
+        <VaultListBody
+          isLoading={isLoading}
+          isError={isError}
+          error={error}
+          isEmpty={isEmpty}
+          vaults={vaults}
+          canManage={canManage}
+          onCreateVault={handleCreateVault}
+          onRetry={refetch}
+          t={t}
+        />
+      </UnlockGate>
 
-      {/* Unlock dialog: shown when the user has a keypair but the session is locked.
-          Wraps UnlockGate in embedded mode so there's no double-card chrome inside the Dialog. */}
-      <Dialog open={unlockOpen} onOpenChange={handleUnlockDialogChange}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t("unlock.title")}</DialogTitle>
-            <DialogDescription>
-              {pendingCreate ? t("list.unlockToCreate") : t("unlock.description")}
-            </DialogDescription>
-          </DialogHeader>
-          <UnlockGate embedded>
-            {/* Session is now unlocked — nothing to show here; the dialog closes via the effect above. */}
-            <span />
-          </UnlockGate>
-        </DialogContent>
-      </Dialog>
+      {/*
+       * Unlock dialog: shown when the user has a keypair but the session is locked and they
+       * clicked the "Locked" badge or "Create vault". The embedded <UnlockGate> here is a
+       * SECOND observer that only mounts when this Dialog is open. Because unlockOpen is
+       * false by default (and Radix unmounts Dialog children when closed), this observer does
+       * NOT exist on the initial render — it only appears after a user gesture. The
+       * retryOnMount: false guard in useMyKeypair means even if this observer mounts while
+       * the query is in error state it will not re-fetch.
+       *
+       * Not shown during first-run (isMissing=true): the bootstrap flow is handled by the
+       * stable <UnlockGate> above; the "Locked" badge is hidden; the unlock dialog can't be
+       * opened.
+       */}
+      {!isMissing ? (
+        <Dialog open={unlockOpen} onOpenChange={handleUnlockDialogChange}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t("unlock.title")}</DialogTitle>
+              <DialogDescription>
+                {pendingCreate ? t("list.unlockToCreate") : t("unlock.description")}
+              </DialogDescription>
+            </DialogHeader>
+            <UnlockGate embedded>
+              {/* Session is now unlocked — nothing to show here; the dialog closes via the effect above. */}
+              <span />
+            </UnlockGate>
+          </DialogContent>
+        </Dialog>
+      ) : null}
 
       {canManage ? (
         <CreateVaultDialog open={createOpen} onOpenChange={setCreateOpen} />
