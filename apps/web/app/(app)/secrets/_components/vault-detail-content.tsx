@@ -14,9 +14,8 @@ import {
   TrashIcon,
   UserMinusIcon,
   UserPlusIcon,
-  XMarkIcon,
 } from "@heroicons/react/24/outline";
-import type { SecretItem } from "@lazyit/shared";
+import type { SecretItem, User } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -872,7 +871,7 @@ function AddMemberDialog({
 
   // Filter out users who are already members.
   const memberUserIds = new Set(currentMembers?.map((m) => m.userId) ?? []);
-  const eligibleUsers = allUsers?.filter((u) => !memberUserIds.has(u.id)) ?? [];
+  const eligibleUsers: User[] = allUsers?.filter((u: User) => !memberUserIds.has(u.id)) ?? [];
 
   async function handleGrant(e: React.FormEvent) {
     e.preventDefault();
@@ -897,7 +896,7 @@ function AddMemberDialog({
         data: { userId: targetUserId, ...wrappedDek },
       });
 
-      const targetUser = eligibleUsers.find((u) => u.id === targetUserId);
+      const targetUser = eligibleUsers.find((u: User) => u.id === targetUserId);
       const targetName = targetUser
         ? `${targetUser.firstName} ${targetUser.lastName}`
         : targetUserId;
@@ -932,7 +931,7 @@ function AddMemberDialog({
                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 <option value="">{t("members.selectUser")}</option>
-                {eligibleUsers.map((u) => (
+                {eligibleUsers.map((u: User) => (
                   <option key={u.id} value={u.id}>
                     {u.firstName} {u.lastName} ({u.email})
                   </option>
