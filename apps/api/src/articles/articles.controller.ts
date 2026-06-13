@@ -173,6 +173,10 @@ export class ArticlesController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
+    // The unified principal threads ADR-0060 §4 folder access into the read (ADMIN sees all; SA fails
+    // closed) — `user` still drives draft visibility (ADR-0022). Placed LAST so the existing positional
+    // filter args are unchanged (Nest resolves params by decorator, not position).
+    @CurrentPrincipal() principal?: Principal,
   ) {
     return this.articles.findPage(
       {
@@ -196,6 +200,7 @@ export class ArticlesController {
       },
       parsePageQuery({ limit, offset, page }),
       user,
+      principal,
     );
   }
 
@@ -220,16 +225,24 @@ export class ArticlesController {
   @RequirePermission('article:read')
   @ApiOperation({ summary: 'Get an article by slug' })
   @ApiOkResponse({ type: ArticleDto })
-  findBySlug(@Param('slug') slug: string, @CurrentUser() user?: User) {
-    return this.articles.findBySlug(slug, user);
+  findBySlug(
+    @Param('slug') slug: string,
+    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.articles.findBySlug(slug, user, principal);
   }
 
   @Get(':id')
   @RequirePermission('article:read')
   @ApiOperation({ summary: 'Get an article by id' })
   @ApiOkResponse({ type: ArticleDto })
-  findOne(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.findOne(id, user);
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.articles.findOne(id, user, principal);
   }
 
   @Get(':id/versions')
@@ -250,6 +263,7 @@ export class ArticlesController {
   findVersions(
     @Param('id') id: string,
     @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -258,6 +272,7 @@ export class ArticlesController {
       id,
       parsePageQuery({ limit, offset, page }),
       user,
+      principal,
     );
   }
 
@@ -272,12 +287,13 @@ export class ArticlesController {
     @Param('id') id: string,
     @Param('version') version: string,
     @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ) {
     const parsed = Number(version);
     if (!Number.isInteger(parsed) || parsed < 1) {
       throw new BadRequestException('version must be a positive integer');
     }
-    return this.articles.findVersion(id, parsed, user);
+    return this.articles.findVersion(id, parsed, user, principal);
   }
 
   @Get(':id/links')
@@ -287,8 +303,12 @@ export class ArticlesController {
       "List an article's links to assets/applications (readable by any reader of the article). (ADR-0042)",
   })
   @ApiOkResponse({ type: [ArticleLinkDto] })
-  findLinks(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.findLinks(id, user);
+  findLinks(
+    @Param('id') id: string,
+    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.articles.findLinks(id, user, principal);
   }
 
   @Get(':id/backlinks')
@@ -298,8 +318,12 @@ export class ArticlesController {
       'List the "References" (incoming article↔article wiki-links) of an article (ADR-0059 §4). Each readable article whose body [[slug]]-references this one. Draft sources are hidden from non-authors; 404 if the target itself isn\'t readable. DISTINCT from the asset/application links panel (ADR-0042).',
   })
   @ApiOkResponse({ type: [ArticleBacklinkDto] })
-  backlinks(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.backlinks(id, user);
+  backlinks(
+    @Param('id') id: string,
+    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.articles.backlinks(id, user, principal);
   }
 
   @Get(':id/aliases')
@@ -309,8 +333,12 @@ export class ArticlesController {
       "List an article's nav-only folder aliases (symlinks) — readable by any reader of the article. (ADR-0059 §2)",
   })
   @ApiOkResponse({ type: [ArticleAliasDto] })
-  findAliases(@Param('id') id: string, @CurrentUser() user?: User) {
-    return this.articles.findAliases(id, user);
+  findAliases(
+    @Param('id') id: string,
+    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.articles.findAliases(id, user, principal);
   }
 
   @Post()
