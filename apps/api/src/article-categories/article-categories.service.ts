@@ -12,6 +12,14 @@ import type {
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+/** Shape returned by a successful cascade delete. */
+export interface CascadeDeleteResult {
+  /** Total folders soft-deleted (the root + every descendant). */
+  deletedFolders: number;
+  /** Total articles soft-deleted across the whole subtree. */
+  deletedArticles: number;
+}
+
 /**
  * Folders (ADR-0059 §1) — the hierarchical evolution of the flat ArticleCategory. The model/table
  * stay `ArticleCategory` / `article_categories` and the endpoints stay `/article-categories` (the
@@ -99,6 +107,86 @@ export class ArticleCategoriesService {
       where: { id },
       data: { deletedAt: new Date() },
     });
+  }
+
+  /**
+   * Cascade soft-delete: soft-delete the target folder, ALL descendant folders (the full subtree),
+   * and ALL articles whose home `categoryId` is anywhere in that subtree. Hard-deletes all
+   * ArticleAlias rows whose `folderId` is in the deleted subtree OR whose `articleId` points to a
+   * soft-deleted article in the subtree (aliases are nav-only; a dead alias is pure noise).
+   * ArticleWikiLink.resolvedTargetId pointing at soft-deleted articles is left stale — the read paths
+   * already filter these (ADR-0059 §3/§4).
+   *
+   * Idempotent on an already-deleted or non-existent folder: 404.
+   * Empty subtree: deletes just the root folder; counts return 0/0 for articles/children beyond it.
+   *
+   * ADMIN-only: the caller must hold `category:delete` (the existing gate). The author-only article
+   * gate is deliberately bypassed — this is an ADMIN folder operation, not an article authorship
+   * action. All mutations run in a single $transaction.
+   *
+   * Returns { deletedFolders, deletedArticles } — the root folder counts in deletedFolders.
+   */
+  async removeCascade(id: string): Promise<CascadeDeleteResult> {
+    // 404 if the root folder doesn't exist or is already soft-deleted.
+    await this.findOne(id);
+
+    // BFS walk: collect all folder ids in the subtree (root + all descendants).
+    // We query ALL children (including already-deleted ones) so we never miss alias rows that
+    // reference a partially-deleted subtree, but we only count/stamp the LIVE ones.
+    const subtreeIds = await this.collectSubtreeIds(id);
+    const now = new Date();
+
+    const [folderResult, articleResult] = await this.prisma.$transaction(
+      async (tx) => {
+        // 1. Hard-delete aliases whose home folder is in the subtree (folder-side aliases).
+        await tx.articleAlias.deleteMany({
+          where: { folderId: { in: subtreeIds } },
+        });
+
+        // 2. Soft-delete all live articles in the subtree (bypass author check — ADMIN op).
+        const articlesUpdate = await tx.article.updateMany({
+          where: {
+            categoryId: { in: subtreeIds },
+            deletedAt: null,
+          },
+          data: { deletedAt: now },
+        });
+
+        // 3. Hard-delete aliases whose article was just soft-deleted in step 2 (article-side
+        //    aliases pointing to the deleted articles, in folders OUTSIDE this subtree).
+        //    We gather the article ids first, then prune their remaining aliases.
+        const deletedArticles = await tx.article.findMany({
+          where: {
+            categoryId: { in: subtreeIds },
+            deletedAt: now,
+          },
+          select: { id: true },
+        });
+        if (deletedArticles.length > 0) {
+          await tx.articleAlias.deleteMany({
+            where: {
+              articleId: { in: deletedArticles.map((a) => a.id) },
+            },
+          });
+        }
+
+        // 4. Soft-delete all live folders in the subtree (root + descendants).
+        const foldersUpdate = await tx.articleCategory.updateMany({
+          where: {
+            id: { in: subtreeIds },
+            deletedAt: null,
+          },
+          data: { deletedAt: now },
+        });
+
+        return [foldersUpdate, articlesUpdate] as const;
+      },
+    );
+
+    return {
+      deletedFolders: folderResult.count,
+      deletedArticles: articleResult.count,
+    };
   }
 
   /**
@@ -202,5 +290,33 @@ export class ArticleCategoriesService {
         visited.add(cursor);
       }
     }
+  }
+
+  /**
+   * BFS walk down the folder tree from `rootId` (inclusive). Returns all folder ids in the subtree
+   * (the root + every descendant at every depth). Uses `includeSoftDeleted` so that already-deleted
+   * branches don't block alias cleanup in a cascade operation.
+   */
+  private async collectSubtreeIds(rootId: string): Promise<string[]> {
+    const ids: string[] = [rootId];
+    const queue: string[] = [rootId];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const children = await this.prisma.articleCategory.findMany({
+        where: { parentId: current },
+        select: { id: true },
+        // Include soft-deleted children: a cascaded subtree may have been partially deleted
+        // by a prior cascade; we still need their ids to clean up any orphan aliases.
+        includeSoftDeleted: true,
+      } as Prisma.ArticleCategoryFindManyArgs);
+
+      for (const child of children) {
+        ids.push(child.id);
+        queue.push(child.id);
+      }
+    }
+
+    return ids;
   }
 }
