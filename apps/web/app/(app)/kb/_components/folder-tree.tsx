@@ -5,16 +5,42 @@ import {
   FolderIcon,
   FolderOpenIcon,
   InboxIcon,
+  LockClosedIcon,
 } from "@heroicons/react/24/outline";
-import type { Folder } from "@lazyit/shared";
+import { isPublicAccessRules, type Folder } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   ancestorFolderIds,
   buildFolderTree,
   type FolderNode,
 } from "@/lib/utils/folder-tree";
 import { cn } from "@/lib/utils";
+import {
+  FolderAccessRuleEditor,
+  type RawAccessRules,
+} from "./folder-access-rule-editor";
+
+/**
+ * The folder `accessRules` field is a `Json?` on the Prisma model, returned in the API response
+ * but not included in the shared `ArticleCategorySchema` (which drives the `Folder` type). The web
+ * layer casts the raw API response to this extended type so the tree and rule editor can read the
+ * presence of a restriction without having to add the field to the shared schema.
+ *
+ * The field's TYPE (the actual rule vocabulary) is validated by `@lazyit/shared`'s
+ * `FolderAccessRuleSchema` / `FolderAccessRulesSchema` wherever we interpret the value
+ * (e.g. `isPublicAccessRules`). It's safe to cast here because the API validated and stored the
+ * JSON via `UpdateFolderAccessRulesSchema` before the row was ever returned.
+ */
+export type FolderWithRules = Folder & {
+  /** May be absent on older rows before the column migration ran; null/empty = PUBLIC. */
+  accessRules?: RawAccessRules;
+};
 
 /**
  * FolderTree — the collapsible, keyboard-navigable hierarchical browser for the Knowledge Base
@@ -23,8 +49,12 @@ import { cn } from "@/lib/utils";
  * grid shows that folder's home articles. The sidebar keeps its single "Knowledge" entry — the tree
  * lives INSIDE the KB view.
  *
- * No access semantics here (ADR-0059 ships structure only): every folder the API returns is rendered,
- * with NO padlock / restricted-folder UI — that is ADR-0060 / #365.
+ * ADR-0060 / #406 — restricted-folder affordances:
+ *   - A padlock icon + "Restricted" tooltip appears on folders carrying a non-empty access rule.
+ *   - An inheritance indicator is shown on child folders whose nearest restricted ancestor is
+ *     restricting them (the effective rule is always the backend's — never recomputed here).
+ *   - ADMIN-only: a settings Popover on each folder row exposes the {@link FolderAccessRuleEditor}.
+ *     The padlock is presentation; the API enforces (INV-9).
  *
  * a11y: an `role="tree"` with `role="treeitem"` rows; each branch carries `aria-expanded`; the active
  * folder carries `aria-selected`. Rows are real `<button>`s, so Enter/Space select and Tab moves
@@ -34,19 +64,60 @@ export function FolderTree({
   folders,
   selectedFolderId,
   onSelect,
+  isAdmin,
 }: {
-  folders: Folder[];
+  folders: FolderWithRules[];
   /** The folder whose articles the list is currently filtered to (`null` = "All articles"). */
   selectedFolderId: string | null;
   onSelect: (folderId: string | null) => void;
+  /** When true the per-folder access-rule editor affordance is rendered (ADMIN-only, ADR-0060). */
+  isAdmin?: boolean;
 }) {
   const t = useTranslations("kb");
-  const tree = useMemo(() => buildFolderTree(folders), [folders]);
+  // Cast to Folder[] for the tree-building utilities which only need the structural fields.
+  const tree = useMemo(
+    () => buildFolderTree(folders as Folder[]),
+    [folders],
+  );
+
+  // Build a set of restricted ancestor ids so child folders can show an inheritance indicator.
+  // This is a PRESENTATION hint — the backend never lets a child widen past an ancestor's rule.
+  const restrictedFolderIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const f of folders) {
+      if (!isPublicAccessRules((f as FolderWithRules).accessRules as Parameters<typeof isPublicAccessRules>[0])) {
+        ids.add(f.id);
+      }
+    }
+    return ids;
+  }, [folders]);
+
+  // Build a parent→id lookup so we can check ancestry quickly.
+  const parentById = useMemo(
+    () => new Map(folders.map((f) => [f.id, f.parentId ?? null])),
+    [folders],
+  );
+
+  /**
+   * Returns the id of the nearest restricted ancestor of `folderId`, or null when no restricted
+   * ancestor exists. Used only for the "inherits restriction from ancestor" indicator — the rule
+   * is the server's, never recomputed here.
+   */
+  function restrictedAncestorId(folderId: string): string | null {
+    let cursor = parentById.get(folderId) ?? null;
+    const seen = new Set<string>();
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      if (restrictedFolderIds.has(cursor)) return cursor;
+      cursor = parentById.get(cursor) ?? null;
+    }
+    return null;
+  }
 
   // Auto-expand the path down to the selected folder so a deep selection is always visible. Beyond
   // that the user's explicit toggles win (tracked in `expanded`); the derived ancestor set seeds it.
   const ancestors = useMemo(
-    () => ancestorFolderIds(folders, selectedFolderId),
+    () => ancestorFolderIds(folders as Folder[], selectedFolderId),
     [folders, selectedFolderId],
   );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -100,12 +171,15 @@ export function FolderTree({
           tree.map((node) => (
             <FolderTreeNode
               key={node.folder.id}
-              node={node}
+              node={node as FolderNodeWithRules}
               depth={0}
               selectedFolderId={selectedFolderId}
               isExpanded={isExpanded}
               onToggle={toggle}
               onSelect={onSelect}
+              isAdmin={isAdmin}
+              restrictedFolderIds={restrictedFolderIds}
+              restrictedAncestorId={restrictedAncestorId}
             />
           ))
         )}
@@ -119,6 +193,11 @@ const rowClass =
 const rowActiveClass =
   "bg-accent/60 font-medium text-foreground hover:bg-accent/60";
 
+type FolderNodeWithRules = FolderNode & {
+  folder: FolderWithRules;
+  children: FolderNodeWithRules[];
+};
+
 /** One folder row (and, when expanded, its children). Indentation is depth-driven padding. */
 function FolderTreeNode({
   node,
@@ -127,13 +206,19 @@ function FolderTreeNode({
   isExpanded,
   onToggle,
   onSelect,
+  isAdmin,
+  restrictedFolderIds,
+  restrictedAncestorId,
 }: {
-  node: FolderNode;
+  node: FolderNodeWithRules;
   depth: number;
   selectedFolderId: string | null;
   isExpanded: (id: string) => boolean;
   onToggle: (id: string) => void;
   onSelect: (folderId: string | null) => void;
+  isAdmin?: boolean;
+  restrictedFolderIds: Set<string>;
+  restrictedAncestorId: (id: string) => string | null;
 }) {
   const t = useTranslations("kb");
   const { folder, children } = node;
@@ -143,6 +228,14 @@ function FolderTreeNode({
   // Indent each level; depth 0 leaves room so the chevron column aligns with the leading folder icon.
   const indentStyle = { paddingLeft: `${0.25 + depth * 0.875}rem` };
   const Icon = expanded && hasChildren ? FolderOpenIcon : FolderIcon;
+
+  // ADR-0060: restriction state of THIS folder.
+  const isRestricted = restrictedFolderIds.has(folder.id);
+  // Whether a parent folder is restricting this one (presentation-only, server enforces).
+  const ancestorId = isRestricted ? null : restrictedAncestorId(folder.id);
+  const inheritsRestriction = Boolean(ancestorId);
+
+  const [editorOpen, setEditorOpen] = useState(false);
 
   return (
     <li role="none">
@@ -180,7 +273,84 @@ function FolderTreeNode({
         >
           <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="truncate">{folder.name}</span>
+
+          {/* ADR-0060: padlock affordance — restricted own rule */}
+          {isRestricted ? (
+            <span
+              title={t("access.restrictedTooltip")}
+              aria-label={t("access.restrictedAriaLabel")}
+              className="ml-auto shrink-0"
+            >
+              <LockClosedIcon
+                className="size-3.5 text-warning"
+                aria-hidden
+              />
+            </span>
+          ) : null}
+
+          {/* ADR-0060: inheritance indicator — a calm "inherits restriction from ancestor" hint */}
+          {inheritsRestriction ? (
+            <span
+              title={t("access.inheritedTooltip")}
+              aria-label={t("access.inheritedAriaLabel")}
+              className="ml-auto shrink-0"
+            >
+              <LockClosedIcon
+                className="size-3.5 text-muted-foreground/60"
+                aria-hidden
+              />
+            </span>
+          ) : null}
         </button>
+
+        {/* ADR-0060: ADMIN-only rule editor — a calm Popover triggered by a secondary icon-button.
+            The padlock / inherited state are presentation only; the server enforces (INV-9). */}
+        {isAdmin ? (
+          <Popover open={editorOpen} onOpenChange={setEditorOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label={t("access.editRulesAriaLabel", {
+                  name: folder.name,
+                })}
+                title={t("access.editRulesTitle")}
+                className={cn(
+                  "ml-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/40 outline-none transition-colors",
+                  "hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring",
+                  (isRestricted || inheritsRestriction) &&
+                    "text-muted-foreground/70",
+                  editorOpen && "text-muted-foreground",
+                )}
+              >
+                <LockClosedIcon className="size-3" aria-hidden />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              sideOffset={6}
+              className="w-80 p-4"
+              // Stop the click from bubbling to the folder-select button.
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 space-y-0.5">
+                <p className="text-sm font-semibold">{t("access.editorTitle")}</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {folder.name}
+                </p>
+                {inheritsRestriction ? (
+                  <p className="mt-1 text-xs text-muted-foreground/70">
+                    {t("access.inheritedNote")}
+                  </p>
+                ) : null}
+              </div>
+              <FolderAccessRuleEditor
+                folderId={folder.id}
+                folderName={folder.name}
+                rawAccessRules={folder.accessRules ?? null}
+              />
+            </PopoverContent>
+          </Popover>
+        ) : null}
       </div>
 
       {hasChildren && expanded ? (
@@ -188,12 +358,15 @@ function FolderTreeNode({
           {children.map((child) => (
             <FolderTreeNode
               key={child.folder.id}
-              node={child}
+              node={child as FolderNodeWithRules}
               depth={depth + 1}
               selectedFolderId={selectedFolderId}
               isExpanded={isExpanded}
               onToggle={onToggle}
               onSelect={onSelect}
+              isAdmin={isAdmin}
+              restrictedFolderIds={restrictedFolderIds}
+              restrictedAncestorId={restrictedAncestorId}
             />
           ))}
         </ul>
