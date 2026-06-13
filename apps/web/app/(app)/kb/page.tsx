@@ -33,7 +33,7 @@ import { useUsers } from "@/lib/api/hooks/use-users";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { ArticleCard } from "./_components/article-card";
-import { FolderTree } from "./_components/folder-tree";
+import { FolderTree, type FolderWithRules } from "./_components/folder-tree";
 import { ImportArticleDialog } from "./_components/import-article-dialog";
 
 /** The two article statuses, as multi-select values (#198). */
@@ -81,6 +81,8 @@ export default function KnowledgeBasePage() {
   const tc = useTranslations("common");
   // New article + Import both create an article, so they gate on article:write.
   const canWrite = useCan("article:write");
+  // ADR-0060: ADMIN-only access-rule editor affordance (the API gates writes server-side).
+  const canManageSettings = useCan("settings:manage");
   const {
     q,
     offset,
@@ -290,9 +292,10 @@ export default function KnowledgeBasePage() {
         <aside className="lg:sticky lg:top-4 lg:w-64 lg:shrink-0">
           <div className="rounded-xl bg-card p-2 text-card-foreground ring-1 ring-foreground/10 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
             <FolderTree
-              folders={categories ?? []}
+              folders={(categories ?? []) as FolderWithRules[]}
               selectedFolderId={selectedFolderId}
               onSelect={handleSelectFolder}
+              isAdmin={canManageSettings}
             />
           </div>
         </aside>
