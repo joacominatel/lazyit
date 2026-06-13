@@ -28,6 +28,7 @@ import { QueueModule } from './queue/queue.module';
 import { ServiceAccountsModule } from './service-accounts/service-accounts.module';
 import { WorkflowEngineModule } from './workflow-engine/workflow-engine.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { SecretManagerModule } from './secret-manager/secret-manager.module';
 import { SearchModule } from './search/search.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
@@ -80,6 +81,11 @@ import { buildLoggerParams } from './logging/logging.config';
     // In-app notification bell (ADR-0056): the four poll endpoints (gated notification:read), the
     // 90-day retention sweep, and the exported NotificationsService the post-commit emitters use.
     NotificationsModule,
+    // Zero-knowledge Secret Manager (ADR-0061, #366): the ciphertext-custodian backend — keypair +
+    // vault/item/membership CRUD + KB-chip resolution. Two-layer authz (RBAC secret:read/secret:manage
+    // ⟂ per-vault crypto membership), human-only. The server stores wrapped blobs + ciphertext and can
+    // NEVER decrypt a value (INV-10): no reveal(), no env key, no cipher anywhere in the module.
+    SecretManagerModule,
   ],
   controllers: [AppController],
   providers: [
