@@ -3,7 +3,7 @@ title: Domain — MOC
 tags: [moc, domain]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-13
 ---
 
 # Domain — Map of Content
@@ -80,9 +80,9 @@ The model is organized in loosely-coupled areas:
    folder per article), [[article-alias]] (nav-only symlinks), [[article-wiki-link]] (materialized
    article↔article `[[slug]]` edges → backlinks); the **folder** is also the KB permission boundary
    ([[0059-kb-folders-links-and-import]], [[0060-kb-folder-access-control]]).
-9. **Secret Manager** — [[secret-vault]], [[secret-item]], [[vault-membership]], [[user-keypair]]: a
-   zero-knowledge vault store beside the KB, the server never decrypting a secret value
-   ([[0061-secret-manager-zero-knowledge]]).
+9. **Secret Manager** — [[secret-vault]], [[secret-item]], [[vault-membership]], [[user-keypair]],
+   [[secret-audit-log]]: a zero-knowledge vault store beside the KB, the server never decrypting a
+   secret value (INV-10, [[0061-secret-manager-zero-knowledge]]). **Built (#366).**
 
 ## Implementation order
 
@@ -100,9 +100,11 @@ The model is built atomic-first (see each entity note for status):
    [[workflow-secret]] ([[0054-applications-workflow-engine]], epic #248).
 9. **Knowledge Base v2** (evolves the KB area) — [[folder]] + [[article-alias]] + [[article-wiki-link]],
    then folder-based access control ([[0059-kb-folders-links-and-import]] / [[0060-kb-folder-access-control]],
-   #364/#365). *Design only — not yet built.*
-10. **Secret Manager** (beside the KB) — [[user-keypair]] first, then [[secret-vault]] +
-    [[vault-membership]] + [[secret-item]] ([[0061-secret-manager-zero-knowledge]], #366).
-    *Design only — not yet built.*
+   #364/#365). **Built** — merged on `feat/kb-secrets`.
+10. **Secret Manager** (beside the KB) — [[user-keypair]] + [[secret-vault]] + [[vault-membership]] +
+    [[secret-item]] + [[secret-audit-log]] ([[0061-secret-manager-zero-knowledge]], #366). **Built** —
+    merged on `feat/secret-manager`. Includes `@lazyit/shared/crypto` subpath, custodian backend
+    (`apps/api/src/secret-manager/`), `apps/web` unlock/grant/peer-reset UI, and the KB masked-chip
+    (`{{ lazyit_secret.HANDLE }}`).
 
 Why asset-centric? → [[0004-asset-centric-design]].

@@ -3,7 +3,7 @@ title: "ADR-0060: Knowledge Base access control — folders as the permission bo
 tags: [adr, knowledge-base, kb, authorization, security]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-06-13
 deciders: [Joaquín Minatel]
 ---
 
@@ -13,8 +13,8 @@ deciders: [Joaquín Minatel]
 
 accepted
 
-> [!note] Decided — not yet integrated
-> Ratified 2026-06-11 in a CTO/CEO design session; this ADR records the decision. **No code is built yet** — implementation is tracked by #365. Status is `accepted` (the decision stands), not `proposed`.
+> [!note] Decided and implemented in #365
+> Ratified 2026-06-11 in a CTO/CEO design session. **Implemented in #365** (merged on `feat/kb-secrets`): folder-based access control (INV-9) — `FolderAccessService`, the API+DB enforcement, article 404-hiding, and the no-escalation alias gate are all built and shipped.
 
 This ADR builds directly on [[0059-kb-folders-links-and-import]] (which turns the flat
 **ArticleCategory** into a hierarchical [[folder]] and gives every article exactly one **home folder**):
