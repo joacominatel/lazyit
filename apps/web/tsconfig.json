@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@lazyit/shared/crypto": ["../../packages/shared/src/crypto/index.ts"]
     }
   },
   "include": [
