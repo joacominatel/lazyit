@@ -20,6 +20,12 @@ import {
   activeWikiLinkQuery,
   applyWikiLinkSuggestion,
 } from "@/components/markdown-wiki-link-autocomplete";
+import {
+  type SecretChipAutocomplete,
+  SecretChipSuggestions,
+  activeSecretChipQuery,
+  applySecretChipSuggestion,
+} from "@/components/markdown-secret-chip-autocomplete";
 import { cn } from "@/lib/utils";
 
 interface MarkdownEditorProps {
@@ -35,6 +41,14 @@ interface MarkdownEditorProps {
    * drive that search. Selecting a suggestion inserts `[[slug]]`. Omit for a plain editor.
    */
   wikiLink?: WikiLinkAutocomplete;
+  /**
+   * Optional `{{ lazyit_secret.HANDLE }}` chip autocomplete (ADR-0061 §8). When provided, typing
+   * `{{ lazyit_secret.` inside the source pane opens a handle picker fed by `suggestions` (the
+   * caller fetches them via `useHandleSuggestions` — HANDLES only, never values); `onQueryChange`
+   * is called with the partial handle text so the caller can drive that search. Selecting a
+   * suggestion inserts `{{ lazyit_secret.HANDLE }}`. Omit for a plain editor without chip support.
+   */
+  secretChip?: SecretChipAutocomplete;
 }
 
 /** The three editor layouts. `split` = source + live preview side-by-side; `write` = source
@@ -70,31 +84,51 @@ export function MarkdownEditor({
   placeholder,
   invalid,
   wikiLink,
+  secretChip,
 }: MarkdownEditorProps) {
   const t = useTranslations("shared");
   const [mode, setMode] = useState<ViewMode>("split");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // The open `[[` token's query (null = the autocomplete is closed) and the highlighted suggestion.
-  const [query, setQuery] = useState<string | null>(null);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const onQueryChange = wikiLink?.onQueryChange;
-  const suggestions = wikiLink?.suggestions ?? [];
-  const open = wikiLink != null && query !== null && suggestions.length > 0;
+  // Wiki-link autocomplete state: the open `[[` token's query and the highlighted suggestion index.
+  const [wikiQuery, setWikiQuery] = useState<string | null>(null);
+  const [wikiActiveIndex, setWikiActiveIndex] = useState(0);
+  const wikiOnQueryChange = wikiLink?.onQueryChange;
+  const wikiSuggestions = wikiLink?.suggestions ?? [];
+  const wikiOpen = wikiLink != null && wikiQuery !== null && wikiSuggestions.length > 0;
+
+  // Secret chip autocomplete state: the open `{{ lazyit_secret.` token's query and active index.
+  const [chipQuery, setChipQuery] = useState<string | null>(null);
+  const [chipActiveIndex, setChipActiveIndex] = useState(0);
+  const chipOnQueryChange = secretChip?.onQueryChange;
+  const chipSuggestions = secretChip?.suggestions ?? [];
+  const chipOpen = secretChip != null && chipQuery !== null && chipSuggestions.length > 0;
+
+  // Only one popup is active at a time (wikiOpen takes priority; chipOpen is checked second).
+  const anyOpen = wikiOpen || chipOpen;
 
   const showSource = mode !== "preview";
   const showPreview = mode !== "write";
 
-  /** Re-derive the open-`[[`-token query from the caret position after any value/caret change. */
+  /** Re-derive both autocomplete queries from the caret position after any value/caret change. */
   const syncQuery = useCallback(
     (text: string, caret: number) => {
-      if (!wikiLink) return;
-      const next = activeWikiLinkQuery(text, caret);
-      setQuery(next);
-      setActiveIndex(0);
-      if (next !== null) onQueryChange?.(next);
+      // Wiki-link query.
+      if (wikiLink) {
+        const next = activeWikiLinkQuery(text, caret);
+        setWikiQuery(next);
+        setWikiActiveIndex(0);
+        if (next !== null) wikiOnQueryChange?.(next);
+      }
+      // Secret chip query.
+      if (secretChip) {
+        const next = activeSecretChipQuery(text, caret);
+        setChipQuery(next);
+        setChipActiveIndex(0);
+        if (next !== null) chipOnQueryChange?.(next);
+      }
     },
-    [wikiLink, onQueryChange],
+    [wikiLink, wikiOnQueryChange, secretChip, chipOnQueryChange],
   );
 
   const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -103,16 +137,32 @@ export function MarkdownEditor({
     syncQuery(text, event.target.selectionStart ?? text.length);
   };
 
-  /** Insert the chosen slug as `[[slug]]`, replacing the open token, and close the popup. */
-  const insertSuggestion = (slug: string) => {
+  /** Insert the chosen wiki-link slug as `[[slug]]`, replacing the open token. */
+  const insertWikiSuggestion = (slug: string) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     const caret = textarea.selectionStart ?? value.length;
     const result = applyWikiLinkSuggestion(value, caret, slug);
     if (!result) return;
     onChange(result.value);
-    setQuery(null);
-    // Restore focus + caret after React re-renders the controlled value.
+    setWikiQuery(null);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(result.caret, result.caret);
+    });
+  };
+
+  /** Insert the chosen secret chip as `{{ lazyit_secret.HANDLE }}`, replacing the open token. */
+  const insertChipSuggestion = (handle: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const caret = textarea.selectionStart ?? value.length;
+    const result = applySecretChipSuggestion(value, caret, handle);
+    if (!result) return;
+    onChange(result.value);
+    setChipQuery(null);
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;
@@ -122,19 +172,38 @@ export function MarkdownEditor({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!open) return;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex((i) => (i + 1) % suggestions.length);
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
-    } else if (event.key === "Enter" || event.key === "Tab") {
-      event.preventDefault();
-      insertSuggestion(suggestions[activeIndex].slug);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      setQuery(null);
+    if (!anyOpen) return;
+    // Wiki-link popup takes priority when both are somehow open simultaneously.
+    if (wikiOpen) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setWikiActiveIndex((i) => (i + 1) % wikiSuggestions.length);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setWikiActiveIndex((i) => (i - 1 + wikiSuggestions.length) % wikiSuggestions.length);
+      } else if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        insertWikiSuggestion(wikiSuggestions[wikiActiveIndex].slug);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        setWikiQuery(null);
+      }
+      return;
+    }
+    if (chipOpen) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setChipActiveIndex((i) => (i + 1) % chipSuggestions.length);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setChipActiveIndex((i) => (i - 1 + chipSuggestions.length) % chipSuggestions.length);
+      } else if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        insertChipSuggestion(chipSuggestions[chipActiveIndex].handle);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        setChipQuery(null);
+      }
     }
   };
 
@@ -146,27 +215,37 @@ export function MarkdownEditor({
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
-        // Keep the open-token query in sync when the caret moves without an edit (arrow/click).
+        // Keep the open-token queries in sync when the caret moves without an edit (arrow/click).
         onKeyUp={(e) =>
           syncQuery(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)
         }
         onClick={(e) =>
           syncQuery(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)
         }
-        onBlur={() => setQuery(null)}
+        onBlur={() => {
+          setWikiQuery(null);
+          setChipQuery(null);
+        }}
         placeholder={placeholder ?? t("editor.markdownPlaceholder")}
         aria-invalid={invalid || undefined}
-        aria-expanded={open || undefined}
-        aria-autocomplete={wikiLink ? "list" : undefined}
+        aria-expanded={anyOpen || undefined}
+        aria-autocomplete={wikiLink || secretChip ? "list" : undefined}
         spellCheck
         className="min-h-[420px] resize-y font-mono text-sm"
       />
-      {open ? (
+      {wikiOpen ? (
         <WikiLinkSuggestions
-          suggestions={suggestions}
-          activeIndex={activeIndex}
-          onHover={setActiveIndex}
-          onSelect={(slug) => insertSuggestion(slug)}
+          suggestions={wikiSuggestions}
+          activeIndex={wikiActiveIndex}
+          onHover={setWikiActiveIndex}
+          onSelect={(slug) => insertWikiSuggestion(slug)}
+        />
+      ) : chipOpen ? (
+        <SecretChipSuggestions
+          suggestions={chipSuggestions}
+          activeIndex={chipActiveIndex}
+          onHover={setChipActiveIndex}
+          onSelect={(handle) => insertChipSuggestion(handle)}
         />
       ) : null}
     </div>

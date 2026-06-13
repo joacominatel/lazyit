@@ -10,6 +10,7 @@ import { SessionTokenSync } from "@/components/session-token-sync";
 import { SidebarShell } from "@/components/sidebar-shell";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/user-menu";
+import { AppSecretProvider } from "@/app/(app)/_components/app-secret-provider";
 
 // Private app shell: sidebar + topbar. The interactive nav (active state) lives
 // in the SidebarNav client component so this layout stays a server component.
@@ -62,9 +63,18 @@ export default async function AppLayout({
         >
           <Breadcrumb />
         </div>
-        <main id="main-content" className="flex-1 p-4 md:p-6">
-          {children}
-        </main>
+        {/*
+          SecretManagerProvider is hoisted to this shell (ADR-0061 §8) so the in-memory crypto
+          session is available app-wide — KB chips (`{{ lazyit_secret.HANDLE }}`) can call the
+          reveal flow from any article, not just from `/secrets`. The session drops on logout
+          (this layout unmounts) and on an explicit lock action. The `/secrets` layout keeps its
+          own `secret:read` access gate; it no longer needs to mount the provider itself.
+        */}
+        <AppSecretProvider>
+          <main id="main-content" className="flex-1 p-4 md:p-6">
+            {children}
+          </main>
+        </AppSecretProvider>
       </div>
     </div>
   );
