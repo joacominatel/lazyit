@@ -6,7 +6,7 @@ import {
   LockClosedIcon,
   LockOpenIcon,
 } from "@heroicons/react/24/outline";
-import type { UserKeypair } from "@lazyit/shared";
+import type { CreateUserKeypair, UserKeypair } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -183,6 +183,16 @@ function UnlockFlow({ keypair, embedded = false }: { keypair: UserKeypair; embed
         </Button>
       </form>
 
+      {/* #452: this is an UNLOCK, not first-time setup — the keypair already exists. A recovery key is
+          shown only ONCE at setup and is NOT re-displayed here. Stating that explicitly avoids the
+          "I set my passphrase but never saw a recovery key" confusion (the user reached unlock, not
+          bootstrap). The "I forgot my passphrase" path below covers the lost-passphrase case. */}
+      {!isRecovery ? (
+        <p className="rounded-md bg-muted/60 p-3 text-center text-xs text-muted-foreground">
+          {t("unlock.alreadySetUpNote")}
+        </p>
+      ) : null}
+
       <div className="flex flex-col items-center gap-1 border-t pt-4 text-center text-xs">
         <button
           type="button"
@@ -209,9 +219,16 @@ function UnlockFlow({ keypair, embedded = false }: { keypair: UserKeypair; embed
 
 /**
  * BOOTSTRAP: a brand-new user picks a vault passphrase, the browser mints a keypair (`bootstrapKeypair`),
- * posts the wrapped material, and the recovery key is shown ONCE. On acknowledge, we unlock the freshly
- * created keypair straight into the session (re-deriving from the passphrase the user just typed) so they
- * land inside the manager already unlocked.
+ * the recovery key is shown ONCE, and ONLY AFTER the user explicitly acknowledges having saved it does the
+ * wrapped material get POSTed to the server. On a successful POST we unlock the freshly created keypair
+ * straight into the session (re-deriving from the passphrase the user just typed) so they land inside the
+ * manager already unlocked.
+ *
+ * #452 HARDENING — recovery-key-before-persist invariant: the keypair material is generated and held in
+ * browser memory FIRST, the `RecoveryKeyModal` is shown, and the POST happens INSIDE `handleAcknowledge`,
+ * gated on the acknowledged modal. There is NO ordering where the server can hold a keypair before the
+ * recovery key has been shown AND acknowledged — `bootstrapKeypair` (mint) no longer POSTs; the POST is
+ * reachable only from the modal's acknowledge handler.
  */
 function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
   const t = useTranslations("secrets");
@@ -221,7 +238,10 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
-  // The wire keypair returned by the POST, used to unlock into the session after acknowledge.
+  // The browser-minted wire DTO, held in memory while the recovery-key modal is up. It is POSTed ONLY
+  // from `handleAcknowledge` — nothing is persisted server-side before the modal is acknowledged (#452).
+  const [pendingWire, setPendingWire] = useState<CreateUserKeypair | null>(null);
+  // The keypair returned by the (post-acknowledge) POST, used to unlock into the session.
   const [createdKeypair, setCreatedKeypair] = useState<UserKeypair | null>(null);
   // SECW-04: if the post-acknowledge auto-unlock throws, we must NOT wipe the form back to blank —
   // the IRREVERSIBLE keypair already exists. We keep it + the passphrase and surface a recovery view.
@@ -235,10 +255,11 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
     if (busy || !passphrase || passphrase !== confirm || passphrase.length < 8) return;
     setBusy(true);
     try {
+      // Mint the keypair material in the browser ONLY — do NOT POST yet. The recovery key MUST be shown
+      // and acknowledged before anything is persisted server-side (#452 recovery-key-before-persist).
       const { wire, recoveryKeyDisplay } = await bootstrapKeypair(passphrase);
-      const created = await createKeypair.mutateAsync(wire);
-      setCreatedKeypair(created);
-      setRecoveryKey(recoveryKeyDisplay); // shown once via the modal
+      setPendingWire(wire);
+      setRecoveryKey(recoveryKeyDisplay); // shown once via the modal; the POST is deferred to acknowledge
     } catch (err) {
       notifyError(err, t("bootstrap.error"));
     } finally {
@@ -247,18 +268,37 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
   }
 
   async function handleAcknowledge() {
-    // The recovery key has been saved & acknowledged. Unlock the new keypair into the session using the
-    // passphrase the user just typed. ONLY drop local secret state once the unlock actually succeeds —
-    // otherwise an unlock failure here would strand the user with an irreversible keypair they can't reach.
+    // The recovery key has been saved & acknowledged — ONLY NOW do we persist the keypair. We close the
+    // modal, POST the held wire DTO, then unlock the new keypair into the session using the passphrase the
+    // user just typed. ONLY drop local secret state once the unlock actually succeeds — an unlock failure
+    // here would otherwise strand the user with an irreversible keypair they can't reach (SECW-04).
     const pass = passphrase;
+    const wire = pendingWire;
+    const shownRecoveryKey = recoveryKey; // captured before we close the modal, to re-show on POST failure
     setRecoveryKey(null);
-    if (!createdKeypair) {
+    if (!wire) {
       setPassphrase("");
       setConfirm("");
       return;
     }
+    setBusy(true);
+    let created: UserKeypair;
     try {
-      const privateKey = await unlockWithPassphrase(createdKeypair, pass);
+      created = await createKeypair.mutateAsync(wire);
+    } catch (err) {
+      // The POST failed → the keypair was NOT persisted. Keep the held wire + passphrase so the user can
+      // retry the POST WITHOUT re-minting (which would invalidate the already-shown recovery key). Re-show
+      // the SAME recovery key behind the same acknowledge gate so the recovery-key-before-persist invariant
+      // continues to hold on the retry.
+      notifyError(err, t("bootstrap.error"));
+      setRecoveryKey(shownRecoveryKey);
+      setBusy(false);
+      return;
+    }
+    setCreatedKeypair(created);
+    setPendingWire(null); // persisted — drop the in-memory wire
+    try {
+      const privateKey = await unlockWithPassphrase(created, pass);
       setPrivateKey(privateKey);
       // Success — now it is safe to drop the local secret state.
       setPassphrase("");
@@ -266,8 +306,11 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
       setCreatedKeypair(null);
       setUnlockFailed(false);
     } catch {
-      // Keep the created keypair + passphrase; show the "created — unlock with your passphrase" view.
+      // POST succeeded but the auto-unlock threw — keep the created keypair + passphrase; show the
+      // "created — unlock with your passphrase" recovery view (SECW-04).
       setUnlockFailed(true);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -377,6 +420,11 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
  * `useResetKeypair` re-mints the keypair (new public key) → a new recovery key is shown once. CRUCIAL: a
  * reset gives them a fresh identity with NO vault access — a surviving vault member must re-grant each
  * vault to the new public key. We surface that loudly.
+ *
+ * #452 HARDENING — same recovery-key-before-persist invariant as bootstrap: the new keypair material is
+ * minted in the browser FIRST, the recovery key is shown, and the reset POST happens INSIDE
+ * `handleAcknowledge`, gated on the acknowledged modal. The reset cannot replace the server-side keypair
+ * before the new recovery key has been shown AND acknowledged.
  */
 function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; embedded?: boolean }) {
   const t = useTranslations("secrets");
@@ -387,6 +435,9 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  // The browser-minted wire DTO, held in memory while the recovery-key modal is up. POSTed (as a reset)
+  // ONLY from `handleAcknowledge` — the server-side keypair is not replaced before acknowledge (#452).
+  const [pendingWire, setPendingWire] = useState<CreateUserKeypair | null>(null);
   const [resetKeypairData, setResetKeypairData] = useState<UserKeypair | null>(null);
   // SECW-04: same discipline as bootstrap — a post-reset auto-unlock failure must not wipe back to blank,
   // because the IRREVERSIBLE reset already minted the new keypair.
@@ -400,9 +451,10 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
     if (busy || !passphrase || passphrase !== confirm || passphrase.length < 8) return;
     setBusy(true);
     try {
+      // Mint the new keypair material in the browser ONLY — do NOT POST the reset yet. The new recovery
+      // key MUST be shown and acknowledged before the server-side keypair is replaced (#452).
       const { wire, recoveryKeyDisplay } = await bootstrapKeypair(passphrase);
-      const updated = await resetKeypair.mutateAsync(wire);
-      setResetKeypairData(updated);
+      setPendingWire(wire);
       setRecoveryKey(recoveryKeyDisplay);
     } catch (err) {
       notifyError(err, t("reset.error"));
@@ -412,15 +464,33 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
   }
 
   async function handleAcknowledge() {
+    // The recovery key has been saved & acknowledged — ONLY NOW do we POST the reset (replacing the
+    // server-side keypair), then unlock the new keypair into the session.
     const pass = passphrase;
+    const wire = pendingWire;
+    const shownRecoveryKey = recoveryKey; // captured before we close the modal, to re-show on POST failure
     setRecoveryKey(null);
-    if (!resetKeypairData) {
+    if (!wire) {
       setPassphrase("");
       setConfirm("");
       return;
     }
+    setBusy(true);
+    let updated: UserKeypair;
     try {
-      const privateKey = await unlockWithPassphrase(resetKeypairData, pass);
+      updated = await resetKeypair.mutateAsync(wire);
+    } catch (err) {
+      // The reset POST failed → the server-side keypair is unchanged. Keep the held wire + passphrase and
+      // re-show the SAME recovery key behind the acknowledge gate so a retry still honours the invariant.
+      notifyError(err, t("reset.error"));
+      setRecoveryKey(shownRecoveryKey);
+      setBusy(false);
+      return;
+    }
+    setResetKeypairData(updated);
+    setPendingWire(null); // reset persisted — drop the in-memory wire
+    try {
+      const privateKey = await unlockWithPassphrase(updated, pass);
       setPrivateKey(privateKey);
       // Success — only now drop the local secret state.
       setPassphrase("");
@@ -428,8 +498,11 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
       setResetKeypairData(null);
       setUnlockFailed(false);
     } catch {
-      // Keep the freshly-minted keypair + passphrase; show the recovery view.
+      // Reset succeeded but the auto-unlock threw — keep the freshly-minted keypair + passphrase; show the
+      // recovery view (SECW-04).
       setUnlockFailed(true);
+    } finally {
+      setBusy(false);
     }
   }
 
