@@ -3,12 +3,12 @@ title: Folder
 tags: [domain, entity]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-12
+updated: 2026-06-13
 ---
 
 # Folder
 
-> 🟢 implemented (structure + access) · Area: Knowledge Base · Implementation order: tbd
+> 🟢 implemented (structure + access + cascade delete) · Area: Knowledge Base · Implementation order: tbd
 
 > [!note] The flat [[article-category]] evolved
 > `Folder` is the hierarchical successor to the flat [[article-category]]
@@ -17,11 +17,11 @@ updated: 2026-06-12
 > KB **access boundary** ([[0060-kb-folder-access-control]]). The **structure** — the tree, the
 > per-parent name uniqueness, the cycle/orphan guards — shipped in #392; the **access layer** — the
 > `accessRules` jsonb column, the DB-first read evaluator, the 404-not-403 existence-hiding, the
-> no-escalation alias check and the search-leak fix — shipped in #404. The Prisma **model and table
-> keep the names `ArticleCategory` / `article_categories`** and the endpoints stay `/article-categories`
-> — only the self-FK + the `accessRules` column were added; the rename to `Folder` / `folders` is a
-> deliberate follow-up. See [[article-category]] for the (now hierarchical) model; the ADRs hold the
-> full detail.
+> no-escalation alias check and the search-leak fix — shipped in #404; the **cascade delete** shipped
+> in #415. The Prisma **model and table keep the names `ArticleCategory` / `article_categories`** and
+> the endpoints stay `/article-categories` — only the self-FK + the `accessRules` column were added;
+> the rename to `Folder` / `folders` is a deliberate follow-up. See [[article-category]] for the (now
+> hierarchical) model; the ADRs hold the full detail.
 
 ## Purpose
 
@@ -53,10 +53,20 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
   walk up the chain** from the proposed parent (the same pattern the manager chain — [[0058-user-manager-and-clone-actions]]
   — and the workflow step graph — [[0054-applications-workflow-engine]] §8 — use); reaching the subject
   is a **400**. A new folder has no children, so a create can't cycle.
-- **No silent orphaning on delete** — soft-deleting a folder that still has live **child folders** is a
-  **409** (same posture as the existing live-articles 409). Reparent or delete the children first. Both
-  guards are application logic: the soft delete (UPDATE deletedAt) never fires the FK referential
-  action, so the schema FKs are only hard-delete safety nets.
+- **No silent orphaning on delete (non-cascade)** — soft-deleting a folder that still has live
+  **child folders** is a **409** (same posture as the existing live-articles 409). Reparent or delete
+  the children first. Both guards are application logic: the soft delete (UPDATE deletedAt) never fires
+  the FK referential action, so the schema FKs are only hard-delete safety nets.
+- **Cascade delete** (#415) — `DELETE /article-categories/:id?cascade=true` (`category:delete`,
+  ADMIN-only) soft-deletes the folder, **all descendant folders** (full subtree, BFS walk), and **all
+  articles** whose home `categoryId` is anywhere in that subtree, in a **single `$transaction`**.
+  Hard-deletes all [[article-alias]] rows whose `folderId` is in the deleted subtree OR whose
+  `articleId` points to a newly soft-deleted article (dead aliases are pure noise). Returns
+  `{ deletedFolders: number, deletedArticles: number }`. Idempotent/safe: 404 if the folder is
+  already deleted or non-existent; an empty folder cascades cleanly (`{ deletedFolders: 1,
+  deletedArticles: 0 }`). The author-only article gate is bypassed (ADMIN folder operation). Stale
+  `ArticleWikiLink.resolvedTargetId` values pointing at soft-deleted articles are left in place — the
+  read paths already filter these (ADR-0059 §3/§4).
 - **One home folder per article** (the evolved required FK); aliases provide additional, nav-only
   appearances.
 - **Bulk `.zip` import mirrors the archive's tree into folders** (#398, [[0059-kb-folders-links-and-import]]
@@ -95,10 +105,12 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
 The endpoints stay `/article-categories` (`ArticleCategoriesModule`) — see [[article-category]] — with
 `parentId` now accepted on create (optional; absent = root) and update (nullable; `null` = move to
 root, a cuid = reparent). A reparent that would create a cycle is **400**; a delete of a folder with
-live sub-folders is **409**. **`PUT /article-categories/:id/access-rules`** (`settings:manage`,
-ADMIN-only) sets or clears the folder's access rules (body `{ accessRules: <rule list> | null }`).
+live sub-folders is **409** (non-cascade). **`DELETE /article-categories/:id?cascade=true`** (`category:delete`,
+ADMIN-only) performs the cascade delete described above and returns `{ deletedFolders, deletedArticles }`.
+**`PUT /article-categories/:id/access-rules`** (`settings:manage`, ADMIN-only) sets or clears the
+folder's access rules (body `{ accessRules: <rule list> | null }`).
 
-## Implemented in #392 + #404; still deferred
+## Implemented in #392 + #404 + #415; still deferred
 
 - **Built (#392, ADR-0059 §1):** the `parentId` self-FK, the per-parent partial-unique name, the DFS
   cycle guard, the no-silent-orphan child-folder 409, and `parentId` on the create/update/read wire
@@ -109,6 +121,10 @@ ADMIN-only) sets or clears the folder's access rules (body `{ accessRules: <rule
   fail-closed; the article read-path 404-not-403 gate; the no-escalation alias re-check; and the
   `/search` per-caller folder-access post-filter (the search-leak fix). The per-folder rule **editor
   UI** is a separate frontend slice.
+- **Built (#415):** the `?cascade=true` flag on `DELETE /:id` — BFS subtree walk, single-transaction
+  soft-delete of all descendant folders + articles, hard-delete of all alias rows in the subtree
+  (folder-side and article-side), ADMIN-only (same `category:delete` gate), returns
+  `{ deletedFolders, deletedArticles }`.
 - **Still deferred:** the `ArticleCategory` → `Folder` model/table **rename** is a follow-up (a
   separate migration); a guided-reparent UX on delete (the rule is "no silent orphaning"; the mechanism
   is the 409 today); the Phase-2 alias-as-share (§7, reserved).

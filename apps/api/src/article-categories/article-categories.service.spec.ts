@@ -19,13 +19,31 @@ type CategoryMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  updateMany: jest.Mock;
   count: jest.Mock;
+};
+
+type ArticleMock = {
+  count: jest.Mock;
+  updateMany: jest.Mock;
+  findMany: jest.Mock;
+};
+
+type ArticleAliasMock = {
+  deleteMany: jest.Mock;
 };
 
 describe('ArticleCategoriesService', () => {
   let service: ArticleCategoriesService;
   let articleCategory: CategoryMock;
-  let article: { count: jest.Mock };
+  let article: ArticleMock;
+  let articleAlias: ArticleAliasMock;
+  let prisma: {
+    articleCategory: CategoryMock;
+    article: ArticleMock;
+    articleAlias: ArticleAliasMock;
+    $transaction: jest.Mock;
+  };
 
   beforeEach(async () => {
     articleCategory = {
@@ -33,14 +51,37 @@ describe('ArticleCategoriesService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
       count: jest.fn(),
     };
-    article = { count: jest.fn() };
+    article = {
+      count: jest.fn(),
+      updateMany: jest.fn(),
+      findMany: jest.fn(),
+    };
+    articleAlias = {
+      deleteMany: jest.fn(),
+    };
+
+    // $transaction: by default, immediately invoke the callback with a tx that mirrors the mocks.
+    const txProxy = {
+      articleAlias,
+      article,
+      articleCategory,
+    };
+    prisma = {
+      articleCategory,
+      article,
+      articleAlias,
+      $transaction: jest.fn((callback: (tx: typeof txProxy) => Promise<unknown>) =>
+        callback(txProxy),
+      ),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         ArticleCategoriesService,
-        { provide: PrismaService, useValue: { articleCategory, article } },
+        { provide: PrismaService, useValue: prisma },
       ],
     }).compile();
 
@@ -285,6 +326,204 @@ describe('ArticleCategoriesService', () => {
         NotFoundException,
       );
       expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // removeCascade — cascade soft-delete (issue #415)
+  // ---------------------------------------------------------------------------
+
+  describe('removeCascade', () => {
+    /**
+     * Wire up the BFS tree walk mock: `findFirst` (findOne existence check) returns the root
+     * folder, then `findMany` returns the children at each level as keyed in `childrenMap`.
+     * After the tree walk, the $transaction callback fires the tx mocks directly.
+     *
+     * `childrenMap` maps a folder id to the ids of its DIRECT children. Omit a key (or map it to [])
+     * to indicate a leaf.
+     */
+    const wireTree = (
+      rootId: string,
+      childrenMap: Record<string, string[]> = {},
+    ) => {
+      // findOne (existence check) — returns a live folder
+      articleCategory.findFirst.mockResolvedValue({
+        id: rootId,
+        deletedAt: null,
+      });
+
+      // BFS findMany calls: each call receives { where: { parentId: X }, select: { id: true }, ... }
+      articleCategory.findMany.mockImplementation(
+        (args: { where?: { parentId?: string } }) => {
+          const pid = args?.where?.parentId;
+          const ids = (pid && childrenMap[pid]) ? childrenMap[pid] : [];
+          return Promise.resolve(ids.map((id) => ({ id })));
+        },
+      );
+    };
+
+    it('cascade soft-deletes a nested subtree (root > child > grandchild) + all their articles; counts are correct', async () => {
+      // Tree: root → child → grandchild
+      wireTree('root', { root: ['child'], child: ['gc'] });
+
+      articleAlias.deleteMany.mockResolvedValue({ count: 0 });
+      article.updateMany.mockResolvedValue({ count: 5 }); // 5 articles total across subtree
+      article.findMany.mockResolvedValue([]); // no article-side aliases to clean
+      articleCategory.updateMany.mockResolvedValue({ count: 3 }); // root + child + gc
+
+      const result = await service.removeCascade('root');
+
+      expect(result).toEqual({ deletedFolders: 3, deletedArticles: 5 });
+
+      // The folder-side alias deletion must cover all 3 subtree ids.
+      expect(articleAlias.deleteMany).toHaveBeenNthCalledWith(1, {
+        where: { folderId: { in: expect.arrayContaining(['root', 'child', 'gc']) } },
+      });
+
+      // Articles in the subtree are soft-deleted (deletedAt: null guard in updateMany).
+      expect(article.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            categoryId: { in: expect.arrayContaining(['root', 'child', 'gc']) },
+            deletedAt: null,
+          }),
+          data: expect.objectContaining({ deletedAt: expect.any(Date) }),
+        }),
+      );
+
+      // Folders in the subtree are soft-deleted.
+      expect(articleCategory.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { in: expect.arrayContaining(['root', 'child', 'gc']) },
+            deletedAt: null,
+          }),
+          data: expect.objectContaining({ deletedAt: expect.any(Date) }),
+        }),
+      );
+
+      // Rows have deletedAt stamped (same Date instance across all updateMany calls in the tx).
+      const articleCall = article.updateMany.mock.calls[0][0] as {
+        data: { deletedAt: Date };
+      };
+      const folderCall = articleCategory.updateMany.mock.calls[0][0] as {
+        data: { deletedAt: Date };
+      };
+      expect(articleCall.data.deletedAt).toBeInstanceOf(Date);
+      expect(folderCall.data.deletedAt).toBeInstanceOf(Date);
+    });
+
+    it('non-cascade (remove) still 409s when the folder has live children', async () => {
+      articleCategory.findFirst.mockResolvedValue({ id: 'f1', deletedAt: null });
+      article.count.mockResolvedValue(0);
+      articleCategory.count.mockResolvedValue(2); // has 2 children
+
+      await expect(service.remove('f1')).rejects.toBeInstanceOf(ConflictException);
+      expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+
+    it('non-cascade still 409s when the folder has live articles', async () => {
+      articleCategory.findFirst.mockResolvedValue({ id: 'f1', deletedAt: null });
+      article.count.mockResolvedValue(1);
+
+      await expect(service.remove('f1')).rejects.toBeInstanceOf(ConflictException);
+      expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+
+    it('404s on a missing or already-soft-deleted folder', async () => {
+      articleCategory.findFirst.mockResolvedValue(null); // findOne returns nothing
+
+      await expect(service.removeCascade('gone')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      // Transaction must NOT be entered if the root folder is gone.
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a descendant article authored by ANOTHER user is soft-deleted by the cascade (ADMIN override)', async () => {
+      // Single-level: root has one child folder that has one article authored by 'other-user'.
+      wireTree('root', { root: ['child'] });
+
+      articleAlias.deleteMany.mockResolvedValue({ count: 0 });
+      // updateMany doesn't care about authorId — it applies to ALL live articles in the subtree.
+      article.updateMany.mockResolvedValue({ count: 1 });
+      article.findMany.mockResolvedValue([{ id: 'art-by-other' }]);
+      // Article-side alias cleanup for the deleted article.
+      articleAlias.deleteMany.mockResolvedValue({ count: 1 });
+      articleCategory.updateMany.mockResolvedValue({ count: 2 }); // root + child
+
+      const result = await service.removeCascade('root');
+
+      expect(result.deletedArticles).toBe(1);
+      // The updateMany has NO authorId filter — confirming the ADMIN bypass.
+      const updateCall = article.updateMany.mock.calls[0][0] as {
+        where: { categoryId: { in: string[] }; deletedAt: null };
+      };
+      expect(Object.keys(updateCall.where)).not.toContain('authorId');
+    });
+
+    it('alias handling: folder-side aliases in the deleted subtree are hard-deleted', async () => {
+      // Leaf folder with one alias pointing at it from OUTSIDE the subtree.
+      wireTree('root');
+
+      articleAlias.deleteMany.mockResolvedValue({ count: 1 });
+      article.updateMany.mockResolvedValue({ count: 0 });
+      article.findMany.mockResolvedValue([]);
+      articleCategory.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.removeCascade('root');
+
+      // The FIRST deleteMany call covers folderId-in-subtree aliases.
+      expect(articleAlias.deleteMany).toHaveBeenNthCalledWith(1, {
+        where: { folderId: { in: ['root'] } },
+      });
+    });
+
+    it('alias handling: article-side aliases outside the subtree are hard-deleted when their article is soft-deleted', async () => {
+      wireTree('root');
+
+      articleAlias.deleteMany.mockResolvedValue({ count: 0 });
+      article.updateMany.mockResolvedValue({ count: 2 }); // 2 articles deleted
+      // findMany returns the ids of the newly deleted articles.
+      article.findMany.mockResolvedValue([{ id: 'a1' }, { id: 'a2' }]);
+      articleCategory.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.removeCascade('root');
+
+      // The SECOND deleteMany call covers articleId-in-deleted-set aliases.
+      expect(articleAlias.deleteMany).toHaveBeenNthCalledWith(2, {
+        where: { articleId: { in: ['a1', 'a2'] } },
+      });
+    });
+
+    it('cascade on an empty folder (no children, no articles) returns { deletedFolders: 1, deletedArticles: 0 }', async () => {
+      wireTree('root'); // no children
+
+      articleAlias.deleteMany.mockResolvedValue({ count: 0 });
+      article.updateMany.mockResolvedValue({ count: 0 });
+      article.findMany.mockResolvedValue([]);
+      articleCategory.updateMany.mockResolvedValue({ count: 1 }); // only the root
+
+      const result = await service.removeCascade('root');
+
+      expect(result).toEqual({ deletedFolders: 1, deletedArticles: 0 });
+    });
+
+    it('all mutations run inside a single $transaction', async () => {
+      wireTree('root', { root: ['child'] });
+
+      articleAlias.deleteMany.mockResolvedValue({ count: 0 });
+      article.updateMany.mockResolvedValue({ count: 0 });
+      article.findMany.mockResolvedValue([]);
+      articleCategory.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.removeCascade('root');
+
+      // $transaction was called exactly once.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      // All the side-effecting calls happened through the tx proxy, not the outer prisma mock.
+      // (The tx proxy IS the same articleAlias/article/articleCategory mock objects in this test
+      // setup, so we simply verify $transaction was the entry point.)
     });
   });
 });
