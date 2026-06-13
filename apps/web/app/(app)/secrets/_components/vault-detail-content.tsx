@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { ApiError } from "@/lib/api/client";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useUsers } from "@/lib/api/hooks/use-users";
@@ -61,6 +62,27 @@ import { useVaultDek } from "./use-vault-dek";
 
 /** How long (ms) a revealed value stays visible before auto-masking. */
 const REVEAL_TIMEOUT_MS = 15_000;
+
+/**
+ * Classify the caller's vault-membership query (SECW-02). A 404 means the caller is NOT a member of this
+ * vault (e.g. an ADMIN browsing it) — distinct from a still-loading query or a genuine load error. Keeping
+ * these apart lets the UI show a clear "you are not a member" state instead of a generic reveal error.
+ */
+type MembershipState = "loading" | "member" | "not-member" | "error";
+
+function classifyMembership(q: {
+  isLoading: boolean;
+  isError: boolean;
+  error: unknown;
+  data: unknown;
+}): MembershipState {
+  if (q.isLoading) return "loading";
+  if (q.data) return "member";
+  if (q.isError && q.error instanceof ApiError && q.error.status === 404) return "not-member";
+  if (q.isError) return "error";
+  // No data, no error, not loading — treat as still settling.
+  return "loading";
+}
 
 /**
  * VaultDetailContent — the vault detail page (items + members), ADR-0061 §3/§6/§7.
@@ -93,6 +115,9 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
   const { data: vault, isLoading: vaultLoading } = useVault(vaultId);
   const { data: items, isLoading: itemsLoading } = useItems(vaultId);
   const { data: members, isLoading: membersLoading } = useMembers(vaultId);
+  // SECW-02: surface a vault-level "you are not a member" banner above the items so a non-member ADMIN
+  // understands why values cannot be decrypted, instead of hitting a generic per-row reveal error.
+  const membershipState = classifyMembership(useMyMembership(vaultId));
 
   const [addItemOpen, setAddItemOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
@@ -132,6 +157,13 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
       {/* Items section */}
       <section className="space-y-4">
         <h2 className="text-base font-semibold">{t("items.sectionTitle")}</h2>
+
+        {/* SECW-02: non-member (e.g. ADMIN) banner — values in this vault cannot be decrypted. */}
+        {membershipState === "not-member" ? (
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+            {t("detail.notMember")}
+          </p>
+        ) : null}
 
         {itemsLoading ? (
           <ItemsSkeleton />
@@ -236,6 +268,12 @@ interface ItemRowProps {
 function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
   const t = useTranslations("secrets");
   const { ensureDek } = useVaultDek(vaultId);
+  const { isUnlocked } = useSecretSession();
+  // SECW-02: read the caller's membership directly so we can distinguish "not a member" (404, e.g. a
+  // non-member ADMIN) and "still loading" from a genuine decrypt failure — revealError is reserved for
+  // real tamper / wrong-DEK cases only.
+  const membershipQuery = useMyMembership(vaultId);
+  const membershipState = classifyMembership(membershipQuery);
 
   // SECURITY: plaintext lives ONLY in this local state. Never put it in a query key,
   // localStorage, or prop. Auto-clear after REVEAL_TIMEOUT_MS.
@@ -249,6 +287,15 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
   // Cleanup the auto-mask timer on unmount.
   useEffect(() => () => clearTimeout(maskTimerRef.current), []);
 
+  // SECW-04 (lens1): when the session locks (isUnlocked → false), immediately cancel the pending auto-mask
+  // timer and re-mask any revealed value. An explicit Lock must re-hide every revealed item at once.
+  useEffect(() => {
+    if (!isUnlocked) {
+      clearTimeout(maskTimerRef.current);
+      setPlaintext(undefined);
+    }
+  }, [isUnlocked]);
+
   const handleReveal = useCallback(() => {
     if (plaintext !== undefined) {
       // Second click → mask immediately.
@@ -256,10 +303,13 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
       setPlaintext(undefined);
       return;
     }
+    // SM-WEB-07: re-clicking reveal clears any lingering error so it never sticks as a dead state.
+    setRevealError(false);
     const dek = ensureDek();
     if (!dek) {
-      // Session was locked (shouldn't happen inside UnlockGate, but be safe).
-      setRevealError(true);
+      // SECW-02: not a genuine decrypt failure — the DEK is unavailable because membership is missing,
+      // still loading, or the session is locked. Those are surfaced via dedicated states below, so we
+      // deliberately do NOT set revealError here (that is reserved for tamper / wrong-DEK).
       return;
     }
     try {
@@ -319,7 +369,23 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
               </button>
             </>
           ) : revealError ? (
-            <span className="text-xs text-destructive">{t("items.revealError")}</span>
+            // SM-WEB-07: pair the genuine decrypt error with a retry affordance so it is never a dead end.
+            <span className="flex items-center gap-2">
+              <span className="text-xs text-destructive">{t("items.revealError")}</span>
+              <button
+                type="button"
+                onClick={handleReveal}
+                className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+              >
+                {t("items.revealRetry")}
+              </button>
+            </span>
+          ) : membershipState === "not-member" ? (
+            <span className="text-xs text-destructive">{t("items.notMember")}</span>
+          ) : membershipState === "error" ? (
+            <span className="text-xs text-destructive">{t("detail.membershipError")}</span>
+          ) : membershipState === "loading" ? (
+            <span className="text-xs text-muted-foreground">{t("items.preparingKey")}</span>
           ) : (
             <span className="text-xs text-muted-foreground">{"•".repeat(16)}</span>
           )}
@@ -331,8 +397,17 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
         <button
           type="button"
           onClick={handleReveal}
-          title={plaintext !== undefined ? t("items.mask") : t("items.reveal")}
-          className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          disabled={membershipState !== "member"}
+          title={
+            membershipState === "not-member"
+              ? t("items.notMember")
+              : membershipState === "loading"
+                ? t("items.preparingKey")
+                : plaintext !== undefined
+                  ? t("items.mask")
+                  : t("items.reveal")
+          }
+          className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
         >
           {plaintext !== undefined ? (
             <EyeSlashIcon className="size-4" aria-hidden />
@@ -442,8 +517,10 @@ function MemberRow({
           <button
             type="button"
             onClick={() => setConfirmOpen(true)}
-            title={t("members.revoke")}
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            // SM-WEB-06: explain WHY the button is disabled when it's the last member, instead of the stale
+            // "Remove access" tooltip that implies the action is available.
+            title={membersCount <= 1 ? t("members.cannotRemoveLast") : t("members.revoke")}
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-40"
             disabled={membersCount <= 1}
           >
             <UserMinusIcon className="size-4" aria-hidden />
@@ -504,16 +581,25 @@ function AddItemDialog({
   const t = useTranslations("secrets");
   const tc = useTranslations("common");
   const { ensureDek } = useVaultDek(vaultId);
+  // SM-WEB-05: know whether the vault key is still being prepared vs genuinely unavailable, so we can
+  // disable submit with a "preparing…" hint instead of firing and dropping the user's typed plaintext.
+  const membershipState = classifyMembership(useMyMembership(vaultId));
   const createItem = useCreateItem();
   const [label, setLabel] = useState("");
   const [handle, setHandle] = useState("");
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
+  // SM-WEB-05: inline actionable error when the DEK cannot be unwrapped — the session can be re-driven
+  // (lock + unlock) and the typed value is preserved so nothing is lost mid-edit.
+  const [keyError, setKeyError] = useState(false);
+
+  const preparingKey = membershipState === "loading";
 
   function reset() {
     setLabel("");
     setHandle("");
     setValue("");
+    setKeyError(false);
   }
 
   function handleOpenChange(next: boolean) {
@@ -523,12 +609,15 @@ function AddItemDialog({
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (busy || !label.trim() || !handle.trim() || !value) return;
+    if (busy || preparingKey || !label.trim() || !handle.trim() || !value) return;
     const dek = ensureDek();
     if (!dek) {
-      toast.error(t("items.dekUnavailable"));
+      // Genuinely can't unwrap — keep the typed value, surface an inline recoverable error, do NOT toast
+      // a dead-end. The user can lock + unlock and retry without losing their entry.
+      setKeyError(true);
       return;
     }
+    setKeyError(false);
     setBusy(true);
     try {
       // Seal the plaintext value in the browser — never send it.
@@ -596,11 +685,22 @@ function AddItemDialog({
               type="password"
               autoComplete="new-password"
               value={value}
-              onChange={(e) => setValue(e.target.value)}
+              onChange={(e) => {
+                setValue(e.target.value);
+                if (keyError) setKeyError(false);
+              }}
               disabled={busy}
               placeholder={t("items.valuePlaceholder")}
             />
-            <FieldDescription>{t("items.valueHint")}</FieldDescription>
+            {keyError ? (
+              <FieldDescription className="text-destructive">
+                {t("items.dekUnavailableInline")}
+              </FieldDescription>
+            ) : preparingKey ? (
+              <FieldDescription>{t("items.preparingKey")}</FieldDescription>
+            ) : (
+              <FieldDescription>{t("items.valueHint")}</FieldDescription>
+            )}
           </Field>
 
           <DialogFooter>
@@ -614,10 +714,10 @@ function AddItemDialog({
             </Button>
             <Button
               type="submit"
-              disabled={busy || !label.trim() || !handle.trim() || !value}
+              disabled={busy || preparingKey || !label.trim() || !handle.trim() || !value}
             >
               {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : null}
-              {busy ? t("items.creating") : t("items.addSubmit")}
+              {busy ? t("items.creating") : preparingKey ? t("items.preparingKey") : t("items.addSubmit")}
             </Button>
           </DialogFooter>
         </form>
@@ -644,57 +744,72 @@ function EditItemDialog({
   const t = useTranslations("secrets");
   const tc = useTranslations("common");
   const { ensureDek } = useVaultDek(vaultId);
+  // SM-WEB-05: distinguish "vault key still preparing" from "genuinely unavailable" so we never strand the
+  // user mid-edit with their typed new value silently dropped.
+  const membershipState = classifyMembership(useMyMembership(vaultId));
   const updateItem = useUpdateItem();
   const [label, setLabel] = useState(item.label);
   const [handle, setHandle] = useState(item.handle);
   const [newValue, setNewValue] = useState("");
   const [busy, setBusy] = useState(false);
+  const [keyError, setKeyError] = useState(false);
+
+  const preparingKey = membershipState === "loading";
+  // Only the value path needs the DEK; label/handle-only edits work without it.
+  const needsKey = newValue.length > 0;
 
   // Sync fields when the item prop changes (re-open for different item).
   useEffect(() => {
     setLabel(item.label);
     setHandle(item.handle);
     setNewValue("");
+    setKeyError(false);
   }, [item.id, item.label, item.handle]);
 
   function handleOpenChange(next: boolean) {
-    if (!next) setNewValue("");
+    if (!next) {
+      setNewValue("");
+      setKeyError(false);
+    }
     onOpenChange(next);
   }
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    try {
-      // Build partial update — envelope only if a new value was entered.
-      type PatchData = {
-        label?: string;
-        handle?: string;
-        ciphertext?: string;
-        iv?: string;
-        authTag?: string;
-        keyVersion?: number;
-      };
-      const patch: PatchData = {};
-      if (label.trim() && label.trim() !== item.label) patch.label = label.trim();
-      if (handle.trim() && handle.trim() !== item.handle) patch.handle = handle.trim();
-      if (newValue) {
-        const dek = ensureDek();
-        if (!dek) {
-          toast.error(t("items.dekUnavailable"));
-          setBusy(false);
-          return;
-        }
-        const envelope = sealItem(dek, newValue);
-        Object.assign(patch, envelope);
-      }
+    if (busy || (needsKey && preparingKey)) return;
+    // Build partial update — envelope only if a new value was entered.
+    type PatchData = {
+      label?: string;
+      handle?: string;
+      ciphertext?: string;
+      iv?: string;
+      authTag?: string;
+      keyVersion?: number;
+    };
+    const patch: PatchData = {};
+    if (label.trim() && label.trim() !== item.label) patch.label = label.trim();
+    if (handle.trim() && handle.trim() !== item.handle) patch.handle = handle.trim();
 
-      if (Object.keys(patch).length === 0) {
-        handleOpenChange(false);
+    if (needsKey) {
+      const dek = ensureDek();
+      if (!dek) {
+        // Genuinely can't unwrap — surface an inline recoverable error and PRESERVE the typed value.
+        // The user can lock + unlock and retry; we never drop their entry on this path.
+        setKeyError(true);
         return;
       }
+      const envelope = sealItem(dek, newValue);
+      Object.assign(patch, envelope);
+    }
 
+    if (Object.keys(patch).length === 0) {
+      handleOpenChange(false);
+      return;
+    }
+
+    setKeyError(false);
+    setBusy(true);
+    try {
       await updateItem.mutateAsync({ vaultId, itemId: item.id, data: patch });
       toast.success(t("items.updated", { label: label.trim() || item.label }));
       handleOpenChange(false);
@@ -746,11 +861,22 @@ function EditItemDialog({
               type="password"
               autoComplete="new-password"
               value={newValue}
-              onChange={(e) => setNewValue(e.target.value)}
+              onChange={(e) => {
+                setNewValue(e.target.value);
+                if (keyError) setKeyError(false);
+              }}
               disabled={busy}
               placeholder={t("items.newValuePlaceholder")}
             />
-            <FieldDescription>{t("items.newValueHint")}</FieldDescription>
+            {keyError ? (
+              <FieldDescription className="text-destructive">
+                {t("items.dekUnavailableInline")}
+              </FieldDescription>
+            ) : needsKey && preparingKey ? (
+              <FieldDescription>{t("items.preparingKey")}</FieldDescription>
+            ) : (
+              <FieldDescription>{t("items.newValueHint")}</FieldDescription>
+            )}
           </Field>
 
           <DialogFooter>
@@ -762,9 +888,12 @@ function EditItemDialog({
             >
               {tc("cancel")}
             </Button>
-            <Button type="submit" disabled={busy || (!label.trim() && !newValue)}>
+            <Button
+              type="submit"
+              disabled={busy || (needsKey && preparingKey) || (!label.trim() && !newValue)}
+            >
               {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : null}
-              {busy ? t("items.updating") : tc("save")}
+              {busy ? t("items.updating") : needsKey && preparingKey ? t("items.preparingKey") : tc("save")}
             </Button>
           </DialogFooter>
         </form>
@@ -854,15 +983,21 @@ function AddMemberDialog({
   const { data: myMembership } = useMyMembership(vaultId);
   const addMember = useAddMember();
 
-  const { data: allUsers, isLoading: usersLoading } = useUsers();
+  // SM-WEB-02: read isError so a users load error is NOT indistinguishable from "no one to add".
+  const { data: allUsers, isLoading: usersLoading, isError: usersLoadError } = useUsers();
   const { data: currentMembers } = useMembers(vaultId);
 
   const [targetUserId, setTargetUserId] = useState("");
   const [busy, setBusy] = useState(false);
 
   // Fetch the target's public key only when a user is selected.
-  const { data: targetPublicKeyData, isLoading: publicKeyLoading } =
-    useUserPublicKey(targetUserId || undefined);
+  // SECW-03: surface a 404 (target never bootstrapped their Secret Manager) distinctly from any other error.
+  const {
+    data: targetPublicKeyData,
+    isLoading: publicKeyLoading,
+    isError: publicKeyError,
+    error: publicKeyErrorObj,
+  } = useUserPublicKey(targetUserId || undefined);
 
   function handleOpenChange(next: boolean) {
     if (!next) setTargetUserId("");
@@ -872,6 +1007,18 @@ function AddMemberDialog({
   // Filter out users who are already members.
   const memberUserIds = new Set(currentMembers?.map((m) => m.userId) ?? []);
   const eligibleUsers: User[] = allUsers?.filter((u: User) => !memberUserIds.has(u.id)) ?? [];
+
+  // SM-WEB-02: with users loaded successfully but nobody left to add, show an explicit empty state and
+  // disable Grant — instead of a dead <select> with only the placeholder option.
+  const noEligible = !usersLoading && !usersLoadError && eligibleUsers.length === 0;
+  // SECW-03: a 404 on the target's public key means they never bootstrapped; any other resolved-empty key
+  // is a different failure. Both block the grant, but the 404 gets a clear, actionable message.
+  const targetNoKeypair =
+    !!targetUserId &&
+    !publicKeyLoading &&
+    publicKeyError &&
+    publicKeyErrorObj instanceof ApiError &&
+    publicKeyErrorObj.status === 404;
 
   async function handleGrant(e: React.FormEvent) {
     e.preventDefault();
@@ -922,6 +1069,16 @@ function AddMemberDialog({
             <FieldLabel htmlFor="grant-user">{t("members.userLabel")}</FieldLabel>
             {usersLoading ? (
               <div className="h-9 animate-pulse rounded-md bg-muted" />
+            ) : usersLoadError ? (
+              // SM-WEB-02: a load error must be distinct from "no one to add".
+              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                {t("members.usersLoadError")}
+              </p>
+            ) : noEligible ? (
+              // SM-WEB-02: explicit empty state instead of a dead <select> with only the placeholder.
+              <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                {t("members.noEligible")}
+              </p>
             ) : (
               <select
                 id="grant-user"
@@ -940,35 +1097,50 @@ function AddMemberDialog({
             )}
             {targetUserId && !publicKeyLoading && !targetPublicKeyData ? (
               <FieldDescription className="text-destructive">
-                {t("members.noPublicKey")}
+                {/* SECW-03: a 404 means the target never bootstrapped — give an actionable message;
+                    any other resolved-empty key keeps the generic note. */}
+                {targetNoKeypair ? t("members.targetNoKeypair") : t("members.noPublicKey")}
               </FieldDescription>
             ) : null}
           </Field>
 
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => handleOpenChange(false)}
-              disabled={busy}
-            >
-              {tc("cancel")}
-            </Button>
-            <Button
-              type="submit"
-              disabled={
-                busy ||
-                !targetUserId ||
-                publicKeyLoading ||
-                !targetPublicKeyData
-              }
-            >
-              {busy || publicKeyLoading ? (
-                <ArrowPathIcon className="size-4 animate-spin" />
-              ) : null}
-              {busy ? t("members.granting") : t("members.grantSubmit")}
-            </Button>
-          </DialogFooter>
+          {!usersLoading && !usersLoadError && !noEligible ? (
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => handleOpenChange(false)}
+                disabled={busy}
+              >
+                {tc("cancel")}
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  busy ||
+                  !targetUserId ||
+                  publicKeyLoading ||
+                  !targetPublicKeyData
+                }
+              >
+                {busy || publicKeyLoading ? (
+                  <ArrowPathIcon className="size-4 animate-spin" />
+                ) : null}
+                {busy ? t("members.granting") : t("members.grantSubmit")}
+              </Button>
+            </DialogFooter>
+          ) : (
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => handleOpenChange(false)}
+                disabled={busy}
+              >
+                {tc("cancel")}
+              </Button>
+            </DialogFooter>
+          )}
         </form>
       </DialogContent>
     </Dialog>
