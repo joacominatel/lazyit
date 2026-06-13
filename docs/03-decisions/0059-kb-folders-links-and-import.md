@@ -3,7 +3,7 @@ title: "ADR-0059: Knowledge Base v2 — folders, aliases, wiki-links & bulk impo
 tags: [adr, knowledge-base, kb, folders, import]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-06-13
 deciders: [Joaquín Minatel]
 ---
 
@@ -11,8 +11,8 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-> [!note] Decided — not yet integrated
-> Ratified 2026-06-11 in a CTO/CEO design session; this ADR records the decision. **No code is built yet** — implementation is tracked by #364. Status is `accepted` (the decision stands), not `proposed`.
+> [!note] Decided and implemented in #364
+> Ratified 2026-06-11 in a CTO/CEO design session. **Implemented in #364** (merged on `feat/kb-secrets`): folders, article-alias, article-wiki-link, and `.zip` import are all built and shipped.
 
 The third wave for the Knowledge Base. [[0021-knowledge-base-design]] shipped the **simple wiki** (one
 `Article` + a **flat** [[article-category]], `LIKE`-only search, no versioning, no linking).

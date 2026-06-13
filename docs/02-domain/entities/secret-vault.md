@@ -26,7 +26,7 @@ rows, each holding the DEK **wrapped to that member's public key**. The server t
 - **has many** [[vault-membership]] rows — one per crypto member, each carrying the DEK wrapped to that
   member's [[user-keypair]] public key.
 - conceptually sits **beside** a Knowledge Base [[folder]] (the Secret Manager lives next to the KB,
-  [[0061-secret-manager-zero-knowledge]]); access to *enter* is gated by the planned `secret:read` /
+  [[0061-secret-manager-zero-knowledge]]); access to *enter* is gated by the `secret:read` /
   `secret:manage` capability, while the wrapped DEK is the **second, orthogonal** layer that lets a member
   *decrypt*.
 
@@ -42,7 +42,7 @@ rows, each holding the DEK **wrapped to that member's public key**. The server t
 - **Soft-revoke v1 = drop the membership.** Removing a member **DROPs** their [[vault-membership]] row so
   their wrapped DEK copy ceases to exist (forward secrecy of *new* writes is organizational, not
   retroactive — note it in the ADR).
-- **Two capability + crypto layers.** `secret:read` / `secret:manage` (planned, ADMIN-only by default —
+- **Two capability + crypto layers.** `secret:read` / `secret:manage` (ADMIN-only by default —
   the same separation-of-duties precedent as `workflow:secrets`) lets a user **enter** the Secret Manager;
   a wrapped DEK lets them **decrypt a given vault**. Both are required.
 

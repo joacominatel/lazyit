@@ -3,7 +3,7 @@ title: Decisions (ADRs) — MOC
 tags: [moc, adr]
 status: draft
 created: 2026-05-25
-updated: 2026-06-11
+updated: 2026-06-13
 ---
 
 <!-- updated 2026-06-01: ADR-0043 (Zitadel source-of-truth) accepted + validated live end-to-end
@@ -105,9 +105,9 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0056-in-app-notification-bell]] | In-app notification bell (admin-only, v1; #313) — append-only `Notification` + per-admin `NotificationRead` join (fan-out-on-read), closed shared type enum, best-effort post-commit emitters (critical-app/admin-granted/low-stock/manual-task/run-failed), poll delivery (SSE Phase-2 behind the same API), new `notification:read` seeded ADMIN-only; distinct from the `recent_activity` view | accepted |
 | [[0057-retry-fix-and-replay]] | Retry-after-fix vs pinned-version replay (#340) — root-cause of «fix the flow, then retry» replaying the pinned version; ships a `workflow:run`-gated **clone-to-new-run from latest** (Option 3, idempotency-guarded, append-only-clean) **and** a transient INV-6-safe **payload-override** on retry (Option 2); sequence-suffix idempotency key `<trigger>:<grantId>:<n>`, fail-closed double-provision guard; automatic per-attempt retry stays deterministic | **accepted** (2026-06-11) |
 | [[0058-user-manager-and-clone-actions]] | User identity graph (#303) — new `User` fields `legajo` / `username` (live-only partial unique) + a self-referential `managerId` with a `managerName` free-text fallback (at-most-one CHECK, `SetNull`, cycle-guard); the model-first identity layer ADR-0054 §6c deferred. Plus clone-with-chosen-actions (`POST /users/:id/clone`: opt-in assignments/grants + an explicit, safe-by-default workflow-engine fire toggle). Mapper gains an additive `grantee.manager` token (no migration) | **accepted** (2026-06-11) |
-| [[0059-kb-folders-links-and-import]] | Knowledge Base v2 — folders (evolved from flat ArticleCategory) + aliases/symlinks + article↔article `[[slug]]` wiki-links + backlinks + bulk .zip import (extends [[0021-knowledge-base-design]]/[[0042-article-versioning-and-linking]]) | **accepted** (2026-06-11) — design only, #364 |
-| [[0060-kb-folder-access-control]] | KB access control — the **folder** is the permission boundary (deliberate per-folder CARVE-OUT from the per-domain-only rule of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]); default PUBLIC, additive dynamic rules (user/role/app-grant/asset-assignee), composes with draft visibility, ADMIN god-mode, no-escalation, API+DB enforcement | **accepted** (2026-06-11) — design only, #365 |
-| [[0061-secret-manager-zero-knowledge]] | Secret Manager — zero-knowledge vaults beside the KB (per-user-keypair envelope, Argon2id, DEK wrapped per member, peer-reset, recovery key shown once, soft-revoke v1); a THIRD secret store distinct from server-decryptable [[workflow-secret]]; new `secret` capability + INV-8 crypto-exception | **accepted** (2026-06-11) — design only, #366 |
+| [[0059-kb-folders-links-and-import]] | Knowledge Base v2 — folders (evolved from flat ArticleCategory) + aliases/symlinks + article↔article `[[slug]]` wiki-links + backlinks + bulk .zip import (extends [[0021-knowledge-base-design]]/[[0042-article-versioning-and-linking]]) | **accepted** (2026-06-11) — **built, merged feat/kb-secrets** |
+| [[0060-kb-folder-access-control]] | KB access control — the **folder** is the permission boundary (deliberate per-folder CARVE-OUT from the per-domain-only rule of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]); default PUBLIC, additive dynamic rules (user/role/app-grant/asset-assignee), composes with draft visibility, ADMIN god-mode, no-escalation, API+DB enforcement | **accepted** (2026-06-11) — **built, merged feat/kb-secrets** |
+| [[0061-secret-manager-zero-knowledge]] | Secret Manager — zero-knowledge vaults beside the KB (per-user-keypair envelope, Argon2id, DEK wrapped per member, peer-reset, recovery key shown once, soft-revoke v1); a THIRD secret store distinct from server-decryptable [[workflow-secret]]; new `secret` capability + INV-8 crypto-exception (INV-10) | **accepted** (2026-06-11) — **built in #366, merged feat/secret-manager** |
 
 ## Pending ADRs (to write when decided)
 - **CD / image publishing** — deferred in [[0027-ci-pipeline]]; define the registry (GHCR) +
