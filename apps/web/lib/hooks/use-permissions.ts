@@ -1,4 +1,5 @@
 import type { Permission, Role } from "@lazyit/shared";
+import { useCallback, useMemo } from "react";
 import { useMyPermissionsQuery } from "@/lib/api/hooks/use-permissions-config";
 import { useCurrentUser } from "@/lib/api/hooks/use-users";
 
@@ -81,13 +82,27 @@ export interface MyPermissionsState {
 export function useMyPermissions(): MyPermissionsState {
   const { data, isLoading, error } = useMyPermissionsQuery();
 
-  const permissions: ReadonlySet<Permission> = new Set(data?.permissions ?? []);
+  // SECW-02: memoize the Set so components that consume `permissions` or `can` do not re-render
+  // on every parent render (a new Set literal is a new reference even when the contents are
+  // identical). `data?.permissions` is the array reference from TanStack's cache — it only
+  // changes when the query data itself changes, so this memo is very cheap to maintain.
+  const permissions = useMemo<ReadonlySet<Permission>>(
+    () => new Set(data?.permissions ?? []),
+    [data?.permissions],
+  );
+
+  // Stable callback: `can` only changes when `permissions` changes, so downstream components
+  // subscribed via `useCan` don't re-render on unrelated query updates.
+  const can = useCallback(
+    (permission: Permission) => permissions.has(permission),
+    [permissions],
+  );
 
   return {
     role: data?.role,
     permissions,
     // Fails closed: an empty set while loading/errored means `can()` is false everywhere.
-    can: (permission: Permission) => permissions.has(permission),
+    can,
     isLoading,
     error,
   };
