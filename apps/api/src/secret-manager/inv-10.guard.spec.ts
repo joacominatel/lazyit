@@ -7,18 +7,24 @@ import { join } from 'node:path';
  *
  * The single biggest regression risk for the zero-knowledge Secret Manager is a future contributor
  * adding a "convenience" server-side decrypt (the server-decryptable `WorkflowSecret` pattern is right
- * there in the repo), or importing the client-side crypto into the API custodian. This test STATICALLY
- * SCANS the apps/api source tree and FAILS CI if any of the three INV-10 fences is breached:
+ * there in the repo), or importing crypto into the API custodian. This test STATICALLY SCANS the
+ * apps/api source tree and FAILS CI if any INV-10 fence is breached:
  *
  *   1. ZERO imports of `@noble/*` or `@lazyit/shared/crypto` ANYWHERE in apps/api — the API is a
  *      ciphertext custodian; all crypto is client-side (ADR-0061 §3, crypto note §0/§6).
  *   2. NO `SECRET_MANAGER_KEY`-style env read in the secret-manager module — there is NO env master key
  *      over values (the deliberate inversion of `WORKFLOW_SECRET_KEY`; crypto note §6).
- *   3. NO reveal/decrypt/unwrap method and NO cipher primitive (`createDecipheriv`/`createCipheriv`/
- *      `aes`/`gcm`) in the secret-manager module — there is NO server-side reveal() (crypto note §6).
+ *   3. NO reveal/decrypt/unwrap method and NO cipher primitive token in the secret-manager module — a
+ *      best-effort NAME/TOKEN heuristic (belt-and-suspenders; can be evaded by an innocuous method name
+ *      + a runtime-assembled algorithm string — which is exactly why #4 exists).
+ *   4. THE SOUND STRUCTURAL INVARIANT: the secret-manager module imports NO cipher-providing module
+ *      (`node:crypto`/`crypto`/`@noble/*`/`@lazyit/shared/crypto`/WebCrypto `.subtle`), scanned on RAW
+ *      text. If the custodian imports nothing that can decrypt, it CANNOT decrypt — regardless of method
+ *      names or obfuscated algorithm strings. This is the LOAD-BEARING check; #3 is a secondary net.
  *
- * This is a pure filesystem scan (no Nest/Prisma bootstrap), so it runs fast and can never be silently
- * disabled by a mock. If this test fails, INV-10 has been violated — do NOT weaken the test.
+ * This is a pure filesystem scan (no Nest/Prisma bootstrap), so it runs fast. It is a strong regression
+ * FENCE, not a formal proof — rely on #4 (the structural import invariant); prefer TIGHTENING over
+ * loosening if a future pattern slips past #1–#3. Do NOT weaken it.
  */
 
 const API_SRC = join(__dirname, '..');
@@ -158,6 +164,25 @@ describe('INV-10 architectural guard (ADR-0061 — the merge gate)', () => {
       if (cipherPrimitive.test(code))
         offenders.push({ file, hit: 'cipher/aes/gcm primitive' });
     }
+    expect(offenders).toEqual([]);
+  });
+
+  it('4. the secret-manager MODULE imports NO cipher-providing module (the SOUND structural invariant)', () => {
+    // The LOAD-BEARING rule. #1–#3 are best-effort name/token heuristics that an adversary can dodge
+    // (an innocuously-named decrypt method + a runtime-assembled `aes-256-gcm` string + a `node:crypto`
+    // import — which #1 does NOT forbid). This rule closes that whole class structurally: a ciphertext
+    // custodian that imports NOTHING capable of decryption CANNOT decrypt, whatever the method is named.
+    // Scanned on RAW text (not the comment/string-stripped code) so an obfuscated specifier can't hide
+    // the dependency edge — an import specifier is a string literal, so stripping would erase it.
+    const cipherProviderImport =
+      /(?:from\s+|require\(\s*|import\s*\(\s*)['"](?:node:crypto|crypto|@noble\/[^'"]+|@lazyit\/shared\/crypto)['"]/;
+    // WebCrypto reached via the global `crypto` (no import): catch a `.subtle` property access. Scanned on
+    // CODE (strings/comments blanked) so the ADR prose that mentions WebCrypto can't false-positive, while
+    // a real `crypto.subtle.decrypt(...)` call still trips it (`.subtle` is hard to obfuscate away).
+    const webcryptoAccess = /\.subtle\b|\bSubtleCrypto\b|\bwebcrypto\b/;
+    const offenders = moduleFiles.filter(
+      (f) => cipherProviderImport.test(read(f)) || webcryptoAccess.test(readCode(f)),
+    );
     expect(offenders).toEqual([]);
   });
 });
