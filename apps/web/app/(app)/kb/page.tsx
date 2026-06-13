@@ -5,10 +5,14 @@ import {
   BookOpenIcon,
   PlusIcon,
 } from "@heroicons/react/24/outline";
-import { type ArticleLinkedTo, type ArticleStatus } from "@lazyit/shared";
+import {
+  type ArticleLinkedTo,
+  type ArticleStatus,
+  isPublicAccessRules,
+} from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ApplicationMultiSelect } from "@/components/application-multi-select";
 import { AssetMultiSelect } from "@/components/asset-multi-select";
@@ -32,7 +36,12 @@ import { useAsset } from "@/lib/api/hooks/use-assets";
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
+import {
+  compareFolderOrder,
+  restrictedAncestorOf,
+} from "@/lib/utils/folder-tree";
 import { ArticleCard } from "./_components/article-card";
+import { FolderBrowseCard } from "./_components/folder-browse-card";
 import { FolderTree, type FolderWithRules } from "./_components/folder-tree";
 import { ImportArticleDialog } from "./_components/import-article-dialog";
 
@@ -83,6 +92,9 @@ export default function KnowledgeBasePage() {
   const canWrite = useCan("article:write");
   // ADR-0060: ADMIN-only access-rule editor affordance (the API gates writes server-side).
   const canManageSettings = useCan("settings:manage");
+  // #415: ADMIN-only folder cascade-delete affordance — gated on `category:delete` (a folder is an
+  // ArticleCategory). The API enforces the real boundary; this only hides/shows the "⋯ → Delete".
+  const canDeleteFolder = useCan("category:delete");
   const {
     q,
     offset,
@@ -152,6 +164,68 @@ export default function KnowledgeBasePage() {
   const { data: users } = useUsers();
 
   const articles = page?.items;
+
+  // Restriction presentation data, shared by the folder-browse cards (#413) and mirroring the tree's
+  // padlocks (#414). `restrictedFolderIds` = folders carrying their OWN non-empty rule; `parentById`
+  // resolves the parent chain for inheritance. Both are PRESENTATION hints — the API enforces access.
+  const restrictedFolderIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const folder of categories ?? []) {
+      const rules = (folder as FolderWithRules).accessRules;
+      if (!isPublicAccessRules(rules as Parameters<typeof isPublicAccessRules>[0]))
+        ids.add(folder.id);
+    }
+    return ids;
+  }, [categories]);
+  const parentById = useMemo(
+    () =>
+      new Map((categories ?? []).map((f) => [f.id, f.parentId ?? null])),
+    [categories],
+  );
+
+  // The child folders of the currently-selected folder, surfaced as enterable cards in the main
+  // content area so you can drill down like a file explorer (#413), not only via the left tree. The
+  // tree data (`categories`) is reused — no extra fetch. Empty at "All articles" (no selection) or
+  // when the selected folder is a leaf. `toSorted` (non-mutating) orders them exactly like the tree
+  // via the shared comparator (order asc, nulls last; then name). Derived without a manual `useMemo`
+  // so the React Compiler owns the memoization (the chained filter/sort defeats preserve-memo).
+  const childFolders =
+    selectedFolderId && categories
+      ? categories
+          .filter((category) => category.parentId === selectedFolderId)
+          .toSorted(compareFolderOrder)
+      : [];
+
+  // Per-folder direct-child count, for the "N folders" line on a browse card (#413). Counts only
+  // live folders already loaded for the tree — no extra fetch.
+  const childCountById = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const folder of categories ?? []) {
+      if (!folder.parentId) continue;
+      counts.set(folder.parentId, (counts.get(folder.parentId) ?? 0) + 1);
+    }
+    return counts;
+  }, [categories]);
+
+  // Resolve a child folder's restriction presentation: its OWN rule wins; else the nearest restricted
+  // ancestor (inherited, #414); else public. The ancestor name is resolved for the inherited tooltip.
+  const folderRestriction = (folderId: string) => {
+    if (restrictedFolderIds.has(folderId)) {
+      return { restriction: "own" as const, ancestorName: undefined };
+    }
+    const ancestorId = restrictedAncestorOf(
+      folderId,
+      parentById,
+      restrictedFolderIds,
+    );
+    if (ancestorId) {
+      return {
+        restriction: "inherited" as const,
+        ancestorName: categoryName(ancestorId),
+      };
+    }
+    return { restriction: "public" as const, ancestorName: undefined };
+  };
 
   const categoryName = (id: string) =>
     categories?.find((category) => category.id === id)?.name ??
@@ -252,9 +326,6 @@ export default function KnowledgeBasePage() {
     label: t(`filters.statusLabel.${STATUS_LABEL_KEY[status]}`),
     adornment: <StatusDot tone={status === "DRAFT" ? "warning" : "success"} />,
   }));
-  const categoryOptions: MultiSelectOption[] = (categories ?? []).map(
-    (category) => ({ value: category.id, label: category.name }),
-  );
   const linkedToOptions: MultiSelectOption[] = LINKED_TO_VALUES.map((kind) => ({
     value: kind,
     label: t(`filters.linkedToLabel.${LINKED_TO_LABEL_KEY[kind]}`),
@@ -296,6 +367,7 @@ export default function KnowledgeBasePage() {
               selectedFolderId={selectedFolderId}
               onSelect={handleSelectFolder}
               isAdmin={canManageSettings}
+              canDelete={canDeleteFolder}
             />
           </div>
         </aside>
@@ -318,13 +390,9 @@ export default function KnowledgeBasePage() {
           onChange={(next) => setFilterValues("status", next)}
           className="sm:w-40"
         />
-        <MultiSelectFilter
-          label={t("filters.categoryLabelName")}
-          options={categoryOptions}
-          selected={categoryValues}
-          onChange={(next) => setFilterValues("categoryId", next)}
-          className="sm:w-48"
-        />
+
+        {/* The category filter dropdown was removed (#412): the folder-tree rail (left) is now the
+            single browse/filter affordance — a tree pick drives the same `categoryId` filter. */}
 
         {/* Linked filter: a "Linked only" toggle, plus a multi-select target narrowing once it's on. */}
         <div className="flex items-center gap-2">
@@ -367,6 +435,32 @@ export default function KnowledgeBasePage() {
 
       <ActiveFilters chips={chips} onClearAll={clearFilters} />
 
+      {/* #413: the selected folder's child folders, as enterable browse cards above the article grid
+          — drill DOWN from the content area like a file explorer (not only via the left tree).
+          Reuses the already-loaded folder data; clicking a card enters it (selects it + drives the
+          categoryId filter). Always shown when present, even while the article list is loading. */}
+      {childFolders.length > 0 ? (
+        <section aria-label={t("folders.subfoldersLabel")}>
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {childFolders.map((folder) => {
+              const { restriction, ancestorName } = folderRestriction(folder.id);
+              return (
+                <li key={folder.id}>
+                  <FolderBrowseCard
+                    name={folder.name}
+                    childCount={childCountById.get(folder.id) ?? 0}
+                    articleCount={0}
+                    restriction={restriction}
+                    ancestorName={ancestorName}
+                    onEnter={() => handleSelectFolder(folder.id)}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
       {isLoading ? (
         <SkeletonCards />
       ) : isError ? (
@@ -376,7 +470,13 @@ export default function KnowledgeBasePage() {
           error={error}
         />
       ) : isEmpty ? (
-        filtersActive ? (
+        // A folder that only holds sub-folders (its own articles empty) is NOT "empty" — the browse
+        // cards above ARE its content, so suppress the full empty state and show a quiet note instead.
+        childFolders.length > 0 ? (
+          <p className="px-1 text-sm text-muted-foreground">
+            {t("list.noArticlesInFolder")}
+          </p>
+        ) : filtersActive ? (
           <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
             <span>{t("list.noMatchFilters")}</span>
             <ClearFiltersLink onClick={clearFilters} />
@@ -409,10 +509,16 @@ export default function KnowledgeBasePage() {
       )}
 
           {!isLoading && !isError && !isEmpty ? (
+            // #416: drive the pager off the URL window (`limit`/`offset` from useListParams — the
+            // single source of truth) rather than the envelope echo. With `keepPreviousData` the
+            // previous page's envelope (offset 0) lingers for a frame while the next page resolves;
+            // feeding `page.offset` made the footer (and the Next button's `offset + limit` math)
+            // read from that stale page, so "Next" appeared to snap back to page 1. The URL window is
+            // already authoritative and updates synchronously on the pick.
             <Pagination
               total={total}
-              limit={page?.limit ?? limit}
-              offset={page?.offset ?? offset}
+              limit={limit}
+              offset={offset}
               itemCount={articles?.length ?? 0}
               onOffsetChange={setOffset}
               isFetching={isFetching}
