@@ -202,5 +202,44 @@
   },
   "wikiLinks": {
     "unresolvedTooltip": "Document not created yet"
+  },
+  "access": {
+    "statePublic": "Public",
+    "stateRestricted": "Restricted",
+    "makePublic": "Make public",
+    "publicHint": "Visible to all authenticated team members.",
+    "restrictedTooltip": "Restricted — only specific users may read this folder",
+    "restrictedAriaLabel": "Restricted folder",
+    "inheritedTooltip": "Inherits a restriction from a parent folder",
+    "inheritedAriaLabel": "Inherits restriction",
+    "inheritedNote": "This folder inherits a restriction from a parent folder.",
+    "editRulesAriaLabel": "Edit access rules for {name}",
+    "editRulesTitle": "Edit access rules",
+    "editorTitle": "Access rules",
+    "addRuleKindLabel": "Rule type",
+    "addRulePlaceholder": "Add a rule…",
+    "addRule": "Add rule",
+    "removeRuleAriaLabel": "Remove rule",
+    "kindUsers": "Users",
+    "kindRole": "Role",
+    "kindAppGrant": "App grant",
+    "kindAssetAssignment": "Asset assignees",
+    "roleLabel": {
+      "ADMIN": "Admins",
+      "MEMBER": "Members",
+      "VIEWER": "Viewers"
+    },
+    "selectRole": "Select a role",
+    "selectApplication": "Select an application",
+    "selectAsset": "Select an asset",
+    "noUsers": "No users yet.",
+    "noApplications": "No applications yet.",
+    "noAssets": "No assets yet.",
+    "save": "Save",
+    "discard": "Discard",
+    "toast": {
+      "saved": "Access rules saved",
+      "saveError": "Could not save access rules"
+    }
   }
 }
