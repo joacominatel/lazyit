@@ -27,6 +27,12 @@ export interface ArticleRow {
   // articles are ever projected into the index (draft privacy — ADR-0022/0035), so indexing the
   // content of an author-private DRAFT is structurally impossible.
   content: string;
+  // The article's HOME folder (= `Article.categoryId`). Carried into the index (ADR-0060 §5 search-leak
+  // fix / INV-9) so the per-caller search post-filter can resolve each hit's home folder and DROP the
+  // ones a non-matching caller may not see. Configured as a FILTERABLE attribute on the index; not part
+  // of the retrievable hit fields (it is access metadata, not a hit field — see RETRIEVE in
+  // search.service.ts).
+  categoryId: string;
 }
 
 export interface UserRow {
@@ -74,6 +80,9 @@ export function projectArticle(row: ArticleRow): SearchDocument {
     status: row.status,
     // Index the Markdown body so a full-text query over article content finds the runbook (ADR-0042).
     content: row.content,
+    // Folder-access metadata (ADR-0060 §5): the home folder, a FILTERABLE attribute the post-filter
+    // uses to drop a restricted hit a non-matching caller may not see. Never returned in a hit.
+    categoryId: row.categoryId,
   };
 }
 
