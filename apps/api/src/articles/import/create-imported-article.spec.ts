@@ -60,7 +60,9 @@ describe('runImportJob (the async import worker create path, ADR-0053)', () => {
       prisma,
     );
 
-    expect(result).toEqual({ articleId: 'art1' });
+    // The single-file path now returns a discriminated result (`kind: 'single'`) so getStatus can
+    // tell it from a `.zip` batch result without re-reading the job data (ADR-0059 §5).
+    expect(result).toEqual({ kind: 'single', articleId: 'art1' });
     const data = articleCreate.mock.calls[0][0].data as {
       title: string;
       slug: string;
@@ -132,7 +134,7 @@ describe('runImportJob (the async import worker create path, ADR-0053)', () => {
       }),
       prisma,
     );
-    expect(result).toEqual({ articleId: 'art1' });
+    expect(result).toEqual({ kind: 'single', articleId: 'art1' });
     const data = articleCreate.mock.calls[0][0].data as { content: string };
     expect(data.content).toContain('Datacenter Runbook');
   });
