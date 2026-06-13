@@ -7,6 +7,7 @@ import type {
   CreateArticle,
   ImportArticle,
   UpdateArticle,
+  ZipImportResult,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
 import { createCrudEndpoints } from "../crud-endpoints";
@@ -46,15 +47,15 @@ export const deleteArticle = crud.remove;
  * is equivalent to the prior single-value contract.
  *
  * `linked`/`linkedTo` drive the card-UI "linked" filter (ADR-0042): `linked: "only"` keeps just the
- * articles that have ≥1 `ArticleLink`, and `linkedTo` narrows that to one or more target kinds
- * (`asset` / `application`). All allowlisted server-side — an unknown value is rejected with 400,
+ * articles that have >=1 `ArticleLink`, and `linkedTo` narrows that to one or more target kinds
+ * (`asset` / `application`). All allowlisted server-side -- an unknown value is rejected with 400,
  * never silently ignored (ADR-0030).
  *
  * `assetId`/`applicationId` are the **specific-entity** link filters (#213): each is a multi-value
- * array of cuids keeping only articles linked to ≥1 of those exact assets / applications. Values
+ * array of cuids keeping only articles linked to >=1 of those exact assets / applications. Values
  * OR-combine within a param and across the two params (linked to one of these assets OR these apps);
  * selecting any id implies `linked: "only"`. Comma-encoded like the other multi-value filters; each
- * element is validated as a cuid server-side (unknown → 400).
+ * element is validated as a cuid server-side (unknown -> 400).
  */
 export interface ArticleFilters {
   categoryId?: string[];
@@ -104,21 +105,23 @@ export function getArticleBySlug(slug: string): Promise<Article> {
   return apiFetch<Article>(`${BASE}/by-slug/${encodeURIComponent(slug)}`);
 }
 
-/** Transition DRAFT → PUBLISHED (author only). Sets publishedAt on first publish. */
+/** Transition DRAFT -> PUBLISHED (author only). Sets publishedAt on first publish. */
 export function publishArticle(id: string): Promise<Article> {
   return apiFetch<Article>(`${BASE}/${id}/publish`, { method: "POST" });
 }
 
-/** Transition PUBLISHED → DRAFT (author only). Keeps publishedAt. */
+/** Transition PUBLISHED -> DRAFT (author only). Keeps publishedAt. */
 export function unpublishArticle(id: string): Promise<Article> {
   return apiFetch<Article>(`${BASE}/${id}/unpublish`, { method: "POST" });
 }
 
 /**
- * Async import contract (ADR-0053). Every import (`.md` / `.txt` / `.docx`) flows through a
- * BullMQ queue for a uniform UX: the `POST` validates the file synchronously, enqueues a job and
- * returns `202 { jobId }`; the client then polls {@link getArticleImportStatus}. The `.docx` parse
- * runs in a sandboxed child so a decompression bomb crashes the child, not the API (SEC-002).
+ * Async import contract (ADR-0053, extended in ADR-0059 §5). Every import
+ * (.md / .txt / .docx / .zip) flows through a BullMQ queue for a uniform
+ * UX: the `POST` validates the file synchronously, enqueues a job and returns
+ * `202 { jobId }`; the client then polls {@link getArticleImportStatus}. The
+ * .docx/.zip parse runs in a sandboxed child so a decompression bomb crashes
+ * the child, not the API (SEC-002).
  */
 
 /** BullMQ job lifecycle as exposed to the client (ADR-0053). */
@@ -130,21 +133,27 @@ export interface ImportArticleResult {
 }
 
 /**
- * Body of `GET /articles/import/:jobId` — the poll target.
- * `articleId` is present only when `state === "completed"`; `error` is a short, friendly message
- * present only when `state === "failed"`. A parse/bomb failure is **permanent** — the message is
- * never phrased as a transient "try again".
+ * Body of `GET /articles/import/:jobId` -- the poll target.
+ * - `articleId`: non-null only when `state === "completed"` for a **single-file** import.
+ *   A .zip import leaves it null (the batch has no single id -- see `batch`).
+ * - `batch`: non-null only when `state === "completed"` for a .zip import (ADR-0059 §5).
+ *   Contains the per-item fan-out result (created / renamed / skipped counts + item list).
+ *   Single-file imports leave it null; existing callers that ignore `batch` are unaffected.
+ * - `error`: a SHORT, friendly message -- non-null only when `state === "failed"`. A parse /
+ *   decompression-bomb / over-quota failure is PERMANENT: the message is never phrased as
+ *   a transient "try again".
  */
 export interface ImportJobStatus {
   jobId: string;
   state: ImportJobState;
   articleId?: string;
+  batch?: ZipImportResult | null;
   error?: string;
 }
 
 /**
- * Enqueue an async import from a `.md`/`.txt`/`.docx` file (multipart). Author = caller. The API
- * validates extension + size synchronously and returns `202 { jobId }`; poll
+ * Enqueue an async import from a .md/.txt/.docx/.zip file (multipart). Author = caller.
+ * The API validates extension + size synchronously and returns `202 { jobId }`; poll
  * {@link getArticleImportStatus} for the result.
  */
 export function importArticle(
@@ -163,7 +172,7 @@ export function importArticle(
   });
 }
 
-/** Poll the status of an import job (ADR-0053). 404 → unknown/expired job id. */
+/** Poll the status of an import job (ADR-0053). 404 -> unknown/expired job id. */
 export function getArticleImportStatus(
   jobId: string,
 ): Promise<ImportJobStatus> {
