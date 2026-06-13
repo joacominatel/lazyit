@@ -33,6 +33,7 @@ import { useUsers } from "@/lib/api/hooks/use-users";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { ArticleCard } from "./_components/article-card";
+import { FolderTree } from "./_components/folder-tree";
 import { ImportArticleDialog } from "./_components/import-article-dialog";
 
 /** The two article statuses, as multi-select values (#198). */
@@ -108,6 +109,16 @@ export default function KnowledgeBasePage() {
     linkedToValues.length > 0 ||
     assetIdValues.length > 0 ||
     applicationIdValues.length > 0;
+
+  // The folder tree is single-select and shares the `categoryId` list filter (ADR-0059 §1): a tree
+  // pick sets exactly one category; the tree highlights it only when one category is active (a
+  // multi-select via the filter dropdown shows "All articles" highlighted, never a misleading single
+  // node). Selecting a folder also resets to the first page.
+  const selectedFolderId =
+    categoryValues.length === 1 ? categoryValues[0] : null;
+  const handleSelectFolder = (folderId: string | null) => {
+    setFilterValues("categoryId", folderId ? [folderId] : []);
+  };
 
   const [importOpen, setImportOpen] = useState(false);
 
@@ -272,7 +283,22 @@ export default function KnowledgeBasePage() {
         }
       />
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      {/* Two columns from `lg`: a folder-tree browse rail (ADR-0059 §1) + the filters/grid. The rail
+          is a sticky, scrollable aside that uses the available height; below `lg` the tree stacks on
+          top so it never cramps the grid on narrow screens. */}
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <aside className="lg:sticky lg:top-4 lg:w-64 lg:shrink-0">
+          <div className="rounded-xl bg-card p-2 text-card-foreground ring-1 ring-foreground/10 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
+            <FolderTree
+              folders={categories ?? []}
+              selectedFolderId={selectedFolderId}
+              onSelect={handleSelectFolder}
+            />
+          </div>
+        </aside>
+
+        <div className="min-w-0 flex-1 space-y-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <SearchInput
           value={q}
           onChange={setQ}
@@ -366,7 +392,7 @@ export default function KnowledgeBasePage() {
           />
         )
       ) : (
-        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {articles?.map((article) => (
             <li key={article.id}>
               <ArticleCard
@@ -379,16 +405,18 @@ export default function KnowledgeBasePage() {
         </ul>
       )}
 
-      {!isLoading && !isError && !isEmpty ? (
-        <Pagination
-          total={total}
-          limit={page?.limit ?? limit}
-          offset={page?.offset ?? offset}
-          itemCount={articles?.length ?? 0}
-          onOffsetChange={setOffset}
-          isFetching={isFetching}
-        />
-      ) : null}
+          {!isLoading && !isError && !isEmpty ? (
+            <Pagination
+              total={total}
+              limit={page?.limit ?? limit}
+              offset={page?.offset ?? offset}
+              itemCount={articles?.length ?? 0}
+              onOffsetChange={setOffset}
+              isFetching={isFetching}
+            />
+          ) : null}
+        </div>
+      </div>
 
       <ImportArticleDialog open={importOpen} onOpenChange={setImportOpen} />
     </div>
