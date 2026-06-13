@@ -1,5 +1,10 @@
 // Barrel for @lazyit/shared — re-export every public contract from here.
 // Organization: schemas/ (zod + inferred types), constants/, utils/ (pure fns), clone/ (pure fns).
+// NOTE: the Secret Manager crypto primitives are intentionally NOT re-exported here. They live behind
+// the SEPARATE `@lazyit/shared/crypto` subpath export (src/crypto/index.ts) because they import the
+// ESM-only `@noble/*` packages — which apps/api's CommonJS Jest cannot load transitively (it would fail
+// to parse every suite that touches this barrel). apps/api is a ciphertext custodian and never needs
+// them; only apps/web (browser flows) and the crypto tests import them, via `@lazyit/shared/crypto`.
 export * from "./clone/clone-defaults";
 export * from "./clone/clone-user-payload";
 export * from "./constants/app";
