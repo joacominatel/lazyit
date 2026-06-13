@@ -615,6 +615,15 @@ model ArticleCategory {
   parentId    String?
   parent      ArticleCategory?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: SetNull)
   children    ArticleCategory[] @relation("FolderTree")
+  // Folder access control (ADR-0060 §3): null/absent = PUBLIC (any authenticated holder of
+  // `article:read` — preserves the pre-0060 behaviour). A non-null jsonb value is an OR-combined list
+  // of the CLOSED rule vocabulary (FolderAccessRulesSchema in @lazyit/shared): `users` / `role` /
+  // `appGrant` / `assetAssignment`. NOT a per-article ACL — the rule attaches to the FOLDER (a bounded
+  // named set) and articles inherit their home folder's rule (INV-9). Validated by zod at the DTO edge
+  // (catalog-as-code, ADR-0007 discipline); the shape is a reviewable closed set, never free-form
+  // policy. Evaluated DB-first at read time (EXISTS over the live AccessGrant/AssetAssignment joins for
+  // the dynamic kinds), never materialised — so access follows offboarding automatically.
+  accessRules Json?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
