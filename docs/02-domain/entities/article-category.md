@@ -3,7 +3,7 @@ title: ArticleCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-13
 ---
 
 # ArticleCategory
@@ -51,6 +51,11 @@ and soft-deleted from the app; the seed set is just an initial, non-special list
   required FK, so orphaning is impossible; reassign or delete those articles first.
 - **Deleting a category that still has live CHILD folders is refused with `409`** (#392) — a non-empty
   subtree is never silently orphaned; reparent or delete the children first.
+- **Cascade delete** (`DELETE /:id?cascade=true`, #415, `category:delete` ADMIN-only) — soft-deletes
+  the folder, **all descendant folders** (full BFS subtree), and **all articles** in the subtree in a
+  single `$transaction`. Hard-deletes all [[article-alias]] rows in the subtree (folder-side) and any
+  article-side aliases whose article was just deleted. Returns `{ deletedFolders, deletedArticles }`.
+  The author-only article gate is bypassed (ADMIN folder operation). See [[folder]] for full rules.
 - Soft delete ([[0006-soft-delete-and-auditing]]).
 
 > [!note] The delete guard is application logic, not the FK
@@ -90,11 +95,12 @@ Prisma model `ArticleCategory` → table `article_categories`. Validation schema
 soft-deleted, ordered by `order` then `name`), `GET /article-categories/:id`, `POST` (optional
 `parentId` → nest; absent = root; `400` if the parent isn't live), `PATCH /:id` (`parentId` nullable —
 `null` moves to root, a cuid reparents; `400` on a cycle), `DELETE /:id` (soft delete; `409` if the
-folder still has live articles **or** live child folders), `POST /:id/restore` (ADMIN-only — clears
-`deletedAt`, [[0041-soft-delete-reuse-and-restore]]), and `PUT /:id/access-rules` (#404,
-`settings:manage` ADMIN-only — set/clear the folder's access rules; body `{ accessRules: <list> | null }`,
-[[0060-kb-folder-access-control]]). Bodies validated against the shared schemas and
-documented via Swagger ([[0018-api-documentation-swagger]]).
+folder still has live articles **or** live child folders; add `?cascade=true` for the full subtree
+cascade returning `{ deletedFolders, deletedArticles }` — `category:delete` ADMIN-only, #415),
+`POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]), and
+`PUT /:id/access-rules` (#404, `settings:manage` ADMIN-only — set/clear the folder's access rules;
+body `{ accessRules: <list> | null }`, [[0060-kb-folder-access-control]]). Bodies validated against
+the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).
 
 Related: [[article]] · [[folder]] · [[asset-category]] · [[shared-package]] ·
 [[0021-knowledge-base-design]] · [[0059-kb-folders-links-and-import]] ·
