@@ -9,7 +9,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/resource-table";
@@ -81,21 +81,17 @@ export default function VaultListContent() {
     }
   }
 
-  // When the session unlocks (isUnlocked flips true) while the unlock dialog is open with
-  // pendingCreate, close the dialog and open the create dialog.
-  if (isUnlocked && unlockOpen && pendingCreate) {
-    // Schedule as microtask so React reconciles the unlock state first.
-    Promise.resolve().then(() => {
-      setUnlockOpen(false);
+  // When the session unlocks while the unlock dialog is open, close it — and if the user arrived from
+  // "Create vault", advance to the create dialog. An EFFECT (not render-phase setState): it reacts to
+  // the unlock state flipping, runs once per change, and never schedules redundant updates during render.
+  useEffect(() => {
+    if (!isUnlocked || !unlockOpen) return;
+    setUnlockOpen(false);
+    if (pendingCreate) {
       setPendingCreate(false);
       setCreateOpen(true);
-    });
-  }
-
-  // When the session unlocks while the unlock dialog is open (without pendingCreate), just close it.
-  if (isUnlocked && unlockOpen && !pendingCreate) {
-    Promise.resolve().then(() => setUnlockOpen(false));
-  }
+    }
+  }, [isUnlocked, unlockOpen, pendingCreate]);
 
   // FIRST-RUN: no keypair at all → show the bootstrap flow as the page body (replaces the list
   // surface entirely). UnlockGate renders the bootstrap form; once done isUnlocked becomes true
