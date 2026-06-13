@@ -48,6 +48,13 @@ export * from "./schemas/permission-meta";
 export * from "./schemas/primitives";
 export * from "./schemas/recent-activity";
 export * from "./schemas/search";
+// Secret Manager — zero-knowledge vault wire shapes (ADR-0061, #366). PURE zod (base64 string blobs +
+// metadata): these import NO `@noble/*` and NO `@lazyit/shared/crypto`, so apps/api's CommonJS Jest can
+// load the barrel. The crypto PRIMITIVES stay behind the separate `@lazyit/shared/crypto` subpath.
+export * from "./schemas/secret-item";
+export * from "./schemas/secret-vault";
+export * from "./schemas/user-keypair";
+export * from "./schemas/vault-membership";
 export * from "./schemas/service-account";
 export * from "./schemas/user";
 export * from "./schemas/user-history";
