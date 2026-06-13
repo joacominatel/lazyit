@@ -1,5 +1,6 @@
 import type { CreateUserKeypair } from "@lazyit/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError } from "@/lib/api/client";
 import {
   createKeypair,
   getMyKeypair,
@@ -20,6 +21,16 @@ export function useMyKeypair() {
   return useQuery({
     queryKey: keypairKeys.me(),
     queryFn: getMyKeypair,
+    // A 404 means "this user has never bootstrapped a keypair" — the EXPECTED first-run state, NOT a
+    // transient failure. The default `retry: 3` would keep the query `pending` through several backed-off
+    // retries (hanging the bootstrap/unlock UI on a spinner and spamming GET /keypair/me), so the page
+    // never flips to the bootstrap surface. Settle to error IMMEDIATELY on 404 so `isMissing` is true at
+    // once and the bootstrap form renders; keep the default retries for genuine transient errors (5xx/network).
+    retry: (failureCount, error) =>
+      !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+    // An errored 404 query is always "stale"; don't re-fire it on every window refocus (more /keypair/me
+    // noise) — the create/reset mutations invalidate it explicitly when the keypair actually changes.
+    refetchOnWindowFocus: false,
   });
 }
 
