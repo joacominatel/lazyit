@@ -65,6 +65,11 @@ write. Schemas (`ArticleWikiLinkSchema`, `ArticleBacklinkSchema`) in `@lazyit/sh
   (service + import worker), the backlinks read with the visibility gate, and the shared
   schemas/parser. Resolves the article↔article-links deferral from
   [[0042-article-versioning-and-linking]].
+- **Built (#398, ADR-0059 §5):** the bulk `.zip` import's **best-effort intra-batch rewire**. After a
+  `.zip` batch is created, the worker re-resolves still-unresolved edges (`resolvedTargetId IS NULL`)
+  whose `targetSlug` matches a slug **minted earlier in the same batch** — so a forward-referencing
+  cross-linked vault arrives already wired, not as a wall of tooltips. A slug nobody minted stays an
+  unresolved forward reference (the §3 tooltip), never a failure.
 - **Still deferred:** a **slug-change inbound-rewire** pass (a target slug edit can stale a link to an
   unresolved tooltip — never a wrong target); folder-access composition (#365); article↔location links.
 
