@@ -8,6 +8,7 @@ import { ArticlesService } from './articles.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { SearchService } from '../search/search.service';
+import { FolderAccessService } from '../article-categories/folder-access.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -107,6 +108,10 @@ describe('ArticlesService', () => {
   // a present user's id back (any caller with a User "exists") and maps undefined to anonymous.
   let actor: ActorService;
   let search: { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
+  // FolderAccessService (ADR-0060 §4) — mocked; defaults to 'ALL' (sees every folder) so the pre-0060
+  // tests are unaffected. Folder-access invariants are tested in folder-access.service.spec.ts; the
+  // 404/no-escalation paths here override visibleFolderIds with a Set.
+  let folderAccess: { visibleFolderIds: jest.Mock };
 
   beforeEach(async () => {
     article = {
@@ -184,6 +189,11 @@ describe('ArticlesService', () => {
     asset = { findFirst: jest.fn().mockResolvedValue({ id: 'as1' }) };
     application = { findFirst: jest.fn().mockResolvedValue({ id: 'app1' }) };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
+    // FolderAccessService (ADR-0060 §4): default to 'ALL' (ADMIN-equivalent "sees every folder") so the
+    // pre-0060 tests stay behavior-preserving — folder access never narrows unless a test wires it.
+    // The dedicated folder-access invariant tests live in folder-access.service.spec.ts; the few here
+    // override visibleFolderIds to a Set to drive the folder-hidden 404 / no-escalation paths.
+    folderAccess = { visibleFolderIds: jest.fn().mockResolvedValue('ALL') };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -204,6 +214,7 @@ describe('ArticlesService', () => {
         },
         { provide: ActorService, useValue: actor },
         { provide: SearchService, useValue: search },
+        { provide: FolderAccessService, useValue: folderAccess },
       ],
     }).compile();
 
@@ -718,6 +729,49 @@ describe('ArticlesService', () => {
       await expect(
         service.findBySlug('nope', AUTHOR_USER as never),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    // --- ADR-0060 §4 folder access composes on top of draft visibility ---------
+
+    it('hides a PUBLISHED article in a folder the caller CANNOT see (404, NOT 403)', async () => {
+      // The article is PUBLISHED (passes draft visibility) but its home folder is restricted and not in
+      // the caller's visible set → folder-hidden → 404 (existence-hiding), never a 403.
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'secret-folder',
+      });
+      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['public-folder']));
+      await expect(
+        service.findOne('a', OTHER_USER as never, OTHER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('shows a PUBLISHED article in a folder the caller CAN see', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'shared-folder',
+      });
+      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['shared-folder']));
+      await expect(
+        service.findOne('a', OTHER_USER as never, OTHER_PRINCIPAL),
+      ).resolves.toMatchObject({ id: 'a' });
+    });
+
+    it('ADMIN (visibleFolderIds = ALL) sees an article in any folder', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'secret-folder',
+      });
+      folderAccess.visibleFolderIds.mockResolvedValue('ALL');
+      await expect(
+        service.findOne('a', OTHER_USER as never, OTHER_PRINCIPAL),
+      ).resolves.toMatchObject({ id: 'a' });
     });
   });
 
@@ -1580,6 +1634,19 @@ describe('ArticlesService', () => {
       await expect(
         service.addAlias('a', { folderId: 'other' }, OTHER_PRINCIPAL),
       ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(articleAlias.create).not.toHaveBeenCalled();
+    });
+
+    it('no-escalation (ADR-0060 §6 / INV-9): cannot alias a target whose HOME folder the actor cannot see (404)', async () => {
+      // The actor IS the author (passes the author gate) but the article's home folder is no longer
+      // visible to them (e.g. an asset-assignment rule whose assignment was released). §6 forbids
+      // surfacing an article you cannot yourself read — the alias is rejected as 404 (folder-hidden),
+      // never written. Belt-and-suspenders with the author gate.
+      article.findFirst.mockResolvedValue(OWNED);
+      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['some-other-folder']));
+      await expect(
+        service.addAlias('a', { folderId: 'other' }, AUTHOR_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
       expect(articleAlias.create).not.toHaveBeenCalled();
     });
 
