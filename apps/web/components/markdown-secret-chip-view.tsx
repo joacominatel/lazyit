@@ -12,8 +12,11 @@ import {
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ApiError } from "@/lib/api/client";
+import { copyText } from "@/lib/secret-manager/clipboard";
 import { openItem } from "@/lib/secret-manager/crypto";
 import { useResolvedHandle } from "@/lib/secret-manager/hooks/use-chip";
+import { useMyKeypair } from "@/lib/secret-manager/hooks/use-keypair";
 import { useVaultDek } from "@/app/(app)/secrets/_components/use-vault-dek";
 import { useSecretSession } from "@/app/(app)/secrets/_components/secret-session";
 import { UnlockGate } from "@/app/(app)/secrets/_components/unlock-gate";
@@ -51,9 +54,20 @@ export function SecretChip({ handle }: { handle?: string }) {
   const t = useTranslations("secrets");
   const { isUnlocked } = useSecretSession();
 
+  // SM-WEB-03: detect whether the caller has a keypair yet. A 404 on keypair/me means "never
+  // bootstrapped" — in that case the UnlockGate renders the first-run BOOTSTRAP form (incl. the
+  // shown-once recovery key), so the dialog header must say "Set up your Secret Manager", NOT the
+  // "enter your passphrase" unlock copy. This only reads PUBLIC keypair metadata (no secret).
+  const { isError: keypairError, error: keypairErr } = useMyKeypair();
+  const isMissingKeypair =
+    keypairError && keypairErr instanceof ApiError && keypairErr.status === 404;
+
   // SECURITY: plaintext in local state only — never a query key, never persisted.
   const [plaintext, setPlaintext] = useState<string | undefined>(undefined);
   const [copied, setCopied] = useState(false);
+  // SECW-06: a copy attempt failed (insecure context — no navigator.clipboard). Prompt the user to
+  // select & copy manually instead of implying success.
+  const [copyFailed, setCopyFailed] = useState(false);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const maskTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -166,12 +180,18 @@ export function SecretChip({ handle }: { handle?: string }) {
     }
   }
 
-  function handleCopy() {
+  async function handleCopy() {
     if (!plaintext) return;
-    void navigator.clipboard?.writeText(plaintext).then(() => {
+    // SECW-06: copyText reports failure (insecure context — no clipboard API) instead of silently
+    // no-opping. On failure, surface a "select & copy manually" hint rather than a false success.
+    const ok = await copyText(plaintext);
+    if (ok) {
+      setCopyFailed(false);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    });
+    } else {
+      setCopyFailed(true);
+    }
   }
 
   // After unlock, auto-reveal if the session was just unlocked and the gate closed.
@@ -227,6 +247,13 @@ export function SecretChip({ handle }: { handle?: string }) {
             >
               <EyeSlashIcon className="size-3" aria-hidden />
             </button>
+            {/* SECW-06: clipboard unavailable (insecure context) — tell the user to copy manually.
+                The value above is `select-all`, so a manual selection still works. */}
+            {copyFailed ? (
+              <span className="ml-0.5 text-[0.65rem] text-destructive" data-secret-chip-copy-failed>
+                {t("chip.copyFailed")}
+              </span>
+            ) : null}
           </>
         ) : (
           <button
@@ -240,12 +267,21 @@ export function SecretChip({ handle }: { handle?: string }) {
         )}
       </span>
 
-      {/* Unlock gate dialog — shown when the user clicks reveal while the session is locked. */}
+      {/* Unlock gate dialog — shown when the user clicks reveal while the session is locked.
+          SM-WEB-03: the header reflects the ACTUAL gate state. A user with no keypair (404) gets the
+          first-run BOOTSTRAP form inside UnlockGate (incl. the shown-once recovery key), so the title
+          must read "Set up your Secret Manager", not "enter your passphrase". */}
       <Dialog open={unlockOpen} onOpenChange={handleUnlockClose}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{t("chip.unlockTitle")}</DialogTitle>
-            <DialogDescription>{t("chip.unlockDescription")}</DialogDescription>
+            <DialogTitle>
+              {isMissingKeypair ? t("chip.bootstrapTitle") : t("chip.unlockTitle")}
+            </DialogTitle>
+            <DialogDescription>
+              {isMissingKeypair
+                ? t("chip.bootstrapDescription")
+                : t("chip.unlockDescription")}
+            </DialogDescription>
           </DialogHeader>
           <UnlockGate>
             {/* Once unlocked the gate renders children; close the dialog automatically. */}
@@ -257,11 +293,21 @@ export function SecretChip({ handle }: { handle?: string }) {
   );
 }
 
-/** Rendered by `UnlockGate` once the session is unlocked — immediately signals close. */
+/**
+ * Rendered by `UnlockGate` once the session is unlocked — immediately signals close.
+ *
+ * SECW-01 / SM-FE-005 / SM-WEB-08: a genuine ONE-SHOT. The parent passes an inline
+ * `onClose={() => handleUnlockClose(false)}` that is a new function identity every render, so a
+ * `[onClose]`-dep effect could re-fire and trigger a redundant `ensureDek()`/`decrypt()`. We keep the
+ * latest `onClose` in a ref (so the call always uses the current closure) and run the effect with a
+ * `[]` dep, so it fires exactly once on mount — no redundant re-decrypt.
+ */
 function UnlockSuccess({ onClose }: { onClose: () => void }) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
-    onClose();
-  }, [onClose]);
+    onCloseRef.current();
+  }, []);
   return (
     <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
       <ArrowPathIcon className="size-4 animate-spin" aria-hidden />

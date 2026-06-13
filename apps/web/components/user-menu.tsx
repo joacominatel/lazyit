@@ -1,8 +1,10 @@
 "use client";
 
+import { LockOpenIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { signOut } from "next-auth/react";
 import { useSession } from "next-auth/react";
+import { useSecretSession } from "@/app/(app)/secrets/_components/secret-session";
 import { UserRoleBadge } from "@/app/(app)/users/_components/user-role-badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -16,7 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { avatarColorFor } from "@/lib/avatar-color";
-import { usePermissions } from "@/lib/hooks/use-permissions";
+import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 
 /**
@@ -28,11 +30,25 @@ import { cn } from "@/lib/utils";
  * exposed here — it lives in session.accessToken and is forwarded via apiFetch). The RBAC role is
  * NOT in the OIDC token, so it comes from `usePermissions()` (→ `/users/me`), reusing the same
  * `UserRoleBadge` the Users module renders.
+ *
+ * SM-WEB-04: it also hosts the app-wide Secret Manager lock affordance. The in-memory secret session
+ * (ADR-0061 §8) is now app-wide — a user can unlock it from a KB chip in `/kb` — but the only Lock
+ * action + unlocked indicator used to live on the `/secrets` landing. The menu item below is gated to
+ * `useCan('secret:read')` AND `isUnlocked`, so a holder who has an unlocked session can see the state
+ * and `lock()` it from anywhere. It renders nothing otherwise. The UserMenu now sits inside the
+ * `SecretManagerProvider` (hoisted in `(app)/layout.tsx`), so `useSecretSession()` is always available.
  */
 export function UserMenu() {
   const t = useTranslations("shared");
+  const ts = useTranslations("secrets");
   const { data: session } = useSession();
   const { role } = usePermissions();
+  // App-wide Secret Manager lock affordance (SM-WEB-04). Gated: only a `secret:read` holder with an
+  // unlocked session sees it. `lock()` drops the in-memory private key + DEK cache (INV-10) — no secret
+  // material is ever read or rendered here, only the boolean state and the lock action.
+  const canReadSecrets = useCan("secret:read");
+  const { isUnlocked, lock } = useSecretSession();
+  const showLock = canReadSecrets && isUnlocked;
 
   const name = session?.user?.name ?? "—";
   const email = session?.user?.email ?? "";
@@ -87,6 +103,17 @@ export function UserMenu() {
         <DropdownMenuSeparator />
         {/* Locale switcher (ADR-0051): a Globe sub-menu with EN / ES. */}
         <LocaleSwitcher />
+        {/* SM-WEB-04: app-wide Secret Manager lock. Shown only to a `secret:read` holder whose session
+            is currently unlocked. Clicking locks the session (drops the in-memory key + DEK cache). */}
+        {showLock ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={lock}>
+              <LockOpenIcon className="text-pillar-knowledge" aria-hidden />
+              {ts("session.lockApp")}
+            </DropdownMenuItem>
+          </>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleSignOut}>
           {t("chrome.signOut")}

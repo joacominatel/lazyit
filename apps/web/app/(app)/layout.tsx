@@ -38,44 +38,45 @@ export default async function AppLayout({
         {t("chrome.skipToContent")}
       </a>
       <SidebarShell />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center gap-2 border-b border-border px-4">
-          <MobileNav />
-          <GlobalSearch />
-          <div className="ml-auto flex items-center gap-2">
-            <ModeBanner />
-            {/* In-app notification bell (ADR-0056) — self-gates on `notification:read`
-                (ADMIN-only), so it renders nothing for non-admins. */}
-            <NotificationBell />
-            <ThemeToggle />
-            <UserMenu />
+      {/*
+        SecretManagerProvider is hoisted to wrap the WHOLE inner column — header + main — (ADR-0061 §8)
+        so the in-memory crypto session is available app-wide. KB chips (`{{ lazyit_secret.HANDLE }}`)
+        can call the reveal flow from any article, AND the top-bar UserMenu can read `isUnlocked` /
+        call `lock()` to surface an app-wide "unlocked — Lock" affordance (SM-WEB-04). The session drops
+        on logout (this layout unmounts) and on an explicit lock action. The `/secrets` layout keeps its
+        own `secret:read` access gate; it no longer needs to mount the provider itself.
+      */}
+      <AppSecretProvider>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="flex h-14 items-center gap-2 border-b border-border px-4">
+            <MobileNav />
+            <GlobalSearch />
+            <div className="ml-auto flex items-center gap-2">
+              <ModeBanner />
+              {/* In-app notification bell (ADR-0056) — self-gates on `notification:read`
+                  (ADMIN-only), so it renders nothing for non-admins. */}
+              <NotificationBell />
+              <ThemeToggle />
+              <UserMenu />
+            </div>
+          </header>
+          {/* Syncs Auth.js access token into the client-side store so apiFetch sends Bearer automatically. */}
+          <SessionTokenSync />
+          {/* Layout-level breadcrumb bar: route-driven, renders nothing on top-level
+              pages (e.g. /dashboard). Retires the per-page "Back to X" buttons.
+              `data-app-chrome` lets the print stylesheet strip it when a print-document
+              (e.g. the Reports/Informes table) owns the page. */}
+          <div
+            data-app-chrome
+            className="border-b border-border px-4 py-2 empty:hidden md:px-6"
+          >
+            <Breadcrumb />
           </div>
-        </header>
-        {/* Syncs Auth.js access token into the client-side store so apiFetch sends Bearer automatically. */}
-        <SessionTokenSync />
-        {/* Layout-level breadcrumb bar: route-driven, renders nothing on top-level
-            pages (e.g. /dashboard). Retires the per-page "Back to X" buttons.
-            `data-app-chrome` lets the print stylesheet strip it when a print-document
-            (e.g. the Reports/Informes table) owns the page. */}
-        <div
-          data-app-chrome
-          className="border-b border-border px-4 py-2 empty:hidden md:px-6"
-        >
-          <Breadcrumb />
-        </div>
-        {/*
-          SecretManagerProvider is hoisted to this shell (ADR-0061 §8) so the in-memory crypto
-          session is available app-wide — KB chips (`{{ lazyit_secret.HANDLE }}`) can call the
-          reveal flow from any article, not just from `/secrets`. The session drops on logout
-          (this layout unmounts) and on an explicit lock action. The `/secrets` layout keeps its
-          own `secret:read` access gate; it no longer needs to mount the provider itself.
-        */}
-        <AppSecretProvider>
           <main id="main-content" className="flex-1 p-4 md:p-6">
             {children}
           </main>
-        </AppSecretProvider>
-      </div>
+        </div>
+      </AppSecretProvider>
     </div>
   );
 }

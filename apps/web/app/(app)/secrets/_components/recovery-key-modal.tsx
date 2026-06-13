@@ -3,6 +3,7 @@
 import { CheckIcon, ClipboardIcon, KeyIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { copyText } from "@/lib/secret-manager/clipboard";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -39,14 +40,24 @@ export function RecoveryKeyModal({
 }) {
   const t = useTranslations("secrets");
   const [copied, setCopied] = useState(false);
+  // SECW-06: the recovery key is the user's ONLY second unlock path. If the clipboard API is
+  // unavailable (insecure context — plain-HTTP self-host), Copy must NOT imply success — that could
+  // make the user dismiss the shown-once key believing it was saved. Track and surface failure.
+  const [copyFailed, setCopyFailed] = useState(false);
   const [acked, setAcked] = useState(false);
 
-  function handleCopy() {
-    // Convenience only — the key is never logged. Best-effort clipboard write.
-    void navigator.clipboard?.writeText(recoveryKey).then(() => {
+  async function handleCopy() {
+    // Convenience only — the key is never logged. copyText reports success/failure (it never throws).
+    const ok = await copyText(recoveryKey);
+    if (ok) {
+      setCopyFailed(false);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    });
+    } else {
+      // Insecure context: no clipboard. Surface a manual-copy instruction; the key block is
+      // `select-all`, so the user can still select & copy it by hand.
+      setCopyFailed(true);
+    }
   }
 
   function handleAck() {
@@ -82,6 +93,13 @@ export function RecoveryKeyModal({
             {copied ? <CheckIcon className="size-4" /> : <ClipboardIcon className="size-4" />}
             {copied ? t("recoveryKey.copied") : t("recoveryKey.copy")}
           </Button>
+          {/* SECW-06: clipboard unavailable (insecure context). Do NOT imply the key was copied —
+              tell the user to copy it manually from the block above (it is `select-all`). */}
+          {copyFailed ? (
+            <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+              {t("recoveryKey.copyFailed")}
+            </p>
+          ) : null}
           <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
             {t("recoveryKey.warning")}
           </p>
