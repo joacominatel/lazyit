@@ -144,5 +144,41 @@
       "imported": "Article imported",
       "importError": "Couldn't import the file"
     }
+  },
+  "folders": {
+    "treeLabel": "Browse folders",
+    "allArticles": "All articles",
+    "empty": "No folders yet",
+    "expand": "Expand {name}",
+    "collapse": "Collapse {name}"
+  },
+  "references": {
+    "panelTitle": "References",
+    "loading": "Loading references…",
+    "empty": "No other articles reference this one yet. Mention it as a [[slug]] wiki-link from another article to surface it here."
+  },
+  "aliases": {
+    "panelTitle": "Also in",
+    "add": "Add to folder",
+    "loading": "Loading folders…",
+    "empty": "This article only lives in its home folder. Add it to another folder to surface it there too — an alias never changes its home or who can see it.",
+    "removeAriaLabel": "Remove from folder",
+    "unknownFolder": "Unknown folder",
+    "dialogTitle": "Add to a folder",
+    "dialogDescription": "Place this article in another folder so it also shows up there when browsing. An alias is navigation only — it doesn't move the article's home or change who can see it.",
+    "folderLabel": "Folder",
+    "folderSelect": "Select a folder",
+    "folderNone": "No other folders available",
+    "chooseFolderError": "Choose a folder.",
+    "submit": "Add",
+    "toast": {
+      "added": "Added to folder",
+      "addError": "Couldn't add to the folder",
+      "removed": "Removed from folder",
+      "removeError": "Couldn't remove from the folder"
+    }
+  },
+  "wikiLinks": {
+    "unresolvedTooltip": "Document not created yet"
   }
 }

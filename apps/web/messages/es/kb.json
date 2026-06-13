@@ -144,5 +144,41 @@
       "imported": "Artículo importado",
       "importError": "No se pudo importar el archivo"
     }
+  },
+  "folders": {
+    "treeLabel": "Explorar carpetas",
+    "allArticles": "Todos los artículos",
+    "empty": "Aún no hay carpetas",
+    "expand": "Expandir {name}",
+    "collapse": "Contraer {name}"
+  },
+  "references": {
+    "panelTitle": "Referencias",
+    "loading": "Cargando referencias…",
+    "empty": "Aún ningún otro artículo referencia a este. Menciónalo como un enlace wiki [[slug]] desde otro artículo para que aparezca aquí."
+  },
+  "aliases": {
+    "panelTitle": "También en",
+    "add": "Añadir a carpeta",
+    "loading": "Cargando carpetas…",
+    "empty": "Este artículo solo vive en su carpeta principal. Añádelo a otra carpeta para que también aparezca allí — un alias nunca cambia su carpeta principal ni quién puede verlo.",
+    "removeAriaLabel": "Quitar de la carpeta",
+    "unknownFolder": "Carpeta desconocida",
+    "dialogTitle": "Añadir a una carpeta",
+    "dialogDescription": "Coloca este artículo en otra carpeta para que también aparezca allí al explorar. Un alias es solo de navegación: no mueve la carpeta principal del artículo ni cambia quién puede verlo.",
+    "folderLabel": "Carpeta",
+    "folderSelect": "Selecciona una carpeta",
+    "folderNone": "No hay otras carpetas disponibles",
+    "chooseFolderError": "Elige una carpeta.",
+    "submit": "Añadir",
+    "toast": {
+      "added": "Añadido a la carpeta",
+      "addError": "No se pudo añadir a la carpeta",
+      "removed": "Quitado de la carpeta",
+      "removeError": "No se pudo quitar de la carpeta"
+    }
+  },
+  "wikiLinks": {
+    "unresolvedTooltip": "Documento aún no creado"
   }
 }

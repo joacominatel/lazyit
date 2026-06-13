@@ -6,9 +6,20 @@ import {
   ViewColumnsIcon,
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import {
+  type KeyboardEvent,
+  useCallback,
+  useRef,
+  useState,
+} from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownView } from "@/components/markdown-view";
+import {
+  type WikiLinkAutocomplete,
+  WikiLinkSuggestions,
+  activeWikiLinkQuery,
+  applyWikiLinkSuggestion,
+} from "@/components/markdown-wiki-link-autocomplete";
 import { cn } from "@/lib/utils";
 
 interface MarkdownEditorProps {
@@ -17,6 +28,13 @@ interface MarkdownEditorProps {
   id?: string;
   placeholder?: string;
   invalid?: boolean;
+  /**
+   * Optional `[[slug]]` wiki-link autocomplete (ADR-0059 §3). When provided, typing `[[` inside the
+   * source pane opens a slug picker fed by `suggestions` (the caller fetches them from the article
+   * search); `onQueryChange` is called with the text the user has typed after `[[` so the caller can
+   * drive that search. Selecting a suggestion inserts `[[slug]]`. Omit for a plain editor.
+   */
+  wikiLink?: WikiLinkAutocomplete;
 }
 
 /** The three editor layouts. `split` = source + live preview side-by-side; `write` = source
@@ -40,6 +58,10 @@ const MODES: { mode: ViewMode; icon: typeof CodeBracketIcon; labelKey: string }[
  * split, a full-width source pane, and a full-width rendered preview — so the author can gain
  * horizontal room for either writing or proofing. Defaults to `split`. Mermaid fences and code
  * blocks render in the preview exactly as they do in the published article (same `MarkdownView`).
+ *
+ * When `wikiLink` is supplied, typing `[[` opens a slug autocomplete (ADR-0059 §3) so an author can
+ * link an existing article without leaving the keyboard — ↑/↓ to move, Enter/Tab to insert `[[slug]]`,
+ * Esc to dismiss.
  */
 export function MarkdownEditor({
   value,
@@ -47,23 +69,107 @@ export function MarkdownEditor({
   id,
   placeholder,
   invalid,
+  wikiLink,
 }: MarkdownEditorProps) {
   const t = useTranslations("shared");
   const [mode, setMode] = useState<ViewMode>("split");
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // The open `[[` token's query (null = the autocomplete is closed) and the highlighted suggestion.
+  const [query, setQuery] = useState<string | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const onQueryChange = wikiLink?.onQueryChange;
+  const suggestions = wikiLink?.suggestions ?? [];
+  const open = wikiLink != null && query !== null && suggestions.length > 0;
 
   const showSource = mode !== "preview";
   const showPreview = mode !== "write";
 
+  /** Re-derive the open-`[[`-token query from the caret position after any value/caret change. */
+  const syncQuery = useCallback(
+    (text: string, caret: number) => {
+      if (!wikiLink) return;
+      const next = activeWikiLinkQuery(text, caret);
+      setQuery(next);
+      setActiveIndex(0);
+      if (next !== null) onQueryChange?.(next);
+    },
+    [wikiLink, onQueryChange],
+  );
+
+  const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const text = event.target.value;
+    onChange(text);
+    syncQuery(text, event.target.selectionStart ?? text.length);
+  };
+
+  /** Insert the chosen slug as `[[slug]]`, replacing the open token, and close the popup. */
+  const insertSuggestion = (slug: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const caret = textarea.selectionStart ?? value.length;
+    const result = applyWikiLinkSuggestion(value, caret, slug);
+    if (!result) return;
+    onChange(result.value);
+    setQuery(null);
+    // Restore focus + caret after React re-renders the controlled value.
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(result.caret, result.caret);
+    });
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!open) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((i) => (i + 1) % suggestions.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      insertSuggestion(suggestions[activeIndex].slug);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setQuery(null);
+    }
+  };
+
   const textarea = (
-    <Textarea
-      id={id}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder ?? t("editor.markdownPlaceholder")}
-      aria-invalid={invalid || undefined}
-      spellCheck
-      className="min-h-[420px] resize-y font-mono text-sm"
-    />
+    <div className="relative">
+      <Textarea
+        ref={textareaRef}
+        id={id}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        // Keep the open-token query in sync when the caret moves without an edit (arrow/click).
+        onKeyUp={(e) =>
+          syncQuery(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)
+        }
+        onClick={(e) =>
+          syncQuery(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)
+        }
+        onBlur={() => setQuery(null)}
+        placeholder={placeholder ?? t("editor.markdownPlaceholder")}
+        aria-invalid={invalid || undefined}
+        aria-expanded={open || undefined}
+        aria-autocomplete={wikiLink ? "list" : undefined}
+        spellCheck
+        className="min-h-[420px] resize-y font-mono text-sm"
+      />
+      {open ? (
+        <WikiLinkSuggestions
+          suggestions={suggestions}
+          activeIndex={activeIndex}
+          onHover={setActiveIndex}
+          onSelect={(slug) => insertSuggestion(slug)}
+        />
+      ) : null}
+    </div>
   );
 
   const preview = (
