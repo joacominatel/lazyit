@@ -40,6 +40,8 @@ export interface ImportedArticleRow {
   content: string;
   excerpt: string | null;
   status: ArticleStatus;
+  // The home folder (ADR-0060 §5): carried into the search doc as the folder-access post-filter key.
+  categoryId: string;
 }
 
 interface ArticleCreateArgs {
@@ -245,6 +247,8 @@ async function indexIfPublished(
       excerpt: article.excerpt,
       status: article.status,
       content: article.content,
+      // Folder-access metadata for the search post-filter (ADR-0060 §5).
+      categoryId: article.categoryId,
     });
   } catch {
     // swallow — search is fire-and-forget (ADR-0035)
