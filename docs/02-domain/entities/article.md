@@ -58,15 +58,20 @@ deferred.
   changes status**.
 - **`publishedAt`** is set on the **first** publish and **never cleared** (unpublishing keeps it,
   recording "was published at least once").
-- **Folder-inherited access** (⚪ planned, [[0060-kb-folder-access-control]]): an article's
+- **Folder-inherited access** (🟢 implemented #404, [[0060-kb-folder-access-control]]): an article's
   visibility is the home [[folder]]'s access scope **composed with** the existing draft-visibility
-  rule above — both must pass. The `article:read` capability still gates whether you can read at all;
-  the folder ACL is an orthogonal **data-scoping** axis that gates *which* articles you see (a bounded
-  carve-out from the per-record-ACL rejection of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]] —
-  access attaches to a named **folder**, not to individual rows). A folder-hidden article returns
-  **404, not 403** (existence-hiding, reusing [[0022-draft-visibility-auth-shim]]); **ADMIN** keeps
-  god-mode over the KB (INV-8). You can never alias/share an article you cannot yourself access
-  (no-escalation — proposed **INV-9**).
+  rule above — both must pass (most-restrictive-wins). The `article:read` capability still gates whether
+  you can read at all; the folder ACL is an orthogonal **data-scoping** axis that gates *which* articles
+  you see (a bounded carve-out from the per-record-ACL rejection of
+  [[0040-rbac-roles]]/[[0046-roles-permissions-v2]] — access attaches to a named **folder**, not to
+  individual rows). Evaluated **DB-first** at every read (`FolderAccessService` — the dynamic
+  `appGrant`/`assetAssignment` rules resolve over the live [[access-grant]]/[[asset-assignment]] joins,
+  so a revoked grant / released assignment drops access on the **next** read). A folder-hidden article
+  returns **404, not 403** (existence-hiding, reusing [[0022-draft-visibility-auth-shim]]); **ADMIN**
+  keeps god-mode over the KB (INV-8); a [[service-account]] **fails closed** on a restricted folder. The
+  list, detail, versions, links, backlinks and aliases reads all compose this gate, and **`/search`**
+  drops a restricted hit a non-matching caller may not see. You can never alias/share an article you
+  cannot yourself access (no-escalation — **INV-9**).
 - **Author-only writes.** Only the author may edit, delete, publish or unpublish. The caller is
   identified by the `X-User-Id` shim until real auth lands ([[0022-draft-visibility-auth-shim]]);
   on create, `authorId` is taken from the caller, **never** the body.
@@ -84,9 +89,14 @@ deferred.
   **v1**; an edit that changes `title`/`content`/`excerpt` and a `publish`/`unpublish` (status
   change) append the next version — all **in the same transaction** as the article write, so the
   prior body is never lost. A metadata-only or no-op `PATCH` writes no version.
-- **Search** ([[0035-search-architecture]] / [[0042]]): a PUBLISHED article is indexed in
-  Meilisearch including its **`content`** (runbook bodies are findable). A DRAFT is never indexed
-  (author-private), so its content can't leak via search.
+- **Search** ([[0035-search-architecture]] / [[0042]] / [[0060-kb-folder-access-control]] §5): a
+  PUBLISHED article is indexed in Meilisearch including its **`content`** (runbook bodies are findable).
+  A DRAFT is never indexed (author-private), so its content can't leak via search. The home folder
+  (`categoryId`) is carried into the index as a **filterable** attribute and the `/search` endpoint runs
+  a **per-caller folder-access post-filter** (re-running the read evaluator over the returned hits and
+  dropping the ones the caller can't see; ADMIN bypasses, an SA fails closed) — so a **restricted
+  article never surfaces to a non-matching caller** (the search-leak fix, INV-9). `categoryId` is
+  retrieved internally for the filter and **stripped** from the shipped hit.
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
 
 > [!warning] Auth is a temporary shim — endpoints are insecure

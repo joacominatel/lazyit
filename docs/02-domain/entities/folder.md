@@ -3,23 +3,25 @@ title: Folder
 tags: [domain, entity]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-06-12
 ---
 
 # Folder
 
-> 🟢 implemented (structure) · Area: Knowledge Base · Implementation order: tbd
+> 🟢 implemented (structure + access) · Area: Knowledge Base · Implementation order: tbd
 
 > [!note] The flat [[article-category]] evolved
 > `Folder` is the hierarchical successor to the flat [[article-category]]
 > ([[0059-kb-folders-links-and-import]]): it adds a self-ref `parentId` (a tree) and the existing
 > required one-category-per-article FK becomes the **one home folder per article**. It is also the
 > KB **access boundary** ([[0060-kb-folder-access-control]]). The **structure** — the tree, the
-> per-parent name uniqueness, the cycle/orphan guards — shipped in #392; **access semantics** remain
-> #365's job. The Prisma **model and table keep the names `ArticleCategory` / `article_categories`**
-> and the endpoints stay `/article-categories` — only a self-FK column was added; the rename to
-> `Folder` / `folders` is a deliberate follow-up. See [[article-category]] for the (now hierarchical)
-> model; the ADRs hold the full detail.
+> per-parent name uniqueness, the cycle/orphan guards — shipped in #392; the **access layer** — the
+> `accessRules` jsonb column, the DB-first read evaluator, the 404-not-403 existence-hiding, the
+> no-escalation alias check and the search-leak fix — shipped in #404. The Prisma **model and table
+> keep the names `ArticleCategory` / `article_categories`** and the endpoints stay `/article-categories`
+> — only the self-FK + the `accessRules` column were added; the rename to `Folder` / `folders` is a
+> deliberate follow-up. See [[article-category]] for the (now hierarchical) model; the ADRs hold the
+> full detail.
 
 ## Purpose
 
@@ -64,10 +66,23 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
   `Workstations/Linux`) yields two distinct folders. A folder created mid-import is reused for sibling
   entries (a path cache), so the tree is built once per job inside the sandboxed worker child.
 - **Access attaches to the folder, not to article rows** — a deliberate, bounded carve-out from the
-  per-record-ACL rejection of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]. Evaluated **DB-first
-  at the API**, enforced at the **DB**, never UI-only; a folder-hidden article returns **404, not
-  403** (existence-hiding, reusing [[0022-draft-visibility-auth-shim]]). ADMIN keeps god-mode (INV-8).
-  Proposed **INV-9** ([[0060-kb-folder-access-control]]).
+  per-record-ACL rejection of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]. The restriction is
+  stored on the folder as a **`accessRules` jsonb** column: `null`/empty = **PUBLIC** (default — any
+  authenticated `article:read` holder), or an **OR-combined** list of the CLOSED rule vocabulary
+  (`users` / `role` / `appGrant` / `assetAssignment`, validated by zod in `@lazyit/shared`). Evaluated
+  **DB-first at the API** (`FolderAccessService`), enforced at the **DB** (the dynamic `appGrant` /
+  `assetAssignment` kinds resolve via the **live** [[access-grant]] `revokedAt IS NULL` /
+  [[asset-assignment]] `releasedAt IS NULL` joins, so access **follows offboarding automatically**),
+  never UI-only. A folder-hidden article returns **404, not 403** (existence-hiding, reusing
+  [[0022-draft-visibility-auth-shim]]). **Inherit-and-narrow** (§1): a child is at least as restricted
+  as its nearest restricted ancestor and can never widen past it (effective rule = own ∩ ancestors').
+  ADMIN keeps god-mode (INV-8); a [[service-account]] **fails closed** on a restricted folder (§8). The
+  rules also gate **`/search`** (a per-caller post-filter drops a restricted article hit a non-matching
+  caller may not see) and the **alias** path (no-escalation: you can never alias an article you can't
+  read). **INV-9** ([[0060-kb-folder-access-control]]).
+- **Setting/clearing a folder's rules is `settings:manage`-gated** (ADMIN-only, `PUT
+  /article-categories/:id/access-rules`) — re-scoping WHO may read a folder is an authorization-
+  management action, distinct from `category:write` (authoring the folder itself).
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
 
 ## Conventions
@@ -80,16 +95,23 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
 The endpoints stay `/article-categories` (`ArticleCategoriesModule`) — see [[article-category]] — with
 `parentId` now accepted on create (optional; absent = root) and update (nullable; `null` = move to
 root, a cuid = reparent). A reparent that would create a cycle is **400**; a delete of a folder with
-live sub-folders is **409**.
+live sub-folders is **409**. **`PUT /article-categories/:id/access-rules`** (`settings:manage`,
+ADMIN-only) sets or clears the folder's access rules (body `{ accessRules: <rule list> | null }`).
 
-## Implemented in #392; still deferred
+## Implemented in #392 + #404; still deferred
 
 - **Built (#392, ADR-0059 §1):** the `parentId` self-FK, the per-parent partial-unique name, the DFS
   cycle guard, the no-silent-orphan child-folder 409, and `parentId` on the create/update/read wire
   shape (`@lazyit/shared` `Folder*` aliases over `ArticleCategory*`).
-- **Still deferred:** the per-folder **access** layer is #365 ([[0060-kb-folder-access-control]]); the
-  `ArticleCategory` → `Folder` model/table **rename** is a follow-up (a separate migration); a
-  guided-reparent UX on delete (the rule is "no silent orphaning"; the mechanism is the 409 today).
+- **Built (#404, ADR-0060):** the `accessRules` jsonb column + the closed zod rule vocabulary
+  (`FolderAccessRulesSchema`); the DB-first read evaluator (`FolderAccessService`) with the §2 PUBLIC
+  fast-path, the §3 OR rules over live joins, §1 inherit-and-narrow, §5 ADMIN god-mode and §8 SA
+  fail-closed; the article read-path 404-not-403 gate; the no-escalation alias re-check; and the
+  `/search` per-caller folder-access post-filter (the search-leak fix). The per-folder rule **editor
+  UI** is a separate frontend slice.
+- **Still deferred:** the `ArticleCategory` → `Folder` model/table **rename** is a follow-up (a
+  separate migration); a guided-reparent UX on delete (the rule is "no silent orphaning"; the mechanism
+  is the 409 today); the Phase-2 alias-as-share (§7, reserved).
 
 Related: [[0059-kb-folders-links-and-import]] · [[0060-kb-folder-access-control]] · [[article]] ·
 [[article-category]] · [[article-alias]] · [[article-wiki-link]] · [[0041-soft-delete-reuse-and-restore]] ·

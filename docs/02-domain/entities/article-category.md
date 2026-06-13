@@ -18,10 +18,11 @@ updated: 2026-05-25
 > with a DFS **cycle guard** and a **no-silent-orphan** child-folder 409. The **model and table keep
 > the names `ArticleCategory` / `article_categories`** and the endpoints stay `/article-categories`
 > (the rename to `Folder` / `folders` is a follow-up). The folder is also the **access boundary**
-> ([[0060-kb-folder-access-control]], #365 — not yet built) — a bounded, named data-scoping axis layered
+> ([[0060-kb-folder-access-control]], shipped #404) — a bounded, named data-scoping axis layered
 > on the unchanged `article:read` capability, a deliberate carve-out from the per-record-ACL rejection
-> of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]. The fields/rules below add the `parentId`
-> tree; see [[folder]] for the full hierarchical entity.
+> of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]. #404 added a jsonb `accessRules` column (the
+> OR-combined closed rule vocabulary) + the DB-first read evaluator. The fields/rules below add the
+> `parentId` tree and `accessRules`; see [[folder]] for the full hierarchical entity.
 
 ## Purpose
 
@@ -75,6 +76,7 @@ Prisma model `ArticleCategory` → table `article_categories`. Validation schema
 | `id` | `cuid` | `@default(cuid())`. |
 | `name` | `string` | Required. Unique among **live** rows only, **per parent** (#392) — a PARTIAL unique index on `(parentId, name) WHERE "deletedAt" IS NULL`, `NULLS NOT DISTINCT` (raw SQL; no `@unique`), so a soft-deleted name is freed within its parent ([[0041-soft-delete-reuse-and-restore]]). |
 | `parentId` | `cuid?` | self-ref FK → ArticleCategory (#392). `null` = a **root** folder. `onDelete: SetNull` (hard-delete safety net). `@@index([parentId])`. |
+| `accessRules` | `jsonb?` | Folder access boundary (#404, [[0060-kb-folder-access-control]] §3). `null`/empty = **PUBLIC**; else an OR-combined list of the CLOSED rule vocabulary (`users`/`role`/`appGrant`/`assetAssignment`, validated by `FolderAccessRulesSchema`). NOT a per-article ACL — articles inherit their home folder's rule. Set via `PUT /:id/access-rules` (`settings:manage`). |
 | `description` | `string?` | optional. |
 | `icon` | `string?` | a heroicon name for the web UI (e.g. "ServerStackIcon"). Not validated. |
 | `order` | `int?` | optional sort key for sidebar/listings; nulls sort last. |
@@ -89,7 +91,9 @@ soft-deleted, ordered by `order` then `name`), `GET /article-categories/:id`, `P
 `parentId` → nest; absent = root; `400` if the parent isn't live), `PATCH /:id` (`parentId` nullable —
 `null` moves to root, a cuid reparents; `400` on a cycle), `DELETE /:id` (soft delete; `409` if the
 folder still has live articles **or** live child folders), `POST /:id/restore` (ADMIN-only — clears
-`deletedAt`, [[0041-soft-delete-reuse-and-restore]]). Bodies validated against the shared schemas and
+`deletedAt`, [[0041-soft-delete-reuse-and-restore]]), and `PUT /:id/access-rules` (#404,
+`settings:manage` ADMIN-only — set/clear the folder's access rules; body `{ accessRules: <list> | null }`,
+[[0060-kb-folder-access-control]]). Bodies validated against the shared schemas and
 documented via Swagger ([[0018-api-documentation-swagger]]).
 
 Related: [[article]] · [[folder]] · [[asset-category]] · [[shared-package]] ·

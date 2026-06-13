@@ -7,10 +7,11 @@ import {
 import { ArticleCategoriesService } from './article-categories.service';
 import { PrismaService } from '../prisma/prisma.service';
 
-// Mock the generated Prisma client so the test never loads the real one (no DB).
+// Mock the generated Prisma client so the test never loads the real one (no DB). `Prisma.DbNull` is
+// the sentinel `setAccessRules(null)` writes to clear the jsonb column, so the mock must expose it.
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
-  Prisma: {},
+  Prisma: { DbNull: 'DbNull' },
 }));
 
 type CategoryMock = {
@@ -247,6 +248,42 @@ describe('ArticleCategoriesService', () => {
       await expect(
         service.update('A', { parentId: 'A' }),
       ).rejects.toBeInstanceOf(BadRequestException);
+      expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setAccessRules (ADR-0060 §3)', () => {
+    it('stores a non-null rule list (restricts the folder)', async () => {
+      articleCategory.findFirst.mockResolvedValue({ id: 'c1', deletedAt: null });
+      const rules = [{ kind: 'role' as const, role: 'MEMBER' as const }];
+      articleCategory.update.mockResolvedValue({ id: 'c1', accessRules: rules });
+
+      await service.setAccessRules('c1', rules);
+
+      expect(articleCategory.update).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        data: { accessRules: rules },
+      });
+    });
+
+    it('clears the restriction (null → Prisma.DbNull, makes the folder PUBLIC again)', async () => {
+      articleCategory.findFirst.mockResolvedValue({ id: 'c1', deletedAt: null });
+      articleCategory.update.mockResolvedValue({ id: 'c1', accessRules: null });
+
+      await service.setAccessRules('c1', null);
+
+      // null clears the jsonb column via the Prisma.DbNull sentinel (writes SQL NULL).
+      expect(articleCategory.update).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        data: { accessRules: 'DbNull' },
+      });
+    });
+
+    it('404s when the folder is missing or soft-deleted', async () => {
+      articleCategory.findFirst.mockResolvedValue(null);
+      await expect(service.setAccessRules('missing', null)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
       expect(articleCategory.update).not.toHaveBeenCalled();
     });
   });

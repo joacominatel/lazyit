@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type {
   CreateArticleCategory,
+  FolderAccessRules,
   UpdateArticleCategory,
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
@@ -120,6 +121,34 @@ export class ArticleCategoriesService {
     return this.prisma.articleCategory.update({
       where: { id },
       data: { deletedAt: null },
+    });
+  }
+
+  // --- folder access control (ADR-0060 §3) ----------------------------------
+
+  /**
+   * Set or clear a folder's access rules (ADR-0060 §3 — the per-folder permission boundary). The body
+   * is the OR-combined CLOSED rule vocabulary (validated against `UpdateFolderAccessRulesSchema` at the
+   * DTO edge): a non-null list RESTRICTS the folder (narrows the audience from public); `null` CLEARS
+   * the restriction (makes the folder PUBLIC again, §2). 404 if the folder is missing or soft-deleted.
+   *
+   * The rule is stored as jsonb on the folder — NOT a per-article ACL (INV-9): N articles inherit their
+   * home folder's rule, so access is authored once per folder. The dynamic kinds (appGrant /
+   * assetAssignment) are evaluated DB-first at READ time (FolderAccessService) over the live joins, so a
+   * stored rule is never materialised and access follows offboarding automatically. Only ADMIN reaches
+   * this (the route is `settings:manage`-gated): a folder ACL is an authorization-management surface.
+   */
+  async setAccessRules(id: string, accessRules: FolderAccessRules) {
+    await this.findOne(id); // 404 if missing or already soft-deleted
+    return this.prisma.articleCategory.update({
+      where: { id },
+      data: {
+        // jsonb column: a rule list is stored verbatim; null clears it (Prisma DbNull writes SQL NULL).
+        accessRules:
+          accessRules === null
+            ? Prisma.DbNull
+            : (accessRules as unknown as Prisma.InputJsonValue),
+      },
     });
   }
 
