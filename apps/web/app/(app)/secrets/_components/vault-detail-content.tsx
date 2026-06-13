@@ -36,6 +36,7 @@ import { ApiError } from "@/lib/api/client";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useUsers } from "@/lib/api/hooks/use-users";
+import { copyText } from "@/lib/secret-manager/clipboard";
 import {
   openItem,
   sealItem,
@@ -280,6 +281,8 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
   const [plaintext, setPlaintext] = useState<string | undefined>(undefined);
   const [revealError, setRevealError] = useState(false);
   const [copied, setCopied] = useState(false);
+  // SECW-06: a copy attempt failed (insecure context — no clipboard API). Prompt manual copy.
+  const [copyFailed, setCopyFailed] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const maskTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -293,6 +296,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
     if (!isUnlocked) {
       clearTimeout(maskTimerRef.current);
       setPlaintext(undefined);
+      setCopyFailed(false);
     }
   }, [isUnlocked]);
 
@@ -301,6 +305,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
       // Second click → mask immediately.
       clearTimeout(maskTimerRef.current);
       setPlaintext(undefined);
+      setCopyFailed(false);
       return;
     }
     // SM-WEB-07: re-clicking reveal clears any lingering error so it never sticks as a dead state.
@@ -330,12 +335,18 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
     }
   }, [plaintext, ensureDek, item]);
 
-  function handleCopy() {
+  async function handleCopy() {
     if (!plaintext) return;
-    void navigator.clipboard?.writeText(plaintext).then(() => {
+    // SECW-06: copyText reports failure (insecure context — no clipboard API) instead of silently
+    // no-opping. On failure, prompt the user to select & copy the value manually (it is `select-all`).
+    const ok = await copyText(plaintext);
+    if (ok) {
+      setCopyFailed(false);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    });
+    } else {
+      setCopyFailed(true);
+    }
   }
 
   return (
@@ -367,6 +378,11 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
                   <ClipboardIcon className="size-3.5" aria-hidden />
                 )}
               </button>
+              {/* SECW-06: clipboard unavailable (insecure context). Prompt manual copy — the value
+                  above is `select-all`, so a manual selection still works. */}
+              {copyFailed ? (
+                <span className="text-xs text-destructive">{t("items.copyFailed")}</span>
+              ) : null}
             </>
           ) : revealError ? (
             // SM-WEB-07: pair the genuine decrypt error with a retry affordance so it is never a dead end.
