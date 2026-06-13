@@ -2,14 +2,22 @@
 
 import {
   ChevronRightIcon,
+  EllipsisHorizontalIcon,
   FolderIcon,
   FolderOpenIcon,
   InboxIcon,
   LockClosedIcon,
+  TrashIcon,
 } from "@heroicons/react/24/outline";
 import { isPublicAccessRules, type Folder } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverContent,
@@ -18,6 +26,8 @@ import {
 import {
   ancestorFolderIds,
   buildFolderTree,
+  descendantFolderCount,
+  restrictedAncestorOf,
   type FolderNode,
 } from "@/lib/utils/folder-tree";
 import { cn } from "@/lib/utils";
@@ -25,6 +35,7 @@ import {
   FolderAccessRuleEditor,
   type RawAccessRules,
 } from "./folder-access-rule-editor";
+import { FolderDeleteDialog } from "./folder-delete-dialog";
 
 /**
  * The folder `accessRules` field is a `Json?` on the Prisma model, returned in the API response
@@ -65,6 +76,7 @@ export function FolderTree({
   selectedFolderId,
   onSelect,
   isAdmin,
+  canDelete,
 }: {
   folders: FolderWithRules[];
   /** The folder whose articles the list is currently filtered to (`null` = "All articles"). */
@@ -72,6 +84,8 @@ export function FolderTree({
   onSelect: (folderId: string | null) => void;
   /** When true the per-folder access-rule editor affordance is rendered (ADMIN-only, ADR-0060). */
   isAdmin?: boolean;
+  /** When true the per-folder "⋯ → Delete folder" cascade affordance is rendered (`category:delete`, #415). */
+  canDelete?: boolean;
 }) {
   const t = useTranslations("kb");
   // Cast to Folder[] for the tree-building utilities which only need the structural fields.
@@ -100,19 +114,28 @@ export function FolderTree({
 
   /**
    * Returns the id of the nearest restricted ancestor of `folderId`, or null when no restricted
-   * ancestor exists. Used only for the "inherits restriction from ancestor" indicator — the rule
-   * is the server's, never recomputed here.
+   * ancestor exists. Used only for the "inherits restriction from ancestor" indicator — the rule is
+   * the server's, never recomputed here. Delegates to the shared pure helper (#414).
    */
   function restrictedAncestorId(folderId: string): string | null {
-    let cursor = parentById.get(folderId) ?? null;
-    const seen = new Set<string>();
-    while (cursor && !seen.has(cursor)) {
-      seen.add(cursor);
-      if (restrictedFolderIds.has(cursor)) return cursor;
-      cursor = parentById.get(cursor) ?? null;
-    }
-    return null;
+    return restrictedAncestorOf(folderId, parentById, restrictedFolderIds);
   }
+
+  // Resolve an ancestor folder's display name for the inherited-restriction tooltip (#414).
+  const nameById = useMemo(
+    () => new Map(folders.map((f) => [f.id, f.name])),
+    [folders],
+  );
+
+  // Descendant-folder counts for the cascade-delete warning pre-count (#415).
+  const descendantCountById = useMemo(() => {
+    if (!canDelete) return new Map<string, number>();
+    const counts = new Map<string, number>();
+    for (const f of folders) {
+      counts.set(f.id, descendantFolderCount(folders as Folder[], f.id));
+    }
+    return counts;
+  }, [folders, canDelete]);
 
   // Auto-expand the path down to the selected folder so a deep selection is always visible. Beyond
   // that the user's explicit toggles win (tracked in `expanded`); the derived ancestor set seeds it.
@@ -178,8 +201,11 @@ export function FolderTree({
               onToggle={toggle}
               onSelect={onSelect}
               isAdmin={isAdmin}
+              canDelete={canDelete}
               restrictedFolderIds={restrictedFolderIds}
               restrictedAncestorId={restrictedAncestorId}
+              nameById={nameById}
+              descendantCountById={descendantCountById}
             />
           ))
         )}
@@ -207,8 +233,11 @@ function FolderTreeNode({
   onToggle,
   onSelect,
   isAdmin,
+  canDelete,
   restrictedFolderIds,
   restrictedAncestorId,
+  nameById,
+  descendantCountById,
 }: {
   node: FolderNodeWithRules;
   depth: number;
@@ -217,8 +246,11 @@ function FolderTreeNode({
   onToggle: (id: string) => void;
   onSelect: (folderId: string | null) => void;
   isAdmin?: boolean;
+  canDelete?: boolean;
   restrictedFolderIds: Set<string>;
   restrictedAncestorId: (id: string) => string | null;
+  nameById: Map<string, string>;
+  descendantCountById: Map<string, number>;
 }) {
   const t = useTranslations("kb");
   const { folder, children } = node;
@@ -234,8 +266,11 @@ function FolderTreeNode({
   // Whether a parent folder is restricting this one (presentation-only, server enforces).
   const ancestorId = isRestricted ? null : restrictedAncestorId(folder.id);
   const inheritsRestriction = Boolean(ancestorId);
+  // The inheriting ancestor's display name, for the unambiguous inherited tooltip (#414).
+  const ancestorName = ancestorId ? nameById.get(ancestorId) : undefined;
 
   const [editorOpen, setEditorOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
     <li role="none">
@@ -288,17 +323,21 @@ function FolderTreeNode({
             </span>
           ) : null}
 
-          {/* ADR-0060: inheritance indicator — a calm "inherits restriction from ancestor" hint */}
+          {/* #414: inherited-restriction padlock — a folder that INHERITS a restriction is restricted
+              too (the backend enforces it), so it must read unambiguously as a LOCK, not a faint hint.
+              A CLOSED padlock in a muted warning tone (distinct-but-related to the own-rule yellow),
+              with a tooltip naming the inheriting ancestor. Presentation only — never asserts access. */}
           {inheritsRestriction ? (
             <span
-              title={t("access.inheritedTooltip")}
-              aria-label={t("access.inheritedAriaLabel")}
+              title={t("access.inheritedRestrictedTooltip", {
+                name: ancestorName ?? "",
+              })}
+              aria-label={t("access.inheritedRestrictedAriaLabel", {
+                name: ancestorName ?? "",
+              })}
               className="ml-auto shrink-0"
             >
-              <LockClosedIcon
-                className="size-3.5 text-muted-foreground/60"
-                aria-hidden
-              />
+              <LockClosedIcon className="size-3.5 text-warning/70" aria-hidden />
             </span>
           ) : null}
         </button>
@@ -337,21 +376,69 @@ function FolderTreeNode({
                 <p className="text-xs text-muted-foreground truncate">
                   {folder.name}
                 </p>
-                {inheritsRestriction ? (
-                  <p className="mt-1 text-xs text-muted-foreground/70">
-                    {t("access.inheritedNote")}
-                  </p>
-                ) : null}
               </div>
               <FolderAccessRuleEditor
                 folderId={folder.id}
                 folderName={folder.name}
                 rawAccessRules={folder.accessRules ?? null}
+                // #414: when this folder has no own rule but a restricted ancestor, the editor shows
+                // the EFFECTIVE state as "Restricted (inherited from <ancestor>)" — never "Public".
+                inheritedFrom={inheritsRestriction ? (ancestorName ?? null) : null}
               />
             </PopoverContent>
           </Popover>
         ) : null}
+
+        {/* #415: ADMIN-only ("category:delete") overflow menu with a cascade Delete. A "⋯" trigger
+            keeps the row calm until invoked; the delete opens a destructive confirm warning the
+            folder + its sub-folders + their articles will be removed from the KB. */}
+        {canDelete ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={t("folders.delete.menuAriaLabel", {
+                  name: folder.name,
+                })}
+                title={t("folders.delete.menuTitle")}
+                className="ml-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/40 outline-none transition-colors hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <EllipsisHorizontalIcon className="size-4" aria-hidden />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={4}>
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => setDeleteOpen(true)}
+              >
+                <TrashIcon className="size-4" aria-hidden />
+                {t("folders.delete.action")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </div>
+
+      {canDelete ? (
+        <FolderDeleteDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          folderId={folder.id}
+          folderName={folder.name}
+          descendantFolderCount={descendantCountById.get(folder.id) ?? 0}
+          // When the deleted folder (or one of its descendants) was the active filter, drop back to
+          // "All articles" so the grid isn't pinned to a now-archived folder.
+          onDeleted={() => {
+            if (
+              selectedFolderId != null &&
+              subtreeContains(node, selectedFolderId)
+            ) {
+              onSelect(null);
+            }
+          }}
+        />
+      ) : null}
 
       {hasChildren && expanded ? (
         <ul role="group" className="space-y-0.5">
@@ -365,12 +452,21 @@ function FolderTreeNode({
               onToggle={onToggle}
               onSelect={onSelect}
               isAdmin={isAdmin}
+              canDelete={canDelete}
               restrictedFolderIds={restrictedFolderIds}
               restrictedAncestorId={restrictedAncestorId}
+              nameById={nameById}
+              descendantCountById={descendantCountById}
             />
           ))}
         </ul>
       ) : null}
     </li>
   );
+}
+
+/** True when `targetId` is this node's own folder or any folder in its subtree (cascade-aware). */
+function subtreeContains(node: FolderNodeWithRules, targetId: string): boolean {
+  if (node.folder.id === targetId) return true;
+  return node.children.some((child) => subtreeContains(child, targetId));
 }

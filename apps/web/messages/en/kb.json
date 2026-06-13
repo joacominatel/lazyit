@@ -8,6 +8,7 @@
     "searchPlaceholder": "Search by title…",
     "errorTitle": "Could not load articles",
     "noMatchFilters": "No articles match your filters.",
+    "noArticlesInFolder": "No articles in this folder yet — open a sub-folder above to keep browsing.",
     "emptyTitle": "No articles yet",
     "emptyDescription": "Capture what your team knows — runbooks, how-tos, onboarding notes. Write your first article or import one from a file.",
     "emptyAction": "Write your first article",
@@ -19,7 +20,6 @@
   },
   "filters": {
     "statusLabelName": "Status",
-    "categoryLabelName": "Category",
     "linkedToLabelName": "Target",
     "assetLabelName": "Assets",
     "applicationLabelName": "Applications",
@@ -172,7 +172,26 @@
     "allArticles": "All articles",
     "empty": "No folders yet",
     "expand": "Expand {name}",
-    "collapse": "Collapse {name}"
+    "collapse": "Collapse {name}",
+    "subfoldersLabel": "Sub-folders",
+    "childFolderCount": "{count, plural, one {# sub-folder} other {# sub-folders}}",
+    "articleCount": "{count, plural, one {# article} other {# articles}}",
+    "emptyFolder": "Empty folder",
+    "delete": {
+      "menuTitle": "Folder actions",
+      "menuAriaLabel": "Actions for {name}",
+      "action": "Delete folder",
+      "title": "Delete this folder?",
+      "warning": "<b>{name}</b> and everything inside it will be removed from the Knowledge Base.",
+      "subfolderWarning": "This also deletes {count, plural, one {# sub-folder} other {# sub-folders}} and all of their articles.",
+      "irreversibleNote": "Articles in these folders are removed from the KB. This can only be undone by an administrator restoring them in the database.",
+      "confirm": "Delete folder",
+      "cancel": "Cancel",
+      "toast": {
+        "deleted": "Deleted {folders, plural, one {# folder} other {# folders}} and {articles, plural, one {# article} other {# articles}}",
+        "error": "Couldn't delete the folder"
+      }
+    }
   },
   "references": {
     "panelTitle": "References",
@@ -206,13 +225,14 @@
   "access": {
     "statePublic": "Public",
     "stateRestricted": "Restricted",
+    "stateInheritedRestricted": "Restricted (inherited from {name})",
     "makePublic": "Make public",
     "publicHint": "Visible to all authenticated team members.",
+    "inheritedRestrictedHint": "This folder is restricted because it inherits a restriction from {name}. Add a rule below to narrow access further.",
     "restrictedTooltip": "Restricted — only specific users may read this folder",
     "restrictedAriaLabel": "Restricted folder",
-    "inheritedTooltip": "Inherits a restriction from a parent folder",
-    "inheritedAriaLabel": "Inherits restriction",
-    "inheritedNote": "This folder inherits a restriction from a parent folder.",
+    "inheritedRestrictedTooltip": "Restricted — inherited from {name}",
+    "inheritedRestrictedAriaLabel": "Restricted folder (inherited from {name})",
     "editRulesAriaLabel": "Edit access rules for {name}",
     "editRulesTitle": "Edit access rules",
     "editorTitle": "Access rules",

@@ -8,6 +8,7 @@
     "searchPlaceholder": "Buscar por título…",
     "errorTitle": "No se pudieron cargar los artículos",
     "noMatchFilters": "Ningún artículo coincide con tus filtros.",
+    "noArticlesInFolder": "Aún no hay artículos en esta carpeta — abre una subcarpeta de arriba para seguir explorando.",
     "emptyTitle": "Aún no hay artículos",
     "emptyDescription": "Documenta lo que sabe tu equipo: runbooks, guías paso a paso, notas de onboarding. Escribe tu primer artículo o importa uno desde un archivo.",
     "emptyAction": "Escribe tu primer artículo",
@@ -19,7 +20,6 @@
   },
   "filters": {
     "statusLabelName": "Estado",
-    "categoryLabelName": "Categoría",
     "linkedToLabelName": "Destino",
     "assetLabelName": "Activos",
     "applicationLabelName": "Aplicaciones",
@@ -172,7 +172,26 @@
     "allArticles": "Todos los artículos",
     "empty": "Aún no hay carpetas",
     "expand": "Expandir {name}",
-    "collapse": "Contraer {name}"
+    "collapse": "Contraer {name}",
+    "subfoldersLabel": "Subcarpetas",
+    "childFolderCount": "{count, plural, one {# subcarpeta} other {# subcarpetas}}",
+    "articleCount": "{count, plural, one {# artículo} other {# artículos}}",
+    "emptyFolder": "Carpeta vacía",
+    "delete": {
+      "menuTitle": "Acciones de carpeta",
+      "menuAriaLabel": "Acciones para {name}",
+      "action": "Eliminar carpeta",
+      "title": "¿Eliminar esta carpeta?",
+      "warning": "<b>{name}</b> y todo lo que contiene se eliminará de la base de conocimiento.",
+      "subfolderWarning": "Esto también elimina {count, plural, one {# subcarpeta} other {# subcarpetas}} y todos sus artículos.",
+      "irreversibleNote": "Los artículos de estas carpetas se eliminan de la base de conocimiento. Solo un administrador puede deshacerlo restaurándolos en la base de datos.",
+      "confirm": "Eliminar carpeta",
+      "cancel": "Cancelar",
+      "toast": {
+        "deleted": "Se eliminaron {folders, plural, one {# carpeta} other {# carpetas}} y {articles, plural, one {# artículo} other {# artículos}}",
+        "error": "No se pudo eliminar la carpeta"
+      }
+    }
   },
   "references": {
     "panelTitle": "Referencias",
@@ -206,13 +225,14 @@
   "access": {
     "statePublic": "Público",
     "stateRestricted": "Restringido",
+    "stateInheritedRestricted": "Restringido (heredado de {name})",
     "makePublic": "Hacer público",
     "publicHint": "Visible para todos los miembros del equipo autenticados.",
+    "inheritedRestrictedHint": "Esta carpeta está restringida porque hereda una restricción de {name}. Añade una regla abajo para restringir aún más el acceso.",
     "restrictedTooltip": "Restringido — solo usuarios específicos pueden leer esta carpeta",
     "restrictedAriaLabel": "Carpeta restringida",
-    "inheritedTooltip": "Hereda una restricción de una carpeta superior",
-    "inheritedAriaLabel": "Hereda restricción",
-    "inheritedNote": "Esta carpeta hereda una restricción de una carpeta superior.",
+    "inheritedRestrictedTooltip": "Restringido — heredado de {name}",
+    "inheritedRestrictedAriaLabel": "Carpeta restringida (heredada de {name})",
     "editRulesAriaLabel": "Editar reglas de acceso para {name}",
     "editRulesTitle": "Editar reglas de acceso",
     "editorTitle": "Reglas de acceso",

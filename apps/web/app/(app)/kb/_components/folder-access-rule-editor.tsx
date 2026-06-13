@@ -59,11 +59,20 @@ export function FolderAccessRuleEditor({
   folderId,
   folderName,
   rawAccessRules,
+  inheritedFrom = null,
 }: {
   folderId: string;
   folderName: string;
   /** The `accessRules` value from the API response — may be null/undefined (= PUBLIC). */
   rawAccessRules: RawAccessRules;
+  /**
+   * The name of the nearest restricted ANCESTOR folder when this folder has NO own rule but inherits
+   * a restriction (#414); `null` when the folder is genuinely public (no own rule, no restricted
+   * ancestor). When set, the effective state reads "Restricted (inherited from <name>)" instead of
+   * "Public" — the descendant IS restricted (the backend enforces it via INV-9), so showing it as
+   * "visible to everyone" was misleading. An admin may still ADD an own rule here to narrow further.
+   */
+  inheritedFrom?: string | null;
 }) {
   const t = useTranslations("kb");
 
@@ -137,17 +146,35 @@ export function FolderAccessRuleEditor({
 
   // ------------------------------------------------------------------ render
 
+  // #414: this folder inherits a restriction when it has NO own rule (isPublic) but a restricted
+  // ancestor exists. The EFFECTIVE state is then "restricted-by-inheritance", never "public".
+  const inheritsRestriction = isPublic && inheritedFrom != null;
+  // Genuinely public: no own rule AND no restricted ancestor.
+  const isEffectivelyPublic = isPublic && !inheritsRestriction;
+
   return (
     <div className="space-y-3">
-      {/* Access state header */}
+      {/* Access state header — reflects the EFFECTIVE state: own-restricted, inherited-restricted
+          (#414) or genuinely public. The inherited case shows a lock + "Restricted (inherited from
+          <ancestor>)", never the misleading "Public — visible to everyone" block. */}
       <div className="flex items-center gap-2">
-        {isPublic ? (
+        {isEffectivelyPublic ? (
           <GlobeAltIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         ) : (
-          <LockClosedIcon className="size-4 shrink-0 text-warning" aria-hidden />
+          <LockClosedIcon
+            className={cn(
+              "size-4 shrink-0",
+              inheritsRestriction ? "text-warning/70" : "text-warning",
+            )}
+            aria-hidden
+          />
         )}
         <span className="text-sm font-medium">
-          {isPublic ? t("access.statePublic") : t("access.stateRestricted")}
+          {isEffectivelyPublic
+            ? t("access.statePublic")
+            : inheritsRestriction
+              ? t("access.stateInheritedRestricted", { name: inheritedFrom })
+              : t("access.stateRestricted")}
         </span>
         {!isPublic && (
           <Button
@@ -164,10 +191,15 @@ export function FolderAccessRuleEditor({
         )}
       </div>
 
-      {/* Public description */}
-      {isPublic ? (
+      {/* Effective-state description: genuinely-public gets the "visible to everyone" hint; an
+          inherited restriction gets a note that an own rule can NARROW it further (#414). */}
+      {isEffectivelyPublic ? (
         <p className="text-xs text-muted-foreground">
           {t("access.publicHint")}
+        </p>
+      ) : inheritsRestriction ? (
+        <p className="text-xs text-muted-foreground">
+          {t("access.inheritedRestrictedHint", { name: inheritedFrom })}
         </p>
       ) : null}
 
