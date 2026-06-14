@@ -3,7 +3,7 @@ title: Notification
 tags: [domain, entity, notifications, rbac, frontend]
 status: accepted
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-14
 ---
 
 # Notification
@@ -36,8 +36,11 @@ Two models (`apps/api/prisma/schema.prisma`, migration `…_add_notifications`):
   `severity` (`info`|`warning`|`critical` — a render cue, not a business criticality), a `title`/`summary`,
   a **soft, polymorphic** `entityType`/`entityId` deep-link target (NOT a FK — the bell points at
   heterogeneous entities and must be free to forget), an optional `targetUserId` (the person the nudge is
-  about — a real `SetNull` FK to [[user]]), a small **redacted** `metadata` jsonb (names/ids only, never
-  bodies/secrets — INV-6), and a **`dedupeKey`** (`UNIQUE`).
+  **about** — a real `SetNull` FK to [[user]]), an optional **`recipientUserId`** (who **sees** it — a real
+  `SetNull` FK to [[user]]; the second visibility axis, [[0056-in-app-notification-bell]] amendment
+  2026-06-14, #453: `null` = broadcast to every `notification:read` holder, a uuid = **targeted** to that
+  user's own bell even when they hold no `notification:read`; indexed), a small **redacted** `metadata`
+  jsonb (names/ids only, never bodies/secrets — INV-6), and a **`dedupeKey`** (`UNIQUE`).
 - **`NotificationRead`** — the per-admin read join `{ notificationId, userId, readAt }`, **unique on
   `(notificationId, userId)`**, written lazily on first mark-read. Absence of a row = **unread** for that
   admin. FK to `Notification` is **Restrict** (the retention sweep deletes the joins first, then the
@@ -49,9 +52,10 @@ anti-join over the small admin cohort.
 
 ## Types (closed shared enum — `@lazyit/shared`)
 
-`critical_app_access` · `admin_granted` · `low_stock` · `workflow.manual_task` · `workflow.run_failed`.
-Catalog-as-code: a typo can't mint a type, and `api` (emit) + `web` (render a closed set of icons/copy)
-agree by construction. Adding a type later is an additive shared-package change.
+`critical_app_access` · `admin_granted` · `low_stock` · `workflow.manual_task` · `workflow.run_failed` ·
+**`secret.vault_setup`** (the targeted login nudge, #453). Catalog-as-code: a typo can't mint a type, and
+`api` (emit) + `web` (render a closed set of icons/copy) agree by construction. Adding a type later is an
+additive shared-package change (and a web exhaustive-map re-typecheck — `TYPE_META` is keyed on the enum).
 
 ## Emitters (best-effort, POST-COMMIT)
 
@@ -65,8 +69,15 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   (a coarse daily bucket — one nudge per consumable per day, re-alerts on a genuine re-cross another day).
 - **`ManualTask` creation** (the engine pausing a run for a human) → `workflow.manual_task`. Dedupe
   `<type>:<manualTaskId>`.
+- **Login** (`GET /users/me`, the app-load self-read) → **`secret.vault_setup`**, a **targeted** nudge
+  (`recipientUserId = caller`) when the caller holds `secret:read` but has **no** [[user-keypair]] (they
+  have never set a vault passphrase, so they can decrypt nothing — [[0061-secret-manager-zero-knowledge]]
+  §7). Dedupe **`secret.vault_setup:<userId>`** (a STABLE key, no time bucket) → **one nudge per user,
+  ever**; none re-fires once a keypair exists. Wired **fail-soft** in `VaultSetupNudgeService` (a
+  notification problem never blocks login or `/me`). **INV-10-safe** — carries no key material, only "set
+  up your vault passphrase" + a link to `/secrets`.
 
-## API (poll, gated `notification:read` — ADMIN-only)
+## API (poll) — read-path authZ (the auth contract)
 
 - `GET /notifications` — the caller's feed (newest-first, paged; `Page<Notification>` per [[0030-list-pagination-contract]]),
   each item with its per-caller `read` flag.
@@ -74,18 +85,36 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
 - `PATCH /notifications/:id/read` — mark one read (idempotent upsert) → `{ marked, unread }`.
 - `PATCH /notifications/read-all` — mark all the caller's unread read → `{ marked, unread }`.
 
-A new **`notification:read`** permission is seeded **ADMIN-only** (in `ADMIN_ONLY_READS`, like
-`logs:read`/`workflow:read`). SSE is a Phase-2 drop-in behind these **same** endpoints — no contract churn.
+**Read-path authZ ([[0056-in-app-notification-bell]] amendment 2026-06-14, #453).** v1 gated all four
+endpoints by `@RequirePermission('notification:read')` (ADMIN-only) — a non-admin was 403'd and could
+never see the bell. Targeted notifications change that: the routes are **relaxed to any authenticated
+human** (a service-account principal is still 403'd — the bell is a per-user surface), and the **service
+scopes** every read to the caller's **visible set**:
+
+- **own targeted rows** (`recipientUserId == caller`) — **always** visible, **regardless of
+  `notification:read`** (the "you see your own" shape of `GET /users/me`); PLUS
+- the **broadcast set** (`recipientUserId IS NULL`) — visible **only if** the caller's role holds
+  **`notification:read`** (still **ADMIN-only** by default, in `ADMIN_ONLY_READS`, like `logs:read`).
+
+The scope is one Prisma `where` (`recipientUserId = caller OR (recipientUserId IS NULL AND
+notification:read)`) reused by list / unread-count / mark-read / mark-all, so they are **IDOR-safe by
+construction**: mark-read first confirms the id is in the caller's visible set, so a caller can never mark
+or count **another user's targeted** notification, and a non-admin can never touch a broadcast row. The
+`notification:read` permission is resolved inside the service via [[0046-roles-permissions-v2]]'s
+`PermissionResolverService` — no new permission is added. SSE is a Phase-2 drop-in behind these **same**
+endpoints — no contract churn.
 
 ## Frontend
 
-The topbar bell (`apps/web/components/notification-bell.tsx`, mounted in `app/(app)/layout.tsx`) is gated
-by `useCan('notification:read')` — **hidden** for non-admins. It polls the unread count (~45s) for the
-badge and the recent page while open, **reuses the [[recent-activity]] activity-row visual grammar**, and
-each row deep-links to its target (the application / consumable / the manual-task inbox). Mark-read on
-click + "mark all read".
+The topbar bell (`apps/web/components/notification-bell.tsx`, mounted in `app/(app)/layout.tsx`) reuses the
+[[recent-activity]] activity-row visual grammar and deep-links each row to its target (the application /
+consumable / the manual-task inbox / `/secrets` for the vault-setup nudge). Mark-read on click + "mark all
+read". **NOTE (#453):** the targeted-recipient backend is built; the bell still gates the whole affordance
+on `useCan('notification:read')` (so a non-admin recipient does not yet see their targeted nudge in the
+bell) — relaxing that gate + the persistent `/secrets` banner is the **frontend follow-up**.
 
 ## Related
 
 [[0056-in-app-notification-bell]] · [[recent-activity]] · [[manual-task]] · [[access-grant]] ·
-[[consumable-movement]] · [[0046-roles-permissions-v2]] · [[0006-soft-delete-and-auditing]] · issue #313
+[[consumable-movement]] · [[user-keypair]] · [[0061-secret-manager-zero-knowledge]] (INV-10) ·
+[[0046-roles-permissions-v2]] · [[0006-soft-delete-and-auditing]] · issue #313 · issue #453
