@@ -16,6 +16,8 @@
  * Pure-ish and framework-agnostic: it depends only on the small {@link ReindexClient} surface (a
  * structural subset of the real `Meilisearch` client) so it can be unit-tested with a fake client.
  */
+import { randomUUID } from 'node:crypto';
+
 import type { SearchDocument } from './search.documents';
 import type { SearchIndex } from './search.service';
 
@@ -112,10 +114,19 @@ function extractCode(err: unknown): string | undefined {
 /**
  * Authoritatively rebuild one index from its full live `docs` set, zero-downtime via index swap.
  *
- * Steps: ensure the live index exists (first-deploy safe) → drop any leftover temp index from an
- * interrupted run → create a fresh temp index → add `docs` in batches (awaiting each task so a
- * failure is loud, not silently "enqueued") → atomically swap the temp index with the live one →
- * delete the temp index (which, post-swap, now holds the stale documents).
+ * Steps: ensure the live index exists (first-deploy safe) → create a fresh, run-unique temp index →
+ * add `docs` in batches (awaiting each task so a failure is loud, not silently "enqueued") →
+ * atomically swap the temp index with the live one → delete the temp index (which, post-swap, now
+ * holds the stale documents).
+ *
+ * **Cross-actor safety (#464).** Three actors can rebuild the same index concurrently: the hourly
+ * reconcile sweeper (#383), the boot self-heal (#370) and the manual `reindex:all` script. So the
+ * temp uid carries a per-run token — `${index}__reindex_tmp_${runId}` — instead of a single shared
+ * `${index}__reindex_tmp`. Each run therefore builds, swaps and disposes *only its own* temp index;
+ * two overlapping rebuilds of the same index can never delete each other's in-progress temp or
+ * promote a half-built one to live. `runId` defaults to a fresh `randomUUID()` and is injectable so
+ * the uid is assertable in tests. Because the uid is unique per run there is no shared leftover to
+ * pre-delete (a prior run's temp had a different uid), so we no longer drop a temp before creating.
  *
  * Throws if any Meili task fails, so the caller can exit non-zero — an operator must never see a
  * green "done" over a partial rebuild.
@@ -124,13 +135,13 @@ export async function reindexIndex(
   client: ReindexClient,
   index: SearchIndex,
   docs: SearchDocument[],
+  runId: string = randomUUID(),
 ): Promise<void> {
-  // A deterministic temp uid (no timestamp) keeps it predictable and self-cleaning across reruns;
-  // we drop any stale leftover before (re)creating it.
-  const tempUid = `${index}__reindex_tmp`;
+  // Run-unique temp uid: each rebuild owns a distinct temp index, so overlapping cross-actor
+  // rebuilds of the same index never collide (#464). Cleaned up below on both success and failure.
+  const tempUid = `${index}__reindex_tmp_${runId}`;
 
   await ensureIndex(client, index);
-  await client.deleteIndexIfExists(tempUid);
   try {
     await client.createIndex(tempUid, { primaryKey: 'id' }).waitTask();
 
@@ -155,8 +166,9 @@ export async function reindexIndex(
       .swapIndexes([{ indexes: [index, tempUid], rename: false }])
       .waitTask();
   } finally {
-    // After a successful swap the temp index holds the *stale* docs; after a failure it holds a
-    // partial build. Either way it is disposable — best-effort cleanup, never mask the real error.
+    // Dispose THIS run's own temp index (the per-run uid), never another concurrent rebuild's
+    // (#464). After a successful swap it holds the *stale* docs; after a failure it holds a partial
+    // build. Either way it is disposable — best-effort cleanup, never mask the real error.
     await client.deleteIndexIfExists(tempUid).catch(() => undefined);
   }
 }

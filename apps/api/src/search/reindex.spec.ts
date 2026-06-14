@@ -35,7 +35,9 @@ function fakeClient(opts: FakeOptions = {}): {
     createIndex: (uid, _options) =>
       task(() => {
         ops.push({ kind: 'createIndex', uid });
-        if (opts.liveAlreadyExists && !uid.endsWith('__reindex_tmp')) {
+        // The temp uid now carries a per-run suffix (`..._${runId}`, #464), so match on
+        // substring rather than `endsWith` to single out the live index.
+        if (opts.liveAlreadyExists && !uid.includes('__reindex_tmp')) {
           throw { code: 'index_already_exists' };
         }
       }),
@@ -69,28 +71,71 @@ function fakeClient(opts: FakeOptions = {}): {
 const docs = (...ids: string[]): SearchDocument[] => ids.map((id) => ({ id }));
 
 describe('reindexIndex (authoritative rebuild)', () => {
-  const TEMP = 'users__reindex_tmp';
+  // An injected, fixed run token makes the per-run temp uid (#464) deterministic and assertable.
+  const RUN = 'run-fixed';
+  const TEMP = `users__reindex_tmp_${RUN}`;
 
   it('builds a fresh temp index, swaps it into place, then drops the temp index', async () => {
     const { client, ops } = fakeClient();
 
-    await reindexIndex(client, 'users', docs('u1', 'u2'));
+    await reindexIndex(client, 'users', docs('u1', 'u2'), RUN);
 
+    // No leading deleteIndexIfExists: with a run-unique temp uid there is no shared leftover to
+    // drop before creating (a prior run's temp had a different uid) — #464.
     expect(ops).toEqual([
       { kind: 'createIndex', uid: 'users' }, // ensure live index exists (first-deploy safe)
-      { kind: 'deleteIndexIfExists', uid: TEMP }, // drop leftover from any interrupted run
-      { kind: 'createIndex', uid: TEMP }, // fresh temp
+      { kind: 'createIndex', uid: TEMP }, // fresh, run-unique temp
       { kind: 'addDocuments', uid: TEMP, ids: ['u1', 'u2'] }, // live set into temp
       { kind: 'swap', indexes: ['users', TEMP] }, // atomic, zero-downtime
-      { kind: 'deleteIndexIfExists', uid: TEMP }, // dispose temp (now holds the stale docs)
+      { kind: 'deleteIndexIfExists', uid: TEMP }, // dispose this run's own temp (now stale docs)
     ]);
+  });
+
+  it('derives the temp uid from a per-run token: `${index}__reindex_tmp_${runId}`', async () => {
+    const { client, ops } = fakeClient();
+
+    await reindexIndex(client, 'assets', docs('a1'), 'abc123');
+
+    const created = ops.filter(
+      (op): op is Extract<Op, { kind: 'createIndex' }> =>
+        op.kind === 'createIndex',
+    );
+    // The live index plus exactly one run-unique temp index.
+    expect(created.map((op) => op.uid)).toEqual([
+      'assets',
+      'assets__reindex_tmp_abc123',
+    ]);
+  });
+
+  it('defaults runId to a fresh unique token when none is injected', async () => {
+    const { client: c1, ops: ops1 } = fakeClient();
+    const { client: c2, ops: ops2 } = fakeClient();
+
+    await reindexIndex(c1, 'users', docs('u1'));
+    await reindexIndex(c2, 'users', docs('u1'));
+
+    const tempOf = (ops: Op[]): string => {
+      const create = ops.find(
+        (op): op is Extract<Op, { kind: 'createIndex' }> =>
+          op.kind === 'createIndex' && op.uid !== 'users',
+      );
+      if (create === undefined) throw new Error('no temp index created');
+      return create.uid;
+    };
+
+    const temp1 = tempOf(ops1);
+    const temp2 = tempOf(ops2);
+    expect(temp1).toMatch(/^users__reindex_tmp_.+/);
+    expect(temp2).toMatch(/^users__reindex_tmp_.+/);
+    // Two un-seeded runs must NOT collide on the same temp uid.
+    expect(temp1).not.toBe(temp2);
   });
 
   it('declares categoryId filterable on the ARTICLES temp index before the swap (ADR-0060 §5)', async () => {
     const { client, ops } = fakeClient();
-    const ARTICLES_TEMP = 'articles__reindex_tmp';
+    const ARTICLES_TEMP = `articles__reindex_tmp_${RUN}`;
 
-    await reindexIndex(client, 'articles', docs('art1'));
+    await reindexIndex(client, 'articles', docs('art1'), RUN);
 
     const filterableOp = ops.find(
       (op) => op.kind === 'updateFilterableAttributes',
@@ -121,7 +166,7 @@ describe('reindexIndex (authoritative rebuild)', () => {
   it('adds documents only to the temp index, never directly to the live index (ghost eviction)', async () => {
     const { client, ops } = fakeClient();
 
-    await reindexIndex(client, 'users', docs('u1'));
+    await reindexIndex(client, 'users', docs('u1'), RUN);
 
     const adds = ops.filter((op) => op.kind === 'addDocuments');
     expect(adds).toHaveLength(1);
@@ -175,14 +220,65 @@ describe('reindexIndex (authoritative rebuild)', () => {
   it('propagates a failed Meili task and still disposes the temp index (no green over a partial build)', async () => {
     const { client, ops } = fakeClient({ failAddDocuments: true });
 
-    await expect(reindexIndex(client, 'users', docs('u1'))).rejects.toThrow(
-      'meili add failed',
-    );
+    await expect(
+      reindexIndex(client, 'users', docs('u1'), RUN),
+    ).rejects.toThrow('meili add failed');
     // The failure must not leak the temp index — cleanup runs in `finally`.
-    const deletes = ops.filter((op) => op.kind === 'deleteIndexIfExists');
-    expect(deletes.length).toBeGreaterThanOrEqual(1);
-    expect(deletes.some((op) => op.uid === TEMP)).toBe(true);
+    const deletes = ops.filter(
+      (op): op is Extract<Op, { kind: 'deleteIndexIfExists' }> =>
+        op.kind === 'deleteIndexIfExists',
+    );
+    // Cleanup targets only THIS run's own temp uid — never another actor's (#464).
+    expect(deletes).toEqual([{ kind: 'deleteIndexIfExists', uid: TEMP }]);
     // It must NOT have swapped a half-built index into place.
     expect(ops.some((op) => op.kind === 'swap')).toBe(false);
+  });
+
+  // #464: cross-actor collision. Two actors (e.g. the hourly reconcile sweeper #383 and the boot
+  // self-heal #370, or a manual `reindex:all`) can rebuild the SAME index at overlapping times.
+  // With a single shared temp uid they raced on it — one deleting/promoting the other's in-progress
+  // temp. The per-run uid must make their temp indexes disjoint so neither touches the other's.
+  describe('concurrent rebuilds of the SAME index (cross-actor)', () => {
+    it('use DISTINCT temp uids and each cleans up only its own temp', async () => {
+      // One shared fake client/op-log — as if both runs hit the same Meili instance.
+      const { client, ops } = fakeClient();
+
+      // Two overlapping rebuilds of 'users' with distinct run tokens.
+      await Promise.all([
+        reindexIndex(client, 'users', docs('u1'), 'actorA'),
+        reindexIndex(client, 'users', docs('u2'), 'actorB'),
+      ]);
+
+      const tempA = 'users__reindex_tmp_actorA';
+      const tempB = 'users__reindex_tmp_actorB';
+      expect(tempA).not.toBe(tempB);
+
+      // Each run created and disposed its OWN temp index — exactly once each.
+      const created = ops.filter(
+        (op): op is Extract<Op, { kind: 'createIndex' }> =>
+          op.kind === 'createIndex',
+      );
+      expect(created.filter((op) => op.uid === tempA)).toHaveLength(1);
+      expect(created.filter((op) => op.uid === tempB)).toHaveLength(1);
+
+      const deletes = ops.filter(
+        (op): op is Extract<Op, { kind: 'deleteIndexIfExists' }> =>
+          op.kind === 'deleteIndexIfExists',
+      );
+      // Every delete targets a per-run temp uid; neither run ever deletes the OTHER's temp,
+      // and there is exactly one delete per run (its own cleanup) — no cross-clobber.
+      expect(deletes.filter((op) => op.uid === tempA)).toHaveLength(1);
+      expect(deletes.filter((op) => op.uid === tempB)).toHaveLength(1);
+      expect(deletes.every((op) => op.uid === tempA || op.uid === tempB)).toBe(
+        true,
+      );
+
+      // Each run swapped its own temp into the live index; never the other's half-built temp.
+      const swaps = ops.filter(
+        (op): op is Extract<Op, { kind: 'swap' }> => op.kind === 'swap',
+      );
+      expect(swaps.some((op) => op.indexes[1] === tempA)).toBe(true);
+      expect(swaps.some((op) => op.indexes[1] === tempB)).toBe(true);
+    });
   });
 });
