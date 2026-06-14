@@ -65,6 +65,7 @@ import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils/format";
 import { ByoiBanner } from "./_components/byoi-banner";
 import { CloneUserWizard } from "./_components/clone-user-wizard";
+import { ManagerDisplay } from "./_components/manager-display";
 import { OffboardingSheet } from "./_components/offboarding-sheet";
 import { UserFormDialog } from "./_components/user-form-dialog";
 import { UserRoleSelect } from "./_components/user-role-select";
@@ -79,20 +80,72 @@ type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
 const FILTER_DEFAULTS = { status: "ALL", archived: "ALL" } as const;
 
 /**
- * The Users-table columns an operator can show/hide via the column picker (#368). Structural columns
- * (`avatar`, the selection checkbox, row `actions`) and the `name` identity column — the row's
- * canonical link — are always rendered and intentionally absent here. Keys match the `ResourceColumn`
- * keys and the per-key body-cell map below, so the header and body never drift. Scoped to this page
- * by CTO decision (the shared `ResourceTable` stays untouched).
+ * The Users-table columns an operator can show/hide via the column picker (#368, extended in #386).
+ * Structural columns (`avatar`, the selection checkbox, row `actions`) and the `name` identity column —
+ * the row's canonical link — are always rendered and intentionally absent here. Keys match the
+ * `ResourceColumn` keys and the per-key body-cell map below, so the header and body never drift, and
+ * the ARRAY ORDER is the canonical left-to-right table order (persistence re-emits selections in this
+ * order). Scoped to this page by CTO decision (the shared `ResourceTable` stays untouched).
+ *
+ * Grouped for a logical picker + table: the four original presentational columns, the ADR-0058 identity
+ * columns (`manager`/`legajo`/`username`), then the two derived #386 activity counts.
  */
-const HIDEABLE_COLUMNS = ["email", "role", "status", "updated"] as const;
+const HIDEABLE_COLUMNS = [
+  "email",
+  "role",
+  "manager",
+  "legajo",
+  "username",
+  "status",
+  "assetsInPossession",
+  "appAccesses",
+  "updated",
+] as const;
 type HideableColumn = (typeof HIDEABLE_COLUMNS)[number];
+
+/**
+ * Column-picker grouping (#386) — purely presentational structure for the dropdown so a now-longer
+ * list reads as three labelled sections: the original presentational columns, the ADR-0058 identity
+ * columns, and the derived activity counts. The flattened union of `keys` MUST equal `HIDEABLE_COLUMNS`
+ * (every hideable column appears in exactly one group); it drives only the menu, never visibility.
+ */
+const COLUMN_GROUPS: { id: string; keys: readonly HideableColumn[] }[] = [
+  { id: "general", keys: ["email", "role", "status", "updated"] },
+  { id: "identity", keys: ["manager", "legajo", "username"] },
+  { id: "activity", keys: ["assetsInPossession", "appAccesses"] },
+];
 
 /** localStorage key persisting the visible hideable-column set (per browser). */
 const COLUMNS_STORAGE_KEY = "lazyit:users:columns";
 
-/** All hideable columns are visible by default — the picker only ever subtracts from this. */
-const DEFAULT_VISIBLE_COLUMNS: HideableColumn[] = [...HIDEABLE_COLUMNS];
+/**
+ * The columns shown by default — the picker subtracts from (and now also adds to) this set. We keep the
+ * lean #368 default (the original four presentational columns) so the table isn't noisy out of the box;
+ * the five #386 columns (manager/legajo/username + the two counts) are OPT-IN, surfaced only when an
+ * operator turns them on. Existing persisted sets (which only ever held a subset of the original four)
+ * keep working unchanged.
+ */
+const DEFAULT_VISIBLE_COLUMNS: HideableColumn[] = [
+  "email",
+  "role",
+  "status",
+  "updated",
+];
+
+/**
+ * A derived #386 activity count (assets-in-possession / app-accesses). The fields are OPTIONAL on the
+ * list row — an ABSENT value means "this response didn't compute it" — so we coalesce absent → 0 and
+ * render a muted "0" for "none" (zero or absent), keeping the real, non-zero counts in the normal
+ * foreground so a busy user stands out. Right-alignment + `tabular-nums` lives on the cell.
+ */
+function CountCell({ value }: { value?: number }) {
+  const count = value ?? 0;
+  return count === 0 ? (
+    <span className="text-muted-foreground">0</span>
+  ) : (
+    count
+  );
+}
 
 export default function UsersPage() {
   const t = useTranslations("users");
@@ -158,7 +211,8 @@ export default function UsersPage() {
   const selectable = archived;
 
   // Per-browser column-picker state (#368). `mounted` gates the persisted set so SSR/first paint
-  // always shows every column (the server snapshot is `DEFAULT_VISIBLE_COLUMNS`) — no hydration flash.
+  // always renders the lean `DEFAULT_VISIBLE_COLUMNS` (the server snapshot) — no hydration flash and,
+  // post-#386, no flash of the opt-in columns before the persisted set resolves.
   const [storedColumns, setStoredColumns, columnsMounted] = useLocalStorage<
     HideableColumn[]
   >(COLUMNS_STORAGE_KEY, DEFAULT_VISIBLE_COLUMNS);
@@ -166,7 +220,7 @@ export default function UsersPage() {
   // build): only keep known hideable keys.
   const visibleColumns = useMemo(() => {
     if (!columnsMounted || !Array.isArray(storedColumns)) {
-      return new Set<HideableColumn>(HIDEABLE_COLUMNS);
+      return new Set<HideableColumn>(DEFAULT_VISIBLE_COLUMNS);
     }
     return new Set(storedColumns.filter((key) => HIDEABLE_COLUMNS.includes(key)));
   }, [columnsMounted, storedColumns]);
@@ -263,10 +317,41 @@ export default function UsersPage() {
           ),
           skeleton: <Skeleton className="h-8 w-[7.5rem] rounded-lg" />,
         },
+        // ADR-0058 identity columns (#386). Not server-sortable here (sort allowlist is unchanged), so
+        // plain text headers — no SortableHeader.
+        isColumnVisible("manager") && {
+          key: "manager",
+          header: t("list.columns.manager"),
+          skeleton: <Skeleton className="h-4 w-28" />,
+        },
+        isColumnVisible("legajo") && {
+          key: "legajo",
+          header: t("list.columns.legajo"),
+          skeleton: <Skeleton className="h-4 w-20" />,
+        },
+        isColumnVisible("username") && {
+          key: "username",
+          header: t("list.columns.username"),
+          skeleton: <Skeleton className="h-4 w-24" />,
+        },
         isColumnVisible("status") && {
           key: "status",
           header: t("list.columns.status"),
           skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
+        },
+        // Derived #386 activity counts. Right-aligned numeric headers/cells; sorting is v1-out per the
+        // issue, so plain (non-sortable) headers.
+        isColumnVisible("assetsInPossession") && {
+          key: "assetsInPossession",
+          header: t("list.columns.assetsInPossession"),
+          headClassName: "text-right",
+          skeleton: <Skeleton className="ml-auto h-4 w-8" />,
+        },
+        isColumnVisible("appAccesses") && {
+          key: "appAccesses",
+          header: t("list.columns.appAccesses"),
+          headClassName: "text-right",
+          skeleton: <Skeleton className="ml-auto h-4 w-8" />,
         },
         isColumnVisible("updated") && {
           key: "updated",
@@ -417,21 +502,28 @@ export default function UsersPage() {
                   <ViewColumnsIcon />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-44">
+              <DropdownMenuContent align="end" className="min-w-48">
                 <DropdownMenuLabel>
                   {t("list.columnPicker.label")}
                 </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {HIDEABLE_COLUMNS.map((key) => (
-                  <DropdownMenuCheckboxItem
-                    key={key}
-                    checked={isColumnVisible(key)}
-                    // Keep the menu open so several columns can be toggled in one pass.
-                    onSelect={(event) => event.preventDefault()}
-                    onCheckedChange={(checked) => toggleColumn(key, checked)}
-                  >
-                    {t(`list.columnPicker.columns.${key}`)}
-                  </DropdownMenuCheckboxItem>
+                {COLUMN_GROUPS.map((group) => (
+                  <div key={group.id}>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">
+                      {t(`list.columnPicker.groups.${group.id}`)}
+                    </DropdownMenuLabel>
+                    {group.keys.map((key) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={isColumnVisible(key)}
+                        // Keep the menu open so several columns can be toggled in one pass.
+                        onSelect={(event) => event.preventDefault()}
+                        onCheckedChange={(checked) => toggleColumn(key, checked)}
+                      >
+                        {t(`list.columnPicker.columns.${key}`)}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </div>
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -552,9 +644,52 @@ export default function UsersPage() {
                     <UserRoleSelect user={user} size="sm" />
                   </TableCell>
                 ),
+                manager: (
+                  <TableCell key="manager">
+                    <ManagerDisplay manager={user.manager} />
+                  </TableCell>
+                ),
+                legajo: (
+                  <TableCell key="legajo">
+                    {user.legajo ? (
+                      user.legajo
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {t("list.cells.empty")}
+                      </span>
+                    )}
+                  </TableCell>
+                ),
+                username: (
+                  <TableCell key="username">
+                    {user.username ? (
+                      user.username
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {t("list.cells.empty")}
+                      </span>
+                    )}
+                  </TableCell>
+                ),
                 status: (
                   <TableCell key="status">
                     <UserStatusBadge isActive={user.isActive} />
+                  </TableCell>
+                ),
+                assetsInPossession: (
+                  <TableCell
+                    key="assetsInPossession"
+                    className="text-right tabular-nums"
+                  >
+                    <CountCell value={user.assetsInPossession} />
+                  </TableCell>
+                ),
+                appAccesses: (
+                  <TableCell
+                    key="appAccesses"
+                    className="text-right tabular-nums"
+                  >
+                    <CountCell value={user.appAccesses} />
                   </TableCell>
                 ),
                 updated: (
