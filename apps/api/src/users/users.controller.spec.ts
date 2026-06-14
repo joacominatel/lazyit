@@ -13,6 +13,15 @@ import { PasswordResetUnsupportedError } from '../auth/identity/identity-provide
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { ActorService } from '../common/actor.service';
+import { VaultSetupNudgeService } from '../notifications/vault-setup-nudge.service';
+
+// The /users/me post-login seam fires the vault-setup nudge through this service (ADR-0056 amendment,
+// #453). It is mocked everywhere the controller is built; the `/me` suite below asserts it is invoked.
+const notifyIfVaultSetupNeeded = jest.fn().mockResolvedValue(undefined);
+const vaultSetupNudgeProvider = {
+  provide: VaultSetupNudgeService,
+  useValue: { notifyIfVaultSetupNeeded },
+};
 
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
@@ -57,6 +66,7 @@ describe('UsersController :id uuid validation (SEC-004)', () => {
             resolveActor: jest.fn().mockReturnValue({}),
           },
         },
+        vaultSetupNudgeProvider,
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -137,6 +147,7 @@ describe('UsersController GET /users/me (ADR-0040)', () => {
             resolveActor: jest.fn().mockReturnValue({}),
           },
         },
+        vaultSetupNudgeProvider,
         { provide: APP_GUARD, useClass: FakeAuthGuard },
       ],
     }).compile();
@@ -148,6 +159,8 @@ describe('UsersController GET /users/me (ADR-0040)', () => {
     await app.close();
   });
 
+  beforeEach(() => notifyIfVaultSetupNeeded.mockClear());
+
   it('returns the current authenticated user including their role', async () => {
     const res = await request(app.getHttpServer())
       .get('/users/me')
@@ -158,6 +171,18 @@ describe('UsersController GET /users/me (ADR-0040)', () => {
       email: 'me@lazyit.local',
       role: 'ADMIN',
     });
+  });
+
+  it('fires the vault-setup nudge at the /me post-login seam (ADR-0056 amendment, #453)', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/users/me')
+      .set('x-test-role', 'ADMIN');
+    expect(res.status).toBe(200);
+    // The nudge is invoked with the resolved @CurrentUser (fail-soft + idempotent inside the service).
+    expect(notifyIfVaultSetupNeeded).toHaveBeenCalledTimes(1);
+    expect(notifyIfVaultSetupNeeded).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'me-1', role: 'ADMIN' }),
+    );
   });
 
   it('does NOT collide with GET /users/:id (me is not parsed as a uuid)', async () => {
@@ -215,6 +240,7 @@ describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
             resolveActor: jest.fn().mockReturnValue({}),
           },
         },
+        vaultSetupNudgeProvider,
       ],
     }).compile();
     app = moduleRef.createNestApplication();

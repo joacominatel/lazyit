@@ -4,9 +4,9 @@ import type {
   CloneUser,
   CloneUserResult,
   CreateUser,
-  Page,
   UpdateUser,
   User,
+  UserListPage,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
 import { createCrudEndpoints } from "../crud-endpoints";
@@ -41,12 +41,14 @@ export interface UserListParams {
 }
 
 /**
- * List users, paged. `GET /users` returns a `Page<User>` envelope; we return the whole
- * envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only the server-supported
- * params are forwarded (extra client-only filter keys are ignored). Default is active-only; pass
- * `deleted: "only"` (ADMIN) for the archived view.
+ * List users, paged. `GET /users` returns a `UserListPage` envelope (the ADR-0030 page over
+ * {@link UserListItem}): the full User row PLUS the optional, batched #386 activity counts
+ * (`assetsInPossession` / `appAccesses`). We return the whole envelope (`items` +
+ * `total`/`limit`/`offset`) so the list can paginate and the column picker can read the counts.
+ * Only the server-supported params are forwarded (extra client-only filter keys are ignored).
+ * Default is active-only; pass `deleted: "only"` (ADMIN) for the archived view.
  */
-export function getUsers(params: UserListParams = {}): Promise<Page<User>> {
+export function getUsers(params: UserListParams = {}): Promise<UserListPage> {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
   if (params.sort) {
@@ -57,7 +59,7 @@ export function getUsers(params: UserListParams = {}): Promise<Page<User>> {
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
-  return apiFetch<Page<User>>(search ? `${BASE}?${search}` : BASE);
+  return apiFetch<UserListPage>(search ? `${BASE}?${search}` : BASE);
 }
 export const getUser = users.get;
 export const createUser = users.create;

@@ -1,7 +1,9 @@
-import type { UpdateSecretVault } from "@lazyit/shared";
+import type {
+  CreateSecretVaultWithMembership,
+  UpdateSecretVault,
+} from "@lazyit/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  type CreateSecretVaultBody,
   createVault,
   deleteVault,
   getVault,
@@ -45,7 +47,7 @@ export function useVault(vaultId: string | undefined) {
 export function useCreateVault() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateSecretVaultBody) => createVault(body),
+    mutationFn: (body: CreateSecretVaultWithMembership) => createVault(body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: vaultKeys.all });
       queryClient.invalidateQueries({ queryKey: membershipKeys.all });

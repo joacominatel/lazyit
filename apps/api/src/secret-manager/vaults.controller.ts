@@ -11,17 +11,15 @@ import {
 } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
 import {
   CreateSecretItemSchema,
-  CreateSecretVaultSchema,
+  CreateSecretVaultWithMembershipSchema,
   CreateVaultMembershipSchema,
   SecretItemSchema,
   SecretVaultSchema,
   UpdateSecretItemSchema,
   UpdateSecretVaultSchema,
   VaultMembershipSchema,
-  WrappedDekSchema,
 } from '@lazyit/shared';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
@@ -31,15 +29,12 @@ import { SecretManagerService } from './secret-manager.service';
 
 /**
  * Create a vault (`POST /secret-vaults`) — the non-secret name + the creator's OWN first wrapped-DEK
- * membership (the DEK is client-generated, posted wrapped; ADR-0061 §3/§4). Composed here from the two
- * shared DTOs so the contract stays one source of truth and the service receives one cohesive body.
+ * membership (the DEK is client-generated, posted wrapped; ADR-0061 §3/§4). The `{ name, membership }`
+ * body is the shared {@link CreateSecretVaultWithMembershipSchema} (one source of truth across api + web).
  */
-const CreateVaultBodySchema = z.strictObject({
-  name: CreateSecretVaultSchema.shape.name,
-  membership: WrappedDekSchema,
-});
-
-class CreateVaultBodyDto extends createZodDto(CreateVaultBodySchema) {}
+class CreateVaultBodyDto extends createZodDto(
+  CreateSecretVaultWithMembershipSchema,
+) {}
 class UpdateSecretVaultDto extends createZodDto(UpdateSecretVaultSchema) {}
 class SecretVaultDto extends createZodDto(SecretVaultSchema) {}
 class CreateSecretItemDto extends createZodDto(CreateSecretItemSchema) {}

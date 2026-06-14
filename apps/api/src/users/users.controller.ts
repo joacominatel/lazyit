@@ -44,6 +44,7 @@ import { assertCanListDeleted } from '../common/deleted-filter';
 import { AssetAssignmentDto } from '../asset-assignments/asset-assignment.dto';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
+import { VaultSetupNudgeService } from '../notifications/vault-setup-nudge.service';
 
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe), TS types and the
 // OpenAPI schema, all from one definition. See docs/03-decisions/0018-api-documentation-swagger.md.
@@ -62,6 +63,7 @@ export class UsersController {
     private readonly assignments: AssetAssignmentsService,
     private readonly grants: AccessGrantsService,
     private readonly actor: ActorService,
+    private readonly vaultSetupNudge: VaultSetupNudgeService,
   ) {}
 
   @Get()
@@ -152,12 +154,17 @@ export class UsersController {
       'show. Any authenticated user may call it; it only ever returns the caller, never another user.',
   })
   @ApiOkResponse({ type: UserDto })
-  me(@CurrentUser() user?: User) {
+  async me(@CurrentUser() user?: User) {
     // The route is non-@Public, so the JwtAuthGuard guarantees a user in OIDC mode. In shim mode an
     // anonymous caller would have no user — surface that as 401 rather than a confusing empty body.
     if (!user) {
       throw new UnauthorizedException('Not authenticated');
     }
+    // POST-LOGIN SEAM (ADR-0056 amendment, #453): /me is the app-load self-read every session makes, so
+    // it is the natural place to fire the one-time vault-setup nudge for a `secret:read` holder with no
+    // keypair. The call is IDEMPOTENT (one notification per user, ever — the dedupeKey) and FAIL-SOFT
+    // (it never throws), so a notification problem can never block the /me response or login.
+    await this.vaultSetupNudge.notifyIfVaultSetupNeeded(user);
     // Resolve the manager descriptor (ADR-0058) so /me matches the full UserSchema the web consumes.
     return this.users.serializeUser(user);
   }

@@ -12,6 +12,13 @@ import { pageSchema } from "./pagination";
  * in `apps/api`. The list endpoint folds each notification's per-caller `read` flag into the item shape
  * below, so the web never stitches two lists.
  *
+ * Two delivery axes (ADR-0056 amendment 2026-06-14, issue #453): a notification is either a **broadcast**
+ * (`recipientUserId == null` → visible to every `notification:read` holder, the v1 admin feed) or
+ * **targeted** (`recipientUserId == U` → visible to U in U's OWN bell, even when U is not an admin). The
+ * read endpoints resolve, per caller: their own targeted rows (always) PLUS the broadcast set (only if
+ * they hold `notification:read`). `recipientUserId` (who SEES it) is distinct from `targetUserId` (who
+ * it is ABOUT).
+ *
  * v1 is POLL-only (`GET /notifications` + `GET /notifications/unread-count`); SSE is a Phase-2 upgrade
  * behind the SAME endpoints and the SAME wire shapes (ADR-0056 §2) — so these types do not change when
  * realtime lands.
@@ -32,6 +39,11 @@ import { pageSchema } from "./pagination";
  *   - `low_stock`           — a consumable crossed from above its `minStock` to at/below it.
  *   - `workflow.manual_task`— a workflow run paused for a human (a ManualTask was created).
  *   - `workflow.run_failed` — a workflow run failed/escalated and stopped (ADR-0054 §8).
+ *   - `secret.vault_setup`  — a TARGETED login nudge (ADR-0056 amendment 2026-06-14, issue #453): a
+ *     `secret:read` holder with no `UserKeypair` is prompted at login to set up their vault passphrase,
+ *     deep-linking to `/secrets`. Delivered targeted (`recipientUserId = that user`) so it lands in
+ *     that user's OWN bell even when they hold no `notification:read`. INV-10-safe — carries NO key
+ *     material, only "you have not set up your vault" metadata + a link.
  */
 export const NOTIFICATION_TYPES = [
   "critical_app_access",
@@ -39,6 +51,7 @@ export const NOTIFICATION_TYPES = [
   "low_stock",
   "workflow.manual_task",
   "workflow.run_failed",
+  "secret.vault_setup",
 ] as const;
 
 /** A single known notification type. The wire shape validates against this enum (→ 400 otherwise). */
@@ -87,6 +100,10 @@ export type NotificationEntityType = z.infer<
  *   - `entityType` / `entityId` — the deep-link target (both null ⇒ no click-through).
  *   - `targetUserId` — the user the nudge is ABOUT (the grantee / the elevated user), for a secondary
  *                    click-through; null when the nudge has no person subject (low stock, run failure).
+ *   - `recipientUserId` — who SEES this notification (ADR-0056 amendment): `null` = a broadcast to
+ *                    every `notification:read` holder (the v1 admin feed); a uuid = a TARGETED nudge
+ *                    visible to THAT user in their own bell, even when they are not an admin. Distinct
+ *                    from `targetUserId` (who it is ABOUT): a row may carry one, both, or neither.
  *   - `metadata`   — small, REDACTED extra context (names/ids only) the web may use to enrich the row;
  *                    never bodies/secrets/PII (INV-6). Optional and free-shape jsonb on the wire.
  *   - `read`       — the per-caller read flag (folded in by the list endpoint).
@@ -101,6 +118,7 @@ export const NotificationSchema = z.object({
   entityType: NotificationEntityTypeSchema.nullable(),
   entityId: z.string().nullable(),
   targetUserId: z.uuid().nullable(),
+  recipientUserId: z.uuid().nullable(),
   metadata: z.record(z.string(), z.unknown()).nullable(),
   read: z.boolean(),
   createdAt: z.iso.datetime(),

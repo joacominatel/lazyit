@@ -1,8 +1,14 @@
 /**
  * Thin, typed fetch wrapper for the lazyit API.
  *
- * Base URL comes from NEXT_PUBLIC_API_URL (see .env.example). Authentication is
- * handled by Auth.js v5 (ADR-0039): the Bearer token is resolved in this order:
+ * Base URL resolution (ADR-0026 / issue-409):
+ *   - Server side (SSR / server components / proxy.ts): prefers INTERNAL_API_URL (an absolute
+ *     Docker-internal URL, e.g. http://api:3001) so Node's undici fetch gets a valid origin.
+ *     Falls back to NEXT_PUBLIC_API_URL then http://localhost:3001.
+ *   - Client side (browser): NEXT_PUBLIC_API_URL is baked as the relative `/api` at build time
+ *     (domain-portable per ADR-0026); INTERNAL_API_URL is never exposed to the browser.
+ *
+ * Authentication is handled by Auth.js v5 (ADR-0039): the Bearer token is resolved in this order:
  *   1. Explicit `token` option passed by the caller (server components use `await auth()`)
  *   2. Client-side session-token store (populated by SessionTokenSync in the app layout)
  *   3. Unauthenticated (public/health endpoints only)
@@ -13,7 +19,25 @@
 
 import { getSessionToken } from "./session-token";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+/**
+ * Absolute API base for the current execution context.
+ *
+ * On the server, Node's `fetch` (undici) requires an absolute URL — a relative `/api` throws
+ * "Failed to parse URL". INTERNAL_API_URL is set on the web container at runtime (compose.yaml)
+ * to the Docker-internal address (http://api:3001) and is only ever read server-side (it is
+ * NOT prefixed `NEXT_PUBLIC_` so it is never baked into the client bundle).
+ *
+ * In the browser `typeof window !== 'undefined'` is true so we fall through to
+ * NEXT_PUBLIC_API_URL (baked as `/api` at build time, reaching the API via Caddy — ADR-0026).
+ */
+const API_URL: string =
+  typeof window === "undefined"
+    ? // Server: absolute internal URL preferred; fall back gracefully for local `bun run dev`.
+      (process.env.INTERNAL_API_URL ??
+        process.env.NEXT_PUBLIC_API_URL ??
+        "http://localhost:3001")
+    : // Browser: always use the build-time public base (relative `/api` or an explicit origin).
+      (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001");
 
 /** Thrown when the API responds with a non-2xx status. */
 export class ApiError extends Error {

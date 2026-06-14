@@ -100,6 +100,16 @@ the web UI; the first login routes you to the in-app **`/setup` wizard** to crea
 ([[auth-bootstrap]] §6b), and JIT provisioning creates your `User` row. In a browser open
 **https://localhost:8443** (accept / trust Caddy's local CA — see the troubleshooting runbook).
 
+> [!note] First-run gate: visiting `/` redirects to `/setup` on a fresh instance
+> On a clean deploy (no ADMIN yet), the proxy (`proxy.ts`) asks `GET /api/config/status` on every
+> unauthenticated page navigation. If the API reports `isConfigured: false`, the visitor is
+> redirected to `/setup`. This requires the web container to reach the API over the Docker-internal
+> network (`http://api:3001`) — which `INTERNAL_API_URL` (set in `compose.yaml`) provides. Without
+> it, Node's `fetch` would receive a relative `/api` URL, throw, and the gate would **fail open**
+> (the marketing landing would show instead of the wizard). The same var is used by SSR server
+> components (the marketing landing CTA). It is a **runtime** env var (not a build arg) and is
+> never exposed to the browser bundle.
+
 > [!warning] Local prod-like: `auth.localhost` must resolve to 127.0.0.1
 > The browser-facing OIDC login redirects through **`auth.{LAZYIT_DOMAIN}`** (Caddy serves the Zitadel
 > console + token endpoints there — ADR-0037 §4). With `LAZYIT_DOMAIN=localhost` that host is

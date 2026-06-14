@@ -9,18 +9,11 @@ import {
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/resource-table";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { ApiError } from "@/lib/api/client";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useMyKeypair } from "@/lib/secret-manager/hooks/use-keypair";
@@ -42,8 +35,13 @@ import { useSecretSession } from "./secret-session";
  *
  * First-run UX (#438): when the user has no keypair (404 on `keypair/me`), the full page body is
  * replaced by the bootstrap flow via `<UnlockGate>` until they set a passphrase and are unlocked.
- * For a returning-but-locked user, the "Locked" badge becomes a button that opens an unlock dialog,
- * and "Create vault" routes through the same dialog so they are never stuck with a disabled button.
+ *
+ * LOCKED-STATE DE-DUP (#449): when the user has a keypair but the session is LOCKED, the page body
+ * (`<UnlockGate>`) already renders the full inline UnlockFlow — that is the single unlock surface. So the
+ * header's session badge and "Create vault" button are shown ONLY when the session is UNLOCKED. Previously
+ * a locked user saw the unlock form in the body AND a "Locked" badge / "Create vault" button in the header
+ * that opened a SECOND unlock dialog — a redundant, confusing double affordance. The header now reflects
+ * the unlocked session (a "Lock" badge + an enabled "Create vault"); while locked, it stays out of the way.
  *
  * STABILITY (#442): <UnlockGate> and <CreateVaultDialog> are always rendered at the SAME tree position
  * regardless of `isMissing`. This prevents mount/unmount churn from toggling the keypair observer,
@@ -61,49 +59,25 @@ export default function VaultListContent() {
   const isMissing =
     keypairIsError && keypairError instanceof ApiError && keypairError.status === 404;
 
-  // Unlock dialog: opened by the "Locked" badge or by the "Create vault" button when locked.
-  // `pendingCreate` tracks whether we should open the create dialog after unlock.
-  const [unlockOpen, setUnlockOpen] = useState(false);
-  const [pendingCreate, setPendingCreate] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
 
   const isEmpty = !isLoading && !isError && (vaults?.length ?? 0) === 0;
 
-  function handleUnlockDialogChange(open: boolean) {
-    setUnlockOpen(open);
-    if (!open) setPendingCreate(false);
-  }
-
-  // Called by the unlock gate (via session) after unlock — because isUnlocked flips to true, the
-  // Dialog re-renders and the <UnlockGate> returns its children (null fragment), closing naturally.
-  // We also auto-advance to the create dialog if the user came from the "Create vault" button.
+  // #449: the create affordances only render when the session is already unlocked (see the header guards
+  // below), so this is always reached with the key in memory — open the create dialog directly. No locked
+  // branch: a locked user unlocks via the inline UnlockFlow in the body, not a redundant header dialog.
   function handleCreateVault() {
-    if (!isUnlocked) {
-      setPendingCreate(true);
-      setUnlockOpen(true);
-    } else {
-      setCreateOpen(true);
-    }
+    setCreateOpen(true);
   }
-
-  // When the session unlocks while the unlock dialog is open, close it — and if the user arrived from
-  // "Create vault", advance to the create dialog. An EFFECT (not render-phase setState): it reacts to
-  // the unlock state flipping, runs once per change, and never schedules redundant updates during render.
-  useEffect(() => {
-    if (!isUnlocked || !unlockOpen) return;
-    setUnlockOpen(false);
-    if (pendingCreate) {
-      setPendingCreate(false);
-      setCreateOpen(true);
-    }
-  }, [isUnlocked, unlockOpen, pendingCreate]);
 
   return (
     <div className="space-y-6">
       {/*
-       * PageHeader: in first-run mode we omit the lock badge / create button because the user
-       * has no keypair yet and those actions require one. The bootstrap form (rendered by
-       * <UnlockGate> below) replaces the vault list body.
+       * PageHeader: the session badge + "Create vault" button render ONLY when the session is UNLOCKED
+       * (#449). In first-run mode (no keypair) the user must bootstrap; while locked-with-keypair the
+       * inline UnlockFlow in the body is the single unlock surface — so we don't duplicate a "Locked"
+       * badge / create button in the header that would open a second unlock dialog. Once unlocked, the
+       * "Unlocked" badge (a Lock action) and the create button appear.
        */}
       <PageHeader
         title={t("list.title")}
@@ -121,20 +95,10 @@ export default function VaultListContent() {
               <LockOpenIcon className="size-3.5" aria-hidden />
               {t("session.unlocked")}
             </button>
-          ) : !isMissing ? (
-            <button
-              type="button"
-              onClick={() => setUnlockOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80"
-              title={t("session.unlockHint")}
-            >
-              <LockClosedIcon className="size-3.5" aria-hidden />
-              {t("session.locked")}
-            </button>
           ) : undefined
         }
         actions={
-          canManage && !isMissing ? (
+          canManage && !isMissing && isUnlocked ? (
             <Button onClick={handleCreateVault}>
               <PlusIcon />
               {t("vaults.createSubmit")}
@@ -169,36 +133,6 @@ export default function VaultListContent() {
           t={t}
         />
       </UnlockGate>
-
-      {/*
-       * Unlock dialog: shown when the user has a keypair but the session is locked and they
-       * clicked the "Locked" badge or "Create vault". The embedded <UnlockGate> here is a
-       * SECOND observer that only mounts when this Dialog is open. Because unlockOpen is
-       * false by default (and Radix unmounts Dialog children when closed), this observer does
-       * NOT exist on the initial render — it only appears after a user gesture. The
-       * retryOnMount: false guard in useMyKeypair means even if this observer mounts while
-       * the query is in error state it will not re-fetch.
-       *
-       * Not shown during first-run (isMissing=true): the bootstrap flow is handled by the
-       * stable <UnlockGate> above; the "Locked" badge is hidden; the unlock dialog can't be
-       * opened.
-       */}
-      {!isMissing ? (
-        <Dialog open={unlockOpen} onOpenChange={handleUnlockDialogChange}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>{t("unlock.title")}</DialogTitle>
-              <DialogDescription>
-                {pendingCreate ? t("list.unlockToCreate") : t("unlock.description")}
-              </DialogDescription>
-            </DialogHeader>
-            <UnlockGate embedded>
-              {/* Session is now unlocked — nothing to show here; the dialog closes via the effect above. */}
-              <span />
-            </UnlockGate>
-          </DialogContent>
-        </Dialog>
-      ) : null}
 
       {canManage ? (
         <CreateVaultDialog open={createOpen} onOpenChange={setCreateOpen} />

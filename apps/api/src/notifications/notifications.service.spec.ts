@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { NotificationsService } from './notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // A stand-in PrismaClientKnownRequestError so the service's `instanceof` + `.code` checks work without
 // loading the real generated client (no DB). Declared INSIDE the (hoisted) jest.mock factory, then
@@ -25,9 +26,16 @@ const { Prisma } = require('../../generated/prisma/client') as {
 const FakePrismaKnownError = Prisma.PrismaClientKnownRequestError;
 
 const ADMIN_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+const MEMBER_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+
+// A viewer = the caller's id + role; the service resolves notification:read from the role (ADMIN → can
+// read the broadcast set; MEMBER → only their own targeted rows).
+const ADMIN_VIEWER = { userId: ADMIN_A, role: 'ADMIN' as const };
+const MEMBER_VIEWER = { userId: MEMBER_B, role: 'MEMBER' as const };
 
 type NotificationModelMock = {
   findMany: jest.Mock;
+  findFirst: jest.Mock;
   count: jest.Mock;
   create: jest.Mock;
   deleteMany: jest.Mock;
@@ -42,10 +50,17 @@ describe('NotificationsService', () => {
   let service: NotificationsService;
   let notification: NotificationModelMock;
   let notificationRead: ReadModelMock;
+  // Mirror the real resolver: only ADMIN holds notification:read (it is in ADMIN_ONLY_READS).
+  const hasAll = jest.fn((role: string, perms: readonly string[]) =>
+    Promise.resolve(
+      perms.every((p) => (p === 'notification:read' ? role === 'ADMIN' : false)),
+    ),
+  );
 
   beforeEach(async () => {
     notification = {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
       count: jest.fn(),
       create: jest.fn(),
       deleteMany: jest.fn(),
@@ -66,9 +81,42 @@ describe('NotificationsService', () => {
       providers: [
         NotificationsService,
         { provide: PrismaService, useValue: prisma },
+        { provide: PermissionResolverService, useValue: { hasAll } },
       ],
     }).compile();
     service = moduleRef.get(NotificationsService);
+  });
+
+  // ── visibility scoping (the auth contract, ADR-0056 amendment #453) ──────────
+  describe('visibility scoping', () => {
+    it('an ADMIN sees BOTH their own targeted rows AND the broadcast set (recipientUserId = me OR null)', async () => {
+      notification.findMany.mockResolvedValue([]);
+      notification.count.mockResolvedValue(0);
+      await service.findPage(ADMIN_VIEWER, {
+        limit: 50,
+        offset: 0,
+        deleted: 'active',
+      });
+      const where = notification.findMany.mock.calls[0]![0].where;
+      expect(where).toEqual({
+        OR: [{ recipientUserId: ADMIN_A }, { recipientUserId: null }],
+      });
+      // The count is scoped by the SAME where (total can't include rows the caller can't see).
+      expect(notification.count).toHaveBeenCalledWith({ where });
+    });
+
+    it('a non-admin (MEMBER) sees ONLY their own targeted rows — never the broadcast set', async () => {
+      notification.findMany.mockResolvedValue([]);
+      notification.count.mockResolvedValue(0);
+      await service.findPage(MEMBER_VIEWER, {
+        limit: 50,
+        offset: 0,
+        deleted: 'active',
+      });
+      const where = notification.findMany.mock.calls[0]![0].where;
+      // No `{ recipientUserId: null }` branch ⇒ broadcast rows are invisible to a non-admin.
+      expect(where).toEqual({ OR: [{ recipientUserId: MEMBER_B }] });
+    });
   });
 
   // ── findPage (fan-out-on-read: per-caller read flag) ────────────────────────
@@ -85,6 +133,7 @@ describe('NotificationsService', () => {
           entityType: 'consumable',
           entityId: 'c1',
           targetUserId: null,
+          recipientUserId: null,
           metadata: null,
           createdAt: now,
           reads: [{ id: 1 }], // the caller HAS read this one
@@ -98,6 +147,7 @@ describe('NotificationsService', () => {
           entityType: 'application',
           entityId: 'a1',
           targetUserId: ADMIN_A,
+          recipientUserId: null,
           metadata: { k: 'v' },
           createdAt: now,
           reads: [], // unread for the caller
@@ -105,7 +155,7 @@ describe('NotificationsService', () => {
       ]);
       notification.count.mockResolvedValue(2);
 
-      const page = await service.findPage(ADMIN_A, {
+      const page = await service.findPage(ADMIN_VIEWER, {
         limit: 50,
         offset: 0,
         deleted: 'active',
@@ -115,6 +165,8 @@ describe('NotificationsService', () => {
       expect(page.items).toHaveLength(2);
       expect(page.items[0]).toMatchObject({ id: 'n1', read: true });
       expect(page.items[1]).toMatchObject({ id: 'n2', read: false });
+      // recipientUserId is folded into the wire shape.
+      expect(page.items[0]).toMatchObject({ recipientUserId: null });
       // createdAt is serialized to an ISO string.
       expect(page.items[0]!.createdAt).toBe('2026-06-09T12:00:00.000Z');
       // The per-caller read include scopes to THIS user (the fan-out-on-read anti-join).
@@ -127,58 +179,110 @@ describe('NotificationsService', () => {
     });
   });
 
-  // ── unreadCount (anti-join) ─────────────────────────────────────────────────
+  // ── unreadCount (anti-join, scoped) ─────────────────────────────────────────
   describe('unreadCount', () => {
-    it('counts notifications with NO read row for the caller (the anti-join)', async () => {
+    it('counts VISIBLE notifications with NO read row for the caller (the scoped anti-join)', async () => {
       notification.count.mockResolvedValue(3);
-      const n = await service.unreadCount(ADMIN_A);
+      const n = await service.unreadCount(ADMIN_VIEWER);
       expect(n).toBe(3);
       expect(notification.count).toHaveBeenCalledWith({
-        where: { reads: { none: { userId: ADMIN_A } } },
+        where: {
+          AND: [
+            { OR: [{ recipientUserId: ADMIN_A }, { recipientUserId: null }] },
+            { reads: { none: { userId: ADMIN_A } } },
+          ],
+        },
+      });
+    });
+
+    it('a non-admin unread count is scoped to their own targeted rows only', async () => {
+      notification.count.mockResolvedValue(1);
+      await service.unreadCount(MEMBER_VIEWER);
+      expect(notification.count).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { OR: [{ recipientUserId: MEMBER_B }] },
+            { reads: { none: { userId: MEMBER_B } } },
+          ],
+        },
       });
     });
   });
 
-  // ── markRead (idempotent upsert) ────────────────────────────────────────────
+  // ── markRead (idempotent upsert, IDOR-safe) ─────────────────────────────────
   describe('markRead', () => {
-    it('marks one read (marked:1) and returns the fresh unread count', async () => {
+    it('marks one VISIBLE notification read (marked:1) and returns the fresh unread count', async () => {
+      notification.findFirst.mockResolvedValue({ id: 'n1' }); // it IS visible to the caller
       notificationRead.create.mockResolvedValue({ id: 1 });
       notification.count.mockResolvedValue(4);
-      const result = await service.markRead(ADMIN_A, 'n1');
+      const result = await service.markRead(ADMIN_VIEWER, 'n1');
       expect(result).toEqual({ marked: 1, unread: 4 });
+      // The visibility gate scopes the lookup to {own targeted OR broadcast} AND the id.
+      expect(notification.findFirst).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { OR: [{ recipientUserId: ADMIN_A }, { recipientUserId: null }] },
+            { id: 'n1' },
+          ],
+        },
+        select: { id: true },
+      });
       expect(notificationRead.create).toHaveBeenCalledWith({
         data: { notificationId: 'n1', userId: ADMIN_A },
       });
     });
 
-    it('is idempotent: an already-read row (P2002) is a clean no-op (marked:0)', async () => {
+    it('IDOR-safe: a notification the caller CANNOT see is a clean no-op (marked:0, no read row written)', async () => {
+      // Another user's targeted notif (or — for a non-admin — a broadcast row): the scoped lookup finds
+      // nothing, so mark-read never writes a read row and never discloses the row's existence.
+      notification.findFirst.mockResolvedValue(null);
+      notification.count.mockResolvedValue(0);
+      const result = await service.markRead(MEMBER_VIEWER, 'someone-elses-targeted');
+      expect(result).toEqual({ marked: 0, unread: 0 });
+      expect(notificationRead.create).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent: an already-read VISIBLE row (P2002) is a clean no-op (marked:0)', async () => {
+      notification.findFirst.mockResolvedValue({ id: 'n1' });
       notificationRead.create.mockRejectedValue(new FakePrismaKnownError('P2002'));
       notification.count.mockResolvedValue(4);
-      const result = await service.markRead(ADMIN_A, 'n1');
+      const result = await service.markRead(ADMIN_VIEWER, 'n1');
       expect(result).toEqual({ marked: 0, unread: 4 });
     });
 
-    it('a missing notification (P2003 FK) is a clean no-op, never a 404', async () => {
+    it('a racing retention delete (P2003 FK) on a VISIBLE row is a clean no-op, never a 404', async () => {
+      notification.findFirst.mockResolvedValue({ id: 'gone' });
       notificationRead.create.mockRejectedValue(new FakePrismaKnownError('P2003'));
       notification.count.mockResolvedValue(4);
-      const result = await service.markRead(ADMIN_A, 'gone');
+      const result = await service.markRead(ADMIN_VIEWER, 'gone');
       expect(result).toEqual({ marked: 0, unread: 4 });
     });
 
     it('re-throws an unexpected error (not P2002/P2003)', async () => {
+      notification.findFirst.mockResolvedValue({ id: 'n1' });
       notificationRead.create.mockRejectedValue(new Error('boom'));
-      await expect(service.markRead(ADMIN_A, 'n1')).rejects.toThrow('boom');
+      await expect(service.markRead(ADMIN_VIEWER, 'n1')).rejects.toThrow('boom');
     });
   });
 
-  // ── markAllRead (bulk) ──────────────────────────────────────────────────────
+  // ── markAllRead (bulk, scoped) ──────────────────────────────────────────────
   describe('markAllRead', () => {
-    it('inserts a read row for every currently-unread notification and reports marked + 0 unread', async () => {
+    it('inserts a read row for every currently-unread VISIBLE notification and reports marked + 0 unread', async () => {
       notification.findMany.mockResolvedValue([{ id: 'n1' }, { id: 'n2' }]);
       notificationRead.createMany.mockResolvedValue({ count: 2 });
       notification.count.mockResolvedValue(0);
-      const result = await service.markAllRead(ADMIN_A);
+      const result = await service.markAllRead(ADMIN_VIEWER);
       expect(result).toEqual({ marked: 2, unread: 0 });
+      // The unread scan is scoped: {visible} AND {no read row for the caller}.
+      expect(notification.findMany).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { OR: [{ recipientUserId: ADMIN_A }, { recipientUserId: null }] },
+            { reads: { none: { userId: ADMIN_A } } },
+          ],
+        },
+        select: { id: true },
+      });
       expect(notificationRead.createMany).toHaveBeenCalledWith({
         data: [
           { notificationId: 'n1', userId: ADMIN_A },
@@ -188,9 +292,9 @@ describe('NotificationsService', () => {
       });
     });
 
-    it('short-circuits when nothing is unread (marked:0, no createMany)', async () => {
+    it('short-circuits when nothing visible is unread (marked:0, no createMany)', async () => {
       notification.findMany.mockResolvedValue([]);
-      const result = await service.markAllRead(ADMIN_A);
+      const result = await service.markAllRead(MEMBER_VIEWER);
       expect(result).toEqual({ marked: 0, unread: 0 });
       expect(notificationRead.createMany).not.toHaveBeenCalled();
     });
@@ -215,6 +319,25 @@ describe('NotificationsService', () => {
             type: 'low_stock',
             dedupeKey: 'low_stock:c1:2026-06-09',
             severity: 'warning',
+          }),
+        }),
+      );
+    });
+
+    it('persists a TARGETED recipientUserId when the emitter sets one (ADR-0056 amendment #453)', async () => {
+      notification.create.mockResolvedValue({ id: 'n10' });
+      await service.emit({
+        type: 'secret.vault_setup',
+        dedupeKey: `secret.vault_setup:${MEMBER_B}`,
+        recipientUserId: MEMBER_B,
+        title: 'Set up your vault passphrase',
+      });
+      expect(notification.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: 'secret.vault_setup',
+            recipientUserId: MEMBER_B,
+            severity: 'info', // default for secret.vault_setup
           }),
         }),
       );

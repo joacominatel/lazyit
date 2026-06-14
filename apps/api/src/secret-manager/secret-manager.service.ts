@@ -7,15 +7,20 @@ import {
 } from '@nestjs/common';
 import type {
   CreateSecretItem,
-  CreateSecretVault,
+  CreateSecretVaultWithMembership,
   CreateUserKeypair,
   CreateVaultMembership,
+  HandleSuggestion,
   ResetUserKeypair,
+  ResolvedHandle,
   SecretItem as SecretItemWire,
   SecretVault as SecretVaultWire,
+  SecretVaultDetail,
   UpdateSecretItem,
   UpdateSecretVault,
   UserKeypair as UserKeypairWire,
+  UserPublicKey,
+  VaultMemberMeta,
   VaultMembership as VaultMembershipWire,
 } from '@lazyit/shared';
 import type {
@@ -144,9 +149,7 @@ export class SecretManagerService {
    * by design (left of the §9 line). 404 if that user has no keypair yet (they must bootstrap one before
    * they can be granted). Returns ONLY the public key + identity, never any wrapped private-key blob.
    */
-  async getUserPublicKey(
-    targetUserId: string,
-  ): Promise<{ userId: string; publicKey: string }> {
+  async getUserPublicKey(targetUserId: string): Promise<UserPublicKey> {
     const row = await this.prisma.userKeypair.findFirst({
       where: { userId: targetUserId },
       select: { userId: true, publicKey: true },
@@ -191,7 +194,7 @@ export class SecretManagerService {
   async getVault(
     principal: Principal | undefined,
     vaultId: string,
-  ): Promise<SecretVaultWire & { members: VaultMemberMeta[] }> {
+  ): Promise<SecretVaultDetail> {
     const userId = this.requireHumanId(principal);
     const vault = await this.getLiveVaultOr404(vaultId);
     await this.assertVaultMetadataVisible(principal, userId, vaultId);
@@ -206,7 +209,7 @@ export class SecretManagerService {
    */
   async createVault(
     principal: Principal | undefined,
-    dto: CreateVaultInput,
+    dto: CreateSecretVaultWithMembership,
   ): Promise<SecretVaultWire> {
     const userId = this.requireHumanId(principal);
     // Pre-check the live-name collision for a clean 409 message; the partial-unique index is the
@@ -345,6 +348,13 @@ export class SecretManagerService {
       throw new ConflictException('A secret with this handle already exists');
     }
     const created = await this.prisma.$transaction(async (tx) => {
+      // Close the deleteVault↔createItem TOCTOU (#425): the liveness + membership pre-checks above ran
+      // OUTSIDE this transaction, so a concurrent deleteVault could soft-delete the vault and hard-drop
+      // our membership between them and this insert (Read Committed), orphaning a live item under a dead
+      // vault (its handle would stay occupied in the live-only partial-unique index). Re-read liveness +
+      // re-assert membership INSIDE the tx, before the create — if the vault is no longer live, abort
+      // with the same not-found error and nothing is written.
+      await this.assertLiveVaultMembershipTx(tx, userId, vaultId);
       const item = await tx.secretItem.create({
         data: {
           vaultId,
@@ -419,6 +429,10 @@ export class SecretManagerService {
       }
     }
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Close the deleteVault↔updateItem TOCTOU (#425): re-read liveness + re-assert membership INSIDE
+      // the tx, before the update, so a concurrent deleteVault that committed after the pre-checks above
+      // cannot resurrect a soft-deleted item under a dead vault. Same not-found error if the vault is gone.
+      await this.assertLiveVaultMembershipTx(tx, userId, vaultId);
       const row = await tx.secretItem.update({
         where: { id: itemId },
         data,
@@ -591,7 +605,7 @@ export class SecretManagerService {
   async resolveByHandle(
     principal: Principal | undefined,
     handle: string,
-  ): Promise<{ item: SecretItemWire; membership: VaultMembershipWire }> {
+  ): Promise<ResolvedHandle> {
     const userId = this.requireHumanId(principal);
     const item = await this.prisma.secretItem.findFirst({ where: { handle } });
     if (!item) {
@@ -705,6 +719,35 @@ export class SecretManagerService {
     });
     if (!member) {
       throw new ForbiddenException(message);
+    }
+  }
+
+  /**
+   * IN-TRANSACTION re-assertion of vault liveness + caller membership (the #425 TOCTOU fence). Run as the
+   * FIRST statement of an item create/update transaction so the guard and the write share one snapshot:
+   * if a concurrent {@link deleteVault} soft-deleted the vault (and hard-dropped this membership) after the
+   * out-of-tx pre-checks, the re-read sees the vault gone and aborts — no live item is left under a dead
+   * vault. Throws the same NotFound/Forbidden the pre-checks would (no information leak vs. the happy path).
+   */
+  private async assertLiveVaultMembershipTx(
+    tx: PrismaTypes.TransactionClient,
+    userId: string,
+    vaultId: string,
+  ): Promise<void> {
+    // The soft-delete read filter applies to tx reads too, so a soft-deleted vault reads as absent.
+    const vault = await tx.secretVault.findFirst({
+      where: { id: vaultId },
+      select: { id: true },
+    });
+    if (!vault) {
+      throw new NotFoundException('Vault not found');
+    }
+    const member = await tx.vaultMembership.findUnique({
+      where: { vaultId_userId: { vaultId, userId } },
+      select: { id: true },
+    });
+    if (!member) {
+      throw new ForbiddenException('You are not a member of this vault');
     }
   }
 
@@ -859,35 +902,4 @@ export class SecretManagerService {
       updatedAt: row.updatedAt.toISOString(),
     };
   }
-}
-
-/** Member display metadata (userId + name/email + memberSince) — NEVER a wrapped DEK or any blob. */
-export interface VaultMemberMeta {
-  userId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  memberSince: string;
-}
-
-/** Chip autocomplete suggestion — handles + labels (metadata) from the caller's vaults. NEVER values. */
-export interface HandleSuggestion {
-  handle: string;
-  label: string;
-  vaultId: string;
-}
-
-/**
- * Vault-create input: the non-secret name + the creator's own first wrapped-DEK membership (the DEK is
- * client-generated and posted wrapped). Composed by the controller from the two shared DTOs so the
- * service receives one cohesive object.
- */
-export interface CreateVaultInput {
-  name: CreateSecretVault['name'];
-  membership: {
-    ephemeralPublicKey: CreateVaultMembership['ephemeralPublicKey'];
-    wrapNonce: CreateVaultMembership['wrapNonce'];
-    wrappedDek: CreateVaultMembership['wrappedDek'];
-    wrapVersion: CreateVaultMembership['wrapVersion'];
-  };
 }

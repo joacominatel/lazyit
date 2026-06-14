@@ -1,10 +1,10 @@
 import type {
+  CreateSecretVaultWithMembership,
   SecretVault,
+  SecretVaultDetail,
   UpdateSecretVault,
-  WrappedDek,
 } from "@lazyit/shared";
 import { apiFetch } from "../../api/client";
-import type { VaultMemberMeta } from "./members";
 
 /**
  * Data-access for `SecretVault` — the folder vault that is the CRYPTO BOUNDARY of the zero-knowledge
@@ -15,28 +15,12 @@ import type { VaultMemberMeta } from "./members";
  *
  * Backend contract (slice 2b): `GET /secret-vaults`, `GET /secret-vaults/:id` (embeds `members`),
  * `POST /secret-vaults { name, membership }`, `PATCH /secret-vaults/:id`, `DELETE /secret-vaults/:id`.
- * All list/single responses are plain (no pagination envelope).
+ * All list/single responses are plain (no pagination envelope). The `{ name, membership }` body
+ * ({@link CreateSecretVaultWithMembership}) and the detail shape ({@link SecretVaultDetail}) are the
+ * shared contracts — one definition across api + web (issue #430).
  */
 
 const BASE = "/secret-vaults";
-
-/**
- * A vault with its embedded member list — the shape of `GET /secret-vaults/:id` (the detail endpoint
- * inlines `members`, unlike the standalone `/members` list). Frontend read-shape only.
- */
-export interface SecretVaultDetail extends SecretVault {
-  members: VaultMemberMeta[];
-}
-
-/**
- * The `POST /secret-vaults` body — composed ad-hoc server-side as `{ name, membership }`, where
- * `membership` is the creator's SELF-WRAP (`createVaultMaterial(...).selfWrap`, a {@link WrappedDek}
- * WITHOUT a `userId` — the creator is the caller). Base64 blobs + metadata only; the DEK is never sent.
- */
-export interface CreateSecretVaultBody {
-  name: string;
-  membership: WrappedDek;
-}
 
 /** List the vaults the caller can see (ADMIN → all; else only vaults they are a member of). Metadata only. */
 export function getVaults(): Promise<SecretVault[]> {
@@ -52,7 +36,9 @@ export function getVault(vaultId: string): Promise<SecretVaultDetail> {
  * Create a vault. `body.name` is server-visible metadata; `body.membership` is the creator's wrapped-DEK
  * self-wrap (produced client-side). The raw DEK stays in the browser and is never part of `body`.
  */
-export function createVault(body: CreateSecretVaultBody): Promise<SecretVault> {
+export function createVault(
+  body: CreateSecretVaultWithMembership,
+): Promise<SecretVault> {
   return apiFetch<SecretVault>(BASE, { method: "POST", body });
 }
 

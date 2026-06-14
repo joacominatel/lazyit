@@ -27,17 +27,19 @@ import {
   useNotifications,
   useUnreadNotificationCount,
 } from "@/lib/api/hooks/use-notifications";
-import { useCan } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 import { formatDateTime, formatRelativeTime } from "@/lib/utils/format";
 
 /**
- * The topbar notification bell (ADR-0056 §8) — gated by `notification:read` (ADMIN-only), so it is
- * HIDDEN entirely for non-admins. It POLLS the unread count for the badge and, while open, the most
- * recent page for the dropdown. Each row reuses the dashboard recent-activity visual grammar (a
- * pillar-tinted icon chip + a single-line title + relative time) so the bell reads as one visual family
- * with the rest of the app — but it is backed by the `Notification` store, not the `recent_activity`
- * view. A row click marks it read and deep-links to its target; "Mark all read" clears the badge.
+ * The topbar notification bell (ADR-0056 §8, amended #453) — rendered for EVERY authenticated human
+ * (the `(app)` shell already requires auth, so this component just always renders). It does NOT self-gate
+ * on `notification:read`: the API is the real gate and scopes the feed per caller, so a non-admin sees
+ * only their own targeted rows (e.g. the `secret.vault_setup` nudge), while a `notification:read` holder
+ * also sees the broadcast set. It POLLS the unread count for the badge and, while open, the most recent
+ * page for the dropdown. Each row reuses the dashboard recent-activity visual grammar (a pillar-tinted
+ * icon chip + a single-line title + relative time) so the bell reads as one visual family with the rest
+ * of the app — but it is backed by the `Notification` store, not the `recent_activity` view. A row click
+ * marks it read and deep-links to its target; "Mark all read" clears the badge.
  *
  * When SSE lands (Phase 2) the same hooks push live behind the same endpoints — this component does not
  * change shape.
@@ -79,6 +81,15 @@ const TYPE_META: Record<
     tone: "bg-destructive/10 text-destructive",
     href: () => "/settings/integrations/tasks",
   },
+  // The login-time vault-setup nudge (ADR-0056 amendment, #453) — a TARGETED per-user notification
+  // prompting a `secret:read` holder with no keypair to set up their vault passphrase. Deep-links to the
+  // Secret Manager bootstrap. (The richer bell/banner UX is the frontend follow-up; this entry keeps the
+  // closed-enum map exhaustive so the type is renderable.)
+  "secret.vault_setup": {
+    icon: KeyIcon,
+    tone: "bg-pillar-access/10 text-pillar-access",
+    href: () => "/secrets",
+  },
 };
 
 /** Fallback meta for an unknown future type (defensive — the closed enum should make this unreachable). */
@@ -94,24 +105,19 @@ function metaFor(type: NotificationType) {
 
 export function NotificationBell() {
   const t = useTranslations("notifications");
-  const canRead = useCan("notification:read");
   const [open, setOpen] = useState(false);
   // Snapshot "now" once so relative times stay pure across renders (react-hooks/purity) — the same
   // pattern as the dashboard recent-activity panel.
   const [now] = useState(() => Date.now());
 
-  // The badge polls whenever the caller may read notifications; the heavier list polls only while the
-  // dropdown is open (and the caller may read).
-  const { data: count } = useUnreadNotificationCount(canRead);
-  const { data: page, isLoading } = useNotifications(canRead && open);
+  // The badge always polls (a cheap COUNT, per-caller scoped server-side); the heavier list polls only
+  // while the dropdown is open. No permission pre-check — the bell shows for every authenticated human
+  // and the API scopes visibility (a non-admin sees only their own targeted rows). A user with zero
+  // notifications simply sees a clean bell: the badge renders only when `unread > 0`.
+  const { data: count } = useUnreadNotificationCount(true);
+  const { data: page, isLoading } = useNotifications(open);
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
-
-  // Gate the whole affordance — hidden for non-admins (the API guard is the real gate; this stops a
-  // 403-only surface from ever rendering).
-  if (!canRead) {
-    return null;
-  }
 
   const unread = count?.unread ?? 0;
   const items = page?.items ?? [];

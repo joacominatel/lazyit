@@ -52,6 +52,7 @@ export * from "./schemas/search";
 // metadata): these import NO `@noble/*` and NO `@lazyit/shared/crypto`, so apps/api's CommonJS Jest can
 // load the barrel. The crypto PRIMITIVES stay behind the separate `@lazyit/shared/crypto` subpath.
 export * from "./schemas/secret-item";
+export * from "./schemas/secret-manager-views";
 export * from "./schemas/secret-vault";
 export * from "./schemas/user-keypair";
 export * from "./schemas/vault-membership";

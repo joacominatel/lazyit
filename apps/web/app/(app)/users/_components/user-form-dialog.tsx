@@ -39,50 +39,12 @@ import {
 } from "@/lib/api/hooks/use-user-mutations";
 import { notifyError } from "@/lib/api/notify-error";
 import { ManagerField } from "./manager-field";
+import {
+  toResolverInput,
+  type UserFormValues,
+} from "./user-form-payload";
 
 const FORM_ID = "user-form";
-
-/**
- * Translate the form's loose values into the wire payload the resolver validates. The form keeps
- * `legajo` / `username` as plain strings (empty = "not set") and `manager` as the XOR
- * {@link ManagerFormValue}; the entity schemas expect optional normalized strings and the manager
- * INPUT union. This drops empties and serializes the manager via `toManagerInput`, so ONE source of
- * truth (the shared `CreateUserSchema` / `UpdateUserSchema`) still validates everything — including the
- * legajo/username bounds and the manager XOR — and surfaces field errors natively.
- */
-function toResolverInput(values: UserFormValues): Record<string, unknown> {
-  const out: Record<string, unknown> = {
-    email: values.email,
-    firstName: values.firstName,
-    lastName: values.lastName,
-    manager: toManagerInput(values.manager),
-  };
-  // Empty optional directory fields are simply absent (not "" — which would fail the min(1) bound).
-  if (values.legajo.trim() !== "") out.legajo = values.legajo;
-  if (values.username.trim() !== "") out.username = values.username;
-  if (values.isActive !== undefined) out.isActive = values.isActive;
-  return out;
-}
-
-/**
- * Form values. `isActive` is only present (and rendered) in edit mode: a new
- * user is always created active — `CreateUserSchema` doesn't accept the field,
- * deactivation is a PATCH (see the User entity note + ADR-0016).
- *
- * `legajo` / `username` are optional directory fields (ADR-0058) — empty string means "not set" and is
- * sent as `null` (edit) / omitted (create). `manager` is the XOR form value serialized via
- * `toManagerInput` on submit. The form values themselves stay loose strings; the shared zod schemas are
- * the contract the resolver enforces (legajo/username/manager are all optional on create + edit).
- */
-type UserFormValues = {
-  email: string;
-  firstName: string;
-  lastName: string;
-  legajo: string;
-  username: string;
-  manager: ManagerFormValue;
-  isActive?: boolean;
-};
 
 /** A blank manager picker (no manager recorded). */
 const EMPTY_MANAGER: ManagerFormValue = { kind: "none" };

@@ -172,6 +172,11 @@ services:
       # (https://host/api/auth/callback/oidc); without it Auth.js infers the container's own
       # 0.0.0.0:3000 and the redirect_uri won't match what's registered in the IdP.
       AUTH_URL: ${WEB_ORIGIN}
+      # Internal API base for server-side fetches (proxy.ts first-run gate + SSR API calls).
+      # NEXT_PUBLIC_API_URL is baked as the relative `/api` for browser calls (domain-portable,
+      # ADR-0026), but relative URLs throw in Node's undici fetch — the server needs an absolute
+      # origin. `api` resolves on the internal Docker network; Caddy handles the public path.
+      INTERNAL_API_URL: http://api:3001
       # OPTIONAL in the bundled flow — leave these unset and the sidecar's oidc-client.json supplies
       # them at startup. Set them only for BYOI (your own IdP, no bundled Zitadel).
       AUTH_ISSUER: ${AUTH_ISSUER:-}

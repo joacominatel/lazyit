@@ -31,16 +31,34 @@
       "name": "Nombre",
       "email": "Correo",
       "role": "Rol",
+      "manager": "Responsable",
+      "legajo": "Legajo",
+      "username": "Nombre de usuario",
       "status": "Estado",
+      "assetsInPossession": "Activos",
+      "appAccesses": "Apps",
       "updated": "Actualizado",
       "actions": "Acciones"
     },
+    "cells": {
+      "empty": "—"
+    },
     "columnPicker": {
       "label": "Columnas",
+      "groups": {
+        "general": "General",
+        "identity": "Identidad",
+        "activity": "Actividad"
+      },
       "columns": {
         "email": "Correo",
         "role": "Rol",
+        "manager": "Responsable",
+        "legajo": "Legajo",
+        "username": "Nombre de usuario",
         "status": "Estado",
+        "assetsInPossession": "Activos en posesión",
+        "appAccesses": "Accesos a apps",
         "updated": "Actualizado"
       }
     },

@@ -1,4 +1,8 @@
-import type { CreateVaultMembership, VaultMembership } from "@lazyit/shared";
+import type {
+  CreateVaultMembership,
+  VaultMemberMeta,
+  VaultMembership,
+} from "@lazyit/shared";
 import { apiFetch } from "../../api/client";
 
 /**
@@ -15,19 +19,6 @@ import { apiFetch } from "../../api/client";
  */
 
 const BASE = "/secret-vaults";
-
-/**
- * A vault member's NON-secret metadata — the shape of `GET /secret-vaults/:id/members` and the embedded
- * `members` on the vault detail. No wrapped-DEK blobs here (those are per-caller, on `membership/me`).
- * Frontend read-shape only.
- */
-export interface VaultMemberMeta {
-  userId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  memberSince: string;
-}
 
 /** The `DELETE …/members/:userId` literal response. */
 export interface RevokeResult {
