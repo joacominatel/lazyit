@@ -725,6 +725,67 @@ describe('SecretManagerService', () => {
     });
   });
 
+  // ── deleteVault↔createItem/updateItem TOCTOU (#425) ───────────────────────────
+  describe('deleteVault TOCTOU — in-transaction liveness re-read', () => {
+    /**
+     * Simulate the race window: the out-of-tx pre-checks pass, then a concurrent deleteVault commits
+     * (vault soft-deleted, memberships dropped) before our insert/update runs. We model "commits inside
+     * the race window" by mocking `tx` so the in-transaction vault re-read returns no live vault — the
+     * #425 fence must then abort with the original not-found error and write NOTHING (no orphan item).
+     */
+    function raceDeleteVault(db: FakePrisma, vaultId: string): void {
+      const realTransaction = db.$transaction.bind(db);
+      db.$transaction = (async <T>(fn: (tx: FakePrisma) => Promise<T>) => {
+        // Concurrent deleteVault lands in the window: soft-delete the vault + drop its memberships, so the
+        // in-tx re-read (assertLiveVaultMembershipTx) sees the vault as absent — exactly the orphan race.
+        const vault = db.vaults.find((v) => v.id === vaultId);
+        if (vault) vault.deletedAt = new Date();
+        db.memberships = db.memberships.filter((m) => m.vaultId !== vaultId);
+        return realTransaction(fn);
+      }) as FakePrisma['$transaction'];
+    }
+
+    it('createItem aborts (404) and creates NO item when the vault dies inside the transaction', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const itemsBefore = db.items.length;
+
+      raceDeleteVault(db, vaultId);
+
+      await expect(
+        svc.createItem(alice, vaultId, {
+          handle: 'orphan',
+          label: 'Would-be orphan',
+          ...ENVELOPE,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      // No live item left under the soft-deleted vault, and its handle is NOT occupied.
+      expect(db.items.length).toBe(itemsBefore);
+      expect(db.items.some((it) => it.handle === 'orphan')).toBe(false);
+    });
+
+    it('updateItem aborts (404) and does NOT resurrect an item when the vault dies inside the transaction', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const item = await svc.createItem(alice, vaultId, {
+        handle: 'h',
+        label: 'L',
+        ...ENVELOPE,
+      });
+
+      raceDeleteVault(db, vaultId);
+
+      await expect(
+        svc.updateItem(alice, vaultId, item.id, { label: 'Renamed' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      // The label edit was NOT applied (the transaction aborted before the update).
+      const row = db.items.find((it) => it.id === item.id);
+      expect(row?.label).toBe('L');
+    });
+  });
+
   // ── Keypair 1:1 + self-only ─────────────────────────────────────────────────
   describe('keypair', () => {
     it('bootstraps once (409 on a second create) and resets in place', async () => {
