@@ -29,6 +29,10 @@ describe("Notification type catalog (catalog-as-code)", () => {
     }
   });
 
+  test("the targeted vault-setup nudge type is present (ADR-0056 amendment, #453)", () => {
+    expect(NOTIFICATION_TYPES).toContain("secret.vault_setup");
+  });
+
   test("rejects an unknown type literal", () => {
     expect(NotificationTypeSchema.safeParse("nope").success).toBe(false);
     expect(NotificationTypeSchema.safeParse("workflow.unknown").success).toBe(
@@ -47,6 +51,7 @@ describe("NotificationSchema (one bell row)", () => {
     entityType: "consumable" as const,
     entityId: "ckxcons0001",
     targetUserId: null,
+    recipientUserId: null,
     metadata: { name: "HDMI cable", currentStock: 3 },
     read: false,
     createdAt: "2026-06-09T12:00:00.000Z",
@@ -63,9 +68,21 @@ describe("NotificationSchema (one bell row)", () => {
       entityType: null,
       entityId: null,
       targetUserId: null,
+      recipientUserId: null,
       metadata: null,
     });
     expect(result.success).toBe(true);
+  });
+
+  test("carries a targeted recipientUserId (a per-user nudge — ADR-0056 amendment, #453)", () => {
+    const recipientUserId = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
+    const result = NotificationSchema.safeParse({
+      ...base,
+      type: "secret.vault_setup" as const,
+      recipientUserId,
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.recipientUserId).toBe(recipientUserId);
   });
 
   test("carries the per-caller read flag", () => {
@@ -92,6 +109,13 @@ describe("NotificationSchema (one bell row)", () => {
   test("rejects a non-uuid targetUserId", () => {
     expect(
       NotificationSchema.safeParse({ ...base, targetUserId: "not-a-uuid" })
+        .success,
+    ).toBe(false);
+  });
+
+  test("rejects a non-uuid recipientUserId", () => {
+    expect(
+      NotificationSchema.safeParse({ ...base, recipientUserId: "not-a-uuid" })
         .success,
     ).toBe(false);
   });
