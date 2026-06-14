@@ -16,7 +16,55 @@ Get lazyit running on your machine. Verified against the repo as of 2026-05-30.
 - **Docker** + Docker Compose — for the PostgreSQL dev database.
 - **Node** available on PATH — some CLIs still expect it (see [[stack]]).
 
-## Steps
+## Quick start — one command (recommended)
+
+The fastest path is the **`dev-setup` script** (`scripts/dev-setup.ts`, issue #483). It automates the
+whole bring-up — backing services, migrate/generate/seed, the Zitadel + OIDC bootstrap, and the
+`apps/{web,api}/.env` wiring — into one command, with two modes:
+
+```bash
+bun install                  # 1. install all workspace dependencies
+cp .env.example .env         # 2. root env only: POSTGRES_*, MEILI_MASTER_KEY, ZITADEL_* (dev IdP)
+
+# 3a. FIRST TIME (or a clean slate) — wipes dev volumes, rebuilds, bootstraps Zitadel, wires env:
+bun run dev:fresh            # destructive: prompts for a typed "yes" (use --yes to skip in CI)
+
+# 3b. EVERY DAY AFTER — services up + a fresh Prisma client, then start the apps:
+bun run dev:up              # assumes dev:fresh ran before (Zitadel already bootstrapped)
+```
+
+Both modes end by running `bun run dev` (web → :3000, api → :3001). Pass `--no-start` to do all the
+prep but stop before starting the apps (useful in CI/tests):
+`bun scripts/dev-setup.ts --fresh --yes --no-start`.
+
+> [!info] What `dev:fresh` does (and what it touches)
+> It mirrors the prod zero-touch bootstrap for dev — **idempotent and fail-loud**. In order:
+> 1. **removes the dev Docker volumes** (`lazyit_{db_data,zitadel_db_data,zitadel_secrets,meili_data,valkey_data}`) — this is the destructive step it asks you to confirm;
+> 2. `docker compose up -d` — the `compose.override.yaml` `zitadel-secrets-init-dev` chmods the
+>    secrets volume so Zitadel no longer crash-loops on a fresh volume (#477);
+> 3. waits for `db` healthy + Zitadel `/debug/healthz` 200;
+> 4. `prisma migrate deploy` → **`prisma generate`** (explicit — `migrate deploy` does NOT regenerate
+>    the client, and a stale client breaks the API boot, #480) → `prisma db seed`;
+> 5. **reuses `infra/scripts/zitadel-bootstrap.sh`** (the same script prod runs) to provision the
+>    project / OIDC app / roles / service-account against the dev Zitadel;
+> 6. stashes the runtime SA key at `~/.lazyit-dev/sa-key.json` (mode 600, **outside** the repo tree);
+> 7. wires `apps/web/.env` (`AUTH_ISSUER`, `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET`) and `apps/api/.env`
+>    (disables `AUTH_MODE=shim`, sets `OIDC_ISSUER`, `OIDC_JWKS_URI=…/oauth/v2/keys`,
+>    `ZITADEL_MGMT_PROJECT_ID`, `ZITADEL_MGMT_SA_KEY_PATH`) — idempotent, never duplicating lines.
+>
+> Requires the host tools `docker`, `jq`, `openssl`, `curl` (it fails loud if any is missing). The
+> `.env` files it writes are gitignored and the SA key never lands in the tree — **no secret is ever
+> committed**. After it finishes, open `http://localhost:3000/setup` to create the first admin **once**,
+> then `http://localhost:3000/login`. See [[auth-bootstrap]] §0d for the dev flow in detail.
+
+> [!info] OIDC vs. the `AUTH_MODE=shim` shortcut
+> `dev:fresh` wires the **real OIDC flow** (Zitadel login → Bearer JWT → JIT-provisioned [[user]]),
+> which is what production runs. If you want the **zero-config** dev shortcut instead (no Zitadel
+> bootstrap, the API resolves the actor from an `X-User-Id` header), skip the script and use the
+> manual steps below with `AUTH_MODE=shim` left in `apps/api/.env`. `AUTH_MODE=shim` is **dev/test
+> only — never run production with it** ([[0037-idp-choice-zitadel-byoi]], [[0038-jit-user-provisioning]]).
+
+## Manual steps (the shortcut / shim path, or when you want each step explicit)
 
 ```bash
 # 1. Install all workspace dependencies
@@ -43,12 +91,15 @@ bun run dev              # web → :3000, api → :3001
 ```
 
 > [!note] `db:up` now starts more than Postgres
-> `bun run db:up` brings up the whole dev infra defined in `docker-compose.yml`: **Postgres**
-> (`db`, :5432), **Meilisearch** (search engine, :7700 — see [[0035-search-architecture]]), and
-> **Zitadel** (the bundled OIDC IdP, :8080) with its **own** Postgres (`zitadel_db`). All are
-> bound to loopback only. Zitadel needs `MEILI_MASTER_KEY` and the `ZITADEL_*` block set in the
-> root `.env` or its container fails to boot. If you only want the app DB and search, you can
-> start a subset, e.g. `docker compose up -d db meilisearch`.
+> `bun run db:up` (`docker compose up -d`) brings up the whole dev infra: **Postgres** (`db`, :5432),
+> **Meilisearch** (search engine, :7700 — see [[0035-search-architecture]]), **Valkey** (BullMQ
+> broker, :6379 — see [[0053-async-workers-bullmq-valkey]]) and **Zitadel** (the bundled OIDC IdP,
+> :8080) with its **own** Postgres (`zitadel_db`). A one-shot **`zitadel-secrets-init-dev`** (added in
+> `compose.override.yaml`) chmods the `zitadel_secrets` volume **before** Zitadel starts so it can
+> write its first-instance machine key — this fixes the #477 dev crash-loop so plain `docker compose
+> up` works with no manual `chmod`. All ports are bound to loopback only. Zitadel needs
+> `MEILI_MASTER_KEY` and the `ZITADEL_*` block set in the root `.env` or its container fails to boot.
+> If you only want the app DB and search, start a subset, e.g. `docker compose up -d db meilisearch`.
 
 > [!info] Authentication in dev — `AUTH_MODE=shim` is the zero-config default
 > `apps/api/.env.example` ships `AUTH_MODE=shim`, so the API does **not** validate OIDC tokens
