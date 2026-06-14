@@ -9,15 +9,21 @@
       "default": "./dist/index.js"
     },
     "./crypto": {
-      "types": "./dist/crypto/index.d.ts",
-      "default": "./dist/crypto/index.js"
+      "import": {
+        "types": "./dist/esm/crypto/index.d.ts",
+        "default": "./dist/esm/crypto/index.js"
+      },
+      "require": {
+        "types": "./dist/crypto/index.d.ts",
+        "default": "./dist/crypto/index.js"
+      }
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json"
+    "build": "bun run scripts/build.ts"
   },
   "dependencies": {
     "@noble/ciphers": "2.2.0",
