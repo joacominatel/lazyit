@@ -31,6 +31,21 @@ updated: 2026-06-13
      envelope, Argon2id, DEK wrapped per member, recovery key shown once; a THIRD secret store distinct
      from the server-decryptable [[workflow-secret]]; new `secret` capability + the INV-8 crypto-exception;
      proposes INV-10; #366). -->
+<!-- updated 2026-06-14: ADR batch (docs/adr-batch-jun14). Three new ADRs + two amendments capturing CEO
+     decisions already made. ADR-0062 (in-app Help/Manual surface — shipped product docs as repo markdown
+     rendered by MarkdownView, ungated + secret-free, en/es; distinct from the KB; EPIC; #454) — **proposed**
+     (awaiting prose ratification). ADR-0063 (configurable Asset Tag Scheme — lazyit's FIRST instance-config
+     store: single-row AssetTagScheme + global monotonic counter, mandatory {num} template, in-transaction
+     allocation w/ retry-on-collision, gaps accepted, OFF by default; #363) — **accepted** (CEO 2026-06-14).
+     ADR-0064 (admin user provisioning — full-page asset-style create flow; a SECOND, narrower password
+     carve-out from ADR-0043: temp-password-only `changeRequired:true`, email auto-verify always-on,
+     BYOI hides the controls, reuses `user:manage`; #411) — **accepted** (CEO 2026-06-14). AMENDMENTS:
+     ADR-0035 (search reconcile sweeper — periodic unref'd setInterval mirroring the notifications retention
+     sweeper, reusing reindexIndex; `SEARCH_RECONCILE_INTERVAL_MS` default hourly; complements reindex:all;
+     #383) — accepted (technical). ADR-0056 (targeted per-user notifications — `recipientUserId` distinct
+     from `targetUserId`, a non-admin sees their OWN targeted notif without `notification:read` over the
+     broadcast set = an AUTH-CONTRACT change; first trigger = login-time vault-setup nudge, dedupeKey
+     `secret.vault_setup:<userId>`; ship `/secrets` banner now; #453) — accepted (CEO 2026-06-14). -->
 
 # Decisions (ADRs) — Map of Content
 
@@ -108,6 +123,18 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0059-kb-folders-links-and-import]] | Knowledge Base v2 — folders (evolved from flat ArticleCategory) + aliases/symlinks + article↔article `[[slug]]` wiki-links + backlinks + bulk .zip import (extends [[0021-knowledge-base-design]]/[[0042-article-versioning-and-linking]]) | **accepted** (2026-06-11) — **built, merged feat/kb-secrets** |
 | [[0060-kb-folder-access-control]] | KB access control — the **folder** is the permission boundary (deliberate per-folder CARVE-OUT from the per-domain-only rule of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]); default PUBLIC, additive dynamic rules (user/role/app-grant/asset-assignee), composes with draft visibility, ADMIN god-mode, no-escalation, API+DB enforcement | **accepted** (2026-06-11) — **built, merged feat/kb-secrets** |
 | [[0061-secret-manager-zero-knowledge]] | Secret Manager — zero-knowledge vaults beside the KB (per-user-keypair envelope, Argon2id, DEK wrapped per member, peer-reset, recovery key shown once, soft-revoke v1); a THIRD secret store distinct from server-decryptable [[workflow-secret]]; new `secret` capability + INV-8 crypto-exception (INV-10) | **accepted** (2026-06-11) — **built in #366, merged feat/secret-manager** |
+| [[0062-in-app-help-manual-surface]] | In-app Help / Manual — a fixed, shipped product-documentation surface (repo markdown at `apps/web/content/manual/<locale>/*.md`, frontmatter, rendered by `MarkdownView`), **ungated** + **secret-free** (respects INV-10 by never touching it), i18n en+es mirroring [[0051-i18n-next-intl]]; **distinct from the KB** ([[0059-kb-folders-links-and-import]]/[[0060-kb-folder-access-control]]); external `docs.lazyit.com` deferred; EPIC; #454 | **proposed** (2026-06-14) |
+| [[0063-configurable-asset-tag-scheme]] | Configurable Asset Tag Scheme — lazyit's **FIRST instance-config store**: a single-row `AssetTagScheme` + global monotonic counter, mandatory `{num}` template (+prefix/suffix/padding), in-transaction allocation w/ retry-on-collision (gaps accepted), **OFF by default** (no scheme ⇒ no auto-tag; manual `assetTag` per [[0041-soft-delete-reuse-and-restore]] unchanged); #363 | **accepted** (2026-06-14) |
+| [[0064-admin-user-provisioning-credentials]] | Admin user provisioning — full-page asset-style create flow (opt-in assign-asset/app); a **bounded SECOND carve-out** from [[0043-zitadel-source-of-truth]]: **temporary password only** (`changeRequired:true`), email auto-verify always-on, **BYOI hides the controls**, reuses `user:manage` ([[0046-roles-permissions-v2]], no new permission); #411 | **accepted** (2026-06-14) |
+
+> **Amendments in this batch (no renumber):** [[0035-search-architecture]] gains a **periodic
+> drift-reconcile sweeper** (unref'd `setInterval` mirroring the notifications retention sweeper, reusing
+> `reindexIndex`; `SEARCH_RECONCILE_INTERVAL_MS`, default hourly; complements `reindex:all`; #383) —
+> *accepted (technical)*. [[0056-in-app-notification-bell]] gains **targeted per-user notifications**
+> (`recipientUserId` ≠ `targetUserId`; a non-admin sees their OWN targeted notification without
+> `notification:read` over the admin broadcast set — an **auth-contract change**; first trigger = the
+> login-time vault-setup nudge, dedupeKey `secret.vault_setup:<userId>`; + ship the `/secrets` banner now;
+> #453) — *accepted (CEO 2026-06-14)*.
 
 ## Pending ADRs (to write when decided)
 - **CD / image publishing** — deferred in [[0027-ci-pipeline]]; define the registry (GHCR) +

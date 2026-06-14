@@ -123,4 +123,6 @@ Concretely:
 
 [[0006-soft-delete-and-auditing]] · [[0032-soft-delete-middleware]] · [[0033-asset-history-event-model]] ·
 [[0019-asset-assignment-integrity]] · [[0038-jit-user-provisioning]] · [[0040-rbac-roles]] ·
-[[0030-list-pagination-contract]] · [[prisma-migrations]] · [[user]] · [[asset]] · [[asset-history]]
+[[0030-list-pagination-contract]] · [[0063-configurable-asset-tag-scheme]] (the configurable scheme
+allocates into this same live-only partial-unique `assetTag` index) · [[prisma-migrations]] · [[user]] ·
+[[asset]] · [[asset-history]]

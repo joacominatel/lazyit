@@ -438,6 +438,8 @@ It **binds to** but does not overload its neighbours:
 
 **Related:** [[0054-applications-workflow-engine]] · [[workflow-secret]] · [[0046-roles-permissions-v2]] ·
 [[0031-logging-strategy]] · [[0029-untrusted-content-sanitization]] · [[0048-service-accounts]] ·
-[[0060-kb-folder-access-control]] · [[0059-kb-folders-links-and-import]] · [[secret-vault]] ·
+[[0060-kb-folder-access-control]] · [[0059-kb-folders-links-and-import]] ·
+[[0056-in-app-notification-bell]] (#453 — the login-time *"set up your vault passphrase"* nudge + the
+`/secrets` banner, for a `secret:read` holder with no [[user-keypair]]) · [[secret-vault]] ·
 [[secret-item]] · [[vault-membership]] · [[user-keypair]] · [[folder]] · [[article]] · [[user]] ·
 [[backups]] · [[INVARIANTS]] (INV-6 / INV-8 / INV-10)
