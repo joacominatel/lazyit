@@ -55,9 +55,13 @@ export class ZitadelIdentityProvider implements IdentityProvider {
       firstName: input.firstName,
       lastName: input.lastName,
       role: input.role,
-      // Bundled first-run only (issue #335): the wizard-chosen password is set on the Zitadel user so
-      // the operator can log in immediately. Undefined in BYOI — lazyit never sets a credential there.
+      // Bundled management only: a password is set on the Zitadel user. The bootstrap wizard (issue
+      // #335) passes one with no changeRequired flag (an immediately-usable initial password for the
+      // first admin); admin provisioning (ADR-0064, issue #411) passes one WITH passwordChangeRequired
+      // so Zitadel forces a change at first login. Undefined in BYOI — lazyit never sets a credential.
       password: input.password,
+      // Default false (bootstrap semantics) — only the admin-provisioning path sets this true.
+      passwordChangeRequired: input.passwordChangeRequired ?? false,
     });
     return { externalId };
   }
