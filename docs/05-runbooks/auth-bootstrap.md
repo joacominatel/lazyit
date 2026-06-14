@@ -114,6 +114,54 @@ secret files already exist it short-circuits with *"already provisioned … noth
 After this, jump to [[#6 — Add users to Zitadel]] (and [[#6b — Designate the first ADMIN (RBAC
 bootstrap)]] on an upgraded instance). Sections 1–5 below document the **manual** alternative.
 
+### 0d. DEV — one command (`bun run dev:fresh`)
+
+The prod sidecar above runs **inside** the Docker network. **Dev** runs the apps natively (`bun run
+dev` on the host) against the same bundled Zitadel, so the equivalent one-command flow lives in
+`scripts/dev-setup.ts` (issue #483) — it **reuses the very same `infra/scripts/zitadel-bootstrap.sh`**,
+just invoked on the host against the loopback-published dev Zitadel (`http://localhost:8080`). See
+[[setup]] for the day-to-day workflow; this is the auth-specific detail.
+
+```sh
+bun run dev:fresh    # wipe dev volumes → up → migrate/generate/seed → bootstrap Zitadel → wire env → start
+bun run dev:up       # (every day after) up + a fresh Prisma client → start; assumes dev:fresh ran before
+```
+
+`dev:fresh` is **idempotent and fail-loud** (the script mirrors the prod sidecar's discipline). It:
+
+1. **removes the dev volumes** `lazyit_{db_data,zitadel_db_data,zitadel_secrets,meili_data,valkey_data}`
+   (the destructive step — it prompts for a typed `yes` unless `--yes` is passed);
+2. `docker compose up -d` — the dev **`zitadel-secrets-init-dev`** (in `compose.override.yaml`) chmods
+   the `zitadel_secrets` volume `0777` **before** Zitadel starts, so Zitadel's non-root uid can write
+   `bootstrap-key.json`. This fixes the #477 dev crash-loop **at the compose level**, so even a plain
+   `docker compose up` (without the script) no longer needs a manual `chmod`;
+3. waits for `db` healthy + Zitadel `/debug/healthz` 200;
+4. `prisma migrate deploy` → **`prisma generate`** (explicit — `migrate deploy` does not regenerate the
+   client; a stale client breaks the API boot, #480) → `prisma db seed`;
+5. copies `bootstrap-key.json` out of the `zitadel_secrets` volume into a throwaway tmpdir and runs
+   **`infra/scripts/zitadel-bootstrap.sh`** there with
+   `ZITADEL_SECRETS_DIR=<tmpdir> ZITADEL_INTERNAL_URL=http://localhost:8080 OIDC_ISSUER=http://localhost:8080 WEB_ORIGIN=http://localhost:3000`
+   (host tools `jq` / `openssl` / `curl` required — it fails loud if any is missing). The script writes
+   `oidc-client.json` + `sa-key.json` into that tmpdir;
+6. stashes `sa-key.json` at `~/.lazyit-dev/sa-key.json` (mode `600`, **outside** the repo tree) and
+   scrubs the tmpdir;
+7. **idempotently** wires the env files (match-and-replace each key in place, never duplicating lines):
+   - `apps/web/.env` — `AUTH_ISSUER=http://localhost:8080`, `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET`;
+   - `apps/api/.env` — **comments out `AUTH_MODE=shim`** (the web is OIDC-only now, so the API must
+     validate the Bearer), `OIDC_ISSUER=http://localhost:8080`,
+     `OIDC_JWKS_URI=http://localhost:8080/oauth/v2/keys` (Zitadel serves keys there, **not** the derived
+     `/.well-known/jwks.json`), `ZITADEL_MGMT_PROJECT_ID`, `ZITADEL_MGMT_SA_KEY_PATH=~/.lazyit-dev/sa-key.json`.
+
+Both `.env` files are gitignored and the SA key lives outside the tree — **no secret is committed**.
+When it finishes, open `http://localhost:3000/setup` to create the first admin **once** (§6b), then
+`http://localhost:3000/login`.
+
+> [!tip] Clean re-bootstrap in dev
+> `dev:fresh` always re-provisions: it removes the `zitadel_secrets` volume (so a fresh
+> `bootstrap-key.json` is exported) and runs the bootstrap script in a **fresh tmpdir** each time, so
+> the script's "already provisioned" short-circuit never fires against stale dev creds. To re-run
+> against an EXISTING stack instead (no wipe), use `dev:up` — it does not touch Zitadel or the `.env`.
+
 ---
 
 ## 1 — Prerequisites (manual path)

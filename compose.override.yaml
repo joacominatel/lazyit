@@ -14,6 +14,11 @@
 #     (no Caddy in front of dev — the apps hit http://localhost:8080 directly);
 #   - relaxes prod-only ergonomics for local work: restart policy back to "no", and drops the
 #     mem_limit/cpus ceilings (a laptop shouldn't be capped). Volumes/healthchecks are inherited.
+#   - adds a DEV `zitadel-secrets-init-dev` (a distinct name from the prod profiles:[prod] one) so
+#     plain `docker compose up` no longer crash-loops Zitadel on a fresh `zitadel_secrets` volume
+#     (#477). It chmods the secrets dir 0777 BEFORE Zitadel starts, so Zitadel's non-root uid can
+#     write bootstrap-key.json (otherwise the 03_default_instance migration fatals + the container
+#     restart-loops). See compose.yaml's prod zitadel-secrets-init for the full rationale.
 
 services:
   db:
@@ -48,6 +53,29 @@ services:
     mem_limit: 0
     cpus: 0
 
+  # --- Zitadel secrets-volume permission fixer — DEV equivalent of the prod one (#477) -----
+  # A freshly-created `zitadel_secrets` volume is owned root:root (mode 0755), but the `zitadel`
+  # container runs as a NON-ROOT uid (~1000). Without this, Zitadel can't write its FirstInstance
+  # machine key (bootstrap-key.json) and the 03_default_instance migration fatals → crash-loop. This
+  # one-shot init runs as root and chmods the dir 0777 BEFORE Zitadel starts, so plain
+  # `docker compose up` works with no manual chmod (and scripts/dev-setup.ts no longer needs it).
+  # The prod zitadel-secrets-init in compose.yaml is profiles:[prod]; this is its UNPROFILED dev
+  # twin (an unprofiled service may not depend_on a profiled one). 0777 on an internal-only named
+  # volume on a single dev host is an accepted tradeoff (mirrors the prod rationale; ADR-0028).
+  # A SEPARATE service name (not "zitadel-secrets-init") on purpose: Compose merges list fields like
+  # `profiles` by UNION across files, so re-declaring the prod service here could never drop its
+  # `profiles: [prod]` (an empty list can't subtract). A distinct, unprofiled name sidesteps the merge
+  # entirely and stays active in the plain `docker compose up` dev run.
+  zitadel-secrets-init-dev:
+    # alpine:3.21 — pinned by digest (matches the prod zitadel-secrets-init in compose.yaml).
+    image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    user: "0:0"
+    restart: "no"
+    command: ["sh", "-c", "chmod 0777 /zitadel-secrets"]
+    volumes:
+      - zitadel_secrets:/zitadel-secrets
+    networks: [internal]
+
   zitadel:
     # Dev: no HTTPS — Zitadel serves plain HTTP on loopback :8080; Caddy only exists in prod.
     command: start-from-init --masterkey "${ZITADEL_MASTERKEY}" --tlsMode disabled
@@ -61,5 +89,14 @@ services:
       # Admin console:  http://localhost:8080/ui/console
       # OIDC discovery: http://localhost:8080/.well-known/openid-configuration
       - "127.0.0.1:8080:8080"
+    # Gate Zitadel on the dev secrets-init COMPLETING (chmod 0777 the volume) so the non-root uid can
+    # write bootstrap-key.json on first boot — fixes the #477 crash-loop at the compose level. This
+    # edge is valid here because BOTH services are unprofiled in the dev merge (the prod merge adds
+    # the equivalent edge in infra/docker-compose.prod.yaml instead — see compose.yaml's note).
+    # NOTE: this MERGES with the base zitadel's `depends_on: { zitadel_db: service_healthy }` (Compose
+    # unions depends_on maps by key), so dev Zitadel waits for BOTH zitadel_db AND this init.
+    depends_on:
+      zitadel-secrets-init-dev:
+        condition: service_completed_successfully
     mem_limit: 0
     cpus: 0
