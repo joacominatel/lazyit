@@ -100,17 +100,27 @@ export interface CreateIdentityUserInput {
   /** The role lazyit assigned locally; mirrored to the IdP when management is supported. */
   role: Role;
   /**
-   * The initial password to set on the IdP user when the provider MANAGES credentials (the bundled
-   * Zitadel — issue #335). Absent in BYOI / generic-OIDC, where the operator's own IdP owns the
-   * credential and lazyit never touches it.
+   * The password to set on the IdP user when the provider MANAGES credentials (the bundled Zitadel —
+   * issue #335 bootstrap, and ADR-0064 admin provisioning). Absent in BYOI / generic-OIDC, where the
+   * operator's own IdP owns the credential and lazyit never touches it.
    *
-   * This is a NARROW carve-out from lazyit's "never sets passwords" model (ADR-0016/0037): it is
-   * justified only because the bundled Zitadel IS lazyit's own IdP, and the first-run wizard has no
-   * SMTP/e-mail-code path to let the operator initialize the credential otherwise. When set, the
-   * Zitadel adapter creates the user pre-verified with `changeRequired:false`, so the operator can log
-   * in immediately with the password they chose.
+   * This is a NARROW carve-out from lazyit's "never sets passwords" model (ADR-0016/0037), justified
+   * only because the bundled Zitadel IS lazyit's own IdP and there is no SMTP/e-mail-code path to let a
+   * user initialize the credential otherwise. The user is always created email pre-verified. Whether
+   * Zitadel forces a change at first login is governed by {@link passwordChangeRequired}.
    */
   password?: string;
+  /**
+   * Whether the {@link password} above is a TEMPORARY one the user MUST change at first login (ADR-0064
+   * admin provisioning, issue #411). Maps to Zitadel's `password.changeRequired`:
+   *   - `false` (default) — the BOOTSTRAP semantics (issue #335): a usable initial password, so the
+   *     very first admin can sign in immediately (no one exists to provision them).
+   *   - `true` — the ADMIN-PROVISIONING semantics: a one-time hand-off secret; Zitadel forces a
+   *     password change at first login, so lazyit never holds the user's real credential.
+   * Ignored when {@link password} is absent and on providers that do not manage credentials (BYOI).
+   * Defaulting to `false` keeps the existing bootstrap/setup call sites unchanged.
+   */
+  passwordChangeRequired?: boolean;
 }
 
 /**
