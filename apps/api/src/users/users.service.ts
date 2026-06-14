@@ -51,6 +51,20 @@ export type SerializedUser = Omit<User, 'managerId' | 'managerName'> & {
 };
 
 /**
+ * The `GET /users` LIST item the service emits (issue #386): a {@link SerializedUser} (timestamps stay
+ * Prisma `Date`s — the HTTP boundary serializes them to ISO strings, matching the wire `UserListItem`
+ * in `@lazyit/shared`) plus the two derived activity counts. The counts are batched per page (one
+ * `groupBy` each, never N+1) and ride ONLY on the list row, so they're optional on the wire and absent
+ * from the single-user reads.
+ */
+export type SerializedUserListItem = SerializedUser & {
+  /** Active AssetAssignments held by the user (`releasedAt: null`, ADR-0019). */
+  assetsInPossession: number;
+  /** Active AccessGrants held by the user (`revokedAt: null`, ADR-0023). */
+  appAccesses: number;
+};
+
+/**
  * The DB write fragment for the manager either/or (ADR-0058). `managerId` XOR `managerName` (or both
  * null). `undefined` here means "leave both columns untouched" (an update that didn't mention manager).
  */
@@ -151,7 +165,59 @@ export class UsersService {
     // Resolve the manager descriptor for every row on the page in ONE batched query (ADR-0058), so the
     // list item matches the full UserSchema (which now carries `manager`) without an N+1 per row.
     const serialized = await this.serializeUsers(items);
-    return pageOf(serialized, total, page);
+    // Attach the two derived activity counts (issue #386) — batched per page, NEVER N+1: one `groupBy`
+    // each over the page's user ids (two queries total, regardless of page size). LIST-only fields.
+    const withCounts = await this.attachActivityCounts(serialized);
+    return pageOf(withCounts, total, page);
+  }
+
+  /**
+   * Attach the two derived, list-only activity counts to each row of a page (issue #386), batched so the
+   * cost is O(1 query per count per page) — NEVER N+1:
+   *
+   *   - `assetsInPossession` — the user's currently-held assets: active {@link
+   *     ../asset-assignments/asset-assignments.service AssetAssignment}s (`releasedAt: null`, ADR-0019).
+   *   - `appAccesses` — the user's currently-held application grants: active {@link
+   *     ../access-grants/access-grants.service AccessGrant}s (`revokedAt: null`, ADR-0023).
+   *
+   * Each count is one Prisma `groupBy` by `userId` over the WHOLE page's ids (`userId IN (<page>)`),
+   * filtered to the ACTIVE lifecycle (released/revoked rows are excluded). Both joins are append-only
+   * (no `deletedAt`), so there is no soft-delete filter to apply here. A user with no rows is absent
+   * from its groupBy result and defaults to `0`. An empty page skips both queries entirely.
+   */
+  private async attachActivityCounts(
+    rows: SerializedUser[],
+  ): Promise<SerializedUserListItem[]> {
+    if (rows.length === 0) {
+      // Empty page: nothing to aggregate — skip BOTH groupBy queries (zero wasted DB round-trips).
+      return [];
+    }
+    const userIds = rows.map((r) => r.id);
+    // Two queries TOTAL for the page — one per count. groupBy returns one row per user that HAS at least
+    // one active row; users with none are simply absent (→ default 0 below). _count._all = the row count.
+    const [assetGroups, grantGroups] = await Promise.all([
+      this.prisma.assetAssignment.groupBy({
+        by: ['userId'],
+        where: { userId: { in: userIds }, releasedAt: null },
+        _count: { _all: true },
+      }),
+      this.prisma.accessGrant.groupBy({
+        by: ['userId'],
+        where: { userId: { in: userIds }, revokedAt: null },
+        _count: { _all: true },
+      }),
+    ]);
+    const assetsByUser = new Map(
+      assetGroups.map((g) => [g.userId, g._count._all]),
+    );
+    const grantsByUser = new Map(
+      grantGroups.map((g) => [g.userId, g._count._all]),
+    );
+    return rows.map((row) => ({
+      ...row,
+      assetsInPossession: assetsByUser.get(row.id) ?? 0,
+      appAccesses: grantsByUser.get(row.id) ?? 0,
+    }));
   }
 
   /** The shared `where` for the user list — used identically by findPage and its count. */

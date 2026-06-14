@@ -92,10 +92,11 @@ describe('UsersService', () => {
   // ADR-0058 §4 / ADR-0056 §3 (issue #359): the bell emitter the clone reuses post-commit for every
   // cloned grant. Mocked so the clone tests assert WHICH grants nudged the bell, without a DB.
   let accessGrants: { emitGrantNotifications: jest.Mock };
-  // The base prisma mock (lifted so the clone tests can prime assetAssignment/accessGrant/asset reads).
+  // The base prisma mock (lifted so the clone tests can prime assetAssignment/accessGrant/asset reads,
+  // and the #386 list-count tests can prime / inspect the per-page `groupBy` aggregations).
   let prismaMock: {
-    assetAssignment: { findMany: jest.Mock };
-    accessGrant: { findMany: jest.Mock };
+    assetAssignment: { findMany: jest.Mock; groupBy: jest.Mock };
+    accessGrant: { findMany: jest.Mock; groupBy: jest.Mock };
     asset: { findMany: jest.Mock };
   };
   /** Accessor for the lifted prisma mock — keeps the clone tests readable. */
@@ -147,9 +148,16 @@ describe('UsersService', () => {
       // password reset). The emission is asserted via the mocked UserHistoryService below.
       userHistory: { create: jest.fn() },
       // ADR-0058 clone plan helpers read the SOURCE's active assignments/grants and live assets here.
-      // Defaults are empty; the clone tests override them per scenario.
-      assetAssignment: { findMany: jest.fn().mockResolvedValue([]) },
-      accessGrant: { findMany: jest.fn().mockResolvedValue([]) },
+      // Defaults are empty; the clone tests override them per scenario. `groupBy` backs the #386 list
+      // activity counts (assets-in-possession / app-accesses); default empty result → every row counts 0.
+      assetAssignment: {
+        findMany: jest.fn().mockResolvedValue([]),
+        groupBy: jest.fn().mockResolvedValue([]),
+      },
+      accessGrant: {
+        findMany: jest.fn().mockResolvedValue([]),
+        groupBy: jest.fn().mockResolvedValue([]),
+      },
       asset: { findMany: jest.fn().mockResolvedValue([]) },
       // Handles BOTH forms: callback (offboard / linked-create / update / restore / clone) with the tx
       // client, and array (findPage's [findMany, count]) which resolves each promise in the array.
@@ -687,8 +695,11 @@ describe('UsersService', () => {
         skip: 0,
       });
       expect(page).toEqual({
-        // The list items are SERIALIZED (ADR-0058): each gains a resolved `manager` (null here).
-        items: [{ id: 'u1', manager: null }],
+        // The list items are SERIALIZED (ADR-0058): each gains a resolved `manager` (null here) and the
+        // #386 list-only activity counts (default 0 here — the groupBy mocks return no rows).
+        items: [
+          { id: 'u1', manager: null, assetsInPossession: 0, appAccesses: 0 },
+        ],
         total: 1,
         limit: 50,
         offset: 0,
@@ -766,7 +777,97 @@ describe('UsersService', () => {
         where: { deletedAt: { not: null } },
         includeSoftDeleted: true,
       });
-      expect(page.items).toEqual([{ id: 'gone', manager: null }]);
+      expect(page.items).toEqual([
+        { id: 'gone', manager: null, assetsInPossession: 0, appAccesses: 0 },
+      ]);
+    });
+
+    // Issue #386 — the two derived, list-only activity counts. They must be BATCHED per page (one
+    // `groupBy` each over the whole page's user ids, never N+1) and reflect only the ACTIVE lifecycle.
+    describe('activity counts (#386)', () => {
+      it('attaches assetsInPossession / appAccesses from one groupBy per count, batched over the page', async () => {
+        user.findMany.mockResolvedValue([
+          { id: 'u1' },
+          { id: 'u2' },
+          { id: 'u3' },
+        ]);
+        user.count.mockResolvedValue(3);
+        // u1 holds 2 assets, u2 holds 1; u3 holds none (absent from the result → defaults to 0).
+        prismaMock.assetAssignment.groupBy.mockResolvedValue([
+          { userId: 'u1', _count: { _all: 2 } },
+          { userId: 'u2', _count: { _all: 1 } },
+        ]);
+        // u1 has 3 app grants, u3 has 1; u2 has none (absent → 0).
+        prismaMock.accessGrant.groupBy.mockResolvedValue([
+          { userId: 'u1', _count: { _all: 3 } },
+          { userId: 'u3', _count: { _all: 1 } },
+        ]);
+
+        const page = await service.findPage(
+          {},
+          { limit: 50, offset: 0, deleted: 'active' },
+        );
+
+        expect(page.items).toEqual([
+          {
+            id: 'u1',
+            manager: null,
+            assetsInPossession: 2,
+            appAccesses: 3,
+          },
+          {
+            id: 'u2',
+            manager: null,
+            assetsInPossession: 1,
+            appAccesses: 0,
+          },
+          {
+            id: 'u3',
+            manager: null,
+            assetsInPossession: 0,
+            appAccesses: 1,
+          },
+        ]);
+
+        // BATCHING PROOF: each count is exactly ONE groupBy for the WHOLE 3-row page — not one per row.
+        expect(prismaMock.assetAssignment.groupBy).toHaveBeenCalledTimes(1);
+        expect(prismaMock.accessGrant.groupBy).toHaveBeenCalledTimes(1);
+      });
+
+      it('counts ACTIVE assignments/grants only (releasedAt: null / revokedAt: null), grouped by userId over the page', async () => {
+        user.findMany.mockResolvedValue([{ id: 'u1' }, { id: 'u2' }]);
+        user.count.mockResolvedValue(2);
+
+        await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
+
+        // Assets-in-possession = active assignments (ADR-0019): releasedAt IS NULL, scoped to the page.
+        expect(prismaMock.assetAssignment.groupBy).toHaveBeenCalledWith({
+          by: ['userId'],
+          where: { userId: { in: ['u1', 'u2'] }, releasedAt: null },
+          _count: { _all: true },
+        });
+        // App-accesses = active grants (ADR-0023): revokedAt IS NULL, scoped to the page.
+        expect(prismaMock.accessGrant.groupBy).toHaveBeenCalledWith({
+          by: ['userId'],
+          where: { userId: { in: ['u1', 'u2'] }, revokedAt: null },
+          _count: { _all: true },
+        });
+      });
+
+      it('skips the count queries entirely for an empty page (no ids to aggregate)', async () => {
+        user.findMany.mockResolvedValue([]);
+        user.count.mockResolvedValue(0);
+
+        const page = await service.findPage(
+          {},
+          { limit: 50, offset: 0, deleted: 'active' },
+        );
+
+        expect(page.items).toEqual([]);
+        // No user ids on the page → neither groupBy is issued (zero wasted queries).
+        expect(prismaMock.assetAssignment.groupBy).not.toHaveBeenCalled();
+        expect(prismaMock.accessGrant.groupBy).not.toHaveBeenCalled();
+      });
     });
   });
 
