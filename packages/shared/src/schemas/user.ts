@@ -53,6 +53,32 @@ export const LegajoSchema = z.string().trim().min(1).max(100);
 export const UsernameSchema = z.string().trim().toLowerCase().min(1).max(100);
 
 /**
+ * The TEMPORARY-password policy for admin user-provisioning (ADR-0064, issue #411). It mirrors
+ * `SetupPasswordSchema` (the first-run bootstrap wizard's password, `schemas/config.ts`) RULE-FOR-RULE
+ * — Zitadel's DEFAULT complexity policy (min 8, max 70, upper + lower + digit + symbol), with the same
+ * per-rule messages — so an admin-provisioned temp password is validated identically to the bootstrap
+ * one and Zitadel never rejects it mid-mirror (which would leave a half-provisioned, un-loggable user).
+ *
+ * It is DEFINED HERE rather than imported from `config.ts` ON PURPOSE: `config.ts` already imports
+ * `EmailSchema` from THIS module (`config → user`), so importing a schema back (`user → config`) would
+ * close a module-import cycle that crashes at evaluation time whenever `user.ts` loads first (the common
+ * case — many schemas import `user` directly). Sharing the same DISCIPLINE without the back-import keeps
+ * the contract correct and the dependency graph acyclic. If these rules ever change, change both.
+ *
+ * Like the bootstrap password, this is NEVER persisted to lazyit's DB, NEVER logged (ADR-0031/0064) and
+ * NEVER echoed back in a response — it is set on the bundled Zitadel and handed off to the admin once.
+ */
+export const TempPasswordSchema = z
+  .string()
+  .min(8, "Must be at least 8 characters long.")
+  .max(70, "Must be less than 70 characters long.")
+  .regex(/[A-Z]/, "Must include an uppercase letter.")
+  .regex(/[a-z]/, "Must include a lowercase letter.")
+  .regex(/[0-9]/, "Must include a number.")
+  .regex(/[^A-Za-z0-9]/, "Must include a symbol.");
+export type TempPassword = z.infer<typeof TempPasswordSchema>;
+
+/**
  * The READ projection of a User's manager (ADR-0058) — a thin, redaction-safe descriptor resolved from
  * the FK, NOT the raw `managerId`/`managerName` columns. A discriminated union over `type`:
  *   - `{ type: "user", … }`     — the manager is a lazyit user. Carries only display fields (id +
@@ -157,6 +183,17 @@ export const CreateUserSchema = z.strictObject({
   username: UsernameSchema.optional(),
   // The manager input union (or null). Omit for "no manager". Cross-field refined above.
   manager: ManagerInputSchema.nullable().optional(),
+  // The TEMPORARY password an admin may set when provisioning a user (ADR-0064, issue #411). OPTIONAL on
+  // the wire — omit it for the unchanged no-credential create. It is HONORED ONLY on the bundled-Zitadel
+  // MANAGEMENT path (`idp.supportsManagement`): the API sets it on the freshly-created Zitadel user with
+  // `changeRequired:true`, so Zitadel forces a password change at first login — it is a one-time hand-off
+  // secret, never a standing admin-known credential. Under BYOI / generic-OIDC the API REJECTS it with a
+  // 400 (the operator's own IdP owns the credential). It is NEVER persisted to lazyit's DB, NEVER logged
+  // (ADR-0031/0064) and NEVER echoed back in a response. Uses {@link TempPasswordSchema}, which mirrors
+  // the bootstrap wizard's `SetupPasswordSchema` discipline rule-for-rule (the same complexity Zitadel
+  // enforces) — distinct from the bootstrap carve-out, which sets `changeRequired:false` for the very
+  // first admin (this path is always `changeRequired:true`).
+  password: TempPasswordSchema.optional(),
 });
 
 /**

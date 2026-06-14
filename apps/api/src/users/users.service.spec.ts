@@ -402,6 +402,126 @@ describe('UsersService', () => {
     expect(history.record).not.toHaveBeenCalled();
   });
 
+  // ADR-0064 (issue #411) — admin temporary-password provisioning. The optional `password` is honored
+  // ONLY on the bundled-Zitadel management path (set with passwordChangeRequired:true, forced change at
+  // first login); rejected under BYOI; never persisted/logged; a no-password create is unchanged.
+  describe('temporary-password provisioning (ADR-0064)', () => {
+    it('management path: forwards the password with passwordChangeRequired:true and never persists it', async () => {
+      const dto = {
+        email: 'p@b.com',
+        firstName: 'Pat',
+        lastName: 'Provision',
+        password: 'Str0ng!Pass',
+      };
+      const created = {
+        id: 'uuid-p',
+        email: dto.email,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        role: 'VIEWER',
+        externalId: null,
+        deletedAt: null,
+      };
+      user.create.mockResolvedValue(created);
+      user.update.mockResolvedValue({
+        ...created,
+        externalId: 'zitadel-user-1',
+      });
+
+      await service.create(dto);
+
+      // The temp password is forwarded to the IdP with passwordChangeRequired:true and the role; the new
+      // Zitadel user is created email-verified by the adapter (asserted in the management-service spec).
+      expect(idp.createUser).toHaveBeenCalledWith({
+        email: 'p@b.com',
+        firstName: 'Pat',
+        lastName: 'Provision',
+        role: 'VIEWER',
+        password: 'Str0ng!Pass',
+        passwordChangeRequired: true,
+      });
+      // NEVER persisted: `password` is not a User column — the Prisma create carries no password field.
+      const createArg = (user.create.mock.calls as Array<[{ data: object }]>)[0][0];
+      expect(createArg.data).not.toHaveProperty('password');
+      // NEVER echoed back: the indexed/search projection carries no credential either.
+      const upsertArg = (search.upsert.mock.calls as Array<[string, object]>)[0][1];
+      expect(upsertArg).not.toHaveProperty('password');
+    });
+
+    it('BYOI (no management): rejects a supplied password with 400 and creates NO local row', async () => {
+      idp.supportsManagement = false;
+      const dto = {
+        email: 'byoi@b.com',
+        firstName: 'By',
+        lastName: 'Oi',
+        password: 'Str0ng!Pass',
+      };
+
+      await expect(service.create(dto)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      // Validated BEFORE the write: no local row created, no IdP call, nothing to compensate.
+      expect(user.create).not.toHaveBeenCalled();
+      expect(idp.createUser).not.toHaveBeenCalled();
+      expect(user.delete).not.toHaveBeenCalled();
+      expect(search.upsert).not.toHaveBeenCalled();
+    });
+
+    it('no password: management create is unchanged (no password/changeRequired forwarded)', async () => {
+      const dto = { email: 'n@b.com', firstName: 'No', lastName: 'Pass' };
+      const created = {
+        id: 'uuid-n',
+        ...dto,
+        role: 'VIEWER',
+        externalId: null,
+        deletedAt: null,
+      };
+      user.create.mockResolvedValue(created);
+      user.update.mockResolvedValue({
+        ...created,
+        externalId: 'zitadel-user-1',
+      });
+
+      await service.create(dto);
+
+      // Back-compat: the createUser call carries no password and no passwordChangeRequired key.
+      const arg = (idp.createUser.mock.calls as Array<[Record<string, unknown>]>)[0][0];
+      expect(arg).not.toHaveProperty('password');
+      expect(arg).not.toHaveProperty('passwordChangeRequired');
+    });
+
+    it('management path: a Zitadel complexity rejection rolls the local row back and surfaces 503 (no half-provisioned user)', async () => {
+      const dto = {
+        email: 'weak@b.com',
+        firstName: 'Weak',
+        lastName: 'Pw',
+        password: 'Str0ng!Pass',
+      };
+      user.create.mockResolvedValue({
+        id: 'uuid-w',
+        ...dto,
+        role: 'VIEWER',
+        externalId: null,
+      });
+      // Zitadel rejects the password against its complexity policy → the adapter surfaces a 503.
+      idp.createUser.mockRejectedValue(
+        new ServiceUnavailableException(
+          'The identity provider is temporarily unavailable.',
+        ),
+      );
+
+      await expect(service.create(dto)).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+      // Compensation: the just-created local row is hard-deleted; no externalId link, no search index,
+      // no CREATED history row — exactly the no-split-brain path the no-password create already follows.
+      expect(user.delete).toHaveBeenCalledWith({ where: { id: 'uuid-w' } });
+      expect(user.update).not.toHaveBeenCalled();
+      expect(search.upsert).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+  });
+
   // SEC-006: externalId is no longer a client-settable create field (it is server-owned, ADR-0016).
   // The schema-level guard is covered by packages/shared user.test.ts; the service just forwards the
   // (already-validated) payload to Prisma, asserted by the case above.

@@ -4,6 +4,7 @@ import {
   ManagerInputSchema,
   RoleSchema,
   RoleSourceSchema,
+  TempPasswordSchema,
   UpdateUserSchema,
   UserSchema,
 } from "./user";
@@ -56,6 +57,47 @@ describe("CreateUserSchema (SEC-006)", () => {
     expect(
       CreateUserSchema.safeParse({ ...valid, role: "SUPERADMIN" }).success,
     ).toBe(false);
+  });
+});
+
+// ADR-0064 (issue #411) — optional admin-provisioned TEMPORARY password. Honored only on the bundled-
+// Zitadel management path by the API; here we just guard the wire contract (optional + complexity).
+describe("CreateUserSchema temporary password (ADR-0064)", () => {
+  const valid = { email: "a@b.com", firstName: "Ada", lastName: "Lovelace" };
+
+  test("password is optional — a create without it is valid (back-compat)", () => {
+    expect(CreateUserSchema.safeParse(valid).success).toBe(true);
+  });
+
+  test("accepts a password meeting the complexity policy", () => {
+    expect(
+      CreateUserSchema.safeParse({ ...valid, password: "Str0ng!Pass" }).success,
+    ).toBe(true);
+  });
+
+  test("rejects a too-short / non-complex / empty password", () => {
+    expect(
+      CreateUserSchema.safeParse({ ...valid, password: "weak" }).success,
+    ).toBe(false);
+    expect(
+      CreateUserSchema.safeParse({ ...valid, password: "" }).success,
+    ).toBe(false);
+    // Missing a symbol — the same rule the bootstrap SetupPasswordSchema enforces.
+    expect(
+      CreateUserSchema.safeParse({ ...valid, password: "Abcdef12" }).success,
+    ).toBe(false);
+  });
+
+  // The policy mirrors the bootstrap SetupPasswordSchema rule-for-rule (min 8 / max 70 / upper / lower /
+  // digit / symbol) so Zitadel never rejects an admin-provisioned temp password mid-mirror.
+  test("TempPasswordSchema enforces the Zitadel default complexity policy", () => {
+    expect(TempPasswordSchema.safeParse("Str0ng!Pass").success).toBe(true);
+    expect(TempPasswordSchema.safeParse("nouppercas3!").success).toBe(false);
+    expect(TempPasswordSchema.safeParse("NOLOWERCASE3!").success).toBe(false);
+    expect(TempPasswordSchema.safeParse("NoDigits!!").success).toBe(false);
+    expect(TempPasswordSchema.safeParse("Ab1!" + "x".repeat(70)).success).toBe(
+      false,
+    );
   });
 });
 

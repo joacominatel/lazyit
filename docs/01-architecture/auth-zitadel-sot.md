@@ -479,6 +479,15 @@ is no mirror to fail and no password is set.
 > so the operator signs in immediately — there is **no SMTP / emailed "Set Password" code** that would
 > otherwise lock them out. A narrow carve-out of "lazyit never sets a password" (ADR-0016/0037), scoped
 > to the bundled IdP; **BYOI shows/sends no password** (its directory owns the credential).
+>
+> **Admin user-provisioning is a second, narrower carve-out** (ADR-0064, #411): `POST /users` accepts an
+> optional **temporary** password and `idp.createUser` sets it with **`changeRequired:true`** (forced
+> change at first login) — distinct from the bootstrap wizard's `changeRequired:false`. The flag is the
+> new `CreateIdentityUserInput.passwordChangeRequired` (default `false`, so bootstrap is unchanged) which
+> `ZitadelManagementService.createUser` writes as `password.changeRequired`; the new user is always created
+> `email.isVerified:true` (always-on, no toggle). Honored **only** on the management path — under BYOI the
+> backend **400s** a supplied password before any local row exists. The temp password is **never persisted
+> or logged** and rides the same compensate-on-failure path as the bootstrap mirror (ADR-0031 / §4 #2).
 
 Idempotency-gated on "any ADMIN exists"; CSRF token required; rate-limited (security §6.3). Creates the
 first ADMIN local row (and, if `integrationMode='zitadel'` and a Management credential is present,

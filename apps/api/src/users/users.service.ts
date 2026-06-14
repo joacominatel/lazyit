@@ -441,6 +441,15 @@ export class UsersService {
    * the CREATED UserHistory payload so the provisioning choice is never silent; a plain create passes
    * nothing (no payload). The manager either/or is validated here (FK live + the XOR; a NEW user has no
    * reports yet, so no cycle is possible — `subjectId = null`).
+   *
+   * Optional temporary password (ADR-0064, issue #411): when `data.password` is present it is set on the
+   * new bundled-Zitadel user with `passwordChangeRequired:true` (forced change at first login). It is a
+   * MANAGEMENT-path carve-out — under BYOI (`!supportsManagement`) a supplied password is a 400 before
+   * any row is created. The password is forwarded to the IdP ONLY: never persisted to our DB (it is not a
+   * `User` column — `buildProfileCreateData` allowlists columns), never logged, never echoed back. A
+   * Zitadel complexity-policy rejection rides the existing compensate-on-failure path (the just-created
+   * local row is hard-deleted, the error re-thrown — no half-provisioned user). Omitting it is fully
+   * back-compatible (the previous no-credential create).
    */
   async create(
     data: CreateUser,
@@ -457,6 +466,16 @@ export class UsersService {
     // data (manager/legajo/username are columns; `manager` the input union is NOT — strip + translate).
     const managerWrite = await this.resolveManagerWrite(data.manager, null);
     const createData = this.buildProfileCreateData(data, role, managerWrite);
+    // Temporary-password provisioning (ADR-0064, issue #411) is a MANAGEMENT-path carve-out: lazyit only
+    // ever sets a credential on the bundled Zitadel it owns. Under BYOI (`!supportsManagement`) the
+    // operator's own IdP owns the credential, so a supplied password has nowhere valid to go — reject it
+    // with a 400 BEFORE any local row is created (validate-before-write: no row to compensate, no
+    // half-provisioned user). The password is NEVER persisted/logged either way (it never reaches the DB).
+    if (data.password && !this.idp.supportsManagement) {
+      throw new BadRequestException(
+        'Temporary-password provisioning is only available with the bundled identity provider.',
+      );
+    }
     // DB-first + mirror (ADR-0043 §3): create the LOCAL row first, then mirror into the IdP. If the
     // mirror fails we must NOT leave a split-brain (local user exists, IdP missing) — so we compensate
     // by removing the just-created local row and surface the Management failure as 503. This is the one
@@ -470,6 +489,16 @@ export class UsersService {
         firstName: user.firstName,
         lastName: user.lastName,
         role,
+        // ADR-0064: when the admin supplied a temporary password (only reachable on the management path
+        // — the BYOI case 400'd above), set it on the new Zitadel user with passwordChangeRequired so
+        // Zitadel forces a change at first login. A Zitadel complexity-policy rejection surfaces as the
+        // adapter's failure and is handled by the compensation below (the local row is hard-deleted, the
+        // error re-thrown), so a rejected password never leaves a half-provisioned user. The password is
+        // forwarded to the IdP ONLY — never written to our DB and never logged (the audit line below
+        // carries email/role, never the credential — ADR-0031/0064).
+        ...(data.password
+          ? { password: data.password, passwordChangeRequired: true }
+          : {}),
       });
       this.auditWriteBack('createUser', actorId, user.id, {
         email: user.email,
