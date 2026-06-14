@@ -95,6 +95,46 @@ enough to trigger the boot self-heal). For now the dropped write is at least **d
 `.catch` logs at ERROR with `{ index, id, op }` — and repairable via `reindex:all`. Pinning explicit
 index settings (`searchableAttributes` / typo tolerance) remains an open question (engine defaults kept).
 
+## Amendment (2026-06-14) — periodic drift-reconcile sweeper (issue #383)
+
+**Status: accepted (technical, within this ADR's direction).** This closes the "still out of scope
+(follow-up)" gap the 2026-06-11 amendment named: a Meili `upsert`/`remove` that is **dropped while the
+DB stays up** (fire-and-forget fail-soft, decision §3 / option 3) leaves the index **silently drifted**
+from the DB — a row that exists-but-isn't-indexed, or is-indexed-but-was-deleted — and the boot
+self-heal only catches a **wholly empty/missing** index, never a *partially* stale one. Until now the
+only repair for that partial drift was the **manual** `reindex:all`. This amendment adds an automatic,
+periodic **drift-reconcile sweeper** that runs while the app is up. **No posture change** — sync stays
+fire-and-forget fail-soft; this is a background self-heal, not a write-path gate.
+
+- **Pattern — an `unref`'d `setInterval`, mirroring the notification retention sweeper.** The reconcile
+  sweeper is structured **exactly like** [[0056-in-app-notification-bell]]'s
+  `apps/api/src/notifications/notifications-retention.sweeper.ts`: a plain `setInterval` (no
+  `@nestjs/schedule` dependency), **`unref`'d** so it never holds the event loop / process open, a
+  **re-entrancy guard** so a slow pass never overlaps the next tick, the **whole pass try/caught** so a
+  transient Meili/DB error never crashes the API (fail-soft), and **not started under `NODE_ENV=test`**
+  (and a no-op in search-disabled mode, no `MEILI_HOST` — same gates as `SearchBootstrapService`).
+- **Mechanism — REUSE the existing reindex service, do NOT duplicate reindex logic.** The sweeper does
+  **not** re-implement projection or index-swap; it **reuses** the existing zero-downtime rebuild path —
+  the same `SearchService.rebuildIndex` → **`reindexIndex`** swap that `reindex:all` and the boot
+  self-heal ([[0035]]'s 2026-06-11 amendment, `SearchBootstrapService`) already use, over the same live
+  document set (soft-deleted excluded; only PUBLISHED articles — draft privacy, ADR-0022/0035). A
+  reconcile pass loads the live DB set for an index and rebuilds it through that existing seam, so a
+  dropped `upsert`/`remove` is reconciled the next pass. (Reusing the full rebuild keeps the sweeper
+  simple and correct; a true *incremental* diff — comparing per-id DB↔Meili to touch only the drifted
+  rows — remains a possible future optimization, but is not needed at 5–20-person estate sizes.)
+- **Configurable cadence — `SEARCH_RECONCILE_INTERVAL_MS` (default: hourly).** The interval is read from
+  the env var **`SEARCH_RECONCILE_INTERVAL_MS`** ([[0028-secrets-and-config]]), defaulting to **one hour**
+  (`60 * 60 * 1000`), matching the retention sweeper's "hourly is ample for a low-volume feed" cadence.
+  An operator can tune it down for a busy install or up to reduce load.
+- **Complements, not replaces, `reindex:all`.** The post-deploy operational **`reindex:all`** step
+  (decision §"Bootstrap / recovery"; Hand-offs) **stays** — it is still the first-deploy backfill and the
+  big-hammer recovery after a long Meili outage. The sweeper handles the *ongoing* drift-from-dropped-
+  writes case automatically between deploys; the manual reindex remains the deterministic full repair.
+
+This makes the §3 fire-and-forget trade-off **self-healing on a timer** without changing the fail-soft
+write posture, mirroring the boot self-heal's "safe, background, never blocks" discipline — now extended
+from *empty index* to *drifted index*.
+
 ## Deferred (explicit)
 
 - Faceting / filtered search, relevance tuning, highlighting, incremental/batched reindex, and
@@ -109,6 +149,7 @@ index settings (`searchableAttributes` / typo tolerance) remains an open questio
   (`apps/web/components/global-search.tsx`); the response is typed in `@lazyit/shared` (`search`
   schema). Results group by entity and degrade gracefully where no detail page exists yet.
 
-Related: [[asset]] · [[article]] · [[user]] · [[location]] · [[application]] ·
+Related: #383 · [[asset]] · [[article]] · [[user]] · [[location]] · [[application]] ·
 [[0031-logging-strategy]] · [[0032-soft-delete-middleware]] · [[0028-secrets-and-config]] ·
-[[0016-auth-strategy-deferred]]
+[[0016-auth-strategy-deferred]] · [[0056-in-app-notification-bell]] (the retention sweeper this
+amendment's reconcile sweeper mirrors)

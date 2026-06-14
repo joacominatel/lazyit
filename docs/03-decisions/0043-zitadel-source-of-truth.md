@@ -253,6 +253,10 @@ already set) and still creates the first ADMIN; the backend makes **zero** Manag
 >    when it is true. This is a **deliberate, narrow carve-out** of the "lazyit never sets a password"
 >    stance (ADR-0016/0037): it applies **only** to the bundled IdP — which IS lazyit's own — and
 >    never to BYOI, where the operator's directory owns the credential and **no password is sent**.
+>    A **second, distinct** carve-out — admin-provisioning a *non-first* user with a **temporary**
+>    password (`changeRequired:true`, forced change at first login) — is recorded in
+>    [[0064-admin-user-provisioning-credentials]]; that one is narrower (temp-only) and likewise
+>    management-path-only, never BYOI.
 > 2. **The management mirror now BLOCKS, not degrades.** The old DEGRADE-NOT-BLOCK (§6 #4) left a
 >    *local-only* ADMIN on a mirror failure — but with a password-bearing bundled user that is exactly
 >    the un-loggable state we are fixing, so on the management path a `createUser` failure now

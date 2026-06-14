@@ -224,8 +224,95 @@ contract — the component does not change shape.
   `useCan('notification:read')`. **Phase 2:** SSE push behind the same API (the deferred Valkey pub/sub
   fanout), upgrading the bell to live without a contract change.
 
-Related: #313 · #248 · [[0054-applications-workflow-engine]] · [[0048-service-accounts]] ·
+## Amendment (2026-06-14) — targeted per-user notifications + the vault-setup nudge (issue #453)
+
+**Status: accepted (CEO sign-off 2026-06-14)** — verbatim: *"Sí, apruebo + banner ya."* This amendment
+is an **auth-contract change to the notification model** — flag it as such. v1 of this ADR was
+**broadcast-to-admins-only**: a `Notification` is fanned out on read to **every holder of
+`notification:read`** (seeded ADMIN-only, §6), and `@RequirePermission('notification:read')` gates all
+four endpoints (`apps/api/src/notifications/notifications.controller.ts`). There was **no way to deliver a
+notification to a specific user** — and crucially **no way for a non-admin to see the bell at all**. This
+amendment adds **targeted per-user delivery** without widening the admin broadcast set.
+
+### A. `recipientUserId` — who SEES it, distinct from `targetUserId` (who it's ABOUT)
+
+- A `Notification` gains a **`recipientUserId`** — the user who should **see** this notification in
+  **their** bell. It is **distinct from** the existing **`targetUserId`** (the *subject* of the event —
+  the grantee / elevated user a broadcast is *about*; see the live schema `model Notification` and
+  `notifications.service.ts`). The two answer different questions: `targetUserId` = "who is this event
+  about?", `recipientUserId` = "whose bell does this land in?". A row may carry one, both, or (for the
+  existing admin broadcasts) neither.
+- **Delivery semantics, additively:**
+  - `recipientUserId == null` → the existing **admin broadcast** behaviour, unchanged: visible to every
+    `notification:read` holder via the fan-out-on-read audience (§1).
+  - `recipientUserId == U` → a **targeted** notification visible to **U** in U's own bell — **even when U
+    is not an admin** and holds no `notification:read` over the broadcast set.
+- **Auth-contract change (the sharp part).** A non-admin recipient can now see the bell **for their OWN
+  targeted notifications only**, *without* gaining `notification:read` over the admin broadcast set. The
+  read endpoints must therefore resolve, per caller:
+  1. the caller's **own targeted** notifications (`recipientUserId == caller`) — always visible to the
+     recipient, **regardless of `notification:read`**; and
+  2. the **broadcast** set (`recipientUserId == null`) — visible **only if** the caller holds
+     `notification:read` (ADMIN-only by default, §6).
+  This is a deliberate, bounded relaxation of the v1 "the bell is ADMIN-only" gate: a non-admin sees a
+  **strict subset** scoped to rows explicitly addressed to them, and **never** the admin broadcast feed.
+  It does **not** add a new permission and does **not** grant `notification:read`; it scopes visibility by
+  **ownership of the row**, the same "you see your own" shape as `GET /users/me`. The
+  `notifications.controller.ts` per-endpoint gate and the `requireHumanId` human-only resolution are
+  updated accordingly (a recipient is, by construction, a human user). Service-account principals remain
+  excluded (no per-user bell state).
+
+### B. First trigger — the vault-setup nudge at login
+
+The first targeted notification:
+
+- **Condition:** at login, a user who **holds `secret:read`** ([[0061-secret-manager-zero-knowledge]] §7
+  / [[0046-roles-permissions-v2]]) **but has no `UserKeypair`** (they have never set a vault passphrase,
+  so they cannot decrypt any vault) gets a **one-time targeted** notification — `recipientUserId = that
+  user` — copy *"set up your vault passphrase"*, deep-linking to `/secrets`.
+- **Idempotent** via the existing dedupe mechanism (§4): **`dedupeKey = secret.vault_setup:<userId>`**.
+  Because `dedupeKey` is `@unique` on `Notification` (live schema), the emit **never re-fires** — a user
+  who logs in ten times before setting up their vault gets **exactly one** vault-setup notification, and
+  none after they create their `UserKeypair`. This is the same "the emitter is best-effort, so it must be
+  safe to fire twice" posture as §4. A new closed `NotificationType` literal (e.g. `secret.vault_setup`)
+  is added to the shared enum (§5) — the standard additive catalog-as-code change, with the golden-test
+  update + **web exhaustive-map re-typecheck** the §6 discipline already requires.
+- This nudge respects **INV-10** ([[0061-secret-manager-zero-knowledge]]): it carries **no secret value,
+  no key material** — only the metadata "you have not set up your vault" and a link. The server learns
+  nothing zero-knowledge (it already knows whether a `UserKeypair` row exists — that is non-secret
+  metadata, §9 of ADR-0061).
+
+### C. Ship the `/secrets` banner NOW (the now-deliverable)
+
+The CEO's *"+ banner ya"*: ship **immediately** a **`/secrets` page banner** for the **same condition**
+(`secret:read` ∧ no `UserKeypair`) prompting "set up your vault passphrase". The banner is a **client-side
+gate** the `/secrets` page can render today from already-available signals (the caller's permissions via
+`useCan('secret:read')` + whether their keypair exists) — it does **not** depend on the targeted-
+notification wiring. The **targeted notification (A+B) is the build behind this ADR**; the banner is the
+immediate, independently-deliverable surface so the prompt exists from day one while the bell wiring lands.
+
+### Amendment consequences
+
+- **Positive:** the bell becomes a **per-user delivery** surface, not just an admin broadcast — a user can
+  be nudged in their **own** bell without being made an admin; the vault-setup gap (a `secret:read` holder
+  who never set a passphrase, and so silently can't decrypt anything) is closed with an idempotent,
+  INV-10-safe nudge; the banner ships immediately, decoupled from the wiring.
+- **Negative / trade-offs (accepted):** a **second visibility axis** on the bell (broadcast vs targeted)
+  and the per-caller read resolution that splits "my targeted rows (always)" from "the broadcast set (if
+  `notification:read`)" — more read logic, but a *narrowing* (a non-admin sees strictly less, scoped to
+  their own rows), never a widening of the admin feed. The auth-contract change is **explicitly flagged**
+  here and must be covered by the authz tests (`notifications.authz.spec.ts`): a non-admin sees **their
+  own** targeted notification and **never** a broadcast one.
+- **Follow-ups:** the `recipientUserId` column + migration (FK to `User`, `@db.Uuid`, `SetNull` — same
+  shape as `targetUserId`); the per-caller read-resolution change in `notifications.service.ts` /
+  `notifications.controller.ts` (own-targeted-always + broadcast-if-permitted) + authz tests; the
+  login-time vault-setup emitter (dedupeKey `secret.vault_setup:<userId>`, fired post-auth, best-effort,
+  no-op once a `UserKeypair` exists); the new `secret.vault_setup` `NotificationType` literal + golden
+  test + web re-typecheck; the `/secrets` banner (now-deliverable, independent of the wiring).
+
+Related: #313 · #248 · #453 · [[0054-applications-workflow-engine]] · [[0048-service-accounts]] ·
 [[0046-roles-permissions-v2]] · [[0044-recent-activity-view]] · [[0034-consumables-design]] ·
 [[0033-asset-history-event-model]] · [[0031-logging-strategy]] · [[0030-list-pagination-contract]] ·
 [[0023-access-management-design]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
+[[0061-secret-manager-zero-knowledge]] (INV-10 — the vault-setup nudge condition) · [[INVARIANTS]] (INV-10) ·
 `docs/workflow-engine/frontend.md` (§6a)
