@@ -174,6 +174,68 @@
       "createError": "Couldn't create user"
     }
   },
+  "create": {
+    "breadcrumb": "New user",
+    "title": "New user",
+    "subtitle": "Onboard a person end to end — identity, role, a starting credential and an optional head start.",
+    "submit": "Create user",
+    "sections": {
+      "identity": "Identity"
+    },
+    "role": {
+      "label": "Role"
+    },
+    "credential": {
+      "title": "Sign-in credential",
+      "description": "Set a temporary password so they can sign in. They'll be asked to choose their own at first login.",
+      "passwordLabel": "Temporary password",
+      "passwordHelp": "One-time, for hand-off only. lazyit never stores it — it's set on the identity provider and replaced when the user signs in.",
+      "passwordRequired": "Set a temporary password so the new user can sign in.",
+      "generate": "Generate",
+      "show": "Show password",
+      "hide": "Hide password",
+      "copyLabel": "Copy password",
+      "checklist": {
+        "length": "8–70 characters",
+        "uppercase": "An uppercase letter",
+        "lowercase": "A lowercase letter",
+        "number": "A number",
+        "symbol": "A symbol"
+      }
+    },
+    "assignments": {
+      "title": "Head start (optional)",
+      "description": "Optionally give them something to start with — you can always do this later.",
+      "assetLabel": "Assign an asset",
+      "assetPlaceholder": "Select an asset…",
+      "assetSearch": "Search assets…",
+      "assetEmpty": "No matching assets.",
+      "assetHelp": "The asset is assigned to the new user once they're created.",
+      "applicationLabel": "Grant application access",
+      "applicationPlaceholder": "Select an application…",
+      "applicationSearch": "Search applications…",
+      "applicationEmpty": "No matching applications.",
+      "applicationHelp": "Opens an access grant for the new user.",
+      "accessLevelLabel": "Access level",
+      "accessLevelHelp": "Optional. Free-form, per application (e.g. admin, viewer)."
+    },
+    "handoff": {
+      "title": "Temporary password",
+      "description": "{name} can now sign in with this one-time password.",
+      "warning": "Hand this off now — it won't be shown again.",
+      "copyLabel": "Copy temporary password",
+      "copied": "Temporary password copied",
+      "openUser": "Open new user"
+    },
+    "toast": {
+      "created": "{name} created",
+      "createError": "Couldn't create the user",
+      "assetAssigned": "Asset assigned",
+      "assetError": "User created, but the asset couldn't be assigned",
+      "accessGranted": "Application access granted",
+      "accessError": "User created, but the application access couldn't be granted"
+    }
+  },
   "clone": {
     "action": "Clone",
     "title": "Clone {name}",
