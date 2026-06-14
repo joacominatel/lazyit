@@ -1,0 +1,33 @@
+{
+  // Second emit pass for the `@lazyit/shared/crypto` subpath ONLY — an ESM build alongside the
+  // CommonJS one from tsconfig.build.json (issue #429, ADR-0014). The main `.` barrel stays CJS for
+  // apps/api's CommonJS Jest; `/crypto` ships dual ESM/CJS so apps/web (Next bundler) and bun's test
+  // runtime consume real ESM via the package `exports` `import` condition — not a tsconfig `paths`
+  // alias to source. `@noble/*` is ESM-only ("type":"module"), so this ESM output `import`s it
+  // directly instead of relying on a CJS `require(esm)` shim.
+  //
+  // Output lands in `dist/esm/crypto/`; the committed `dist/esm/package.json` ({"type":"module"})
+  // marks every `.js` under it an ES module, while the rest of `dist/` stays CommonJS (the package
+  // root declares no "type"). moduleResolution "Bundler" preserves the source's extensionless
+  // relative imports (`./params`, `./aead`) — resolved by bun and the Next bundler, the only two
+  // consumers of this subpath.
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist/esm",
+    "rootDir": "./src",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": false,
+    "types": []
+  },
+  "include": ["src/crypto"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]
+}
