@@ -140,6 +140,19 @@ shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). 
 and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their application access
 ([[access-grant]]).
 
+> [!note] `GET /users` list item — derived activity counts (issue #386)
+> The `GET /users` LIST item is the full `UserSchema` (so it already carries the resolved `manager`
+> descriptor + `legajo`/`username`, [[0058-user-manager-and-clone-actions]]) **plus two OPTIONAL,
+> list-only activity counts** (`UserListItemSchema` in `@lazyit/shared`, `schemas/user-list.ts`):
+> `assetsInPossession` (active [[asset-assignment]]s, `releasedAt IS NULL` — [[0019-asset-assignment-integrity]])
+> and `appAccesses` (active [[access-grant]]s, `revokedAt IS NULL` — [[0023-access-management-design]]).
+> They power the [[0030-list-pagination-contract|Users column picker]] (#386). Both are **batched per
+> page** — `findPage` issues exactly **one Prisma `groupBy` per count** over the page's user ids (two
+> queries total, never N+1) and attaches the result to each row (`0` when none). They are **optional +
+> additive**: the single-user reads (`GET /users/:id`, `/me`, create/update) return the bare
+> `UserSchema` and DON'T carry them, so existing consumers are unaffected. The page envelope itself is
+> unchanged (ADR-0030 `Page<T>` — the counts ride on each row).
+
 > [!note] RBAC safety guards (ADR-0040, Round 3)
 > Changing a `role` is governed by two service-level guards. The API **refuses to remove the last
 > remaining `ADMIN`** — demoting away from `ADMIN`, offboarding or deleting the final administrator
