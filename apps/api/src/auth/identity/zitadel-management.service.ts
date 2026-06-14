@@ -196,11 +196,20 @@ export class ZitadelManagementService {
     lastName: string;
     role: Role;
     /**
-     * The initial password to set on the new Zitadel user (bundled first-run wizard, issue #335).
-     * When present it is set with `changeRequired:false` so the user is ACTIVE and can log in at once.
-     * Absent in BYOI / trusted-IdP, where lazyit never sets a credential (ADR-0016/0037).
+     * The password to set on the new Zitadel user (bundled management only). Absent in BYOI /
+     * trusted-IdP, where lazyit never sets a credential (ADR-0016/0037). The user is always created
+     * email pre-verified; whether the password must be changed at first login is {@link
+     * passwordChangeRequired}.
      */
     password?: string;
+    /**
+     * Whether {@link password} is TEMPORARY and must be changed at first login — Zitadel's
+     * `password.changeRequired` (ADR-0064 admin provisioning, issue #411). Defaults to `false`, the
+     * bootstrap-wizard semantics (issue #335): an immediately-usable initial password for the very
+     * first admin. The admin-provisioning path passes `true` (a one-time hand-off secret). Ignored when
+     * {@link password} is absent.
+     */
+    passwordChangeRequired?: boolean;
   }): Promise<string> {
     this.assertConfigured();
     const body: {
@@ -212,12 +221,18 @@ export class ZitadelManagementService {
       username: input.email,
       profile: { givenName: input.firstName, familyName: input.lastName },
       // Pre-verified: the operator's directory owns the mailbox (trusted-IdP model, ADR-0037/0038).
+      // Always-on email auto-verify (ADR-0064 §3) — there is no email-verified toggle.
       email: { email: input.email, isVerified: true },
     };
     if (input.password) {
-      // With a password + verified email + changeRequired:false the user is ACTIVE immediately and can
-      // log in right away — no e-mail-delivered initialization code (lazyit has no SMTP), issue #335.
-      body.password = { password: input.password, changeRequired: false };
+      // With a password + verified email the user is ACTIVE — no e-mail-delivered initialization code
+      // (lazyit has no SMTP). `changeRequired:false` (bootstrap, issue #335) lets the first admin log in
+      // and keep that password; `changeRequired:true` (admin provisioning, ADR-0064) makes Zitadel force
+      // a password change at first login, so the provisioned password is a one-time hand-off secret.
+      body.password = {
+        password: input.password,
+        changeRequired: input.passwordChangeRequired ?? false,
+      };
     }
     // NOT retried on a transient failure: a lost-response retry could create a DUPLICATE Zitadel user
     // (POST /v2/users/human is non-idempotent — no client-supplied id). A transient blip surfaces the
