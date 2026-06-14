@@ -3,7 +3,7 @@ title: The @lazyit/shared Package
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-13
+updated: 2026-06-14
 ---
 
 # The `@lazyit/shared` Package
@@ -94,13 +94,16 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
 > - `packages/shared/src/crypto/` exports X25519/ECDH key generation, HKDF-SHA-256, AES-256-GCM
 >   envelope split/join (the `WorkflowSecret`-identical ciphertext+authTag layout), Argon2id parameter
 >   constants, and Crockford-base32 recovery-key encode/decode.
-> - Imported as `@lazyit/shared/crypto` (a `package.json` subpath export — `dist/crypto/index.js`).
+> - Imported as `@lazyit/shared/crypto` (a `package.json` subpath export). It ships **dual ESM/CJS**
+>   via the `exports`-map conditions (#429, [[0014-shared-package-build]]): `import` →
+>   `dist/esm/crypto/index.js` (real ESM), `require` → `dist/crypto/index.js` (CJS). apps/web (the
+>   Next bundler) and bun's test runtime take the `import` condition, so they consume the **published
+>   subpath** — not a tsconfig `paths` alias to source (the v1 workaround, now removed).
 > - **No `window`, no DOM, no `.wasm`** — the WASM boundary is in `apps/web` (the Argon2id WASM
 >   wrapper `hash-wasm` is a `apps/web`-only dependency). The subpath is intentionally **excluded from
 >   the main barrel** (`src/index.ts` does NOT re-export it) because `@noble/*` is ESM-only: pulling it
 >   into the main barrel would break `apps/api`'s CommonJS Jest across every suite that touches the barrel.
->   `apps/api` is a ciphertext custodian and never needs these primitives.
-> - Follow-up **#429** tracks formally shipping the subpath as an ESM module type.
+>   `apps/api` is a ciphertext custodian and never needs these primitives (the INV-10 guard proves it).
 >
 > The wrapped DEK blobs, keypair crypto, and all decrypt/unwrap operations stay client-side in
 > `apps/web` — they never enter `shared` beyond the pure-function primitives above. The zero-knowledge
@@ -116,10 +119,13 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
 
 ## Conventions
 
-- **Strict TypeScript**, **built** with `tsc -p tsconfig.build.json` to `dist/` (CommonJS +
-  `.d.ts`); `main`/`types`/`exports` point at `dist/`. The base `tsconfig.json` stays no-emit
-  (editor / Bun). Turbo runs the build before dependents (`build`/`dev`/`test` `dependsOn`
-  `^build`). Why a build (and not source-direct): [[0014-shared-package-build]].
+- **Strict TypeScript**, **built** to `dist/` (CommonJS + `.d.ts`); `main`/`types`/`exports` point
+  at `dist/`. The `build` script (`scripts/build.ts`) runs two `tsc` emits — the CommonJS pass
+  (`tsconfig.build.json`) for the whole package plus an **ESM pass of `src/crypto` only**
+  (`tsconfig.crypto-esm.json` → `dist/esm/crypto/`), so the `@lazyit/shared/crypto` subpath ships
+  dual ESM/CJS (#429). The base `tsconfig.json` stays no-emit (editor / Bun). Turbo runs the build
+  before dependents (`build`/`dev`/`test` `dependsOn` `^build`). Why a build (and not source-direct),
+  and why `/crypto` is dual: [[0014-shared-package-build]].
 - Organize `src/` by kind — `schemas/` (zod + inferred types), `constants/`, `utils/` (pure fns),
   `clone/` (the per-entity "clone a record" sanitizers — pure mappers from a persisted record to a
   `CreateX`-shaped partial, used to pre-fill the create forms) — then re-export from the barrel
