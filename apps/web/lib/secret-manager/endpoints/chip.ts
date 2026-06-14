@@ -1,4 +1,4 @@
-import type { SecretItem, VaultMembership } from "@lazyit/shared";
+import type { HandleSuggestion, ResolvedHandle } from "@lazyit/shared";
 import { apiFetch } from "../../api/client";
 
 /**
@@ -13,26 +13,6 @@ import { apiFetch } from "../../api/client";
  */
 
 const BASE = "/secret-manager/items";
-
-/**
- * A handle autocomplete suggestion (`GET …/handles`) — server-visible metadata ONLY (handle/label/
- * vaultId), never a value. Frontend read-shape.
- */
-export interface HandleSuggestion {
-  handle: string;
-  label: string;
-  vaultId: string;
-}
-
-/**
- * The chip-resolution response (`GET …/by-handle/:handle`): the referenced item (ciphertext envelope)
- * plus the caller's OWN wrapped-DEK membership for its vault, so the browser can unwrap → decrypt in
- * place. 403 if the caller is not a live member of the item's vault; 404 if no live handle.
- */
-export interface ResolvedHandle {
-  item: SecretItem;
-  membership: VaultMembership;
-}
 
 /**
  * List handle suggestions, optionally filtered by a case-insensitive substring `q` over handle/label.
