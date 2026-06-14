@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { unwrapDekFromMembership } from "@/lib/secret-manager/crypto";
 import { useMyMembership } from "@/lib/secret-manager/hooks/use-members";
-import { useSecretSession } from "./secret-session";
+import { useSecretDek, useSecretSession } from "./secret-session";
 
 /**
  * useVaultDek — the read-chain bridge (ADR-0061 / crypto-design §6 step 2), packaged for the UI.
@@ -23,7 +23,10 @@ import { useSecretSession } from "./secret-session";
  * (safe — it's wrapped to the caller's public key); the UNWRAPPED dek is not.
  */
 export function useVaultDek(vaultId: string) {
-  const { getPrivateKey, getDek, hasDek, cacheDek, isUnlocked } = useSecretSession();
+  // Stable slice (key + unlock state) vs DEK slice (cache accessors) — SM-FE-006. The vault read-chain
+  // legitimately reacts to DEK churn, so subscribing here to both contexts is intended.
+  const { getPrivateKey, isUnlocked } = useSecretSession();
+  const { getDek, hasDek, cacheDek } = useSecretDek();
   const { data: membership, isLoading: membershipLoading } = useMyMembership(vaultId);
 
   const ensureDek = useCallback((): Uint8Array | undefined => {
