@@ -1,4 +1,8 @@
-import type { CreateUserKeypair, UserKeypair } from "@lazyit/shared";
+import type {
+  CreateUserKeypair,
+  UserKeypair,
+  UserPublicKey,
+} from "@lazyit/shared";
 import { apiFetch } from "../../api/client";
 
 /**
@@ -14,16 +18,6 @@ import { apiFetch } from "../../api/client";
  */
 
 const BASE = "/secret-manager";
-
-/**
- * The public-key lookup response (`GET /secret-manager/users/:userId/public-key`) — the ONLY keypair
- * field a non-owner may read, used by the granter to wrap a DEK to a target member. Frontend read-shape
- * only (not a shared DTO; the value is `publicKey` base64, never private material).
- */
-export interface UserPublicKey {
-  userId: string;
-  publicKey: string;
-}
 
 /** Fetch the caller's own keypair (public key + both wrapped private-key copies + salts/IVs). */
 export function getMyKeypair(): Promise<UserKeypair> {

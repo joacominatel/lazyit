@@ -7,15 +7,20 @@ import {
 } from '@nestjs/common';
 import type {
   CreateSecretItem,
-  CreateSecretVault,
+  CreateSecretVaultWithMembership,
   CreateUserKeypair,
   CreateVaultMembership,
+  HandleSuggestion,
   ResetUserKeypair,
+  ResolvedHandle,
   SecretItem as SecretItemWire,
   SecretVault as SecretVaultWire,
+  SecretVaultDetail,
   UpdateSecretItem,
   UpdateSecretVault,
   UserKeypair as UserKeypairWire,
+  UserPublicKey,
+  VaultMemberMeta,
   VaultMembership as VaultMembershipWire,
 } from '@lazyit/shared';
 import type {
@@ -144,9 +149,7 @@ export class SecretManagerService {
    * by design (left of the §9 line). 404 if that user has no keypair yet (they must bootstrap one before
    * they can be granted). Returns ONLY the public key + identity, never any wrapped private-key blob.
    */
-  async getUserPublicKey(
-    targetUserId: string,
-  ): Promise<{ userId: string; publicKey: string }> {
+  async getUserPublicKey(targetUserId: string): Promise<UserPublicKey> {
     const row = await this.prisma.userKeypair.findFirst({
       where: { userId: targetUserId },
       select: { userId: true, publicKey: true },
@@ -191,7 +194,7 @@ export class SecretManagerService {
   async getVault(
     principal: Principal | undefined,
     vaultId: string,
-  ): Promise<SecretVaultWire & { members: VaultMemberMeta[] }> {
+  ): Promise<SecretVaultDetail> {
     const userId = this.requireHumanId(principal);
     const vault = await this.getLiveVaultOr404(vaultId);
     await this.assertVaultMetadataVisible(principal, userId, vaultId);
@@ -206,7 +209,7 @@ export class SecretManagerService {
    */
   async createVault(
     principal: Principal | undefined,
-    dto: CreateVaultInput,
+    dto: CreateSecretVaultWithMembership,
   ): Promise<SecretVaultWire> {
     const userId = this.requireHumanId(principal);
     // Pre-check the live-name collision for a clean 409 message; the partial-unique index is the
@@ -602,7 +605,7 @@ export class SecretManagerService {
   async resolveByHandle(
     principal: Principal | undefined,
     handle: string,
-  ): Promise<{ item: SecretItemWire; membership: VaultMembershipWire }> {
+  ): Promise<ResolvedHandle> {
     const userId = this.requireHumanId(principal);
     const item = await this.prisma.secretItem.findFirst({ where: { handle } });
     if (!item) {
@@ -899,35 +902,4 @@ export class SecretManagerService {
       updatedAt: row.updatedAt.toISOString(),
     };
   }
-}
-
-/** Member display metadata (userId + name/email + memberSince) — NEVER a wrapped DEK or any blob. */
-export interface VaultMemberMeta {
-  userId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  memberSince: string;
-}
-
-/** Chip autocomplete suggestion — handles + labels (metadata) from the caller's vaults. NEVER values. */
-export interface HandleSuggestion {
-  handle: string;
-  label: string;
-  vaultId: string;
-}
-
-/**
- * Vault-create input: the non-secret name + the creator's own first wrapped-DEK membership (the DEK is
- * client-generated and posted wrapped). Composed by the controller from the two shared DTOs so the
- * service receives one cohesive object.
- */
-export interface CreateVaultInput {
-  name: CreateSecretVault['name'];
-  membership: {
-    ephemeralPublicKey: CreateVaultMembership['ephemeralPublicKey'];
-    wrapNonce: CreateVaultMembership['wrapNonce'];
-    wrappedDek: CreateVaultMembership['wrappedDek'];
-    wrapVersion: CreateVaultMembership['wrapVersion'];
-  };
 }

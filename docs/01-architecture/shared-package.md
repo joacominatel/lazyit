@@ -85,8 +85,15 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
 >
 > **Main barrel (`@lazyit/shared`)** — pure zod schemas and inferred types, no crypto:
 > - `schemas/secret-vault.ts`, `schemas/secret-item.ts`, `schemas/vault-membership.ts`,
->   `schemas/user-keypair.ts` — the wire-shape DTOs (base64 string blobs + metadata). No `@noble/*`.
->   Safe for `apps/api`'s CommonJS Jest to load via the main barrel.
+>   `schemas/user-keypair.ts` — the per-entity wire-shape DTOs (base64 string blobs + metadata). No
+>   `@noble/*`. Safe for `apps/api`'s CommonJS Jest to load via the main barrel.
+> - `schemas/secret-manager-views.ts` (#430) — the **composite/read shapes** that the per-entity
+>   schemas don't cover on their own, so api + web (and the slice-4 chip) share one definition instead
+>   of each side re-modelling them: `CreateSecretVaultWithMembershipSchema` (the `POST /secret-vaults`
+>   `{ name, membership }` body), `UserPublicKeySchema` (the public-key lookup `{ userId, publicKey }`),
+>   `VaultMemberMetaSchema` + `SecretVaultDetailSchema` (member metadata + the vault detail that embeds
+>   it), and `HandleSuggestionSchema` + `ResolvedHandleSchema` (the chip autocomplete + `{ item,
+>   membership }` resolution). Pure zod — composes only the sibling schemas above, still `@noble/*`-free.
 > - The **recovery-key zod validator** (Crockford-base32 format `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`) and
 >   the `{{ lazyit_secret.HANDLE }}` chip reference format are validated via schemas in this main barrel.
 >
