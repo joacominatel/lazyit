@@ -191,8 +191,11 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > a 503 surfaced — no half-provisioned user). This is a **second, narrower** carve-out than the bootstrap
 > wizard's initial password (which is `changeRequired:false` for the very first admin — [[0043-zitadel-source-of-truth]]
 > / #335). It reuses the existing **`user:manage`** gate (no new permission). Omitting `password` is fully
-> back-compatible (the previous no-credential create). _Phase 1 (backend + shared contract); the full-page
-> create UI with the password control is a later phase._
+> back-compatible (the previous no-credential create). Because `CloneUserSchema.profile` reuses
+> `CreateUserSchema`, **`POST /users/:id/clone` accepts the same optional `password`** and provisions it
+> identically (same `user:manage` gate, same BYOI-400 / `changeRequired:true` / never-persisted handling) —
+> a cloned user is a new user who likewise needs a one-time credential. _Phase 1 (backend + shared
+> contract); the full-page create UI with the password control is a later phase._
 
 **Web:** `users/[id]` is the asset-centric **per-person** detail page (the counterpart to the asset
 detail) — it composes the two nested reads above plus the user's authored [[article]]s, answering
