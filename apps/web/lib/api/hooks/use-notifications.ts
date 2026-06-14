@@ -14,11 +14,12 @@ import {
 import { createQueryKeys } from "../query-keys";
 
 /**
- * Read + action hooks for the in-app notification bell (ADR-0056). Until SSE lands (Phase 2, behind the
- * SAME endpoints), the bell is POLLED: the unread count and the dropdown list refetch on an interval so
- * a new nudge surfaces without a manual reload — the same poll-as-floor posture the workflow task inbox
- * takes. Every hook is ADMIN-only server-side (`notification:read`); the bell itself is gated by
- * `useCan('notification:read')`, so these only run for an admin.
+ * Read + action hooks for the in-app notification bell (ADR-0056, amended #453). Until SSE lands (Phase 2,
+ * behind the SAME endpoints), the bell is POLLED: the unread count and the dropdown list refetch on an
+ * interval so a new nudge surfaces without a manual reload — the same poll-as-floor posture the workflow
+ * task inbox takes. The endpoints are open to any authenticated human and scope the feed per caller
+ * server-side (own targeted rows always; the broadcast set only with `notification:read`), so these hooks
+ * run for every signed-in user — a non-admin sees only their own targeted rows (e.g. the vault-setup nudge).
  */
 const baseKeys = createQueryKeys("notifications");
 export const notificationKeys = {
@@ -35,9 +36,9 @@ export const NOTIFICATION_POLL_INTERVAL_MS = 45000;
 export const NOTIFICATION_PAGE_SIZE = 20;
 
 /**
- * The unread BADGE count — a tiny, frequently-polled query so the bell badge stays live. Enabled only
- * when the caller may read notifications (the bell passes `enabled` from `useCan('notification:read')`),
- * so a non-admin session never polls a 403.
+ * The unread BADGE count — a tiny, frequently-polled query so the bell badge stays live. The bell enables
+ * it for every authenticated human (the API scopes the count per caller); the badge only renders when the
+ * count is > 0, so a user with no notifications sees a clean bell.
  */
 export function useUnreadNotificationCount(enabled: boolean) {
   return useQuery({
@@ -51,8 +52,8 @@ export function useUnreadNotificationCount(enabled: boolean) {
 
 /**
  * The dropdown LIST — the most-recent page of notifications, each with its per-caller `read` flag.
- * Polled while the bell is mounted+enabled so the list stays current; `enabled` is typically the
- * dropdown's open state ANDed with the permission, so a closed bell doesn't poll the heavier list.
+ * Polled while the bell is mounted+enabled so the list stays current; `enabled` is the dropdown's open
+ * state, so a closed bell doesn't poll the heavier list.
  */
 export function useNotifications(enabled: boolean) {
   return useQuery({
