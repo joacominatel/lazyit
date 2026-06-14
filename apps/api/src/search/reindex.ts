@@ -58,9 +58,10 @@ const FILTERABLE_ATTRIBUTES: Partial<Record<SearchIndex, string[]>> = {
 export interface ReindexClient {
   index(uid: string): ReindexIndex;
   createIndex(uid: string, options: { primaryKey: 'id' }): AwaitableTask;
-  swapIndexes(
-    params: { indexes: [string, string]; rename: boolean }[],
-  ): AwaitableTask;
+  // Only `indexes` is sent: the newer `rename` field (added in later Meili/meilisearch-js) is
+  // rejected by the pinned server (v1.12.3), and `rename: false` is the swap default anyway, so
+  // omitting it preserves the swap-don't-rename behaviour and works against v1.12.x (#479).
+  swapIndexes(params: { indexes: [string, string] }[]): AwaitableTask;
   deleteIndexIfExists(uid: string): Promise<boolean>;
 }
 
@@ -163,7 +164,7 @@ export async function reindexIndex(
     // Atomic swap: queries against `index` see the old, complete data right up to the swap, then the
     // freshly-built data — never an empty or half-built index.
     await client
-      .swapIndexes([{ indexes: [index, tempUid], rename: false }])
+      .swapIndexes([{ indexes: [index, tempUid] }])
       .waitTask();
   } finally {
     // Dispose THIS run's own temp index (the per-run uid), never another concurrent rebuild's
