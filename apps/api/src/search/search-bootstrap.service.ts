@@ -12,7 +12,11 @@ import {
   projectUser,
   type SearchDocument,
 } from './search.documents';
-import { SearchService, type SearchIndex } from './search.service';
+import {
+  SearchService,
+  SEARCH_INDEXES,
+  type SearchIndex,
+} from './search.service';
 
 /**
  * Boot-time search self-heal (issue #370). A freshly-seeded database leaves the five Meili indexes
@@ -69,7 +73,7 @@ export class SearchBootstrapService implements OnApplicationBootstrap {
         `Search self-heal: ${stale.length} empty/missing index(es) [${stale.join(', ')}] — rebuilding in the background.`,
       );
       for (const index of stale) {
-        await this.rebuild(index);
+        await this.rebuild(index, 'self-heal');
       }
       return stale;
     } catch (err) {
@@ -80,17 +84,41 @@ export class SearchBootstrapService implements OnApplicationBootstrap {
     }
   }
 
-  /** Load the live set for one index and rebuild it (zero-downtime). Errors are logged, not thrown. */
-  private async rebuild(index: SearchIndex): Promise<void> {
+  /**
+   * One drift-reconcile pass (issue #383, ADR-0035 amendment 2026-06-14): rebuild **every** index from
+   * its live DB set, reusing the exact `loadDocs → rebuildIndex → reindexIndex` seam the boot self-heal
+   * and `reindex:all` use. Unlike {@link selfHeal} (which only touches empty/missing indexes), this runs
+   * unconditionally so a *partial* drift — a single dropped fire-and-forget `upsert`/`remove` while the
+   * DB stayed up — is repaired without a manual `reindex:all`. Each index is rebuilt zero-downtime via
+   * the temp-index-swap; a per-index failure is logged and the pass continues to the next index. Public
+   * so the {@link SearchReconcileSweeper} (and a test/operator) can trigger it directly. Sequential, to
+   * never run five concurrent rebuilds against a possibly-recovering engine.
+   */
+  async reconcileAll(): Promise<SearchIndex[]> {
+    for (const index of SEARCH_INDEXES) {
+      await this.rebuild(index, 'reconcile');
+    }
+    return [...SEARCH_INDEXES];
+  }
+
+  /**
+   * Load the live set for one index and rebuild it (zero-downtime). `label` only tags the log line
+   * (`self-heal` vs `reconcile`) so the two callers read distinctly in the logs. Errors are logged,
+   * not thrown — a single index's failure never aborts the surrounding pass.
+   */
+  private async rebuild(
+    index: SearchIndex,
+    label: 'self-heal' | 'reconcile',
+  ): Promise<void> {
     try {
       const docs = await this.loadDocs(index);
       await this.search.rebuildIndex(index, docs);
       this.logger.log(
-        `Search self-heal: rebuilt '${index}' with ${docs.length} document(s).`,
+        `Search ${label}: rebuilt '${index}' with ${docs.length} document(s).`,
       );
     } catch (err) {
       this.logger.error(
-        `Search self-heal: failed to rebuild '${index}': ${
+        `Search ${label}: failed to rebuild '${index}': ${
           err instanceof Error ? err.message : String(err)
         }`,
       );

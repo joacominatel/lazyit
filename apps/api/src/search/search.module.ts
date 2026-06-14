@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { SearchBootstrapService } from './search-bootstrap.service';
+import { SearchReconcileSweeper } from './search-reconcile.sweeper';
 import { SearchController } from './search.controller';
 import { SearchService } from './search.service';
 import { ArticleCategoriesModule } from '../article-categories/article-categories.module';
@@ -12,13 +13,17 @@ import { ArticleCategoriesModule } from '../article-categories/article-categorie
  * {@link SearchBootstrapService} runs a boot-time, background, no-op-when-populated self-heal of empty
  * Meili indexes (issue #370) — it injects the (global) PrismaService, so no extra module import.
  *
+ * {@link SearchReconcileSweeper} runs a periodic, `unref`'d drift-reconcile of every index (issue #383,
+ * ADR-0035 amendment 2026-06-14) so a dropped fire-and-forget write self-heals on a timer without a
+ * manual `reindex:all`. Cadence: `SEARCH_RECONCILE_INTERVAL_MS` (default hourly).
+ *
  * Imports {@link ArticleCategoriesModule} for the FolderAccessService — the ADR-0060 §5 article search
  * post-filter (INV-9) that drops a restricted article hit from a non-matching caller's results.
  */
 @Global()
 @Module({
   imports: [ArticleCategoriesModule],
-  providers: [SearchService, SearchBootstrapService],
+  providers: [SearchService, SearchBootstrapService, SearchReconcileSweeper],
   exports: [SearchService],
   controllers: [SearchController],
 })

@@ -135,6 +135,16 @@ Subsequent deploys do not need it — the API keeps Meili in sync incrementally.
 `SearchService` is fail-soft: if Meilisearch is unreachable, search calls no-op and the app
 continues to function ([[0035-search-architecture]]).
 
+> [!tip] Drift now self-heals on a timer (no manual reindex between deploys)
+> A fire-and-forget sync dropped while Meili is momentarily down leaves that index drifted from the
+> DB. The API runs a **periodic drift-reconcile sweeper** that rebuilds every index from the live DB
+> set (the same zero-downtime swap as `reindex:all`), so such drift repairs itself automatically —
+> default **hourly**, tunable via `SEARCH_RECONCILE_INTERVAL_MS` (milliseconds) in `.env.prod`
+> ([[0035-search-architecture]] amendment 2026-06-14, issue #383). `reindex:all` above stays the
+> first-deploy backfill and the deterministic big-hammer recovery after a long outage; the sweeper
+> handles ongoing drift in between. The sweep is `unref`'d (never holds the process open) and
+> fail-soft (a reconcile error never crashes the API).
+
 ## 3. Verify
 
 ```sh
