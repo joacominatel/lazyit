@@ -9,7 +9,7 @@ type Op =
   | { kind: 'createIndex'; uid: string }
   | { kind: 'addDocuments'; uid: string; ids: string[] }
   | { kind: 'updateFilterableAttributes'; uid: string; attributes: string[] }
-  | { kind: 'swap'; indexes: [string, string] }
+  | { kind: 'swap'; indexes: [string, string]; params: { indexes: [string, string] } }
   | { kind: 'deleteIndexIfExists'; uid: string };
 
 interface FakeOptions {
@@ -58,7 +58,13 @@ function fakeClient(opts: FakeOptions = {}): {
     }),
     swapIndexes: (params) =>
       task(() => {
-        ops.push({ kind: 'swap', indexes: params[0].indexes });
+        // Record the full swap param so a test can assert the exact wire shape — i.e. that ONLY
+        // `indexes` is sent and the `rename` field (rejected by Meili v1.12.3) is absent (#479).
+        ops.push({
+          kind: 'swap',
+          indexes: params[0].indexes,
+          params: params[0],
+        });
       }),
     deleteIndexIfExists: async (uid) => {
       ops.push({ kind: 'deleteIndexIfExists', uid });
@@ -86,9 +92,30 @@ describe('reindexIndex (authoritative rebuild)', () => {
       { kind: 'createIndex', uid: 'users' }, // ensure live index exists (first-deploy safe)
       { kind: 'createIndex', uid: TEMP }, // fresh, run-unique temp
       { kind: 'addDocuments', uid: TEMP, ids: ['u1', 'u2'] }, // live set into temp
-      { kind: 'swap', indexes: ['users', TEMP] }, // atomic, zero-downtime
+      {
+        kind: 'swap',
+        indexes: ['users', TEMP],
+        params: { indexes: ['users', TEMP] },
+      }, // atomic, zero-downtime
       { kind: 'deleteIndexIfExists', uid: TEMP }, // dispose this run's own temp (now stale docs)
     ]);
+  });
+
+  // #479: the pinned Meilisearch server (v1.12.3) rejects the newer `rename` field on /swap-indexes
+  // ("Unknown field `rename` inside `[0]`"). The swap must send ONLY `indexes` so it works on v1.12.x;
+  // `rename: false` is the swap default anyway, so omitting it preserves swap-don't-rename behaviour.
+  it('swaps with ONLY the `indexes` field — never the v1.12.3-unsupported `rename` (#479)', async () => {
+    const { client, ops } = fakeClient();
+
+    await reindexIndex(client, 'users', docs('u1'), RUN);
+
+    const swap = ops.find(
+      (op): op is Extract<Op, { kind: 'swap' }> => op.kind === 'swap',
+    );
+    expect(swap).toBeDefined();
+    // The exact wire payload: the two-index swap and nothing else (no `rename` key).
+    expect(swap?.params).toEqual({ indexes: ['users', TEMP] });
+    expect(swap?.params).not.toHaveProperty('rename');
   });
 
   it('derives the temp uid from a per-run token: `${index}__reindex_tmp_${runId}`', async () => {
