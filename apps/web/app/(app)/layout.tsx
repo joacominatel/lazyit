@@ -53,8 +53,9 @@ export default async function AppLayout({
             <GlobalSearch />
             <div className="ml-auto flex items-center gap-2">
               <ModeBanner />
-              {/* In-app notification bell (ADR-0056) — self-gates on `notification:read`
-                  (ADMIN-only), so it renders nothing for non-admins. */}
+              {/* In-app notification bell (ADR-0056, amended #453) — rendered for all
+                  authenticated humans; the API scopes feed visibility per recipient (a
+                  non-admin sees only their own targeted rows, e.g. the vault-setup nudge). */}
               <NotificationBell />
               <ThemeToggle />
               <UserMenu />

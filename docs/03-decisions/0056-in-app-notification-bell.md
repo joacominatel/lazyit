@@ -262,6 +262,17 @@ amendment adds **targeted per-user delivery** without widening the admin broadca
   updated accordingly (a recipient is, by construction, a human user). Service-account principals remain
   excluded (no per-user bell state).
 
+> **Bell-UI relaxation (frontend, 2026-06-14).** §8 originally **hid the bell entirely** for non-admins
+> (it self-gated on `useCan('notification:read')`, returning `null`). With targeted delivery landed, that
+> hiding would suppress a non-admin recipient's **own** nudge. The frontend now **renders the bell for
+> every authenticated human** and no longer self-gates on `notification:read`; visibility is scoped
+> **server-side** per recipient (own targeted rows always; the broadcast set only with `notification:read`)
+> — the API is the real gate, the client gate is removed (defense-in-depth was a 403-avoidance nicety, now
+> moot since the endpoints are open to any authenticated human and scope per caller). The unread badge
+> polls always (a cheap, per-caller COUNT); the heavier list still polls only while the popover is open. A
+> user with zero notifications sees a clean bell with no badge. Backend in PR #468; frontend catch-up under
+> #453.
+
 ### B. First trigger — the vault-setup nudge at login
 
 The first targeted notification:
@@ -282,7 +293,16 @@ The first targeted notification:
   nothing zero-knowledge (it already knows whether a `UserKeypair` row exists — that is non-secret
   metadata, §9 of ADR-0061).
 
-### C. Ship the `/secrets` banner NOW (the now-deliverable)
+### C. The `/secrets` banner — DROPPED (CEO decision, 2026-06-14)
+
+> **Update (2026-06-14) — Section C is intentionally NOT shipped.** Per a later CEO call the same day
+> (*"solo la campana"*), the standalone `/secrets` page banner is **dropped**. Two reasons make it
+> redundant: (1) the **bell is now rendered for every authenticated human** (see the bell-UI note below),
+> so the vault-setup nudge is discoverable from **any** page, not only `/secrets`; and (2) the `/secrets`
+> page already renders the keypair **bootstrap form** as the on-page CTA for the **exact same population**
+> (`secret:read` ∧ no `UserKeypair`), so a separate banner would just duplicate that prompt. The targeted
+> notification (A + B) — the real build behind this amendment — stands and is unaffected. The original
+> banner proposal is kept below for the record.
 
 The CEO's *"+ banner ya"*: ship **immediately** a **`/secrets` page banner** for the **same condition**
 (`secret:read` ∧ no `UserKeypair`) prompting "set up your vault passphrase". The banner is a **client-side
