@@ -118,10 +118,12 @@ model User {
   manualTasksCompleted     ManualTask[]      @relation("ManualTaskCompletedBy")
 
   // In-app notification bell (ADR-0056). Notifications this user is the SUBJECT of (the grantee /
-  // the elevated user — Notification.targetUserId, SetNull so deletion never blocks), and the
-  // per-admin read joins this user owns (NotificationRead.userId, Cascade — deleting the user drops
-  // only their read rows, never the events).
+  // the elevated user — Notification.targetUserId, SetNull so deletion never blocks), notifications
+  // TARGETED at this user's own bell (Notification.recipientUserId, SetNull — ADR-0056 amendment, #453),
+  // and the per-admin read joins this user owns (NotificationRead.userId, Cascade — deleting the user
+  // drops only their read rows, never the events).
   notificationsTargeting Notification[]     @relation("NotificationTargetUser")
+  notificationsReceiving Notification[]     @relation("NotificationRecipientUser")
   notificationReads      NotificationRead[] @relation("NotificationReader")
 
   // Secret Manager — zero-knowledge vaults (ADR-0061, #366). This user's single keypair (1:1,
@@ -1459,6 +1461,12 @@ model WorkflowSecret {
 /// to point at heterogeneous entities, exactly like the `recent_activity` view's text `entityId`.
 /// `targetUserId` IS a real (optional, SetNull) FK to the person the nudge is about, for a secondary
 /// click-through that survives the user's deletion.
+///
+/// `recipientUserId` (ADR-0056 amendment 2026-06-14, issue #453) is the SECOND visibility axis — who
+/// SEES this notification, distinct from `targetUserId` (who it is ABOUT). `null` = a BROADCAST to every
+/// `notification:read` holder (the v1 admin feed, unchanged); a uuid = a TARGETED nudge visible to THAT
+/// user in their own bell, even when they hold no `notification:read`. Same FK shape as `targetUserId`
+/// (optional, SetNull, @db.Uuid): losing the recipient never blocks deletion and the event survives.
 model Notification {
   id           String   @id @default(cuid())
   // The closed catalog type (NotificationType in @lazyit/shared) — drives the bell's icon + copy.
@@ -1476,24 +1484,31 @@ model Notification {
   entityId     String?
   // The person the nudge is ABOUT (grantee / elevated user). Optional FK, SetNull: losing the user
   // never blocks deletion and the event survives. @db.Uuid to match User.id.
-  targetUserId String?  @db.Uuid
-  targetUser   User?    @relation("NotificationTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  targetUserId    String?  @db.Uuid
+  targetUser      User?    @relation("NotificationTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  // Who SEES it (ADR-0056 amendment, #453): null = broadcast to every `notification:read` holder; a
+  // uuid = TARGETED to that user's own bell (even a non-admin). Same shape as targetUserId (optional FK,
+  // SetNull, @db.Uuid) — losing the recipient never blocks deletion and the event survives.
+  recipientUserId String?  @db.Uuid
+  recipientUser   User?    @relation("NotificationRecipientUser", fields: [recipientUserId], references: [id], onDelete: SetNull)
   // Server-built human headline + an optional one-line clarifier.
-  title        String
-  summary      String?
+  title           String
+  summary         String?
   // REDACTED extra context the web may render (names/ids only — never bodies/secrets/PII; INV-6).
-  metadata     Json?
-  createdAt    DateTime @default(now())
+  metadata        Json?
+  createdAt       DateTime @default(now())
 
   // The per-admin read joins for this event (fan-out-on-read). Restrict on that side: an event with
   // read history is not hard-deletable by a stray cascade — the retention sweep is the ONLY deleter,
   // and it removes the read joins FIRST, then the event.
   reads NotificationRead[]
 
-  // No updatedAt / deletedAt: append-only (ADR-0006). Indexes: the dedupe key (idempotent emit), and
-  // (type, createdAt) / createdAt for the newest-first feed + the retention sweep's age scan.
+  // No updatedAt / deletedAt: append-only (ADR-0006). Indexes: the dedupe key (idempotent emit),
+  // (type, createdAt) / createdAt for the newest-first feed + the retention sweep's age scan, and
+  // recipientUserId for the per-user targeted-feed scan (ADR-0056 amendment, #453).
   @@index([type, createdAt])
   @@index([createdAt])
+  @@index([recipientUserId])
   @@map("notifications")
 }
 

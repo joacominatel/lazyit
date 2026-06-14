@@ -10,8 +10,9 @@ import {
   type Page,
   type PageQuery,
 } from '@lazyit/shared';
-import { Prisma } from '../../generated/prisma/client';
+import { Prisma, type Role } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 /**
  * The input an emitter hands {@link NotificationsService.emit} to record one curated nudge (ADR-0056
@@ -29,75 +30,158 @@ export interface EmitNotificationInput {
   entityType?: NotificationEntityType | null;
   entityId?: string | null;
   targetUserId?: string | null;
+  /**
+   * Who SEES this notification (ADR-0056 amendment, #453). `null`/omitted = a BROADCAST to every
+   * `notification:read` holder (the v1 admin feed, the default for all existing emitters). A uuid = a
+   * TARGETED nudge that lands ONLY in that user's own bell — visible even when they hold no
+   * `notification:read`.
+   */
+  recipientUserId?: string | null;
   /** Small, REDACTED extra context (names/ids only). */
   metadata?: Record<string, unknown> | null;
 }
 
 /**
+ * The CALLER reading the bell — their human user id (the per-user read-state key) plus their DB role
+ * (the input to the broadcast-visibility check, ADR-0056 amendment). The service resolves whether the
+ * role holds `notification:read` to decide if the caller may see the broadcast set; the controller only
+ * forwards the principal's id + role, never a pre-computed permission, so the authZ decision lives in
+ * one place.
+ */
+export interface NotificationViewer {
+  userId: string;
+  role: Role;
+}
+
+/**
  * NotificationsService — the in-app notification bell store (ADR-0056). An APPEND-ONLY `Notification`
- * event table + a per-admin `NotificationRead` join, delivered by POLL (v1). Two faces:
- *   - the READ API the controller exposes (gated `notification:read`): the caller's paged feed with a
- *     folded-in per-caller `read` flag, the unread count (an anti-join), and mark-one / mark-all read.
+ * event table + a per-user `NotificationRead` join, delivered by POLL (v1). Two faces:
+ *   - the READ API the controller exposes: the caller's paged feed with a folded-in per-caller `read`
+ *     flag, the unread count (an anti-join), and mark-one / mark-all read.
  *   - the EMIT API the post-commit emitters call ({@link emit}) — idempotent on `dedupeKey`.
  *
- * Fan-out-on-READ: an event is written ONCE; "unread for admin A" = a Notification with no
+ * Fan-out-on-READ: an event is written ONCE; "unread for caller A" = a *visible* Notification with no
  * NotificationRead row for A. Storage is proportional to EVENTS, not events × admins, and the audience
- * (every holder of `notification:read`) is computed at READ time, so it is always current — an admin
- * added after an event still sees it; a removed admin leaves no stale rows.
+ * is computed at READ time, so it is always current — an admin added after an event still sees it; a
+ * removed admin leaves no stale rows.
+ *
+ * VISIBILITY (the auth contract, ADR-0056 amendment 2026-06-14, #453). Every read method scopes its
+ * query by {@link visibilityWhere}: a caller sees
+ *   (a) their OWN TARGETED rows (`recipientUserId == caller`) — ALWAYS, regardless of `notification:read`
+ *       (so a non-admin can read a notification addressed to them, the same "you see your own" shape as
+ *       `GET /users/me`); PLUS
+ *   (b) the BROADCAST set (`recipientUserId IS NULL`) — ONLY IF the caller's role holds
+ *       `notification:read` (ADMIN-only by default).
+ * This is enforced in ONE place — the service — so the controller can stay open to any authenticated
+ * human and the scope can never be bypassed. Mark-read/unread-count reuse the SAME `where`, so they are
+ * IDOR-safe by construction: a caller can never mark or count a row they cannot see (notably another
+ * user's targeted notification, or — for a non-admin — any broadcast row).
  */
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly permissions: PermissionResolverService,
+  ) {}
+
+  /**
+   * The visibility scope for a caller (ADR-0056 amendment, #453) — the single source of truth every
+   * read path applies. Always includes the caller's own targeted rows; includes the broadcast set only
+   * when the role holds `notification:read`. Returned as a Prisma `where` fragment so `findPage`,
+   * `unreadCount`, `markRead` and `markAllRead` all scope IDENTICALLY (no path can widen the audience).
+   */
+  private async visibilityWhere(
+    viewer: NotificationViewer,
+  ): Promise<Prisma.NotificationWhereInput> {
+    const canReadBroadcast = await this.permissions.hasAll(viewer.role, [
+      'notification:read',
+    ]);
+    // (a) own targeted rows — always; (b) broadcast rows — only for a notification:read holder.
+    const or: Prisma.NotificationWhereInput[] = [
+      { recipientUserId: viewer.userId },
+    ];
+    if (canReadBroadcast) {
+      or.push({ recipientUserId: null });
+    }
+    return { OR: or };
+  }
 
   /**
    * The caller's notification feed (newest-first, paged per ADR-0030) — unread AND read, each item
-   * carrying its per-CALLER `read` flag. The read flag is folded in by LEFT-joining the caller's
-   * NotificationRead rows (Prisma `include` filtered to `userId`), so the web never stitches two lists.
-   * `total` is the count over the caller's whole (retained) set. Runs the page + count in one
-   * transaction so the total can't drift from the page.
+   * carrying its per-CALLER `read` flag. SCOPED by {@link visibilityWhere} (ADR-0056 amendment, #453):
+   * the caller's own targeted rows always, plus the broadcast set only if they hold `notification:read`.
+   * The read flag is folded in by LEFT-joining the caller's NotificationRead rows (Prisma `include`
+   * filtered to `userId`), so the web never stitches two lists. `total` is the count over the caller's
+   * VISIBLE (retained) set. Runs the page + count in one transaction so the total can't drift from the
+   * page.
    */
-  async findPage(userId: string, page: PageQuery): Promise<Page<NotificationWire>> {
+  async findPage(
+    viewer: NotificationViewer,
+    page: PageQuery,
+  ): Promise<Page<NotificationWire>> {
     const { take, skip } = offsetOf(page);
+    const where = await this.visibilityWhere(viewer);
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.notification.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
         take,
         skip,
         // Only the CALLER's read row (if any) — the anti-join that yields the per-caller `read` flag.
-        include: { reads: { where: { userId }, select: { id: true }, take: 1 } },
+        include: {
+          reads: { where: { userId: viewer.userId }, select: { id: true }, take: 1 },
+        },
       }),
-      this.prisma.notification.count(),
+      this.prisma.notification.count({ where }),
     ]);
     const items = rows.map((row) => this.toWire(row, row.reads.length > 0));
     return pageOf(items, total, page);
   }
 
   /**
-   * The badge number — the caller's UNREAD count (ADR-0056 §2). One anti-join: notifications with NO
-   * NotificationRead row for this admin. Expressed as a `count` with a `reads: { none: { userId } }`
-   * filter so Postgres does the anti-join (no N+1, no fetching rows).
+   * The badge number — the caller's UNREAD count (ADR-0056 §2). An anti-join SCOPED to the caller's
+   * visible set ({@link visibilityWhere}): notifications the caller can SEE with NO NotificationRead row
+   * for them. Combining the visibility `where` with `reads: { none }` is what makes the count IDOR-safe
+   * — a non-admin can never count broadcast rows, and no caller can count another user's targeted rows.
    */
-  unreadCount(userId: string): Promise<number> {
+  async unreadCount(viewer: NotificationViewer): Promise<number> {
+    const where = await this.visibilityWhere(viewer);
     return this.prisma.notification.count({
-      where: { reads: { none: { userId } } },
+      where: { AND: [where, { reads: { none: { userId: viewer.userId } } }] },
     });
   }
 
   /**
-   * Mark ONE notification read for the caller (idempotent upsert of the NotificationRead row). A
-   * missing notification id is a clean no-op (`marked: 0`) — the bell never 404s on a row the retention
-   * sweep may have pruned out from under a stale client. Returns `marked` (0 if it was already read or
-   * absent) + the FRESH unread count so the badge updates without a refetch.
+   * Mark ONE notification read for the caller — IDOR-safe (ADR-0056 amendment, #453). First confirms the
+   * notification is WITHIN the caller's visible scope ({@link visibilityWhere}); a row the caller cannot
+   * see (another user's targeted notif, or — for a non-admin — any broadcast row) is a clean no-op
+   * (`marked: 0`), never marked and never disclosed. A missing/retention-pruned id is likewise a no-op
+   * (the bell never 404s on a stale client). Returns `marked` (0 if it was invisible, already read or
+   * absent) + the FRESH (scoped) unread count so the badge updates without a refetch.
    */
-  async markRead(userId: string, notificationId: string): Promise<MarkReadResult> {
+  async markRead(
+    viewer: NotificationViewer,
+    notificationId: string,
+  ): Promise<MarkReadResult> {
+    const where = await this.visibilityWhere(viewer);
+    // Gate on VISIBILITY before writing any read row: the caller may only mark what they can see.
+    const visible = await this.prisma.notification.findFirst({
+      where: { AND: [where, { id: notificationId }] },
+      select: { id: true },
+    });
+    if (!visible) {
+      // Invisible (not theirs / not a permitted broadcast) or absent → no-op, no disclosure.
+      return { marked: 0, unread: await this.unreadCount(viewer) };
+    }
+
     let marked = 0;
     try {
       // create() throws P2002 on the (notificationId, userId) unique if already read → idempotent: the
-      // mark is a no-op and `marked` stays 0. A missing notification throws P2003 (FK) → also a no-op.
+      // mark is a no-op and `marked` stays 0. A racing retention delete throws P2003 (FK) → also a no-op.
       await this.prisma.notificationRead.create({
-        data: { notificationId, userId },
+        data: { notificationId, userId: viewer.userId },
       });
       marked = 1;
     } catch (err) {
@@ -105,29 +189,32 @@ export class NotificationsService {
         throw err;
       }
     }
-    const unread = await this.unreadCount(userId);
+    const unread = await this.unreadCount(viewer);
     return { marked, unread };
   }
 
   /**
-   * Mark ALL the caller's currently-unread notifications read (ADR-0056 §2). Inserts a NotificationRead
-   * row for every notification the caller has no read row for, in one `createMany` with
+   * Mark ALL the caller's currently-unread VISIBLE notifications read (ADR-0056 §2). SCOPED by
+   * {@link visibilityWhere}: it only ever marks rows the caller can see, so mark-all can never touch
+   * another user's targeted notification or (for a non-admin) a broadcast row. Inserts a NotificationRead
+   * row for every visible notification the caller has no read row for, in one `createMany` with
    * `skipDuplicates` (so a concurrent mark-one can't collide). Returns how many rows were newly written
    * (`marked`) + the fresh unread count (0 after a successful mark-all).
    */
-  async markAllRead(userId: string): Promise<MarkReadResult> {
+  async markAllRead(viewer: NotificationViewer): Promise<MarkReadResult> {
+    const where = await this.visibilityWhere(viewer);
     const unreadIds = await this.prisma.notification.findMany({
-      where: { reads: { none: { userId } } },
+      where: { AND: [where, { reads: { none: { userId: viewer.userId } } }] },
       select: { id: true },
     });
     if (unreadIds.length === 0) {
       return { marked: 0, unread: 0 };
     }
     const result = await this.prisma.notificationRead.createMany({
-      data: unreadIds.map((n) => ({ notificationId: n.id, userId })),
+      data: unreadIds.map((n) => ({ notificationId: n.id, userId: viewer.userId })),
       skipDuplicates: true,
     });
-    const unread = await this.unreadCount(userId);
+    const unread = await this.unreadCount(viewer);
     return { marked: result.count, unread };
   }
 
@@ -153,6 +240,9 @@ export class NotificationsService {
           ...(input.entityId != null ? { entityId: input.entityId } : {}),
           ...(input.targetUserId != null
             ? { targetUserId: input.targetUserId }
+            : {}),
+          ...(input.recipientUserId != null
+            ? { recipientUserId: input.recipientUserId }
             : {}),
           ...(input.metadata != null
             ? { metadata: input.metadata as Prisma.InputJsonValue }
@@ -189,6 +279,7 @@ export class NotificationsService {
       entityType: string | null;
       entityId: string | null;
       targetUserId: string | null;
+      recipientUserId: string | null;
       metadata: Prisma.JsonValue | null;
       createdAt: Date;
     },
@@ -203,6 +294,7 @@ export class NotificationsService {
       entityType: row.entityType as NotificationEntityType | null,
       entityId: row.entityId,
       targetUserId: row.targetUserId,
+      recipientUserId: row.recipientUserId,
       metadata: (row.metadata as Record<string, unknown> | null) ?? null,
       read,
       createdAt: row.createdAt.toISOString(),
@@ -219,6 +311,7 @@ export class NotificationsService {
       case 'low_stock':
         return 'warning';
       case 'workflow.manual_task':
+      case 'secret.vault_setup':
         return 'info';
       default:
         return 'info';
