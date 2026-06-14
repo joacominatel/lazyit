@@ -983,6 +983,14 @@ function DeleteItemDialog({
 // AddMemberDialog — pick a user → wrap DEK to their public key → grant
 // ---------------------------------------------------------------------------
 
+/**
+ * AddMemberDialog — the OUTER shell. SM-FE-004: the grant flow pulls the WHOLE user directory
+ * (`useUsers`) plus this vault's membership/members queries. Those used to fire on vault-detail mount even
+ * while the dialog was closed, because the heavy hooks lived on this always-mounted component. We now keep
+ * the hooks in {@link AddMemberDialogBody} and mount the body ONLY when `open` is true — so nothing fetches
+ * until the admin actually opens the grant dialog. The dialog chrome (title/description) stays in the shell
+ * so the open/close transition is unaffected.
+ */
 function AddMemberDialog({
   open,
   onOpenChange,
@@ -991,6 +999,31 @@ function AddMemberDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   vaultId: string;
+}) {
+  const t = useTranslations("secrets");
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t("members.addTitle")}</DialogTitle>
+          <DialogDescription>{t("members.addDescription")}</DialogDescription>
+        </DialogHeader>
+        {/* Gate the data hooks behind `open` — the body (and its useUsers/useMembers/useMyMembership/
+            useUserPublicKey queries) only mounts once the dialog is open. */}
+        {open ? <AddMemberDialogBody vaultId={vaultId} onClose={() => onOpenChange(false)} /> : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The grant form + its data hooks. Mounted only while the dialog is open (SM-FE-004). */
+function AddMemberDialogBody({
+  vaultId,
+  onClose,
+}: {
+  vaultId: string;
+  onClose: () => void;
 }) {
   const t = useTranslations("secrets");
   const tc = useTranslations("common");
@@ -1014,11 +1047,6 @@ function AddMemberDialog({
     isError: publicKeyError,
     error: publicKeyErrorObj,
   } = useUserPublicKey(targetUserId || undefined);
-
-  function handleOpenChange(next: boolean) {
-    if (!next) setTargetUserId("");
-    onOpenChange(next);
-  }
 
   // Filter out users who are already members.
   const memberUserIds = new Set(currentMembers?.map((m) => m.userId) ?? []);
@@ -1064,7 +1092,7 @@ function AddMemberDialog({
         ? `${targetUser.firstName} ${targetUser.lastName}`
         : targetUserId;
       toast.success(t("members.granted", { name: targetName }));
-      handleOpenChange(false);
+      onClose();
     } catch (err) {
       notifyError(err, t("members.grantError"));
     } finally {
@@ -1073,93 +1101,69 @@ function AddMemberDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{t("members.addTitle")}</DialogTitle>
-          <DialogDescription>{t("members.addDescription")}</DialogDescription>
-        </DialogHeader>
+    <form onSubmit={handleGrant} className="space-y-4">
+      <Field>
+        <FieldLabel htmlFor="grant-user">{t("members.userLabel")}</FieldLabel>
+        {usersLoading ? (
+          <div className="h-9 animate-pulse rounded-md bg-muted" />
+        ) : usersLoadError ? (
+          // SM-WEB-02: a load error must be distinct from "no one to add".
+          <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {t("members.usersLoadError")}
+          </p>
+        ) : noEligible ? (
+          // SM-WEB-02: explicit empty state instead of a dead <select> with only the placeholder.
+          <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            {t("members.noEligible")}
+          </p>
+        ) : (
+          <select
+            id="grant-user"
+            value={targetUserId}
+            onChange={(e) => setTargetUserId(e.target.value)}
+            disabled={busy}
+            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="">{t("members.selectUser")}</option>
+            {eligibleUsers.map((u: User) => (
+              <option key={u.id} value={u.id}>
+                {u.firstName} {u.lastName} ({u.email})
+              </option>
+            ))}
+          </select>
+        )}
+        {targetUserId && !publicKeyLoading && !targetPublicKeyData ? (
+          <FieldDescription className="text-destructive">
+            {/* SECW-03: a 404 means the target never bootstrapped — give an actionable message;
+                any other resolved-empty key keeps the generic note. */}
+            {targetNoKeypair ? t("members.targetNoKeypair") : t("members.noPublicKey")}
+          </FieldDescription>
+        ) : null}
+      </Field>
 
-        <form onSubmit={handleGrant} className="space-y-4">
-          <Field>
-            <FieldLabel htmlFor="grant-user">{t("members.userLabel")}</FieldLabel>
-            {usersLoading ? (
-              <div className="h-9 animate-pulse rounded-md bg-muted" />
-            ) : usersLoadError ? (
-              // SM-WEB-02: a load error must be distinct from "no one to add".
-              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                {t("members.usersLoadError")}
-              </p>
-            ) : noEligible ? (
-              // SM-WEB-02: explicit empty state instead of a dead <select> with only the placeholder.
-              <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                {t("members.noEligible")}
-              </p>
-            ) : (
-              <select
-                id="grant-user"
-                value={targetUserId}
-                onChange={(e) => setTargetUserId(e.target.value)}
-                disabled={busy}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                <option value="">{t("members.selectUser")}</option>
-                {eligibleUsers.map((u: User) => (
-                  <option key={u.id} value={u.id}>
-                    {u.firstName} {u.lastName} ({u.email})
-                  </option>
-                ))}
-              </select>
-            )}
-            {targetUserId && !publicKeyLoading && !targetPublicKeyData ? (
-              <FieldDescription className="text-destructive">
-                {/* SECW-03: a 404 means the target never bootstrapped — give an actionable message;
-                    any other resolved-empty key keeps the generic note. */}
-                {targetNoKeypair ? t("members.targetNoKeypair") : t("members.noPublicKey")}
-              </FieldDescription>
+      {!usersLoading && !usersLoadError && !noEligible ? (
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+            {tc("cancel")}
+          </Button>
+          <Button
+            type="submit"
+            disabled={busy || !targetUserId || publicKeyLoading || !targetPublicKeyData}
+          >
+            {busy || publicKeyLoading ? (
+              <ArrowPathIcon className="size-4 animate-spin" />
             ) : null}
-          </Field>
-
-          {!usersLoading && !usersLoadError && !noEligible ? (
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => handleOpenChange(false)}
-                disabled={busy}
-              >
-                {tc("cancel")}
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  busy ||
-                  !targetUserId ||
-                  publicKeyLoading ||
-                  !targetPublicKeyData
-                }
-              >
-                {busy || publicKeyLoading ? (
-                  <ArrowPathIcon className="size-4 animate-spin" />
-                ) : null}
-                {busy ? t("members.granting") : t("members.grantSubmit")}
-              </Button>
-            </DialogFooter>
-          ) : (
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => handleOpenChange(false)}
-                disabled={busy}
-              >
-                {tc("cancel")}
-              </Button>
-            </DialogFooter>
-          )}
-        </form>
-      </DialogContent>
-    </Dialog>
+            {busy ? t("members.granting") : t("members.grantSubmit")}
+          </Button>
+        </DialogFooter>
+      ) : (
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+            {tc("cancel")}
+          </Button>
+        </DialogFooter>
+      )}
+    </form>
   );
 }
 
