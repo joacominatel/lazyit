@@ -31,16 +31,34 @@
       "name": "Name",
       "email": "Email",
       "role": "Role",
+      "manager": "Manager",
+      "legajo": "Employee number",
+      "username": "Username",
       "status": "Status",
+      "assetsInPossession": "Assets",
+      "appAccesses": "Apps",
       "updated": "Updated",
       "actions": "Actions"
     },
+    "cells": {
+      "empty": "—"
+    },
     "columnPicker": {
       "label": "Columns",
+      "groups": {
+        "general": "General",
+        "identity": "Identity",
+        "activity": "Activity"
+      },
       "columns": {
         "email": "Email",
         "role": "Role",
+        "manager": "Manager",
+        "legajo": "Employee number",
+        "username": "Username",
         "status": "Status",
+        "assetsInPossession": "Assets in possession",
+        "appAccesses": "App accesses",
         "updated": "Updated"
       }
     },
