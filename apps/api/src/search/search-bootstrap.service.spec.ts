@@ -73,7 +73,9 @@ describe('SearchBootstrapService', () => {
       expect(healed).toEqual(['assets', 'articles']);
       // Only the stale indexes were rebuilt — users/locations/applications were skipped.
       expect(search.rebuildIndex).toHaveBeenCalledTimes(2);
-      expect(search.rebuildIndex).toHaveBeenCalledWith('assets', [{ id: 'a1' }]);
+      expect(search.rebuildIndex).toHaveBeenCalledWith('assets', [
+        { id: 'a1' },
+      ]);
       expect(search.rebuildIndex).toHaveBeenCalledWith('articles', [
         { id: 'ar1' },
         { id: 'ar2' },
@@ -126,6 +128,44 @@ describe('SearchBootstrapService', () => {
         { id: 'ar1' },
         { id: 'ar2' },
       ]);
+    });
+  });
+
+  describe('reconcileAll', () => {
+    it('rebuilds EVERY index (not just empty/missing) — for the drift-reconcile sweeper, issue #383', async () => {
+      const rebuilt = await build(search, prisma).reconcileAll();
+
+      // All five indexes, regardless of current doc counts — emptyOrMissingIndexes is NOT consulted.
+      expect(rebuilt).toEqual([
+        'assets',
+        'articles',
+        'users',
+        'locations',
+        'applications',
+      ]);
+      expect(search.emptyOrMissingIndexes).not.toHaveBeenCalled();
+      expect(search.rebuildIndex).toHaveBeenCalledTimes(5);
+      expect(search.rebuildIndex).toHaveBeenCalledWith('assets', [
+        { id: 'a1' },
+      ]);
+    });
+
+    it('continues to the next index when one rebuild fails (per-index fail-soft)', async () => {
+      search.rebuildIndex.mockRejectedValueOnce(
+        new Error('rebuild assets failed'),
+      );
+
+      const rebuilt = await build(search, prisma).reconcileAll();
+
+      // assets failed but the pass still attempted (and reported) all five indexes.
+      expect(rebuilt).toEqual([
+        'assets',
+        'articles',
+        'users',
+        'locations',
+        'applications',
+      ]);
+      expect(search.rebuildIndex).toHaveBeenCalledTimes(5);
     });
   });
 
