@@ -79,6 +79,15 @@ const TYPE_META: Record<
     tone: "bg-destructive/10 text-destructive",
     href: () => "/settings/integrations/tasks",
   },
+  // The login-time vault-setup nudge (ADR-0056 amendment, #453) — a TARGETED per-user notification
+  // prompting a `secret:read` holder with no keypair to set up their vault passphrase. Deep-links to the
+  // Secret Manager bootstrap. (The richer bell/banner UX is the frontend follow-up; this entry keeps the
+  // closed-enum map exhaustive so the type is renderable.)
+  "secret.vault_setup": {
+    icon: KeyIcon,
+    tone: "bg-pillar-access/10 text-pillar-access",
+    href: () => "/secrets",
+  },
 };
 
 /** Fallback meta for an unknown future type (defensive — the closed enum should make this unreachable). */
