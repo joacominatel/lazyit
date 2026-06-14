@@ -375,11 +375,6 @@ export default function UsersPage() {
   const total = page?.total ?? 0;
   const isEmpty = total === 0;
 
-  function openCreate() {
-    setEditing(undefined);
-    setFormOpen(true);
-  }
-
   function openEdit(user: User) {
     setEditing(user);
     setFormOpen(true);
@@ -432,9 +427,11 @@ export default function UsersPage() {
               />
             ) : null}
             {canManage ? (
-              <Button onClick={openCreate}>
-                <PlusIcon />
-                {t("list.newUser")}
+              <Button asChild>
+                <Link href="/users/new">
+                  <PlusIcon />
+                  {t("list.newUser")}
+                </Link>
               </Button>
             ) : null}
           </>
@@ -459,7 +456,7 @@ export default function UsersPage() {
           description={t("empty.description")}
           action={
             canManage
-              ? { label: t("empty.action"), onClick: openCreate }
+              ? { label: t("empty.action"), href: "/users/new" }
               : undefined
           }
         />
