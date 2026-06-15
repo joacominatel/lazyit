@@ -227,7 +227,7 @@ function DonutRing({
     >
       {/* Inner disc punches the ring into a donut and carries the total. */}
       <div className="flex size-[6.5rem] flex-col items-center justify-center rounded-full bg-card text-center shadow-e1">
-        <span className="text-2xl font-semibold tabular-nums leading-none text-foreground">
+        <span className="text-display font-semibold tabular-nums leading-none text-foreground">
           {total}
         </span>
         <span className="mt-1 text-xs text-muted-foreground">
