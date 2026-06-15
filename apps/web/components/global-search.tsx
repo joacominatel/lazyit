@@ -123,7 +123,7 @@ export function GlobalSearch() {
         <span className="hidden flex-1 text-left sm:inline">
           {t("search.placeholderShort")}
         </span>
-        <kbd className="pointer-events-none hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium sm:inline-flex">
+        <kbd className="pointer-events-none hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-xs font-medium sm:inline-flex">
           ⌘K
         </kbd>
       </button>
@@ -239,7 +239,7 @@ export function GlobalSearch() {
               )}
             </CommandList>
 
-            <div className="flex items-center justify-end gap-3 border-t px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="flex items-center justify-end gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
               <span>
                 <Kbd>↑</Kbd>
                 <Kbd>↓</Kbd> {t("search.navigate")}
@@ -308,7 +308,7 @@ function FilterChip({
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="mx-0.5 rounded border bg-muted px-1 font-mono text-[10px]">
+    <kbd className="mx-0.5 rounded border bg-muted px-1 font-mono text-xs">
       {children}
     </kbd>
   );
