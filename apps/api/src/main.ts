@@ -49,7 +49,7 @@ async function bootstrap() {
   // error UX — cross-origin responses hide non-safelisted headers from JS unless exposed.
   app.enableCors({
     origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     exposedHeaders: ['X-Request-Id'],
     credentials: true,
   });
