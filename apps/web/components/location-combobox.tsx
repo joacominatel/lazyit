@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Combobox } from "@/components/combobox";
 import { useLocation, useLocationList } from "@/lib/api/hooks/use-locations";
@@ -32,6 +33,7 @@ export function LocationCombobox({
   searchPlaceholder?: string;
   emptyText?: string;
 }) {
+  const tc = useTranslations("common");
   const [query, setQuery] = useState("");
   const { data, isFetching } = useLocationList({
     q: query || undefined,
@@ -62,6 +64,8 @@ export function LocationCombobox({
       placeholder={placeholder}
       searchPlaceholder={searchPlaceholder}
       emptyText={emptyText}
+      loadingText={tc("searching")}
+      typeToSearchText={tc("typeToSearch")}
     />
   );
 }
