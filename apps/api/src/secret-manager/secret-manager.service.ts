@@ -11,6 +11,7 @@ import type {
   CreateUserKeypair,
   CreateVaultMembership,
   HandleSuggestion,
+  RegenerateRecoveryKey,
   ResetUserKeypair,
   ResolvedHandle,
   SecretItem as SecretItemWire,
@@ -136,6 +137,52 @@ export class SecretManagerService {
       });
       await this.writeAudit(tx, {
         action: 'KEYPAIR_RESET',
+        actorId: userId,
+        targetUserId: userId,
+      });
+      return row;
+    });
+    return this.keypairToWire(updated);
+  }
+
+  /**
+   * Regenerate ONLY the recovery wrap of the caller's EXISTING keypair (ADR-0065). Self-only, human-only.
+   * The "lost the recovery key, still have the passphrase" path: the client unlocked the private key with
+   * the passphrase IN THE BROWSER, minted a NEW recovery key, re-wrapped the SAME private key under it,
+   * and posts ONLY the three recovery-wrap columns. This is NOT bootstrap and NOT a reset — it requires a
+   * LIVE keypair (404 if none) and overwrites EXACTLY `privateKeyEncByRecovery`/`recoverySalt`/
+   * `recoveryIv` (+ the @updatedAt bump). It NEVER touches `publicKey`, `privateKeyEncByPassphrase`,
+   * `passphraseSalt`, `passphraseIv`, or `kdfParams` — so there is no DEK re-wrap and no membership churn
+   * (ADR-0065 §1). The server stores ciphertext only and never sees the private key, passphrase, or
+   * recovery key (INV-10). Audited RECOVERY_KEY_REGENERATED (metadata only).
+   */
+  async regenerateRecoveryKey(
+    principal: Principal | undefined,
+    dto: RegenerateRecoveryKey,
+  ): Promise<UserKeypairWire> {
+    const userId = this.requireHumanId(principal);
+    // Must already have a LIVE keypair — this re-mints an existing recovery wrap, it does NOT bootstrap.
+    // findFirst respects the soft-delete read filter, so a soft-deleted keypair reads as absent (→ 404).
+    const existing = await this.prisma.userKeypair.findFirst({
+      where: { userId },
+    });
+    if (!existing) {
+      throw new NotFoundException('No keypair found for the current user');
+    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.userKeypair.update({
+        where: { id: existing.id },
+        // ONLY the recovery wrap. publicKey / privateKeyEncByPassphrase / passphraseSalt / passphraseIv /
+        // kdfParams are deliberately omitted — they MUST stay untouched (ADR-0065 §1). `updatedAt` bumps
+        // via @updatedAt automatically.
+        data: {
+          privateKeyEncByRecovery: dto.privateKeyEncByRecovery,
+          recoverySalt: dto.recoverySalt,
+          recoveryIv: dto.recoveryIv,
+        },
+      });
+      await this.writeAudit(tx, {
+        action: 'RECOVERY_KEY_REGENERATED',
         actorId: userId,
         targetUserId: userId,
       });
