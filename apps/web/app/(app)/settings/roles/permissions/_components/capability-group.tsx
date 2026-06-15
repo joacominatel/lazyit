@@ -85,7 +85,7 @@ export function CapabilityGroup({
                     </StatusBadge>
                   )}
                   {partiallyOn && (
-                    <span className="rounded-full border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    <span className="rounded-full border bg-muted px-1.5 py-0.5 text-label font-medium uppercase text-muted-foreground">
                       {t("roles.permissions.capabilityGroup.partial")}
                     </span>
                   )}
