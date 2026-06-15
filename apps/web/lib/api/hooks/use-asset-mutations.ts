@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import type { BatchAssetStatus, CreateAsset, UpdateAsset } from "@lazyit/shared";
 import {
   batchDeleteAssets,
@@ -9,23 +9,15 @@ import {
   restoreAsset,
   updateAsset,
 } from "../endpoints/assets";
-import { assetKeys } from "./use-assets";
-import { invalidateDashboard } from "./use-dashboard";
+import { useInvalidateAssets } from "./use-assets";
 
 /**
  * Write hooks for the Asset resource. Each invalidates `assetKeys.all` on success
  * (the common prefix → lists, detail and nested assignments all refetch) AND the
- * dashboard (asset-status counts feed the summary — issue #499). Toasts, navigation
- * and dialog state are owned by the calling component.
+ * dashboard (asset-status counts feed the summary — issue #499) via the shared
+ * `useInvalidateAssets` helper. Toasts, navigation and dialog state are owned by
+ * the calling component.
  */
-
-function useInvalidateAssets() {
-  const queryClient = useQueryClient();
-  return () => {
-    queryClient.invalidateQueries({ queryKey: assetKeys.all });
-    invalidateDashboard(queryClient);
-  };
-}
 
 export function useCreateAsset() {
   const invalidate = useInvalidateAssets();
