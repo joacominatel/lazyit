@@ -265,7 +265,7 @@ function ResetPasswordFlow({
     newPassword === confirm &&
     newPassword.length >= 8;
 
-  async function handleReset(e: React.FormEvent) {
+  async function handleResetPassword(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
     setBusy(true);
@@ -327,7 +327,7 @@ function ResetPasswordFlow({
         <p className="text-sm text-muted-foreground">{t("resetPassword.description")}</p>
       </div>
 
-      <form onSubmit={handleReset} className="space-y-4">
+      <form onSubmit={handleResetPassword} className="space-y-4">
         <Field>
           <FieldLabel htmlFor="reset-password-recovery">{t("resetPassword.recoveryKeyLabel")}</FieldLabel>
           <Input
