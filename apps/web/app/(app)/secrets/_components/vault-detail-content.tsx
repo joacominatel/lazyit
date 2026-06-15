@@ -20,6 +20,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Callout } from "@/components/callout";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import {
@@ -161,9 +162,9 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
 
         {/* SECW-02: non-member (e.g. ADMIN) banner — values in this vault cannot be decrypted. */}
         {membershipState === "not-member" ? (
-          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+          <Callout tone="warning" className="text-xs">
             {t("detail.notMember")}
-          </p>
+          </Callout>
         ) : null}
 
         {itemsLoading ? (
@@ -204,9 +205,9 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
 
         {/* Single-member safety nudge */}
         {!membersLoading && members && members.length === 1 ? (
-          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+          <Callout tone="warning" className="text-xs">
             {t("members.singleMemberWarning")}
-          </p>
+          </Callout>
         ) : null}
 
         {membersLoading ? (
@@ -553,9 +554,9 @@ function MemberRow({
                   })}
                 </DialogDescription>
               </DialogHeader>
-              <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+              <Callout tone="warning" className="text-xs">
                 {t("members.revokeSemanticNote")}
-              </p>
+              </Callout>
               <DialogFooter>
                 <Button
                   variant="outline"
