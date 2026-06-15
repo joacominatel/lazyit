@@ -420,6 +420,19 @@ class FakePrisma {
       this.keypairs.push(row);
       return row;
     },
+    update: ({
+      where,
+      data,
+    }: {
+      where: { id: string };
+      data: Partial<KeypairRow>;
+    }) => {
+      const existing = this.keypairs.find((k) => k.id === where.id);
+      if (!existing) throw new Error('keypair row not found');
+      // Only the keys present in `data` are written (mirrors a Prisma partial update); @updatedAt bumps.
+      Object.assign(existing, data, { updatedAt: new Date() });
+      return existing;
+    },
   };
 
   // -- secretAuditLog -----------------------------------------------------------
@@ -463,6 +476,13 @@ describe('SecretManagerService', () => {
       await expect(svc.getMyKeypair(sa)).rejects.toBeInstanceOf(
         ForbiddenException,
       );
+      await expect(
+        svc.regenerateRecoveryKey(sa, {
+          privateKeyEncByRecovery: 'bmV3UmVj',
+          recoverySalt: 'bmV3U2FsdA==',
+          recoveryIv: 'bmV3SXY=',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
       await expect(
         svc.createVault(sa, { name: 'X', membership: WRAP }),
       ).rejects.toBeInstanceOf(ForbiddenException);
@@ -812,6 +832,108 @@ describe('SecretManagerService', () => {
     });
   });
 
+  // ── Regenerate recovery key (ADR-0065): re-mint ONLY the recovery wrap ─────────
+  describe('regenerate recovery key', () => {
+    // A NEW recovery wrap (distinct base64 from the original KEYPAIR.recovery* fixtures).
+    const NEW_RECOVERY = {
+      privateKeyEncByRecovery: 'bmV3UHJpdkVuY1JlYw==',
+      recoverySalt: 'bmV3UmVjU2FsdA==',
+      recoveryIv: 'bmV3UmVjSXY=',
+    };
+
+    it('404s when the caller has no keypair (NOT a bootstrap path)', async () => {
+      const { svc } = build();
+      await expect(
+        svc.regenerateRecoveryKey(human('alice'), NEW_RECOVERY),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('updates ONLY the 3 recovery columns; public key / passphrase wrap / kdfParams unchanged', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      await svc.createMyKeypair(alice, KEYPAIR);
+      const before = db.keypairs.find((k) => k.userId === 'alice')!;
+      const beforeId = before.id;
+      const beforeCreatedAt = before.createdAt;
+
+      const out = await svc.regenerateRecoveryKey(alice, NEW_RECOVERY);
+
+      // The 3 recovery columns are the NEW blobs.
+      expect(out.privateKeyEncByRecovery).toBe(
+        NEW_RECOVERY.privateKeyEncByRecovery,
+      );
+      expect(out.recoverySalt).toBe(NEW_RECOVERY.recoverySalt);
+      expect(out.recoveryIv).toBe(NEW_RECOVERY.recoveryIv);
+
+      // EVERYTHING else is byte-for-byte the original — no keypair rotation, no passphrase-wrap touch.
+      expect(out.publicKey).toBe(KEYPAIR.publicKey);
+      expect(out.privateKeyEncByPassphrase).toBe(
+        KEYPAIR.privateKeyEncByPassphrase,
+      );
+      expect(out.passphraseSalt).toBe(KEYPAIR.passphraseSalt);
+      expect(out.passphraseIv).toBe(KEYPAIR.passphraseIv);
+      expect(out.kdfParams).toEqual(KEYPAIR.kdfParams);
+
+      // Same row replaced in place (id stable, createdAt preserved) — never a second keypair minted.
+      expect(out.id).toBe(beforeId);
+      expect(db.keypairs).toHaveLength(1);
+      const after = db.keypairs.find((k) => k.userId === 'alice')!;
+      expect(after.createdAt).toEqual(beforeCreatedAt);
+      // Re-fetch via the service to confirm the persisted state matches the returned wire.
+      const refetched = await svc.getMyKeypair(alice);
+      expect(refetched.privateKeyEncByRecovery).toBe(
+        NEW_RECOVERY.privateKeyEncByRecovery,
+      );
+      expect(refetched.publicKey).toBe(KEYPAIR.publicKey);
+    });
+
+    it('writes exactly one RECOVERY_KEY_REGENERATED audit row (metadata only, self-targeted)', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      await svc.createMyKeypair(alice, KEYPAIR); // KEYPAIR_CREATED
+      db.audit.length = 0; // isolate the regenerate audit row
+      await svc.regenerateRecoveryKey(alice, NEW_RECOVERY);
+      expect(db.audit).toHaveLength(1);
+      const row = db.audit[0];
+      expect(row.action).toBe('RECOVERY_KEY_REGENERATED');
+      expect(row.actorId).toBe('alice');
+      expect(row.targetUserId).toBe('alice'); // self-only
+      // metadata only — no blob/value field leaked into the audit row
+      expect(Object.keys(row).sort()).toEqual(
+        ['action', 'actorId', 'itemId', 'targetUserId', 'vaultId'].sort(),
+      );
+      expect(JSON.stringify(row)).not.toContain(
+        NEW_RECOVERY.privateKeyEncByRecovery,
+      );
+    });
+
+    it('is self-only: the target is derived from the principal, not a parameter', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const bob = human('bob');
+      await svc.createMyKeypair(alice, KEYPAIR);
+      await svc.createMyKeypair(bob, KEYPAIR);
+
+      // Bob regenerating only touches Bob's row; Alice's recovery wrap stays the original.
+      await svc.regenerateRecoveryKey(bob, NEW_RECOVERY);
+      const aliceRow = db.keypairs.find((k) => k.userId === 'alice')!;
+      const bobRow = db.keypairs.find((k) => k.userId === 'bob')!;
+      expect(aliceRow.privateKeyEncByRecovery).toBe(
+        KEYPAIR.privateKeyEncByRecovery,
+      );
+      expect(bobRow.privateKeyEncByRecovery).toBe(
+        NEW_RECOVERY.privateKeyEncByRecovery,
+      );
+    });
+
+    it('rejects a service-account principal (human-only, 403)', async () => {
+      const { svc } = build();
+      await expect(
+        svc.regenerateRecoveryKey(serviceAccount(), NEW_RECOVERY),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
   // ── Item envelope all-or-none ─────────────────────────────────────────────────
   describe('item update — envelope all-or-none', () => {
     it('rejects a partial envelope (400) and accepts a label-only edit', async () => {
@@ -891,6 +1013,11 @@ describe('SecretManagerService', () => {
       await svc.deleteItem(alice, vaultId, item.id); // ITEM_DELETED
       await svc.deleteVault(alice, vaultId); // VAULT_DELETED
       await svc.resetMyKeypair(alice, KEYPAIR); // KEYPAIR_RESET
+      await svc.regenerateRecoveryKey(alice, {
+        privateKeyEncByRecovery: 'bmV3UmVjMg==',
+        recoverySalt: 'bmV3U2FsdDI=',
+        recoveryIv: 'bmV3SXYy',
+      }); // RECOVERY_KEY_REGENERATED
 
       const actions = db.audit.map((a) => a.action);
       expect(actions).toEqual([
@@ -904,6 +1031,7 @@ describe('SecretManagerService', () => {
         'ITEM_DELETED',
         'VAULT_DELETED',
         'KEYPAIR_RESET',
+        'RECOVERY_KEY_REGENERATED',
       ]);
       // metadata only — no blob/value field on any audit row
       for (const row of db.audit) {
