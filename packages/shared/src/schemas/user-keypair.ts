@@ -93,3 +93,21 @@ export type CreateUserKeypair = z.infer<typeof CreateUserKeypairSchema>;
  */
 export const ResetUserKeypairSchema = CreateUserKeypairSchema;
 export type ResetUserKeypair = z.infer<typeof ResetUserKeypairSchema>;
+
+/**
+ * Regenerate ONLY the recovery wrap for an EXISTING keypair (`POST /secret-manager/keypair/recovery`,
+ * ADR-0065). The narrow, self-only "lost the recovery key, still have the passphrase" path: the client
+ * unlocks the private key with the passphrase IN THE BROWSER (always re-derived via the passphrase —
+ * ADR-0065 Status resolution 2), mints a NEW recovery key, re-wraps the SAME private key under it, and
+ * posts ONLY the three recovery-wrap columns. Unlike a reset (`PUT /me`), this NEVER changes the public
+ * key, the passphrase wrap, or `kdfParams` — so there is no DEK re-wrap and no membership churn
+ * (ADR-0065 §1). The server overwrites EXACTLY `privateKeyEncByRecovery` + `recoverySalt` + `recoveryIv`;
+ * it never sees the private key, the passphrase, or the recovery key (INV-10). Requires a LIVE keypair
+ * (404 if none — this is NOT bootstrap). Same base64 blob discipline as the create/reset DTOs.
+ */
+export const RegenerateRecoveryKeySchema = z.strictObject({
+  privateKeyEncByRecovery: base64Blob,
+  recoverySalt: base64Blob,
+  recoveryIv: base64Blob,
+});
+export type RegenerateRecoveryKey = z.infer<typeof RegenerateRecoveryKeySchema>;
