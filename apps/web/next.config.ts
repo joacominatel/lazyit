@@ -55,6 +55,18 @@ const nextConfig: NextConfig = {
   // Don't advertise the framework (#501); removes the `x-powered-by` response header.
   poweredByHeader: false,
 
+  experimental: {
+    // Tree-shake the barrel icon libraries (#511): import only the icons actually used instead of
+    // pulling the whole barrel, trimming dev-compile work and the production bundle. Next applies
+    // this automatically to many packages, but the explicit @heroicons entrypoints are not on its
+    // default list, so we opt them in by name.
+    optimizePackageImports: [
+      "@heroicons/react/24/outline",
+      "@heroicons/react/24/solid",
+      "@heroicons/react/16/solid",
+    ],
+  },
+
   // Apply the baseline security headers to every route.
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
