@@ -28,7 +28,11 @@
  * code, not just at the authorization layer.
  */
 
-import type { CreateUserKeypair, UserKeypair } from "@lazyit/shared";
+import type {
+  ChangeKeypairPassword,
+  CreateUserKeypair,
+  UserKeypair,
+} from "@lazyit/shared";
 import {
   type SecretEnvelope,
   type WrappedDek,
@@ -244,6 +248,50 @@ export async function unlockWithRecoveryKey(
     keypair.recoveryIv,
   );
   return openBytes(wrappingKey, envelope);
+}
+
+/**
+ * Re-wrap the PASSWORD copy (Copy A) of an ALREADY-UNLOCKED private key under a NEW password (ADR-0066 §2,
+ * the `POST /secret-manager/keypair/password` payload). This is the single client-side primitive behind both
+ * **change password** (the private key was unlocked with the CURRENT password) and **reset password** (the
+ * private key was unlocked with the RECOVERY KEY) — the caller supplies the already-unlocked private key, so
+ * this function does not care which credential produced it (the server can't tell either; INV-10).
+ *
+ * It mirrors {@link bootstrapKeypair}'s Copy-A branch EXACTLY: a fresh CSPRNG `passphraseSalt`, the frozen
+ * `Argon2id(newPassword)` wrapping key, and `sealBytes` over the private key — same KDF params/discipline,
+ * byte-for-byte. It produces ONLY the four Copy-A fields; the public key and the recovery wrap (Copy B) are
+ * untouched, so the recovery key keeps working and there is no DEK re-wrap / membership churn.
+ *
+ * The new password and the derived wrapping key are EPHEMERAL — present only in this call, never persisted,
+ * logged, or sent. The private key bytes belong to the caller, who drops them after use; only the wrapped
+ * Copy-A blob (ciphertext + clear salt/IV + KDF params) is returned for the server to store.
+ *
+ * @param privateKey  the caller's ALREADY-unlocked 32-byte X25519 private key (browser memory only).
+ * @param newPassword the user's new password (UTF-8; never persisted/logged/sent).
+ */
+export async function rewrapPasswordCopy(
+  privateKey: Uint8Array,
+  newPassword: string,
+): Promise<ChangeKeypairPassword> {
+  // Copy A — Argon2id(newPassword) over the private key (identical to bootstrapKeypair's Copy-A branch).
+  const passphraseSalt = randomBytes(SALT_BYTES);
+  const passphraseKey = await deriveKeyArgon2id(newPassword, passphraseSalt);
+  const sealedByPassphrase = sealBytes(passphraseKey, privateKey);
+
+  return {
+    privateKeyEncByPassphrase: joinSealedBlob(sealedByPassphrase),
+    passphraseSalt: bytesToBase64(passphraseSalt),
+    passphraseIv: sealedByPassphrase.iv,
+    kdfParams: {
+      alg: ARGON2ID_PARAMS.alg,
+      memorySize: ARGON2ID_PARAMS.memorySize,
+      iterations: ARGON2ID_PARAMS.iterations,
+      parallelism: ARGON2ID_PARAMS.parallelism,
+      saltLength: ARGON2ID_PARAMS.saltLength,
+      hashLength: ARGON2ID_PARAMS.hashLength,
+      v: ARGON2ID_PARAMS.v,
+    },
+  };
 }
 
 /**
