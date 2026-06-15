@@ -10,8 +10,8 @@ export function stockTone(currentStock: number, minStock: number | null): StockT
   return "ok";
 }
 
-/** Stock status → the shared status tone (single source of truth for status color). */
-const STATUS_TONE: Record<StockTone, StatusTone> = {
+/** Stock status → the shared status tone (single source of truth for stock-status color). */
+export const STOCK_STATUS_TONE: Record<StockTone, StatusTone> = {
   ok: "success",
   low: "warning",
   out: "danger",
@@ -32,7 +32,7 @@ export function StockBadge({
   const tone = stockTone(currentStock, minStock);
   return (
     <StatusBadge
-      tone={STATUS_TONE[tone]}
+      tone={STOCK_STATUS_TONE[tone]}
       className={cn("h-auto rounded-md px-2 text-sm tabular-nums", className)}
     >
       {currentStock}

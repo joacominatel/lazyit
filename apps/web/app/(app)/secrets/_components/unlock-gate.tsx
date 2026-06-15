@@ -9,6 +9,7 @@ import {
 import type { CreateUserKeypair, UserKeypair } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { Callout } from "@/components/callout";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -543,16 +544,16 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
   return (
     <div className={embedded ? "space-y-5" : "mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10"}>
       <div className="flex flex-col items-center gap-2 text-center">
-        <span className="flex size-12 items-center justify-center rounded-full bg-amber-500/10">
-          <ExclamationTriangleIcon className="size-6 text-amber-600 dark:text-amber-400" aria-hidden />
+        <span className="flex size-12 items-center justify-center rounded-full bg-warning/10">
+          <ExclamationTriangleIcon className="size-6 text-warning" aria-hidden />
         </span>
         <h2 className="text-lg font-semibold">{t("reset.title")}</h2>
         <p className="text-sm text-muted-foreground">{t("reset.description")}</p>
       </div>
 
-      <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+      <Callout tone="warning" className="text-xs">
         {t("reset.regrantWarning")}
-      </p>
+      </Callout>
 
       <form onSubmit={handleReset} className="space-y-4">
         <Field>

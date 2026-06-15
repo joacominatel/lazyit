@@ -151,7 +151,7 @@ function BatchResultPanel({
       {/* Summary bar */}
       <div className="flex items-start gap-3">
         <CheckCircleIcon
-          className="mt-0.5 size-5 shrink-0 text-green-600 dark:text-green-400"
+          className="mt-0.5 size-5 shrink-0 text-success"
           aria-hidden="true"
         />
         <div className="flex-1 space-y-0.5">

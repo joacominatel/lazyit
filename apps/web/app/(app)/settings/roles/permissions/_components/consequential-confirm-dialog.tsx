@@ -15,6 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Callout } from "@/components/callout";
 import { Button } from "@/components/ui/button";
 import type { SaveDiff } from "./permissions-form";
 
@@ -67,20 +68,22 @@ export function ConsequentialConfirmDialog({
         <div className="space-y-4">
           {hasGrants && (
             <section className="space-y-2">
-              <h3 className="flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-500">
-                <ExclamationTriangleIcon className="size-4" />
+              <h3 className="flex items-center gap-1.5 text-sm font-medium">
+                <ExclamationTriangleIcon
+                  className="size-4 text-warning"
+                  aria-hidden
+                />
                 {t("roles.permissions.confirm.grantsHeading")}
               </h3>
-              <ul className="space-y-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-                {diff.aboveTierGrants.map((c) => (
-                  <li
-                    key={c.permission}
-                    className="text-sm text-foreground/90"
-                  >
-                    {c.message}
-                  </li>
-                ))}
-              </ul>
+              <Callout tone="warning">
+                <div className="space-y-1.5">
+                  {diff.aboveTierGrants.map((c) => (
+                    <p key={c.permission} className="text-sm">
+                      {c.message}
+                    </p>
+                  ))}
+                </div>
+              </Callout>
             </section>
           )}
 

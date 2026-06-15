@@ -18,6 +18,7 @@ import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-pa
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/resource-table";
 import {
@@ -40,7 +41,7 @@ import { useUsers } from "@/lib/api/hooks/use-users";
 import { formatDate } from "@/lib/utils/format";
 import { MovementTypeBadge } from "../_components/movement-type-badge";
 import { QuickAdjustButtons } from "../_components/quick-adjust-buttons";
-import { stockTone } from "../_components/stock-badge";
+import { STOCK_STATUS_TONE, stockTone } from "../_components/stock-badge";
 import { StockMovementDialog } from "../_components/stock-movement-dialog";
 
 /** Stock tone → its i18n key under `consumables.detail` for the display label. */
@@ -48,12 +49,6 @@ const STATUS_LABEL_KEY = {
   ok: "statusInStock",
   low: "statusLowStock",
   out: "statusOutOfStock",
-} as const;
-
-const STATUS_CLASS = {
-  ok: "text-emerald-600 dark:text-emerald-400",
-  low: "text-amber-600 dark:text-amber-400",
-  out: "text-destructive",
 } as const;
 
 /** Signed quantity prefix per movement type (IN adds, OUT subtracts, ADJUSTMENT sets absolute). */
@@ -185,9 +180,9 @@ export default function ConsumableDetailPage() {
             {consumable.currentStock}
           </span>
           <span className="text-lg text-muted-foreground">{consumable.unit}</span>
-          <span className={`text-sm font-medium ${STATUS_CLASS[tone]}`}>
-            · {t(`detail.${STATUS_LABEL_KEY[tone]}`)}
-          </span>
+          <StatusBadge tone={STOCK_STATUS_TONE[tone]}>
+            {t(`detail.${STATUS_LABEL_KEY[tone]}`)}
+          </StatusBadge>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {consumable.minStock != null
