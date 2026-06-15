@@ -10,16 +10,21 @@ import {
   updateAsset,
 } from "../endpoints/assets";
 import { assetKeys } from "./use-assets";
+import { invalidateDashboard } from "./use-dashboard";
 
 /**
  * Write hooks for the Asset resource. Each invalidates `assetKeys.all` on success
- * (the common prefix → lists, detail and nested assignments all refetch). Toasts,
- * navigation and dialog state are owned by the calling component.
+ * (the common prefix → lists, detail and nested assignments all refetch) AND the
+ * dashboard (asset-status counts feed the summary — issue #499). Toasts, navigation
+ * and dialog state are owned by the calling component.
  */
 
 function useInvalidateAssets() {
   const queryClient = useQueryClient();
-  return () => queryClient.invalidateQueries({ queryKey: assetKeys.all });
+  return () => {
+    queryClient.invalidateQueries({ queryKey: assetKeys.all });
+    invalidateDashboard(queryClient);
+  };
 }
 
 export function useCreateAsset() {
