@@ -1,11 +1,52 @@
 "use client"
 
-import { useMemo } from "react"
+import {
+  cloneElement,
+  createContext,
+  isValidElement,
+  useContext,
+  useId,
+  useMemo,
+} from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
+
+/**
+ * Shared per-`Field` accessibility context. Each `Field` mints one stable error-node id (`useId`)
+ * so the control and its `FieldError` can be programmatically linked (WCAG 1.3.1 / 3.3.1): the error
+ * text renders with this `id`, and the invalid control points at it via `aria-describedby` /
+ * `aria-errormessage`. Threaded through context so existing call sites inherit the wiring with no
+ * per-form edits — the only signal a `Field` needs from the call site is its already-present
+ * `data-invalid` prop.
+ */
+type FieldContextValue = { errorId: string; invalid: boolean }
+
+const FieldContext = createContext<FieldContextValue | null>(null)
+
+/**
+ * Merge a `Field`'s error id into a control's `aria-describedby` (and set `aria-errormessage`) only
+ * while the field is invalid, so a screen-reader user landing on the control hears *why* it failed —
+ * not just that it's "invalid". Outside a `Field`, or when valid, the control is returned untouched.
+ *
+ * Controls that render a native element opt in for free: `Field` injects these props onto the host
+ * element carrying `aria-invalid` (see `withFieldErrorLink`). Components that don't forward arbitrary
+ * aria attributes can call this hook to wire themselves explicitly.
+ */
+function useFieldErrorLink(
+  describedBy?: string,
+): { "aria-describedby"?: string; "aria-errormessage"?: string } {
+  const ctx = useContext(FieldContext)
+  if (!ctx?.invalid) {
+    return describedBy ? { "aria-describedby": describedBy } : {}
+  }
+  return {
+    "aria-describedby": [describedBy, ctx.errorId].filter(Boolean).join(" "),
+    "aria-errormessage": ctx.errorId,
+  }
+}
 
 function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
   return (
@@ -69,19 +110,80 @@ const fieldVariants = cva(
   }
 )
 
+/**
+ * Recursively link the field's error node to the invalid control. Injects `aria-describedby` /
+ * `aria-errormessage` onto the first host element (a string-typed element — `input`, `textarea`, a
+ * Radix trigger's underlying button, etc.) that already carries a truthy `aria-invalid`, so the
+ * association rides the same `aria-invalid` every converged field sets and needs no call-site change.
+ * Recurses through plain wrapper elements (e.g. the `div` some controls sit in) to find it. Function
+ * components are left untouched — they decide their own prop forwarding (and can opt in via
+ * `useFieldErrorLink`).
+ */
+function withFieldErrorLink(node: React.ReactNode, errorId: string): React.ReactNode {
+  if (Array.isArray(node)) {
+    return node.map((child) => withFieldErrorLink(child, errorId))
+  }
+  if (!isValidElement(node)) return node
+
+  const element = node as React.ReactElement<{
+    "aria-invalid"?: boolean | "true" | "false"
+    "aria-describedby"?: string
+    children?: React.ReactNode
+  }>
+  const { "aria-invalid": ariaInvalid, "aria-describedby": describedBy } = element.props
+
+  if (typeof element.type === "string") {
+    const isInvalid = ariaInvalid === true || ariaInvalid === "true"
+    if (isInvalid) {
+      return cloneElement(element, {
+        "aria-describedby": [describedBy, errorId].filter(Boolean).join(" "),
+        "aria-errormessage": errorId,
+      } as Partial<typeof element.props>)
+    }
+    // A host wrapper (e.g. the password input's flex row) may contain the invalid control — recurse.
+    if (element.props.children) {
+      return cloneElement(
+        element,
+        undefined,
+        withFieldErrorLink(element.props.children, errorId),
+      )
+    }
+  }
+  return node
+}
+
 function Field({
   className,
   orientation = "vertical",
+  children,
+  "data-invalid": dataInvalid,
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof fieldVariants>) {
+}: React.ComponentProps<"div"> &
+  VariantProps<typeof fieldVariants> & {
+    /** Set from the RHF `fieldState.invalid` at the call site; drives the error-link wiring. */
+    "data-invalid"?: boolean | "true" | "false"
+  }) {
+  const errorId = useId()
+  // Every converged field passes `data-invalid` from its RHF `fieldState.invalid`, so this mirrors
+  // the control's `aria-invalid` without the call site wiring anything new.
+  const invalid = dataInvalid === true || dataInvalid === "true"
+  const context = useMemo<FieldContextValue>(
+    () => ({ errorId, invalid }),
+    [errorId, invalid],
+  )
   return (
-    <div
-      role="group"
-      data-slot="field"
-      data-orientation={orientation}
-      className={cn(fieldVariants({ orientation }), className)}
-      {...props}
-    />
+    <FieldContext.Provider value={context}>
+      <div
+        role="group"
+        data-slot="field"
+        data-orientation={orientation}
+        data-invalid={dataInvalid}
+        className={cn(fieldVariants({ orientation }), className)}
+        {...props}
+      >
+        {invalid ? withFieldErrorLink(children, errorId) : children}
+      </div>
+    </FieldContext.Provider>
   )
 }
 
@@ -193,10 +295,14 @@ function FieldError({
   className,
   children,
   errors,
+  id,
   ...props
 }: React.ComponentProps<"div"> & {
   errors?: Array<{ message?: string } | undefined>
 }) {
+  // Take the Field's stable error id so the invalid control can point its `aria-describedby` /
+  // `aria-errormessage` here. An explicit `id` prop still wins for callers that manage it themselves.
+  const fieldErrorId = useContext(FieldContext)?.errorId
   const content = useMemo(() => {
     if (children) {
       return children
@@ -231,6 +337,7 @@ function FieldError({
   return (
     <div
       role="alert"
+      id={id ?? fieldErrorId}
       data-slot="field-error"
       className={cn("text-sm font-normal text-destructive", className)}
       {...props}
@@ -251,4 +358,5 @@ export {
   FieldSet,
   FieldContent,
   FieldTitle,
+  useFieldErrorLink,
 }
