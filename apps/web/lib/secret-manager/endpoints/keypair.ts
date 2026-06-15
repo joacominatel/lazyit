@@ -1,4 +1,5 @@
 import type {
+  ChangeKeypairPassword,
   CreateUserKeypair,
   UserKeypair,
   UserPublicKey,
@@ -40,6 +41,25 @@ export function createKeypair(data: CreateUserKeypair): Promise<UserKeypair> {
  */
 export function resetMyKeypair(data: CreateUserKeypair): Promise<UserKeypair> {
   return apiFetch<UserKeypair>(`${BASE}/keypair/me`, { method: "PUT", body: data });
+}
+
+/**
+ * Change OR reset the caller's PASSWORD wrap (Copy A) of an EXISTING keypair (ADR-0066,
+ * `POST /secret-manager/keypair/password`). `data` is the {@link ChangeKeypairPassword} wire DTO produced
+ * CLIENT-SIDE by `rewrapPasswordCopy` — the four Copy-A fields only (the new wrapped private-key blob + its
+ * fresh salt/IV/KDF params). ONE endpoint serves both **change** (the private key was unlocked with the
+ * current password) and **reset** (unlocked with the recovery key); the server cannot tell which and only
+ * overwrites Copy A — the public key and the recovery wrap (Copy B) are untouched. 404 if the caller has no
+ * keypair (this is NOT bootstrap). Self-only: there is no `:userId` variant. INV-10: the server never sees
+ * the private key, either password, or the recovery key — only the wrapped blob.
+ */
+export function changePassword(
+  data: ChangeKeypairPassword,
+): Promise<UserKeypair> {
+  return apiFetch<UserKeypair>(`${BASE}/keypair/password`, {
+    method: "POST",
+    body: data,
+  });
 }
 
 /**
