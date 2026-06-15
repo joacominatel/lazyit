@@ -44,10 +44,17 @@ export function ManagerField({
 }) {
   const t = useTranslations("users.form.manager");
 
+  // Defensive boundary: the prop is typed `ManagerFormValue`, but a `Controller` whose field
+  // started life `undefined`/`null` (an unset manager) can hand this component a value with no
+  // `.kind`, which would crash the `Select` below. Treat any missing value as the "none" kind so
+  // the picker renders cleared instead of throwing — the parent forms default it, this guards the
+  // edge regardless.
+  const safeValue: ManagerFormValue = value ?? { kind: "none" };
+
   return (
     <div className="space-y-2">
       <Select
-        value={value.kind}
+        value={safeValue.kind}
         disabled={disabled}
         onValueChange={(kind) => {
           if (kind === "user") onChange({ kind: "user", managerId: "" });
@@ -66,9 +73,9 @@ export function ManagerField({
         </SelectContent>
       </Select>
 
-      {value.kind === "user" ? (
+      {safeValue.kind === "user" ? (
         <UserCombobox
-          value={value.managerId || undefined}
+          value={safeValue.managerId || undefined}
           onValueChange={(managerId) => onChange({ kind: "user", managerId })}
           ariaInvalid={ariaInvalid}
           disabled={disabled}
@@ -79,9 +86,9 @@ export function ManagerField({
         />
       ) : null}
 
-      {value.kind === "external" ? (
+      {safeValue.kind === "external" ? (
         <Input
-          value={value.managerName}
+          value={safeValue.managerName}
           onChange={(e) =>
             onChange({ kind: "external", managerName: e.target.value })
           }
