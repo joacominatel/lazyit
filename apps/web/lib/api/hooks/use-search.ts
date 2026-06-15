@@ -36,7 +36,7 @@ export function useSearch({
   const trimmed = q.trim();
   return useQuery({
     queryKey: searchKeys.query(trimmed, entities, limit),
-    queryFn: () => search({ q: trimmed, entities, limit }),
+    queryFn: ({ signal }) => search({ q: trimmed, entities, limit }, signal),
     enabled: enabled && trimmed.length > 0,
     placeholderData: keepPreviousData,
     staleTime: 30_000,

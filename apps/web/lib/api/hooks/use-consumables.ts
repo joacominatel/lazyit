@@ -30,7 +30,7 @@ export const consumableKeys = {
 export function useConsumables(params: ConsumableListParams = {}) {
   return useQuery({
     queryKey: consumableKeys.list(params),
-    queryFn: () => getConsumables(params),
+    queryFn: ({ signal }) => getConsumables(params, signal),
     placeholderData: keepPreviousData,
   });
 }

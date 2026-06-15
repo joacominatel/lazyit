@@ -37,7 +37,7 @@ export const articleKeys = {
 export function useArticles(filters: ArticleFilters = {}) {
   return useQuery({
     queryKey: articleKeys.list(filters),
-    queryFn: () => getArticles(filters),
+    queryFn: ({ signal }) => getArticles(filters, signal),
     placeholderData: keepPreviousData,
   });
 }
@@ -69,7 +69,7 @@ export function useArticle(id: string | undefined) {
 export function useArticleImportStatus(jobId: string | undefined) {
   return useQuery({
     queryKey: articleKeys.importStatus(jobId ?? ""),
-    queryFn: () => getArticleImportStatus(jobId as string),
+    queryFn: ({ signal }) => getArticleImportStatus(jobId as string, signal),
     enabled: Boolean(jobId),
     placeholderData: keepPreviousData,
     refetchInterval: (query) => {

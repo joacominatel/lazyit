@@ -30,7 +30,7 @@ export const locationKeys = {
 export function useLocations() {
   return useQuery({
     queryKey: locationKeys.lists(),
-    queryFn: () => getLocations({ limit: MAX_PAGE_LIMIT }),
+    queryFn: ({ signal }) => getLocations({ limit: MAX_PAGE_LIMIT }, signal),
     select: (page) => page.items,
   });
 }
@@ -42,7 +42,7 @@ export function useLocations() {
 export function useLocationList(params: LocationListParams = {}) {
   return useQuery({
     queryKey: locationKeys.list(params),
-    queryFn: () => getLocations(params),
+    queryFn: ({ signal }) => getLocations(params, signal),
     placeholderData: keepPreviousData,
   });
 }

@@ -48,7 +48,10 @@ export interface UserListParams {
  * Only the server-supported params are forwarded (extra client-only filter keys are ignored).
  * Default is active-only; pass `deleted: "only"` (ADMIN) for the archived view.
  */
-export function getUsers(params: UserListParams = {}): Promise<UserListPage> {
+export function getUsers(
+  params: UserListParams = {},
+  signal?: AbortSignal,
+): Promise<UserListPage> {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
   if (params.sort) {
@@ -59,7 +62,7 @@ export function getUsers(params: UserListParams = {}): Promise<UserListPage> {
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
-  return apiFetch<UserListPage>(search ? `${BASE}?${search}` : BASE);
+  return apiFetch<UserListPage>(search ? `${BASE}?${search}` : BASE, { signal });
 }
 export const getUser = users.get;
 export const createUser = users.create;
