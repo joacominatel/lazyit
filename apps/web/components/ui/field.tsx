@@ -1,11 +1,50 @@
 "use client"
 
-import { useMemo } from "react"
+import { createContext, useContext, useId, useMemo } from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
+
+/**
+ * Shared per-`Field` accessibility context. Each `Field` mints one stable error-node id (`useId`)
+ * so the control and its `FieldError` can be programmatically linked (WCAG 1.3.1 / 3.3.1): the error
+ * text renders with this `id`, and the invalid control points at it via `aria-describedby` /
+ * `aria-errormessage`. Threaded through context so existing call sites inherit the wiring with no
+ * per-form edits — the only signal a `Field` needs from the call site is its already-present
+ * `data-invalid` prop.
+ */
+type FieldContextValue = { errorId: string; invalid: boolean }
+
+const FieldContext = createContext<FieldContextValue | null>(null)
+
+/**
+ * Merge a `Field`'s error id into a control's `aria-describedby` (and set `aria-errormessage`) only
+ * while the field is invalid, so a screen-reader user landing on the control hears *why* it failed —
+ * not just that it's "invalid" (WCAG 1.3.1 / 3.3.1). Outside a `Field`, or while valid, the
+ * caller's own `aria-describedby` / `aria-errormessage` pass through untouched.
+ *
+ * Native controls (`Input`, `Textarea`, the Radix `SelectTrigger`) call this with their incoming
+ * aria props and spread the result onto the rendered element — so the linkage holds even though
+ * those controls are function components that React does not let the parent `Field` clone into.
+ */
+function useFieldErrorLink({
+  "aria-describedby": describedBy,
+  "aria-errormessage": errorMessage,
+}: {
+  "aria-describedby"?: string
+  "aria-errormessage"?: string
+} = {}): { "aria-describedby"?: string; "aria-errormessage"?: string } {
+  const ctx = useContext(FieldContext)
+  if (!ctx?.invalid) {
+    return { "aria-describedby": describedBy, "aria-errormessage": errorMessage }
+  }
+  return {
+    "aria-describedby": [describedBy, ctx.errorId].filter(Boolean).join(" "),
+    "aria-errormessage": errorMessage ?? ctx.errorId,
+  }
+}
 
 function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
   return (
@@ -72,16 +111,36 @@ const fieldVariants = cva(
 function Field({
   className,
   orientation = "vertical",
+  children,
+  "data-invalid": dataInvalid,
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof fieldVariants>) {
+}: React.ComponentProps<"div"> &
+  VariantProps<typeof fieldVariants> & {
+    /** Set from the RHF `fieldState.invalid` at the call site; drives the error-link wiring. */
+    "data-invalid"?: boolean | "true" | "false"
+  }) {
+  const errorId = useId()
+  // Every converged field passes `data-invalid` from its RHF `fieldState.invalid`, so this mirrors
+  // the control's `aria-invalid` without the call site wiring anything new. Native controls read
+  // this via `useFieldErrorLink` and link themselves to `FieldError` when invalid.
+  const invalid = dataInvalid === true || dataInvalid === "true"
+  const context = useMemo<FieldContextValue>(
+    () => ({ errorId, invalid }),
+    [errorId, invalid],
+  )
   return (
-    <div
-      role="group"
-      data-slot="field"
-      data-orientation={orientation}
-      className={cn(fieldVariants({ orientation }), className)}
-      {...props}
-    />
+    <FieldContext.Provider value={context}>
+      <div
+        role="group"
+        data-slot="field"
+        data-orientation={orientation}
+        data-invalid={dataInvalid}
+        className={cn(fieldVariants({ orientation }), className)}
+        {...props}
+      >
+        {children}
+      </div>
+    </FieldContext.Provider>
   )
 }
 
@@ -193,10 +252,14 @@ function FieldError({
   className,
   children,
   errors,
+  id,
   ...props
 }: React.ComponentProps<"div"> & {
   errors?: Array<{ message?: string } | undefined>
 }) {
+  // Take the Field's stable error id so the invalid control can point its `aria-describedby` /
+  // `aria-errormessage` here. An explicit `id` prop still wins for callers that manage it themselves.
+  const fieldErrorId = useContext(FieldContext)?.errorId
   const content = useMemo(() => {
     if (children) {
       return children
@@ -231,6 +294,7 @@ function FieldError({
   return (
     <div
       role="alert"
+      id={id ?? fieldErrorId}
       data-slot="field-error"
       className={cn("text-sm font-normal text-destructive", className)}
       {...props}
@@ -251,4 +315,5 @@ export {
   FieldSet,
   FieldContent,
   FieldTitle,
+  useFieldErrorLink,
 }
