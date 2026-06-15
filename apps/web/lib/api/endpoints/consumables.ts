@@ -60,6 +60,7 @@ export interface ConsumableListParams {
  */
 export function getConsumables(
   params: ConsumableListParams = {},
+  signal?: AbortSignal,
 ): Promise<ConsumableListPage> {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
@@ -72,7 +73,10 @@ export function getConsumables(
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
-  return apiFetch<ConsumableListPage>(search ? `${BASE}?${search}` : BASE);
+  return apiFetch<ConsumableListPage>(
+    search ? `${BASE}?${search}` : BASE,
+    { signal },
+  );
 }
 
 /** A consumable's stock movement ledger (newest first), optionally filtered by type / date range. */
