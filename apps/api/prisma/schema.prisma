@@ -1715,8 +1715,13 @@ enum SecretAuditAction {
   MEMBERSHIP_REVOKED
   KEYPAIR_CREATED
   KEYPAIR_RESET
-  // Re-mint of ONLY the recovery wrap on an existing keypair (ADR-0065): the public key + passphrase
-  // wrap + kdfParams are untouched, only privateKeyEncByRecovery/recoverySalt/recoveryIv are replaced.
+  // Re-wrap of ONLY the password wrap (Copy A) on an existing keypair (ADR-0066, change/reset password):
+  // publicKey + the recovery wrap (privateKeyEncByRecovery/recoverySalt/recoveryIv) are untouched, only
+  // privateKeyEncByPassphrase/passphraseSalt/passphraseIv/kdfParams are replaced.
+  PASSWORD_CHANGED
+  // DORMANT (ADR-0066): the ADR-0065 "regenerate the recovery key with the password" flow was reverted.
+  // The code that wrote this value is removed; the enum value is LEFT in place because dropping a Postgres
+  // enum value requires a risky type recreation (not worth it for an unused, harmless value). No row uses it.
   RECOVERY_KEY_REGENERATED
 }
 
