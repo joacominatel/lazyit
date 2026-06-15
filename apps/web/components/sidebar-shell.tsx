@@ -4,6 +4,7 @@ import {
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
 } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { SidebarNav } from "@/components/sidebar-nav";
@@ -12,6 +13,7 @@ import { cn } from "@/lib/utils";
 const STORAGE_KEY = "sidebar-collapsed";
 
 export function SidebarShell() {
+  const t = useTranslations("shared");
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -49,8 +51,14 @@ export function SidebarShell() {
           </Link>
         )}
         <button
+          type="button"
           onClick={toggle}
-          title={collapsed ? "Expandir sidebar" : "Colapsar sidebar"}
+          aria-pressed={collapsed}
+          aria-label={
+            collapsed
+              ? t("chrome.expandSidebar")
+              : t("chrome.collapseSidebar")
+          }
           className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
           {collapsed ? (
