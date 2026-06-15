@@ -26,19 +26,17 @@ import { cn } from "@/lib/utils";
  *
  *  - GFM extras the base schema already covers (tables, task-list checkboxes,
  *    strikethrough) are kept.
- *  - `target`/`rel` are allowed on links so rendered anchors can open safely.
+ *
+ * `target`/`rel` are deliberately NOT widened here (#512): the base schema's `a` allow-list stands.
+ * Anchor safety is enforced at render time by the `SafeAnchor` renderer below, which forces
+ * `rel="noopener noreferrer"` on any `target="_blank"` — so a future plugin that emits `target=_blank`
+ * can never produce reverse-tabnabbing / referrer leakage, and the sanitizer stays as tight as the base.
  *
  * Sanitizing here closes SEC-003 (stored XSS via KB Markdown) **by construction**:
  * even if `rehype-raw` is ever enabled upstream, untrusted HTML is filtered
  * against this allow-list rather than rendered verbatim.
  */
-const SANITIZE_SCHEMA = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    a: [...(defaultSchema.attributes?.a ?? []), "target", "rel"],
-  },
-};
+const SANITIZE_SCHEMA = defaultSchema;
 
 /**
  * Custom renderers (issue #200, #310). Fenced code blocks get syntax highlighting + a per-block
@@ -76,6 +74,15 @@ const MARKDOWN_COMPONENTS: Components = {
   // isn't double-wrapped in the default <pre> (inline code never reaches this renderer).
   pre({ children }: ComponentPropsWithoutRef<"pre">) {
     return <>{children}</>;
+  },
+  // #512: force `rel="noopener noreferrer"` on any anchor that opens in a new tab. The sanitize
+  // schema no longer allows `target`/`rel` at all (so today nothing reaches here with `target`), but
+  // this makes the guarantee navigation-independent: should a remark/rehype plugin ever emit
+  // `target="_blank"`, the opened tab can never reach `window.opener` and the referrer is stripped.
+  a({ node, target, rel, ...rest }) {
+    void node;
+    const safeRel = target === "_blank" ? "noopener noreferrer" : rel;
+    return <a target={target} rel={safeRel} {...rest} />;
   },
 };
 
