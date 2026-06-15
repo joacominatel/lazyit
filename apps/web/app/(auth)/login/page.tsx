@@ -17,6 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getConfigStatus } from "@/lib/api/endpoints/config";
+import { safeInternalPath } from "@/lib/utils/safe-redirect";
 
 /**
  * Sign-in page — redirects the user to the configured OIDC provider.
@@ -72,7 +73,10 @@ export default async function LoginPage({
   searchParams: Promise<{ callbackUrl?: string; error?: string }>;
 }) {
   const { callbackUrl, error } = await searchParams;
-  const destination = callbackUrl ?? "/dashboard";
+  // Open-redirect guard (#495): `callbackUrl` is attacker-controllable, so collapse it to a
+  // guaranteed same-origin path. Applied to BOTH the authenticated `redirect()` below (the unsafe
+  // branch) and — defensively — the `redirectTo` handed to `signIn`.
+  const destination = safeInternalPath(callbackUrl);
 
   // Already signed in → skip the login screen.
   if (await auth()) {
