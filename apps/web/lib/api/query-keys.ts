@@ -19,3 +19,34 @@ export function createQueryKeys<const TName extends string>(name: TName) {
     detail: (id: string) => [...all, "detail", id] as const,
   };
 }
+
+/** The page-envelope shape (subset of `@lazyit/shared`'s `Page<T>`) a directory `select` reads. */
+interface DirectoryPage<T> {
+  items: T[];
+  total: number;
+}
+
+/**
+ * `select` for the "whole-directory" lookup hooks (`useUsers`, `useAssetModels`) that fetch a single
+ * `MAX_PAGE_LIMIT` page and expose just `items` to client-side joiners (pickers, owner/grantee
+ * lookups). Returning `page.items` keeps those consumers' `data` shape exactly `T[]`, but a single
+ * page silently DROPS rows past the cap — so when `items.length < total` we emit a dev `console.warn`
+ * naming the resource and the totals, making the cap loud instead of silent (issue #508). The
+ * dedicated searchable, server-paged list hook (`useUserList` / `useAssetModelList`) is the answer
+ * for directories that can legitimately exceed the cap.
+ */
+export function selectDirectoryItems<T>(resource: string) {
+  return (page: DirectoryPage<T>): T[] => {
+    if (
+      process.env.NODE_ENV !== "production" &&
+      page.items.length < page.total
+    ) {
+      console.warn(
+        `[${resource}] directory truncated: showing ${page.items.length} of ${page.total}. ` +
+          `Rows past the page cap are dropped from client-side lookups — use the searchable ` +
+          `server-paged list hook for this resource.`,
+      );
+    }
+    return page.items;
+  };
+}

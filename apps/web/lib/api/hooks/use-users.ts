@@ -8,7 +8,7 @@ import {
   getUsers,
   type UserListParams,
 } from "../endpoints/users";
-import { createQueryKeys } from "../query-keys";
+import { createQueryKeys, selectDirectoryItems } from "../query-keys";
 
 /**
  * Query-key factory for the User resource (shape from `createQueryKeys`, see
@@ -36,13 +36,14 @@ export const userKeys = {
  * owners, access grantees, article authors, the assign/grant dialogs). The list is paginated
  * server-side (ADR-0030), so this requests the hard-max page (200) to materialize the whole
  * directory for those lookups; the dedicated **Users list page** uses {@link useUserList} for real
- * paging. Returns just `items` so the existing `User[]` consumers are unchanged.
+ * paging. Returns just `items` so the existing `User[]` consumers are unchanged — but `select` warns
+ * (dev) when the directory exceeds the cap so the truncation is never silent (issue #508).
  */
 export function useUsers() {
   return useQuery({
     queryKey: userKeys.lists(),
     queryFn: () => getUsers({ limit: MAX_PAGE_LIMIT }),
-    select: (page) => page.items,
+    select: selectDirectoryItems("users"),
   });
 }
 

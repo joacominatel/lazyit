@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CloneUser, CreateUser, Role, UpdateUser } from "@lazyit/shared";
 import { applicationKeys } from "./use-applications";
 import { assetKeys } from "./use-assets";
+import { invalidateDashboard } from "./use-dashboard";
 import {
   cloneUser,
   createUser,
@@ -34,8 +35,9 @@ export function useCreateUser() {
  * source's selected active assignments + grants in one transaction, optionally firing the workflow
  * engine on the cloned grants. Invalidates more than a plain create — besides the users cache (the new
  * user joins the directory), it invalidates the assets and applications caches because the clone opens
- * new assignments + grants those screens must reflect. Toasts, the result view and navigation stay with
- * the calling component; this only keeps the cache coherent.
+ * new assignments + grants those screens must reflect — and the dashboard, whose summary counts and
+ * activity feed derive from those new assignments + grants (issue #499). Toasts, the result view and
+ * navigation stay with the calling component; this only keeps the cache coherent.
  */
 export function useCloneUser() {
   const queryClient = useQueryClient();
@@ -46,6 +48,7 @@ export function useCloneUser() {
       queryClient.invalidateQueries({ queryKey: userKeys.all });
       queryClient.invalidateQueries({ queryKey: assetKeys.all });
       queryClient.invalidateQueries({ queryKey: applicationKeys.all });
+      invalidateDashboard(queryClient);
     },
   });
 }
@@ -98,7 +101,8 @@ export function useDeleteUser() {
  *
  * Invalidates more than the plain delete: besides the users cache (so the directory + per-person
  * panels refetch), it invalidates the assets and applications caches because the reclaimed assets
- * are now unassigned and the revoked grants are now closed — those screens must reflect it. Toasts,
+ * are now unassigned and the revoked grants are now closed — and the dashboard, whose summary counts
+ * and activity feed derive from those released assignments + revoked grants (issue #499). Toasts,
  * the success animation and navigation stay with the calling component.
  */
 export function useOffboardUser() {
@@ -109,6 +113,7 @@ export function useOffboardUser() {
       queryClient.invalidateQueries({ queryKey: userKeys.all });
       queryClient.invalidateQueries({ queryKey: assetKeys.all });
       queryClient.invalidateQueries({ queryKey: applicationKeys.all });
+      invalidateDashboard(queryClient);
     },
   });
 }

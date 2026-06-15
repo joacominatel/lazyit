@@ -17,7 +17,7 @@ import {
   getAssetModels,
   updateAssetModel,
 } from "../endpoints/asset-models";
-import { createQueryKeys } from "../query-keys";
+import { createQueryKeys, selectDirectoryItems } from "../query-keys";
 
 /** Query keys for Asset models. */
 const baseAssetModelKeys = createQueryKeys("asset-models");
@@ -33,13 +33,14 @@ export const assetModelKeys = {
  * Settings → Taxonomies table. The list is paginated server-side (ADR-0030), so this requests the
  * hard-max page (200) to materialize the directory; the searchable picker uses {@link
  * useAssetModelList} for real `q`-driven paging. Returns just `items` so existing `AssetModel[]`
- * consumers are unchanged (issue #199).
+ * consumers are unchanged (issue #199) — but `select` warns (dev) when the directory exceeds the
+ * cap so the truncation is never silent (issue #508).
  */
 export function useAssetModels() {
   return useQuery({
     queryKey: assetModelKeys.lists(),
     queryFn: () => getAssetModels({ limit: MAX_PAGE_LIMIT }),
-    select: (page) => page.items,
+    select: selectDirectoryItems("asset-models"),
   });
 }
 

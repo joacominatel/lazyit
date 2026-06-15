@@ -1,5 +1,6 @@
 "use client";
 
+import { MAX_PAGE_LIMIT } from "@lazyit/shared";
 import { useCallback, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -155,8 +156,15 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
   const rawDir = searchParams.get("dir");
   const dir: SortDir = rawDir === "asc" || rawDir === "desc" ? rawDir : defaultDir;
 
+  // Clamp the URL `limit` to the API's hard cap (ADR-0030): the server REJECTS (400) a limit over
+  // MAX_PAGE_LIMIT — never silently clamps — and `resource-table.tsx` renders rows unvirtualized, so
+  // a hand-edited/bookmarked `?limit=5000` would both 400 and (if honoured) freeze the tab. We cap
+  // here so a tampered URL degrades to the max page instead of erroring (issue #508).
   const limitParam = Number(searchParams.get("limit"));
-  const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : defaultLimit;
+  const limit =
+    Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(limitParam, MAX_PAGE_LIMIT)
+      : defaultLimit;
 
   const offsetParam = Number(searchParams.get("offset"));
   const offset = Number.isFinite(offsetParam) && offsetParam >= 0 ? offsetParam : 0;
