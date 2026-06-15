@@ -176,7 +176,7 @@ export default function ConsumableDetailPage() {
         }
       >
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="text-4xl font-semibold tabular-nums">
+          <span className="text-display font-semibold tabular-nums">
             {consumable.currentStock}
           </span>
           <span className="text-lg text-muted-foreground">{consumable.unit}</span>
