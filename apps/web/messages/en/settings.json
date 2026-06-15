@@ -498,6 +498,30 @@
       "consumable": "consumable category",
       "article": "article category"
     },
+    "quickCreate": {
+      "category": {
+        "title": "New {kind, select, asset {asset category} application {application category} consumable {consumable category} article {article category} other {category}}",
+        "description": "Create a category to use it right away. You can refine it later.",
+        "nameLabel": "Name",
+        "namePlaceholder": "e.g. Laptops",
+        "created": "Category created",
+        "createError": "Couldn't create the category"
+      },
+      "model": {
+        "title": "New model",
+        "description": "Create a make/model to use it right away. You can refine it later.",
+        "nameLabel": "Name",
+        "namePlaceholder": "Latitude 5520",
+        "manufacturerLabel": "Manufacturer",
+        "manufacturerPlaceholder": "Dell",
+        "categoryLabel": "Category",
+        "categoryPlaceholder": "Select a category",
+        "searchCategory": "Search categories…",
+        "noCategories": "No categories found",
+        "created": "Model created",
+        "createError": "Couldn't create the model"
+      }
+    },
     "categories": {
       "newButton": "New {label}",
       "loadError": "Could not load {label} list",
