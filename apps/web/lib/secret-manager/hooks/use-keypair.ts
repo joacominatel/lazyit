@@ -1,6 +1,7 @@
-import type { CreateUserKeypair } from "@lazyit/shared";
+import type { ChangeKeypairPassword, CreateUserKeypair } from "@lazyit/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  changePassword,
   createKeypair,
   getMyKeypair,
   getUserPublicKey,
@@ -97,6 +98,21 @@ export function useResetKeypair() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: CreateUserKeypair) => resetMyKeypair(data),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: keypairKeys.all }),
+  });
+}
+
+/**
+ * Change OR reset the caller's password wrap (Copy A) of an existing keypair (ADR-0066). `data` is the
+ * {@link ChangeKeypairPassword} wire DTO produced CLIENT-SIDE (`rewrapPasswordCopy`) — the four Copy-A
+ * fields only, no secret. Invalidates the keypair root so `me` re-reads the new salt/IV/blob; Copy B and the
+ * public key are unchanged, so memberships and the recovery key are unaffected.
+ */
+export function useChangePassword() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ChangeKeypairPassword) => changePassword(data),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: keypairKeys.all }),
   });
