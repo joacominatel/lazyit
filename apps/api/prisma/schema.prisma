@@ -1715,6 +1715,9 @@ enum SecretAuditAction {
   MEMBERSHIP_REVOKED
   KEYPAIR_CREATED
   KEYPAIR_RESET
+  // Re-mint of ONLY the recovery wrap on an existing keypair (ADR-0065): the public key + passphrase
+  // wrap + kdfParams are untouched, only privateKeyEncByRecovery/recoverySalt/recoveryIv are replaced.
+  RECOVERY_KEY_REGENERATED
 }
 
 /// An APPEND-ONLY audit log of Secret Manager actions (ADR-0061 §10, crypto note §8) — records WHO acted
