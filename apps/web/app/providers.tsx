@@ -10,7 +10,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
-import { SHARED_FORMATS } from "@/i18n/request";
+import { SHARED_FORMATS } from "@/i18n/config";
 
 function makeQueryClient() {
   return new QueryClient({
