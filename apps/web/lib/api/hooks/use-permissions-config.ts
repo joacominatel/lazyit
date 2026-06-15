@@ -14,10 +14,11 @@ import {
  * A write to the matrix invalidates BOTH — editing MEMBER/VIEWER can change what the *current* admin
  * (or any open session) is allowed to do, so the cached `can()` set must refetch too.
  */
+const PERMISSION_CONFIG_ROOT = ["permissions-config"] as const;
 export const permissionConfigKeys = {
-  all: ["permissions-config"] as const,
-  matrix: () => [...["permissions-config"], "matrix"] as const,
-  mine: () => [...["permissions-config"], "mine"] as const,
+  all: PERMISSION_CONFIG_ROOT,
+  matrix: () => [...PERMISSION_CONFIG_ROOT, "matrix"] as const,
+  mine: () => [...PERMISSION_CONFIG_ROOT, "mine"] as const,
 };
 
 /**
