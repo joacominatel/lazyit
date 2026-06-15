@@ -1,9 +1,9 @@
 ---
 title: "ADR-0065: Secret Manager — regenerate the recovery key for an existing keypair"
 tags: [adr, secrets, security, crypto, recovery, knowledge-base]
-status: proposed
+status: accepted
 created: 2026-06-14
-updated: 2026-06-14
+updated: 2026-06-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -11,12 +11,26 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — 2026-06-14 (CEO-chosen Option 2; awaiting sign-off). Issue #452 — the deferred
-"regenerate" half. This is the **docs-only contract**; no application code is written here. It is a
-**bounded extension** of [[0061-secret-manager-zero-knowledge]]: a new client flow + a small
+**accepted** — 2026-06-15 (CEO sign-off on Option 2). Issue #452 — the deferred "regenerate" half.
+It is a **bounded extension** of [[0061-secret-manager-zero-knowledge]]: a new client flow + a small
 ciphertext-custodian endpoint that lets a user **re-mint their off-host recovery key without changing
-their keypair**, preserving INV-10 end to end. The implementation is a **future task gated on this
-ADR's acceptance**.
+their keypair**, preserving INV-10 end to end.
+
+Two CEO resolutions bind the implementation slice (they refine the §2 "proposal" wording without
+changing the contract):
+
+1. **Endpoint shape — `POST /secret-manager/keypair/recovery`.** The narrow, self-only route is
+   confirmed over the `PATCH …/keypair/me` equivalent floated in §2, precisely to signal "narrow
+   recovery-blob replacement, NOT a keypair reset".
+2. **Passphrase is always required.** The regenerate flow **always re-derives the private key via the
+   passphrase** (§3 step 2) — even inside an already-unlocked session, the client must drive the
+   re-wrap through a fresh passphrase unlock rather than reusing a cached private key. This is a
+   **client concern** (the server is a pure ciphertext custodian and never sees the passphrase), but
+   it is the invariant the flow is built on.
+
+The implementation lands on `feat/issue-452-regenerate-recovery-key` (backend slice: the shared DTO,
+the endpoint + service, the `RECOVERY_KEY_REGENERATED` audit action + migration, and the INV-10 guard
+extension; the frontend "regenerate recovery key" flow is a later wave).
 
 ## Context
 
@@ -117,9 +131,10 @@ Because the **public key is unchanged**, every [[vault-membership]] blob (a DEK 
 key) still unwraps with the same private key. There is **no DEK re-wrap** and **no membership churn** —
 the decisive advantage over peer-reset.
 
-### 2. Proposed endpoint shape
+### 2. Endpoint shape (confirmed)
 
-A new, narrow, **self-only** write that **replaces** the recovery-key-wrapped blob and nothing else:
+A new, narrow, **self-only** write that **replaces** the recovery-key-wrapped blob and nothing else.
+The CEO confirmed `POST /secret-manager/keypair/recovery` (Status resolution 1):
 
 ```
 POST /secret-manager/keypair/recovery        (self-only; principal from the auth context)
@@ -139,10 +154,11 @@ server behaviour:
 - HumanOnlyGuard + the same `secret:read` capability gate as the other keypair routes
 ```
 
-> The verb/path is a **proposal** for the implementation slice; `POST …/keypair/recovery` is preferred
-> over an unscoped `PUT …/me` precisely to signal "narrow recovery-blob replacement, NOT a keypair
-> reset". A `PATCH …/keypair/me` over the three recovery columns is an acceptable equivalent — the
-> binding contract is **"replace only the recovery wrap; touch nothing else"**, not the exact verb.
+> The verb/path is **confirmed** (Status resolution 1): `POST …/keypair/recovery` over an unscoped
+> `PUT …/me` precisely to signal "narrow recovery-blob replacement, NOT a keypair reset". A
+> `PATCH …/keypair/me` over the three recovery columns was an acceptable equivalent, but the CEO chose
+> the explicit `POST …/recovery`; either way the binding contract is **"replace only the recovery wrap;
+> touch nothing else"**.
 
 ### 3. Client flow (all crypto in the browser; reuse the existing primitives)
 

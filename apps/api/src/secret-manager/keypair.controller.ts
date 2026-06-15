@@ -12,6 +12,7 @@ import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
   CreateUserKeypairSchema,
+  RegenerateRecoveryKeySchema,
   ResetUserKeypairSchema,
   UserKeypairSchema,
 } from '@lazyit/shared';
@@ -24,6 +25,9 @@ import { SecretManagerService } from './secret-manager.service';
 class UserKeypairDto extends createZodDto(UserKeypairSchema) {}
 class CreateUserKeypairDto extends createZodDto(CreateUserKeypairSchema) {}
 class ResetUserKeypairDto extends createZodDto(ResetUserKeypairSchema) {}
+class RegenerateRecoveryKeyDto extends createZodDto(
+  RegenerateRecoveryKeySchema,
+) {}
 
 /**
  * Secret Manager — keypair surface (ADR-0061 §3). The per-user X25519 envelope the whole zero-knowledge
@@ -77,6 +81,20 @@ export class KeypairController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.secrets.resetMyKeypair(principal, dto);
+  }
+
+  @Post('keypair/recovery')
+  @RequirePermission('secret:read')
+  @ApiOperation({
+    summary:
+      "Regenerate ONLY the caller's recovery wrap (lost recovery key, kept passphrase). Keypair unchanged; 404 if none.",
+  })
+  @ApiOkResponse({ type: UserKeypairDto })
+  regenerateRecovery(
+    @Body() dto: RegenerateRecoveryKeyDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.secrets.regenerateRecoveryKey(principal, dto);
   }
 
   @Get('users/:userId/public-key')
