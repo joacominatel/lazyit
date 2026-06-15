@@ -187,6 +187,11 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
   // depend only on the stable `router`. The ref always holds this render's values, so `commit`
   // reads fresh URL state at call time while keeping a constant identity — race-free, no stale URL.
   const latest = useRef({ searchParams, pathname });
+  // Writing this ref during render is intentional and safe: the write is idempotent, and the value
+  // is only READ at event time inside `commit` (never during render), so there is no torn read. It
+  // keeps `commit` referentially stable (deps: [router]) while always seeing the latest URL state.
+  // The react-hooks/refs rule (React-Compiler-era) is conservative about this proven pattern.
+  // eslint-disable-next-line react-hooks/refs
   latest.current = { searchParams, pathname };
 
   const commit = useCallback(
