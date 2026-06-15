@@ -355,7 +355,10 @@
       "workflow:manage": { "label": "Configure workflows & connections" },
       "workflow:run": { "label": "Run & retry workflows" },
       "workflow:task": { "label": "Complete manual tasks" },
-      "workflow:secrets": { "label": "Manage connector credentials" }
+      "workflow:secrets": { "label": "Manage connector credentials" },
+      "notification:read": { "label": "View notifications" },
+      "secret:read": { "label": "View the Secret Manager" },
+      "secret:manage": { "label": "Manage vaults & memberships" }
     },
     "capabilities": {
       "inventory:view": {
@@ -449,6 +452,18 @@
       "workflow:secrets": {
         "label": "Manage connector credentials",
         "description": "Configure, enter and rotate per-app connector credentials — kept separate from authoring the workflow logic."
+      },
+      "notifications:view": {
+        "label": "View notifications",
+        "description": "See the in-app notification bell — curated operational nudges (critical-app access, admin elevation, low stock, workflow tasks)."
+      },
+      "secret:view": {
+        "label": "View the Secret Manager",
+        "description": "See that vaults and secret items exist (names, handles, member lists) — zero-knowledge metadata only; no values are revealed."
+      },
+      "secret:manage": {
+        "label": "Manage vaults & memberships",
+        "description": "Create, edit and delete vaults; manage vault memberships (grant/revoke wrapped DEKs) — the full Secret Manager administration surface."
       }
     },
     "presets": {
