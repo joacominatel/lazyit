@@ -59,9 +59,9 @@ import {
   useReportsActivityPage,
 } from "@/lib/api/hooks/use-dashboard";
 import { useUsers } from "@/lib/api/hooks/use-users";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/utils/format";
 import { downloadCsv } from "./informes-csv";
 
 /**
@@ -184,7 +184,7 @@ function toDateToIso(date: string): string | undefined {
 export function InformesScreen() {
   const t = useTranslations("informes");
   const tAction = useTranslations("shared.activity.action");
-  // Snapshot "now" once so relative times + the relative-range presets stay pure across renders.
+  // Snapshot "now" once so the relative-range presets + day-grouping stay pure across renders.
   const [now] = useState(() => Date.now());
   const {
     q,
@@ -592,7 +592,6 @@ export function InformesScreen() {
       ) : (
         <TableView
           items={items}
-          now={now}
           offset={offset}
           limit={limit}
           total={total}
@@ -680,7 +679,6 @@ function TimelineView({
                 item={item}
                 isLast={rowInGroup === group.items.length - 1}
                 index={index}
-                now={now}
               />
             ))}
           </ol>
@@ -711,18 +709,16 @@ function ActivityRowWithBadge({
   item,
   isLast,
   index,
-  now,
 }: {
   item: RecentActivityItem;
   isLast: boolean;
   index: number;
-  now: number;
 }) {
   const tAction = useTranslations("shared.activity.action");
   return (
     <div className="flex items-start gap-2">
       <div className="min-w-0 flex-1">
-        <ActivityRow item={item} isLast={isLast} index={index} now={now} />
+        <ActivityRow item={item} isLast={isLast} index={index} />
       </div>
       <StatusBadge tone={actionTone(item.action)} className="mt-0.5 shrink-0">
         {actionLabel(item.action, tAction)}
@@ -737,7 +733,6 @@ function ActivityRowWithBadge({
  */
 function TableView({
   items,
-  now,
   offset,
   limit,
   total,
@@ -745,7 +740,6 @@ function TableView({
   onClearFilters,
 }: {
   items: RecentActivityItem[];
-  now: number;
   offset: number;
   limit: number;
   total: number;
@@ -754,6 +748,7 @@ function TableView({
 }) {
   const t = useTranslations("informes");
   const tAction = useTranslations("shared.activity.action");
+  const { dateTime, relative } = useFormatters();
   const columns: ResourceColumn[] = [
     {
       key: "when",
@@ -804,11 +799,8 @@ function TableView({
               meta={
                 <>
                   <ResourceCardMeta label={t("table.columns.when")}>
-                    <span
-                      className="tabular-nums"
-                      title={new Date(item.occurredAt).toLocaleString()}
-                    >
-                      {formatRelativeTime(item.occurredAt, now)}
+                    <span className="tabular-nums" title={dateTime(item.occurredAt)}>
+                      {relative(item.occurredAt)}
                     </span>
                   </ResourceCardMeta>
                   <ResourceCardMeta label={t("table.columns.entity")}>
@@ -833,9 +825,9 @@ function TableView({
             >
               <TableCell
                 className="text-muted-foreground tabular-nums whitespace-nowrap"
-                title={new Date(item.occurredAt).toLocaleString()}
+                title={dateTime(item.occurredAt)}
               >
-                {formatRelativeTime(item.occurredAt, now)}
+                {relative(item.occurredAt)}
               </TableCell>
               <TableCell>
                 <StatusBadge tone={actionTone(item.action)}>

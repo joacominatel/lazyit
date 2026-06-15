@@ -44,7 +44,7 @@ import {
   useServiceAccounts,
 } from "@/lib/api/hooks/use-service-accounts";
 import { useCan } from "@/lib/hooks/use-permissions";
-import { formatRelativeTime } from "@/lib/utils/format";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { permissionLabel } from "../../_lib/permission-labels";
 import { RotateDialog } from "./rotate-dialog";
 import { ServiceAccountFormDialog } from "./service-account-form-dialog";
@@ -66,7 +66,8 @@ const MAX_PERMISSION_LABELS = 2;
 export function ServiceAccountsManager() {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
-  // A render-stable "now" so the relative-time and expiry derivations stay pure (react-hooks/purity).
+  const { relative } = useFormatters();
+  // A render-stable "now" so the status/expiry derivation (serviceAccountStatus) stays pure.
   const [now] = useState(() => Date.now());
   const [showRevoked, setShowRevoked] = useState(false);
   const { data, isLoading, isError, error, refetch } =
@@ -251,7 +252,7 @@ export function ServiceAccountsManager() {
                 </TableCell>
                 <TableCell className="text-muted-foreground tabular-nums">
                   {account.lastUsedAt
-                    ? formatRelativeTime(account.lastUsedAt, now)
+                    ? relative(account.lastUsedAt)
                     : t("serviceAccounts.never")}
                 </TableCell>
                 <TableCell>

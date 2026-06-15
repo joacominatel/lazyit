@@ -14,7 +14,7 @@ import {
 import { StatusBadge } from "@/components/ui/status-badge";
 import { TableCell } from "@/components/ui/table";
 import { useWorkflowTasks } from "@/lib/api/hooks/use-workflow-tasks";
-import { formatRelativeTime } from "@/lib/utils/format";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 
 const PAGE_SIZE = 20;
 
@@ -27,8 +27,8 @@ const PAGE_SIZE = 20;
  */
 export function TasksInbox() {
   const t = useTranslations("workflow");
+  const { relative } = useFormatters();
   const [offset, setOffset] = useState(0);
-  const [now] = useState(() => Date.now());
   const { data, isLoading, isError, error, refetch, isFetching } =
     useWorkflowTasks({ status: "PENDING", limit: PAGE_SIZE, offset });
 
@@ -76,7 +76,7 @@ export function TasksInbox() {
               <StatusBadge tone="neutral">{task.stepKey}</StatusBadge>
             </TableCell>
             <TableCell className="text-muted-foreground tabular-nums">
-              {formatRelativeTime(task.createdAt, now)}
+              {relative(task.createdAt)}
             </TableCell>
           </LinkableRow>
         ))}

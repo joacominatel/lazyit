@@ -498,6 +498,30 @@
       "consumable": "categoría de consumible",
       "article": "categoría de artículo"
     },
+    "quickCreate": {
+      "category": {
+        "title": "Nueva {kind, select, asset {categoría de activo} application {categoría de aplicación} consumable {categoría de consumible} article {categoría de artículo} other {categoría}}",
+        "description": "Crea una categoría para usarla de inmediato. Puedes refinarla más tarde.",
+        "nameLabel": "Nombre",
+        "namePlaceholder": "p. ej. Portátiles",
+        "created": "Categoría creada",
+        "createError": "No se pudo crear la categoría"
+      },
+      "model": {
+        "title": "Nuevo modelo",
+        "description": "Crea una marca/modelo para usarla de inmediato. Puedes refinarla más tarde.",
+        "nameLabel": "Nombre",
+        "namePlaceholder": "Latitude 5520",
+        "manufacturerLabel": "Fabricante",
+        "manufacturerPlaceholder": "Dell",
+        "categoryLabel": "Categoría",
+        "categoryPlaceholder": "Elige una categoría",
+        "searchCategory": "Buscar categorías…",
+        "noCategories": "No se encontraron categorías",
+        "created": "Modelo creado",
+        "createError": "No se pudo crear el modelo"
+      }
+    },
     "categories": {
       "newButton": "Nueva {label}",
       "loadError": "No se pudo cargar la lista de {label}",

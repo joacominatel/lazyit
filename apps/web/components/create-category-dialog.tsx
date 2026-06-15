@@ -3,6 +3,7 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateAssetCategorySchema } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -21,13 +22,6 @@ import type { CategoryKind, CreatedCategory } from "@/lib/api/endpoints/categori
 import { useCreateCategory } from "@/lib/api/hooks/use-create-category";
 import { notifyError } from "@/lib/api/notify-error";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
-
-const LABEL: Record<CategoryKind, string> = {
-  asset: "asset category",
-  application: "application category",
-  consumable: "consumable category",
-  article: "article category",
-};
 
 /**
  * Form schema — only a name. The four category create schemas share an identical `name` field, so
@@ -59,6 +53,8 @@ export function CreateCategoryDialog({
   onOpenChange,
   onCreated,
 }: CreateCategoryDialogProps) {
+  const t = useTranslations("settings.taxonomies.quickCreate.category");
+  const tc = useTranslations("common");
   const create = useCreateCategory(kind);
 
   const form = useForm<FormValues>({
@@ -80,11 +76,11 @@ export function CreateCategoryDialog({
     (values) => {
       create.mutate(values.name, {
         onSuccess: (category) => {
-          toast.success("Category created");
+          toast.success(t("created"));
           onCreated?.(category);
           handleOpenChange(false);
         },
-        onError: (error) => notifyError(error, "Couldn't create the category"),
+        onError: (error) => notifyError(error, t("createError")),
       });
     },
     (_errors, event) => scrollToFirstError(event?.target ?? null),
@@ -94,10 +90,8 @@ export function CreateCategoryDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>New {LABEL[kind]}</DialogTitle>
-          <DialogDescription>
-            Create a category to use it right away. You can refine it later.
-          </DialogDescription>
+          <DialogTitle>{t("title", { kind })}</DialogTitle>
+          <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
         {/* stopPropagation: this dialog renders in a Radix Portal, but React events bubble through
@@ -117,13 +111,13 @@ export function CreateCategoryDialog({
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
                 <FieldLabel htmlFor="new-category-name" required>
-                  Name
+                  {t("nameLabel")}
                 </FieldLabel>
                 <Input
                   {...field}
                   id="new-category-name"
                   value={field.value ?? ""}
-                  placeholder="e.g. Laptops"
+                  placeholder={t("namePlaceholder")}
                   aria-invalid={fieldState.invalid || undefined}
                   autoFocus
                 />
@@ -140,11 +134,11 @@ export function CreateCategoryDialog({
             onClick={() => handleOpenChange(false)}
             disabled={create.isPending}
           >
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button type="submit" form={FORM_ID} disabled={create.isPending}>
             {create.isPending && <ArrowPathIcon className="animate-spin" />}
-            Create
+            {tc("create")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -15,8 +15,8 @@ import Link from "next/link";
 import type { ComponentType, CSSProperties } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { avatarColorFor } from "@/lib/avatar-color";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
-import { formatDateTime, formatRelativeTime } from "@/lib/utils/format";
 
 /**
  * Shared timeline-row vocabulary for the unified recent-activity feed — extracted from the
@@ -111,15 +111,14 @@ export function ActivityRow({
   item,
   isLast,
   index,
-  now,
 }: {
   item: RecentActivityItem;
   isLast: boolean;
   /** Global 0-based position in the flattened stream, for the capped staggered settle. */
   index: number;
-  now: number;
 }) {
   const t = useTranslations("shared");
+  const { dateTime, relative } = useFormatters();
   const meta = ENTITY_META[item.entityType];
   const Icon = meta.icon;
 
@@ -143,7 +142,7 @@ export function ActivityRow({
   const showTargetUserLink =
     item.targetUserId !== null && targetUser !== null && !isUserPillar;
 
-  const absolute = formatDateTime(item.occurredAt);
+  const absolute = dateTime(item.occurredAt);
 
   return (
     <li
@@ -200,7 +199,7 @@ export function ActivityRow({
             title={t("activity.occurredAt", { datetime: absolute })}
             aria-label={t("activity.occurredAt", { datetime: absolute })}
           >
-            {formatRelativeTime(item.occurredAt, now)}
+            {relative(item.occurredAt)}
           </time>
         </div>
       </div>

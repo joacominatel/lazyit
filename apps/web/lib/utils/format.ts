@@ -16,21 +16,6 @@ export function formatDate(iso: string): string {
 }
 
 /**
- * ISO timestamp → an absolute, locale-aware date+time (e.g. "May 25, 2026, 3:04 PM"). Used as the
- * tooltip/aria companion to the activity feed's relative time so an audit-relevant entry always
- * carries the exact moment it occurred, not just "9h ago" (issue #311).
- */
-export function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-/**
  * A duration in milliseconds → a compact human label ("420ms", "3.2s", "2m 5s", "1h 4m"). Returns null
  * for a null/negative input so callers can omit the field cleanly. Mirrors the run-timeline's per-step
  * duration grammar so a run's wall-clock duration reads consistently with its step durations.
@@ -59,26 +44,6 @@ export function formatDurationBetween(
 }
 
 /**
- * ISO timestamp → a short relative label ("just now", "5m ago", "2h ago", "3d ago", "2mo ago",
- * "1y ago"). `now` (epoch ms) is passed in by the caller — snapshot it once with
- * `useState(() => Date.now())` so rendering stays pure (react-hooks/purity), rather than calling
- * `Date.now()` here during render.
- */
-export function formatRelativeTime(iso: string, now: number): string {
-  const seconds = Math.round((now - new Date(iso).getTime()) / 1000);
-  if (seconds < 45) return "just now";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.round(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.round(months / 12)}y ago`;
-}
-
-/**
  * Raw spec/object key → a human label. Splits camelCase, snake_case and kebab-case,
  * then Title-Cases each word ("cpuModel" / "cpu_model" / "cpu-model" → "Cpu Model").
  * Used to render free-form `Asset.specs` keys readably on the detail page. A key
@@ -100,13 +65,20 @@ export function formatFieldLabel(key: string): string {
 
 /**
  * Render a free-form spec value (string | number | boolean | null | object) as a
- * display string. Scalars are shown verbatim; booleans as "Yes"/"No"; null/undefined
- * as "—"; anything non-scalar (arrays/objects, which the custom-fields editor never
- * produces but legacy specs might) falls back to compact JSON.
+ * display string. Scalars are shown verbatim; booleans via the caller-supplied,
+ * localized `booleanLabels` ("Yes"/"No" · "Sí"/"No"); null/undefined as "—"; anything
+ * non-scalar (arrays/objects, which the custom-fields editor never produces but legacy
+ * specs might) falls back to compact JSON.
+ *
+ * `booleanLabels` is passed in (e.g. `{ yes: t("yes"), no: t("no") }`) so this stays a
+ * pure, framework-agnostic util — the locale lives at the call site (issue #506).
  */
-export function formatSpecValue(value: unknown): string {
+export function formatSpecValue(
+  value: unknown,
+  booleanLabels: { yes: string; no: string },
+): string {
   if (value === null || value === undefined) return "—";
-  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "boolean") return value ? booleanLabels.yes : booleanLabels.no;
   if (typeof value === "string" || typeof value === "number") {
     return String(value);
   }

@@ -10,6 +10,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
+import { SHARED_FORMATS } from "@/i18n/config";
 
 function makeQueryClient() {
   return new QueryClient({
@@ -47,9 +48,15 @@ export function Providers({
 
   return (
     // NextIntlClientProvider wraps everything so any Client Component can call
-    // `useTranslations(...)`. Server Components use `getTranslations` directly and
-    // don't need this provider.
-    <NextIntlClientProvider locale={locale} messages={messages}>
+    // `useTranslations(...)` / `useFormatter(...)`. The shared date/time presets
+    // (issue #497) are forwarded here so client formatting matches the server config
+    // (`i18n/request.ts`). Server Components use `getTranslations`/`getFormatter`
+    // directly and don't need this provider.
+    <NextIntlClientProvider
+      locale={locale}
+      messages={messages}
+      formats={SHARED_FORMATS}
+    >
       <SessionProvider>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider

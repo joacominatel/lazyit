@@ -1,6 +1,11 @@
 import { cookies } from "next/headers";
 import { getRequestConfig } from "next-intl/server";
-import { defaultLocale, isLocale, LOCALE_COOKIE } from "./config";
+import {
+  defaultLocale,
+  isLocale,
+  LOCALE_COOKIE,
+  SHARED_FORMATS,
+} from "./config";
 
 /**
  * Per-request next-intl configuration (ADR-0051). Cookie-mode, no i18n routing: the
@@ -24,5 +29,6 @@ export default getRequestConfig(async () => {
   return {
     locale,
     messages: (await import(`../messages/${locale}/_all`)).default,
+    formats: SHARED_FORMATS,
   };
 });

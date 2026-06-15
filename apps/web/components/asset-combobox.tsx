@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Combobox } from "@/components/combobox";
 import { useAsset, useAssets } from "@/lib/api/hooks/use-assets";
@@ -33,6 +34,7 @@ export function AssetCombobox({
   searchPlaceholder?: string;
   emptyText?: string;
 }) {
+  const tc = useTranslations("common");
   const [query, setQuery] = useState("");
   const { data, isFetching } = useAssets({ q: query || undefined, limit: 50 });
   const { data: selected } = useAsset(value || undefined);
@@ -63,6 +65,8 @@ export function AssetCombobox({
       placeholder={placeholder}
       searchPlaceholder={searchPlaceholder}
       emptyText={emptyText}
+      loadingText={tc("searching")}
+      typeToSearchText={tc("typeToSearch")}
     />
   );
 }
