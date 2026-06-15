@@ -53,7 +53,7 @@ export function useInvalidateAssets() {
 export function useAssets(filters: AssetFilters = {}) {
   return useQuery({
     queryKey: assetKeys.list(filters),
-    queryFn: () => getAssets(filters),
+    queryFn: ({ signal }) => getAssets(filters, signal),
     placeholderData: keepPreviousData,
   });
 }

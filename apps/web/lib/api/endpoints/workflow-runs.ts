@@ -103,6 +103,7 @@ export interface WorkflowRunFilters {
 /** List runs (filtered, paged). Returns the `Page<WorkflowRun>` envelope (ADR-0030). */
 export function getWorkflowRuns(
   filters: WorkflowRunFilters = {},
+  signal?: AbortSignal,
 ): Promise<Page<WorkflowRun>> {
   const params = new URLSearchParams();
   if (filters.applicationId) params.set("applicationId", filters.applicationId);
@@ -114,12 +115,15 @@ export function getWorkflowRuns(
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));
   const qs = params.toString();
-  return apiFetch<Page<WorkflowRun>>(qs ? `${BASE}?${qs}` : BASE);
+  return apiFetch<Page<WorkflowRun>>(qs ? `${BASE}?${qs}` : BASE, { signal });
 }
 
 /** Fetch one run with its ordered step attempts and the traversed graph (`GET /workflow-runs/:id`). */
-export function getWorkflowRun(id: string): Promise<WorkflowRunDetail> {
-  return apiFetch<WorkflowRunDetail>(`${BASE}/${id}`);
+export function getWorkflowRun(
+  id: string,
+  signal?: AbortSignal,
+): Promise<WorkflowRunDetail> {
+  return apiFetch<WorkflowRunDetail>(`${BASE}/${id}`, { signal });
 }
 
 /**

@@ -62,7 +62,10 @@ export interface AssetFilters {
  * pagination controls. `limit`/`offset` are echoed by the server. By default only active rows are
  * returned; pass `deleted: "only"` (ADMIN) for the archived view of soft-deleted rows.
  */
-export function getAssets(filters: AssetFilters = {}): Promise<AssetListPage> {
+export function getAssets(
+  filters: AssetFilters = {},
+  signal?: AbortSignal,
+): Promise<AssetListPage> {
   const params = new URLSearchParams();
   if (filters.q) params.set("q", filters.q);
   if (filters.categoryId) params.set("categoryId", filters.categoryId);
@@ -77,7 +80,7 @@ export function getAssets(filters: AssetFilters = {}): Promise<AssetListPage> {
     params.set("offset", String(filters.offset));
   if (filters.deleted) params.set("deleted", filters.deleted);
   const qs = params.toString();
-  return apiFetch<AssetListPage>(qs ? `${BASE}?${qs}` : BASE);
+  return apiFetch<AssetListPage>(qs ? `${BASE}?${qs}` : BASE, { signal });
 }
 
 /** A single expanded asset by id. */

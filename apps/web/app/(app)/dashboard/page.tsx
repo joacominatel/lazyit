@@ -373,7 +373,7 @@ function PillarCard({
           {/* Metric settles in on first mount with a subtle, capped stagger (initial-mount
               only; reduced-motion collapses it to instant via the globals.css guard). */}
           <span
-            className="inline-block animate-rise-in text-2xl font-semibold tabular-nums text-foreground [animation-delay:calc(var(--i)*60ms)]"
+            className="inline-block animate-rise-in text-display font-semibold tabular-nums text-foreground [animation-delay:calc(var(--i)*60ms)]"
             style={{ "--i": index } as CSSProperties}
           >
             {metric}
@@ -704,7 +704,7 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
 
   return (
     <section>
-      <h2 className="mb-3 text-lg font-semibold tracking-tight">
+      <h2 className="mb-3 text-section font-semibold">
         {t("needsAttention.heading")}
       </h2>
       {visibleItems.length === 0 ? (

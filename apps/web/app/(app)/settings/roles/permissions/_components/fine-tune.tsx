@@ -93,7 +93,7 @@ export function FineTune({ staged, onToggle }: FineTuneProps) {
                             aria-label={p}
                           />
                           <span className="flex-1">{permissionLabel(t, p)}</span>
-                          <code className="text-[11px] text-muted-foreground">
+                          <code className="text-xs text-muted-foreground">
                             {p}
                           </code>
                           {aboveTier && (

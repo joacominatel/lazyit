@@ -18,11 +18,18 @@ export interface SearchParams {
   limit?: number;
 }
 
-/** Run a cross-entity search, building the `?q=&entities=assets,articles&limit=` query string. */
-export function search({ q, entities, limit }: SearchParams): Promise<SearchResults> {
+/**
+ * Run a cross-entity search, building the `?q=&entities=assets,articles&limit=` query string.
+ * `signal` is the TanStack Query `queryFn` AbortSignal — forwarding it lets a superseded keystroke's
+ * request cancel in-flight instead of running to completion.
+ */
+export function search(
+  { q, entities, limit }: SearchParams,
+  signal?: AbortSignal,
+): Promise<SearchResults> {
   const params = new URLSearchParams();
   params.set("q", q);
   if (entities && entities.length > 0) params.set("entities", entities.join(","));
   if (limit !== undefined) params.set("limit", String(limit));
-  return apiFetch<SearchResults>(`${BASE}?${params.toString()}`);
+  return apiFetch<SearchResults>(`${BASE}?${params.toString()}`, { signal });
 }

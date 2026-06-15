@@ -124,7 +124,7 @@ export function PermissionPicker({
                       className="flex flex-1 flex-wrap items-center gap-2 text-sm"
                     >
                       <span>{permissionLabel(t, permission)}</span>
-                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
+                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-muted-foreground">
                         {permission}
                       </code>
                       {aboveTier ? (

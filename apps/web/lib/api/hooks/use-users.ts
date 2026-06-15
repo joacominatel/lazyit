@@ -1,4 +1,4 @@
-import { MAX_PAGE_LIMIT } from "@lazyit/shared";
+import { MAX_PAGE_LIMIT, type UserListItem } from "@lazyit/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   getCurrentUser,
@@ -42,8 +42,10 @@ export const userKeys = {
 export function useUsers() {
   return useQuery({
     queryKey: userKeys.lists(),
-    queryFn: () => getUsers({ limit: MAX_PAGE_LIMIT }),
-    select: selectDirectoryItems("users"),
+    queryFn: ({ signal }) => getUsers({ limit: MAX_PAGE_LIMIT }, signal),
+    // Pin the element generic: with the queryFn now taking the context arg, TanStack's overload no
+    // longer back-infers the page item type into `select`, so name it to keep `data` as UserListItem[].
+    select: selectDirectoryItems<UserListItem>("users"),
   });
 }
 
@@ -56,7 +58,7 @@ export function useUsers() {
 export function useUserList(params: UserListParams = {}) {
   return useQuery({
     queryKey: userKeys.list(params),
-    queryFn: () => getUsers(params),
+    queryFn: ({ signal }) => getUsers(params, signal),
     placeholderData: keepPreviousData,
   });
 }

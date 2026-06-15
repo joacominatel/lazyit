@@ -44,6 +44,7 @@ export interface ApplicationListParams {
  */
 export function getApplications(
   params: ApplicationListParams = {},
+  signal?: AbortSignal,
 ): Promise<Page<Application>> {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
@@ -55,7 +56,10 @@ export function getApplications(
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
-  return apiFetch<Page<Application>>(search ? `${BASE}?${search}` : BASE);
+  return apiFetch<Page<Application>>(
+    search ? `${BASE}?${search}` : BASE,
+    { signal },
+  );
 }
 export const getApplication = crud.get;
 export const createApplication = crud.create;

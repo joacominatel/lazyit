@@ -38,7 +38,7 @@ const RUN_POLL_INTERVAL_MS = 4000;
 export function useWorkflowRuns(filters: WorkflowRunFilters = {}) {
   return useQuery({
     queryKey: workflowRunKeys.list(filters),
-    queryFn: () => getWorkflowRuns(filters),
+    queryFn: ({ signal }) => getWorkflowRuns(filters, signal),
     placeholderData: keepPreviousData,
   });
 }
@@ -51,7 +51,7 @@ export function useWorkflowRuns(filters: WorkflowRunFilters = {}) {
 export function useWorkflowRun(id: string | undefined) {
   return useQuery({
     queryKey: workflowRunKeys.detail(id ?? ""),
-    queryFn: () => getWorkflowRun(id as string),
+    queryFn: ({ signal }) => getWorkflowRun(id as string, signal),
     enabled: Boolean(id),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
