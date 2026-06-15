@@ -113,8 +113,10 @@ function toResolverInput(
     role: values.role,
     manager: toManagerInput(values.manager),
   };
-  if (values.legajo.trim() !== "") out.legajo = values.legajo;
-  if (values.username.trim() !== "") out.username = values.username;
+  // Coalesce before `.trim()` — an untouched optional can be `undefined` at submit (RHF), even
+  // though the field is typed `string` with an `""` default.
+  if ((values.legajo ?? "").trim() !== "") out.legajo = values.legajo;
+  if ((values.username ?? "").trim() !== "") out.username = values.username;
   if (requiresPassword && values.password !== "") out.password = values.password;
   return out;
 }
@@ -255,8 +257,10 @@ export function UserCreateForm() {
 
     setSubmitting(true);
 
-    const legajo = values.legajo.trim();
-    const username = values.username.trim();
+    // Coalesce before `.trim()` — RHF can hand back `undefined` for an untouched optional even
+    // though the field is typed `string`/`""` (same guard as `accessLevel` below).
+    const legajo = (values.legajo ?? "").trim();
+    const username = (values.username ?? "").trim();
     const manager = toManagerInput(values.manager);
 
     const payload: CreateUser = {
@@ -300,7 +304,10 @@ export function UserCreateForm() {
       }
     }
     if (values.applicationId !== "") {
-      const level = values.accessLevel.trim();
+      // RHF can yield `undefined` for an untouched optional field even though it is typed `string`
+      // with an `""` default, so coalesce before calling a string method (the field was reset, or
+      // never registered, on some paths). Downstream only assigns when non-empty.
+      const level = (values.accessLevel ?? "").trim();
       try {
         await grantAccess.mutateAsync({
           userId: created.id,

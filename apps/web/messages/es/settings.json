@@ -355,7 +355,10 @@
       "workflow:manage": { "label": "Configurar flujos de trabajo y conexiones" },
       "workflow:run": { "label": "Ejecutar y reintentar flujos de trabajo" },
       "workflow:task": { "label": "Completar tareas manuales" },
-      "workflow:secrets": { "label": "Gestionar credenciales de conectores" }
+      "workflow:secrets": { "label": "Gestionar credenciales de conectores" },
+      "notification:read": { "label": "Ver notificaciones" },
+      "secret:read": { "label": "Ver el Gestor de Secretos" },
+      "secret:manage": { "label": "Gestionar bóvedas y membresías" }
     },
     "capabilities": {
       "inventory:view": {
@@ -449,6 +452,18 @@
       "workflow:secrets": {
         "label": "Gestionar credenciales de conectores",
         "description": "Configurar, introducir y rotar las credenciales de conectores por aplicación — separado de la autoría de la lógica del flujo."
+      },
+      "notifications:view": {
+        "label": "Ver notificaciones",
+        "description": "Ver la campana de notificaciones en la app — avisos operativos seleccionados (acceso a apps críticas, elevación de administrador, stock bajo, tareas de flujo de trabajo)."
+      },
+      "secret:view": {
+        "label": "Ver el Gestor de Secretos",
+        "description": "Ver que existen bóvedas y elementos secretos (nombres, identificadores, listas de miembros) — solo metadatos de conocimiento cero; no se revela ningún valor."
+      },
+      "secret:manage": {
+        "label": "Gestionar bóvedas y membresías",
+        "description": "Crear, editar y eliminar bóvedas; gestionar las membresías de las bóvedas (otorgar/revocar DEK envueltas) — toda la superficie de administración del Gestor de Secretos."
       }
     },
     "presets": {
