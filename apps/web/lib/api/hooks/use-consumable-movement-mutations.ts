@@ -6,11 +6,13 @@ import type {
 } from "@lazyit/shared";
 import { createConsumableMovement } from "../endpoints/consumables";
 import { consumableKeys } from "./use-consumables";
+import { invalidateDashboard } from "./use-dashboard";
 
 /**
  * Record a stock movement (IN / OUT / ADJUSTMENT). Invalidates `consumableKeys.all` so the cached
- * `currentStock` (on the list and detail) and the movement ledger refetch. A 409 (an OUT that would
- * go negative) rejects — callers surface it as a toast.
+ * `currentStock` (on the list and detail) and the movement ledger refetch, plus the dashboard whose
+ * low-stock tally derives from `currentStock` (issue #499). A 409 (an OUT that would go negative)
+ * rejects — callers surface it as a toast.
  */
 export function useRecordMovement() {
   const queryClient = useQueryClient();
@@ -22,8 +24,10 @@ export function useRecordMovement() {
       consumableId: string;
       data: CreateConsumableMovement;
     }) => createConsumableMovement(consumableId, data),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: consumableKeys.all }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: consumableKeys.all });
+      invalidateDashboard(queryClient);
+    },
   });
 }
 
@@ -120,8 +124,12 @@ export function useQuickAdjustStock() {
         queryClient.setQueryData(key, data);
       }
     },
-    // Reconcile with the server (also refetches the movement ledger).
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: consumableKeys.all }),
+    // Reconcile with the server (also refetches the movement ledger) and the dashboard low-stock
+    // tally (issue #499). The optimistic snapshot/rollback above is untouched — this only ADDS the
+    // dashboard refetch to the settle, never the rollback path.
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: consumableKeys.all });
+      invalidateDashboard(queryClient);
+    },
   });
 }
