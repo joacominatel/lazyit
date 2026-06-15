@@ -272,6 +272,36 @@ describe('ZitadelManagementService (ADR-0043 Phase 2)', () => {
     });
   });
 
+  it('createUser sets changeRequired:true (and keeps isVerified:true) for an admin-provisioned temporary password — ADR-0064, issue #411', async () => {
+    const svc = configure();
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse()) // token
+      .mockResolvedValueOnce(jsonResponse({ userId: 'zitadel-user-7' })) // create
+      .mockResolvedValueOnce(jsonResponse({ result: [] })) // grantRole → search
+      .mockResolvedValueOnce(jsonResponse({ userGrantId: 'g-1' })); // grantRole → ADD
+
+    await svc.createUser({
+      email: 'a@b.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'VIEWER',
+      password: 'Abcdef1!',
+      passwordChangeRequired: true,
+    });
+
+    const createBody = JSON.parse(bodyOf(callAt(1))) as {
+      email: { email: string; isVerified: boolean };
+      password?: { password: string; changeRequired: boolean };
+    };
+    // Admin provisioning (ADR-0064): the temporary password is set with changeRequired:true so Zitadel
+    // forces a password change at first login; email auto-verify is always-on (ADR-0064 §3 — no toggle).
+    expect(createBody.email).toEqual({ email: 'a@b.com', isVerified: true });
+    expect(createBody.password).toEqual({
+      password: 'Abcdef1!',
+      changeRequired: true,
+    });
+  });
+
   it('deactivateUser POSTs /v2/users/{id}/deactivate', async () => {
     const svc = configure();
     fetchMock

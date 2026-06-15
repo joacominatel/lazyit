@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   buildFiltersPatch,
@@ -176,12 +176,31 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
   // --- writer: rebuild the param string from the current URL + a patch, then replace() ---
   // The patch is applied as a whole (see buildNextUrl), so a multi-key patch lands in one
   // router.replace — two keys changed together can never clobber each other (#217).
+  //
+  // `commit` MUST be referentially stable across renders (#487): consumers spread the derived
+  // setters into child props (`onChange`, `onDebouncedChange`, `onOffsetChange`, …), so a setter
+  // whose identity changes every render can drive child effects to re-fire and re-commit — a
+  // feedback loop that hits the browser's `history.replaceState()` rate limit (>100 calls / 10s →
+  // SecurityError). The naive fix — dropping `searchParams`/`pathname` from the deps — would close
+  // over a STALE snapshot and rebuild the next URL from outdated params, dropping concurrent keys.
+  // Instead we route the latest `{ searchParams, pathname }` through a ref updated every render and
+  // depend only on the stable `router`. The ref always holds this render's values, so `commit`
+  // reads fresh URL state at call time while keeping a constant identity — race-free, no stale URL.
+  const latest = useRef({ searchParams, pathname });
+  // Writing this ref during render is intentional and safe: the write is idempotent, and the value
+  // is only READ at event time inside `commit` (never during render), so there is no torn read. It
+  // keeps `commit` referentially stable (deps: [router]) while always seeing the latest URL state.
+  // The react-hooks/refs rule (React-Compiler-era) is conservative about this proven pattern.
+  // eslint-disable-next-line react-hooks/refs
+  latest.current = { searchParams, pathname };
+
   const commit = useCallback(
     (patch: Record<string, string | number | undefined>) => {
-      const href = buildNextUrl(searchParams.toString(), pathname, patch);
+      const { searchParams: sp, pathname: path } = latest.current;
+      const href = buildNextUrl(sp.toString(), path, patch);
       router.replace(href, { scroll: false });
     },
-    [router, pathname, searchParams],
+    [router],
   );
 
   const setQ = useCallback(

@@ -177,6 +177,26 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > IdP link ([[INVARIANTS]] INV-4) — never a misleading success. Both rely on the same Private-Key-JWT
 > Management auth as the create/role write-backs ([[0043-zitadel-source-of-truth]] §3).
 
+> [!note] Create accepts an optional temporary password ([[0064-admin-user-provisioning-credentials]], #411)
+> `POST /users` accepts an **optional** `password` on `CreateUserSchema` — a **temporary** credential for
+> admin provisioning. It is honored **only on the bundled-Zitadel management path** (`idp.supportsManagement`):
+> the new Zitadel user is created with the password set **`changeRequired:true`**, so Zitadel **forces a
+> password change at first login** — a one-time hand-off secret, never a standing admin-known credential.
+> The user is created **email auto-verified** (always-on, ADR-0064 §3 — no email-verified toggle). Under
+> **BYOI / generic OIDC** a supplied `password` is rejected with **400** *before any local row is created*
+> (the operator's own IdP owns the credential; the controls are hidden in the later full-page UI). The
+> password is **never persisted** to lazyit's DB (it is not a `User` column) and **never logged/echoed**
+> ([[0031-logging-strategy]] / [[0064-admin-user-provisioning-credentials]]). A Zitadel complexity-policy
+> rejection rides the existing **compensate-on-failure** path (the just-created local row is hard-deleted,
+> a 503 surfaced — no half-provisioned user). This is a **second, narrower** carve-out than the bootstrap
+> wizard's initial password (which is `changeRequired:false` for the very first admin — [[0043-zitadel-source-of-truth]]
+> / #335). It reuses the existing **`user:manage`** gate (no new permission). Omitting `password` is fully
+> back-compatible (the previous no-credential create). Because `CloneUserSchema.profile` reuses
+> `CreateUserSchema`, **`POST /users/:id/clone` accepts the same optional `password`** and provisions it
+> identically (same `user:manage` gate, same BYOI-400 / `changeRequired:true` / never-persisted handling) —
+> a cloned user is a new user who likewise needs a one-time credential. _Phase 1 (backend + shared
+> contract); the full-page create UI with the password control is a later phase._
+
 **Web:** `users/[id]` is the asset-centric **per-person** detail page (the counterpart to the asset
 detail) — it composes the two nested reads above plus the user's authored [[article]]s, answering
 "who can access what" for one person and cross-linking user ⇄ asset / application. See
