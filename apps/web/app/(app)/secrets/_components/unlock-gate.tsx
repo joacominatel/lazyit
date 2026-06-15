@@ -3,6 +3,7 @@
 import {
   ArrowPathIcon,
   ExclamationTriangleIcon,
+  KeyIcon,
   LockClosedIcon,
   LockOpenIcon,
 } from "@heroicons/react/24/outline";
@@ -15,9 +16,15 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api/client";
 import { notifyError } from "@/lib/api/notify-error";
-import { useCreateKeypair, useMyKeypair, useResetKeypair } from "@/lib/secret-manager/hooks/use-keypair";
+import {
+  useChangePassword,
+  useCreateKeypair,
+  useMyKeypair,
+  useResetKeypair,
+} from "@/lib/secret-manager/hooks/use-keypair";
 import {
   bootstrapKeypair,
+  rewrapPasswordCopy,
   unlockWithPassphrase,
   unlockWithRecoveryKey,
 } from "@/lib/secret-manager/crypto";
@@ -100,15 +107,17 @@ function UnlockError({ embedded = false }: { embedded?: boolean }) {
 }
 
 /**
- * The LOCKED state: a member who has a keypair must enter their vault passphrase to unlock the private
- * key into the in-memory session. A secondary "I lost my passphrase" toggle swaps to the recovery-key
- * input; a "I lost both" link starts a peer-reset.
+ * The LOCKED state (ADR-0066): a member who has a keypair enters their PASSWORD — the only direct ENTRY
+ * credential — to unlock the private key into the in-memory session. The recovery key is NO LONGER a direct
+ * unlock path: the "Forgot your password?" link goes to the RESET-PASSWORD flow (recovery key + a new
+ * password → re-wrap Copy A → auto-unlock), and "I lost both" still starts a peer-reset.
  */
 function UnlockFlow({ keypair, embedded = false }: { keypair: UserKeypair; embedded?: boolean }) {
   const t = useTranslations("secrets");
-  const tc = useTranslations("common");
   const { setPrivateKey } = useSecretSession();
-  const [mode, setMode] = useState<"passphrase" | "recovery" | "reset">("passphrase");
+  // ADR-0066: only the password is a direct entry; "resetPassword" (recovery key → new password) and
+  // "peerReset" (lost both) are recovery sub-flows. There is NO "recovery" direct-unlock mode anymore.
+  const [mode, setMode] = useState<"password" | "resetPassword" | "peerReset">("password");
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -119,15 +128,13 @@ function UnlockFlow({ keypair, embedded = false }: { keypair: UserKeypair; embed
     setBusy(true);
     setFailed(false);
     try {
-      const privateKey =
-        mode === "recovery"
-          ? await unlockWithRecoveryKey(keypair, secret)
-          : await unlockWithPassphrase(keypair, secret);
+      // ENTRY is password-only now (ADR-0066) — the recovery key cannot unlock the session directly.
+      const privateKey = await unlockWithPassphrase(keypair, secret);
       setSecret(""); // drop the entered secret from local state immediately
       setPrivateKey(privateKey);
     } catch {
-      // The crypto layer throws a generic, payload-free decrypt error on a wrong passphrase/recovery key.
-      // Never surface the raw error (it carries no secret, but keep the discipline) — just a friendly note.
+      // The crypto layer throws a generic, payload-free decrypt error on a wrong password. Never surface
+      // the raw error (it carries no secret, but keep the discipline) — just a friendly note.
       setFailed(true);
       setSecret("");
     } finally {
@@ -135,11 +142,13 @@ function UnlockFlow({ keypair, embedded = false }: { keypair: UserKeypair; embed
     }
   }
 
-  if (mode === "reset") {
-    return <PeerResetFlow onCancel={() => setMode("passphrase")} embedded={embedded} />;
+  if (mode === "resetPassword") {
+    return <ResetPasswordFlow keypair={keypair} onCancel={() => setMode("password")} embedded={embedded} />;
   }
 
-  const isRecovery = mode === "recovery";
+  if (mode === "peerReset") {
+    return <PeerResetFlow onCancel={() => setMode("password")} embedded={embedded} />;
+  }
 
   return (
     <div className={embedded ? "space-y-5" : "mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10"}>
@@ -148,32 +157,27 @@ function UnlockFlow({ keypair, embedded = false }: { keypair: UserKeypair; embed
           <LockClosedIcon className="size-6 text-pillar-knowledge" aria-hidden />
         </span>
         <h2 className="text-lg font-semibold">{t("unlock.title")}</h2>
-        <p className="text-sm text-muted-foreground">
-          {isRecovery ? t("unlock.recoveryDescription") : t("unlock.description")}
-        </p>
+        <p className="text-sm text-muted-foreground">{t("unlock.description")}</p>
       </div>
 
       <form onSubmit={handleUnlock} className="space-y-4">
         <Field>
-          <FieldLabel htmlFor="unlock-secret">
-            {isRecovery ? t("unlock.recoveryKeyLabel") : t("unlock.passphraseLabel")}
-          </FieldLabel>
+          <FieldLabel htmlFor="unlock-secret">{t("unlock.passwordLabel")}</FieldLabel>
           <Input
             id="unlock-secret"
-            type={isRecovery ? "text" : "password"}
-            autoComplete="off"
+            type="password"
+            autoComplete="current-password"
             value={secret}
             onChange={(e) => {
               setSecret(e.target.value);
               setFailed(false);
             }}
             disabled={busy}
-            placeholder={isRecovery ? "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" : undefined}
             autoFocus
           />
           {failed ? (
             <FieldDescription className="text-destructive">
-              {isRecovery ? t("unlock.recoveryFailed") : t("unlock.passphraseFailed")}
+              {t("unlock.passwordFailed")}
             </FieldDescription>
           ) : null}
         </Field>
@@ -186,34 +190,214 @@ function UnlockFlow({ keypair, embedded = false }: { keypair: UserKeypair; embed
 
       {/* #452: this is an UNLOCK, not first-time setup — the keypair already exists. A recovery key is
           shown only ONCE at setup and is NOT re-displayed here. Stating that explicitly avoids the
-          "I set my passphrase but never saw a recovery key" confusion (the user reached unlock, not
-          bootstrap). The "I forgot my passphrase" path below covers the lost-passphrase case. */}
-      {!isRecovery ? (
-        <p className="rounded-md bg-muted/60 p-3 text-center text-xs text-muted-foreground">
-          {t("unlock.alreadySetUpNote")}
-        </p>
-      ) : null}
+          "I set my password but never saw a recovery key" confusion (the user reached unlock, not
+          bootstrap). The "Forgot your password?" path below covers the lost-password case. */}
+      <p className="rounded-md bg-muted/60 p-3 text-center text-xs text-muted-foreground">
+        {t("unlock.alreadySetUpNote")}
+      </p>
 
       <div className="flex flex-col items-center gap-1 border-t pt-4 text-center text-xs">
         <button
           type="button"
           className="text-primary underline-offset-2 hover:underline"
           onClick={() => {
-            setMode(isRecovery ? "passphrase" : "recovery");
+            setMode("resetPassword");
             setSecret("");
             setFailed(false);
           }}
         >
-          {isRecovery ? t("unlock.usePassphrase") : t("unlock.lostPassphrase")}
+          {t("unlock.forgotPassword")}
         </button>
         <button
           type="button"
           className="text-muted-foreground underline-offset-2 hover:underline"
-          onClick={() => setMode("reset")}
+          onClick={() => setMode("peerReset")}
         >
           {t("unlock.lostBoth")}
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * RESET PASSWORD with the recovery key (ADR-0066 §2c). The "I forgot my password but I have my recovery key"
+ * path — it REPLACES the old "unlock directly with the recovery key" entry. The recovery key is the ROOT: it
+ * can only RESET the password, never log in directly.
+ *
+ * Flow: unlock the private key with the RECOVERY KEY in the browser (wrong key → inline error, nothing
+ * posted) → re-wrap Copy A under the NEW password (`rewrapPasswordCopy`) → POST `/keypair/password`
+ * (overwrites ONLY Copy A; Copy B / public key / DEKs / memberships untouched) → AUTO-UNLOCK the session
+ * with the private key we already hold (no second password prompt). The recovery key, the new password, and
+ * the private key are EPHEMERAL: held only across this submit and dropped on success.
+ *
+ * AUTO-UNLOCK ORDERING: we set the private key into the session ONLY AFTER the POST succeeds. If the POST
+ * fails the session stays locked and the user can retry; if it succeeds, the password they just set is live
+ * and they land inside already unlocked with the key in memory.
+ */
+function ResetPasswordFlow({
+  keypair,
+  onCancel,
+  embedded = false,
+}: {
+  keypair: UserKeypair;
+  onCancel: () => void;
+  embedded?: boolean;
+}) {
+  const t = useTranslations("secrets");
+  const tc = useTranslations("common");
+  const { setPrivateKey } = useSecretSession();
+  const changePassword = useChangePassword();
+  const [recoveryKey, setRecoveryKey] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  // Wrong RECOVERY KEY — inline error, nothing posted.
+  const [failed, setFailed] = useState(false);
+  const [noKeypair, setNoKeypair] = useState(false);
+
+  const mismatch = confirm.length > 0 && newPassword !== confirm;
+  const tooShort = newPassword.length > 0 && newPassword.length < 8;
+  const canSubmit =
+    !busy &&
+    Boolean(recoveryKey) &&
+    Boolean(newPassword) &&
+    newPassword === confirm &&
+    newPassword.length >= 8;
+
+  async function handleReset(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) return;
+    setBusy(true);
+    setFailed(false);
+    setNoKeypair(false);
+
+    // Step 1 — unlock the private key with the RECOVERY KEY in the browser. A wrong key throws the generic,
+    // payload-free decrypt error BEFORE anything is posted; nothing changes.
+    let privateKey: Uint8Array;
+    try {
+      privateKey = await unlockWithRecoveryKey(keypair, recoveryKey);
+    } catch {
+      setFailed(true);
+      setRecoveryKey("");
+      setBusy(false);
+      return;
+    }
+
+    // Step 2 — re-wrap Copy A under the NEW password (browser).
+    let wire;
+    try {
+      wire = await rewrapPasswordCopy(privateKey, newPassword);
+    } catch (err) {
+      notifyError(err, t("resetPassword.error"));
+      setBusy(false);
+      return;
+    }
+
+    // Step 3 — COMMIT the new Copy-A wrap server-side (overwrites ONLY the password copy). 404 means the
+    // caller has no keypair (defensive — this surface only renders when one exists).
+    try {
+      await changePassword.mutateAsync(wire);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setNoKeypair(true);
+      } else {
+        notifyError(err, t("resetPassword.error"));
+      }
+      setBusy(false);
+      return;
+    }
+
+    // Step 4 — AUTO-UNLOCK: the new password is live and we already hold the private key the recovery key
+    // unlocked, so set it into the session (no second prompt). Drop all secret state.
+    setRecoveryKey("");
+    setNewPassword("");
+    setConfirm("");
+    setPrivateKey(privateKey);
+    setBusy(false);
+  }
+
+  return (
+    <div className={embedded ? "space-y-5" : "mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10"}>
+      <div className="flex flex-col items-center gap-2 text-center">
+        <span className="flex size-12 items-center justify-center rounded-full bg-pillar-knowledge/10">
+          <KeyIcon className="size-6 text-pillar-knowledge" aria-hidden />
+        </span>
+        <h2 className="text-lg font-semibold">{t("resetPassword.title")}</h2>
+        <p className="text-sm text-muted-foreground">{t("resetPassword.description")}</p>
+      </div>
+
+      <form onSubmit={handleReset} className="space-y-4">
+        <Field>
+          <FieldLabel htmlFor="reset-password-recovery">{t("resetPassword.recoveryKeyLabel")}</FieldLabel>
+          <Input
+            id="reset-password-recovery"
+            type="text"
+            autoComplete="off"
+            value={recoveryKey}
+            onChange={(e) => {
+              setRecoveryKey(e.target.value);
+              setFailed(false);
+              setNoKeypair(false);
+            }}
+            disabled={busy}
+            placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+            autoFocus
+          />
+          {failed ? (
+            <FieldDescription className="text-destructive">
+              {t("resetPassword.recoveryFailed")}
+            </FieldDescription>
+          ) : null}
+          {noKeypair ? (
+            <FieldDescription className="text-destructive">
+              {t("resetPassword.noKeypair")}
+            </FieldDescription>
+          ) : null}
+        </Field>
+
+        <Field>
+          <FieldLabel htmlFor="reset-password-new">{t("resetPassword.newLabel")}</FieldLabel>
+          <Input
+            id="reset-password-new"
+            type="password"
+            autoComplete="new-password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            disabled={busy}
+          />
+          <FieldDescription className={tooShort ? "text-destructive" : undefined}>
+            {tooShort ? t("resetPassword.tooShort") : t("resetPassword.newHint")}
+          </FieldDescription>
+        </Field>
+
+        <Field>
+          <FieldLabel htmlFor="reset-password-confirm">{t("resetPassword.confirmLabel")}</FieldLabel>
+          <Input
+            id="reset-password-confirm"
+            type="password"
+            autoComplete="new-password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            disabled={busy}
+          />
+          {mismatch ? (
+            <FieldDescription className="text-destructive">
+              {t("resetPassword.mismatch")}
+            </FieldDescription>
+          ) : null}
+        </Field>
+
+        <div className="flex gap-2">
+          <Button type="button" variant="outline" className="flex-1" onClick={onCancel} disabled={busy}>
+            {tc("cancel")}
+          </Button>
+          <Button type="submit" className="flex-1" disabled={!canSubmit}>
+            {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : <LockOpenIcon className="size-4" />}
+            {busy ? t("resetPassword.resetting") : t("resetPassword.submit")}
+          </Button>
+        </div>
+      </form>
     </div>
   );
 }
