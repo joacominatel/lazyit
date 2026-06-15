@@ -28,11 +28,7 @@
  * code, not just at the authorization layer.
  */
 
-import type {
-  CreateUserKeypair,
-  RegenerateRecoveryKey,
-  UserKeypair,
-} from "@lazyit/shared";
+import type { CreateUserKeypair, UserKeypair } from "@lazyit/shared";
 import {
   type SecretEnvelope,
   type WrappedDek,
@@ -248,64 +244,6 @@ export async function unlockWithRecoveryKey(
     keypair.recoveryIv,
   );
   return openBytes(wrappingKey, envelope);
-}
-
-/**
- * The result of {@link regenerateRecoveryWrap}: the narrow wire DTO to POST (only the three recovery-wrap
- * columns) plus the NEW recovery-key DISPLAY string. Same shown-once discipline as {@link BootstrappedKeypair}:
- * the display string is shown to the user EXACTLY ONCE and dropped immediately after — never persisted,
- * never logged, never sent to the server. The server stores only the recovery-key-WRAPPED private-key blob
- * inside `wire`.
- */
-export interface RegeneratedRecoveryKey {
-  /** The `RegenerateRecoveryKey` DTO — the three recovery-wrap columns ONLY. Safe to POST to `/secret-manager/keypair/recovery`. */
-  wire: RegenerateRecoveryKey;
-  /** The NEW recovery key as `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX` — SHOWN ONCE, NEVER persisted/logged/sent. */
-  recoveryKeyDisplay: string;
-}
-
-/**
- * Regenerate ONLY the recovery-key wrap of an EXISTING keypair (ADR-0065 §3). Re-composes the bootstrap
- * primitives — minus the keypair generation and the passphrase wrap — into the "lost the recovery key, kept
- * the passphrase" flow. Runs entirely in the browser:
- *   1. unlock the private key from the passphrase-wrapped copy (`unlockWithPassphrase`; Argon2id → openBytes)
- *      — ADR-0065 ALWAYS re-derives via the passphrase (never a cached private key), even in an unlocked
- *      session, as the security boundary against a walk-up attacker on an unattended unlocked session;
- *   2. mint a NEW recovery key (shown once);
- *   3. re-wrap the SAME private key under HKDF(newRecoveryKeyBytes) with a FRESH salt → Copy B only.
- *
- * The public key, the passphrase-wrapped blob, `kdfParams`, the per-vault DEKs, and EVERY membership are
- * UNTOUCHED — only `privateKeyEncByRecovery`/`recoverySalt`/`recoveryIv` change (ADR-0065 §1). The passphrase,
- * the new recovery key, the HKDF wrapping key, and the unwrapped private key are all EPHEMERAL — none appears
- * in `wire`. The unwrapped private key is dropped at the end of this call (it never enters the session here).
- *
- * @param keypair    the caller's existing {@link UserKeypair} (from `GET /keypair/me`).
- * @param passphrase the user's vault passphrase (UTF-8; never persisted/logged/sent). A wrong passphrase
- *                   throws the generic, payload-free decrypt error from `unlockWithPassphrase`.
- */
-export async function regenerateRecoveryWrap(
-  keypair: UserKeypair,
-  passphrase: string,
-): Promise<RegeneratedRecoveryKey> {
-  // Step 1 — ALWAYS re-derive the private key from the passphrase (ADR-0065 Status resolution 2). Throws on
-  // a wrong passphrase before any new key is minted, so a failed attempt leaks nothing and mints nothing.
-  const privateKey = await unlockWithPassphrase(keypair, passphrase);
-
-  // Step 2 — a fresh, high-entropy recovery key (shown once).
-  const recovery = generateRecoveryKey();
-
-  // Step 3 — re-wrap the SAME private key under HKDF(new recovery key) with a fresh salt → Copy B only.
-  const recoverySalt = randomBytes(SALT_BYTES);
-  const recoveryKey = deriveRecoveryWrapKey(recovery.bytes, recoverySalt);
-  const sealedByRecovery = sealBytes(recoveryKey, privateKey);
-
-  const wire: RegenerateRecoveryKey = {
-    privateKeyEncByRecovery: joinSealedBlob(sealedByRecovery),
-    recoverySalt: bytesToBase64(recoverySalt),
-    recoveryIv: sealedByRecovery.iv,
-  };
-
-  return { wire, recoveryKeyDisplay: recovery.display };
 }
 
 /**
