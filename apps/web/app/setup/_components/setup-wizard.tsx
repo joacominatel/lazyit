@@ -149,7 +149,7 @@ export function SetupWizard() {
       <Card className="w-full">
         <CardHeader>
           <div className="flex items-center gap-2">
-            <CheckCircleIcon className="size-5 text-emerald-600 dark:text-emerald-400" />
+            <CheckCircleIcon className="size-5 text-success" />
             <CardTitle>Already set up</CardTitle>
           </div>
           <CardDescription>
