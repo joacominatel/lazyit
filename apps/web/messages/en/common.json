@@ -18,6 +18,8 @@
   "submit": "Submit",
   "loading": "Loading…",
   "saving": "Saving…",
+  "searching": "Searching…",
+  "typeToSearch": "Type to search…",
   "noResults": "No results",
   "required": "Required",
   "optional": "Optional",
