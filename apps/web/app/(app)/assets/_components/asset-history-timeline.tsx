@@ -7,15 +7,15 @@ import type {
   User,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { UserAvatar } from "@/components/user-avatar";
 import { useAssetHistory } from "@/lib/api/hooks/use-asset-history";
 import { useUsers } from "@/lib/api/hooks/use-users";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/utils/format";
 
 /** Maps each event type to its label key under `assets.detail.timeline.events`. */
 const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
@@ -100,8 +100,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
   const { data: users } = useUsers();
   const t = useTranslations("assets.detail.timeline");
   const tc = useTranslations("common");
-  // Snapshot "now" once so relative times stay pure across renders (react-hooks/purity).
-  const [now] = useState(() => Date.now());
+  const { dateTime, relative } = useFormatters();
 
   const userById = useMemo(
     () => new Map<string, User>((users ?? []).map((user) => [user.id, user])),
@@ -206,9 +205,9 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
                   {text && <span className="text-sm">{text}</span>}
                   <span
                     className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground"
-                    title={new Date(event.createdAt).toLocaleString()}
+                    title={dateTime(event.createdAt)}
                   >
-                    {formatRelativeTime(event.createdAt, now)}
+                    {relative(event.createdAt)}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
