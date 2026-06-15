@@ -14,9 +14,9 @@ import type {
   WorkflowRunStep,
   WorkflowTransitionEdge,
 } from "@/lib/api/endpoints/workflow-runs";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
 import { runStatusTone, stepStatusTone } from "@/lib/workflow/status";
-import { formatRelativeTime } from "@/lib/utils/format";
 import { WorkflowEdgeLabel, WorkflowNode } from "./workflow-graph";
 
 /** Human-readable duration: sub-second in ms, else seconds with one decimal. */
@@ -49,7 +49,7 @@ const SUCCESS_EDGES: ReadonlySet<WorkflowTransitionEdge> = new Set([
  */
 export function RunTimeline({ run }: { run: WorkflowRunDetail }) {
   const t = useTranslations("workflow");
-  const [now] = useState(() => Date.now());
+  const { dateTime, relative } = useFormatters();
 
   return (
     <div className="space-y-4">
@@ -63,9 +63,9 @@ export function RunTimeline({ run }: { run: WorkflowRunDetail }) {
         {run.startedAt ? (
           <span
             className="ml-auto text-xs tabular-nums text-muted-foreground"
-            title={new Date(run.startedAt).toLocaleString()}
+            title={dateTime(run.startedAt)}
           >
-            {formatRelativeTime(run.startedAt, now)}
+            {relative(run.startedAt)}
           </span>
         ) : null}
       </div>
