@@ -100,6 +100,8 @@
     "devMode": "Dev Mode",
     "production": "Production",
     "dismissModeBanner": "Dismiss mode banner",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar",
     "breadcrumbLabel": "Breadcrumb",
     "breadcrumb": {
       "dashboard": "Dashboard",

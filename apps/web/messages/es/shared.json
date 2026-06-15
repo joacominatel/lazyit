@@ -100,6 +100,8 @@
     "devMode": "Modo desarrollo",
     "production": "Producción",
     "dismissModeBanner": "Descartar aviso de modo",
+    "collapseSidebar": "Colapsar barra lateral",
+    "expandSidebar": "Expandir barra lateral",
     "breadcrumbLabel": "Ruta de navegación",
     "breadcrumb": {
       "dashboard": "Panel",
