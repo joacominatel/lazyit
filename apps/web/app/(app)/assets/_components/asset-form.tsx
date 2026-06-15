@@ -40,6 +40,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { notifyError } from "@/lib/api/notify-error";
+import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { useAssetStatusLabel } from "./asset-status-badge";
 import {
   type CustomFieldError,
@@ -196,54 +197,61 @@ export function AssetForm({
       t("customFields.removeFieldLabel", { index }),
   };
 
-  const onSubmit = form.handleSubmit((values) => {
-    // Validate the custom-field rows (non-empty + unique names); abort on any error.
-    const { errors, ok } = validateRows(specRows);
-    setSpecErrors(errors);
-    if (!ok) return;
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      // Validate the custom-field rows (non-empty + unique names); abort on any error.
+      const { errors, ok } = validateRows(specRows);
+      setSpecErrors(errors);
+      if (!ok) {
+        // The custom-field rows live outside RHF, so a row error never reaches RHF's `onInvalid`.
+        // The spec rows set `aria-invalid` too, so the shared helper (which defers a frame for the
+        // just-set errors to paint) finds the first one in DOM order and scrolls/focuses it.
+        scrollToFirstError(document.getElementById(FORM_ID));
+        return;
+      }
 
-    // Serialize rows into the specs object, merging preserved non-scalar entries.
-    let specs = rowsToSpecs(specRows, preservedSpecs);
-    // On edit, if the user cleared every field but the asset previously had specs,
-    // send `{}` to actually clear them (an omitted key is a no-op in a PATCH).
-    if (isEdit && specs === undefined && hadSpecs) specs = {};
+      // Serialize rows into the specs object, merging preserved non-scalar entries.
+      let specs = rowsToSpecs(specRows, preservedSpecs);
+      // On edit, if the user cleared every field but the asset previously had specs,
+      // send `{}` to actually clear them (an omitted key is a no-op in a PATCH).
+      if (isEdit && specs === undefined && hadSpecs) specs = {};
 
-    const payload = {
-      name: values.name,
-      status: values.status,
-      serial: values.serial,
-      assetTag: values.assetTag,
-      modelId: values.modelId,
-      locationId: values.locationId,
-      purchaseDate: values.purchaseDate,
-      warrantyEnd: values.warrantyEnd,
-      notes: values.notes,
-      specs,
-    };
+      const payload = {
+        name: values.name,
+        status: values.status,
+        serial: values.serial,
+        assetTag: values.assetTag,
+        modelId: values.modelId,
+        locationId: values.locationId,
+        purchaseDate: values.purchaseDate,
+        warrantyEnd: values.warrantyEnd,
+        notes: values.notes,
+        specs,
+      };
 
-    if (asset) {
-      updateAsset.mutate(
-        { id: asset.id, data: payload },
-        {
-          onSuccess: (updated) => {
-            toast.success(t("savedToast"));
-            router.push(`/assets/${updated.id}`);
+      if (asset) {
+        updateAsset.mutate(
+          { id: asset.id, data: payload },
+          {
+            onSuccess: (updated) => {
+              toast.success(t("savedToast"));
+              router.push(`/assets/${updated.id}`);
+            },
+            onError: (error) => notifyError(error, t("saveError")),
           },
-          onError: (error) =>
-            notifyError(error, t("saveError")),
-        },
-      );
-    } else {
-      createAsset.mutate(payload, {
-        onSuccess: (created) => {
-          toast.success(t("createdToast"));
-          router.push(`/assets/${created.id}`);
-        },
-        onError: (error) =>
-          notifyError(error, t("createError")),
-      });
-    }
-  });
+        );
+      } else {
+        createAsset.mutate(payload, {
+          onSuccess: (created) => {
+            toast.success(t("createdToast"));
+            router.push(`/assets/${created.id}`);
+          },
+          onError: (error) => notifyError(error, t("createError")),
+        });
+      }
+    },
+    (_errors, event) => scrollToFirstError(event?.target ?? null),
+  );
 
   return (
     <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
