@@ -39,7 +39,7 @@ export function ByoiSnippet() {
           aria-label="Copy environment variables"
         >
           {copied ? (
-            <CheckIcon className="text-emerald-600 dark:text-emerald-400" />
+            <CheckIcon className="text-success" />
           ) : (
             <ClipboardIcon />
           )}
