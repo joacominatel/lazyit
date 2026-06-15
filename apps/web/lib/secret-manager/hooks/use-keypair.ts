@@ -1,10 +1,11 @@
-import type { CreateUserKeypair } from "@lazyit/shared";
+import type { CreateUserKeypair, RegenerateRecoveryKey } from "@lazyit/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import {
   createKeypair,
   getMyKeypair,
   getUserPublicKey,
+  regenerateRecoveryKey,
   resetMyKeypair,
 } from "../endpoints/keypair";
 import { keypairKeys } from "../query-keys";
@@ -98,6 +99,23 @@ export function useResetKeypair() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: CreateUserKeypair) => resetMyKeypair(data),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: keypairKeys.all }),
+  });
+}
+
+/**
+ * Regenerate ONLY the recovery wrap of the caller's existing keypair (ADR-0065). `data` is the
+ * {@link RegenerateRecoveryKey} wire DTO produced CLIENT-SIDE (`regenerateRecoveryWrap`) — the three
+ * recovery-wrap columns only; NOTHING secret (passphrase, new recovery key, private key) is passed to this
+ * hook, cached, or logged. On success we invalidate the keypair root so `me` re-reads the updated recovery
+ * fields (`recoverySalt`/`recoveryIv`/`privateKeyEncByRecovery`). The public key and passphrase wrap are
+ * unchanged, so no membership/DEK churn follows.
+ */
+export function useRegenerateRecoveryKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: RegenerateRecoveryKey) => regenerateRecoveryKey(data),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: keypairKeys.all }),
   });
