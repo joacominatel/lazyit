@@ -1,7 +1,7 @@
 ---
 title: "ADR-0065: Secret Manager — regenerate the recovery key for an existing keypair"
 tags: [adr, secrets, security, crypto, recovery, knowledge-base]
-status: accepted
+status: superseded
 created: 2026-06-14
 updated: 2026-06-15
 deciders: [Joaquín Minatel]
@@ -9,8 +9,17 @@ deciders: [Joaquín Minatel]
 
 # ADR-0065: Secret Manager — regenerate the recovery key for an existing keypair
 
+> [!warning] Superseded by [[0066-secret-manager-password-vs-recovery-root]] (2026-06-15)
+> The CEO refined the credential model to asymmetric **password = daily entry (mutable) / recovery key =
+> root that only RESETS the password**. The "regenerate the recovery key with the password" flow below is
+> **reverted** (the weaker password must not be able to rotate the root). Its backend surface
+> (`POST /secret-manager/keypair/recovery`, `RegenerateRecoveryKeySchema`, `regenerateRecoveryKey`) was
+> removed; the `RECOVERY_KEY_REGENERATED` audit enum value is left dormant. The body below is retained
+> for history. See [[0066-secret-manager-password-vs-recovery-root]].
+
 ## Status
 
+**superseded** by [[0066-secret-manager-password-vs-recovery-root]] (2026-06-15). Originally
 **accepted** — 2026-06-15 (CEO sign-off on Option 2). Issue #452 — the deferred "regenerate" half.
 It is a **bounded extension** of [[0061-secret-manager-zero-knowledge]]: a new client flow + a small
 ciphertext-custodian endpoint that lets a user **re-mint their off-host recovery key without changing

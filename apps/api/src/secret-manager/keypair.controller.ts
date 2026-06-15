@@ -11,8 +11,8 @@ import {
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ChangeKeypairPasswordSchema,
   CreateUserKeypairSchema,
-  RegenerateRecoveryKeySchema,
   ResetUserKeypairSchema,
   UserKeypairSchema,
 } from '@lazyit/shared';
@@ -25,8 +25,8 @@ import { SecretManagerService } from './secret-manager.service';
 class UserKeypairDto extends createZodDto(UserKeypairSchema) {}
 class CreateUserKeypairDto extends createZodDto(CreateUserKeypairSchema) {}
 class ResetUserKeypairDto extends createZodDto(ResetUserKeypairSchema) {}
-class RegenerateRecoveryKeyDto extends createZodDto(
-  RegenerateRecoveryKeySchema,
+class ChangeKeypairPasswordDto extends createZodDto(
+  ChangeKeypairPasswordSchema,
 ) {}
 
 /**
@@ -83,18 +83,18 @@ export class KeypairController {
     return this.secrets.resetMyKeypair(principal, dto);
   }
 
-  @Post('keypair/recovery')
+  @Post('keypair/password')
   @RequirePermission('secret:read')
   @ApiOperation({
     summary:
-      "Regenerate ONLY the caller's recovery wrap (lost recovery key, kept passphrase). Keypair unchanged; 404 if none.",
+      "Change/reset ONLY the caller's password wrap (Copy A). Re-wraps the private key under a new password (unlocked client-side via the current password OR the recovery key). Public key + recovery wrap unchanged; 404 if none.",
   })
   @ApiOkResponse({ type: UserKeypairDto })
-  regenerateRecovery(
-    @Body() dto: RegenerateRecoveryKeyDto,
+  changePassword(
+    @Body() dto: ChangeKeypairPasswordDto,
     @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.secrets.regenerateRecoveryKey(principal, dto);
+    return this.secrets.changePassword(principal, dto);
   }
 
   @Get('users/:userId/public-key')
