@@ -14,11 +14,9 @@ import { DetailPanel } from "@/components/detail-panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, StatusDot } from "@/components/ui/status-badge";
 import { useWorkflowRuns } from "@/lib/api/hooks/use-workflow-runs";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { grantRunState, runStatusTone } from "@/lib/workflow/status";
-import {
-  formatDurationBetween,
-  formatRelativeTime,
-} from "@/lib/utils/format";
+import { formatDurationBetween } from "@/lib/utils/format";
 import { RetryRunButton } from "./retry-run-button";
 
 /** The collapsed and expanded page sizes (ADR-0049: a short, scannable list, expand only on demand). */
@@ -36,7 +34,6 @@ const EXPANDED_LIMIT = 50;
  */
 export function RecentRuns({ applicationId }: { applicationId: string }) {
   const t = useTranslations("workflow");
-  const [now] = useState(() => Date.now());
   const [expanded, setExpanded] = useState(false);
   const { data, isLoading } = useWorkflowRuns({
     applicationId,
@@ -65,7 +62,6 @@ export function RecentRuns({ applicationId }: { applicationId: string }) {
                 key={run.id}
                 run={run}
                 applicationId={applicationId}
-                now={now}
               />
             ))}
           </ul>
@@ -91,13 +87,12 @@ export function RecentRuns({ applicationId }: { applicationId: string }) {
 function RecentRunRow({
   run,
   applicationId,
-  now,
 }: {
   run: WorkflowRun;
   applicationId: string;
-  now: number;
 }) {
   const t = useTranslations("workflow");
+  const { dateTime, relative } = useFormatters();
   const tone = runStatusTone(run.status);
   const needsAttention = grantRunState(run.status) === "needsAttention";
   const startedIso = run.startedAt ?? run.createdAt;
@@ -141,9 +136,9 @@ function RecentRunRow({
           />
           <span
             className="hidden text-xs tabular-nums text-muted-foreground sm:inline"
-            title={new Date(startedIso).toLocaleString()}
+            title={dateTime(startedIso)}
           >
-            {formatRelativeTime(startedIso, now)}
+            {relative(startedIso)}
           </span>
           <ChevronRightIcon className="size-4 text-muted-foreground/60 transition-transform group-hover/run:translate-x-0.5 group-hover/run:text-muted-foreground" />
         </div>
