@@ -19,7 +19,6 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { useMyKeypair } from "@/lib/secret-manager/hooks/use-keypair";
 import { useVaults } from "@/lib/secret-manager/hooks/use-vaults";
 import { CreateVaultDialog } from "./create-vault-dialog";
-import { RegenerateRecoveryKeyFlow } from "./regenerate-recovery-key-flow";
 import { UnlockGate } from "./unlock-gate";
 import { useSecretSession } from "./secret-session";
 
@@ -54,11 +53,7 @@ export default function VaultListContent() {
   const canManage = useCan("secret:manage");
   const { isUnlocked, lock } = useSecretSession();
   const { data: vaults, isLoading, isError, error, refetch } = useVaults();
-  const {
-    data: keypair,
-    isError: keypairIsError,
-    error: keypairError,
-  } = useMyKeypair();
+  const { isError: keypairIsError, error: keypairError } = useMyKeypair();
 
   // A 404 on keypair/me means the user has never bootstrapped — first-run path.
   const isMissing =
@@ -103,18 +98,11 @@ export default function VaultListContent() {
           ) : undefined
         }
         actions={
-          !isMissing && isUnlocked ? (
-            <>
-              {/* Regenerate-recovery-key (ADR-0065, #452): available to any user with a keypair (not during
-                  bootstrap) — secondary action next to "Create vault". Always re-prompts for the passphrase. */}
-              {keypair ? <RegenerateRecoveryKeyFlow keypair={keypair} /> : null}
-              {canManage ? (
-                <Button onClick={handleCreateVault}>
-                  <PlusIcon />
-                  {t("vaults.createSubmit")}
-                </Button>
-              ) : null}
-            </>
+          !isMissing && isUnlocked && canManage ? (
+            <Button onClick={handleCreateVault}>
+              <PlusIcon />
+              {t("vaults.createSubmit")}
+            </Button>
           ) : null
         }
       />
