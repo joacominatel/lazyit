@@ -39,6 +39,7 @@ import {
   useUpdateApplication,
 } from "@/lib/api/hooks/use-application-mutations";
 import { notifyError } from "@/lib/api/notify-error";
+import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
 const FORM_ID = "application-form";
 /** Radix Select forbids an empty-string item value; use a sentinel for "no category". */
@@ -167,7 +168,7 @@ export function ApplicationForm({
           notifyError(error, t("form.createError")),
       });
     }
-  });
+  }, (_errors, event) => scrollToFirstError(event?.target ?? null));
 
   return (
     <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
