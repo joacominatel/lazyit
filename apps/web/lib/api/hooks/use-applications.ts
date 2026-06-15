@@ -33,7 +33,7 @@ export const applicationKeys = {
 export function useApplications() {
   return useQuery({
     queryKey: applicationKeys.lists(),
-    queryFn: () => getApplications({ limit: MAX_PAGE_LIMIT }),
+    queryFn: ({ signal }) => getApplications({ limit: MAX_PAGE_LIMIT }, signal),
     select: (page) => page.items,
   });
 }
@@ -46,7 +46,7 @@ export function useApplications() {
 export function useApplicationList(params: ApplicationListParams = {}) {
   return useQuery({
     queryKey: applicationKeys.list(params),
-    queryFn: () => getApplications(params),
+    queryFn: ({ signal }) => getApplications(params, signal),
     placeholderData: keepPreviousData,
   });
 }
