@@ -186,12 +186,13 @@ describe('INV-10 architectural guard (ADR-0061 — the merge gate)', () => {
     expect(offenders).toEqual([]);
   });
 
-  // ── ADR-0065 regenerate-recovery write path (the third keypair write) ──────────────
+  // ── ADR-0066 change/reset-password write path (the third keypair write) ─────────────
   // The module-wide scans (#1–#4) already cover any file added to the module, so the new route/service
   // inherit the structural fence automatically. These explicit assertions PIN the new write path so a
   // future refactor that re-introduces crypto on it (or returns a raw row) fails CI by name — the ADR
-  // §"Security & invariants" 🚩 requirement to extend this guard to the new route.
-  it('5. the regenerate-recovery route + service exist, import NO cipher, and return only the wire shape', () => {
+  // §"Security & invariants" 🚩 requirement to extend this guard to the new route. (Supersedes the ADR-0065
+  // keypair/recovery pinning, which was reverted.)
+  it('5. the change-password route + service exist, import NO cipher, and return only the wire shape', () => {
     const controller = join(MODULE_DIR, 'keypair.controller.ts');
     const service = join(MODULE_DIR, 'secret-manager.service.ts');
     const controllerCode = readCode(controller);
@@ -201,12 +202,12 @@ describe('INV-10 architectural guard (ADR-0061 — the merge gate)', () => {
     //     (HumanOnlyGuard at the class level + the `secret:read` capability gate), delegating to the
     //     service — never decrypting inline.
     expect(controllerCode).toMatch(/@Post\(\s*\)|@Post\(/); // a POST exists
-    expect(read(controller)).toMatch(/keypair\/recovery/); // the route path (a string literal)
-    expect(controllerCode).toMatch(/regenerateRecoveryKey\s*\(/); // delegates to the service
+    expect(read(controller)).toMatch(/keypair\/password/); // the route path (a string literal)
+    expect(controllerCode).toMatch(/changePassword\s*\(/); // delegates to the service
     expect(controllerCode).toMatch(/RequirePermission/); // capability-gated
 
     // (b) The service method exists and is the ONLY thing the route calls.
-    expect(serviceCode).toMatch(/regenerateRecoveryKey\s*\(/);
+    expect(serviceCode).toMatch(/changePassword\s*\(/);
 
     // (c) INV-10 on the new path: neither file imports a cipher provider nor reads a master-key env, and
     //     the service returns the wire projection (keypairToWire) — never a raw Prisma row or plaintext.
