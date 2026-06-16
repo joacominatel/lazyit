@@ -1,0 +1,19 @@
+{
+  "nav": {
+    "title": "Ayuda",
+    "backToIndex": "Volver a Ayuda"
+  },
+  "index": {
+    "title": "Ayuda",
+    "subtitle": "Documentación de producto de lazyit — pública y publicada junto con la app.",
+    "empty": "Todavía no hay páginas de ayuda disponibles."
+  },
+  "page": {
+    "fallbackNotice": "Esta página aún no está traducida a tu idioma, por lo que se muestra en inglés."
+  },
+  "notFound": {
+    "title": "Página de ayuda no encontrada",
+    "description": "La página que buscas no existe en el Manual.",
+    "backToIndex": "Volver a Ayuda"
+  }
+}
