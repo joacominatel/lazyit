@@ -8,7 +8,7 @@ import type { Metadata } from "next";
 // deferred to the SSR work (#500).
 export const metadata: Metadata = { title: "Reports" };
 
-export default function InformesLayout({
+export default function ReportsLayout({
   children,
 }: {
   children: React.ReactNode;
