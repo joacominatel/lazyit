@@ -29,6 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { UserAvatar } from "@/components/user-avatar";
 import { useOffboardUser } from "@/lib/api/hooks/use-user-mutations";
 import { notifyError } from "@/lib/api/notify-error";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import {
   DEFAULT_OFFBOARDING_MESSAGE,
@@ -46,7 +47,6 @@ import {
   useOffboardingData,
 } from "@/lib/offboarding/use-offboarding-data";
 import { cn } from "@/lib/utils";
-import { formatDate } from "@/lib/utils/format";
 
 /**
  * OffboardingSheet — Wave 3b (issue #172, ADR-0049 «Activated Restraint»). Replaces the plain delete
@@ -134,6 +134,7 @@ function AssetLine({ asset }: { asset: OffboardAssetRow }) {
 /** One access row in the "to revoke" list. */
 function GrantLine({ grant }: { grant: OffboardGrantRow }) {
   const t = useTranslations("users.offboarding");
+  const { date } = useFormatters();
   const title =
     grant.appName ??
     (grant.resolved ? t("applicationFallback") : grant.applicationId);
@@ -154,7 +155,7 @@ function GrantLine({ grant }: { grant: OffboardGrantRow }) {
         </div>
         <p className="truncate text-xs text-muted-foreground">
           {grant.expiresAt
-            ? t("expires", { date: formatDate(grant.expiresAt) })
+            ? t("expires", { date: date(grant.expiresAt) })
             : t("noExpiry")}
           {!grant.resolved
             ? t("verifyByIdSuffix", { id: grant.applicationId })
