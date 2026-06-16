@@ -9,6 +9,7 @@ import type { Permission } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import { Callout } from "@/components/callout";
 import { Button } from "@/components/ui/button";
 import { TestItPanel } from "./test-it-panel";
 
@@ -78,10 +79,13 @@ export function SecretReveal({
         </p>
       </div>
 
-      <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
-        <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0" />
-        <span>{t("serviceAccounts.secretReveal.warning")}</span>
-      </div>
+      <Callout
+        tone="warning"
+        icon={<ExclamationTriangleIcon />}
+        className="rounded-lg text-sm"
+      >
+        {t("serviceAccounts.secretReveal.warning")}
+      </Callout>
 
       <div className="space-y-2">
         <div className="flex items-center gap-2 rounded-lg border bg-muted/50 p-2">

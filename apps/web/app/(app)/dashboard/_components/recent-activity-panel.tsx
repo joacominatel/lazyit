@@ -109,7 +109,6 @@ export function RecentActivityPanel() {
                       item={item}
                       isLast={rowInGroup === group.items.length - 1}
                       index={index}
-                      now={now}
                     />
                   ))}
                 </ol>

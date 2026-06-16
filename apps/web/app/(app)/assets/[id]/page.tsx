@@ -262,7 +262,9 @@ export default function AssetDetailPage() {
                 <dt className="text-xs font-medium text-muted-foreground">
                   {formatFieldLabel(key) || key}
                 </dt>
-                <dd className="text-sm break-words">{formatSpecValue(value)}</dd>
+                <dd className="text-sm break-words">
+                  {formatSpecValue(value, { yes: tc("yes"), no: tc("no") })}
+                </dd>
               </div>
             ))}
           </dl>

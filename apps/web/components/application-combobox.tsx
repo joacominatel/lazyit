@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Combobox } from "@/components/combobox";
 import {
@@ -36,6 +37,7 @@ export function ApplicationCombobox({
   searchPlaceholder?: string;
   emptyText?: string;
 }) {
+  const tc = useTranslations("common");
   const [query, setQuery] = useState("");
   const { data, isFetching } = useApplicationList({
     q: query || undefined,
@@ -67,6 +69,8 @@ export function ApplicationCombobox({
       placeholder={placeholder}
       searchPlaceholder={searchPlaceholder}
       emptyText={emptyText}
+      loadingText={tc("searching")}
+      typeToSearchText={tc("typeToSearch")}
     />
   );
 }

@@ -9,11 +9,14 @@ import {
   updateArticle,
 } from "../endpoints/articles";
 import { articleKeys } from "./use-articles";
+import { invalidateDashboard } from "./use-dashboard";
 
 /**
  * Write hooks for the Article resource. Each invalidates `articleKeys.all` on
- * success — the common prefix, so lists, details and slug lookups all refetch.
- * Toasts, navigation and dialog state are owned by the calling component.
+ * success — the common prefix, so lists, details and slug lookups all refetch —
+ * AND the dashboard, whose published/draft article counts derive from the same
+ * state (issue #499). Toasts, navigation and dialog state are owned by the calling
+ * component.
  *
  * The bespoke transitions (publish / unpublish / import) are exactly why the KB
  * keeps hand-written hooks instead of a generic factory (ADR-0020).
@@ -21,7 +24,10 @@ import { articleKeys } from "./use-articles";
 
 function useInvalidateArticles() {
   const queryClient = useQueryClient();
-  return () => queryClient.invalidateQueries({ queryKey: articleKeys.all });
+  return () => {
+    queryClient.invalidateQueries({ queryKey: articleKeys.all });
+    invalidateDashboard(queryClient);
+  };
 }
 
 export function useCreateArticle() {

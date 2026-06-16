@@ -45,6 +45,7 @@ export interface LocationListParams {
  */
 export function getLocations(
   params: LocationListParams = {},
+  signal?: AbortSignal,
 ): Promise<Page<Location>> {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
@@ -56,7 +57,10 @@ export function getLocations(
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
-  return apiFetch<Page<Location>>(search ? `${BASE}?${search}` : BASE);
+  return apiFetch<Page<Location>>(
+    search ? `${BASE}?${search}` : BASE,
+    { signal },
+  );
 }
 export const getLocation = locations.get;
 export const createLocation = locations.create;

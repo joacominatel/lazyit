@@ -1,4 +1,4 @@
-import { MAX_PAGE_LIMIT } from "@lazyit/shared";
+import { MAX_PAGE_LIMIT, type UserListItem } from "@lazyit/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   getCurrentUser,
@@ -8,7 +8,7 @@ import {
   getUsers,
   type UserListParams,
 } from "../endpoints/users";
-import { createQueryKeys } from "../query-keys";
+import { createQueryKeys, selectDirectoryItems } from "../query-keys";
 
 /**
  * Query-key factory for the User resource (shape from `createQueryKeys`, see
@@ -36,13 +36,16 @@ export const userKeys = {
  * owners, access grantees, article authors, the assign/grant dialogs). The list is paginated
  * server-side (ADR-0030), so this requests the hard-max page (200) to materialize the whole
  * directory for those lookups; the dedicated **Users list page** uses {@link useUserList} for real
- * paging. Returns just `items` so the existing `User[]` consumers are unchanged.
+ * paging. Returns just `items` so the existing `User[]` consumers are unchanged — but `select` warns
+ * (dev) when the directory exceeds the cap so the truncation is never silent (issue #508).
  */
 export function useUsers() {
   return useQuery({
     queryKey: userKeys.lists(),
-    queryFn: () => getUsers({ limit: MAX_PAGE_LIMIT }),
-    select: (page) => page.items,
+    queryFn: ({ signal }) => getUsers({ limit: MAX_PAGE_LIMIT }, signal),
+    // Pin the element generic: with the queryFn now taking the context arg, TanStack's overload no
+    // longer back-infers the page item type into `select`, so name it to keep `data` as UserListItem[].
+    select: selectDirectoryItems<UserListItem>("users"),
   });
 }
 
@@ -55,7 +58,7 @@ export function useUsers() {
 export function useUserList(params: UserListParams = {}) {
   return useQuery({
     queryKey: userKeys.list(params),
-    queryFn: () => getUsers(params),
+    queryFn: ({ signal }) => getUsers(params, signal),
     placeholderData: keepPreviousData,
   });
 }

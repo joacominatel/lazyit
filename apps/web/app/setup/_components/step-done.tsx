@@ -20,7 +20,7 @@ export function StepDone({
     <>
       <CardContent className="space-y-4">
         <div className="flex flex-col items-center gap-3 py-4 text-center">
-          <CheckCircleIcon className="size-12 text-emerald-600 dark:text-emerald-400" />
+          <CheckCircleIcon className="size-12 text-success" />
           <div className="space-y-1">
             <p className="text-base font-medium text-foreground">
               You&apos;re all set

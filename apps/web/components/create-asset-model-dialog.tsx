@@ -3,6 +3,7 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { type AssetModel, CreateAssetModelSchema } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -56,6 +57,8 @@ export function CreateAssetModelDialog({
   onOpenChange,
   onCreated,
 }: CreateAssetModelDialogProps) {
+  const t = useTranslations("settings.taxonomies.quickCreate.model");
+  const tc = useTranslations("common");
   const { data: categories } = useAssetCategories();
   const create = useCreateAssetModel();
 
@@ -80,11 +83,11 @@ export function CreateAssetModelDialog({
         },
         {
           onSuccess: (model) => {
-            toast.success("Model created");
+            toast.success(t("created"));
             onCreated?.(model);
             onOpenChange(false);
           },
-          onError: (error) => notifyError(error, "Couldn't create the model"),
+          onError: (error) => notifyError(error, t("createError")),
         },
       );
     },
@@ -95,10 +98,8 @@ export function CreateAssetModelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New model</DialogTitle>
-          <DialogDescription>
-            Create a make/model to use it right away. You can refine it later.
-          </DialogDescription>
+          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
         {/* stopPropagation: this dialog renders in a Radix Portal, but React events bubble through
@@ -119,13 +120,13 @@ export function CreateAssetModelDialog({
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
                   <FieldLabel htmlFor="new-model-name" required>
-                    Name
+                    {t("nameLabel")}
                   </FieldLabel>
                   <Input
                     {...field}
                     id="new-model-name"
                     value={field.value ?? ""}
-                    placeholder="Latitude 5520"
+                    placeholder={t("namePlaceholder")}
                     aria-invalid={fieldState.invalid || undefined}
                     autoFocus
                   />
@@ -139,13 +140,13 @@ export function CreateAssetModelDialog({
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || undefined}>
                   <FieldLabel htmlFor="new-model-manufacturer" required>
-                    Manufacturer
+                    {t("manufacturerLabel")}
                   </FieldLabel>
                   <Input
                     {...field}
                     id="new-model-manufacturer"
                     value={field.value ?? ""}
-                    placeholder="Dell"
+                    placeholder={t("manufacturerPlaceholder")}
                     aria-invalid={fieldState.invalid || undefined}
                   />
                   <FieldError errors={[fieldState.error]} />
@@ -157,7 +158,9 @@ export function CreateAssetModelDialog({
               name="categoryId"
               render={({ field }) => (
                 <Field>
-                  <FieldLabel htmlFor="new-model-category">Category</FieldLabel>
+                  <FieldLabel htmlFor="new-model-category">
+                    {t("categoryLabel")}
+                  </FieldLabel>
                   <CategoryCombobox
                     id="new-model-category"
                     value={field.value ?? ""}
@@ -165,9 +168,9 @@ export function CreateAssetModelDialog({
                       field.onChange(value === "" ? undefined : value)
                     }
                     categories={categories ?? []}
-                    placeholder="Select a category"
-                    searchPlaceholder="Search categories…"
-                    emptyText="No categories found"
+                    placeholder={t("categoryPlaceholder")}
+                    searchPlaceholder={t("searchCategory")}
+                    emptyText={t("noCategories")}
                   />
                 </Field>
               )}
@@ -182,11 +185,11 @@ export function CreateAssetModelDialog({
             onClick={() => onOpenChange(false)}
             disabled={create.isPending}
           >
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button type="submit" form={FORM_ID} disabled={create.isPending}>
             {create.isPending && <ArrowPathIcon className="animate-spin" />}
-            Create
+            {tc("create")}
           </Button>
         </DialogFooter>
       </DialogContent>

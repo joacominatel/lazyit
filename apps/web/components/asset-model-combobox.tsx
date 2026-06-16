@@ -1,6 +1,7 @@
 "use client";
 
 import type { AssetModel } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Combobox } from "@/components/combobox";
 import {
@@ -39,6 +40,7 @@ export function AssetModelCombobox({
   searchPlaceholder?: string;
   emptyText?: string;
 }) {
+  const tc = useTranslations("common");
   const [query, setQuery] = useState("");
   const { data, isFetching } = useAssetModelList({
     q: query || undefined,
@@ -76,6 +78,8 @@ export function AssetModelCombobox({
       placeholder={placeholder}
       searchPlaceholder={searchPlaceholder}
       emptyText={emptyText}
+      loadingText={tc("searching")}
+      typeToSearchText={tc("typeToSearch")}
     />
   );
 }

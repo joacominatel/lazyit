@@ -11,6 +11,7 @@ import {
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   permissionLabel,
@@ -123,14 +124,17 @@ export function PermissionPicker({
                       className="flex flex-1 flex-wrap items-center gap-2 text-sm"
                     >
                       <span>{permissionLabel(t, permission)}</span>
-                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
+                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-muted-foreground">
                         {permission}
                       </code>
                       {aboveTier ? (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-500">
-                          <ExclamationTriangleIcon className="size-3" />
+                        <StatusBadge
+                          tone="warning"
+                          className="gap-1 px-1.5 uppercase tracking-wide"
+                        >
+                          <ExclamationTriangleIcon aria-hidden />
                           {t("serviceAccounts.permissionPicker.adminLevel")}
-                        </span>
+                        </StatusBadge>
                       ) : null}
                     </label>
                   </li>

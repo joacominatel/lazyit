@@ -3,6 +3,7 @@
 import { LockClosedIcon } from "@heroicons/react/24/outline";
 import { type EditableRole, type Role } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
+import { StatusDot } from "@/components/ui/status-badge";
 import { cn } from "@/lib/utils";
 
 interface RoleSegmentedProps {
@@ -76,8 +77,10 @@ export function RoleSegmented({
               {counts ? counts[role] : "—"}
             </span>
             {dirty && (
-              <span
-                className="size-1.5 rounded-full bg-amber-500"
+              <StatusDot
+                tone="warning"
+                role="img"
+                aria-hidden={false}
                 aria-label={t("roles.permissions.segmented.unsavedChanges")}
               />
             )}

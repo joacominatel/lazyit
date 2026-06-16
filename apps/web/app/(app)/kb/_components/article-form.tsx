@@ -40,6 +40,7 @@ import {
   useUpdateArticle,
 } from "@/lib/api/hooks/use-article-mutations";
 import { notifyError } from "@/lib/api/notify-error";
+import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
 const FORM_ID = "article-form";
 
@@ -147,7 +148,7 @@ export function ArticleForm({ article }: { article?: Article }) {
         },
       );
     }
-  });
+  }, (_errors, event) => scrollToFirstError(event?.target ?? null));
 
   const hasCategories = (categories?.length ?? 0) > 0;
 

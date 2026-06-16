@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Combobox } from "@/components/combobox";
 import { useUser, useUserList } from "@/lib/api/hooks/use-users";
@@ -37,6 +38,7 @@ export function UserCombobox({
   searchPlaceholder?: string;
   emptyText?: string;
 }) {
+  const tc = useTranslations("common");
   const [query, setQuery] = useState("");
   // Active-only directory page for the current query. The status filter is client-side over the page
   // (the user list's `q` is server-side; `isActive` is not a server param — see endpoints/users.ts).
@@ -71,6 +73,8 @@ export function UserCombobox({
       placeholder={placeholder}
       searchPlaceholder={searchPlaceholder}
       emptyText={emptyText}
+      loadingText={tc("searching")}
+      typeToSearchText={tc("typeToSearch")}
     />
   );
 }

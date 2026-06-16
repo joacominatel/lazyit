@@ -1,0 +1,42 @@
+/**
+ * Open-redirect guard for user-supplied redirect targets (e.g. the `callbackUrl` query param on
+ * /login). The app itself only ever sets a relative same-origin `callbackUrl` (`proxy.ts`), but an
+ * attacker can hand-craft `/login?callbackUrl=https://evil.example` and send it to a signed-in user;
+ * `redirect()` would then bounce them off-site. This helper collapses any untrusted value to a
+ * guaranteed same-origin path, falling back to `/dashboard`. Pure and framework-agnostic so it is
+ * trivially unit-testable. See issue #495.
+ */
+
+/** Default landing path when the supplied target is missing or not a safe same-origin path. */
+export const DEFAULT_REDIRECT = "/dashboard";
+
+/**
+ * Returns `raw` only when it is a safe same-origin **relative** path, otherwise {@link DEFAULT_REDIRECT}.
+ *
+ * Accepted: a path that starts with a single `/` and is not parseable as an authority
+ * (e.g. `/dashboard`, `/tickets?status=open`, and the bare `/`).
+ *
+ * Rejected (→ `/dashboard`):
+ *   - absolute / protocol-relative URLs: `//evil.example`, `/\evil.example`, `https://evil.example`
+ *   - any scheme form: `javascript:alert(1)`, `mailto:x`, `http:evil`
+ *   - backslash tricks browsers normalise to `/`: `\/evil`, `/\`
+ *   - values with control characters (CR/LF response-splitting), empty / non-string / non-`/` values
+ */
+export function safeInternalPath(raw: unknown): string {
+  if (typeof raw !== "string") return DEFAULT_REDIRECT;
+
+  // Trimming surrounding whitespace is intentional: leading/trailing spaces never form a valid
+  // path and would otherwise let `  //evil` slip past the leading-slash check below.
+  const value = raw.trim();
+
+  // Reject control characters first (incl. CR/LF used for header/response splitting).
+  if (/[\u0000-\u001f\u007f]/.test(value)) return DEFAULT_REDIRECT;
+
+  // Must start with exactly one forward slash NOT followed by another slash or a backslash — that
+  // rules out `//host` and `/\host` (both resolve to an external origin in browsers). Anything
+  // without a leading slash (every `scheme:` form) is rejected too. The bare `/` is allowed: the
+  // negative lookahead is satisfied when no character follows.
+  if (!/^\/(?![/\\])/.test(value)) return DEFAULT_REDIRECT;
+
+  return value;
+}

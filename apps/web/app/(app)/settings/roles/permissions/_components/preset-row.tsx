@@ -59,7 +59,7 @@ export function PresetRow({ active, onApply }: PresetRowProps) {
           className={cn(
             "flex max-w-xs flex-col items-start gap-0.5 rounded-lg border border-dashed px-3 py-2 text-left",
             active === "custom"
-              ? "border-amber-500/50 bg-amber-500/5"
+              ? "border-warning/50 bg-warning/10"
               : "opacity-60",
           )}
         >

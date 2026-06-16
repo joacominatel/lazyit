@@ -1,8 +1,24 @@
+"use client"
+
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { useFieldErrorLink } from "@/components/ui/field"
 
-function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
+function Textarea({
+  className,
+  "aria-describedby": describedBy,
+  "aria-errormessage": errorMessage,
+  ...props
+}: React.ComponentProps<"textarea">) {
+  // When rendered inside an invalid `Field`, link this textarea to its `FieldError` (WCAG 1.3.1 /
+  // 3.3.1) by merging the error id into `aria-describedby` / `aria-errormessage`. Outside a `Field`,
+  // or while valid, the caller's own values pass through unchanged.
+  const errorLink = useFieldErrorLink({
+    "aria-describedby": describedBy,
+    "aria-errormessage": errorMessage,
+  })
+
   return (
     <textarea
       data-slot="textarea"
@@ -11,6 +27,7 @@ function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
         className
       )}
       {...props}
+      {...errorLink}
     />
   )
 }

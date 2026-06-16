@@ -16,7 +16,6 @@ import type { AssetStatus, DashboardSummary } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import type { ComponentType, CSSProperties, ReactNode } from "react";
-import { useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import type { Pillar } from "@/components/pillar-scope";
@@ -34,8 +33,8 @@ import { useDashboardSummary } from "@/lib/api/hooks/use-dashboard";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { lift } from "@/lib/recipes";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/utils/format";
 import { useAssetStatusLabel } from "../assets/_components/asset-status-badge";
 import { PulseRail, type QuickAction } from "./_components/pulse-rail";
 import { RecentActivityPanel } from "./_components/recent-activity-panel";
@@ -52,6 +51,7 @@ import { RecentActivityPanel } from "./_components/recent-activity-panel";
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
   const tc = useTranslations("common");
+  const { dateTime, relative } = useFormatters();
   const { data, isLoading, isError, error, refetch, isFetching } =
     useDashboardSummary();
   // The quick actions are cross-pillar shortcuts into create flows; each gates on its own
@@ -88,8 +88,6 @@ export default function DashboardPage() {
   )
     .filter((action) => action.show)
     .map(({ href, label }) => ({ href, label }));
-  // Snapshot "now" once so the "Updated <relative>" stamp stays pure across renders.
-  const [now] = useState(() => Date.now());
 
   return (
     <div className="space-y-6">
@@ -101,10 +99,10 @@ export default function DashboardPage() {
             {data ? (
               <span
                 className="text-xs text-muted-foreground tabular-nums"
-                title={new Date(data.generatedAt).toLocaleString()}
+                title={dateTime(data.generatedAt)}
               >
                 {t("updated", {
-                  relative: formatRelativeTime(data.generatedAt, now),
+                  relative: relative(data.generatedAt),
                 })}
               </span>
             ) : null}
@@ -375,7 +373,7 @@ function PillarCard({
           {/* Metric settles in on first mount with a subtle, capped stagger (initial-mount
               only; reduced-motion collapses it to instant via the globals.css guard). */}
           <span
-            className="inline-block animate-rise-in text-2xl font-semibold tabular-nums text-foreground [animation-delay:calc(var(--i)*60ms)]"
+            className="inline-block animate-rise-in text-display font-semibold tabular-nums text-foreground [animation-delay:calc(var(--i)*60ms)]"
             style={{ "--i": index } as CSSProperties}
           >
             {metric}
@@ -706,7 +704,7 @@ function NeedsAttention({ summary }: { summary: DashboardSummary }) {
 
   return (
     <section>
-      <h2 className="mb-3 text-lg font-semibold tracking-tight">
+      <h2 className="mb-3 text-section font-semibold">
         {t("needsAttention.heading")}
       </h2>
       {visibleItems.length === 0 ? (

@@ -11,6 +11,7 @@ import {
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ChangeKeypairPasswordSchema,
   CreateUserKeypairSchema,
   ResetUserKeypairSchema,
   UserKeypairSchema,
@@ -24,6 +25,9 @@ import { SecretManagerService } from './secret-manager.service';
 class UserKeypairDto extends createZodDto(UserKeypairSchema) {}
 class CreateUserKeypairDto extends createZodDto(CreateUserKeypairSchema) {}
 class ResetUserKeypairDto extends createZodDto(ResetUserKeypairSchema) {}
+class ChangeKeypairPasswordDto extends createZodDto(
+  ChangeKeypairPasswordSchema,
+) {}
 
 /**
  * Secret Manager — keypair surface (ADR-0061 §3). The per-user X25519 envelope the whole zero-knowledge
@@ -77,6 +81,20 @@ export class KeypairController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.secrets.resetMyKeypair(principal, dto);
+  }
+
+  @Post('keypair/password')
+  @RequirePermission('secret:read')
+  @ApiOperation({
+    summary:
+      "Change/reset ONLY the caller's password wrap (Copy A). Re-wraps the private key under a new password (unlocked client-side via the current password OR the recovery key). Public key + recovery wrap unchanged; 404 if none.",
+  })
+  @ApiOkResponse({ type: UserKeypairDto })
+  changePassword(
+    @Body() dto: ChangeKeypairPasswordDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.secrets.changePassword(principal, dto);
   }
 
   @Get('users/:userId/public-key')

@@ -93,3 +93,27 @@ export type CreateUserKeypair = z.infer<typeof CreateUserKeypairSchema>;
  */
 export const ResetUserKeypairSchema = CreateUserKeypairSchema;
 export type ResetUserKeypair = z.infer<typeof ResetUserKeypairSchema>;
+
+/**
+ * Change / reset the PASSWORD wrap (Copy A) of an EXISTING keypair (`POST /secret-manager/keypair/password`,
+ * ADR-0066). The ASYMMETRIC model: the password is the daily ENTRY credential (mutable); the recovery key
+ * is the ROOT that only RESETS the password. ONE endpoint serves both operations because the server cannot
+ * tell — and need not know — which credential the client used to unlock:
+ *   - CHANGE: the client unlocks the private key with the CURRENT password IN THE BROWSER, then re-wraps it
+ *     under `Argon2id(new password)`.
+ *   - RESET: the client unlocks the private key with the RECOVERY KEY IN THE BROWSER, then re-wraps it
+ *     under `Argon2id(new password)` (the session auto-unlocks afterwards — it already holds the key).
+ * Either way the client posts ONLY the four Copy-A columns. Unlike a reset (`PUT /me`), this NEVER changes
+ * the public key OR the recovery wrap (`privateKeyEncByRecovery`/`recoverySalt`/`recoveryIv`) — Copy B keeps
+ * working — so there is no DEK re-wrap and no membership churn (ADR-0066 §2). The server overwrites EXACTLY
+ * `privateKeyEncByPassphrase` + `passphraseSalt` + `passphraseIv` + `kdfParams`; it never sees the private
+ * key, either password, or the recovery key (INV-10). Requires a LIVE keypair (404 if none — NOT bootstrap).
+ * Same base64/Kdf discipline as the create/reset DTOs.
+ */
+export const ChangeKeypairPasswordSchema = z.strictObject({
+  privateKeyEncByPassphrase: base64Blob,
+  passphraseSalt: base64Blob,
+  passphraseIv: base64Blob,
+  kdfParams: KdfParamsSchema,
+});
+export type ChangeKeypairPassword = z.infer<typeof ChangeKeypairPasswordSchema>;

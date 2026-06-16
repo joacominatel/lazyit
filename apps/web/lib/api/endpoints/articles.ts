@@ -78,6 +78,7 @@ export interface ArticleFilters {
  */
 export function getArticles(
   filters: ArticleFilters = {},
+  signal?: AbortSignal,
 ): Promise<ArticleListPage> {
   const params = new URLSearchParams();
   // Multi-select filters (#198): comma-encode each non-empty array into its one query param.
@@ -97,7 +98,7 @@ export function getArticles(
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));
   const qs = params.toString();
-  return apiFetch<ArticleListPage>(qs ? `${BASE}?${qs}` : BASE);
+  return apiFetch<ArticleListPage>(qs ? `${BASE}?${qs}` : BASE, { signal });
 }
 
 /** Fetch a single article by its slug (the public/detail lookup). */
@@ -175,8 +176,10 @@ export function importArticle(
 /** Poll the status of an import job (ADR-0053). 404 -> unknown/expired job id. */
 export function getArticleImportStatus(
   jobId: string,
+  signal?: AbortSignal,
 ): Promise<ImportJobStatus> {
   return apiFetch<ImportJobStatus>(
     `${BASE}/import/${encodeURIComponent(jobId)}`,
+    { signal },
   );
 }

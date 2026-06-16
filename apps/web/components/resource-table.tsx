@@ -15,6 +15,7 @@ import { ChevronDownIcon, ChevronUpIcon, XMarkIcon } from "@heroicons/react/16/s
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { isValidElement } from "react";
 import type { ComponentProps, ComponentType, MouseEvent, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { RequestIdNote } from "@/components/request-id-note";
@@ -115,6 +116,22 @@ interface ResourceTableProps {
 }
 
 /**
+ * Derive the `aria-sort` value for a column's `<th>` from its header node so the sort state is
+ * programmatically determinable (WCAG 1.3.1). When the header is a {@link SortableHeader}, the
+ * column is sortable: the active one reflects its direction, the rest report `"none"`. Non-sortable
+ * headers get no attribute (`undefined`).
+ */
+function ariaSortForHeader(header: ReactNode): "ascending" | "descending" | "none" | undefined {
+  if (!isValidElement(header) || header.type !== SortableHeader) return undefined;
+  const { active, direction } = header.props as {
+    active: boolean;
+    direction: SortDirection;
+  };
+  if (!active) return "none";
+  return direction === "asc" ? "ascending" : "descending";
+}
+
+/**
  * Bordered table shell with a header derived from `columns`, plus the two in-table states (loading
  * skeletons and filtered-empty). Pages own the rows, the filter bar and the no-data / error branches
  * (via EmptyState/ErrorState). The shared scaffolding behind every resource list — see ADR-0020.
@@ -166,7 +183,11 @@ export function ResourceTable({
                 </TableHead>
               ) : null}
               {columns.map((column) => (
-                <TableHead key={column.key} className={column.headClassName}>
+                <TableHead
+                  key={column.key}
+                  className={column.headClassName}
+                  aria-sort={ariaSortForHeader(column.header)}
+                >
                   {column.srOnlyHeader ? (
                     <span className="sr-only">{column.header}</span>
                   ) : (

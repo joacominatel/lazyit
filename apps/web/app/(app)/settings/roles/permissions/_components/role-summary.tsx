@@ -48,7 +48,7 @@ const LEVEL_META: Record<
 > = {
   edit: {
     icon: PencilSquareIcon,
-    className: "text-emerald-700 dark:text-emerald-500",
+    className: "text-success",
   },
   view: {
     icon: EyeIcon,

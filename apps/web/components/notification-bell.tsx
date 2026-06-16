@@ -27,8 +27,8 @@ import {
   useNotifications,
   useUnreadNotificationCount,
 } from "@/lib/api/hooks/use-notifications";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
-import { formatDateTime, formatRelativeTime } from "@/lib/utils/format";
 
 /**
  * The topbar notification bell (ADR-0056 §8, amended #453) — rendered for EVERY authenticated human
@@ -106,9 +106,6 @@ function metaFor(type: NotificationType) {
 export function NotificationBell() {
   const t = useTranslations("notifications");
   const [open, setOpen] = useState(false);
-  // Snapshot "now" once so relative times stay pure across renders (react-hooks/purity) — the same
-  // pattern as the dashboard recent-activity panel.
-  const [now] = useState(() => Date.now());
 
   // The badge always polls (a cheap COUNT, per-caller scoped server-side); the heavier list polls only
   // while the dropdown is open. No permission pre-check — the bell shows for every authenticated human
@@ -171,7 +168,6 @@ export function NotificationBell() {
                 <NotificationListItem
                   key={n.id}
                   notification={n}
-                  now={now}
                   onActivate={() => {
                     if (!n.read) markRead.mutate(n.id);
                     setOpen(false);
@@ -193,17 +189,16 @@ export function NotificationBell() {
  */
 function NotificationListItem({
   notification: n,
-  now,
   onActivate,
 }: {
   notification: Notification;
-  now: number;
   onActivate: () => void;
 }) {
   const t = useTranslations("notifications");
+  const { dateTime, relative } = useFormatters();
   const meta = metaFor(n.type);
   const Icon = meta.icon;
-  const absolute = formatDateTime(n.createdAt);
+  const absolute = dateTime(n.createdAt);
 
   return (
     <li className={cn("relative", !n.read && "bg-primary/[0.03]")}>
@@ -241,7 +236,7 @@ function NotificationListItem({
             className="mt-1 block text-xs tabular-nums text-muted-foreground"
             title={t("occurredAt", { datetime: absolute })}
           >
-            {formatRelativeTime(n.createdAt, now)}
+            {relative(n.createdAt)}
           </time>
         </div>
         {!n.read && (

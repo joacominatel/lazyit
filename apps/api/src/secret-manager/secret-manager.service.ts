@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type {
+  ChangeKeypairPassword,
   CreateSecretItem,
   CreateSecretVaultWithMembership,
   CreateUserKeypair,
@@ -136,6 +137,58 @@ export class SecretManagerService {
       });
       await this.writeAudit(tx, {
         action: 'KEYPAIR_RESET',
+        actorId: userId,
+        targetUserId: userId,
+      });
+      return row;
+    });
+    return this.keypairToWire(updated);
+  }
+
+  /**
+   * Change / reset ONLY the password wrap (Copy A) of the caller's EXISTING keypair (ADR-0066). Self-only,
+   * human-only. The ASYMMETRIC model: the password is the daily ENTRY credential (mutable), the recovery
+   * key is the ROOT that only RESETS the password. ONE method serves both:
+   *   - CHANGE — the client unlocked the private key with the CURRENT password IN THE BROWSER, re-wrapped
+   *     it under `Argon2id(new password)`.
+   *   - RESET — the client unlocked the private key with the RECOVERY KEY IN THE BROWSER, re-wrapped it
+   *     under `Argon2id(new password)`.
+   * The server cannot tell (and need not know) which credential the client used — it only ever receives
+   * the new Copy A blob. This is NOT bootstrap and NOT a keypair reset — it requires a LIVE keypair (404 if
+   * none) and overwrites EXACTLY `privateKeyEncByPassphrase`/`passphraseSalt`/`passphraseIv`/`kdfParams`
+   * (+ the @updatedAt bump). It NEVER touches `publicKey`, `privateKeyEncByRecovery`, `recoverySalt`, or
+   * `recoveryIv` — Copy B keeps working — so there is no DEK re-wrap and no membership churn (ADR-0066 §2).
+   * The server stores ciphertext only and never sees the private key, either password, or the recovery key
+   * (INV-10). Audited PASSWORD_CHANGED (metadata only).
+   */
+  async changePassword(
+    principal: Principal | undefined,
+    dto: ChangeKeypairPassword,
+  ): Promise<UserKeypairWire> {
+    const userId = this.requireHumanId(principal);
+    // Must already have a LIVE keypair — this re-wraps an existing password copy, it does NOT bootstrap.
+    // findFirst respects the soft-delete read filter, so a soft-deleted keypair reads as absent (→ 404).
+    const existing = await this.prisma.userKeypair.findFirst({
+      where: { userId },
+    });
+    if (!existing) {
+      throw new NotFoundException('No keypair found for the current user');
+    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.userKeypair.update({
+        where: { id: existing.id },
+        // ONLY the password wrap (Copy A). publicKey / privateKeyEncByRecovery / recoverySalt / recoveryIv
+        // are deliberately omitted — they MUST stay untouched (ADR-0066 §2). `updatedAt` bumps via
+        // @updatedAt automatically.
+        data: {
+          privateKeyEncByPassphrase: dto.privateKeyEncByPassphrase,
+          passphraseSalt: dto.passphraseSalt,
+          passphraseIv: dto.passphraseIv,
+          kdfParams: dto.kdfParams,
+        },
+      });
+      await this.writeAudit(tx, {
+        action: 'PASSWORD_CHANGED',
         actorId: userId,
         targetUserId: userId,
       });

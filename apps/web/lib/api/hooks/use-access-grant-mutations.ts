@@ -15,13 +15,15 @@ import {
 } from "../endpoints/access-grants";
 import { accessGrantKeys } from "./use-access-grants";
 import { applicationKeys } from "./use-applications";
+import { invalidateDashboard } from "./use-dashboard";
 import { userKeys } from "./use-users";
 
 /**
  * Grant / revoke / edit writes. Each invalidates the grant lists, the applications cache AND the
  * users cache: the Access list shows per-application active-grant counts + avatars, the application
  * detail shows the grant panels, and the user detail shows that user's grants — all of which derive
- * from grant state.
+ * from grant state. Also invalidates the dashboard, whose active/expiring/critical-grant tallies
+ * derive from the same state (issue #499).
  */
 function useInvalidateGrants() {
   const queryClient = useQueryClient();
@@ -29,6 +31,7 @@ function useInvalidateGrants() {
     queryClient.invalidateQueries({ queryKey: accessGrantKeys.all });
     queryClient.invalidateQueries({ queryKey: applicationKeys.all });
     queryClient.invalidateQueries({ queryKey: userKeys.all });
+    invalidateDashboard(queryClient);
   };
 }
 

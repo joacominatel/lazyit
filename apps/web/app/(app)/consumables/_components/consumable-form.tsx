@@ -31,6 +31,7 @@ import {
   useUpdateConsumable,
 } from "@/lib/api/hooks/use-consumable-mutations";
 import { notifyError } from "@/lib/api/notify-error";
+import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
 const FORM_ID = "consumable-form";
 
@@ -144,7 +145,7 @@ export function ConsumableForm({
           notifyError(error, t("form.createError")),
       });
     }
-  });
+  }, (_errors, event) => scrollToFirstError(event?.target ?? null));
 
   return (
     <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">

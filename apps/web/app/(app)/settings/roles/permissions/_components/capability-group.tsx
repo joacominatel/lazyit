@@ -8,6 +8,7 @@ import {
   type PermissionPillar,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import {
@@ -75,13 +76,16 @@ export function CapabilityGroup({
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">{capLabel}</span>
                   {aboveTier && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-500">
-                      <ExclamationTriangleIcon className="size-3" />
+                    <StatusBadge
+                      tone="warning"
+                      className="gap-1 px-1.5 uppercase tracking-wide"
+                    >
+                      <ExclamationTriangleIcon aria-hidden />
                       {t("roles.permissions.capabilityGroup.adminLevel")}
-                    </span>
+                    </StatusBadge>
                   )}
                   {partiallyOn && (
-                    <span className="rounded-full border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    <span className="rounded-full border bg-muted px-1.5 py-0.5 text-label font-medium uppercase text-muted-foreground">
                       {t("roles.permissions.capabilityGroup.partial")}
                     </span>
                   )}
@@ -95,7 +99,7 @@ export function CapabilityGroup({
                 onCheckedChange={(on) => onToggle(cap, on)}
                 aria-label={capLabel}
                 className={cn(
-                  partiallyOn && "data-unchecked:bg-amber-500/40",
+                  partiallyOn && "data-unchecked:bg-warning/40",
                 )}
               />
             </li>

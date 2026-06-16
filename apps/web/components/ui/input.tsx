@@ -1,8 +1,25 @@
+"use client"
+
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { useFieldErrorLink } from "@/components/ui/field"
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+function Input({
+  className,
+  type,
+  "aria-describedby": describedBy,
+  "aria-errormessage": errorMessage,
+  ...props
+}: React.ComponentProps<"input">) {
+  // When rendered inside an invalid `Field`, link this input to its `FieldError` (WCAG 1.3.1 /
+  // 3.3.1) by merging the error id into `aria-describedby` / `aria-errormessage`. Outside a `Field`,
+  // or while valid, the caller's own values pass through unchanged.
+  const errorLink = useFieldErrorLink({
+    "aria-describedby": describedBy,
+    "aria-errormessage": errorMessage,
+  })
+
   return (
     <input
       type={type}
@@ -12,6 +29,7 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
         className
       )}
       {...props}
+      {...errorLink}
     />
   )
 }

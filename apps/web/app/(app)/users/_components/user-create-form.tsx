@@ -51,6 +51,7 @@ import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { useCreateUser } from "@/lib/api/hooks/use-user-mutations";
 import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
+import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { ManagerField } from "./manager-field";
 
 const FORM_ID = "user-create-form";
@@ -252,6 +253,9 @@ export function UserCreateForm() {
         type: "required",
         message: t("credential.passwordRequired"),
       });
+      // This manual error is set outside RHF's resolver, so `onInvalid` below won't fire — scroll to
+      // it here (the password input's `aria-invalid` repaints first; the helper defers a frame).
+      scrollToFirstError(document.getElementById(FORM_ID));
       return;
     }
 
@@ -329,7 +333,7 @@ export function UserCreateForm() {
     }
 
     router.push(`/users/${created.id}`);
-  });
+  }, (_errors, event) => scrollToFirstError(event?.target ?? null));
 
   // ── Shown-once temporary-password hand-off ────────────────────────────────────────────────────
   if (handoff) {

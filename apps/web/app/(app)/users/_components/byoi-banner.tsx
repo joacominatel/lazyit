@@ -2,6 +2,7 @@
 
 import { InformationCircleIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
+import { Callout } from "@/components/callout";
 import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 
 /**
@@ -19,16 +20,13 @@ export function ByoiBanner() {
   }
 
   return (
-    <div className="flex gap-3 rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 text-sm dark:border-blue-500/40 dark:bg-blue-500/10">
-      <InformationCircleIcon className="size-5 shrink-0 text-blue-600 dark:text-blue-400" />
-      <div className="space-y-0.5">
-        <p className="font-medium text-blue-900 dark:text-blue-200">
-          {t("title")}
-        </p>
-        <p className="text-blue-800/90 dark:text-blue-300/90">
-          {t("description")}
-        </p>
-      </div>
-    </div>
+    <Callout
+      tone="info"
+      icon={<InformationCircleIcon className="size-5!" />}
+      className="rounded-lg px-4 py-3 text-sm"
+    >
+      <p className="font-medium">{t("title")}</p>
+      <p className="text-card-foreground/80">{t("description")}</p>
+    </Callout>
   );
 }

@@ -1,5 +1,6 @@
 import {
   keepPreviousData,
+  type QueryClient,
   useInfiniteQuery,
   useQuery,
 } from "@tanstack/react-query";
@@ -78,6 +79,20 @@ export const dashboardKeys = {
       activityFilterKey(filters),
     ] as const,
 };
+
+/**
+ * Invalidate every dashboard read (summary + activity feed) under the `dashboardKeys.all` prefix.
+ *
+ * The dashboard has no mutations of its own — its summary and unified activity feed are DERIVED from
+ * the other pillars (assets, access grants, consumable movements, articles). So the cross-cutting
+ * mutations that write those resources must call this from their `onSuccess`/`onSettled`, alongside
+ * their own resource invalidations, or the landing-page counts and feed stay stale up to the global
+ * 60s `staleTime` after a write (issue #499). Standalone (takes the `QueryClient`) so each mutation
+ * hook reuses it without re-declaring `dashboardKeys`.
+ */
+export function invalidateDashboard(queryClient: QueryClient): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: dashboardKeys.all });
+}
 
 /**
  * Fetch the dashboard summary (assets by status, active/expiring/critical grants, consumable
