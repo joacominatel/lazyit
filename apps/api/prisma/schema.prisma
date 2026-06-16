@@ -473,8 +473,12 @@ enum AssetStatus {
 /// The running number is STRUCTURAL (ADR-0063 §1/§2): the rendered tag is always
 /// `prefix + zeroPad(nextNumber, width) + suffix`, so `nextNumber` is an always-present column — there
 /// is no template string / `{num}` token to omit. `nextNumber` is the MONOTONIC counter (the NEXT
-/// value to allocate); it is incremented atomically inside the asset-create `$transaction`. Gaps are
-/// accepted (ADR-0063 §3): a rolled-back / retried / deleted allocation is never back-filled.
+/// value to allocate); it is incremented atomically via a single-row `{ increment: 1 }` that COMMITS
+/// ON ITS OWN — deliberately OUTSIDE the asset-create `$transaction`. That independent commit is what
+/// makes "gaps accepted" work and lets a tag collision ADVANCE rather than spin: were the increment
+/// folded into the create transaction, a rolled-back insert would un-consume the number and a retry
+/// would re-render the same colliding tag forever. Gaps are accepted (ADR-0063 §3): a rolled-back /
+/// retried / deleted allocation is never back-filled.
 ///
 /// Conventions (ADR-0006): MUTABLE instance config — `createdAt` + `updatedAt`, but NO `deletedAt`.
 /// It is NOT soft-deletable (so it is deliberately absent from SOFT_DELETABLE_MODELS): disabling the
@@ -490,7 +494,11 @@ model AssetTagScheme {
   /// Optional zero-pad width for the number (e.g. 5 => 00042). 0 / null = no padding.
   width      Int?
   /// The MONOTONIC counter — the NEXT sequence value to allocate. Incremented atomically (Prisma
-  /// `{ increment: 1 }`) inside the asset-create transaction so concurrent creates never collide.
+  /// `{ increment: 1 }`) in a standalone update that COMMITS INDEPENDENTLY of the asset-create
+  /// `$transaction`, so concurrent creates read distinct numbers and a rolled-back insert never
+  /// un-consumes its number (gaps accepted; a collision advances instead of spinning). Edge cases
+  /// (ADR-0063): the counter freezes with a clean 400 at the int4 ceiling (unreachable at any real
+  /// scale), and a `startNumber: 0` makes the first rendered tag carry the number 0.
   nextNumber Int      @default(1)
   /// OFF by default (ADR-0063 §4): false = no auto-tag; the create path is byte-for-byte unchanged.
   enabled    Boolean  @default(false)
