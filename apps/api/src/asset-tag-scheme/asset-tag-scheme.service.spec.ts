@@ -9,7 +9,10 @@ jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {
     PrismaClientKnownRequestError: class extends Error {
-      constructor(public code: string) {
+      constructor(
+        public code: string,
+        public meta?: { target?: string | string[] },
+      ) {
         super(`prisma-${code}`);
       }
     },
@@ -23,10 +26,13 @@ import {
 } from './asset-tag-scheme.service';
 
 // The P2002 factory the collision tests throw — a genuine instance of the mocked known-error class.
+// `meta.target` carries the index/column that raised the conflict, so the guard can be exercised for
+// real (an assetTag collision retries; a serial collision must NOT).
 const FakePrismaKnownError =
   Prisma.PrismaClientKnownRequestError as unknown as new (
     code: string,
-  ) => Error & { code: string };
+    meta?: { target?: string | string[] },
+  ) => Error & { code: string; meta?: { target?: string | string[] } };
 
 type SchemeMock = {
   findFirst: jest.Mock;
@@ -210,9 +216,42 @@ describe('AssetTagSchemeService', () => {
     expect(result).toBe('LAZY-00042-X');
   });
 
-  // --- isUniqueTagCollision ----------------------------------------------
-  it('isUniqueTagCollision matches a P2002 known error and nothing else', () => {
-    expect(isUniqueTagCollision(new FakePrismaKnownError('P2002'))).toBe(true);
+  // --- isUniqueTagCollision (TARGET-AWARE: only the assetTag index advances) ----------------------
+  it('matches a P2002 scoped to the assetTag index — both the index-name string and the column-array shape', () => {
+    // adapter-pg surfaces the raw partial index by NAME (the real shape for this index).
+    expect(
+      isUniqueTagCollision(
+        new FakePrismaKnownError('P2002', {
+          target: 'assets_assetTag_active_key',
+        }),
+      ),
+    ).toBe(true);
+    // Defensive: the column-array shape (["assetTag"]) is also recognised.
+    expect(
+      isUniqueTagCollision(
+        new FakePrismaKnownError('P2002', { target: ['assetTag'] }),
+      ),
+    ).toBe(true);
+  });
+
+  it('does NOT match a P2002 on the SERIAL index (a different live partial-unique) — it must propagate', () => {
+    expect(
+      isUniqueTagCollision(
+        new FakePrismaKnownError('P2002', {
+          target: 'assets_serial_active_key',
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isUniqueTagCollision(
+        new FakePrismaKnownError('P2002', { target: ['serial'] }),
+      ),
+    ).toBe(false);
+  });
+
+  it('does NOT match a P2002 with no usable target, a non-P2002, or a non-Prisma error', () => {
+    // A bare P2002 (no meta.target) can't be confirmed as the assetTag index → don't retry.
+    expect(isUniqueTagCollision(new FakePrismaKnownError('P2002'))).toBe(false);
     expect(isUniqueTagCollision(new FakePrismaKnownError('P2025'))).toBe(false);
     expect(isUniqueTagCollision(new Error('boom'))).toBe(false);
     expect(isUniqueTagCollision(undefined)).toBe(false);
