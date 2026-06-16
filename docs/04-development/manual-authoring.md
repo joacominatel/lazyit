@@ -71,6 +71,27 @@ The seed IA (ADR-0062 §5) — fill these out in #536: **Getting started · Lang
 Permissions · Best practices · Detailed explanations**. Keep `section` strings consistent across pages and
 locales so buckets merge correctly.
 
+## Navigation & search (issue #560)
+
+Every Help route (`/help` AND `/help/<slug>`) is wrapped by a **persistent left sidebar** —
+`apps/web/app/(marketing)/help/layout.tsx` (a Server Component) — that loads the page list once and renders the
+nav beside the page content. The sidebar is **100% frontmatter-driven**: the same `section` → pages grouping the
+index uses, sorted by `order`, with the **active page highlighted**. There is **nothing to register** — add a
+page (per "How to add a Help page" below) and it appears in the sidebar automatically. On desktop (lg+) the rail
+is always visible; on mobile it collapses into a "Browse" drawer (a shadcn `Sheet`). The sidebar/search
+components live under `apps/web/app/(marketing)/help/_components/`.
+
+At the top of the sidebar is a **simple, client-side search** box. It is deliberately **NOT Meilisearch** —
+ADR-0062 §6 defers full-text search; this is a lightweight, in-memory filter with **no server call and no Meili
+index**. The loader builds a small per-locale index at request time (`buildManualSearchIndex` →
+`{ slug, title, section, headings[], excerpt }`, headings + a short plaintext excerpt extracted from the body)
+and the client filters it as you type: **accent-insensitive** (so "configuracion" matches "configuración"),
+substring, **title-first** ranking (title > section > heading > excerpt). The match/rank logic is the pure,
+unit-tested `apps/web/lib/manual/search.ts` (`normalizeForSearch`, `searchManual`, plus the `extractHeadings` /
+`buildExcerpt` index builders). What this means for authoring: a clear, distinctive **`title`**, a consistent
+**`section`**, and descriptive **`#`/`##` headings** are what make a page findable — the same fields the IA
+already rewards.
+
 ## i18n + the es→en fallback
 
 - The active locale is the **`NEXT_LOCALE` cookie** (cookie-mode, no `/es/` URL prefix — [[0051-i18n-next-intl]]).
@@ -106,13 +127,16 @@ Run it before pushing Manual changes. It is wired as the `check:manual-parity` p
    ordinary relative links (`/help/<slug>`). **Never** reference a secret or a vault — the Manual is secret-free
    by construction ([[0062-in-app-help-manual-surface]] §3 / INV-10).
 4. Run `bun run check:manual-parity` and confirm it passes.
-5. The page appears automatically on `/help`, grouped by its `section` and sorted by `order` — no registration,
-   no index file to edit.
+5. The page appears automatically on `/help`, grouped by its `section` and sorted by `order` — both on the index
+   and in the **sidebar** (issue #560) — and becomes searchable in the sidebar search. No registration, no index
+   file to edit.
 
 ## Related
 
-- [[0062-in-app-help-manual-surface]] — the decision (public, code-versioned, KB-distinct).
+- [[0062-in-app-help-manual-surface]] — the decision (public, code-versioned, KB-distinct; §6 defers Meili search).
 - [[0051-i18n-next-intl]] — cookie-mode i18n, en + es, default/fallback `en`.
 - [[i18n]] — translating the rest of the chrome (message catalogs).
 - `apps/web/components/markdown-view.tsx` — the renderer (`disableKbExtensions` prop).
-- `apps/web/lib/manual/` — the loader + the pure, tested resolve/sort/group logic.
+- `apps/web/lib/manual/` — the loader (incl. `buildManualSearchIndex`) + the pure, tested resolve/sort/group and
+  `search` (normalize/rank + heading/excerpt extraction) logic.
+- `apps/web/app/(marketing)/help/layout.tsx` + `_components/` — the sidebar + simple client-side search (#560).
