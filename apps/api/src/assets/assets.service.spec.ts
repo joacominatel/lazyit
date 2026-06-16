@@ -32,9 +32,10 @@ jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 import { Prisma } from '../../generated/prisma/client';
 // The P2002 factory the collision-retry tests throw — a genuine instance of the mocked known-error
 // class, so `isUniqueTagCollision`'s instanceof check matches it (ADR-0063 collision-retry).
-const FakePrismaKnownError = Prisma.PrismaClientKnownRequestError as unknown as new (
-  code: string,
-) => Error & { code: string };
+const FakePrismaKnownError =
+  Prisma.PrismaClientKnownRequestError as unknown as new (
+    code: string,
+  ) => Error & { code: string };
 
 type PrismaAssetMock = {
   findMany: jest.Mock;
@@ -244,11 +245,8 @@ describe('AssetsService', () => {
       // create/update/remove pass a CALLBACK (interactive tx); findPage passes an ARRAY of two
       // promises (findMany + count). Support both forms.
       $transaction: jest.fn(
-        (
-          arg:
-            | ((client: TxClientMock) => unknown)
-            | Array<Promise<unknown>>,
-        ) => (Array.isArray(arg) ? Promise.all(arg) : arg(txClient)),
+        (arg: ((client: TxClientMock) => unknown) | Array<Promise<unknown>>) =>
+          Array.isArray(arg) ? Promise.all(arg) : arg(txClient),
       ),
     };
     // ActorService is a pure, dependency-free resolver (the guard already validated the principal), so
@@ -361,7 +359,9 @@ describe('AssetsService', () => {
     };
     txAssetModel.findFirst.mockResolvedValue(null);
 
-    await expect(service.create(dto)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.create(dto)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
 
     expect(tx.create).not.toHaveBeenCalled();
     expect(history.record).not.toHaveBeenCalled();
@@ -490,7 +490,9 @@ describe('AssetsService', () => {
     tagScheme.allocateTag.mockResolvedValue(undefined);
     tx.create.mockRejectedValue(new FakePrismaKnownError('P2002'));
 
-    await expect(service.create(dto)).rejects.toBeInstanceOf(FakePrismaKnownError);
+    await expect(service.create(dto)).rejects.toBeInstanceOf(
+      FakePrismaKnownError,
+    );
     // No advance-and-retry for an explicit tag: a single attempt, then the P2002 propagates.
     expect(tx.create).toHaveBeenCalledTimes(1);
   });
@@ -1174,10 +1176,10 @@ describe('AssetsService', () => {
     await service.restore('a1', HUMAN_PRINCIPAL);
 
     // The first lookup uses the includeSoftDeleted escape hatch (so a soft-deleted asset is visible).
-    const firstLookup = asset.findFirst.mock.calls[0][0] as {
-      includeSoftDeleted?: boolean;
-    };
-    expect(firstLookup.includeSoftDeleted).toBe(true);
+    const lookups = asset.findFirst.mock.calls as Array<
+      [{ includeSoftDeleted?: boolean }]
+    >;
+    expect(lookups[0][0].includeSoftDeleted).toBe(true);
     // deletedAt is cleared inside a transaction (never a plain update).
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     const calls = tx.update.mock.calls as UpdateCall[];

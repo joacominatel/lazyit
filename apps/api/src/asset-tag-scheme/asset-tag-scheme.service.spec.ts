@@ -23,14 +23,22 @@ import {
 } from './asset-tag-scheme.service';
 
 // The P2002 factory the collision tests throw — a genuine instance of the mocked known-error class.
-const FakePrismaKnownError = Prisma.PrismaClientKnownRequestError as unknown as new (
-  code: string,
-) => Error & { code: string };
+const FakePrismaKnownError =
+  Prisma.PrismaClientKnownRequestError as unknown as new (
+    code: string,
+  ) => Error & { code: string };
 
 type SchemeMock = {
   findFirst: jest.Mock;
   upsert: jest.Mock;
   update: jest.Mock;
+};
+
+// The shape of the upsert() arg, so the assertions stay type-safe (no-unsafe-member-access).
+type UpsertArg = {
+  where: { id: string };
+  create: Record<string, unknown>;
+  update: Record<string, unknown>;
 };
 
 describe('AssetTagSchemeService', () => {
@@ -117,11 +125,8 @@ describe('AssetTagSchemeService', () => {
       startNumber: 1000,
     });
 
-    const arg = assetTagScheme.upsert.mock.calls[0][0] as {
-      where: { id: string };
-      create: Record<string, unknown>;
-      update: Record<string, unknown>;
-    };
+    const calls = assetTagScheme.upsert.mock.calls as Array<[UpsertArg]>;
+    const arg = calls[0][0];
     expect(arg.where).toEqual({ id: SINGLETON });
     expect(arg.create.nextNumber).toBe(1000);
     expect(arg.create.suffix).toBeNull(); // omitted affix persists as NULL
@@ -144,10 +149,8 @@ describe('AssetTagSchemeService', () => {
 
     await service.updateScheme({ enabled: false });
 
-    const arg = assetTagScheme.upsert.mock.calls[0][0] as {
-      update: Record<string, unknown>;
-      create: Record<string, unknown>;
-    };
+    const calls = assetTagScheme.upsert.mock.calls as Array<[UpsertArg]>;
+    const arg = calls[0][0];
     expect(arg.update).not.toHaveProperty('nextNumber'); // counter left where it is
     expect(arg.create.nextNumber).toBe(1); // first-create default
   });
