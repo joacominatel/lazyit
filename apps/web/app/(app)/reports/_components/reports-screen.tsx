@@ -62,10 +62,10 @@ import { useUsers } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { cn } from "@/lib/utils";
-import { downloadCsv } from "./informes-csv";
+import { downloadCsv } from "./reports-csv";
 
 /**
- * The Reports/Informes screen body (rendered only once `logs:read` is confirmed — see `page.tsx`).
+ * The Reports screen body (rendered only once `logs:read` is confirmed — see `page.tsx`).
  *
  * Since issue #183 (DEBT-1 frontend) every filter is **server-side**: the unified `GET
  * /dashboard/activity` feed now narrows by `entityType` (scope tabs), `actorId` (an Actor select, or
@@ -181,8 +181,8 @@ function toDateToIso(date: string): string | undefined {
   return d.toISOString();
 }
 
-export function InformesScreen() {
-  const t = useTranslations("informes");
+export function ReportsScreen() {
+  const t = useTranslations("reports");
   const tAction = useTranslations("shared.activity.action");
   // Snapshot "now" once so the relative-range presets + day-grouping stay pure across renders.
   const [now] = useState(() => Date.now());
@@ -650,7 +650,7 @@ function TimelineView({
   isFetchingNextPage: boolean;
   onLoadMore: () => void;
 }) {
-  const t = useTranslations("informes");
+  const t = useTranslations("reports");
   const tShared = useTranslations("shared");
   const groups = useMemo(() => groupByDay(items, now), [items, now]);
   return (
@@ -746,7 +746,7 @@ function TableView({
   onOffsetChange: (offset: number) => void;
   onClearFilters: () => void;
 }) {
-  const t = useTranslations("informes");
+  const t = useTranslations("reports");
   const tAction = useTranslations("shared.activity.action");
   const { dateTime, relative } = useFormatters();
   const columns: ResourceColumn[] = [
