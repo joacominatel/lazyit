@@ -1,0 +1,19 @@
+{
+  "nav": {
+    "title": "Help",
+    "backToIndex": "Back to Help"
+  },
+  "index": {
+    "title": "Help",
+    "subtitle": "Product documentation for lazyit — public, and shipped with the app.",
+    "empty": "No help pages are available yet."
+  },
+  "page": {
+    "fallbackNotice": "This page isn't translated for your language yet, so it's shown in English."
+  },
+  "notFound": {
+    "title": "Help page not found",
+    "description": "The page you're looking for doesn't exist in the Manual.",
+    "backToIndex": "Back to Help"
+  }
+}
