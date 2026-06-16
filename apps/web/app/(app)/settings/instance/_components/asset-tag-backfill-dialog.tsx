@@ -81,7 +81,8 @@ export function AssetTagBackfillDialog({
     useAssetTagBackfillPreview({
       mode,
       modelId: modelId || undefined,
-      page,
+      // UI page state is 0-based (prev/next, display); the contract is 1-based — convert at the wire.
+      page: page + 1,
       pageSize: PAGE_SIZE,
       enabled: open,
     });
