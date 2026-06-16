@@ -18,8 +18,8 @@ import { useApplicationCategories, useDeleteApplicationCategory } from "@/lib/ap
 import { useArticleCategories, useDeleteArticleCategory } from "@/lib/api/hooks/use-article-categories";
 import { useAssetCategories, useDeleteAssetCategory } from "@/lib/api/hooks/use-asset-categories";
 import { useConsumableCategories, useDeleteConsumableCategory } from "@/lib/api/hooks/use-consumable-categories";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
-import { formatDate } from "@/lib/utils/format";
 import { CategoryFormDialog } from "./category-form-dialog";
 import {
   type AnyCategory,
@@ -37,6 +37,7 @@ import {
 export function CategoryManager({ kind }: { kind: CategoryKind }) {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
+  const { date } = useFormatters();
   const assetQuery = useAssetCategories();
   const applicationQuery = useApplicationCategories();
   const consumableQuery = useConsumableCategories();
@@ -181,7 +182,7 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
                 </TableCell>
               ) : null}
               <TableCell className="text-muted-foreground tabular-nums">
-                {formatDate(category.updatedAt)}
+                {date(category.updatedAt)}
               </TableCell>
               <TableCell className="text-right">
                 {canWrite || canDelete ? (
