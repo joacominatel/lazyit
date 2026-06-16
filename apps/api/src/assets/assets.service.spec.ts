@@ -1,20 +1,40 @@
 import { Test } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AssetsService } from './assets.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { SearchService } from '../search/search.service';
+import { AssetTagSchemeService } from '../asset-tag-scheme/asset-tag-scheme.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
-// `Prisma` only for types (erased at runtime), so an empty object is enough.
+// `Prisma` mostly for types (erased at runtime), but `isUniqueTagCollision` (ADR-0063) does a real
+// `instanceof Prisma.PrismaClientKnownRequestError` at runtime, so the factory provides that class
+// (defined INSIDE the factory — jest.mock is hoisted, so an outer reference would hit the TDZ).
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
-  Prisma: {},
+  Prisma: {
+    PrismaClientKnownRequestError: class extends Error {
+      constructor(public code: string) {
+        super(`prisma-${code}`);
+      }
+    },
+  },
 }));
 // AssetsService transitively imports the ESM `meilisearch` package (via SearchService); jest can't
 // transform it. SearchService is replaced by a mock below; this stub stops the real module loading.
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
+
+import { Prisma } from '../../generated/prisma/client';
+// The P2002 factory the collision-retry tests throw — a genuine instance of the mocked known-error
+// class, so `isUniqueTagCollision`'s instanceof check matches it (ADR-0063 collision-retry).
+const FakePrismaKnownError = Prisma.PrismaClientKnownRequestError as unknown as new (
+  code: string,
+) => Error & { code: string };
 
 type PrismaAssetMock = {
   findMany: jest.Mock;
@@ -203,6 +223,7 @@ describe('AssetsService', () => {
   let actor: ActorService;
   let history: { record: jest.Mock; list: jest.Mock };
   let search: { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
+  let tagScheme: { allocateTag: jest.Mock };
 
   beforeEach(async () => {
     asset = {
@@ -235,6 +256,9 @@ describe('AssetsService', () => {
     actor = new ActorService();
     history = { record: jest.fn(), list: jest.fn() };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
+    // OFF by default (ADR-0063): allocateTag returns undefined, so the create path is unchanged for
+    // every existing test. Allocation tests override this per-case.
+    tagScheme = { allocateTag: jest.fn().mockResolvedValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -243,6 +267,7 @@ describe('AssetsService', () => {
         { provide: ActorService, useValue: actor },
         { provide: AssetHistoryService, useValue: history },
         { provide: SearchService, useValue: search },
+        { provide: AssetTagSchemeService, useValue: tagScheme },
       ],
     }).compile();
 
@@ -392,6 +417,92 @@ describe('AssetsService', () => {
         eventType: 'CREATED',
         actor: { serviceAccountId: SA_ID },
       },
+    );
+  });
+
+  // --- asset-tag scheme allocation (ADR-0063 / #363) ----------------------
+
+  it('OFF by default: allocateTag returns undefined → no assetTag key sent to Prisma', async () => {
+    const dto = { name: 'SRV-01', status: 'OPERATIONAL' as const };
+    tx.create.mockResolvedValue({ id: 'a1', ...dto });
+
+    await service.create(dto);
+
+    // allocateTag was asked (with the absent explicit tag) and declined → the data has no assetTag.
+    expect(tagScheme.allocateTag).toHaveBeenCalledWith(undefined);
+    const calls = tx.create.mock.calls as CreateCall[];
+    expect(calls[0][0].data).not.toHaveProperty('assetTag');
+  });
+
+  it('enabled scheme auto-assigns the rendered tag when no explicit tag is supplied', async () => {
+    const dto = { name: 'SRV-01', status: 'OPERATIONAL' as const };
+    tagScheme.allocateTag.mockResolvedValueOnce('LAZY-00042');
+    tx.create.mockResolvedValue({ id: 'a1', assetTag: 'LAZY-00042', ...dto });
+
+    await service.create(dto);
+
+    const calls = tx.create.mock.calls as CreateCall[];
+    expect(calls[0][0].data.assetTag).toBe('LAZY-00042');
+    expect(tx.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('explicit assetTag ALWAYS wins — allocateTag is told the explicit tag and the explicit value is used', async () => {
+    const dto = {
+      name: 'SRV-01',
+      status: 'OPERATIONAL' as const,
+      assetTag: 'MANUAL-1',
+    };
+    // Even if the scheme would render something, allocateTag returns undefined for an explicit tag.
+    tagScheme.allocateTag.mockResolvedValueOnce(undefined);
+    tx.create.mockResolvedValue({ id: 'a1', ...dto });
+
+    await service.create(dto);
+
+    expect(tagScheme.allocateTag).toHaveBeenCalledWith('MANUAL-1');
+    const calls = tx.create.mock.calls as CreateCall[];
+    expect(calls[0][0].data.assetTag).toBe('MANUAL-1');
+  });
+
+  it('retries with the NEXT counter value when the rendered tag collides with a live tag (P2002)', async () => {
+    const dto = { name: 'SRV-01', status: 'OPERATIONAL' as const };
+    // First allocation renders a colliding tag; the asset insert hits the live-tag partial unique
+    // index (P2002); the create advances to the next number and succeeds.
+    tagScheme.allocateTag
+      .mockResolvedValueOnce('LAZY-00042')
+      .mockResolvedValueOnce('LAZY-00043');
+    tx.create
+      .mockRejectedValueOnce(new FakePrismaKnownError('P2002'))
+      .mockResolvedValueOnce({ id: 'a1', assetTag: 'LAZY-00043', ...dto });
+
+    const result = (await service.create(dto)) as { assetTag: string };
+
+    expect(tagScheme.allocateTag).toHaveBeenCalledTimes(2);
+    expect(tx.create).toHaveBeenCalledTimes(2);
+    expect(result.assetTag).toBe('LAZY-00043');
+  });
+
+  it('an EXPLICIT-tag P2002 is NOT retried — it propagates (the caller picked a duplicate)', async () => {
+    const dto = {
+      name: 'SRV-01',
+      status: 'OPERATIONAL' as const,
+      assetTag: 'DUP-1',
+    };
+    tagScheme.allocateTag.mockResolvedValue(undefined);
+    tx.create.mockRejectedValue(new FakePrismaKnownError('P2002'));
+
+    await expect(service.create(dto)).rejects.toBeInstanceOf(FakePrismaKnownError);
+    // No advance-and-retry for an explicit tag: a single attempt, then the P2002 propagates.
+    expect(tx.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws 409 after exhausting the bounded retry budget on persistent collisions', async () => {
+    const dto = { name: 'SRV-01', status: 'OPERATIONAL' as const };
+    tagScheme.allocateTag.mockResolvedValue('LAZY-00042'); // always renders a colliding tag
+    tx.create.mockRejectedValue(new FakePrismaKnownError('P2002')); // always collides
+
+    await expect(service.create(dto)).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.create).toHaveBeenCalledTimes(
+      AssetTagSchemeService.MAX_ALLOCATION_ATTEMPTS,
     );
   });
 
