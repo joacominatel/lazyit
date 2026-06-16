@@ -57,7 +57,7 @@ export function toCsv(items: RecentActivityItem[]): string {
  */
 export function downloadCsv(
   items: RecentActivityItem[],
-  filename = `informes-${new Date().toISOString().slice(0, 10)}.csv`,
+  filename = `reports-${new Date().toISOString().slice(0, 10)}.csv`,
 ): void {
   if (typeof document === "undefined") return;
   const csv = toCsv(items);

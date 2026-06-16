@@ -9,7 +9,7 @@ import auth from "./auth.json";
 import common from "./common.json";
 import consumables from "./consumables.json";
 import dashboard from "./dashboard.json";
-import informes from "./informes.json";
+import reports from "./reports.json";
 import kb from "./kb.json";
 import locations from "./locations.json";
 import nav from "./nav.json";
@@ -32,7 +32,7 @@ const messages = {
   users,
   locations,
   settings,
-  informes,
+  reports,
   auth,
   workflow,
   notifications,

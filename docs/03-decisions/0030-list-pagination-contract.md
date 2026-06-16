@@ -331,7 +331,7 @@ removable chip per value in the active-filter bar (Activated Restraint, ADR-0049
 
 **Problem.** Every setter writes via one `router.replace(...)` computed from the **render-time**
 `searchParams` snapshot — there is no merge between calls. So a handler that fired **two** setters in
-one event (e.g. KB's "Linked only" off, clearing `linked` + `linkedTo`; or informes writing a
+one event (e.g. KB's "Linked only" off, clearing `linked` + `linkedTo`; or reports writing a
 `from`/`to` date pair) hit **last-write-wins**: the second `replace` re-emitted the stale snapshot and
 re-introduced the key the first had removed. The KB toggle could be turned on but **not off**
 (regression of #198 / PR #212, which split the linked filter into two params).

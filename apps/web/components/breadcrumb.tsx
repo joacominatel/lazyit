@@ -20,7 +20,7 @@ const KNOWN_SEGMENTS = [
   "consumables",
   "applications",
   "kb",
-  "informes",
+  "reports",
   "users",
   "locations",
   "new",
