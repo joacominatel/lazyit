@@ -14,7 +14,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import type { ManualSearchEntry } from "@/lib/manual/search";
-import type { ManualSection } from "@/lib/manual/types";
+import type { ManualCategory } from "@/lib/manual/types";
 import { HelpSearch } from "./help-search";
 
 /**
@@ -31,10 +31,10 @@ import { HelpSearch } from "./help-search";
  */
 export function HelpSidebarMobile({
   index,
-  sections,
+  categories,
 }: {
   index: ManualSearchEntry[];
-  sections: ManualSection[];
+  categories: ManualCategory[];
 }) {
   const t = useTranslations("help");
   const pathname = usePathname();
@@ -71,7 +71,7 @@ export function HelpSidebarMobile({
           <div className="overflow-y-auto p-4">
             <HelpSearch
               index={index}
-              sections={sections}
+              categories={categories}
               onNavigate={() => setOpen(false)}
             />
           </div>
