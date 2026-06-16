@@ -9,10 +9,12 @@ import { getManualSections } from "@/lib/manual/loader";
  * markdown trees at `apps/web/content/manual/<locale>/*.md`. Public, login-free (the
  * `(marketing)` route group + the `isPublicPath` allowance in `proxy.ts`), and secret-free.
  *
- * Server Component: it reads the filesystem via the server-only loader and resolves the active
- * locale from the `NEXT_LOCALE` cookie. `force-dynamic` so a new/edited markdown page (and a
- * locale switch, which is cookie-driven) is reflected without a rebuild — the content tree is a
- * small, in-repo set, so per-request reads are cheap.
+ * The persistent sidebar (search + section nav) is provided by the segment `layout.tsx` (issue
+ * #560); this page renders only the content column — a welcome header plus the section index as a
+ * landing list. Server Component: it reads the filesystem via the server-only loader and resolves
+ * the active locale from the `NEXT_LOCALE` cookie. `force-dynamic` so a new/edited markdown page (and
+ * a cookie-driven locale switch) is reflected without a rebuild — the content tree is a small,
+ * in-repo set, so per-request reads are cheap.
  */
 export const dynamic = "force-dynamic";
 
@@ -21,7 +23,7 @@ export default async function HelpIndexPage() {
   const sections = await getManualSections();
 
   return (
-    <section className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-6 py-16">
+    <section className="flex w-full max-w-3xl flex-col gap-10">
       <header className="flex flex-col gap-2">
         <h1 className="text-3xl font-semibold tracking-tight text-balance">
           {t("index.title")}
