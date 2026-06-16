@@ -105,8 +105,9 @@ export class AssetTagSchemeService {
    * Otherwise it atomically consumes the next counter value and renders `prefix + zeroPad + suffix`.
    * If the rendered tag collides with an existing LIVE tag (a manual tag took that value — P2002 on
    * `assets_assetTag_active_key`) the asset insert will reject; the CALLER retries by calling this
-   * again, which advances to the next number (gaps accepted). We probe for an existing live tag here
-   * to skip an attempt cheaply, but the asset-insert P2002 remains the authoritative collision guard.
+   * again, which advances to the next number (gaps accepted). There is no pre-probe here — the
+   * asset-insert P2002 (scoped to the assetTag index by `isUniqueTagCollision`) is the sole, and
+   * authoritative, collision guard.
    *
    * CONCURRENCY (ADR-0063 §3): the increment is a single atomic `update ... { increment: 1 }` that
    * COMMITS on its own — two concurrent creates therefore read different numbers and never collide.
@@ -162,9 +163,50 @@ export class AssetTagSchemeService {
   }
 }
 
-/** Type guard for the live-tag unique collision (P2002 on `assets_assetTag_active_key`). */
+/**
+ * The name of the raw partial-unique index that enforces live-tag uniqueness (created in raw SQL in
+ * migration 20260601130000, NOT a PSL `@unique` — Prisma can't express the `WHERE deletedAt IS NULL`
+ * partial). Because Prisma doesn't know this index from the schema, a P2002 raised by it surfaces
+ * `meta.target` as the INDEX NAME string here (rather than a `["assetTag"]` column array). We still
+ * match the column-array shape defensively in case the surfaced shape ever changes.
+ */
+const ASSET_TAG_UNIQUE_INDEX = 'assets_assetTag_active_key';
+const ASSET_TAG_COLUMN = 'assetTag';
+
+/**
+ * Type guard for the live-tag unique collision: a P2002 raised by the `assets_assetTag_active_key`
+ * partial-unique index (ADR-0041/0063). It must be TARGET-AWARE — `Asset` has TWO live-only partial
+ * uniques (serial AND assetTag), so a duplicate-`serial` create with an auto-tag in play would
+ * otherwise be misclassified as a tag collision and spin the whole retry budget (burning ~50 counter
+ * numbers) before a misleading 409. Only an assetTag collision advances-and-retries; any other P2002
+ * (serial, or anything else) returns false and propagates immediately to the global filter as a
+ * prompt, correct 409 — no counter waste.
+ *
+ * `meta.target` is inspected following the established shape in `prisma-exception.filter.ts`. We match
+ * BOTH the raw-index shape (a string equal to / containing the index name — what adapter-pg surfaces
+ * for this raw partial index) AND the column-array shape (an array including `assetTag`), so the guard
+ * is robust to either.
+ */
 export function isUniqueTagCollision(err: unknown): boolean {
-  return (
-    err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002'
-  );
+  if (
+    !(err instanceof Prisma.PrismaClientKnownRequestError) ||
+    err.code !== 'P2002'
+  ) {
+    return false;
+  }
+  const target = err.meta?.target;
+  if (typeof target === 'string') {
+    // Raw partial index: adapter-pg surfaces the index NAME (e.g. "assets_assetTag_active_key").
+    return (
+      target === ASSET_TAG_UNIQUE_INDEX || target.includes(ASSET_TAG_COLUMN)
+    );
+  }
+  if (Array.isArray(target)) {
+    // Column-array shape (defensive): a P2002 whose target lists the assetTag column / index name.
+    return target.some(
+      (t) => t === ASSET_TAG_COLUMN || t === ASSET_TAG_UNIQUE_INDEX,
+    );
+  }
+  // No usable target (e.g. a bare P2002) → cannot confirm it is the assetTag index, so DON'T retry.
+  return false;
 }
