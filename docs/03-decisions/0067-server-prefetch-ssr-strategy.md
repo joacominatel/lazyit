@@ -1,7 +1,7 @@
 ---
 title: "ADR-0067: Server-prefetch + hydration rendering strategy for high-traffic routes"
 tags: [adr, frontend, rendering, ssr, tanstack-query, nextjs]
-status: proposed
+status: accepted
 created: 2026-06-16
 updated: 2026-06-16
 deciders: [Joaquín Minatel]
@@ -11,8 +11,7 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — 2026-06-16 (CTO recommendation; awaiting CEO ratification before implementation
-begins). Issue #500. Implementation is deferred to a separate, ratified wave.
+**accepted** — 2026-06-16 (CEO ratification). Implementation deferred to issue #537.
 
 ## Context
 
