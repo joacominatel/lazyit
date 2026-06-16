@@ -11,6 +11,13 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
+> **Implemented (backend, 2026-06-16, #363):** `AssetTagScheme` single-row model + `asset_tag_scheme`
+> migration (singleton-id CHECK), the `@lazyit/shared` `AssetTagSchemeSchema` / `UpdateAssetTagSchemeSchema`
+> (the running number is modelled as explicit fields, so a `{num}`-less config is unrepresentable),
+> `GET`/`PUT /config/asset-tag-scheme` (`settings:manage`), and in-create atomic allocation with bounded
+> retry-on-P2002 (`AssetTagSchemeService.allocateTag` + the `AssetsService.create` retry loop). The
+> settings UI is the frontend follow-up.
+
 **accepted** — 2026-06-14 (CEO sign-off). Issue #363. This is lazyit's **first instance-configuration
 store** — a dedicated, single-row config entity that holds an org-wide setting (the asset-tag template)
 plus a global counter — so it sets the pattern for instance config to come. It builds on the flexible
