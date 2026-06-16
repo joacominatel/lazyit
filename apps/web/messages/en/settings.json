@@ -33,7 +33,7 @@
   },
   "instance": {
     "title": "Instance",
-    "subtitle": "How this lazyit instance is configured. Read-only — operators set posture via environment.",
+    "subtitle": "How this lazyit instance is configured — runtime posture (set via environment) and the asset-tag scheme.",
     "cardTitle": "Configuration",
     "loadError": "Could not load instance status",
     "loadErrorHint": "The API may be down or unreachable.",
@@ -52,6 +52,45 @@
     "identityProvider": {
       "zitadel": "Zitadel (bundled)",
       "generic-oidc": "Generic OIDC (bring your own)"
+    }
+  },
+  "assetTagScheme": {
+    "title": "Asset tag scheme",
+    "subtitle": "Auto-assign a running asset tag to new assets — a prefix, a zero-padded number and a suffix. Off until you turn it on; an explicit tag always wins.",
+    "loadError": "Could not load the asset-tag scheme.",
+    "retry": "Retry",
+    "save": "Save scheme",
+    "disabledHint": "The scheme is off. New assets keep their manual tag (or none) — turn it on to auto-assign.",
+    "preview": {
+      "label": "Next tag"
+    },
+    "fields": {
+      "enabled": {
+        "label": "Auto-assign asset tags",
+        "description": "When on, a new asset with no tag gets the next number automatically."
+      },
+      "prefix": {
+        "label": "Prefix",
+        "placeholder": "IT-"
+      },
+      "suffix": {
+        "label": "Suffix",
+        "placeholder": "-HW"
+      },
+      "width": {
+        "label": "Number width",
+        "placeholder": "4",
+        "description": "Zero-pad the number to this many digits (e.g. 4 → 0042). Leave blank for no padding."
+      },
+      "startNumber": {
+        "label": "Start at",
+        "placeholder": "Next: {next}",
+        "description": "Optional. Re-seed the counter so the next tag starts here. Leave blank to continue the sequence."
+      }
+    },
+    "toast": {
+      "saved": "Asset-tag scheme saved.",
+      "saveError": "Could not save the asset-tag scheme."
     }
   },
   "roles": {
