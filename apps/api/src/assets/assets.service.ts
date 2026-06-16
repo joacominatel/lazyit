@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   AssetStatus,
   BatchResult,
@@ -24,6 +29,10 @@ import {
 } from '../asset-history/asset-history.service';
 import { SearchService } from '../search/search.service';
 import { projectAsset } from '../search/search.documents';
+import {
+  AssetTagSchemeService,
+  isUniqueTagCollision,
+} from '../asset-tag-scheme/asset-tag-scheme.service';
 
 /** Optional filters for listing assets. `categoryId` filters by the asset's model's category. */
 export interface AssetFilters {
@@ -124,6 +133,7 @@ export class AssetsService {
     private readonly actor: ActorService,
     private readonly history: AssetHistoryService,
     private readonly search: SearchService,
+    private readonly tagScheme: AssetTagSchemeService,
   ) {}
 
   /**
@@ -214,45 +224,88 @@ export class AssetsService {
   /**
    * Create. Emits a `CREATED` history event transactionally with the insert (ADR-0033); the actor
    * comes from the authenticated User (ADR-0038). Invalid modelId/locationId hit the FK → 400.
+   *
+   * Asset-tag scheme (ADR-0063 §3/§4): when a scheme is ENABLED and the caller did NOT pass an
+   * explicit `assetTag`, an auto-tag is allocated. The allocation atomically consumes the next
+   * counter value (concurrency-safe) and renders the tag; if it collides with an existing LIVE tag
+   * (P2002 on `assets_assetTag_active_key`, e.g. a manual tag took that value) the create RETRIES with
+   * the next counter value, bounded. Each consumed number is durable, so a clash ADVANCES the sequence
+   * — gaps are accepted, never back-filled. OFF by default: with no scheme / a disabled scheme / an
+   * explicit tag, `allocateTag` returns undefined and this path is byte-for-byte today's behaviour.
    */
   async create(data: CreateAsset, principal?: Principal) {
     const actor = this.actor.resolveActor(principal);
-    const { specs, ...rest } = data;
-    const asset = await this.prisma.$transaction(async (tx) => {
-      let resolvedSpecs = specs;
-      if (rest.modelId) {
-        const model = await tx.assetModel.findFirst({
-          where: { id: rest.modelId },
-          select: { specs: true },
+    const { specs, assetTag, ...rest } = data;
+
+    // Bounded retry only matters when an auto-tag is in play; an explicit/absent tag runs ONCE (the
+    // first attempt's allocateTag returns undefined and no collision-advance is possible).
+    let lastError: unknown;
+    for (
+      let attempt = 0;
+      attempt < AssetTagSchemeService.MAX_ALLOCATION_ATTEMPTS;
+      attempt++
+    ) {
+      // Allocate (or pass through) the tag. On a retry this advances the counter to the next value.
+      const allocatedTag = await this.tagScheme.allocateTag(assetTag);
+      const effectiveTag = assetTag ?? allocatedTag; // explicit wins; else the auto-tag (or undefined).
+      try {
+        const asset = await this.prisma.$transaction(async (tx) => {
+          let resolvedSpecs = specs;
+          if (rest.modelId) {
+            const model = await tx.assetModel.findFirst({
+              where: { id: rest.modelId },
+              select: { specs: true },
+            });
+            if (!model) {
+              throw new BadRequestException(
+                `AssetModel ${rest.modelId} not found`,
+              );
+            }
+            resolvedSpecs = applyAssetModelSpecsDefaults(
+              model.specs as Record<string, unknown> | null,
+              specs,
+            );
+          }
+          // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
+          const created = await tx.asset.create({
+            data: {
+              ...rest,
+              ...(effectiveTag !== undefined ? { assetTag: effectiveTag } : {}),
+              ...(resolvedSpecs !== undefined
+                ? { specs: resolvedSpecs as Prisma.InputJsonValue }
+                : {}),
+            },
+          });
+          await this.history.record(tx, {
+            assetId: created.id,
+            eventType: 'CREATED',
+            actor,
+          });
+          return created;
         });
-        if (!model) {
-          throw new BadRequestException(`AssetModel ${rest.modelId} not found`);
+        // Fire-and-forget search sync after the commit (ADR-0035): un-awaited, never throws, no-op
+        // when Meili is disabled. Outside the transaction so a search outage can't roll back the write.
+        this.search.upsert('assets', projectAsset(asset));
+        return asset;
+      } catch (err) {
+        // Only an AUTO-allocated tag may advance-and-retry on a unique collision. An EXPLICIT tag
+        // colliding is the caller's own duplicate → propagate the P2002 (the global filter → 409).
+        if (
+          allocatedTag !== undefined &&
+          assetTag === undefined &&
+          isUniqueTagCollision(err)
+        ) {
+          lastError = err;
+          continue;
         }
-        resolvedSpecs = applyAssetModelSpecsDefaults(
-          model.specs as Record<string, unknown> | null,
-          specs,
-        );
+        throw err;
       }
-      // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
-      const created = await tx.asset.create({
-        data: {
-          ...rest,
-          ...(resolvedSpecs !== undefined
-            ? { specs: resolvedSpecs as Prisma.InputJsonValue }
-            : {}),
-        },
-      });
-      await this.history.record(tx, {
-        assetId: created.id,
-        eventType: 'CREATED',
-        actor,
-      });
-      return created;
-    });
-    // Fire-and-forget search sync after the commit (ADR-0035): un-awaited, never throws, no-op when
-    // Meili is disabled. Outside the transaction so a search outage can't roll back the write.
-    this.search.upsert('assets', projectAsset(asset));
-    return asset;
+    }
+    // Exhausted the retry budget: the rendered tags densely collide with the live manual estate.
+    throw new ConflictException(
+      'Could not allocate a unique asset tag — the configured scheme keeps colliding with existing tags; retry or adjust the scheme.',
+      { cause: lastError instanceof Error ? lastError : undefined },
+    );
   }
 
   /**
