@@ -1,7 +1,8 @@
 ---
 title: Primeros pasos
 order: 1
-section: Primeros pasos
+category: getting-started
+subcategory: initial-setup
 ---
 
 # Primeros pasos
