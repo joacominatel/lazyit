@@ -1,4 +1,5 @@
 import { InformationCircleIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardFooter } from "@/components/ui/card";
 import type { IdpChoice } from "./types";
@@ -20,6 +21,7 @@ export function StepConfigure({
   onBack: () => void;
   onNext: () => void;
 }) {
+  const t = useTranslations("setup.configure");
   return (
     <>
       <CardContent className="space-y-4">
@@ -28,30 +30,23 @@ export function StepConfigure({
             <InformationCircleIcon className="size-5 shrink-0 text-primary" />
             <div className="space-y-1 text-sm">
               <p className="font-medium text-foreground">
-                Bundled Zitadel is ready
+                {t("zitadelReadyTitle")}
               </p>
-              <p className="text-muted-foreground">
-                Your identity provider was provisioned automatically — there is
-                nothing to configure here. If sign-in isn&apos;t available yet,
-                Zitadel may still be starting up; give it a moment.
-              </p>
+              <p className="text-muted-foreground">{t("zitadelReadyBody")}</p>
             </div>
           </div>
         ) : (
           <>
-            <p className="text-sm text-muted-foreground">
-              Confirm your OIDC provider is wired before continuing — the
-              administrator you create next must be able to sign in through it.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("byoiConfirm")}</p>
             <ByoiSnippet />
           </>
         )}
       </CardContent>
       <CardFooter className="justify-between">
         <Button variant="outline" onClick={onBack}>
-          Back
+          {t("back")}
         </Button>
-        <Button onClick={onNext}>Continue</Button>
+        <Button onClick={onNext}>{t("continue")}</Button>
       </CardFooter>
     </>
   );
