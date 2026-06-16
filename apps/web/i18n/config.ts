@@ -34,6 +34,23 @@ export function isLocale(value: string | undefined | null): value is Locale {
 }
 
 /**
+ * Instance-wide display time zone (issue #548). next-intl needs an explicit global `timeZone`
+ * for any date/time formatting that includes a time part (the `long` preset below adds
+ * `hour`/`minute`); without one it falls back to the runtime zone and emits an
+ * `ENVIRONMENT_FALLBACK` warning — and, worse, the server (renders in the container's zone) and
+ * the client (renders in the browser's zone) can disagree, risking a hydration mismatch.
+ *
+ * lazyit is single-org self-hosted with no per-user time zone in v1, so we pick ONE display zone
+ * for the whole instance, configurable via `NEXT_PUBLIC_DEFAULT_TIME_ZONE` and defaulting to
+ * `UTC`. The `NEXT_PUBLIC_` prefix is load-bearing: it makes the value readable on BOTH the server
+ * and the client, so the SAME zone flows to `i18n/request.ts` (server, `getRequestConfig`) and to
+ * `NextIntlClientProvider` (client, `app/providers.tsx`) — server and client MUST agree to avoid a
+ * hydration mismatch. Accepts any IANA zone name, e.g. `America/Argentina/Buenos_Aires`.
+ */
+export const DEFAULT_TIME_ZONE =
+  process.env.NEXT_PUBLIC_DEFAULT_TIME_ZONE || "UTC";
+
+/**
  * Shared date/time presets (issue #497) — referenced by name through `useFormatter().dateTime(iso,
  * "short")` / `getFormatter().dateTime(iso, "long")` so every table column and its hover tooltip
  * render the date the SAME way for a given locale. Wired into the per-request config in
