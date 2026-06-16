@@ -30,6 +30,8 @@ import {
   type CascadeDeleteResult,
 } from './article-categories.service';
 import { RequirePermission } from '../auth/require-permission.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import type { Principal } from '../auth/principal';
 
 class ArticleCategoryDto extends createZodDto(ArticleCategorySchema) {}
 class CreateArticleCategoryDto extends createZodDto(
@@ -66,16 +68,20 @@ export class ArticleCategoriesController {
     summary: 'List all article categories (excludes soft-deleted)',
   })
   @ApiOkResponse({ type: [ArticleCategoryDto] })
-  findAll() {
-    return this.categories.findAll();
+  // The folder `accessRules` (ADR-0060 §3) is returned ONLY to a `settings:manage` caller (the web
+  // rule-editor), stripped for an ordinary `category:read` reader (INV-9 / #554) — the service resolves
+  // the caller's permission DB-first from this principal.
+  findAll(@CurrentPrincipal() principal?: Principal) {
+    return this.categories.findAll(principal);
   }
 
   @Get(':id')
   @RequirePermission('category:read')
   @ApiOperation({ summary: 'Get an article category by id' })
   @ApiOkResponse({ type: ArticleCategoryDto })
-  findOne(@Param('id') id: string) {
-    return this.categories.findOne(id);
+  // Same accessRules gating as findAll (INV-9 / #554): rules included only for a `settings:manage` caller.
+  findOne(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.categories.findOne(id, principal);
   }
 
   @Post()

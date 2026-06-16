@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ArticleCategoriesService } from './article-categories.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). `Prisma.DbNull` is
 // the sentinel `setAccessRules(null)` writes to clear the jsonb column, so the mock must expose it.
@@ -44,6 +45,10 @@ describe('ArticleCategoriesService', () => {
     articleAlias: ArticleAliasMock;
     $transaction: jest.Mock;
   };
+  // PermissionResolverService (ADR-0046) — mocked. Drives the #554 accessRules read gate: hasAll()
+  // returns true only for a `settings:manage` caller. Defaults to FALSE (no rules) so the pre-#554
+  // read tests assert the public shape; the accessRules tests override it per-case.
+  let permissions: { hasAll: jest.Mock };
 
   beforeEach(async () => {
     articleCategory = {
@@ -78,10 +83,13 @@ describe('ArticleCategoriesService', () => {
       ),
     };
 
+    permissions = { hasAll: jest.fn().mockResolvedValue(false) };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         ArticleCategoriesService,
         { provide: PrismaService, useValue: prisma },
+        { provide: PermissionResolverService, useValue: permissions },
       ],
     }).compile();
 
@@ -121,24 +129,72 @@ describe('ArticleCategoriesService', () => {
     expect(articleCategory.create).not.toHaveBeenCalled();
   });
 
-  it('findAll excludes soft-deleted, ordered by order (nulls last) then name', async () => {
+  // Principal fixtures for the #554 accessRules read gate. Only the `settings:manage` resolution drives
+  // the gate (mocked via `permissions.hasAll`), so the user role here is illustrative only.
+  const VIEWER_PRINCIPAL = { kind: 'human', user: { role: 'VIEWER' } } as never;
+  const ADMIN_PRINCIPAL = { kind: 'human', user: { role: 'ADMIN' } } as never;
+
+  it('findAll excludes soft-deleted, ordered by order (nulls last) then name; OMITS accessRules for a non-admin (#554)', async () => {
     articleCategory.findMany.mockResolvedValue([]);
 
     await service.findAll();
 
-    expect(articleCategory.findMany).toHaveBeenCalledWith({
-      orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
-    });
+    const call = (
+      articleCategory.findMany.mock.calls as Array<
+        [{ orderBy: unknown; select: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.orderBy).toEqual([
+      { order: { sort: 'asc', nulls: 'last' } },
+      { name: 'asc' },
+    ]);
+    // The default read uses an explicit select that NEVER includes accessRules (INV-9 / #554).
+    expect(call.select).not.toHaveProperty('accessRules');
+    expect(call.select).toMatchObject({ id: true, name: true });
   });
 
-  it('returns a category by id when it exists', async () => {
+  it('findAll INCLUDES accessRules for a settings:manage caller (the rule-editor — #554)', async () => {
+    permissions.hasAll.mockResolvedValue(true);
+    articleCategory.findMany.mockResolvedValue([]);
+
+    await service.findAll(ADMIN_PRINCIPAL);
+
+    expect(permissions.hasAll).toHaveBeenCalledWith('ADMIN', ['settings:manage']);
+    const call = (
+      articleCategory.findMany.mock.calls as Array<[{ select: Record<string, unknown> }]>
+    )[0][0];
+    expect(call.select).toHaveProperty('accessRules', true);
+  });
+
+  it('returns a category by id when it exists; OMITS accessRules for a non-admin (#554)', async () => {
     const found = { id: 'c1', name: 'Networking', deletedAt: null };
     articleCategory.findFirst.mockResolvedValue(found);
 
-    await expect(service.findOne('c1')).resolves.toEqual(found);
-    expect(articleCategory.findFirst).toHaveBeenCalledWith({
-      where: { id: 'c1' },
+    await expect(service.findOne('c1', VIEWER_PRINCIPAL)).resolves.toEqual(found);
+    const call = (
+      articleCategory.findFirst.mock.calls as Array<
+        [{ where: unknown; select: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.where).toEqual({ id: 'c1' });
+    expect(call.select).not.toHaveProperty('accessRules');
+    expect(call.select).toMatchObject({ id: true, name: true });
+  });
+
+  it('findOne INCLUDES accessRules for a settings:manage caller (#554)', async () => {
+    permissions.hasAll.mockResolvedValue(true);
+    articleCategory.findFirst.mockResolvedValue({
+      id: 'c1',
+      accessRules: [{ kind: 'role', role: 'ADMIN' }],
     });
+
+    await service.findOne('c1', ADMIN_PRINCIPAL);
+
+    expect(permissions.hasAll).toHaveBeenCalledWith('ADMIN', ['settings:manage']);
+    const call = (
+      articleCategory.findFirst.mock.calls as Array<[{ select: Record<string, unknown> }]>
+    )[0][0];
+    expect(call.select).toHaveProperty('accessRules', true);
   });
 
   it('throws NotFound when the category does not exist', async () => {

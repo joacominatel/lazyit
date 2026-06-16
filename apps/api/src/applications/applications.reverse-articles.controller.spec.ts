@@ -41,7 +41,10 @@ describe('ApplicationsController GET /applications/:id/articles (paginated + fil
     findArticlesForApplication.mockClear();
   });
 
-  it('guards existence (findOne) before reading, then forwards filters + the page window', async () => {
+  it('guards existence (findOne) before reading, then forwards filters + the page window + the caller principal (#553)', async () => {
+    // The caller principal is threaded through so the reverse list is folder-access-pinned (ADR-0060
+    // §4 / INV-9 — #553); the controller forwards it as the 4th arg to the service.
+    const principal = { kind: 'human', user: { id: 'u1' } } as never;
     await controller.findArticles(
       'app1',
       'vpn',
@@ -50,6 +53,7 @@ describe('ApplicationsController GET /applications/:id/articles (paginated + fil
       '10',
       '20',
       undefined,
+      principal,
     );
     expect(findOne).toHaveBeenCalledWith('app1');
     expect(findArticlesForApplication).toHaveBeenCalledTimes(1);
@@ -61,6 +65,7 @@ describe('ApplicationsController GET /applications/:id/articles (paginated + fil
         categoryId: ['clh1abc0000xyz0000000abcd'],
       },
       expect.objectContaining({ limit: 10, offset: 20 }),
+      principal,
     );
   });
 
@@ -81,6 +86,9 @@ describe('ApplicationsController GET /applications/:id/articles (paginated + fil
         ],
       }),
       expect.anything(),
+      // No principal passed in this call → forwarded as undefined (folder pin resolves to the
+      // fail-closed / public set in the service).
+      undefined,
     );
   });
 

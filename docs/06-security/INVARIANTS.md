@@ -417,13 +417,27 @@ laundering access to a folder they cannot see.
 - `apps/api/src/articles/articles.service.ts` — the read path (`findOne`/`findBySlug`/`findPage` +
   versions/links/backlinks/aliases) composes the folder gate most-restrictive-wins with the draft rule
   ([[0022-draft-visibility-auth-shim]]) and `article:read`, **404-ing** a folder-hidden article
-  (existence-hiding, never 403). `addAlias` re-checks the actor's §4 read access to the TARGET before
-  writing the alias row (no-escalation, §6).
+  (existence-hiding, never 403). The **reverse KB lookups** (`findArticlesForAsset` /
+  `findArticlesForApplication` → `findLinkedArticlesPage` / `buildReverseWhere`, backing
+  `GET /assets/:id/articles` and `GET /applications/:id/articles`) thread the caller principal and AND
+  the same `categoryId IN <visible>` folder pin on top of the PUBLISHED + link scope, so a restricted
+  article never leaks (title/slug/excerpt/existence) through the link scope — ADMIN (`'ALL'`) gets no
+  pin (SEC-#553). Both alias and link writes re-check the actor's §4 read access to the TARGET before
+  writing (no-escalation, §6): `addAlias` and `addLink` both call `assertFolderVisible` on the
+  article's home folder (404 on a hidden folder), so an author who lost folder read cannot launder a
+  restricted article via the reverse lookup (SEC-#556).
 - `apps/api/src/search/search.service.ts` — `/search` post-filters article hits per caller (the
   search-leak fix): the home folder is carried into the Meili doc (`projectArticle` → `categoryId`,
   a filterable attribute set by `reindex.ts`), then any hit whose folder the caller can't see is dropped
   (ADMIN bypasses; SA/anonymous → PUBLIC only); the internal `categoryId` is stripped before the hit
   ships.
+- `apps/api/src/article-categories/article-categories.service.ts` — the category reads
+  (`findAll`/`findOne`, backing `GET /article-categories`) use an explicit select that **omits the
+  `accessRules` jsonb column** (the folder's permission boundary: allowed user UUIDs + the gating
+  role/applicationId/assetId) for an ordinary `category:read` caller, and re-include it **only** for a
+  caller holding `settings:manage` (the web rule-editor) — the SAME gate that WRITES the rules. The
+  permission is resolved DB-first via `PermissionResolverService` (human role → RolePermission matrix,
+  ADMIN full; service account → direct grants); anonymous / no principal fails closed (SEC-#554).
 - DB / storage — the rule set is a zod-validated jsonb `accessRules` column on `ArticleCategory`
   (`FolderAccessRulesSchema` in `@lazyit/shared`, a CLOSED `users`/`role`/`appGrant`/`assetAssignment`
   vocabulary), set via `PUT /article-categories/:id/access-rules` (`settings:manage`, ADMIN-only). The
@@ -431,8 +445,10 @@ laundering access to a folder they cannot see.
   applies); folder-name uniqueness within a parent stays a live-only PARTIAL unique index (ADR-0041).
 - Tests: `folder-access.service.spec.ts` (ADMIN-sees-all, SA fail-closed, inherit-narrow-never-widen,
   revoked-grant/released-assignment drops access, malformed-fails-closed), `articles.service.spec.ts`
-  (folder-hidden → 404, no-escalation alias), `search.service.spec.ts` (restricted hit excluded for a
-  non-matching caller — the leak is closed), `folder.test.ts` (the closed rule vocabulary).
+  (folder-hidden → 404, no-escalation alias AND link, reverse-lookup folder pin), `search.service.spec.ts`
+  (restricted hit excluded for a non-matching caller — the leak is closed), `article-categories.service.spec.ts`
+  (accessRules omitted for non-admins, returned for `settings:manage`), `folder.test.ts` (the closed
+  rule vocabulary).
 - Decision + data model: [[0060-kb-folder-access-control]], [[folder]], [[article-alias]].
 
 ## INV-10 — Secret Manager values are zero-knowledge; the server can never decrypt a secret value
