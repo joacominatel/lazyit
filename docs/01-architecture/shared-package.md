@@ -36,7 +36,7 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
   asset `specs` schemas live here too.)
 - **Types & interfaces** — preferably **inferred** from the zod schemas (`z.infer<...>`), plus
   hand-written shared types where there's no schema.
-- **Enums & constants** — shared status vocabularies, ticket priorities, role names, etc.
+- **Enums & constants** — shared status vocabularies, role names, permission literals, etc.
 - **Pure, framework-agnostic utilities** — small pure functions used by both sides
   (formatting, parsing, computed values like deriving stock from movements). No side effects.
 

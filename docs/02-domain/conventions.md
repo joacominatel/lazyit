@@ -25,7 +25,7 @@ The ID strategy is intentional per entity (see [[0005-id-strategy]]):
 | Strategy | Used for | Why |
 | --- | --- | --- |
 | `uuid()` | Sensitive / externally-exposed entities — primarily [[user]] | Non-enumerable, safe to expose in URLs/tokens |
-| `cuid()` | Most domain entities — [[asset]], [[ticket]], [[application]], … | Compact, sortable-ish, collision-resistant |
+| `cuid()` | Most domain entities — [[asset]], [[application]], [[consumable]], … | Compact, sortable-ish, collision-resistant |
 | `autoincrement()` | Logs & history — [[asset-history]], audit logs | Cheap, ordered, never exposed externally |
 
 ## Timestamps

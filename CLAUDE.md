@@ -1,7 +1,7 @@
 # lazyit — Project Guide for Claude
 
 lazyit is a **self-hosted, internal web app for small IT/Systems teams** (5–20 people):
-asset inventory, application access, tickets, consumables and a knowledge base.
+asset inventory, application access, consumables and a knowledge base.
 Positioning: ServiceNow-grade capability, but modern, opinionated and IT-native.
 
 > **The full documentation lives in `docs/`** — an Obsidian vault (YAML frontmatter,
@@ -140,9 +140,9 @@ bunx prisma generate        # client → apps/api/generated/prisma
 - **Frontend:** Next.js (App Router) + Tailwind v4 (shadcn/ui planned).
   → `docs/03-decisions/0010-nextjs-frontend.md`, `docs/03-decisions/0011-tailwind-styling.md`
 - **Domain build order:** User + Location → AssetModel + AssetCategory + Asset →
-  AssetAssignment + AssetHistory → Ticket + TicketComment →
-  Application + AccessGrant + AccessRequest → Consumable + ConsumableMovement →
-  Article + ArticleCategory + ArticleVersion. → `docs/02-domain/_MOC.md`
+  AssetAssignment + AssetHistory → Application + AccessGrant + AccessRequest →
+  Consumable + ConsumableMovement → Article + ArticleCategory + ArticleVersion.
+  → `docs/02-domain/_MOC.md`
 
 ## Bun usage — SCOPED (important)
 

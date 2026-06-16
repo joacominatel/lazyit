@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-16
 ---
 
 # Asset
@@ -21,8 +21,7 @@ concrete instance of a generic [[asset-model]].
 - **is an instance of** an optional [[asset-model]] (`modelId`, nullable FK, `onDelete: SetNull`).
 - **lives at** an optional [[location]] (`locationId`, nullable FK, `onDelete: SetNull`).
 - **is owned via** N [[asset-assignment]] records — 🟢 ownership over time (concurrent, multi-owner).
-- **has** N [[asset-history]] entries — ⚪ **not yet implemented** (deferred).
-- **is referenced by** N [[ticket]]s — ⚪ not yet implemented.
+- **has** N [[asset-history]] entries — 🟢 implemented; see `GET /assets/:id/history`.
 
 ## Business rules
 

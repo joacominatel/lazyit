@@ -3,7 +3,7 @@ title: Domain — MOC
 tags: [moc, domain]
 status: draft
 created: 2026-05-25
-updated: 2026-06-13
+updated: 2026-06-16
 ---
 
 # Domain — Map of Content
@@ -25,9 +25,6 @@ erDiagram
     Asset ||--o{ AssetAssignment : has
     User ||--o{ AssetAssignment : "owns via"
     Asset ||--o{ AssetHistory : "changes logged in"
-    Asset ||--o{ Ticket : "referenced by"
-    User ||--o{ Ticket : "referenced by"
-    Ticket ||--o{ TicketComment : has
     ApplicationCategory ||--o{ Application : classifies
     Application ||--o{ AccessGrant : "granted via"
     User ||--o{ AccessGrant : has
@@ -69,10 +66,9 @@ The model is organized in loosely-coupled areas:
 1. **Assets (core)** — [[asset]], [[asset-model]], [[asset-category]], [[location]],
    [[asset-assignment]], [[asset-history]].
 2. **People** — [[user]] (central to access, peripheral to assets).
-3. **Tickets** — [[ticket]], [[ticket-comment]] (cross-cutting).
-4. **Access** — [[application]], [[application-category]], [[access-grant]], [[access-request]].
-5. **Consumables** — [[consumable]], [[consumable-movement]].
-6. **Knowledge base** — [[article]], [[article-category]], [[article-version]], [[article-link]].
+3. **Access** — [[application]], [[application-category]], [[access-grant]], [[access-request]].
+4. **Consumables** — [[consumable]], [[consumable-movement]].
+5. **Knowledge base** — [[article]], [[article-category]], [[article-version]], [[article-link]].
 7. **Workflow engine** — [[application-workflow]], [[workflow-connection]], [[workflow-version]],
    [[workflow-run]], [[workflow-step-run]], [[manual-task]], [[workflow-secret]] (an opt-in extension
    of **Access** — [[0054-applications-workflow-engine]]).
@@ -91,20 +87,19 @@ The model is built atomic-first (see each entity note for status):
 1. [[user]] + [[location]] — no dependencies.
 2. [[asset-model]] + [[asset-category]] + [[asset]] — the core.
 3. [[asset-assignment]] + [[asset-history]] — traceability.
-4. [[ticket]] + [[ticket-comment]].
-5. [[application]] + [[application-category]] + [[access-grant]] + [[access-request]].
-6. [[consumable]] + [[consumable-movement]].
-7. [[article]] + [[article-category]] + [[article-version]] + [[article-link]].
-8. **Workflow engine** (opt-in, after Access) — [[application-workflow]] + [[workflow-connection]] +
+4. [[application]] + [[application-category]] + [[access-grant]] + [[access-request]].
+5. [[consumable]] + [[consumable-movement]].
+6. [[article]] + [[article-category]] + [[article-version]] + [[article-link]].
+7. **Workflow engine** (opt-in, after Access) — [[application-workflow]] + [[workflow-connection]] +
    [[workflow-version]] + [[workflow-run]] + [[workflow-step-run]] + [[manual-task]] +
    [[workflow-secret]] ([[0054-applications-workflow-engine]], epic #248).
-9. **Knowledge Base v2** (evolves the KB area) — [[folder]] + [[article-alias]] + [[article-wiki-link]],
+8. **Knowledge Base v2** (evolves the KB area) — [[folder]] + [[article-alias]] + [[article-wiki-link]],
    then folder-based access control ([[0059-kb-folders-links-and-import]] / [[0060-kb-folder-access-control]],
    #364/#365). **Built** — merged on `feat/kb-secrets`.
-10. **Secret Manager** (beside the KB) — [[user-keypair]] + [[secret-vault]] + [[vault-membership]] +
-    [[secret-item]] + [[secret-audit-log]] ([[0061-secret-manager-zero-knowledge]], #366). **Built** —
-    merged on `feat/secret-manager`. Includes `@lazyit/shared/crypto` subpath, custodian backend
-    (`apps/api/src/secret-manager/`), `apps/web` unlock/grant/peer-reset UI, and the KB masked-chip
-    (`{{ lazyit_secret.HANDLE }}`).
+9. **Secret Manager** (beside the KB) — [[user-keypair]] + [[secret-vault]] + [[vault-membership]] +
+   [[secret-item]] + [[secret-audit-log]] ([[0061-secret-manager-zero-knowledge]], #366). **Built** —
+   merged on `feat/secret-manager`. Includes `@lazyit/shared/crypto` subpath, custodian backend
+   (`apps/api/src/secret-manager/`), `apps/web` unlock/grant/peer-reset UI, and the KB masked-chip
+   (`{{ lazyit_secret.HANDLE }}`).
 
 Why asset-centric? → [[0004-asset-centric-design]].

@@ -19,7 +19,7 @@ system — not the User.
 - **The audit question is about things.** The critical question in an audit is "*what do
   we have and where is it?*" — an asset question, not a user question.
 - **Traceability falls out naturally.** Centering the asset gives us, for free: a history
-  of owners, associated tickets, and state changes over time.
+  of owners and state changes over time.
 
 ## What "asset-centric" means concretely
 
@@ -36,12 +36,10 @@ system — not the User.
 
 - **[[user]]** is central to *access* and peripheral to *assets*: a user is an owner of N
   assets (via [[asset-assignment]]) and holds N [[access-grant]]s.
-- **[[ticket]]** is cross-cutting: it can reference an asset, a user, or both.
-
 ## Consequence
 
 Designing around the asset means the schema, the UI, and the audit story all orient around
-"the things we own and their lifecycle", with people and tickets attached to them — rather
-than a user inbox with assets bolted on.
+"the things we own and their lifecycle", with people and their access attached to them —
+rather than a user inbox with assets bolted on.
 
 Full decision record: [[0004-asset-centric-design]]. Conventions: [[conventions]].
