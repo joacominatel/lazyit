@@ -11,6 +11,8 @@ import type {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { isServicePrincipal, type Principal } from '../auth/principal';
 
 /** Shape returned by a successful cascade delete. */
 export interface CascadeDeleteResult {
@@ -19,6 +21,26 @@ export interface CascadeDeleteResult {
   /** Total articles soft-deleted across the whole subtree. */
   deletedArticles: number;
 }
+
+/**
+ * The non-sensitive ArticleCategory columns — every field of the row EXCEPT `accessRules` (ADR-0060 §3:
+ * the per-folder permission boundary — allowed user UUIDs + the gating role/applicationId/assetId). A
+ * folder's access rule is an AUTHORIZATION-management surface; it must NOT be returned to an ordinary
+ * `category:read` caller (which is default-open and includes VIEWER), only to a `settings:manage`
+ * holder — the same gate that WRITES it (INV-9 / #554). The default read uses this explicit select so
+ * `accessRules` is never even fetched; the rule-editor read path re-includes it on top.
+ */
+const CATEGORY_PUBLIC_SELECT = {
+  id: true,
+  name: true,
+  description: true,
+  icon: true,
+  order: true,
+  parentId: true,
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+} satisfies Prisma.ArticleCategorySelect;
 
 /**
  * Folders (ADR-0059 §1) — the hierarchical evolution of the flat ArticleCategory. The model/table
@@ -30,24 +52,55 @@ export interface CascadeDeleteResult {
  */
 @Injectable()
 export class ArticleCategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly permissions: PermissionResolverService,
+  ) {}
 
-  /** All non-deleted categories, ordered by `order` (nulls last) then name. */
-  findAll() {
+  /**
+   * All non-deleted categories, ordered by `order` (nulls last) then name. `accessRules` (the folder's
+   * permission boundary — ADR-0060 §3) is INCLUDED only for a caller holding `settings:manage` (the
+   * web rule-editor); for an ordinary `category:read` caller it is omitted entirely (INV-9 / #554). The
+   * internal mutation callers pass no principal → they receive the public shape (and discard it).
+   */
+  async findAll(principal?: Principal) {
+    const withRules = await this.canSeeAccessRules(principal);
     return this.prisma.articleCategory.findMany({
       orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
+      select: { ...CATEGORY_PUBLIC_SELECT, ...(withRules ? { accessRules: true } : {}) },
     });
   }
 
-  /** A single non-deleted category by id; throws 404 if missing or deleted. */
-  async findOne(id: string) {
+  /**
+   * A single non-deleted category by id; throws 404 if missing or deleted. `accessRules` is included
+   * only for a `settings:manage` caller (the rule-editor), omitted otherwise (INV-9 / #554) — same gate
+   * as {@link findAll}. Mutation methods call this for the 404 guard with no principal and discard the
+   * (public-shaped) return.
+   */
+  async findOne(id: string, principal?: Principal) {
+    const withRules = await this.canSeeAccessRules(principal);
     const category = await this.prisma.articleCategory.findFirst({
       where: { id },
+      select: { ...CATEGORY_PUBLIC_SELECT, ...(withRules ? { accessRules: true } : {}) },
     });
     if (!category) {
       throw new NotFoundException(`ArticleCategory ${id} not found`);
     }
     return category;
+  }
+
+  /**
+   * Whether the caller may see a folder's `accessRules` on a read — i.e. holds `settings:manage` (the
+   * SAME gate that writes it via PUT :id/access-rules, ADR-0060 §3). Resolved DB-first, never from a
+   * token (INV-1 / INV-8): a human's role → the RolePermission matrix (ADMIN always full); a service
+   * account → its direct permission grants. Anonymous / no principal → false (fail closed).
+   */
+  private async canSeeAccessRules(principal?: Principal): Promise<boolean> {
+    if (principal === undefined) return false;
+    if (isServicePrincipal(principal)) {
+      return principal.permissions.has('settings:manage');
+    }
+    return this.permissions.hasAll(principal.user.role, ['settings:manage']);
   }
 
   /**
