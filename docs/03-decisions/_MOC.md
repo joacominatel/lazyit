@@ -31,6 +31,10 @@ updated: 2026-06-13
      envelope, Argon2id, DEK wrapped per member, recovery key shown once; a THIRD secret store distinct
      from the server-decryptable [[workflow-secret]]; new `secret` capability + the INV-8 crypto-exception;
      proposes INV-10; #366). -->
+<!-- updated 2026-06-16: ADR-0067 (server-prefetch + hydration rendering strategy — targeted pilot on
+     the 6 highest-traffic routes; eliminates skeleton→hydrate→fetch waterfall; keeps TanStack Query
+     as client cache; adds loading.tsx + error.tsx coverage; must sequence after #498; resolves
+     ADR-0020 deferred debt; #500) — **proposed** (awaiting CEO ratification). -->
 <!-- updated 2026-06-14: ADR batch (docs/adr-batch-jun14). Three new ADRs + two amendments capturing CEO
      decisions already made. ADR-0062 (in-app Help/Manual surface — shipped product docs as repo markdown
      rendered by MarkdownView, ungated + secret-free, en/es; distinct from the KB; EPIC; #454) — **proposed**
@@ -127,6 +131,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0063-configurable-asset-tag-scheme]] | Configurable Asset Tag Scheme — lazyit's **FIRST instance-config store**: a single-row `AssetTagScheme` + global monotonic counter, mandatory `{num}` template (+prefix/suffix/padding), in-transaction allocation w/ retry-on-collision (gaps accepted), **OFF by default** (no scheme ⇒ no auto-tag; manual `assetTag` per [[0041-soft-delete-reuse-and-restore]] unchanged); #363 | **accepted** (2026-06-14) |
 | [[0064-admin-user-provisioning-credentials]] | Admin user provisioning — full-page asset-style create flow (opt-in assign-asset/app); a **bounded SECOND carve-out** from [[0043-zitadel-source-of-truth]]: **temporary password only** (`changeRequired:true`), email auto-verify always-on, **BYOI hides the controls**, reuses `user:manage` ([[0046-roles-permissions-v2]], no new permission); #411 | **accepted** (2026-06-14) |
 | [[0065-secret-manager-regenerate-recovery-key]] | Secret Manager — regenerate the recovery key for an EXISTING keypair (#452, the deferred "regenerate" half): unlock the private key **with the passphrase** client-side → mint a NEW recovery key → re-wrap **only** the recovery-wrapped blob (`privateKeyEncByRecovery`/`recoverySalt`/`recoveryIv`); public key, per-vault DEKs, and all [[vault-membership]] UNCHANGED (no DEK re-wrap, no membership churn — the non-destructive alternative to peer-reset). New self-only `POST /secret-manager/keypair/recovery`; shown-once (reuses #452/PR #457 ordering); **INV-10 preserved** (server stays ciphertext custodian, can't validate the blob). "Lost BOTH passphrase + recovery key" on a single-member vault = still permanent loss (by design). Extends [[0061-secret-manager-zero-knowledge]] | **proposed** (2026-06-14) — docs-only; implementation gated on acceptance |
+| [[0067-server-prefetch-ssr-strategy]] | Server-prefetch + hydration rendering strategy — targeted pilot on the 6 highest-traffic routes (`/dashboard` + 5 entity list pages): thin async Server Component pages using `prefetchQuery` + `dehydrate` + `<HydrationBoundary>` (TanStack Query v5); eliminates the skeleton→hydrate→fetch waterfall; keeps TanStack Query as the client cache; adds group-level `loading.tsx` + per-group `error.tsx`; must sequence after #498 (session-seeding fix); builds on [[0039-authjs-v5-frontend-oidc]] §6a; resolves the deferred debt noted in [[0020-frontend-data-layer]]; #500 | **proposed** (2026-06-16) — CEO ratification required before implementation |
 
 > **Amendments in this batch (no renumber):** [[0035-search-architecture]] gains a **periodic
 > drift-reconcile sweeper** (unref'd `setInterval` mirroring the notifications retention sweeper, reusing
