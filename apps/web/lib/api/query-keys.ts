@@ -50,3 +50,33 @@ export function selectDirectoryItems<T>(resource: string) {
     return page.items;
   };
 }
+
+/**
+ * Query keys for the org-wide asset-tag scheme (ADR-0063, #363). A SINGLETON config row (no list /
+ * detail), so it doesn't use the `createQueryKeys` factory — one `single()` key is the whole resource.
+ * Shaped like `configKeys`: `all` is the invalidation prefix the PUT mutation refetches.
+ */
+export const assetTagSchemeKeys = {
+  all: ["asset-tag-scheme"] as const,
+  single: () => [...["asset-tag-scheme"], "single"] as const,
+  /**
+   * The seed suggestion for a pattern (ADR-0068 §2). Keyed by the (prefix, suffix, width) so the
+   * editor refetches only when the operator changes the template, not on every keystroke elsewhere.
+   */
+  seedSuggestion: (params: {
+    prefix?: string;
+    suffix?: string;
+    width?: number;
+  }) => [...["asset-tag-scheme"], "seed-suggestion", params] as const,
+  /**
+   * A backfill preview page (ADR-0068 §4). Keyed by the scope + page window so paging within the
+   * wizard caches per page; switching mode/model is a distinct key (a fresh preview).
+   */
+  backfillPreview: (params: {
+    mode: string;
+    modelId?: string;
+    page?: number;
+    pageSize?: number;
+  }) => [...["asset-tag-scheme"], "backfill-preview", params] as const,
+};
+

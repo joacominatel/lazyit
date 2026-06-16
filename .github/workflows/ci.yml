@@ -1,12 +1,12 @@
 name: CI
 
-# Quality gate for the integration (dev) and production (master) branches, and every PR
-# targeting them. No deploy (CD is deferred — ADR-0027).
+# Quality gate for the integration (dev), staging (stage) and production (master) branches,
+# and every PR targeting them. No deploy (CD is deferred — ADR-0027).
 on:
   push:
-    branches: [master, dev]
+    branches: [master, dev, stage]
   pull_request:
-    branches: [master, dev]
+    branches: [master, dev, stage]
 
 concurrency:
   group: ci-${{ github.ref }}

@@ -146,8 +146,8 @@ const NAV: NavSection[] = [
     headingKey: "reports",
     items: [
       {
-        labelKey: "informes",
-        href: "/informes",
+        labelKey: "reports",
+        href: "/reports",
         icon: ClockIcon,
         permission: "logs:read",
       },

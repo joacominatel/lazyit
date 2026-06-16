@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { getRequestConfig } from "next-intl/server";
 import {
+  DEFAULT_TIME_ZONE,
   defaultLocale,
   isLocale,
   LOCALE_COOKIE,
@@ -30,5 +31,9 @@ export default getRequestConfig(async () => {
     locale,
     messages: (await import(`../messages/${locale}/_all`)).default,
     formats: SHARED_FORMATS,
+    // Instance-wide display time zone (issue #548). MUST match the value passed to
+    // `NextIntlClientProvider` in `app/providers.tsx` — both read the one `DEFAULT_TIME_ZONE`
+    // constant so server- and client-rendered timestamps agree (no hydration mismatch).
+    timeZone: DEFAULT_TIME_ZONE,
   };
 });

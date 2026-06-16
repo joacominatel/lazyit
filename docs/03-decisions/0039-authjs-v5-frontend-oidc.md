@@ -166,6 +166,30 @@ Callers supply the token from their session context:
 - **Client components / hooks**: read from `useSession().data.accessToken`
 - **Server components**: read from `(await auth()).accessToken`
 
+#### 6a. Client-side auto-injection + first-paint seeding (amendment, issue #498)
+
+The "explicit token wiring" follow-up below was subsequently built: `apiFetch` falls back to a
+module-level **session-token store** (`lib/api/session-token.ts`) when no explicit `token` is
+passed, so client hooks no longer thread the token manually. `SessionTokenSync` (rendered in the
+`(app)`/`(print)` layouts) reads `useSession()` and writes the token into that store.
+
+There is a subtle race at cold load: `<SessionProvider>` originally mounted with **no** `session`
+prop, so `useSession()` started `{ status: 'loading' }` and fetched `/api/auth/session` on the
+client — and `SessionTokenSync` only wrote the token in a post-mount `useEffect`. During that
+window the store was empty and any TanStack Query that fired sent **no** `Authorization` header →
+spurious 401s (the global query `retry` masked it). Fix (#498):
+
+- The root layout (`app/layout.tsx`) resolves the session with `await auth()` and passes it to
+  `<SessionProvider session={session}>` (via `Providers`). `useSession()` is then `authenticated`
+  on the **first** client render — the canonical Auth.js v5 SSR-seeding pattern.
+- `SessionTokenSync` also writes the token **synchronously during render** (not only in the
+  effect) so the store is populated before the component returns and before any child query's
+  `queryFn` runs. The store is a plain module variable, so this is a safe, idempotent side effect;
+  the effect is kept to mirror later transitions (sign-out clears it, a refresh swaps it).
+
+No SSR/prefetch refactor (that is issue #500); `apiFetch` is unchanged — it still omits the header
+only when the token is genuinely falsy (public endpoints).
+
 ### 7. Shim removal
 
 `apps/web/lib/api/acting-user.ts` and `apps/web/components/user-switcher.tsx` are deleted.

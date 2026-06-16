@@ -37,8 +37,10 @@ import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
+import type { Principal } from '../auth/principal';
 
 class ApplicationDto extends createZodDto(ApplicationSchema) {}
 class ApplicationListPageDto extends createZodDto(ApplicationListPageSchema) {}
@@ -227,6 +229,9 @@ export class ApplicationsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
+    // Folder access (ADR-0060 §4 / INV-9 — #553): thread the caller so the reverse list is pinned to
+    // the folders this actor may see (a restricted article never leaks through the link scope).
+    @CurrentPrincipal() principal?: Principal,
   ) {
     await this.applications.findOne(id); // 404 if the application is missing or soft-deleted
     return this.articles.findArticlesForApplication(
@@ -238,6 +243,7 @@ export class ApplicationsController {
         categoryId: parseCuidArrayQuery(categoryId, 'categoryId'),
       },
       parsePageQuery({ limit, offset, page }),
+      principal,
     );
   }
 

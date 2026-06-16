@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ErrorState } from "@/components/resource-table";
 import { UserAvatar } from "@/components/user-avatar";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useArticles } from "@/lib/api/hooks/use-articles";
@@ -28,7 +29,6 @@ import {
   useUserAssignments,
   useUserGrants,
 } from "@/lib/api/hooks/use-users";
-import { formatDate } from "@/lib/utils/format";
 import { ArticleStatusBadge } from "../../kb/_components/article-status-badge";
 import { CloneUserWizard } from "../_components/clone-user-wizard";
 import { ManagerDisplay } from "../_components/manager-display";
@@ -47,6 +47,7 @@ import { UserStatusBadge } from "../_components/user-status-badge";
  */
 export default function UserDetailPage() {
   const t = useTranslations("users");
+  const { date } = useFormatters();
   const params = useParams<{ id: string }>();
   const id = params.id;
   // Edit and Offboard are both the coarse user:manage capability (so is the role control below).
@@ -193,10 +194,10 @@ export default function UserDetailPage() {
             )}
           </DetailField>
           <DetailField label={t("detail.fields.joined")}>
-            {formatDate(user.createdAt)}
+            {date(user.createdAt)}
           </DetailField>
           <DetailField label={t("detail.fields.lastUpdated")}>
-            {formatDate(user.updatedAt)}
+            {date(user.updatedAt)}
           </DetailField>
         </dl>
       </DetailPanel>
@@ -225,7 +226,7 @@ export default function UserDetailPage() {
                     {assignment.notes
                       ? assignment.notes
                       : t("detail.assets.assignedOn", {
-                          date: formatDate(assignment.assignedAt),
+                          date: date(assignment.assignedAt),
                         })}
                   </p>
                 </div>
@@ -277,11 +278,11 @@ export default function UserDetailPage() {
                     </div>
                     <p className="truncate text-sm text-muted-foreground">
                       {t("detail.access.granted", {
-                        date: formatDate(grant.grantedAt),
+                        date: date(grant.grantedAt),
                       })}
                       {grant.expiresAt
                         ? t("detail.access.expiresSuffix", {
-                            date: formatDate(grant.expiresAt),
+                            date: date(grant.expiresAt),
                           })
                         : ""}
                       {grant.notes
@@ -350,9 +351,9 @@ export default function UserDetailPage() {
                     t("detail.ownershipHistory.assetFallback")}
                 </Link>
                 <span className="tabular-nums text-muted-foreground">
-                  {formatDate(assignment.assignedAt)} →{" "}
+                  {date(assignment.assignedAt)} →{" "}
                   {assignment.releasedAt
-                    ? formatDate(assignment.releasedAt)
+                    ? date(assignment.releasedAt)
                     : "—"}
                 </span>
               </li>
@@ -382,8 +383,8 @@ export default function UserDetailPage() {
                   )}
                 </span>
                 <span className="tabular-nums text-muted-foreground">
-                  {formatDate(grant.grantedAt)} →{" "}
-                  {grant.revokedAt ? formatDate(grant.revokedAt) : "—"}
+                  {date(grant.grantedAt)} →{" "}
+                  {grant.revokedAt ? date(grant.revokedAt) : "—"}
                 </span>
               </li>
             ))}

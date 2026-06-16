@@ -1225,6 +1225,45 @@ describe('ArticlesService', () => {
       expect(articleLink.create).not.toHaveBeenCalled();
     });
 
+    it('no-escalation (ADR-0060 §6 / INV-9 — #556): cannot link a target whose HOME folder the actor cannot see (404)', async () => {
+      // The actor IS the author (passes the author gate) but the article's home folder is no longer
+      // visible to them (offboarding / admin move / self-move). §6 forbids surfacing an article you
+      // cannot yourself read — and a link IS a surfacing channel (the reverse lookup, #553). The link
+      // is rejected as 404 (folder-hidden), never written — mirroring the alias no-escalation gate.
+      article.findFirst.mockResolvedValue({
+        ...PUBLISHED_OWNED,
+        categoryId: 'secret-folder',
+      });
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['some-other-folder']),
+      );
+      await expect(
+        service.addLink('a', { assetId: 'as1' }, AUTHOR_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(articleLink.create).not.toHaveBeenCalled();
+      // The target-liveness check is never even reached — the folder gate fails first.
+      expect(asset.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('links a target whose HOME folder the actor CAN see (happy path still works — #556)', async () => {
+      article.findFirst.mockResolvedValue({
+        ...PUBLISHED_OWNED,
+        categoryId: 'shared-folder',
+      });
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['shared-folder']),
+      );
+      await service.addLink('a', { assetId: 'as1' }, AUTHOR_PRINCIPAL);
+      expect(articleLink.create).toHaveBeenCalledWith({
+        data: {
+          articleId: 'a',
+          assetId: 'as1',
+          applicationId: null,
+          createdById: AUTHOR,
+        },
+      });
+    });
+
     it('removes a link the article owns (author only)', async () => {
       article.findFirst.mockResolvedValue(PUBLISHED_OWNED);
       articleLink.findFirst.mockResolvedValueOnce({
@@ -1383,6 +1422,62 @@ describe('ArticlesService', () => {
       const and = lastReverseWhere().AND;
       expect(and).toContainEqual({ status: 'PUBLISHED' });
       expect(and).toContainEqual({ status: { in: ['DRAFT'] } });
+    });
+
+    // --- ADR-0060 §4 folder access pins the reverse lookups too (INV-9 — #553) ---
+    // A PUBLISHED article linked to an asset/application still must NOT surface (title/slug/excerpt)
+    // through the reverse list if its home folder is hidden from the caller — the link is a surfacing
+    // channel. The where is pinned to `categoryId IN <visible>`, exactly as findPage does. ADMIN ('ALL')
+    // gets no pin. Resolved per call from the (mocked) FolderAccessService.
+
+    it('reverse list (asset) is pinned to the caller visible folders — a folder-hidden article is filtered out (#553)', async () => {
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['public-folder']),
+      );
+      article.findMany.mockResolvedValueOnce([]);
+      await service.findArticlesForAsset('as1', {}, REVERSE_PAGE, OTHER_PRINCIPAL);
+      // The caller's visible folder set is resolved DB-first per call (never cached).
+      expect(folderAccess.visibleFolderIds).toHaveBeenCalledWith(OTHER_PRINCIPAL);
+      const and = lastReverseWhere().AND;
+      // The folder pin is ANDed on top of the PUBLISHED + link scope, so a restricted article never
+      // surfaces through the link scope (existence-hiding).
+      expect(and).toContainEqual({ status: 'PUBLISHED' });
+      expect(and).toContainEqual({ links: { some: { assetId: 'as1' } } });
+      expect(and).toContainEqual({ categoryId: { in: ['public-folder'] } });
+    });
+
+    it('reverse list (application) is pinned to the caller visible folders too (#553)', async () => {
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['public-folder']),
+      );
+      article.findMany.mockResolvedValueOnce([]);
+      await service.findArticlesForApplication(
+        'app1',
+        {},
+        REVERSE_PAGE,
+        OTHER_PRINCIPAL,
+      );
+      expect(folderAccess.visibleFolderIds).toHaveBeenCalledWith(OTHER_PRINCIPAL);
+      const and = lastReverseWhere().AND;
+      expect(and).toContainEqual({ links: { some: { applicationId: 'app1' } } });
+      expect(and).toContainEqual({ categoryId: { in: ['public-folder'] } });
+    });
+
+    it('ADMIN (visibleFolderIds = ALL) gets NO folder pin on the reverse list — sees an article in any folder (#553)', async () => {
+      folderAccess.visibleFolderIds.mockResolvedValue('ALL');
+      article.findMany.mockResolvedValueOnce([]);
+      await service.findArticlesForAsset(
+        'as1',
+        {},
+        REVERSE_PAGE,
+        AUTHOR_PRINCIPAL,
+      );
+      const and = lastReverseWhere().AND;
+      // No `categoryId` clause is added for an ADMIN — the link scope + PUBLISHED pin stand alone.
+      expect(and).toContainEqual({ status: 'PUBLISHED' });
+      expect(
+        and.some((c) => Object.prototype.hasOwnProperty.call(c, 'categoryId')),
+      ).toBe(false);
     });
   });
 

@@ -34,13 +34,13 @@ workflow**. On approval it produces an [[access-grant]].
 - Approver(s) would be defined as part of this workflow (where to attach them — the target
   [[application]], a team, or a role — is a design choice for when it's built).
 
-> [!note] Relationship to tickets
-> An access request resembles a [[ticket]] with a specialized workflow. Decide whether it
-> is a distinct entity (as modeled here) or a ticket subtype when both areas are built.
+> [!note] Relationship to tickets — question closed (CEO 2026-06-16)
+> lazyit will NOT have a ticketing pillar (see [[vision]] non-goals). AccessRequest is a
+> distinct entity in its own right — the ticket-subtype overlap question is moot.
 
 ## Conventions
 
 - **ID:** `cuid()` — see [[0005-id-strategy]].
 - **Timestamps / soft delete:** `createdAt`, `updatedAt`, `deletedAt`.
 
-Related: [[access-grant]] · [[application]] · [[user]] · [[ticket]]
+Related: [[access-grant]] · [[application]] · [[user]]

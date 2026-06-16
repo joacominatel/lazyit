@@ -86,7 +86,7 @@ cookie (next-intl's documented convention) — there is no URL prefix and no rou
 - **Catalogs** — `apps/web/messages/en.json` + `messages/es.json`, **namespaced by area**. Phase
   0 seeds `common` (Save/Cancel/Delete/… ) and `nav` (the sidebar labels) **fully in en + es**,
   and ships empty `{}` placeholders for the section namespaces (`dashboard`, `assets`,
-  `applications`, `consumables`, `kb`, `users`, `locations`, `settings`, `informes`, `auth`).
+  `applications`, `consumables`, `kb`, `users`, `locations`, `settings`, `reports`, `auth`).
 - **Worked example** — `components/sidebar-nav.tsx` is wired through `useTranslations('nav')`
   (labels and section headings), proving the plumbing end-to-end.
 

@@ -19,11 +19,11 @@ import {
   type ResourceColumn,
   ResourceTable,
 } from "@/components/resource-table";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useAssets } from "@/lib/api/hooks/use-assets";
 import { useDeleteLocation } from "@/lib/api/hooks/use-location-mutations";
 import { useLocation } from "@/lib/api/hooks/use-locations";
-import { formatDate } from "@/lib/utils/format";
 import { AssetStatusBadge } from "../../assets/_components/asset-status-badge";
 import { StackedOwnerAvatars } from "../../assets/_components/stacked-owner-avatars";
 import { LocationFormDialog } from "../_components/location-form-dialog";
@@ -37,6 +37,7 @@ import { LocationTypeBadge } from "../_components/location-type-badge";
 export default function LocationDetailPage() {
   const t = useTranslations("locations");
   const tc = useTranslations("common");
+  const { date } = useFormatters();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
@@ -165,7 +166,7 @@ export default function LocationDetailPage() {
             {location.address ?? "—"}
           </DetailField>
           <DetailField label={t("detail.fields.lastUpdated")}>
-            {formatDate(location.updatedAt)}
+            {date(location.updatedAt)}
           </DetailField>
         </dl>
         {location.notes && (

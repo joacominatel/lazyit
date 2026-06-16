@@ -1,3 +1,4 @@
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
 /**
@@ -15,9 +16,10 @@ export function WizardSteps({
   /** 1-based index of the current step. */
   current: number;
 }) {
+  const t = useTranslations("setup");
   const total = labels.length;
   return (
-    <ol className="mt-3 flex items-center gap-1.5" aria-label="Setup progress">
+    <ol className="mt-3 flex items-center gap-1.5" aria-label={t("progressLabel")}>
       {labels.map((label, i) => {
         const n = i + 1;
         const done = n < current;

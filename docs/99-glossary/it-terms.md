@@ -19,7 +19,6 @@ General IT/operations vocabulary. For lazyit's own domain objects, see
 | **Access request** | A pending, approval-gated request for access ([[access-request]]). |
 | **Provisioning** | Setting up access/hardware for a user (e.g. on onboarding). |
 | **Deprovisioning / offboarding** | Revoking access and reclaiming assets when someone leaves. |
-| **SLA** | Service Level Agreement — target response/resolution times for tickets. |
 | **Runbook** | A step-by-step operational procedure (for operating lazyit; see [[05-runbooks/_MOC|Runbooks]]). |
 | **CMDB** | Configuration Management Database — the inventory of assets and their relationships; lazyit's asset model plays this role. |
 | **AD / LDAP** | Active Directory / directory service; an AD group is a kind of [[application]] you can grant access to. |

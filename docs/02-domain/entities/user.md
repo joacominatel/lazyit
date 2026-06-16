@@ -21,7 +21,6 @@ the reverse.
 - **owns** N [[asset]]s via [[asset-assignment]] (with history).
 - **holds** N [[access-grant]]s to [[application]]s.
 - **raises** N [[access-request]]s.
-- **is referenced by** N [[ticket]]s (requester, affected user, or assignee).
 - **has** an append-only [[user-history]] — its own lifecycle log (create / update / role change /
   manager change / offboard / restore / password-reset), the User counterpart of [[asset-history]]
   (DEBT-2, #185 — [[0050-user-history-and-activity-user-entity]]). A User is also the **actor** on
@@ -114,8 +113,8 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > scope (separate follow-up):** the mapper `grantee.manager`/`legajo`/`username` token group.
 
 > [!note] `isActive` vs `deletedAt` — independent concepts
-> `isActive = false` means the person is **offboarded/disabled but retained** (tickets and past
-> assignments still reference them) — this is the offboarding rule above. `deletedAt` means the
+> `isActive = false` means the person is **offboarded/disabled but retained** (past
+> assignments and access grants still reference them) — this is the offboarding rule above. `deletedAt` means the
 > record is **soft-deleted** (hidden from normal queries). A user can be inactive yet not
 > deleted. Creation always starts active; deactivation is a `PATCH`.
 
@@ -202,7 +201,7 @@ detail) — it composes the two nested reads above plus the user's authored [[ar
 "who can access what" for one person and cross-linking user ⇄ asset / application. See
 [[0020-frontend-data-layer]].
 
-Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] · [[ticket]] ·
+Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] ·
 [[role-permission]] · [[service-account]] · [[asset-centric]] · [[shared-package]] ·
 [[0013-zod-validation-pipe]] · [[0016-auth-strategy-deferred]] · [[0038-jit-user-provisioning]] ·
 [[0040-rbac-roles]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[INVARIANTS]]

@@ -38,7 +38,7 @@ import {
   useConsumableMovements,
 } from "@/lib/api/hooks/use-consumables";
 import { useUsers } from "@/lib/api/hooks/use-users";
-import { formatDate } from "@/lib/utils/format";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { MovementTypeBadge } from "../_components/movement-type-badge";
 import { QuickAdjustButtons } from "../_components/quick-adjust-buttons";
 import { STOCK_STATUS_TONE, stockTone } from "../_components/stock-badge";
@@ -60,6 +60,7 @@ function quantityLabel(type: ConsumableMovementType, quantity: number): string {
 
 export default function ConsumableDetailPage() {
   const t = useTranslations("consumables");
+  const { date } = useFormatters();
   const tc = useTranslations("common");
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -318,7 +319,7 @@ export default function ConsumableDetailPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {formatDate(movement.createdAt)}
+                        {date(movement.createdAt)}
                       </TableCell>
                     </TableRow>
                   );

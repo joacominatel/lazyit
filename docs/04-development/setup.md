@@ -3,7 +3,7 @@ title: Local Setup
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-05-30
+updated: 2026-06-16
 ---
 
 # Local Setup
@@ -101,13 +101,21 @@ bun run dev              # web → :3000, api → :3001
 > `MEILI_MASTER_KEY` and the `ZITADEL_*` block set in the root `.env` or its container fails to boot.
 > If you only want the app DB and search, start a subset, e.g. `docker compose up -d db meilisearch`.
 
-> [!info] Authentication in dev — `AUTH_MODE=shim` is the zero-config default
-> `apps/api/.env.example` ships `AUTH_MODE=shim`, so the API does **not** validate OIDC tokens
-> locally — it resolves the actor from an `X-User-Id` header (a UUID). This lets you run the
-> stack without bootstrapping Zitadel. To exercise the real OIDC flow (Zitadel login → Bearer
-> JWT → JIT-provisioned [[user]]), unset `AUTH_MODE` and register the OIDC client by following
-> [[auth-bootstrap]]. **`AUTH_MODE=shim` is dev/test only — never run production with it**
-> ([[0037-idp-choice-zitadel-byoi]], [[0038-jit-user-provisioning]]).
+> [!info] Authentication in dev — two modes
+> **Web UI login** requires a real OIDC flow. `dev:fresh` (above) wires it automatically: it
+> bootstraps the bundled Zitadel, then writes `AUTH_ISSUER` / `AUTH_CLIENT_ID` /
+> `AUTH_CLIENT_SECRET` into `apps/web/.env` and switches `apps/api/.env` to OIDC mode (it
+> comments out `AUTH_MODE=shim` and sets `OIDC_ISSUER` / `OIDC_JWKS_URI`). After `dev:fresh`
+> runs, open `http://localhost:3000/setup` to create the first admin once, then
+> `http://localhost:3000/login`.
+>
+> **`AUTH_MODE=shim`** (the value `apps/api/.env.example` ships) is a **dev/test shortcut for
+> direct API access only** (curl, Swagger at `/api/docs`): the API resolves the actor from an
+> `X-User-Id` header instead of validating a Bearer JWT — handy for shell scripts and Swagger
+> testing, but **not wired into the web UI**. The web is OIDC-only; if `AUTH_MODE=shim` is
+> still active (i.e. you haven't run `dev:fresh`), the browser will complete the OIDC flow but
+> every API call from the web will return `401`. **Never run production with `AUTH_MODE=shim`
+> — the header is forgeable** ([[0037-idp-choice-zitadel-byoi]], [[0038-jit-user-provisioning]]).
 
 > [!note] Seeding (Prisma 7)
 > The seed command lives in **`prisma.config.ts`** (`migrations.seed: "bun prisma/seed.ts"`),

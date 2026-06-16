@@ -1,9 +1,9 @@
 ---
 title: "Applications Workflow Engine — Architecture Synthesis"
 tags: [workflow-engine, architecture, synthesis, access, adr-candidate]
-status: draft-for-ceo
+status: accepted
 created: 2026-06-07
-updated: 2026-06-07
+updated: 2026-06-16
 authors: [chief-architect]
 reconciles:
   - "[[domain-product]]"
@@ -280,15 +280,15 @@ Every specialist flagged scope drift as the dominant *product* risk. The line is
 
 ### Phase 0 — Prerequisites (not engine work; hard gate)
 
-- Land **[[0053-async-workers-bullmq-valkey|ADR-0053]]** on `dev` (Valkey in `compose.yaml`,
-  `@nestjs/bullmq` + `ioredis`, base queue module, pilot = async `.docx` import). Currently on
-  `feat/issue-247-async-workers-bullmq-valkey`, **not yet wired**.
-- Land **ADR-0052** (SystemSecret + Notifications/bell/SSE) on `dev`. Currently on
-  `feat/settings_notifications_smtp`, **not yet merged**. (See the ADR-numbering note below.)
-- Add the `workflow:*` permissions to the `@lazyit/shared` catalog + golden/parity tests + web
-  `tsc`.
-- Build the **central egress guard** as shared infra (it is substrate-independent and the make-or-
-  break control).
+> **Phase 0 is COMPLETE.** All prerequisites shipped on `master` (epic #248, Phase 1).
+
+- **[[0053-async-workers-bullmq-valkey|ADR-0053]] — SHIPPED.** BullMQ + Valkey in `compose.yaml`,
+  `@nestjs/bullmq` + `ioredis`, base queue module, pilot = async `.docx` import.
+- **Notification bell (in-app nudges) — SHIPPED** ([[0056-in-app-notification-bell]]). The
+  "ADR-0052" numbering referenced in the pre-build design docs was renumbered to 0056 on merge;
+  SystemSecret was subsumed by the `WorkflowSecret` store per [[0054-applications-workflow-engine]].
+- `workflow:*` permissions are in the `@lazyit/shared` catalog (golden/parity tests green).
+- **Central egress guard — built** (deny-private + internal-target allowlist seam, per [[0055-on-prem-internal-target-connectors]]).
 
 ### Phase 1 — Minimal v1 (the Jira case; opt-in; zero-overhead default)
 

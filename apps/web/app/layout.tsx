@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { getLocale, getMessages } from "next-intl/server";
+import { auth } from "@/auth";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -36,6 +37,12 @@ export default async function RootLayout({
   // via the provider tree.
   const locale = await getLocale();
   const messages = await getMessages();
+  // Resolve the Auth.js session server-side and seed <SessionProvider> with it so `useSession()`
+  // is `authenticated` on the first client render. Without this it starts in `loading`, and the
+  // Bearer token isn't in the client store until SessionTokenSync's post-mount effect — leaving a
+  // first-paint window where queries fired without an Authorization header and got spurious 401s
+  // (issue #498, ADR-0039). Public routes get `null` and behave exactly as before.
+  const session = await auth();
 
   // suppressHydrationWarning: next-themes sets the theme class on <html> before
   // hydration, which would otherwise trip React's mismatch warning.
@@ -46,7 +53,7 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable}`}
     >
       <body className="min-h-svh antialiased">
-        <Providers locale={locale} messages={messages}>
+        <Providers locale={locale} messages={messages} session={session}>
           {children}
         </Providers>
       </body>

@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-16
 ---
 
 # Asset
@@ -21,8 +21,7 @@ concrete instance of a generic [[asset-model]].
 - **is an instance of** an optional [[asset-model]] (`modelId`, nullable FK, `onDelete: SetNull`).
 - **lives at** an optional [[location]] (`locationId`, nullable FK, `onDelete: SetNull`).
 - **is owned via** N [[asset-assignment]] records — 🟢 ownership over time (concurrent, multi-owner).
-- **has** N [[asset-history]] entries — ⚪ **not yet implemented** (deferred).
-- **is referenced by** N [[ticket]]s — ⚪ not yet implemented.
+- **has** N [[asset-history]] entries — 🟢 implemented; see `GET /assets/:id/history`.
 
 ## Business rules
 
@@ -35,6 +34,33 @@ concrete instance of a generic [[asset-model]].
   (consistent with [[location]]`.type`).
 - `serial` and `assetTag` are each unique **among live rows** when present (a live duplicate returns
   `409`); a soft-deleted value is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]).
+- **`id` vs `assetTag` — two different identities.** `id` is the internal `cuid()` primary key
+  (system-generated, opaque, used in URLs/FKs); `assetTag` is the **human-facing** label a team
+  writes on the physical sticker (`LAZY-00042`). They are independent: `assetTag` is optional, mutable,
+  and live-only-unique; `id` is permanent. Never use `assetTag` as a foreign key.
+- **Configurable asset-tag scheme (opt-in, OFF by default — [[0063-configurable-asset-tag-scheme]]).**
+  An instance may configure an org-wide scheme so a new asset gets its `assetTag` **auto-assigned**:
+  a `prefix` + a mandatory running number (`prefix + zeroPad(num, width) + suffix`, e.g. `LAZY-00042`).
+  The number comes from a single monotonic counter in the `AssetTagScheme` config row, incremented
+  atomically inside the asset-create transaction, so concurrent creates never collide. **OFF by
+  default:** with no scheme (or a disabled one) asset creation is unchanged — `assetTag` is whatever
+  the operator typed (or null). An **explicit `assetTag` always wins** (the scheme only fills the gap).
+  the sequence is **monotonic, not gapless** (rolled-back / retried / deleted numbers are not
+  back-filled).
+- **Skip-existing invariant + estate awareness ([[0068-asset-tag-existing-estate-awareness]]).** An
+  auto-allocated tag is **never** a tag already on a live asset: on allocation the counter advances to
+  the next number whose rendered tag is free, jumping past a contiguous occupied block in one step (so
+  e.g. existing `IT-1000, IT-1002, IT-1005` → allocations `IT-1001, IT-1003, IT-1004, IT-1006…`). The
+  live-only partial-unique index stays the concurrency backstop. At config time a **seed suggestion**
+  (`GET /config/asset-tag-scheme/seed-suggestion`) parses the existing matching tags and proposes
+  `startNumber = max + 1` so the counter seeds above the occupied range.
+- **Backfill ([[0068-asset-tag-existing-estate-awareness]] §3/§4).** Enabling the scheme does **not**
+  retroactively tag existing assets — that is a deliberate, audited bulk action (`settings:manage`)
+  with a read-only **preview** (`GET …/backfill/preview`, writes nothing — `proposedTag` is indicative)
+  and an **apply** (`POST …/backfill/apply`, forward-only, no undo, one `AssetHistory` row per retag).
+  Two modes: `untagged-only` (default, safe — only assets with no tag) and `normalize-non-conforming`
+  (opt-in, behind a warning — also retags tags that don't match the scheme; **conforming manual tags
+  are never touched**). Optional `modelId` filter + per-row deselect.
 - FKs (`modelId`, `locationId`) are `onDelete: SetNull`: deleting a model/location **detaches**
   assets, never deletes them (auditability > strict referential integrity). Combined with soft
   delete everywhere, references are preserved in practice.
@@ -83,7 +109,7 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `id` | `cuid` | `@default(cuid())`. |
 | `name` | `string` | required (e.g. "SW-CORE-01"); naming convention is the user's, not enforced. |
 | `serial` | `string?` | Optional. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted serial is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
-| `assetTag` | `string?` | Optional internal company label. Same live-only PARTIAL unique index as `serial` ([[0041-soft-delete-reuse-and-restore]]). |
+| `assetTag` | `string?` | Optional human-facing company label (the physical sticker; distinct from the internal `id`). Same live-only PARTIAL unique index as `serial` ([[0041-soft-delete-reuse-and-restore]]). **Auto-assigned** on create when the opt-in `AssetTagScheme` is enabled and no explicit value is supplied ([[0063-configurable-asset-tag-scheme]]); OFF by default. |
 | `status` | `AssetStatus` | required enum, **no default**. |
 | `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object for now (see debt note). The web edits this via a **custom-fields editor** (a list of `{ name, value }` string rows). On create, selecting a model with default specs pre-fills those rows; the operator can change them before saving. Detail renders specs as a label-cased key/value list, not raw JSON. |
 | `notes` | `string?` | optional. |
