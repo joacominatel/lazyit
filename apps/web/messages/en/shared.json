@@ -97,6 +97,7 @@
     "signOut": "Sign out",
     "openNavigationMenu": "Open navigation menu",
     "toggleTheme": "Toggle theme",
+    "changeLanguage": "Change language",
     "devMode": "Dev Mode",
     "production": "Production",
     "dismissModeBanner": "Dismiss mode banner",
