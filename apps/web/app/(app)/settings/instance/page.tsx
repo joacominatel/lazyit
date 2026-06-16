@@ -14,6 +14,7 @@ import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api/client";
 import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { AdminGate } from "../_components/admin-gate";
+import { AssetTagSchemeEditor } from "./_components/asset-tag-scheme-editor";
 
 /** A label / value row inside a panel; value can be text or a badge. */
 function InfoRow({ label, children }: { label: string; children: ReactNode }) {
@@ -123,6 +124,8 @@ export default function InstancePage() {
             ) : null}
           </CardContent>
         </Card>
+
+        <AssetTagSchemeEditor />
       </div>
     </AdminGate>
   );
