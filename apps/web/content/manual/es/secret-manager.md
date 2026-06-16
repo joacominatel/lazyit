@@ -1,7 +1,8 @@
 ---
 title: Gestor de Secretos
 order: 1
-section: Servicios
+category: secret-manager
+subcategory: security-model
 ---
 
 # Gestor de Secretos

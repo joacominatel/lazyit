@@ -1,7 +1,8 @@
 ---
 title: Getting started
 order: 1
-section: Getting started
+category: getting-started
+subcategory: initial-setup
 ---
 
 # Getting started

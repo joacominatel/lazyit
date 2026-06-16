@@ -8,25 +8,27 @@
  * The pure decision logic (locale fallback, sort, grouping) lives in `resolve.ts` so it stays
  * testable without disk; this file is the thin IO shell.
  *
+ * The IA is a TWO-LEVEL tree (issue #563): Category → Subcategory → page, ordered by the manifest
+ * `content/manual/_nav.ts`; the loader resolves the localized display labels (from `help.json`) for
+ * the search index, but the nav components resolve their own labels client-side via `useTranslations`.
+ *
  * The Manual is PUBLIC and SECRET-FREE by construction (ADR-0062 §3): this loader reads static
  * repo markdown and has no path to a session, a vault, or any `Article` row.
  */
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import matter from "gray-matter";
-import { getLocale } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
+import { MANUAL_NAV_KEYS } from "@/content/manual/_nav";
 import { defaultLocale, isLocale, type Locale, locales } from "@/i18n/config";
-import {
-  groupIntoSections,
-  resolvePageLocale,
-} from "./resolve";
+import { groupIntoCategories, resolvePageLocale } from "./resolve";
 import { buildExcerpt, extractHeadings } from "./search";
 import type { ManualSearchEntry } from "./search";
 import type {
+  ManualCategory,
   ManualFrontmatter,
   ManualPage,
   ManualPageSummary,
-  ManualSection,
 } from "./types";
 
 /** Absolute path to the Manual content root. `process.cwd()` is the `apps/web` package root. */
@@ -49,8 +51,8 @@ function pageFile(locale: Locale, slug: string): string {
  * Coerce raw gray-matter frontmatter into the guaranteed {@link ManualFrontmatter} subset,
  * TOLERANT of extra fields (they pass through untouched — ADR-0062 §2). Missing/blank values
  * get sensible, non-throwing defaults so a half-authored page never crashes the render: a
- * missing `title` falls back to the slug, a non-numeric `order` sorts last, a missing `section`
- * lands in a catch-all bucket.
+ * missing `title` falls back to the slug, a non-numeric `order` sorts last, and a missing
+ * `category`/`subcategory` lands in a catch-all key the loader dev-warns about.
  */
 function normalizeFrontmatter(
   raw: Record<string, unknown>,
@@ -62,11 +64,15 @@ function normalizeFrontmatter(
     typeof raw.order === "number" && Number.isFinite(raw.order)
       ? raw.order
       : Number.MAX_SAFE_INTEGER;
-  const section =
-    typeof raw.section === "string" && raw.section.trim()
-      ? raw.section.trim()
-      : "General";
-  return { ...raw, title, order, section };
+  const category =
+    typeof raw.category === "string" && raw.category.trim()
+      ? raw.category.trim()
+      : "uncategorized";
+  const subcategory =
+    typeof raw.subcategory === "string" && raw.subcategory.trim()
+      ? raw.subcategory.trim()
+      : "general";
+  return { ...raw, title, order, category, subcategory };
 }
 
 /** List the `.md` slugs present in a locale's tree. Returns `[]` if the directory is absent. */
@@ -162,12 +168,8 @@ export async function getManualPage(slug: string): Promise<ManualPage | null> {
   };
 }
 
-/**
- * Build the `/help` section index for the active locale. Lists every page that exists in EITHER
- * the active locale or the fallback (`en`), reads only its frontmatter (not the body), applies the
- * es→en fallback per page, then groups + sorts into sections via the pure `resolve` helpers.
- */
-export async function getManualSections(): Promise<ManualSection[]> {
+/** Read only the frontmatter of every page that exists in the active locale or the `en` fallback. */
+async function loadPageSummaries(): Promise<ManualPageSummary[]> {
   const requested = await activeLocale();
 
   // The union of slugs across the active locale and the default — so a page that exists only in
@@ -193,44 +195,78 @@ export async function getManualSections(): Promise<ManualSection[]> {
     }),
   );
 
-  return groupIntoSections(
-    summaries.filter((s): s is ManualPageSummary => s !== null),
-  );
+  return summaries.filter((s): s is ManualPageSummary => s !== null);
+}
+
+/**
+ * Build the nested `/help` index for the active locale: every page that exists in EITHER the active
+ * locale or the fallback (`en`), grouped into the Category → Subcategory → page tree in manifest
+ * order via the pure {@link groupIntoCategories} (issue #563). Only NON-EMPTY buckets are emitted.
+ *
+ * Dev-warns when a page's `category`/`subcategory` is not in the manifest (`content/manual/_nav.ts`)
+ * — such pages still render (sorted last) but are a content defect to fix.
+ */
+export async function getManualCategories(): Promise<ManualCategory[]> {
+  const summaries = await loadPageSummaries();
+  const categories = groupIntoCategories(summaries);
+
+  if (process.env.NODE_ENV !== "production") {
+    for (const page of summaries) {
+      const cat = MANUAL_NAV_KEYS.get(page.frontmatter.category);
+      if (!cat || !cat.has(page.frontmatter.subcategory)) {
+        console.warn(
+          `[manual] page "${page.slug}" has category/subcategory ` +
+            `"${page.frontmatter.category}/${page.frontmatter.subcategory}" not in the manifest ` +
+            `(content/manual/_nav.ts) — it renders last. Fix its frontmatter or add it to the manifest.`,
+        );
+      }
+    }
+  }
+
+  return categories;
 }
 
 /**
  * Build the SIMPLE client-side search index for the active locale (ADR-0062 §6 — explicitly NOT
- * Meilisearch; full-text search is deferred). Mirrors {@link getManualSections} (same slug union +
+ * Meilisearch; full-text search is deferred). Mirrors {@link getManualCategories} (same slug union +
  * es→en per-page fallback) but reads the full body — not just the frontmatter — so it can extract the
- * page's headings and a short plaintext excerpt via the pure helpers in `search.ts`.
+ * page's headings and a short plaintext excerpt via the pure helpers in `search.ts`. Resolves the
+ * LOCALIZED category/subcategory labels (from `help.json`) so search can match on what the user sees.
  *
  * The result is a small, plain-serializable array handed straight to the client `<HelpSearch>` as a
  * prop. There is NO server endpoint and NO network call: the entire filter runs in the browser over
  * this build-at-request-time index. SERVER-ONLY (it does disk IO + reads the locale cookie).
  */
 export async function buildManualSearchIndex(): Promise<ManualSearchEntry[]> {
-  const requested = await activeLocale();
-
-  const slugSet = new Set<string>([
-    ...(await listSlugs(requested)),
-    ...(await listSlugs(defaultLocale)),
+  const [summaries, t] = await Promise.all([
+    loadPageSummaries(),
+    getTranslations("help"),
   ]);
 
+  // Resolve the localized label for a category/subcategory key. Every key in the manifest has a
+  // label in `help.json` (parity-checked); a key NOT in the manifest (an orphan page) has none, so
+  // we index it by its raw key rather than triggering next-intl's missing-message path.
+  const categoryLabel = (key: string): string =>
+    MANUAL_NAV_KEYS.has(key) ? t(`categories.${key}` as never) : key;
+  const subcategoryLabel = (category: string, sub: string): string =>
+    MANUAL_NAV_KEYS.get(category)?.has(sub)
+      ? t(`subcategories.${category}.${sub}` as never)
+      : sub;
+
   const entries = await Promise.all(
-    [...slugSet].map(async (slug): Promise<ManualSearchEntry | null> => {
-      const available = await availableLocalesForSlug(slug);
-      const resolution = resolvePageLocale(requested, available);
-      if (!resolution) return null;
-      const page = await readPage(resolution.locale, slug);
+    summaries.map(async (summary): Promise<ManualSearchEntry | null> => {
+      const page = await readPage(summary.resolvedLocale, summary.slug);
       if (!page) return null;
+      const { category, subcategory } = page.frontmatter;
       return {
-        slug,
+        slug: summary.slug,
         title: page.frontmatter.title,
-        section: page.frontmatter.section,
+        category: categoryLabel(category),
+        subcategory: subcategoryLabel(category, subcategory),
         headings: extractHeadings(page.content),
         excerpt: buildExcerpt(page.content),
-        resolvedLocale: resolution.locale,
-        isFallback: resolution.isFallback,
+        resolvedLocale: summary.resolvedLocale,
+        isFallback: summary.isFallback,
       };
     }),
   );

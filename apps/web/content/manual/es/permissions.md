@@ -1,7 +1,8 @@
 ---
 title: Permisos
 order: 1
-section: Permisos
+category: users-permissions
+subcategory: permissions
 ---
 
 # Permisos

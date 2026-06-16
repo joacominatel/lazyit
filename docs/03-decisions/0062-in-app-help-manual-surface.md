@@ -102,8 +102,8 @@ itself*. They never share storage, and the Manual never reads from or writes to 
 ### 2. Source — markdown in the repo
 
 - Content lives at **`apps/web/content/manual/<locale>/*.md`** — one markdown file per page, with a YAML
-  **frontmatter** carrying at least `title`, `order` (in-section sort) and `section` (the IA bucket,
-  §5). The frontmatter is the page's metadata; the markdown body is the content.
+  **frontmatter** carrying `title`, `order` (in-subcategory sort) and the stable `category` + `subcategory`
+  keys (the nested IA bucket, §5). The frontmatter is the page's metadata; the markdown body is the content.
 - Rendered by the existing **`MarkdownView`** (`apps/web/components/markdown-view.tsx`)
   — the same renderer the KB uses, so the Manual gets the same code blocks, mermaid, and typography for
   free. (The KB-only extensions that resolve against DB state — `[[slug]]` wiki-links into `Article`
@@ -158,25 +158,36 @@ The Manual is internationalized the same way the rest of the chrome is — **en 
   `es` falls back to the `en` file (and is a documentation defect, the same parity discipline as the
   message catalogs).
 
-### 5. Initial information architecture
+### 5. Information architecture — the nested, importance-ordered tree (ratified, #563)
 
-The Manual is accessed via a public route on the **landing/marketing side** of the app (e.g. `/manual`
-or `/help`) — offline-capable, self-hosted, no external dependency. It is NOT behind the `(app)` auth
-guard.
+The Manual is accessed via a public route on the **landing/marketing side** of the app (`/help`) —
+offline-capable, self-hosted, no external dependency. It is NOT behind the `(app)` auth guard.
 
-The first sections, taken from the CEO's enumeration:
+The IA is a **two-level tree — Category → Subcategory → page** — in **importance order** (most important
+category first; this supersedes the original 7-section seed from the CEO's enumeration). Frontmatter carries
+stable kebab-case **keys** (`category`, `subcategory`, `order`, `title`); the display **labels** live in i18n
+(`messages/<locale>/help.json`, en + es), not in frontmatter. The ordering is encoded once in the manifest
+`apps/web/content/manual/_nav.ts` (the single source of importance ordering). Only categories/subcategories that
+have ≥1 page render — the surface grows as the content epic lands.
 
-- **Getting started** — first run, the bootstrap wizard, creating users.
-- **Languages** — switching locale, the en/es coverage.
-- **Configuration** — settings, integrations, the permission matrix editor.
-- **Services** — the moving parts (API, web, Postgres, Valkey, Meilisearch, Zitadel) and what each does.
-- **Permissions** — the roles + configurable-permissions model in plain language
-  ([[0046-roles-permissions-v2]]), how to scope MEMBER/VIEWER, the admin-only reads.
-- **Best practices** — recommended operating conventions (naming, folder ACLs, vault membership hygiene).
-- **Detailed explanations** — the deeper, per-area "how it really works" pages, including the Secret
-  Manager and recovery-key mechanics (feature documentation only — no secret data).
+The **13 ratified categories** (key — en label), each with its subcategories in order:
 
-The IA is the **seed**, not the full content; the per-page authoring is the implementation wave.
+1. `getting-started` — *Getting started* → Introduction · Initial setup · Users & team · Languages
+2. `assets` — *Assets & Inventory* → Asset basics · Models & categories · Locations · Assignments & history · Asset tags
+3. `users-permissions` — *Users & Permissions* → Roles · Permissions · Permission configuration · Service accounts · User lifecycle
+4. `applications-access` — *Applications & Access* → Applications · Access grants · Criticality & alerts · Access requests
+5. `knowledge-base` — *Knowledge Base* → Articles & authoring · Folders & access · Linking & discovery · Versioning · Import
+6. `secret-manager` — *Secret Manager* → Vaults & members · Passwords & recovery keys · Security model · Secret references
+7. `consumables` — *Consumables* → Consumables & categories · Stock movements · Low-stock alerts
+8. `access-automation` — *Access Automation* → Concepts · Building a workflow · Manual tasks · Testing & observability · Permissions · Troubleshooting
+9. `notifications-activity` — *Notifications & Activity* → Notification bell · Activity & reports · Global search
+10. `configuration` — *Configuration & Settings* → Instance settings · Taxonomies · Asset tag scheme · Time zone & formats · Search index
+11. `deployment-operations` — *Deployment & Operations* → Self-hosting · Services · Backups & restore · Identity provider · Reverse proxy & TLS · Troubleshooting · Upgrades
+12. `security-best-practices` — *Security & Best practices* → Security model · Access-control principles · Operational security · Recommended patterns
+13. `reference` — *Reference* → Glossary
+
+This tree is the authoritative skeleton; the per-page authoring (the content) is a separate wave. See
+`docs/04-development/manual-authoring.md` for the frontmatter/manifest/label mechanics.
 
 ## Consequences
 
@@ -202,8 +213,8 @@ The IA is the **seed**, not the full content; the per-page authoring is the impl
     markdown is positioned to be the single source for both.
 - **Follow-ups (the implementation EPIC, a later wave):**
   - The `apps/web/content/manual/<locale>/*.md` tree + frontmatter convention, the Help/Manual route
-    (under the `(marketing)` route group, public, no auth gate), navigation, the section index, and the
-    en/es content fan-out.
+    (under the `(marketing)` route group, public, no auth gate), navigation, the nested category index, and
+    the en/es content fan-out.
   - Revisit the hybrid external `docs.lazyit.com` as its own future ADR if a separate public docs site
     is wanted (the in-repo markdown is the single source for both).
 

@@ -11,7 +11,7 @@
  *  1. {@link normalizeForSearch} — accent-insensitive, lowercase folding so "configuracion" matches
  *     "configuración" (NFD-decompose, strip combining diacritics, lowercase).
  *  2. {@link searchManual} — substring match across the index with TITLE-FIRST ranking
- *     (title > section/heading > excerpt).
+ *     (title > category > subcategory > heading > excerpt).
  */
 import type { Locale } from "@/i18n/config";
 
@@ -20,18 +20,20 @@ import type { Locale } from "@/i18n/config";
  * `buildManualSearchIndex` (loader) from frontmatter + the markdown body, then passed as a plain prop
  * to the client `<HelpSearch>` — so the whole index is a small, serializable array.
  *
- *  - `slug`     — the page's URL slug; the result links to `/help/<slug>`.
- *  - `title`    — frontmatter title (the strongest match signal).
- *  - `section`  — the IA bucket (frontmatter `section`).
- *  - `headings` — the `#`/`##`/… heading texts extracted from the body (plaintext, syntax stripped).
- *  - `excerpt`  — a short plaintext lead of the body (frontmatter + markdown syntax stripped, capped).
+ *  - `slug`        — the page's URL slug; the result links to `/help/<slug>`.
+ *  - `title`       — frontmatter title (the strongest match signal).
+ *  - `category`    — the LOCALIZED category label (resolved from `categories.<key>` in `help.json`).
+ *  - `subcategory` — the LOCALIZED subcategory label (resolved from `subcategories.<cat>.<key>`).
+ *  - `headings`    — the `#`/`##`/… heading texts extracted from the body (plaintext, syntax stripped).
+ *  - `excerpt`     — a short plaintext lead of the body (frontmatter + markdown syntax stripped, capped).
  *  - `resolvedLocale` / `isFallback` — which locale the body was read from (an `es` page may fall back
  *    to `en` — ADR-0062 §4); carried so the UI could flag a fallback result if it wants to.
  */
 export interface ManualSearchEntry {
   slug: string;
   title: string;
-  section: string;
+  category: string;
+  subcategory: string;
   headings: string[];
   excerpt: string;
   resolvedLocale: Locale;
@@ -63,17 +65,19 @@ export function normalizeForSearch(value: string): string {
 
 /** Rank buckets — the lower the value, the earlier the result sorts (title beats everything). */
 const RANK_TITLE = 0;
-const RANK_SECTION = 1;
-const RANK_HEADING = 2;
-const RANK_EXCERPT = 3;
+const RANK_CATEGORY = 1;
+const RANK_SUBCATEGORY = 2;
+const RANK_HEADING = 3;
+const RANK_EXCERPT = 4;
 
 /**
  * Filter + rank the index for a query, TITLE-FIRST (ADR-0062 §6). Both the query and every field are
  * run through {@link normalizeForSearch}, so matching is accent- and case-insensitive substring.
  *
- * Ranking, best to worst: a title hit (0) beats a section hit (1) beats a heading hit (2) beats an
- * excerpt-only hit (3). Each entry contributes AT MOST ONE result, at its best-matching field. Ties
- * within a rank keep a stable, deterministic order: alphabetical by title, then slug.
+ * Ranking, best to worst: a title hit (0) beats a category hit (1) beats a subcategory hit (2) beats a
+ * heading hit (3) beats an excerpt-only hit (4). Each entry contributes AT MOST ONE result, at its
+ * best-matching field. Ties within a rank keep a stable, deterministic order: alphabetical by title,
+ * then slug.
  *
  * An empty/whitespace query returns `[]` — the caller treats that as "not searching" and shows the
  * full nav instead of a results list. PURE: no IO; safe to call on every keystroke.
@@ -108,7 +112,10 @@ export function searchManual(
  */
 function bestRank(entry: ManualSearchEntry, needle: string): number | null {
   if (normalizeForSearch(entry.title).includes(needle)) return RANK_TITLE;
-  if (normalizeForSearch(entry.section).includes(needle)) return RANK_SECTION;
+  if (normalizeForSearch(entry.category).includes(needle)) return RANK_CATEGORY;
+  if (normalizeForSearch(entry.subcategory).includes(needle)) {
+    return RANK_SUBCATEGORY;
+  }
   if (
     entry.headings.some((heading) =>
       normalizeForSearch(heading).includes(needle),

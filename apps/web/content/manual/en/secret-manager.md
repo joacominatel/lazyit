@@ -1,7 +1,8 @@
 ---
 title: Secret Manager
 order: 1
-section: Services
+category: secret-manager
+subcategory: security-model
 ---
 
 # Secret Manager
