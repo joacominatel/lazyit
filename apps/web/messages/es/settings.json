@@ -33,7 +33,7 @@
   },
   "instance": {
     "title": "Instancia",
-    "subtitle": "Cómo está configurada esta instancia de lazyit. Solo lectura — los operadores definen la postura mediante variables de entorno.",
+    "subtitle": "Cómo está configurada esta instancia de lazyit — la postura de ejecución (definida por variables de entorno) y el esquema de etiquetas de activos.",
     "cardTitle": "Configuración",
     "loadError": "No se pudo cargar el estado de la instancia",
     "loadErrorHint": "La API podría estar caída o ser inaccesible.",
@@ -52,6 +52,45 @@
     "identityProvider": {
       "zitadel": "Zitadel (incluido)",
       "generic-oidc": "OIDC genérico (usa el tuyo)"
+    }
+  },
+  "assetTagScheme": {
+    "title": "Esquema de etiquetas de activos",
+    "subtitle": "Asigna automáticamente una etiqueta correlativa a los activos nuevos — un prefijo, un número con ceros a la izquierda y un sufijo. Desactivado hasta que lo actives; una etiqueta explícita siempre prevalece.",
+    "loadError": "No se pudo cargar el esquema de etiquetas.",
+    "retry": "Reintentar",
+    "save": "Guardar esquema",
+    "disabledHint": "El esquema está desactivado. Los activos nuevos conservan su etiqueta manual (o ninguna) — actívalo para asignarla automáticamente.",
+    "preview": {
+      "label": "Próxima etiqueta"
+    },
+    "fields": {
+      "enabled": {
+        "label": "Asignar etiquetas automáticamente",
+        "description": "Cuando está activo, un activo nuevo sin etiqueta recibe el siguiente número de forma automática."
+      },
+      "prefix": {
+        "label": "Prefijo",
+        "placeholder": "IT-"
+      },
+      "suffix": {
+        "label": "Sufijo",
+        "placeholder": "-HW"
+      },
+      "width": {
+        "label": "Dígitos del número",
+        "placeholder": "4",
+        "description": "Rellena el número con ceros hasta esta cantidad de dígitos (p. ej. 4 → 0042). Déjalo vacío para no rellenar."
+      },
+      "startNumber": {
+        "label": "Empezar en",
+        "placeholder": "Siguiente: {next}",
+        "description": "Opcional. Reinicia el contador para que la próxima etiqueta empiece aquí. Déjalo vacío para continuar la secuencia."
+      }
+    },
+    "toast": {
+      "saved": "Esquema de etiquetas guardado.",
+      "saveError": "No se pudo guardar el esquema de etiquetas."
     }
   },
   "roles": {
