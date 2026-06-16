@@ -14,7 +14,7 @@ How lazyit relates to the tools a small IT team might otherwise reach for.
 | --- | --- | --- | --- |
 | **ServiceNow** | ITSM suite | Complete, enterprise-grade | Expensive, heavy, legacy UX; over-scoped for 5–20 people |
 | **Jira / Linear** | Issue tracking | Great workflows & UX | Generic; no native concept of assets, access, consumables |
-| **Snipe-IT** | Asset inventory | Solid, open-source inventory | Inventory only; no tickets, access, or knowledge base |
+| **Snipe-IT** | Asset inventory | Solid, open-source inventory | Inventory only; no access management, knowledge base, or provisioning automation |
 | **GLPI** | ITSM (open source) | Broad, free | Dated UX; configuration-heavy; steep to operate well |
 | **Freshservice** | ITSM SaaS | Modern, approachable | SaaS-only; pricing scales with agents; not self-hosted |
 | **Spreadsheets / Notion** | Ad hoc | Zero cost, flexible | No model, no automation, no audit trail; breaks at scale |
@@ -23,7 +23,7 @@ How lazyit relates to the tools a small IT team might otherwise reach for.
 
 lazyit intentionally occupies the gap between **narrow** (Snipe-IT) and **heavy/generic**
 (ServiceNow, Jira): one opinionated, IT-native, self-hosted app that unifies inventory +
-access + tickets + consumables + knowledge, with auditability by default.
+access + consumables + knowledge, with auditability by default.
 
 One capability usually reserved for the heavy suites it now also has, on its own honest terms:
 **provisioning automation** — an opt-in, per-application [[workflow-engine/_MOC|Workflow Engine]]
