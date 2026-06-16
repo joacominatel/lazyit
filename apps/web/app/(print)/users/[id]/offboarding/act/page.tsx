@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUser } from "@/lib/api/hooks/use-users";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import {
   DEFAULT_OFFBOARDING_MESSAGE,
@@ -19,7 +20,6 @@ import {
   SHOW_ASSETS_KEY,
 } from "@/lib/offboarding/constants";
 import { useOffboardingData } from "@/lib/offboarding/use-offboarding-data";
-import { formatDate } from "@/lib/utils/format";
 
 /**
  * Offboarding Return Act — the printable, signable document (Wave 3b, issue #172). Lives in the
@@ -38,6 +38,7 @@ import { formatDate } from "@/lib/utils/format";
  */
 export default function OffboardingActPage() {
   const t = useTranslations("users.act");
+  const { date } = useFormatters();
   const params = useParams<{ id: string }>();
   const id = params.id;
 
@@ -97,7 +98,7 @@ export default function OffboardingActPage() {
           {org}
         </span>
         <span className="tabular-nums text-muted-foreground">
-          {formatDate(issuedAt)}
+          {date(issuedAt)}
         </span>
       </header>
 
@@ -214,7 +215,7 @@ export default function OffboardingActPage() {
                 grant.accessLevel,
                 grant.isCritical ? t("critical") : null,
                 grant.expiresAt
-                  ? t("expires", { date: formatDate(grant.expiresAt) })
+                  ? t("expires", { date: date(grant.expiresAt) })
                   : null,
               ].filter(Boolean);
               return (
