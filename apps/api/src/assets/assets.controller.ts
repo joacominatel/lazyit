@@ -306,6 +306,9 @@ export class AssetsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
+    // Folder access (ADR-0060 §4 / INV-9 — #553): thread the caller so the reverse list is pinned to
+    // the folders this actor may see (a restricted article never leaks through the link scope).
+    @CurrentPrincipal() principal?: Principal,
   ) {
     await this.assets.assertExists(id); // 404 if the asset is missing or soft-deleted
     return this.articles.findArticlesForAsset(
@@ -317,6 +320,7 @@ export class AssetsController {
         categoryId: parseCuidArrayQuery(categoryId, 'categoryId'),
       },
       parsePageQuery({ limit, offset, page }),
+      principal,
     );
   }
 
