@@ -50,3 +50,14 @@ export function selectDirectoryItems<T>(resource: string) {
     return page.items;
   };
 }
+
+/**
+ * Query keys for the org-wide asset-tag scheme (ADR-0063, #363). A SINGLETON config row (no list /
+ * detail), so it doesn't use the `createQueryKeys` factory — one `single()` key is the whole resource.
+ * Shaped like `configKeys`: `all` is the invalidation prefix the PUT mutation refetches.
+ */
+export const assetTagSchemeKeys = {
+  all: ["asset-tag-scheme"] as const,
+  single: () => [...["asset-tag-scheme"], "single"] as const,
+};
+
