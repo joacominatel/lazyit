@@ -12,15 +12,22 @@ function entry(
   slug: string,
   {
     title = slug,
-    section = "General",
+    category = "General",
+    subcategory = "General",
     headings = [],
     excerpt = "",
-  }: Partial<Pick<ManualSearchEntry, "title" | "section" | "headings" | "excerpt">> = {},
+  }: Partial<
+    Pick<
+      ManualSearchEntry,
+      "title" | "category" | "subcategory" | "headings" | "excerpt"
+    >
+  > = {},
 ): ManualSearchEntry {
   return {
     slug,
     title,
-    section,
+    category,
+    subcategory,
     headings,
     excerpt,
     resolvedLocale: "en",
@@ -47,16 +54,22 @@ describe("normalizeForSearch — accent/case folding", () => {
 
 describe("searchManual — filtering", () => {
   const index = [
-    entry("getting-started", { title: "Getting started", section: "Getting started" }),
+    entry("getting-started", {
+      title: "Getting started",
+      category: "Getting started",
+      subcategory: "Initial setup",
+    }),
     entry("configuration", {
       title: "Configuración",
-      section: "Configuration",
+      category: "Configuration",
+      subcategory: "Instance settings",
       headings: ["Time zone", "Asset tags"],
       excerpt: "Set up your instance defaults.",
     }),
     entry("permissions", {
       title: "Permissions",
-      section: "Permissions",
+      category: "Users & Permissions",
+      subcategory: "Permissions",
       excerpt: "Roles and access control.",
     }),
   ];
@@ -83,6 +96,12 @@ describe("searchManual — filtering", () => {
     ]);
   });
 
+  test("matches on the subcategory label", () => {
+    expect(searchManual(index, "instance settings").map((h) => h.entry.slug)).toEqual([
+      "configuration",
+    ]);
+  });
+
   test("matches on the excerpt", () => {
     expect(searchManual(index, "roles").map((h) => h.entry.slug)).toEqual([
       "permissions",
@@ -95,26 +114,38 @@ describe("searchManual — filtering", () => {
 });
 
 describe("searchManual — title-first ranking", () => {
-  test("a title hit outranks a section/heading/excerpt hit for the same term", () => {
+  test("title > category > subcategory > heading > excerpt for the same term", () => {
     const index = [
       entry("uses-in-excerpt", {
         title: "Other page",
-        section: "Other",
+        category: "Other",
+        subcategory: "Other",
         excerpt: "This mentions assets in the body only.",
       }),
-      entry("assets", { title: "Assets", section: "Inventory" }),
+      entry("assets", { title: "Assets", category: "Inventory", subcategory: "Basics" }),
       entry("uses-in-heading", {
         title: "Inventory overview",
-        section: "Inventory",
+        category: "Inventory",
+        subcategory: "Basics",
         headings: ["Managing assets"],
       }),
-      entry("uses-in-section", { title: "Catalog", section: "Assets" }),
+      entry("uses-in-subcategory", {
+        title: "Catalog",
+        category: "Inventory",
+        subcategory: "Assets",
+      }),
+      entry("uses-in-category", {
+        title: "Catalog 2",
+        category: "Assets",
+        subcategory: "Basics",
+      }),
     ];
     const hits = searchManual(index, "assets");
-    // title (assets) → section (uses-in-section) → heading (uses-in-heading) → excerpt (uses-in-excerpt)
+    // title → category → subcategory → heading → excerpt
     expect(hits.map((h) => h.entry.slug)).toEqual([
       "assets",
-      "uses-in-section",
+      "uses-in-category",
+      "uses-in-subcategory",
       "uses-in-heading",
       "uses-in-excerpt",
     ]);
@@ -122,9 +153,9 @@ describe("searchManual — title-first ranking", () => {
 
   test("ties within a rank break alphabetically by title, then slug", () => {
     const index = [
-      entry("b", { title: "Beta config", section: "General" }),
-      entry("a", { title: "Alpha config", section: "General" }),
-      entry("a2", { title: "Alpha config", section: "General" }),
+      entry("b", { title: "Beta config" }),
+      entry("a", { title: "Alpha config" }),
+      entry("a2", { title: "Alpha config" }),
     ];
     const hits = searchManual(index, "config");
     // Same rank (all title hits) → title asc, then slug asc: "Alpha config"(a) , "Alpha config"(a2), "Beta config"(b)
@@ -135,7 +166,8 @@ describe("searchManual — title-first ranking", () => {
     const index = [
       entry("dup", {
         title: "Search everywhere",
-        section: "Search section",
+        category: "Search category",
+        subcategory: "Search subcategory",
         headings: ["Search heading"],
         excerpt: "search in the body",
       }),
