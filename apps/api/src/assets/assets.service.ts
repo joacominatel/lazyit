@@ -11,11 +11,7 @@ import type {
   PageQuery,
   UpdateAsset,
 } from '@lazyit/shared';
-import {
-  applyAssetModelSpecsDefaults,
-  offsetOf,
-  pageOf,
-} from '@lazyit/shared';
+import { applyAssetModelSpecsDefaults, offsetOf, pageOf } from '@lazyit/shared';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { Prisma } from '../../generated/prisma/client';

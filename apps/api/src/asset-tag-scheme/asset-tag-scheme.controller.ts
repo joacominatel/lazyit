@@ -12,7 +12,9 @@ import { AssetTagSchemeService } from './asset-tag-scheme.service';
 
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe) + TS types + OpenAPI schema.
 class AssetTagSchemeDto extends createZodDto(AssetTagSchemeSchema) {}
-class UpdateAssetTagSchemeDto extends createZodDto(UpdateAssetTagSchemeSchema) {}
+class UpdateAssetTagSchemeDto extends createZodDto(
+  UpdateAssetTagSchemeSchema,
+) {}
 
 /**
  * AssetTagSchemeController — the settings surface for lazyit's first instance-config entity

@@ -115,7 +115,9 @@ export class AssetTagSchemeService {
    * forever. Committing the increment independently makes each consumed value durable, which is
    * exactly what "gaps accepted" requires and what lets a collision ADVANCE rather than spin.
    */
-  async allocateTag(explicitTag: string | undefined): Promise<string | undefined> {
+  async allocateTag(
+    explicitTag: string | undefined,
+  ): Promise<string | undefined> {
     if (explicitTag !== undefined) {
       return undefined; // explicit tag wins — never auto-allocate over it.
     }
