@@ -1487,10 +1487,13 @@ model Notification {
   targetUserId    String?  @db.Uuid
   targetUser      User?    @relation("NotificationTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
   // Who SEES it (ADR-0056 amendment, #453): null = broadcast to every `notification:read` holder; a
-  // uuid = TARGETED to that user's own bell (even a non-admin). Same shape as targetUserId (optional FK,
-  // SetNull, @db.Uuid) — losing the recipient never blocks deletion and the event survives.
+  // uuid = TARGETED to that user's own bell (even a non-admin). Optional FK, @db.Uuid to match User.id.
+  // onDelete: CASCADE (NOT SetNull like targetUserId) — issue #470: a TARGETED notification whose
+  // recipient is hard-deleted has no audience, so it must be DROPPED, not silently promoted into the
+  // broadcast set (recipientUserId=null) visible to every `notification:read` holder. Hard-deleting a
+  // user is rare (only the just-created-user rollback paths), so this is defense-in-depth.
   recipientUserId String?  @db.Uuid
-  recipientUser   User?    @relation("NotificationRecipientUser", fields: [recipientUserId], references: [id], onDelete: SetNull)
+  recipientUser   User?    @relation("NotificationRecipientUser", fields: [recipientUserId], references: [id], onDelete: Cascade)
   // Server-built human headline + an optional one-line clarifier.
   title           String
   summary         String?
