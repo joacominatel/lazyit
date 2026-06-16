@@ -36,14 +36,14 @@ describe("buildNextUrl", () => {
   });
 
   test("sets two keys at once", () => {
-    const href = buildNextUrl("", "/informes", { from: "2026-01-01", to: "2026-02-01" });
+    const href = buildNextUrl("", "/reports", { from: "2026-01-01", to: "2026-02-01" });
     const params = new URL(`http://x${href}`).searchParams;
     expect(params.get("from")).toBe("2026-01-01");
     expect(params.get("to")).toBe("2026-02-01");
   });
 
   test("preserves unrelated existing params", () => {
-    const href = buildNextUrl("tab=assets&action=create", "/informes", {
+    const href = buildNextUrl("tab=assets&action=create", "/reports", {
       from: "2026-01-01",
       to: "2026-02-01",
     });
@@ -113,7 +113,7 @@ describe("buildFiltersPatch", () => {
     });
   });
 
-  test("writes a from/to date pair together (informes)", () => {
+  test("writes a from/to date pair together (reports)", () => {
     const patch = buildFiltersPatch(
       { from: "2026-01-01", to: "2026-02-01" },
       { from: "", to: "" },
