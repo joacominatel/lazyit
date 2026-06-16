@@ -49,11 +49,11 @@ import { restoreConsumable } from "@/lib/api/endpoints/consumables";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
 import { runPerIdBatch } from "@/lib/api/per-id-batch";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
-import { formatDate } from "@/lib/utils/format";
 import { QuickAdjustButtons } from "./_components/quick-adjust-buttons";
 import { StockBadge } from "./_components/stock-badge";
 
@@ -70,6 +70,7 @@ const FILTER_DEFAULTS = {
 
 export default function ConsumablesPage() {
   const t = useTranslations("consumables");
+  const { date } = useFormatters();
   const tShared = useTranslations("shared");
   const router = useRouter();
   // `isAdmin` still gates the archived (`deleted=only`) slice (API keeps it ADMIN-only). Create/edit/
@@ -435,7 +436,7 @@ export default function ConsumablesPage() {
                       <span className="font-mono">{consumable.sku ?? "—"}</span>
                     </ResourceCardMeta>
                     <ResourceCardMeta label={t("list.meta.updated")}>
-                      {formatDate(consumable.updatedAt)}
+                      {date(consumable.updatedAt)}
                     </ResourceCardMeta>
                   </>
                 }
@@ -532,7 +533,7 @@ export default function ConsumablesPage() {
                   {consumable.sku ?? "—"}
                 </TableCell>
                 <TableCell className="text-muted-foreground tabular-nums">
-                  {formatDate(consumable.updatedAt)}
+                  {date(consumable.updatedAt)}
                 </TableCell>
                 <TableCell>
                   {!archived && canWrite ? (
