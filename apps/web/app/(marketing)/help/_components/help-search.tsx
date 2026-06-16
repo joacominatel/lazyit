@@ -8,7 +8,7 @@ import { useId, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { searchManual, type ManualSearchEntry } from "@/lib/manual/search";
-import type { ManualSection } from "@/lib/manual/types";
+import type { ManualCategory } from "@/lib/manual/types";
 import { cn } from "@/lib/utils";
 import { HelpNav } from "./help-nav";
 
@@ -17,18 +17,18 @@ import { HelpNav } from "./help-nav";
  * search is deferred). A search box at the top of the sidebar filters the build-time `index` in memory
  * as the user types — accent-insensitive, title-first — via the pure `searchManual`. NO network call.
  *
- * While the query is empty the component renders the full `<HelpNav>` (sections → pages, active page
- * highlighted). Once the user types, it swaps the nav for a flat results list linking to
- * `/help/<slug>`, with a clean "no results" state. The `index` and `sections` are plain props passed
- * down from the Server Component layout.
+ * While the query is empty the component renders the full `<HelpNav>` (nested category → subcategory
+ * → pages, active page highlighted). Once the user types, it swaps the nav for a flat results list
+ * linking to `/help/<slug>`, with a clean "no results" state. The `index` and `categories` are plain
+ * props passed down from the Server Component layout.
  */
 export function HelpSearch({
   index,
-  sections,
+  categories,
   onNavigate,
 }: {
   index: ManualSearchEntry[];
-  sections: ManualSection[];
+  categories: ManualCategory[];
   onNavigate?: () => void;
 }) {
   const t = useTranslations("help");
@@ -77,7 +77,7 @@ export function HelpSearch({
       {searching ? (
         <HelpSearchResults results={results} onNavigate={onNavigate} />
       ) : (
-        <HelpNav sections={sections} onNavigate={onNavigate} />
+        <HelpNav categories={categories} onNavigate={onNavigate} />
       )}
     </div>
   );
@@ -116,7 +116,7 @@ function HelpSearchResults({
             >
               <span className="font-medium text-foreground">{entry.title}</span>
               <span className="text-xs text-muted-foreground/80">
-                {entry.section}
+                {entry.category} · {entry.subcategory}
               </span>
             </Link>
           </li>
