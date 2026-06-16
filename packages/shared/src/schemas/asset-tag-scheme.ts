@@ -52,6 +52,35 @@ export function renderAssetTag(
  * API returns `enabled: false` with the defaults, so the frontend always has a concrete shape to
  * render (never a 404 for "unset"). `nextNumber` is the NEXT value that would be allocated.
  */
+/**
+ * Parse the numeric body out of a tag given a scheme's affixes (ADR-0068 §1/§2). A tag MATCHES the
+ * scheme when it (a) starts with `prefix`, (b) ends with `suffix`, and (c) the middle is non-empty
+ * and ALL digits — then the parsed integer is returned. Anything else (wrong affix, empty/non-numeric
+ * middle, a number that overflows) returns `null` (the tag does not conform). `width` is NOT enforced
+ * here: a zero-padded body and a wider body are both valid (padding is presentational), matching the
+ * "editing the template does not rewrite issued tags" rule — only the prefix/suffix/digits shape
+ * decides. NOTE on overlapping affixes: when `prefix.length + suffix.length` exceeds the tag length the
+ * slice would be negative/empty, so the digits check below rejects it — a tag must carry a real body.
+ *
+ * Pure and framework-agnostic so api (seed parsing + the normalize-non-conforming selection) and web
+ * (any client-side hinting) agree on EXACTLY what "conforms" means.
+ */
+export function parseAssetTagNumber(
+  scheme: { prefix?: string | null; suffix?: string | null },
+  tag: string,
+): number | null {
+  const prefix = scheme.prefix ?? "";
+  const suffix = scheme.suffix ?? "";
+  if (!tag.startsWith(prefix) || !tag.endsWith(suffix)) return null;
+  // The body sits between the affixes; guard against affixes that overlap (longer than the tag).
+  const bodyEnd = tag.length - suffix.length;
+  if (bodyEnd <= prefix.length) return null;
+  const body = tag.slice(prefix.length, bodyEnd);
+  if (!/^[0-9]+$/.test(body)) return null;
+  const num = Number(body);
+  return Number.isSafeInteger(num) ? num : null;
+}
+
 export const AssetTagSchemeSchema = z.object({
   prefix: z.string().nullable(),
   suffix: z.string().nullable(),

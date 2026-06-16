@@ -59,5 +59,24 @@ export function selectDirectoryItems<T>(resource: string) {
 export const assetTagSchemeKeys = {
   all: ["asset-tag-scheme"] as const,
   single: () => [...["asset-tag-scheme"], "single"] as const,
+  /**
+   * The seed suggestion for a pattern (ADR-0068 §2). Keyed by the (prefix, suffix, width) so the
+   * editor refetches only when the operator changes the template, not on every keystroke elsewhere.
+   */
+  seedSuggestion: (params: {
+    prefix?: string;
+    suffix?: string;
+    width?: number;
+  }) => [...["asset-tag-scheme"], "seed-suggestion", params] as const,
+  /**
+   * A backfill preview page (ADR-0068 §4). Keyed by the scope + page window so paging within the
+   * wizard caches per page; switching mode/model is a distinct key (a fresh preview).
+   */
+  backfillPreview: (params: {
+    mode: string;
+    modelId?: string;
+    page?: number;
+    pageSize?: number;
+  }) => [...["asset-tag-scheme"], "backfill-preview", params] as const,
 };
 
