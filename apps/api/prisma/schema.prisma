@@ -463,6 +463,53 @@ enum AssetStatus {
   UNKNOWN
 }
 
+/// lazyit's FIRST instance-config entity (ADR-0063, #363): the org-wide, single-row, opt-in scheme
+/// that auto-assigns a running asset tag on create. SINGLE ROW — the instance has exactly one scheme,
+/// so the row IS the identity (the "small configuration, the row is the identity" spirit of
+/// RolePermission, ADR-0046 §3). Singleton enforced two ways: the `id` defaults to the fixed literal
+/// `"singleton"` (so every upsert targets the same row) AND a CHECK constraint in the migration pins
+/// it to that value (so a second row is structurally impossible). The service reads/upserts by that id.
+///
+/// The running number is STRUCTURAL (ADR-0063 §1/§2): the rendered tag is always
+/// `prefix + zeroPad(nextNumber, width) + suffix`, so `nextNumber` is an always-present column — there
+/// is no template string / `{num}` token to omit. `nextNumber` is the MONOTONIC counter (the NEXT
+/// value to allocate); it is incremented atomically via a single-row `{ increment: 1 }` that COMMITS
+/// ON ITS OWN — deliberately OUTSIDE the asset-create `$transaction`. That independent commit is what
+/// makes "gaps accepted" work and lets a tag collision ADVANCE rather than spin: were the increment
+/// folded into the create transaction, a rolled-back insert would un-consume the number and a retry
+/// would re-render the same colliding tag forever. Gaps are accepted (ADR-0063 §3): a rolled-back /
+/// retried / deleted allocation is never back-filled.
+///
+/// Conventions (ADR-0006): MUTABLE instance config — `createdAt` + `updatedAt`, but NO `deletedAt`.
+/// It is NOT soft-deletable (so it is deliberately absent from SOFT_DELETABLE_MODELS): disabling the
+/// scheme flips `enabled` and leaves the counter where it was (re-enabling continues, never restarts).
+model AssetTagScheme {
+  /// Fixed singleton key — the only valid value is "singleton" (a migration CHECK pins it). Not a
+  /// generated id: there is one config row for the whole instance, so its id is a known constant.
+  id         String   @id @default("singleton")
+  /// Optional free-text affix prepended to the rendered tag (e.g. "LAZY-"). null = none.
+  prefix     String?
+  /// Optional free-text affix appended to the rendered tag. null = none.
+  suffix     String?
+  /// Optional zero-pad width for the number (e.g. 5 => 00042). 0 / null = no padding.
+  width      Int?
+  /// The MONOTONIC counter — the NEXT sequence value to allocate. Incremented atomically (Prisma
+  /// `{ increment: 1 }`) in a standalone update that COMMITS INDEPENDENTLY of the asset-create
+  /// `$transaction`, so concurrent creates read distinct numbers and a rolled-back insert never
+  /// un-consumes its number (gaps accepted; a collision advances instead of spinning). Edge cases
+  /// (ADR-0063): the counter freezes with a clean 400 at the int4 ceiling (unreachable at any real
+  /// scale), and a `startNumber: 0` makes the first rendered tag carry the number 0.
+  nextNumber Int      @default(1)
+  /// OFF by default (ADR-0063 §4): false = no auto-tag; the create path is byte-for-byte unchanged.
+  enabled    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // No deletedAt: mutable instance config, never soft-deleted (ADR-0006 / ADR-0063 §1). Keep OUT of
+  // SOFT_DELETABLE_MODELS so reads are not auto-scoped to `deletedAt: null` (the column doesn't exist).
+  @@map("asset_tag_scheme")
+}
+
 /// Timestamped join recording who owns an Asset, over time (asset-centric ownership; ADR-0004).
 /// Append-only with a release marker: rows are never deleted, only "closed" by setting
 /// releasedAt (ADR-0006). Multi-owner: an asset may have several active assignments at once.
