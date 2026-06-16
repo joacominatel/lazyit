@@ -10,6 +10,7 @@ import {
   AssetStatusSchema,
   cloneAssetDefaults,
   CreateAssetSchema,
+  renderAssetTag,
   UpdateAssetSchema,
 } from "@lazyit/shared";
 import { useRouter } from "next/navigation";
@@ -38,6 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useAssetTagScheme } from "@/lib/api/hooks/use-asset-tag-scheme";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { notifyError } from "@/lib/api/notify-error";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
@@ -138,6 +140,16 @@ export function AssetForm({
   const createAsset = useCreateAsset();
   const updateAsset = useUpdateAsset();
   const isPending = createAsset.isPending || updateAsset.isPending;
+
+  // Asset-tag scheme hint (ADR-0063, #363): on CREATE, when the org enabled an auto-tag scheme, hint the
+  // next auto-generated tag as the `assetTag` placeholder so the operator knows leaving it blank
+  // auto-assigns. The field stays optional and an explicit value still wins (the scheme only fills the
+  // gap server-side). Never shown on edit, and a no-op when the scheme is OFF/absent (today's behaviour).
+  const { data: tagScheme } = useAssetTagScheme();
+  const autoTagHint =
+    !isEdit && tagScheme?.enabled
+      ? renderAssetTag(tagScheme, tagScheme.nextNumber)
+      : undefined;
 
   // Specs source: the edited asset's specs, or the clone source's (deep-copied by the sanitizer).
   const specsSource = asset?.specs ?? cloneSource?.specs;
@@ -405,7 +417,11 @@ export function AssetForm({
                   onChange={(event) =>
                     field.onChange(event.target.value || undefined)
                   }
-                  placeholder={t("assetTagPlaceholder")}
+                  placeholder={
+                    autoTagHint
+                      ? t("assetTagAutoHint", { tag: autoTagHint })
+                      : t("assetTagPlaceholder")
+                  }
                   className="font-mono"
                   aria-invalid={fieldState.invalid || undefined}
                 />
