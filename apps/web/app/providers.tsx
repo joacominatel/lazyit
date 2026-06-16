@@ -11,7 +11,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
-import { SHARED_FORMATS } from "@/i18n/config";
+import { DEFAULT_TIME_ZONE, SHARED_FORMATS } from "@/i18n/config";
 
 function makeQueryClient() {
   return new QueryClient({
@@ -60,12 +60,16 @@ export function Providers({
     // NextIntlClientProvider wraps everything so any Client Component can call
     // `useTranslations(...)` / `useFormatter(...)`. The shared date/time presets
     // (issue #497) are forwarded here so client formatting matches the server config
-    // (`i18n/request.ts`). Server Components use `getTranslations`/`getFormatter`
-    // directly and don't need this provider.
+    // (`i18n/request.ts`). The `timeZone` (issue #548) is the same instance-wide
+    // `DEFAULT_TIME_ZONE` the server config uses, so client- and server-rendered
+    // timestamps agree (no hydration mismatch) and next-intl stops falling back to the
+    // runtime zone. Server Components use `getTranslations`/`getFormatter` directly and
+    // don't need this provider.
     <NextIntlClientProvider
       locale={locale}
       messages={messages}
       formats={SHARED_FORMATS}
+      timeZone={DEFAULT_TIME_ZONE}
     >
       <SessionProvider session={session}>
         <QueryClientProvider client={queryClient}>
