@@ -595,6 +595,13 @@ export class ArticlesService {
    * guaranteed by a DB CHECK; the target must reference a live (non-soft-deleted) row, and a
    * duplicate link (same article+target) is rejected (409 via the partial unique index, mapped by
    * the global PrismaExceptionFilter).
+   *
+   * No-escalation (ADR-0060 §6 / INV-9): after the author gate, re-check the actor can SEE the
+   * article's home folder, mirroring `addAlias` — an author who can no longer read a restricted folder
+   * (offboarding / admin move / self-move) must not be able to surface that article through the reverse
+   * lookup by linking it (a link is itself a surfacing channel — #553). Folder-hidden → 404 (the
+   * article is invisible to this actor, so linking it is "not found", never an info-leaking 403). Same
+   * ADMIN ('ALL') bypass as the alias path.
    */
   async addLink(
     articleId: string,
@@ -602,7 +609,10 @@ export class ArticlesService {
     principal?: Principal,
   ) {
     const cu = this.requireAuthor(principal);
-    await this.loadOwned(articleId, cu);
+    const article = await this.loadOwned(articleId, cu);
+    await this.assertFolderVisible(article.categoryId, principal, () => {
+      throw new NotFoundException(`Article ${articleId} not found`);
+    });
     if (data.assetId) {
       await this.assertAssetUsable(data.assetId);
     } else if (data.applicationId) {
@@ -776,11 +786,13 @@ export class ArticlesService {
     assetId: string,
     filters: ReverseArticleListFilters = {},
     page: PageQuery,
+    principal?: Principal,
   ): Promise<Page<ArticleListItem>> {
     return this.findLinkedArticlesPage(
       { links: { some: { assetId } } },
       filters,
       page,
+      principal,
     );
   }
 
@@ -795,11 +807,13 @@ export class ArticlesService {
     applicationId: string,
     filters: ReverseArticleListFilters = {},
     page: PageQuery,
+    principal?: Principal,
   ): Promise<Page<ArticleListItem>> {
     return this.findLinkedArticlesPage(
       { links: { some: { applicationId } } },
       filters,
       page,
+      principal,
     );
   }
 
@@ -811,13 +825,20 @@ export class ArticlesService {
    * the author), ANDs the caller-supplied scope (`links: { some: { assetId|applicationId } }`) and the
    * optional `q`/`status`/`categoryId` filters (#198). The page+count share one `where`, so a `status`
    * filter narrowing *within* PUBLISHED is reflected identically in both.
+   *
+   * Folder access (ADR-0060 §4 / INV-9): the reverse list is **also** pinned to the caller's visible
+   * home folders (`categoryId IN <visible>`), so a folder-hidden article never surfaces through the
+   * link scope (existence-hiding — title/slug/excerpt of a restricted article stay invisible). Resolved
+   * DB-first per call (never cached); ADMIN ('ALL') gets no folder pin, exactly as `findPage` does.
    */
   private async findLinkedArticlesPage(
     scope: Prisma.ArticleWhereInput,
     filters: ReverseArticleListFilters,
     page: PageQuery,
+    principal?: Principal,
   ): Promise<Page<ArticleListItem>> {
-    const where = this.buildReverseWhere(scope, filters);
+    const visible = await this.folderAccess.visibleFolderIds(principal);
+    const where = this.buildReverseWhere(scope, filters, visible);
     const { take, skip } = offsetOf(page);
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.article.findMany({
@@ -842,12 +863,20 @@ export class ArticlesService {
    * hard PUBLISHED rule and the link scope, then ANDs the optional multi-select filters (#198): a
    * `categoryId`/`status` `{ in: [...] }` (OR within the filter) and a `q` substring over title/excerpt.
    * The controller never passes an empty filter array (an empty selection omits the filter entirely).
+   *
+   * Folder access (ADR-0060 §4 / INV-9): unless ADMIN ('ALL'), the caller's visible home folders are
+   * ANDed in (`categoryId IN <visible>`), so a folder-hidden article is filtered out of the reverse
+   * list (existence-hiding) — exactly the pin `findPage` applies via the same `folderWhere` helper. An
+   * empty visible set yields `categoryId: { in: [] }` → no rows.
    */
   private buildReverseWhere(
     scope: Prisma.ArticleWhereInput,
     filters: ReverseArticleListFilters,
+    visibleFolders?: VisibleFolders,
   ): Prisma.ArticleWhereInput {
     const and: Prisma.ArticleWhereInput[] = [{ status: 'PUBLISHED' }, scope];
+    const folderClause = this.folderWhere(visibleFolders);
+    if (folderClause) and.push(folderClause);
     if (filters.categoryId?.length) {
       and.push({ categoryId: { in: filters.categoryId } });
     }
