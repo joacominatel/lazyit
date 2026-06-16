@@ -3,7 +3,7 @@ title: Vision
 tags: [overview]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-16
 ---
 
 # Vision
@@ -11,7 +11,7 @@ updated: 2026-05-25
 **lazyit** is an internal web application for IT / Systems teams — helpdesk, support,
 infrastructure. It is the single place where a small IT team manages everything technical
 in a company: asset inventory, application access, datacenter, backups, switches and Cisco
-gear, laptops, licenses, tickets, requests, and internal documentation.
+gear, laptops, licenses, requests, and internal documentation.
 
 ## Who it is for
 
@@ -56,5 +56,9 @@ later. Full rationale: [[0015-deployment-model]]; authentication direction:
 - ITIL-complete process certification.
 - Multi-tenant SaaS — **deferred**, not now; lazyit ships single-org and self-hosted
   ([[0015-deployment-model]]).
+- **Ticketing system** — lazyit will NOT have a dedicated ticketing pillar. CEO decision
+  2026-06-16: the product is IT-native (assets, access, consumables, KB) and deliberately
+  not a generic ticket tool. The `Ticket`/`TicketComment` entities were never built; they
+  are removed from the domain.
 
 Related: [[problem-space]] · [[competitors]] · [[asset-centric]]
