@@ -20,8 +20,8 @@ import {
   useAssetModels,
   useDeleteAssetModel,
 } from "@/lib/api/hooks/use-asset-models";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
-import { formatDate } from "@/lib/utils/format";
 import { AssetModelFormDialog } from "./asset-model-form-dialog";
 
 /**
@@ -32,6 +32,7 @@ import { AssetModelFormDialog } from "./asset-model-form-dialog";
 export function AssetModelManager() {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
+  const { date } = useFormatters();
   const { data, isLoading, isError, error, refetch } = useAssetModels();
   const { data: categories } = useAssetCategories();
   const remove = useDeleteAssetModel();
@@ -159,7 +160,7 @@ export function AssetModelManager() {
                   : "—"}
               </TableCell>
               <TableCell className="text-muted-foreground tabular-nums">
-                {formatDate(model.updatedAt)}
+                {date(model.updatedAt)}
               </TableCell>
               <TableCell className="text-right">
                 {canWrite || canDelete ? (

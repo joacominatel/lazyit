@@ -55,11 +55,11 @@ import { restoreLocation } from "@/lib/api/endpoints/locations";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
 import { runPerIdBatch } from "@/lib/api/per-id-batch";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
-import { formatDate } from "@/lib/utils/format";
 import { LocationFormDialog } from "./_components/location-form-dialog";
 import {
   LocationTypeBadge,
@@ -75,6 +75,7 @@ const FILTER_DEFAULTS = { type: "ALL", archived: "ALL" } as const;
 export default function LocationsPage() {
   const t = useTranslations("locations");
   const tShared = useTranslations("shared");
+  const { date } = useFormatters();
   const locationTypeLabel = useLocationTypeLabel();
   // `isAdmin` still gates the archived (`deleted=only`) slice (API keeps it ADMIN-only). Create/edit
   // are location:write; delete/restore are location:delete.
@@ -377,7 +378,7 @@ export default function LocationsPage() {
                       {location.floor ?? "—"}
                     </ResourceCardMeta>
                     <ResourceCardMeta label={t("list.meta.updated")}>
-                      {formatDate(location.updatedAt)}
+                      {date(location.updatedAt)}
                     </ResourceCardMeta>
                     {location.address ? (
                       <ResourceCardMeta
@@ -449,7 +450,7 @@ export default function LocationsPage() {
                   {location.address ?? "—"}
                 </TableCell>
                 <TableCell className="text-muted-foreground tabular-nums">
-                  {formatDate(location.updatedAt)}
+                  {date(location.updatedAt)}
                 </TableCell>
                 <TableCell className="text-right">
                   {archived ? (

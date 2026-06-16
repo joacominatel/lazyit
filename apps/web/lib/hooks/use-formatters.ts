@@ -8,9 +8,9 @@ import { useCallback } from "react";
  *
  * Wraps next-intl's `useFormatter()` (which reads the active `NEXT_LOCALE`, ADR-0051) + `useNow()`
  * so every relative time ("5m ago" / "hace 5 min") and absolute stamp honours the user's locale
- * instead of the runtime default. Replaces the old `formatDate`/`formatDateTime`/`formatRelativeTime`
- * helpers, which passed `undefined` as the locale (server default, usually `en-US`) and hard-coded
- * the relative-time grammar in English.
+ * instead of the runtime default. Replaces the old `formatDate` helper in `lib/utils/format.ts`, which
+ * passed `undefined` as the locale (server default, usually `en-US`) and hard-coded the relative-time
+ * grammar in English.
  *
  * `useNow()` supplies the render-stable "now" reference (a global value re-evaluated on the
  * `updateInterval`), so call sites no longer thread a `useState(() => Date.now())` snapshot just to

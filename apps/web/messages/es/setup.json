@@ -1,0 +1,83 @@
+{
+  "title": "Configurar lazyit",
+  "description": "Unos pocos pasos para dejar tu instancia lista. Esto se ejecuta una sola vez.",
+  "progressLabel": "Progreso de la configuración",
+  "steps": {
+    "welcome": "Bienvenida",
+    "configure": "Configurar",
+    "admin": "Administrador",
+    "done": "Listo"
+  },
+  "error": {
+    "title": "No se pudo conectar con el servidor",
+    "description": "El asistente de configuración necesita comunicarse con la API de lazyit. Verifica que la API esté en ejecución y accesible, y vuelve a intentarlo.",
+    "retry": "Reintentar"
+  },
+  "alreadySetUp": {
+    "title": "Ya está configurado",
+    "description": "Esta instancia ya tiene un administrador. Te llevamos a iniciar sesión…"
+  },
+  "toast": {
+    "adminCreated": "Administrador creado",
+    "adminCreatedMirrored": "Administrador creado y replicado en tu IdP",
+    "adminCreateError": "No se pudo crear el administrador"
+  },
+  "welcome": {
+    "question": "¿Cómo quieres que los usuarios inicien sesión en lazyit?",
+    "idpLabel": "Proveedor de identidad",
+    "zitadel": {
+      "title": "Zitadel incluido",
+      "description": "El proveedor de identidad autoalojado recomendado, configurado por ti. Sin cuentas externas que conectar."
+    },
+    "byoi": {
+      "title": "Usa tu propio OIDC",
+      "description": "Conecta lazyit con un proveedor OIDC que ya tengas (Okta, Authentik, Keycloak, Entra ID…)."
+    },
+    "continue": "Continuar"
+  },
+  "configure": {
+    "zitadelReadyTitle": "Zitadel incluido está listo",
+    "zitadelReadyBody": "Tu proveedor de identidad se aprovisionó automáticamente: no hay nada que configurar aquí. Si el inicio de sesión aún no está disponible, es posible que Zitadel todavía se esté iniciando; dale un momento.",
+    "byoiConfirm": "Confirma que tu proveedor OIDC esté conectado antes de continuar: el administrador que crees a continuación debe poder iniciar sesión a través de él.",
+    "back": "Volver",
+    "continue": "Continuar"
+  },
+  "byoi": {
+    "instructions": "Define estas variables en la app web y luego reiníciala:",
+    "copyLabel": "Copiar variables de entorno",
+    "copied": "Copiado",
+    "note": "lazyit descubre el resto a partir de tu proveedor. La gestión de usuarios y roles sigue siendo local: tu IdP solo se encarga del inicio de sesión."
+  },
+  "admin": {
+    "intro": "Crea el primer administrador. Esta persona podrá gestionar usuarios, accesos y todo lo demás.",
+    "firstNameLabel": "Nombre",
+    "firstNamePlaceholder": "Ada",
+    "lastNameLabel": "Apellido",
+    "lastNamePlaceholder": "Lovelace",
+    "emailLabel": "Correo electrónico",
+    "emailPlaceholder": "ada@tu-organizacion.com",
+    "passwordLabel": "Nueva contraseña",
+    "confirmPasswordLabel": "Confirmar contraseña",
+    "passwordPlaceholder": "••••••••",
+    "roleLabel": "Rol:",
+    "roleValue": "Administrador",
+    "roleLocked": "Fijo para el primer usuario",
+    "back": "Volver",
+    "submit": "Crear administrador",
+    "checklist": {
+      "minLength": "Debe tener al menos 8 caracteres.",
+      "maxLength": "Debe tener menos de 70 caracteres.",
+      "uppercase": "Debe incluir una letra mayúscula.",
+      "lowercase": "Debe incluir una letra minúscula.",
+      "number": "Debe incluir un número.",
+      "symbol": "Debe incluir un símbolo.",
+      "match": "La confirmación de contraseña coincide."
+    }
+  },
+  "done": {
+    "title": "Todo listo",
+    "bodyWithEmail": "<email></email> es ahora el administrador. Inicia sesión a través de tu proveedor de identidad para empezar a usar lazyit.",
+    "bodyWithoutEmail": "Tu cuenta de administrador está lista. Inicia sesión para empezar a usar lazyit.",
+    "finish": "Ir a iniciar sesión"
+  }
+}

@@ -33,7 +33,7 @@ import {
 } from "@/lib/api/hooks/use-applications";
 import { useRevokeGrant } from "@/lib/api/hooks/use-access-grant-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
-import { formatDate } from "@/lib/utils/format";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { EditGrantDialog } from "../_components/edit-grant-dialog";
 import { GrantAccessDialog } from "../_components/grant-access-dialog";
 import { RevokeGrantDialog } from "../_components/revoke-grant-dialog";
@@ -47,6 +47,7 @@ function toHref(url: string): string {
 
 export default function ApplicationDetailPage() {
   const t = useTranslations("applications");
+  const { date } = useFormatters();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
@@ -307,7 +308,7 @@ export default function ApplicationDetailPage() {
                       </div>
                       <p className="truncate text-sm text-muted-foreground">
                         {t("detail.grantedLine", {
-                          date: formatDate(grant.grantedAt),
+                          date: date(grant.grantedAt),
                         })}
                         {grant.grantedById
                           ? t("detail.grantedByPart", {
@@ -316,7 +317,7 @@ export default function ApplicationDetailPage() {
                           : ""}
                         {grant.expiresAt
                           ? t("detail.expiresPart", {
-                              date: formatDate(grant.expiresAt),
+                              date: date(grant.expiresAt),
                             })
                           : ""}
                         {grant.notes
@@ -368,8 +369,8 @@ export default function ApplicationDetailPage() {
                   )}
                 </span>
                 <span className="tabular-nums text-muted-foreground">
-                  {formatDate(grant.grantedAt)} →{" "}
-                  {grant.revokedAt ? formatDate(grant.revokedAt) : "—"}
+                  {date(grant.grantedAt)} →{" "}
+                  {grant.revokedAt ? date(grant.revokedAt) : "—"}
                   {grant.revokedById
                     ? t("detail.historyRevokedByPart", {
                         name: userName(grant.revokedById),

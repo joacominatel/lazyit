@@ -4,18 +4,6 @@
  */
 
 /**
- * ISO timestamp → short local date (e.g. "May 25, 2026"). Used for the
- * "Updated"/"Created" columns of every resource table.
- */
-export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-/**
  * A duration in milliseconds → a compact human label ("420ms", "3.2s", "2m 5s", "1h 4m"). Returns null
  * for a null/negative input so callers can omit the field cleanly. Mirrors the run-timeline's per-step
  * duration grammar so a run's wall-clock duration reads consistently with its step durations.

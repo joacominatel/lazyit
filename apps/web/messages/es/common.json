@@ -42,5 +42,12 @@
   "import": "Importar",
   "download": "Descargar",
   "upload": "Subir",
-  "settings": "Configuración"
+  "settings": "Configuración",
+  "combobox": {
+    "placeholder": "Seleccionar…",
+    "searchPlaceholder": "Buscar…",
+    "empty": "Sin resultados.",
+    "typeToSearch": "Escribe para buscar…",
+    "loading": "Buscando…"
+  }
 }

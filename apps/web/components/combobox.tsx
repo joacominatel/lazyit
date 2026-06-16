@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckIcon, ChevronUpDownIcon } from "@heroicons/react/16/solid";
+import { useTranslations } from "next-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   Command,
@@ -68,11 +69,11 @@ export interface ComboboxProps {
   onValueChange: (value: string) => void;
   /** The options to render. In server-search mode this is the current query's page. */
   items: ComboboxItem[];
-  /** Trigger text when nothing is selected. */
+  /** Trigger text when nothing is selected. Defaults to the localized `common.combobox.placeholder`. */
   placeholder?: string;
-  /** Search box placeholder. */
+  /** Search box placeholder. Defaults to the localized `common.combobox.searchPlaceholder`. */
   searchPlaceholder?: string;
-  /** Shown when the (filtered/searched) list is empty. */
+  /** Shown when the (filtered/searched) list is empty. Defaults to the localized `common.combobox.empty`. */
   emptyText?: string;
   disabled?: boolean;
   /** Forwarded to the trigger for the `FieldLabel htmlFor` association. */
@@ -103,10 +104,13 @@ export interface ComboboxProps {
   minQueryLength?: number;
   /**
    * Server-search: copy shown before the query reaches {@link ComboboxProps.minQueryLength}. Only
-   * surfaced when `minQueryLength > 0`. Defaults to a generic "Type to search…".
+   * surfaced when `minQueryLength > 0`. Defaults to the localized `common.combobox.typeToSearch`.
    */
   typeToSearchText?: string;
-  /** Server-search loading copy (screen-reader friendly). Defaults to a generic "Searching…". */
+  /**
+   * Server-search loading copy (screen-reader friendly). Defaults to the localized
+   * `common.combobox.loading`.
+   */
   loadingText?: string;
 }
 
@@ -114,9 +118,9 @@ export function Combobox({
   value,
   onValueChange,
   items,
-  placeholder = "Select…",
-  searchPlaceholder = "Search…",
-  emptyText = "No results.",
+  placeholder,
+  searchPlaceholder,
+  emptyText,
   disabled,
   id,
   "aria-invalid": ariaInvalid,
@@ -126,9 +130,18 @@ export function Combobox({
   debounceMs = 250,
   selectedLabel,
   minQueryLength = 0,
-  typeToSearchText = "Type to search…",
-  loadingText = "Searching…",
+  typeToSearchText,
+  loadingText,
 }: ComboboxProps) {
+  // Defaults route through `common.combobox.*` so an async-search picker announces its empty/loading/
+  // hint states in the active locale (issue #506); an explicit prop still wins for screen-specific copy.
+  const tc = useTranslations("common.combobox");
+  placeholder ??= tc("placeholder");
+  searchPlaceholder ??= tc("searchPlaceholder");
+  emptyText ??= tc("empty");
+  typeToSearchText ??= tc("typeToSearch");
+  loadingText ??= tc("loading");
+
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const listId = useId();

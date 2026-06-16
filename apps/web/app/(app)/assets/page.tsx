@@ -64,11 +64,11 @@ import {
 } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
 import type { EntityKey } from "@/lib/entity-key";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
-import { formatDate } from "@/lib/utils/format";
 import {
   AssetStatusBadge,
   useAssetStatusLabel,
@@ -100,6 +100,7 @@ const OWNERSHIP_LABEL_KEY: Record<OwnershipFilter, "any" | "has" | "none"> = {
 export default function AssetsPage() {
   const router = useRouter();
   const t = useTranslations("assets.list");
+  const { date } = useFormatters();
   const tEmpty = useTranslations("assets.empty");
   const tc = useTranslations("common");
   const tShared = useTranslations("shared");
@@ -520,7 +521,7 @@ export default function AssetsPage() {
                       />
                     </ResourceCardMeta>
                     <ResourceCardMeta label={t("columns.updated")}>
-                      {formatDate(asset.updatedAt)}
+                      {date(asset.updatedAt)}
                     </ResourceCardMeta>
                   </>
                 }
@@ -604,7 +605,7 @@ export default function AssetsPage() {
                   <StackedOwnerAvatars assignments={asset.activeAssignments} />
                 </TableCell>
                 <TableCell className="text-muted-foreground tabular-nums">
-                  {formatDate(asset.updatedAt)}
+                  {date(asset.updatedAt)}
                 </TableCell>
                 <TableCell className="text-right">
                   {archived ? (

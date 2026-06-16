@@ -15,6 +15,7 @@ import locations from "./locations.json";
 import nav from "./nav.json";
 import notifications from "./notifications.json";
 import settings from "./settings.json";
+import setup from "./setup.json";
 import shared from "./shared.json";
 import users from "./users.json";
 import secrets from "./secrets.json";
@@ -33,6 +34,7 @@ const messages = {
   locations,
   settings,
   reports,
+  setup,
   auth,
   workflow,
   notifications,

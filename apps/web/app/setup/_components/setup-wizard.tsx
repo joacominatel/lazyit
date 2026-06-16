@@ -5,6 +5,7 @@ import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -48,6 +49,7 @@ import { WizardSteps } from "./wizard-steps";
 type StepId = "welcome" | "configure" | "admin" | "done";
 
 export function SetupWizard() {
+  const t = useTranslations("setup");
   const router = useRouter();
   const { data: status, isLoading, isError, error, refetch } = useConfigStatus();
 
@@ -67,14 +69,16 @@ export function SetupWizard() {
   // derived from the live choice so the progress indicator and the Back/Continue jumps agree.
   const steps = useMemo<{ id: StepId; label: string }[]>(() => {
     const middle: { id: StepId; label: string }[] =
-      idpChoice === "byoi" ? [{ id: "configure", label: "Configure" }] : [];
+      idpChoice === "byoi"
+        ? [{ id: "configure", label: t("steps.configure") }]
+        : [];
     return [
-      { id: "welcome", label: "Welcome" },
+      { id: "welcome", label: t("steps.welcome") },
       ...middle,
-      { id: "admin", label: "Administrator" },
-      { id: "done", label: "Done" },
+      { id: "admin", label: t("steps.admin") },
+      { id: "done", label: t("steps.done") },
     ];
-  }, [idpChoice]);
+  }, [idpChoice, t]);
 
   const currentIndex = Math.max(
     0,
@@ -122,12 +126,9 @@ export function SetupWizard() {
         <CardHeader>
           <div className="flex items-center gap-2 text-destructive">
             <ExclamationTriangleIcon className="size-5" />
-            <CardTitle>Couldn&apos;t reach the server</CardTitle>
+            <CardTitle>{t("error.title")}</CardTitle>
           </div>
-          <CardDescription>
-            The setup wizard needs to talk to the lazyit API. Check that the API
-            is running and reachable, then try again.
-          </CardDescription>
+          <CardDescription>{t("error.description")}</CardDescription>
         </CardHeader>
         <CardContent>
           <RequestIdNote requestId={requestId} />
@@ -135,7 +136,7 @@ export function SetupWizard() {
         <CardFooter>
           <Button variant="outline" onClick={() => refetch()}>
             <ArrowPathIcon />
-            Retry
+            {t("error.retry")}
           </Button>
         </CardFooter>
       </Card>
@@ -150,11 +151,9 @@ export function SetupWizard() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <CheckCircleIcon className="size-5 text-success" />
-            <CardTitle>Already set up</CardTitle>
+            <CardTitle>{t("alreadySetUp.title")}</CardTitle>
           </div>
-          <CardDescription>
-            This instance already has an administrator. Taking you to sign in…
-          </CardDescription>
+          <CardDescription>{t("alreadySetUp.description")}</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -163,9 +162,7 @@ export function SetupWizard() {
   function handleAdminCreated(email: string, mirrored: boolean) {
     setCreatedEmail(email);
     toast.success(
-      mirrored
-        ? "Administrator created and mirrored to your IdP"
-        : "Administrator created",
+      mirrored ? t("toast.adminCreatedMirrored") : t("toast.adminCreated"),
     );
     goTo("done");
   }
@@ -173,10 +170,8 @@ export function SetupWizard() {
   return (
     <Card className="w-full">
       <CardHeader>
-        <CardTitle>Set up lazyit</CardTitle>
-        <CardDescription>
-          A few quick steps to get your instance ready. This runs once.
-        </CardDescription>
+        <CardTitle>{t("title")}</CardTitle>
+        <CardDescription>{t("description")}</CardDescription>
         <WizardSteps
           labels={steps.map((s) => s.label)}
           current={currentIndex + 1}
@@ -201,7 +196,7 @@ export function SetupWizard() {
           requiresAdminPassword={status.requiresAdminPassword}
           onBack={goBack}
           onCreated={handleAdminCreated}
-          onError={(err) => notifyError(err, "Couldn't create the administrator")}
+          onError={(err) => notifyError(err, t("toast.adminCreateError"))}
         />
       )}
 
