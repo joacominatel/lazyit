@@ -30,6 +30,7 @@ export * from "./schemas/asset-history";
 export * from "./schemas/asset-list";
 export * from "./schemas/asset-model";
 export * from "./schemas/asset-model-list";
+export * from "./schemas/asset-tag-backfill";
 export * from "./schemas/asset-tag-scheme";
 export * from "./schemas/application-list";
 export * from "./schemas/batch";

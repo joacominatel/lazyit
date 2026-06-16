@@ -45,9 +45,22 @@ concrete instance of a generic [[asset-model]].
   atomically inside the asset-create transaction, so concurrent creates never collide. **OFF by
   default:** with no scheme (or a disabled one) asset creation is unchanged — `assetTag` is whatever
   the operator typed (or null). An **explicit `assetTag` always wins** (the scheme only fills the gap).
-  A rendered tag that clashes with an existing live tag advances to the next number (bounded retry);
   the sequence is **monotonic, not gapless** (rolled-back / retried / deleted numbers are not
-  back-filled). Enabling the scheme does **not** retroactively tag existing assets.
+  back-filled).
+- **Skip-existing invariant + estate awareness ([[0068-asset-tag-existing-estate-awareness]]).** An
+  auto-allocated tag is **never** a tag already on a live asset: on allocation the counter advances to
+  the next number whose rendered tag is free, jumping past a contiguous occupied block in one step (so
+  e.g. existing `IT-1000, IT-1002, IT-1005` → allocations `IT-1001, IT-1003, IT-1004, IT-1006…`). The
+  live-only partial-unique index stays the concurrency backstop. At config time a **seed suggestion**
+  (`GET /config/asset-tag-scheme/seed-suggestion`) parses the existing matching tags and proposes
+  `startNumber = max + 1` so the counter seeds above the occupied range.
+- **Backfill ([[0068-asset-tag-existing-estate-awareness]] §3/§4).** Enabling the scheme does **not**
+  retroactively tag existing assets — that is a deliberate, audited bulk action (`settings:manage`)
+  with a read-only **preview** (`GET …/backfill/preview`, writes nothing — `proposedTag` is indicative)
+  and an **apply** (`POST …/backfill/apply`, forward-only, no undo, one `AssetHistory` row per retag).
+  Two modes: `untagged-only` (default, safe — only assets with no tag) and `normalize-non-conforming`
+  (opt-in, behind a warning — also retags tags that don't match the scheme; **conforming manual tags
+  are never touched**). Optional `modelId` filter + per-row deselect.
 - FKs (`modelId`, `locationId`) are `onDelete: SetNull`: deleting a model/location **detaches**
   assets, never deletes them (auditability > strict referential integrity). Combined with soft
   delete everywhere, references are preserved in practice.
