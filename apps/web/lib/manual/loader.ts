@@ -1,0 +1,197 @@
+/**
+ * Server-side Help / Manual content loader (ADR-0062). Reads the per-locale markdown trees at
+ * `apps/web/content/manual/<locale>/*.md`, parses YAML frontmatter, and resolves the active
+ * locale (with es→en fallback) for the page route and the `/help` index.
+ *
+ * SERVER-ONLY by construction: it imports `node:fs/promises` and `next-intl/server`, both of
+ * which are server-only modules — importing this file into a Client Component is a build error.
+ * The pure decision logic (locale fallback, sort, grouping) lives in `resolve.ts` so it stays
+ * testable without disk; this file is the thin IO shell.
+ *
+ * The Manual is PUBLIC and SECRET-FREE by construction (ADR-0062 §3): this loader reads static
+ * repo markdown and has no path to a session, a vault, or any `Article` row.
+ */
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import matter from "gray-matter";
+import { getLocale } from "next-intl/server";
+import { defaultLocale, isLocale, type Locale, locales } from "@/i18n/config";
+import {
+  groupIntoSections,
+  resolvePageLocale,
+} from "./resolve";
+import type {
+  ManualFrontmatter,
+  ManualPage,
+  ManualPageSummary,
+  ManualSection,
+} from "./types";
+
+/** Absolute path to the Manual content root. `process.cwd()` is the `apps/web` package root. */
+const CONTENT_ROOT = path.join(process.cwd(), "content", "manual");
+
+/** A slug is a single path segment of lowercase letters, digits and hyphens — no traversal. */
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Directory holding a locale's markdown tree. */
+function localeDir(locale: Locale): string {
+  return path.join(CONTENT_ROOT, locale);
+}
+
+/** Absolute file path for a (locale, slug) pair. Caller MUST have validated the slug first. */
+function pageFile(locale: Locale, slug: string): string {
+  return path.join(localeDir(locale), `${slug}.md`);
+}
+
+/**
+ * Coerce raw gray-matter frontmatter into the guaranteed {@link ManualFrontmatter} subset,
+ * TOLERANT of extra fields (they pass through untouched — ADR-0062 §2). Missing/blank values
+ * get sensible, non-throwing defaults so a half-authored page never crashes the render: a
+ * missing `title` falls back to the slug, a non-numeric `order` sorts last, a missing `section`
+ * lands in a catch-all bucket.
+ */
+function normalizeFrontmatter(
+  raw: Record<string, unknown>,
+  slug: string,
+): ManualFrontmatter {
+  const title =
+    typeof raw.title === "string" && raw.title.trim() ? raw.title.trim() : slug;
+  const order =
+    typeof raw.order === "number" && Number.isFinite(raw.order)
+      ? raw.order
+      : Number.MAX_SAFE_INTEGER;
+  const section =
+    typeof raw.section === "string" && raw.section.trim()
+      ? raw.section.trim()
+      : "General";
+  return { ...raw, title, order, section };
+}
+
+/** List the `.md` slugs present in a locale's tree. Returns `[]` if the directory is absent. */
+async function listSlugs(locale: Locale): Promise<string[]> {
+  let entries: string[];
+  try {
+    entries = await readdir(localeDir(locale));
+  } catch {
+    // No tree for this locale yet — treat as empty rather than throwing.
+    return [];
+  }
+  return entries
+    .filter((name) => name.endsWith(".md"))
+    .map((name) => name.slice(0, -".md".length))
+    .filter((slug) => SLUG_RE.test(slug));
+}
+
+/** The set of locales that actually have a file for `slug`, used by the pure fallback resolver. */
+async function availableLocalesForSlug(slug: string): Promise<Locale[]> {
+  const checks = await Promise.all(
+    locales.map(async (locale) => {
+      try {
+        await readFile(pageFile(locale, slug), "utf8");
+        return locale;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return checks.filter((l): l is Locale => l !== null);
+}
+
+/** Read + parse a single (locale, slug) file. Returns `null` if it does not exist. */
+async function readPage(
+  locale: Locale,
+  slug: string,
+): Promise<{ frontmatter: ManualFrontmatter; content: string } | null> {
+  let raw: string;
+  try {
+    raw = await readFile(pageFile(locale, slug), "utf8");
+  } catch {
+    return null;
+  }
+  const parsed = matter(raw);
+  return {
+    frontmatter: normalizeFrontmatter(
+      parsed.data as Record<string, unknown>,
+      slug,
+    ),
+    content: parsed.content,
+  };
+}
+
+/**
+ * Resolve the active locale from the `NEXT_LOCALE` cookie (ADR-0051 cookie-mode) via next-intl.
+ * Narrows the value to a supported `Locale`, defaulting to `en` — so a stale/unknown cookie can
+ * never point the loader at a non-existent tree.
+ */
+async function activeLocale(): Promise<Locale> {
+  const value = await getLocale();
+  return isLocale(value) ? value : defaultLocale;
+}
+
+/**
+ * Load a single Manual page for the active locale, applying the es→en fallback (ADR-0062 §4).
+ * Returns `null` when the slug is invalid or exists in no locale — the route maps that to a 404.
+ * A fallback render logs a dev warning (a missing-translation documentation defect).
+ */
+export async function getManualPage(slug: string): Promise<ManualPage | null> {
+  if (!SLUG_RE.test(slug)) return null;
+
+  const requested = await activeLocale();
+  const available = await availableLocalesForSlug(slug);
+  const resolution = resolvePageLocale(requested, available);
+  if (!resolution) return null;
+
+  const page = await readPage(resolution.locale, slug);
+  if (!page) return null;
+
+  if (resolution.isFallback && process.env.NODE_ENV !== "production") {
+    console.warn(
+      `[manual] page "${slug}" missing for locale "${requested}" — fell back to "${resolution.locale}". ` +
+        `Add content/manual/${requested}/${slug}.md (run \`bun run check:manual-parity\`).`,
+    );
+  }
+
+  return {
+    slug,
+    resolvedLocale: resolution.locale,
+    isFallback: resolution.isFallback,
+    frontmatter: page.frontmatter,
+    content: page.content,
+  };
+}
+
+/**
+ * Build the `/help` section index for the active locale. Lists every page that exists in EITHER
+ * the active locale or the fallback (`en`), reads only its frontmatter (not the body), applies the
+ * es→en fallback per page, then groups + sorts into sections via the pure `resolve` helpers.
+ */
+export async function getManualSections(): Promise<ManualSection[]> {
+  const requested = await activeLocale();
+
+  // The union of slugs across the active locale and the default — so a page that exists only in
+  // `en` still appears (via fallback) when browsing in `es` (ADR-0062 §4).
+  const slugSet = new Set<string>([
+    ...(await listSlugs(requested)),
+    ...(await listSlugs(defaultLocale)),
+  ]);
+
+  const summaries = await Promise.all(
+    [...slugSet].map(async (slug): Promise<ManualPageSummary | null> => {
+      const available = await availableLocalesForSlug(slug);
+      const resolution = resolvePageLocale(requested, available);
+      if (!resolution) return null;
+      const page = await readPage(resolution.locale, slug);
+      if (!page) return null;
+      return {
+        slug,
+        resolvedLocale: resolution.locale,
+        isFallback: resolution.isFallback,
+        frontmatter: page.frontmatter,
+      };
+    }),
+  );
+
+  return groupIntoSections(
+    summaries.filter((s): s is ManualPageSummary => s !== null),
+  );
+}
