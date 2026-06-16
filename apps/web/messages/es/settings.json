@@ -91,6 +91,54 @@
     "toast": {
       "saved": "Esquema de etiquetas guardado.",
       "saveError": "No se pudo guardar el esquema de etiquetas."
+    },
+    "seedSuggestion": {
+      "message": "{count, plural, one {# etiqueta existente coincide} other {# etiquetas existentes coinciden}} con este patrón (la más alta: {highest}). Inicio sugerido: {start}.",
+      "accept": "Empezar en {start}"
+    },
+    "backfill": {
+      "launch": "Etiquetar activos existentes",
+      "title": "Etiquetar activos existentes",
+      "subtitle": "Aplica el esquema a los activos que ya existen. Revisa las etiquetas propuestas, deselecciona las que quieras omitir y aplica. Esto escribe etiquetas nuevas y queda auditado — no hay deshacer masivo.",
+      "mode": {
+        "label": "Qué etiquetar",
+        "untaggedOnly": "Solo sin etiqueta",
+        "normalize": "También corregir no conformes",
+        "untaggedOnlyHint": "Solo los activos que aún no tienen etiqueta recibirán una. Las etiquetas existentes no se tocan.",
+        "normalizeHint": "También vuelve a etiquetar los activos cuya etiqueta no coincide con este esquema. Las etiquetas conformes nunca se cambian."
+      },
+      "warning": {
+        "title": "Esto sobrescribe etiquetas existentes",
+        "body": "El modo no conforme reemplaza etiquetas puestas a mano — que pueden estar impresas en etiquetas físicas. El cambio queda auditado pero no se puede deshacer de forma masiva. Las etiquetas conformes nunca se tocan."
+      },
+      "modelFilter": {
+        "label": "Limitar a un modelo (opcional)",
+        "placeholder": "Todos los modelos"
+      },
+      "loadError": "No se pudo cargar la vista previa.",
+      "retry": "Reintentar",
+      "empty": "Ningún activo coincide con este alcance — no hay nada que etiquetar.",
+      "summary": "{selected} de {total} seleccionados",
+      "table": {
+        "asset": "Activo",
+        "currentTag": "Etiqueta actual",
+        "proposedTag": "Etiqueta propuesta",
+        "noTag": "Sin etiqueta",
+        "unnamed": "Activo sin nombre",
+        "selectPage": "Seleccionar todo en esta página",
+        "toggleRow": "Incluir {name}"
+      },
+      "pagination": {
+        "page": "Página {page} de {pageCount}",
+        "previous": "Anterior",
+        "next": "Siguiente"
+      },
+      "cancel": "Cancelar",
+      "apply": "Etiquetar {count, plural, one {# activo} other {# activos}}",
+      "toast": {
+        "applied": "Etiquetados {tagged}, omitidos {skipped}.",
+        "applyError": "No se pudo aplicar el etiquetado."
+      }
     }
   },
   "roles": {

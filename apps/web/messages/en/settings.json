@@ -91,6 +91,54 @@
     "toast": {
       "saved": "Asset-tag scheme saved.",
       "saveError": "Could not save the asset-tag scheme."
+    },
+    "seedSuggestion": {
+      "message": "{count, plural, one {# existing tag matches} other {# existing tags match}} this pattern (highest: {highest}). Suggested start: {start}.",
+      "accept": "Start at {start}"
+    },
+    "backfill": {
+      "launch": "Tag existing assets",
+      "title": "Tag existing assets",
+      "subtitle": "Apply the scheme to assets that already exist. Review the proposed tags below, deselect any you want to skip, then apply. This writes new tags and is audited — there is no bulk undo.",
+      "mode": {
+        "label": "What to tag",
+        "untaggedOnly": "Untagged only",
+        "normalize": "Also fix non-conforming",
+        "untaggedOnlyHint": "Only assets that have no tag yet will get one. Existing tags are left untouched.",
+        "normalizeHint": "Also re-tag assets whose tag doesn't match this scheme. Conforming tags are never changed."
+      },
+      "warning": {
+        "title": "This overwrites existing tags",
+        "body": "Non-conforming mode replaces tags that someone set by hand — which may be printed on physical labels. The change is audited but cannot be bulk-undone. Conforming tags are never touched."
+      },
+      "modelFilter": {
+        "label": "Limit to model (optional)",
+        "placeholder": "All models"
+      },
+      "loadError": "Could not load the preview.",
+      "retry": "Retry",
+      "empty": "No assets match this scope — nothing to tag.",
+      "summary": "{selected} of {total} selected",
+      "table": {
+        "asset": "Asset",
+        "currentTag": "Current tag",
+        "proposedTag": "Proposed tag",
+        "noTag": "No tag",
+        "unnamed": "Unnamed asset",
+        "selectPage": "Select all on this page",
+        "toggleRow": "Include {name}"
+      },
+      "pagination": {
+        "page": "Page {page} of {pageCount}",
+        "previous": "Previous",
+        "next": "Next"
+      },
+      "cancel": "Cancel",
+      "apply": "Tag {count, plural, one {# asset} other {# assets}}",
+      "toast": {
+        "applied": "Tagged {tagged}, skipped {skipped}.",
+        "applyError": "Could not apply the backfill."
+      }
     }
   },
   "roles": {

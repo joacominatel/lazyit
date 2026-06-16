@@ -1,6 +1,10 @@
 "use client";
 
-import { ArrowPathIcon, TagIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowPathIcon,
+  RectangleStackIcon,
+  TagIcon,
+} from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   ASSET_TAG_AFFIX_MAX,
@@ -10,7 +14,7 @@ import {
   UpdateAssetTagSchemeSchema,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Controller, type Resolver, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -33,9 +37,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
   useAssetTagScheme,
+  useAssetTagSeedSuggestion,
   useUpdateAssetTagScheme,
 } from "@/lib/api/hooks/use-asset-tag-scheme";
 import { notifyError } from "@/lib/api/notify-error";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
+import { AssetTagBackfillDialog } from "./asset-tag-backfill-dialog";
+
+/** A blank/absent affix → undefined (for the debounced seed-suggestion key). */
+function trimToUndefined(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
 
 /**
  * Form values shape — deliberately the SAME shape the shared `UpdateAssetTagSchemeSchema` expects, so
@@ -87,7 +100,7 @@ export function AssetTagSchemeEditor() {
       startNumber: undefined,
     },
   });
-  const { control, reset, handleSubmit, formState } = form;
+  const { control, reset, handleSubmit, formState, setValue } = form;
 
   // Re-seed the form whenever the server scheme changes (initial load + after every save). `startNumber`
   // is intentionally LEFT BLANK on seed — it's a write-only re-seed input ("start the next tag at N"),
@@ -128,6 +141,29 @@ export function AssetTagSchemeEditor() {
       onError: (error) => notifyError(error, t("toast.saveError")),
     });
   });
+
+  // Seed suggestion (ADR-0068 §2): debounce the pattern the operator is composing, then fetch the
+  // suggested `startNumber` = max(existing matching tag) + 1. Surfaced inline; the admin clicks to
+  // accept it into the `startNumber` field (never auto-applied). Idle until the scheme is enabled and
+  // the affixes settle — the key is the trimmed pattern so it refetches only when that changes.
+  const debouncedPrefix = useDebouncedValue(trimToUndefined(prefix), 400);
+  const debouncedSuffix = useDebouncedValue(trimToUndefined(suffix), 400);
+  const debouncedWidth = useDebouncedValue(width, 400);
+  const seed = useAssetTagSeedSuggestion({
+    prefix: debouncedPrefix,
+    suffix: debouncedSuffix,
+    width: debouncedWidth,
+    enabled: Boolean(enabled),
+  });
+  // Only surface the affordance when the suggestion actually advances past where the form would seed.
+  const seedData = seed.data;
+  const showSeedSuggestion =
+    Boolean(enabled) &&
+    seedData !== undefined &&
+    seedData.matchedCount > 0 &&
+    startNumber !== seedData.suggestedStartNumber;
+
+  const [backfillOpen, setBackfillOpen] = useState(false);
 
   return (
     <Card className="max-w-xl">
@@ -328,6 +364,49 @@ export function AssetTagSchemeEditor() {
                 />
               </div>
 
+              {/* Seed suggestion (ADR-0068 §2) — informational; the admin clicks to accept it into
+                  `startNumber`. Only shown when live tags already match the pattern (matchedCount > 0). */}
+              {showSeedSuggestion ? (
+                <div
+                  aria-live="polite"
+                  className="flex flex-col gap-2 rounded-lg border border-info/30 bg-info/10 p-3 text-sm text-card-foreground sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <p className="min-w-0">
+                    {t("seedSuggestion.message", {
+                      count: seedData.matchedCount,
+                      highest:
+                        seedData.maxExistingNumber !== null
+                          ? renderAssetTag(
+                              {
+                                prefix: emptyToUndefined(prefix),
+                                suffix: emptyToUndefined(suffix),
+                                width,
+                              },
+                              seedData.maxExistingNumber,
+                            )
+                          : "—",
+                      start: seedData.suggestedStartNumber,
+                    })}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() =>
+                      setValue("startNumber", seedData.suggestedStartNumber, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      })
+                    }
+                  >
+                    {t("seedSuggestion.accept", {
+                      start: seedData.suggestedStartNumber,
+                    })}
+                  </Button>
+                </div>
+              ) : null}
+
               {!enabled ? (
                 <p className="text-sm text-muted-foreground">
                   {t("disabledHint")}
@@ -335,7 +414,21 @@ export function AssetTagSchemeEditor() {
               ) : null}
             </FieldGroup>
 
-            <div className="flex justify-end">
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+              {/* Backfill wizard launch — only when the scheme is enabled (nothing to backfill into a
+                  disabled scheme). The dialog is `settings:manage`-gated by the page's AdminGate + API. */}
+              {enabled ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setBackfillOpen(true)}
+                >
+                  <RectangleStackIcon />
+                  {t("backfill.launch")}
+                </Button>
+              ) : (
+                <span />
+              )}
               <Button
                 type="submit"
                 disabled={update.isPending || !formState.isDirty}
@@ -347,6 +440,11 @@ export function AssetTagSchemeEditor() {
           </form>
         )}
       </CardContent>
+
+      <AssetTagBackfillDialog
+        open={backfillOpen}
+        onOpenChange={setBackfillOpen}
+      />
     </Card>
   );
 }
