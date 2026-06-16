@@ -872,7 +872,7 @@ Summarized: extend `GET /dashboard/activity` (or a new `GET /reports/activity`) 
 
 ## 8. Build order (frontend, ships without backend)
 
-1. Add `/informes` route + nav section + `ClockIcon` (compose `PageHeader`, `Breadcrumb`).
+1. Add `/reports` route + nav section + `ClockIcon` (compose `PageHeader`, `Breadcrumb`).
 2. `pillarTone()` + `actionTone()` token helpers (activates `--chart-*` / status tokens) — also retrofit `recent-activity-panel.tsx` to use them (kills the hardcoded sky/violet/amber).
 3. Tabs (All/Assets/Access/Stock enabled; Users/My-history disabled-with-tooltip).
 4. Filter bar (free-text + action + relative date, client-side v1) wired to URL params.
