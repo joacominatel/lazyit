@@ -1,4 +1,5 @@
 import { CheckCircleIcon, ServerStackIcon, KeyIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardFooter } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -11,23 +12,6 @@ interface Option {
   description: string;
   icon: typeof ServerStackIcon;
 }
-
-const OPTIONS: Option[] = [
-  {
-    value: "zitadel",
-    title: "Bundled Zitadel",
-    description:
-      "The recommended self-hosted identity provider, set up for you. No external accounts to wire.",
-    icon: ServerStackIcon,
-  },
-  {
-    value: "byoi",
-    title: "Bring your own OIDC",
-    description:
-      "Point lazyit at an OIDC provider you already run (Okta, Authentik, Keycloak, Entra ID…).",
-    icon: KeyIcon,
-  },
-];
 
 /**
  * Step 1 — Welcome + IdP choice (ADR-0043 §7a step 1). Two selectable cards (a radiogroup) for the
@@ -43,18 +27,31 @@ export function StepWelcome({
   onChoiceChange: (choice: IdpChoice) => void;
   onNext: () => void;
 }) {
+  const t = useTranslations("setup.welcome");
+  const options: Option[] = [
+    {
+      value: "zitadel",
+      title: t("zitadel.title"),
+      description: t("zitadel.description"),
+      icon: ServerStackIcon,
+    },
+    {
+      value: "byoi",
+      title: t("byoi.title"),
+      description: t("byoi.description"),
+      icon: KeyIcon,
+    },
+  ];
   return (
     <>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          How do you want users to sign in to lazyit?
-        </p>
+        <p className="text-sm text-muted-foreground">{t("question")}</p>
         <div
           role="radiogroup"
-          aria-label="Identity provider"
+          aria-label={t("idpLabel")}
           className="grid gap-3 sm:grid-cols-2"
         >
-          {OPTIONS.map((option) => {
+          {options.map((option) => {
             const selected = choice === option.value;
             const Icon = option.icon;
             return (
@@ -87,7 +84,7 @@ export function StepWelcome({
         {choice === "byoi" && <ByoiSnippet />}
       </CardContent>
       <CardFooter className="justify-end">
-        <Button onClick={onNext}>Continue</Button>
+        <Button onClick={onNext}>{t("continue")}</Button>
       </CardFooter>
     </>
   );
