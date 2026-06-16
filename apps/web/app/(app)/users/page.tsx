@@ -57,12 +57,12 @@ import { restoreUser } from "@/lib/api/endpoints/users";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
 import { runPerIdBatch } from "@/lib/api/per-id-batch";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
-import { formatDate } from "@/lib/utils/format";
 import { ByoiBanner } from "./_components/byoi-banner";
 import { CloneUserWizard } from "./_components/clone-user-wizard";
 import { ManagerDisplay } from "./_components/manager-display";
@@ -149,6 +149,7 @@ function CountCell({ value }: { value?: number }) {
 
 export default function UsersPage() {
   const t = useTranslations("users");
+  const { date } = useFormatters();
   const tShared = useTranslations("shared");
   // User administration (create / edit / clone / role-change / offboard / restore) is the single
   // coarse `user:manage` capability on the backend. `isAdmin` still gates the archived (`deleted=only`)
@@ -582,7 +583,7 @@ export default function UsersPage() {
                       <UserRoleSelect user={user} size="sm" />
                     </ResourceCardMeta>
                     <ResourceCardMeta label={t("list.meta.updated")}>
-                      {formatDate(user.updatedAt)}
+                      {date(user.updatedAt)}
                     </ResourceCardMeta>
                   </>
                 }
@@ -694,7 +695,7 @@ export default function UsersPage() {
                     key="updated"
                     className="text-muted-foreground tabular-nums"
                   >
-                    {formatDate(user.updatedAt)}
+                    {date(user.updatedAt)}
                   </TableCell>
                 ),
                 actions: (

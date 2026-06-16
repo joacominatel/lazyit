@@ -32,15 +32,15 @@ lives in spreadsheets, someone's head, and a chat history.
   enterprises; a 5–20 person team drowns in them.
 - **Too generic** — Jira / Linear are great at issues but know nothing about IT objects;
   you bolt assets and access on with custom fields and discipline that erodes.
-- **Too narrow** — Snipe-IT does inventory well but stops there; access, tickets and
-  knowledge live elsewhere.
+- **Too narrow** — Snipe-IT does inventory well but stops there; access management,
+  provisioning automation and knowledge live elsewhere.
 
 See [[competitors]] for the detailed comparison.
 
 ## The bet
 
 A focused, IT-native, asset-centric system (see [[asset-centric]]) that unifies inventory,
-access, tickets, consumables and knowledge — with auditability built in — is more valuable
+access, consumables and knowledge — with auditability built in — is more valuable
 to a small IT team than any of the generic or narrow alternatives, and far cheaper to run
 than the enterprise suites.
 

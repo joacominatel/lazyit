@@ -84,6 +84,7 @@
     "serialPlaceholder": "SN-12345",
     "assetTag": "Etiqueta",
     "assetTagPlaceholder": "LZ-0001",
+    "assetTagAutoHint": "Automática: {tag} — déjala vacía para asignarla sola",
     "purchaseDate": "Fecha de compra",
     "warrantyEnd": "Fin de garantía",
     "notes": "Notas",

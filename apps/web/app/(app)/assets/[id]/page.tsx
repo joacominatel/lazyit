@@ -23,12 +23,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user-avatar";
 import { ErrorState } from "@/components/resource-table";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useAsset, useAssetAssignments } from "@/lib/api/hooks/use-assets";
 import { useDeleteAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { notifyError } from "@/lib/api/notify-error";
-import { formatDate, formatFieldLabel, formatSpecValue } from "@/lib/utils/format";
+import { formatFieldLabel, formatSpecValue } from "@/lib/utils/format";
 import { AssetHistoryTimeline } from "../_components/asset-history-timeline";
 import { AssetStatusBadge } from "../_components/asset-status-badge";
 import { AssignUserDialog } from "../_components/assign-user-dialog";
@@ -41,6 +42,7 @@ export default function AssetDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const t = useTranslations("assets.detail");
+  const { date } = useFormatters();
   const tList = useTranslations("assets.list");
   const tc = useTranslations("common");
   const id = params.id;
@@ -234,10 +236,10 @@ export default function AssetDetailPage() {
             )}
           </DetailField>
           <DetailField label={t("purchaseDate")}>
-            {asset.purchaseDate ? formatDate(asset.purchaseDate) : "—"}
+            {asset.purchaseDate ? date(asset.purchaseDate) : "—"}
           </DetailField>
           <DetailField label={t("warrantyEnd")}>
-            {asset.warrantyEnd ? formatDate(asset.warrantyEnd) : "—"}
+            {asset.warrantyEnd ? date(asset.warrantyEnd) : "—"}
           </DetailField>
         </dl>
         {asset.notes && (
@@ -324,7 +326,7 @@ export default function AssetDetailPage() {
                         {assignment.notes
                           ? assignment.notes
                           : t("assignedOn", {
-                              date: formatDate(assignment.assignedAt),
+                              date: date(assignment.assignedAt),
                             })}
                       </p>
                     </div>
@@ -370,9 +372,9 @@ export default function AssetDetailPage() {
                   {ownerName(assignment)}
                 </Link>
                 <span className="tabular-nums text-muted-foreground">
-                  {formatDate(assignment.assignedAt)} →{" "}
+                  {date(assignment.assignedAt)} →{" "}
                   {assignment.releasedAt
-                    ? formatDate(assignment.releasedAt)
+                    ? date(assignment.releasedAt)
                     : "—"}
                 </span>
                 {assignment.notes && (

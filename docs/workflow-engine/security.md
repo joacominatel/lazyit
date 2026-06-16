@@ -1,8 +1,9 @@
 ---
 title: "Workflow Engine — Security & Threat Model"
 tags: [workflow-engine, security, threat-model, ssrf, secrets, rbac, audit, sandboxing]
-status: proposed
+status: accepted
 created: 2026-06-07
+updated: 2026-06-16
 ---
 
 # Workflow Engine — Security & Threat Model
@@ -497,10 +498,12 @@ security justification is specifically the sandboxed processor and the async dec
 
 ## 12. Phased, v1-first plan
 
-**Phase 0 — prerequisites (not this engine, but blocking).**
-- Land **ADR-0052** (`SecretEncryptionService` + `SystemSecret` + Notifications/bell/SSE) on `dev` — it
-  is currently only on `feat/settings_notifications_smtp`. The engine reuses all of it.
-- Land **ADR-0053** (BullMQ + Valkey, sandboxed processors).
+**Phase 0 — prerequisites — COMPLETE (shipped on `master`, epic #248, Phase 1).**
+- **[[0053-async-workers-bullmq-valkey|ADR-0053]]** (BullMQ + Valkey, sandboxed processors) — SHIPPED.
+- **Notification bell** ([[0056-in-app-notification-bell]]) — SHIPPED. (The pre-build docs referred to
+  "ADR-0052 `SecretEncryptionService` + Notifications" — that branch was renumbered 0056 on merge;
+  connector secrets use `WORKFLOW_SECRET_KEY` per [[0054-applications-workflow-engine]] instead.)
+- All `workflow:*` permissions are in the `@lazyit/shared` catalog; engine routes are annotated.
 
 **Phase 1 — v1: outbound REST + manual, opt-in, two triggers.**
 - New `workflow` permission domain + literals in `@lazyit/shared` (+ golden test; re-typecheck web maps).

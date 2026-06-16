@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ZitadelPasswordSchema } from "./primitives";
 import { EmailSchema } from "./user";
 
 /**
@@ -69,22 +70,16 @@ export type CsrfToken = z.infer<typeof CsrfTokenSchema>;
  * carried in the `X-CSRF-Token` header, not the body, mirroring the standard double-submit pattern.
  */
 /**
- * Initial-password policy for the first ADMIN, mirroring Zitadel's DEFAULT password complexity policy
- * (min 8, max 70, upper + lower + digit + symbol). lazyit sets this password on the freshly-created
- * Zitadel user via the Management API in the bundled flow (issue #335); enforcing the SAME rules here —
- * shared by the wizard's live checklist and the API's validation — guarantees Zitadel never rejects
- * the password mid-mirror (which would leave a half-provisioned, un-loggable admin). The per-rule
- * messages match the wizard's checklist copy 1:1. NOT used in BYOI mode (the operator's IdP owns the
- * credential — ADR-0037/0038). `.max(70)` is a hard cap before the regex checks for a clear error.
+ * Initial-password policy for the first ADMIN — the SHARED {@link ZitadelPasswordSchema}
+ * (`schemas/primitives.ts`): Zitadel's DEFAULT complexity policy (min 8, max 70, upper + lower + digit +
+ * symbol), with the per-rule messages the wizard's live checklist renders 1:1. lazyit sets this password
+ * on the freshly-created Zitadel user via the Management API in the bundled flow (issue #335); using the
+ * SAME single definition the admin temp-password `TempPasswordSchema` (`schemas/user.ts`) uses guarantees
+ * Zitadel never rejects the password mid-mirror (which would leave a half-provisioned, un-loggable admin)
+ * and that the two policies can no longer DRIFT apart (issue #474). NOT used in BYOI mode (the operator's
+ * IdP owns the credential — ADR-0037/0038). `.max(70)` is a hard cap before the regex checks.
  */
-export const SetupPasswordSchema = z
-  .string()
-  .min(8, "Must be at least 8 characters long.")
-  .max(70, "Must be less than 70 characters long.")
-  .regex(/[A-Z]/, "Must include an uppercase letter.")
-  .regex(/[a-z]/, "Must include a lowercase letter.")
-  .regex(/[0-9]/, "Must include a number.")
-  .regex(/[^A-Za-z0-9]/, "Must include a symbol.");
+export const SetupPasswordSchema = ZitadelPasswordSchema;
 export type SetupPassword = z.infer<typeof SetupPasswordSchema>;
 
 export const SetupAdminSchema = z.strictObject({

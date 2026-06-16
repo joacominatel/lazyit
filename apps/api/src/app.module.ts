@@ -11,6 +11,7 @@ import { LocationsModule } from './locations/locations.module';
 import { AssetCategoriesModule } from './asset-categories/asset-categories.module';
 import { AssetModelsModule } from './asset-models/asset-models.module';
 import { AssetsModule } from './assets/assets.module';
+import { AssetTagSchemeModule } from './asset-tag-scheme/asset-tag-scheme.module';
 import { AssetAssignmentsModule } from './asset-assignments/asset-assignments.module';
 import { ArticleCategoriesModule } from './article-categories/article-categories.module';
 import { ArticlesModule } from './articles/articles.module';
@@ -61,6 +62,9 @@ import { buildLoggerParams } from './logging/logging.config';
     AssetCategoriesModule,
     AssetModelsModule,
     AssetsModule,
+    // Configurable asset-tag scheme (ADR-0063, #363): the first instance-config entity. Hosts
+    // GET/PUT /config/asset-tag-scheme and exports AssetTagSchemeService for in-create allocation.
+    AssetTagSchemeModule,
     AssetAssignmentsModule,
     ArticleCategoriesModule,
     ArticlesModule,

@@ -56,7 +56,7 @@ import {
   useUserGrants,
 } from "@/lib/api/hooks/use-users";
 import { notifyError } from "@/lib/api/notify-error";
-import { formatDate } from "@/lib/utils/format";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { ManagerField } from "./manager-field";
 
 const FORM_ID = "clone-user-form";
@@ -118,6 +118,7 @@ export function CloneUserWizard({
   source,
 }: CloneUserWizardProps) {
   const t = useTranslations("users.clone");
+  const { date } = useFormatters();
   const tf = useTranslations("users.form");
   const tc = useTranslations("common");
   const router = useRouter();
@@ -388,7 +389,7 @@ export function CloneUserWizard({
                   label:
                     assetNameById.get(a.assetId) ?? t("assets.assetFallback"),
                   meta: t("assets.assignedOn", {
-                    date: formatDate(a.assignedAt),
+                    date: date(a.assignedAt),
                   }),
                 }))}
                 selected={selectedAssignments}

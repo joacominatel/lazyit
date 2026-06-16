@@ -11,6 +11,29 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
+> **Implemented (backend, 2026-06-16, #363):** `AssetTagScheme` single-row model + `asset_tag_scheme`
+> migration (singleton-id CHECK), the `@lazyit/shared` `AssetTagSchemeSchema` / `UpdateAssetTagSchemeSchema`
+> (the running number is modelled as explicit fields, so a `{num}`-less config is unrepresentable),
+> `GET`/`PUT /config/asset-tag-scheme` (`settings:manage`), and in-create atomic allocation with bounded
+> retry-on-P2002 (`AssetTagSchemeService.allocateTag` + the `AssetsService.create` retry loop).
+>
+> **Implemented (frontend, 2026-06-16, #363):** the configuration surface lives in **Settings → Instance**
+> (`app/(app)/settings/instance`) — a `settings:manage`-gated editor (`enabled` toggle, `prefix`/`suffix`/
+> `width`/`startNumber`) with a **live preview** of the next tag rendered via the shared `renderAssetTag`,
+> backed by `useAssetTagScheme` / `useUpdateAssetTagScheme` (ADR-0020 data layer). The asset CREATE form
+> hints the next auto-tag as the `assetTag` placeholder when the scheme is enabled (the field stays
+> optional; an explicit value still wins). A setup-wizard step is intentionally OUT OF SCOPE (§4).
+>
+> **Refinement of §3 (deliberate, documented):** the shipped allocation commits the counter increment
+> **independently of** the asset-create `$transaction` — NOT inside it, as §3's original wording said.
+> The concurrency guarantee (no duplicate live tags) is preserved by the **atomic single-row increment**
+> itself, not by transaction co-location; committing the increment on its own is precisely what makes
+> "gaps accepted" and collision-ADVANCE-rather-than-spin work (a rolled-back insert must NOT un-consume
+> the number, or a retry would re-render the same colliding tag forever). §3 below has been updated to
+> describe the as-shipped design; the decision and its guarantees are unchanged. The retry guard is also
+> **target-aware** — only a P2002 on the `assets_assetTag_active_key` index advances-and-retries; a
+> collision on the sibling `assets_serial_active_key` (or any other P2002) propagates promptly.
+
 **accepted** — 2026-06-14 (CEO sign-off). Issue #363. This is lazyit's **first instance-configuration
 store** — a dedicated, single-row config entity that holds an org-wide setting (the asset-tag template)
 plus a global counter — so it sets the pattern for instance config to come. It builds on the flexible
@@ -108,24 +131,35 @@ write). Prefix/suffix are optional free text; width is an optional non-negative 
 is what lands in `Asset.assetTag` — so it is subject to the **same live-only partial-unique constraint**
 the manual tag already has (§3).
 
-### 3. Allocation — in the asset-create `$transaction`, retry on collision, **gaps accepted**
+### 3. Allocation — atomic counter increment committed independently, retry on collision, **gaps accepted**
 
 When the scheme is enabled, creating an [[asset]] that does **not** carry an explicit `assetTag`
 allocates one:
 
-- **Inside the asset-create `$transaction`.** The counter is read-and-incremented and the tag rendered
-  **within the same transaction** that inserts the asset, so two concurrent creates cannot read the same
-  number. The increment is atomic (an `UPDATE … SET nextNumber = nextNumber + 1 RETURNING`-style read, or
-  the equivalent Prisma `update` with `{ increment: 1 }`), so the counter is the single monotonic source.
-- **Retry on unique-collision.** The rendered tag still hits the **live-only partial-unique index**
-  `assets_assetTag_active_key` ([[0041-soft-delete-reuse-and-restore]]) — e.g. if a manual tag already
-  took the value the formula produced. On a P2002 collision the allocation **retries** with the next
-  counter value (bounded retries), so a clash advances rather than fails the create.
-- **Gaps are accepted.** A counter value consumed by a **rolled-back** transaction, a retried collision,
-  or a later **deleted/soft-deleted** asset is **not back-filled**. The sequence may have holes
+- **Atomic increment, committed independently of the asset-create `$transaction`.** The counter is
+  advanced by a single-row atomic `update … { increment: 1 }` (an `UPDATE … SET nextNumber = nextNumber + 1
+  RETURNING`-style read) that **commits on its own**, returning the value to allocate. Because the
+  increment is a single atomic row update, two concurrent creates always read **distinct** numbers — the
+  concurrency guarantee comes from the atomic increment, not from sharing the asset insert's transaction.
+  The increment is **deliberately NOT folded into** the asset-create `$transaction`: were it, a
+  rolled-back insert would un-consume the number, so a retry would re-render the **same** colliding tag
+  forever. Committing it independently makes each consumed value durable — exactly what "gaps accepted"
+  requires and what lets a collision ADVANCE rather than spin.
+- **Retry on a unique-collision scoped to the tag index.** The rendered tag is inserted on the asset; if
+  it hits the **live-only partial-unique index** `assets_assetTag_active_key`
+  ([[0041-soft-delete-reuse-and-restore]]) — e.g. a manual tag already took the value the formula produced
+  — the asset insert raises a P2002 and the **caller retries** with the next (already-committed) counter
+  value, bounded. The retry guard is **target-aware**: `Asset` has two live-only partial uniques (serial
+  AND assetTag), so only a P2002 whose target is the `assets_assetTag_active_key` index advances-and-
+  retries; a collision on `assets_serial_active_key` (a genuine duplicate serial) or any other P2002
+  **propagates immediately** as a prompt 409, without spinning the retry loop or burning counter values.
+- **Gaps are accepted.** A counter value consumed by a **rolled-back** insert, a retried collision, or a
+  later **deleted/soft-deleted** asset is **not back-filled**. The sequence may have holes
   (`…0041, 0043, 0044…`). This is the deliberate, documented trade-off: gap-free numbering would require
   serializing all asset creation through a single lock and reclaiming numbers on delete, which is not
-  worth it for a 5–20-person team. The counter is monotonic, not gapless.
+  worth it for a 5–20-person team. The counter is monotonic, not gapless. **Edge cases (intentional):**
+  the counter freezes with a clean 400 at the `int4` ceiling (unreachable at any realistic scale), and a
+  `startNumber` of `0` makes the first rendered tag carry the number `0`.
 
 ### 4. OFF by default — the load-bearing CEO constraint
 

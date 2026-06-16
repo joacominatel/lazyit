@@ -23,7 +23,7 @@ Conventions for application code. Data-model conventions live in [[conventions]]
 
 ## Backend (NestJS)
 
-- Organize by **module per bounded area** ([[02-domain/_MOC|Domain]]): assets, tickets,
+- Organize by **module per bounded area** ([[02-domain/_MOC|Domain]]): assets,
   access, consumables, knowledge base.
 - Use dependency injection; e.g. a single injectable `PrismaService` (next code step after
   the domain model — [[0002-nestjs-backend]], [[0003-prisma-orm]]).

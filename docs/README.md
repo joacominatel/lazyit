@@ -9,7 +9,7 @@ updated: 2026-06-13
 # lazyit — Documentation
 
 > Internal IT operations platform for small teams (5–20 people): asset inventory,
-> access management, tickets, consumables and a knowledge base. ServiceNow-grade
+> access management, consumables and a knowledge base. ServiceNow-grade
 > capability, modern and opinionated, self-hosted.
 
 This is the entry point and global **Map of Content (MOC)** for the project docs.
@@ -56,7 +56,7 @@ frontmatter, and internal references use `[[wiki-links]]`.
   `.canvas` files for now — see the gaps section.
 - **Folder indexes:** each folder has a `_MOC.md` that lists and frames its notes.
 
-## Project snapshot (as of 2026-05-25)
+## Project snapshot (as of 2026-06-16)
 
 Verified against the repo, not just the briefing:
 
@@ -64,7 +64,10 @@ Verified against the repo, not just the briefing:
 - `apps/web`: Next.js `16.2.6` + React `19.2.4`, runs on `:3000`.
 - `apps/api`: NestJS `11.0.1`, runs on `:3001`.
 - ORM: Prisma `7.8.0`; DB: PostgreSQL `18-alpine` via Docker Compose.
-- Shared: `@lazyit/shared` (`packages/shared`) — currently only exports `APP_NAME`.
+- Shared: `@lazyit/shared` (`packages/shared`) — exports the permission catalog, `Page<T>`, per-entity
+  zod schemas, service-account schemas, workflow engine contract (`schemas/workflow.ts`), Secret Manager
+  wire-DTOs and composite views, and crypto primitives via the `@lazyit/shared/crypto` subpath. See
+  `docs/01-architecture/shared-package.md`.
 
 See [[stack]] for the full picture and [[02-domain/_MOC|Domain]] for what comes next.
 
@@ -101,7 +104,7 @@ All open questions from the initial briefing are now decided (2026-05-25):
 ### Not written yet (intentional stubs)
 
 - Entity **field tables** — added once a model lands in Prisma (most now have them); still conceptual-only
-  for the not-yet-built entities (Ticket, AccessRequest — see [[entities/_MOC|Entities]]).
+  for the not-yet-built entity ([[access-request]] — see [[entities/_MOC|Entities]]).
 - **Knowledge Base v2 + Secret Manager — BUILT.** Three ADRs ratified 2026-06-11; all three are now
   fully implemented and merged:
   - **KB v2 structure** — folders (the flat [[article-category]] evolved into a hierarchy + one home

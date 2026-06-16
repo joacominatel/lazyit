@@ -30,9 +30,9 @@ import {
 } from "@/lib/api/hooks/use-article-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { useWikiLinkResolver } from "@/lib/api/hooks/use-wiki-link-resolver";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
-import { formatDate } from "@/lib/utils/format";
 import { ArticleAliasesPanel } from "../_components/article-aliases-panel";
 import { ArticleLinksPanel } from "../_components/article-links-panel";
 import { ArticleReferencesPanel } from "../_components/article-references-panel";
@@ -40,6 +40,7 @@ import { ArticleStatusBadge } from "../_components/article-status-badge";
 
 export default function ArticleDetailPage() {
   const t = useTranslations("kb");
+  const { date } = useFormatters();
   const params = useParams<{ slug: string }>();
   const router = useRouter();
   const slug = params.slug;
@@ -127,14 +128,14 @@ export default function ArticleDetailPage() {
             </span>
             <span aria-hidden>·</span>
             <span className="tabular-nums">
-              {t("detail.updated", { date: formatDate(article.updatedAt) })}
+              {t("detail.updated", { date: date(article.updatedAt) })}
             </span>
             {article.publishedAt && (
               <>
                 <span aria-hidden>·</span>
                 <span className="tabular-nums">
                   {t("detail.published", {
-                    date: formatDate(article.publishedAt),
+                    date: date(article.publishedAt),
                   })}
                 </span>
               </>

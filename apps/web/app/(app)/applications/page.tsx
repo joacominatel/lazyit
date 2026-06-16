@@ -39,10 +39,10 @@ import { useApplicationCategories } from "@/lib/api/hooks/use-application-catego
 import { useApplicationList } from "@/lib/api/hooks/use-applications";
 import { useDeleteApplication } from "@/lib/api/hooks/use-application-mutations";
 import { useUsers } from "@/lib/api/hooks/use-users";
+import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { cn } from "@/lib/utils";
-import { formatDate } from "@/lib/utils/format";
 import { StackedUserAvatars } from "./_components/stacked-user-avatars";
 
 type CriticalityFilter = "ALL" | "CRITICAL" | "NORMAL";
@@ -55,6 +55,7 @@ const FILTER_DEFAULTS = { category: "ALL", criticality: "ALL" } as const;
 
 export default function ApplicationsPage() {
   const t = useTranslations("applications");
+  const { date } = useFormatters();
   const router = useRouter();
   const canWrite = useCan("application:write");
   const canDelete = useCan("application:delete");
@@ -401,7 +402,7 @@ export default function ApplicationsPage() {
                         )}
                       </ResourceCardMeta>
                       <ResourceCardMeta label={t("list.columns.updated")}>
-                        {formatDate(application.updatedAt)}
+                        {date(application.updatedAt)}
                       </ResourceCardMeta>
                     </>
                   }
@@ -486,7 +487,7 @@ export default function ApplicationsPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground tabular-nums">
-                    {formatDate(application.updatedAt)}
+                    {date(application.updatedAt)}
                   </TableCell>
                   <TableCell className="text-right">
                     {canWrite || canDelete ? (
