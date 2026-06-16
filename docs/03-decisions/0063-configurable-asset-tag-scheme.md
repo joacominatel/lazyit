@@ -15,8 +15,14 @@ deciders: [Joaquín Minatel]
 > migration (singleton-id CHECK), the `@lazyit/shared` `AssetTagSchemeSchema` / `UpdateAssetTagSchemeSchema`
 > (the running number is modelled as explicit fields, so a `{num}`-less config is unrepresentable),
 > `GET`/`PUT /config/asset-tag-scheme` (`settings:manage`), and in-create atomic allocation with bounded
-> retry-on-P2002 (`AssetTagSchemeService.allocateTag` + the `AssetsService.create` retry loop). The
-> settings UI is the frontend follow-up.
+> retry-on-P2002 (`AssetTagSchemeService.allocateTag` + the `AssetsService.create` retry loop).
+>
+> **Implemented (frontend, 2026-06-16, #363):** the configuration surface lives in **Settings → Instance**
+> (`app/(app)/settings/instance`) — a `settings:manage`-gated editor (`enabled` toggle, `prefix`/`suffix`/
+> `width`/`startNumber`) with a **live preview** of the next tag rendered via the shared `renderAssetTag`,
+> backed by `useAssetTagScheme` / `useUpdateAssetTagScheme` (ADR-0020 data layer). The asset CREATE form
+> hints the next auto-tag as the `assetTag` placeholder when the scheme is enabled (the field stays
+> optional; an explicit value still wins). A setup-wizard step is intentionally OUT OF SCOPE (§4).
 >
 > **Refinement of §3 (deliberate, documented):** the shipped allocation commits the counter increment
 > **independently of** the asset-create `$transaction` — NOT inside it, as §3's original wording said.
