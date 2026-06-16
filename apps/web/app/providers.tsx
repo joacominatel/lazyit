@@ -5,6 +5,7 @@ import {
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query";
+import type { Session } from "next-auth";
 import type { AbstractIntlMessages } from "next-intl";
 import { NextIntlClientProvider } from "next-intl";
 import { SessionProvider } from "next-auth/react";
@@ -37,12 +38,21 @@ export function Providers({
   children,
   locale,
   messages,
+  session,
 }: {
   children: React.ReactNode;
   /** Active locale (cookie-mode, ADR-0051) — resolved server-side in the root layout. */
   locale: string;
   /** The full message catalog for `locale`, forwarded to Client Components. */
   messages: AbstractIntlMessages;
+  /**
+   * Server-resolved Auth.js session (from `auth()` in the root layout). Seeding it here makes
+   * `useSession()` return `authenticated` on the FIRST client render instead of starting in
+   * `loading` and fetching `/api/auth/session` client-side. That closes the first-paint window
+   * where SessionTokenSync hadn't yet set the Bearer token and queries fired token-less → 401
+   * (issue #498, ADR-0039).
+   */
+  session: Session | null;
 }) {
   const queryClient = getQueryClient();
 
@@ -57,7 +67,7 @@ export function Providers({
       messages={messages}
       formats={SHARED_FORMATS}
     >
-      <SessionProvider>
+      <SessionProvider session={session}>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider
             attribute="class"
