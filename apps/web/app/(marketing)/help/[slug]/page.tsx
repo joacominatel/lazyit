@@ -12,9 +12,11 @@ import { getManualPage } from "@/lib/manual/loader";
  * chips) render as literal text and the page never touches an `Article` row or a vault
  * (ADR-0062 §2/§3). Public, login-free, secret-free.
  *
- * Server Component: the active locale comes from the `NEXT_LOCALE` cookie via the server-only
- * loader, which applies the es→en fallback (ADR-0062 §4). An unknown slug → `notFound()`.
- * `force-dynamic` mirrors the index so content edits and locale switches show without a rebuild.
+ * The persistent sidebar (search + section nav) is provided by the segment `layout.tsx` (issue
+ * #560); this page renders only the content column. Server Component: the active locale comes from
+ * the `NEXT_LOCALE` cookie via the server-only loader, which applies the es→en fallback (ADR-0062
+ * §4). An unknown slug → `notFound()`. `force-dynamic` mirrors the index so content edits and locale
+ * switches show without a rebuild.
  */
 export const dynamic = "force-dynamic";
 
@@ -30,7 +32,7 @@ export default async function HelpPage({
   const t = await getTranslations("help");
 
   return (
-    <article className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-16">
+    <article className="flex w-full max-w-3xl flex-col gap-6">
       <Link
         href="/help"
         className="text-sm font-medium text-muted-foreground underline-offset-2 hover:underline"

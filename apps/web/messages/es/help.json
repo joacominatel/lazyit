@@ -1,7 +1,17 @@
 {
   "nav": {
     "title": "Ayuda",
-    "backToIndex": "Volver a Ayuda"
+    "backToIndex": "Volver a Ayuda",
+    "sidebarLabel": "Secciones de Ayuda",
+    "openMenu": "Abrir el menú de Ayuda",
+    "browse": "Explorar"
+  },
+  "search": {
+    "placeholder": "Buscar en la Ayuda…",
+    "label": "Buscar en la Ayuda",
+    "clear": "Limpiar búsqueda",
+    "noResults": "No hay páginas de ayuda que coincidan.",
+    "resultsLabel": "Resultados de búsqueda"
   },
   "index": {
     "title": "Ayuda",

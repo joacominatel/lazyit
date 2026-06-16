@@ -1,7 +1,17 @@
 {
   "nav": {
     "title": "Help",
-    "backToIndex": "Back to Help"
+    "backToIndex": "Back to Help",
+    "sidebarLabel": "Help sections",
+    "openMenu": "Open the Help menu",
+    "browse": "Browse"
+  },
+  "search": {
+    "placeholder": "Search the Help…",
+    "label": "Search the Help",
+    "clear": "Clear search",
+    "noResults": "No matching Help pages.",
+    "resultsLabel": "Search results"
   },
   "index": {
     "title": "Help",
