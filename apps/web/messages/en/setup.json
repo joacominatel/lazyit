@@ -1,0 +1,83 @@
+{
+  "title": "Set up lazyit",
+  "description": "A few quick steps to get your instance ready. This runs once.",
+  "progressLabel": "Setup progress",
+  "steps": {
+    "welcome": "Welcome",
+    "configure": "Configure",
+    "admin": "Administrator",
+    "done": "Done"
+  },
+  "error": {
+    "title": "Couldn't reach the server",
+    "description": "The setup wizard needs to talk to the lazyit API. Check that the API is running and reachable, then try again.",
+    "retry": "Retry"
+  },
+  "alreadySetUp": {
+    "title": "Already set up",
+    "description": "This instance already has an administrator. Taking you to sign in…"
+  },
+  "toast": {
+    "adminCreated": "Administrator created",
+    "adminCreatedMirrored": "Administrator created and mirrored to your IdP",
+    "adminCreateError": "Couldn't create the administrator"
+  },
+  "welcome": {
+    "question": "How do you want users to sign in to lazyit?",
+    "idpLabel": "Identity provider",
+    "zitadel": {
+      "title": "Bundled Zitadel",
+      "description": "The recommended self-hosted identity provider, set up for you. No external accounts to wire."
+    },
+    "byoi": {
+      "title": "Bring your own OIDC",
+      "description": "Point lazyit at an OIDC provider you already run (Okta, Authentik, Keycloak, Entra ID…)."
+    },
+    "continue": "Continue"
+  },
+  "configure": {
+    "zitadelReadyTitle": "Bundled Zitadel is ready",
+    "zitadelReadyBody": "Your identity provider was provisioned automatically — there is nothing to configure here. If sign-in isn't available yet, Zitadel may still be starting up; give it a moment.",
+    "byoiConfirm": "Confirm your OIDC provider is wired before continuing — the administrator you create next must be able to sign in through it.",
+    "back": "Back",
+    "continue": "Continue"
+  },
+  "byoi": {
+    "instructions": "Set these on the web app, then restart it:",
+    "copyLabel": "Copy environment variables",
+    "copied": "Copied",
+    "note": "lazyit discovers the rest from your provider. User and role management stays local — your IdP owns sign-in only."
+  },
+  "admin": {
+    "intro": "Create the first administrator. This person can manage users, access and everything else.",
+    "firstNameLabel": "First name",
+    "firstNamePlaceholder": "Ada",
+    "lastNameLabel": "Last name",
+    "lastNamePlaceholder": "Lovelace",
+    "emailLabel": "Email",
+    "emailPlaceholder": "ada@your-org.com",
+    "passwordLabel": "New password",
+    "confirmPasswordLabel": "Confirm password",
+    "passwordPlaceholder": "••••••••",
+    "roleLabel": "Role:",
+    "roleValue": "Administrator",
+    "roleLocked": "Locked for the first user",
+    "back": "Back",
+    "submit": "Create administrator",
+    "checklist": {
+      "minLength": "Must be at least 8 characters long.",
+      "maxLength": "Must be less than 70 characters long.",
+      "uppercase": "Must include an uppercase letter.",
+      "lowercase": "Must include a lowercase letter.",
+      "number": "Must include a number.",
+      "symbol": "Must include a symbol.",
+      "match": "Password confirmation matched."
+    }
+  },
+  "done": {
+    "title": "You're all set",
+    "bodyWithEmail": "<email></email> is now the administrator. Sign in through your identity provider to start using lazyit.",
+    "bodyWithoutEmail": "Your administrator account is ready. Sign in to start using lazyit.",
+    "finish": "Go to sign in"
+  }
+}
