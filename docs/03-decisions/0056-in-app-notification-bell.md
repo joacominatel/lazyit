@@ -330,7 +330,27 @@ immediate, independently-deliverable surface so the prompt exists from day one w
   no-op once a `UserKeypair` exists); the new `secret.vault_setup` `NotificationType` literal + golden
   test + web re-typecheck; the `/secrets` banner (now-deliverable, independent of the wiring).
 
-Related: #313 · #248 · #453 · [[0054-applications-workflow-engine]] · [[0048-service-accounts]] ·
+### FK refinement (2026-06-16) — `recipientUserId` is `onDelete: Cascade`, not `SetNull` (issue #470)
+
+The amendment shipped `recipientUserId` with **`onDelete: SetNull`**, copying `targetUserId`'s shape. A
+lazyit-sentinel review of PR #468 flagged the subtle consequence (issue #470): the targeted-vs-broadcast
+visibility scope (§A) reads `recipientUserId == null` as a **broadcast** to every `notification:read`
+holder. So if a user who received a **targeted** notification were ever **hard-deleted**, `SetNull` would
+flip `recipientUserId → NULL` and silently **promote** that private nudge into the admin broadcast feed —
+exactly the wrong default for a row that was scoped to one person.
+
+**Resolved by `onDelete: Cascade`** (migration `…_notification_recipient_user_fk_cascade`, one
+`ALTER … ON DELETE CASCADE` on the FK, nothing else): a targeted notification whose recipient is
+hard-deleted **has no audience, so it is DROPPED** — never broadcast. This is the right semantic for the
+*recipient* axis and is **defense-in-depth**: real user removal is **soft-delete** (the row persists, the
+FK never fires), and the only hard-delete paths (`users.service.ts` `compensateLocalCreate`,
+`config.service.ts` setup rollback) delete a *just-created* user with zero notification history. The
+notification copy also carries no secrets (INV-6 / INV-10), so this was latent, not reachable today — but
+the FK now encodes the correct intent rather than relying on that. The two FKs are intentionally
+**different**: `targetUserId` stays `SetNull` (the event survives the loss of the person it was *about*);
+`recipientUserId` is `Cascade` (the event has no reason to exist once the person it was *for* is gone).
+
+Related: #313 · #248 · #453 · #470 · [[0054-applications-workflow-engine]] · [[0048-service-accounts]] ·
 [[0046-roles-permissions-v2]] · [[0044-recent-activity-view]] · [[0034-consumables-design]] ·
 [[0033-asset-history-event-model]] · [[0031-logging-strategy]] · [[0030-list-pagination-contract]] ·
 [[0023-access-management-design]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
