@@ -20,6 +20,8 @@ import {
   groupIntoSections,
   resolvePageLocale,
 } from "./resolve";
+import { buildExcerpt, extractHeadings } from "./search";
+import type { ManualSearchEntry } from "./search";
 import type {
   ManualFrontmatter,
   ManualPage,
@@ -194,4 +196,44 @@ export async function getManualSections(): Promise<ManualSection[]> {
   return groupIntoSections(
     summaries.filter((s): s is ManualPageSummary => s !== null),
   );
+}
+
+/**
+ * Build the SIMPLE client-side search index for the active locale (ADR-0062 §6 — explicitly NOT
+ * Meilisearch; full-text search is deferred). Mirrors {@link getManualSections} (same slug union +
+ * es→en per-page fallback) but reads the full body — not just the frontmatter — so it can extract the
+ * page's headings and a short plaintext excerpt via the pure helpers in `search.ts`.
+ *
+ * The result is a small, plain-serializable array handed straight to the client `<HelpSearch>` as a
+ * prop. There is NO server endpoint and NO network call: the entire filter runs in the browser over
+ * this build-at-request-time index. SERVER-ONLY (it does disk IO + reads the locale cookie).
+ */
+export async function buildManualSearchIndex(): Promise<ManualSearchEntry[]> {
+  const requested = await activeLocale();
+
+  const slugSet = new Set<string>([
+    ...(await listSlugs(requested)),
+    ...(await listSlugs(defaultLocale)),
+  ]);
+
+  const entries = await Promise.all(
+    [...slugSet].map(async (slug): Promise<ManualSearchEntry | null> => {
+      const available = await availableLocalesForSlug(slug);
+      const resolution = resolvePageLocale(requested, available);
+      if (!resolution) return null;
+      const page = await readPage(resolution.locale, slug);
+      if (!page) return null;
+      return {
+        slug,
+        title: page.frontmatter.title,
+        section: page.frontmatter.section,
+        headings: extractHeadings(page.content),
+        excerpt: buildExcerpt(page.content),
+        resolvedLocale: resolution.locale,
+        isFallback: resolution.isFallback,
+      };
+    }),
+  );
+
+  return entries.filter((e): e is ManualSearchEntry => e !== null);
 }
