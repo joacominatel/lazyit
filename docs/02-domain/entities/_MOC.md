@@ -3,7 +3,7 @@ title: Entities — MOC
 tags: [moc, domain]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-16
 ---
 
 # Entities — Map of Content
@@ -42,11 +42,6 @@ updated: 2026-05-25
 - 🟢 [[service-account-permission]] — a service account's direct permission grants. [[0048-service-accounts]]
 - 🟢 [[service-account-audit-log]] — append-only trail of service-account lifecycle. [[0048-service-accounts]]
 
-## Tickets
-
-- ⚪ [[ticket]] — cross-cutting work item; references assets and/or users.
-- ⚪ [[ticket-comment]] — discussion thread on a ticket.
-
 ## Access
 
 - 🟢 [[application]] — a SaaS, internal app or service access is granted on.
@@ -70,8 +65,9 @@ access changes — fired **after** the [[access-grant]] commits, decoupled (the 
 
 ## Consumables
 
-- ⚪ [[consumable]] — stock-counted item (cables, mice, toner…).
-- ⚪ [[consumable-movement]] — stock in/out movement.
+- 🟢 [[consumable-category]] — user-managed grouping of consumable types.
+- 🟢 [[consumable]] — stock-counted item (cables, mice, toner…).
+- 🟢 [[consumable-movement]] — stock in/out movement.
 
 ## Knowledge Base
 
@@ -79,9 +75,9 @@ access changes — fired **after** the [[access-grant]] commits, decoupled (the 
 - 🟢 [[article-category]] — user-managed grouping of articles.
 - 🟢 [[article-version]] — append-only historical version of an article ([[0042-article-versioning-and-linking]]).
 - 🟢 [[article-link]] — links an article to an asset or application ([[0042-article-versioning-and-linking]]).
-- ⚪ [[folder]] — the flat [[article-category]] evolved: a self-referential hierarchy (`parentId`) that is an article's **one home folder**; live-only partial-unique name within a parent. [[0059-kb-folders-links-and-import]]
-- ⚪ [[article-alias]] — a nav-only symlink to an article living elsewhere (`createdAt`-only, hard-delete; never widens access). [[0059-kb-folders-links-and-import]]
-- ⚪ [[article-wiki-link]] — a materialized article↔article `[[slug]]` edge computed on save (powers backlinks + fast resolution; hard-rebuilt). [[0059-kb-folders-links-and-import]]
+- 🟢 [[folder]] — the flat [[article-category]] evolved: a self-referential hierarchy (`parentId`) that is an article's **one home folder**; live-only partial-unique name within a parent. [[0059-kb-folders-links-and-import]]
+- 🟢 [[article-alias]] — a nav-only symlink to an article living elsewhere (`createdAt`-only, hard-delete; never widens access). [[0059-kb-folders-links-and-import]]
+- 🟢 [[article-wiki-link]] — a materialized article↔article `[[slug]]` edge computed on save (powers backlinks + fast resolution; hard-rebuilt). [[0059-kb-folders-links-and-import]]
 
 ## Dashboard (derived)
 
@@ -92,7 +88,8 @@ access changes — fired **after** the [[access-grant]] commits, decoupled (the 
 The curated, ADMIN-only bell — distinct from the [[recent-activity]] view (which can't address a row).
 See [[0056-in-app-notification-bell]] · issue #313.
 
-- 🟢 [[notification]] — append-only event store of curated nudges + a per-admin read join (fan-out-on-read).
+- 🟢 [[notification]] — append-only event store of curated nudges (fan-out-on-read).
+- 🟢 [[notification-read]] — per-user read join for targeted and broadcast notifications.
 
 ## Secret Manager
 
@@ -102,9 +99,10 @@ envelope wraps a per-vault DEK to each member; capability `secret:read`/`secret:
 a wrapped DEK lets you *decrypt*. Distinct from the server-decryptable [[workflow-secret]]. See
 [[0061-secret-manager-zero-knowledge]] · issue #366.
 
-- ⚪ [[secret-vault]] — a folder vault = the crypto boundary; server-visible name + members, a random DEK never stored in clear. [[0061-secret-manager-zero-knowledge]]
-- ⚪ [[secret-item]] — a secret value inside a vault; stores only ciphertext/iv/authTag/keyVersion under the vault DEK. [[0061-secret-manager-zero-knowledge]]
-- ⚪ [[vault-membership]] — a crypto member of a vault; the row carries the DEK wrapped to the member's public key (soft-revoke v1 = drop the row). [[0061-secret-manager-zero-knowledge]]
-- ⚪ [[user-keypair]] — one keypair per User; public key in clear + private key wrapped under Argon2id(password) and again under the recovery key. [[0061-secret-manager-zero-knowledge]]
+- 🟢 [[secret-vault]] — a folder vault = the crypto boundary; server-visible name + members, a random DEK never stored in clear. [[0061-secret-manager-zero-knowledge]]
+- 🟢 [[secret-item]] — a secret value inside a vault; stores only ciphertext/iv/authTag/keyVersion under the vault DEK. [[0061-secret-manager-zero-knowledge]]
+- 🟢 [[vault-membership]] — a crypto member of a vault; the row carries the DEK wrapped to the member's public key (soft-revoke v1 = drop the row). [[0061-secret-manager-zero-knowledge]]
+- 🟢 [[user-keypair]] — one keypair per User; public key in clear + private key wrapped under Argon2id(password) and again under the recovery key. [[0061-secret-manager-zero-knowledge]]
+- 🟢 [[secret-audit-log]] — append-only trail of secret-manager operations (vault create/delete, member add/remove, item write). [[0061-secret-manager-zero-knowledge]]
 
 Model overview & order: [[02-domain/_MOC|Domain]]. Conventions: [[conventions]].
