@@ -40,7 +40,14 @@ function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/api/auth") ||
     pathname === "/login" ||
     pathname === "/setup" ||
-    pathname === "/"
+    pathname === "/" ||
+    // The Help / Manual surface is PUBLIC, login-free product documentation (ADR-0062 §3): it
+    // lives in the `(marketing)` route group, but route groups add no URL segment, so `/help`
+    // would otherwise fall through to route protection and redirect to /login. Allow `/help`
+    // and every sub-path. The first-run `/setup` gate still runs first (it short-circuits an
+    // UNCONFIGURED instance before this check), so a fresh operator is unaffected.
+    pathname === "/help" ||
+    pathname.startsWith("/help/")
   );
 }
 
