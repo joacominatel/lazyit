@@ -15,5 +15,5 @@ Shared vocabulary so docs and code use terms consistently.
   [[workflow-engine/_MOC|Applications Workflow Engine]] (Workflow, Run, Manual Task, BullMQ,
   Valkey, egress guard, transactional outbox, …).
 
-Domain-entity terms (Asset, Ticket, AccessGrant, …) are defined in
+Domain-entity terms (Asset, AccessGrant, Consumable, …) are defined in
 [[entities/_MOC|Entities]], not here.
