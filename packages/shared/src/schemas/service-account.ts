@@ -32,22 +32,31 @@ import { PermissionSchema } from "./permission";
 export const SERVICE_ACCOUNT_TOKEN_PREFIX = "lzit_sa_" as const;
 
 /**
- * Catalog permissions a SERVICE ACCOUNT may never hold (INV-SA-3, ADR-0048 Fork #3): the coarse
- * principal/authz-management verbs. Holding either makes a bot ADMIN-equivalent — `settings:manage`
- * gates the ENTIRE Service-Accounts API (self-escalate, mint backdoor bots, persist the foothold) AND
- * `PUT /config/permissions` (rewrite the human MEMBER/VIEWER matrix); `user:manage` gates `POST /users`
- * (create a human ADMIN). Code-enforced here as the source of truth so no non-human principal can ever
- * be granted them — Layer 1 of the SEC-011 fix. Layer 2 (ServicePrincipalForbiddenGuard) is the runtime
- * backstop that neutralises any pre-existing grant.
+ * Catalog permissions a SERVICE ACCOUNT may never hold (INV-SA-3, ADR-0048 Fork #3). Two reasons land a
+ * permission here: (a) it is ADMIN-equivalent, or (b) the capability is HUMAN-ONLY by design.
  *
- * Deliberately limited to these two: `accessGrant:grant` and the `:delete` family are legitimate for
- * automation bots (a CI bot revoking app access, a cleanup bot) and do not enable self-escalation.
- * Widening the set is a separate product call — add literals here and to the golden test if the team
- * later decides otherwise.
+ * (a) ADMIN-equivalent: `settings:manage` gates the ENTIRE Service-Accounts API (self-escalate, mint
+ * backdoor bots, persist the foothold) AND `PUT /config/permissions` (rewrite the human MEMBER/VIEWER
+ * matrix); `user:manage` gates `POST /users` (create a human ADMIN).
+ *
+ * (b) HUMAN-ONLY: `import:run` (ADR-0069) gates the bulk-import wizard, which is human-only by
+ * construction — the import controller carries `ServicePrincipalForbiddenGuard` (Layer 2) so a bot is
+ * 403'd outright on every route regardless of grants. A persisted `import:run` grant on an SA is
+ * therefore non-functional, but allowing it to persist is misleading; Layer-1 consistency refuses it at
+ * the edge (mirrors the #555 SA-ungrantable pattern).
+ *
+ * Code-enforced here as the source of truth so no non-human principal can ever be granted them — Layer 1
+ * of the SEC-011 fix. Layer 2 (ServicePrincipalForbiddenGuard) is the runtime backstop that neutralises
+ * any pre-existing grant.
+ *
+ * Deliberately NOT here: `accessGrant:grant` and the `:delete` family are legitimate for automation bots
+ * (a CI bot revoking app access, a cleanup bot) and do not enable self-escalation. Widening the set is a
+ * separate product call — add literals here and to the golden test if the team later decides otherwise.
  */
 export const SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS = [
   "settings:manage",
   "user:manage",
+  "import:run",
 ] as const;
 
 const UNGRANTABLE = new Set<string>(SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS);
