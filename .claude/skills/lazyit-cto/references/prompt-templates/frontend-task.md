@@ -87,6 +87,9 @@ The frontend operates under established conventions. Do not deviate without rais
 4. <Keyboard navigation if applicable>
 5. <Mobile responsiveness if applicable>
 6. <Form validation matches backend zod schema>
+7. **Public Manual updated** — if this ships or changes a user-facing capability, the matching
+   `/help` Manual page(s) are created/updated (`apps/web/content/manual/`, en + es) per
+   `docs/04-development/manual-authoring.md`. State "n/a" only if nothing an operator sees changed.
 
 ## UX expectations
 
