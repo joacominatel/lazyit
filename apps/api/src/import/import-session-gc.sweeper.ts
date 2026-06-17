@@ -12,9 +12,12 @@ export const IMPORT_GC_SWEEP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 /**
  * The migrator session GARBAGE-COLLECTOR (ADR-0069 §2, wave 4b, #635). An `ImportSession` is TRANSIENT
  * (`expiresAt` = 24h from upload) — it holds the operator's uploaded rows as transient scratch, NOT
- * audit data — so once it expires it is HARD-DELETED, cascading to its `ImportRow`s (and, by the
- * schema's `onDelete: Cascade`, its `ImportRun` ledger rows; the durable asset→import correlation
- * survives independently on each created asset's `CREATED` `AssetHistory` provenance — ADR-0069 §8/§9).
+ * audit data — so once it expires it is HARD-DELETED, cascading ONLY to its `ImportRow`s (the parsed
+ * scratch rows; `onDelete: Cascade`). The `ImportRun` ledger DOES NOT cascade and is NEVER reaped: it is
+ * the APPEND-ONLY audit-of-record (file hash, counts, conflict summary — ADR-0069 §9 / ADR-0006), and it
+ * correlates back to its session via a DURABLE PLAIN `sessionId` column (deliberately NOT an FK — see the
+ * `ImportRun` model doc), so the ledger outlives the session it describes. The asset→import correlation
+ * also survives independently on each created asset's `CREATED` `AssetHistory` provenance (§8/§9).
  *
  * Structured exactly like {@link NotificationsRetentionSweeper}: a plain `setInterval` (no
  * `@nestjs/schedule` dependency — it isn't installed), `unref`'d so it never holds the process open,
@@ -54,7 +57,8 @@ export class ImportSessionGcSweeper implements OnModuleInit, OnModuleDestroy {
 
   /**
    * One GC pass: hard-delete every expired session that is NOT mid-commit; the FK cascade reaps its
-   * `ImportRow`s and `ImportRun` ledger rows. Returns how many sessions were deleted (telemetry/tests).
+   * `ImportRow`s ONLY — the `ImportRun` ledger is NOT cascaded (durable plain `sessionId`, append-only).
+   * Returns how many sessions were deleted (telemetry/tests).
    * Re-entrancy guarded; the whole pass is try/caught so a failing sweep never aborts the app or
    * overlaps the next tick. Public so a test / operator can trigger it directly.
    */
@@ -74,7 +78,7 @@ export class ImportSessionGcSweeper implements OnModuleInit, OnModuleDestroy {
       });
       if (count > 0) {
         this.logger.log(
-          `Hard-deleted ${count} expired import session(s) (+ cascaded rows) past their 24h TTL.`,
+          `Hard-deleted ${count} expired import session(s) (+ cascaded ImportRows; ImportRun ledger preserved) past their 24h TTL.`,
         );
       }
       return count;
