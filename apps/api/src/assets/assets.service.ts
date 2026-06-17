@@ -232,7 +232,7 @@ export class AssetsService {
   async create(
     data: CreateAsset,
     principal?: Principal,
-    options?: { createdPayload?: Prisma.InputJsonValue },
+    options?: { createdPayload?: Prisma.InputJsonValue; suppressSearch?: boolean },
   ) {
     const actor = this.actor.resolveActor(principal);
     const { specs, assetTag, ...rest } = data;
@@ -291,7 +291,12 @@ export class AssetsService {
         });
         // Fire-and-forget search sync after the commit (ADR-0035): un-awaited, never throws, no-op
         // when Meili is disabled. Outside the transaction so a search outage can't roll back the write.
-        this.search.upsert('assets', projectAsset(asset));
+        // `suppressSearch` (ADR-0069 §10): the bulk migrator commit skips THIS asset's per-row upsert
+        // and runs ONE post-bulk reconcile instead — scoped to the import's own writes, so a concurrent
+        // non-import write (an article, a user…) is NEVER dropped (no process-wide suppression).
+        if (!options?.suppressSearch) {
+          this.search.upsert('assets', projectAsset(asset));
+        }
         return asset;
       } catch (err) {
         // Only an AUTO-allocated tag may advance-and-retry on a unique collision. An EXPLICIT tag
