@@ -56,8 +56,21 @@ export interface OffboardingData {
   grants: OffboardGrantRow[];
   /** True while any of the underlying reads are still loading — drive skeletons off this. */
   isLoading: boolean;
-  /** True when the user holds nothing to return and has no access to revoke. */
+  /**
+   * True when ANY of the four underlying reads failed. Critical: a failed read collapses `assets`/
+   * `grants` to empty (`data ?? []`), so without this flag a fetch error is indistinguishable from
+   * "user holds nothing" — and the Return Act would under-report. Surfaces MUST render an explicit
+   * error state (never `isEmpty`) when this is true and must NOT present an act built from partial
+   * data. See issue #601.
+   */
+  isError: boolean;
+  /**
+   * True ONLY when every read succeeded and the user genuinely holds nothing to return and has no
+   * access to revoke. Never true while loading or on error.
+   */
   isEmpty: boolean;
+  /** Refetch all four underlying reads — wire to a "retry" control in the error state. */
+  refetch: () => void;
 }
 
 /** Join an AssetModel's manufacturer + name into a single display string. */
@@ -148,10 +161,29 @@ export function useOffboardingData(
     assetsQuery.isLoading ||
     applicationsQuery.isLoading;
 
+  // Any failed read makes the resolved lists untrustworthy (they silently collapse to empty), so a
+  // single failure poisons the whole view — better to refuse than to under-report on a compliance act.
+  const isError =
+    assignmentsQuery.isError ||
+    grantsQuery.isError ||
+    assetsQuery.isError ||
+    applicationsQuery.isError;
+
+  const refetch = () => {
+    void assignmentsQuery.refetch();
+    void grantsQuery.refetch();
+    void assetsQuery.refetch();
+    void applicationsQuery.refetch();
+  };
+
   return {
     assets,
     grants,
     isLoading,
-    isEmpty: !isLoading && assets.length === 0 && grants.length === 0,
+    isError,
+    // Genuinely-empty requires success: never conflate a failed read with "nothing to return".
+    isEmpty:
+      !isLoading && !isError && assets.length === 0 && grants.length === 0,
+    refetch,
   };
 }
