@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     template: "%s · lazyit",
   },
   description:
-    "Self-hosted IT asset, access, ticket and knowledge management for small teams.",
+    "Self-hosted IT asset, access, consumable and knowledge management for small teams.",
 };
 
 export default async function RootLayout({

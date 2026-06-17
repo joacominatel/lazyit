@@ -68,7 +68,7 @@ async function bootstrap() {
     const config = new DocumentBuilder()
       .setTitle('lazyit API')
       .setDescription(
-        'Self-hosted IT asset, access, ticket and knowledge-base API.',
+        'Self-hosted IT asset, access, consumable and knowledge-base API.',
       )
       .setVersion('0.1')
       // addBearerAuth() only DEFINES the scheme; addSecurityRequirements applies it GLOBALLY so every
