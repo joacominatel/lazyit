@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -6,7 +7,7 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { createHash } from 'node:crypto';
-import type { ImportEntity } from '@lazyit/shared';
+import type { ImportEntity, ImportMapping } from '@lazyit/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { isQueueUnavailableError } from '../queue/redis-connection';
 import {
@@ -171,5 +172,37 @@ export class ImportSessionService {
         raw: r.raw as Record<string, string>,
       })),
     };
+  }
+
+  /**
+   * Persist the operator's confirmed column/value/FK mapping (ADR-0069 §4 map step) onto an owner's
+   * session and advance it to MAPPED. Owner-scoped (no IDOR — `updateMany` with `ownerId`, 404 on no
+   * match). STATUS-GATED: a mapping can only be confirmed once the file is PARSED (rows materialized,
+   * headers known) or re-confirmed while still MAPPED — never on a PENDING/PARSING session (no headers
+   * yet) nor after the dry-run plan is frozen (DRY_RUN/COMMITTING/COMMITTED), where re-mapping would
+   * silently invalidate the resolution plan. The mapping is validated against `ImportMappingSchema` at
+   * the controller boundary; here we store the already-typed blob.
+   */
+  async setMapping(
+    sessionId: string,
+    ownerId: string,
+    mapping: ImportMapping,
+  ): Promise<void> {
+    const session = await this.prisma.importSession.findFirst({
+      where: { id: sessionId, ownerId },
+      select: { status: true },
+    });
+    if (!session) {
+      throw new NotFoundException(`Import session ${sessionId} not found`);
+    }
+    if (session.status !== 'PARSED' && session.status !== 'MAPPED') {
+      throw new ConflictException(
+        `Import session ${sessionId} cannot be mapped in status ${session.status}; the file must be parsed first, and a mapping can no longer change once the dry-run plan is frozen.`,
+      );
+    }
+    await this.prisma.importSession.updateMany({
+      where: { id: sessionId, ownerId },
+      data: { mapping: mapping as object, status: 'MAPPED' },
+    });
   }
 }
