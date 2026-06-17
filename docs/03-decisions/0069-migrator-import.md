@@ -185,6 +185,33 @@ The in-app `/help` Manual gets an Importer page in **en + es** in the same chang
 including the bilingual UX copy for the conflict menu, ghost-restore, partial-success, and the
 "history is phase-2" notice.
 
+## Implementation notes (wave 4a — commit engine, #633)
+
+The write path (§8/§10) landed in `apps/api/src/import/import-commit.{service,worker}.ts`. Two
+decisions worth recording, both consistent with the ADR:
+
+- **The commit worker is IN-PROCESS, not a sandboxed forked child** (unlike the parse worker). The
+  commit MUST route every write through the Nest-DI `AssetsService.create()` to preserve the CREATED
+  history, actor attribution and asset-tag invariants — a DI-less forked child can't reach those. The
+  bomb-isolation that justified a forked *parse* child does not apply at commit time (the file bytes
+  were parsed and discarded in wave 2; the commit replays already-stored `ImportRow`s). Mirrors the
+  `WorkflowRunWorker` pattern. Concurrency 1; idempotent so a BullMQ retry replays cleanly.
+- **Create-new references use audit-honest phase-1 defaults for required-no-default fields** the
+  resolution plan can't carry: a created `Location` gets `type: OTHER`, a created `AssetModel` gets
+  `manufacturer: 'Unknown'` (the natural-key value is the only create input the dry-run captures). The
+  operator can edit these later; nothing is silently dropped. Upgrade path: thread richer per-reference
+  fields through the plan when the wizard lets the operator fill them.
+- **Side-effect suppression** is a depth-counter bracket on `SearchService.runSuppressed(fn)` — the
+  per-row Meili upserts are muted for the whole bulk and ONE `rebuildIndex('assets', …)` reconcile runs
+  after (§10), without touching the `AssetsService.create()` hot path's signature beyond an optional
+  CREATED-event provenance payload (`{ source:'import', importRunId }`, §8 — no history-enum migration).
+- **Row-level `skipped`** is in the `ImportCounts`/`ImportRun` shape but stays 0 in phase 1: the wave-3
+  plan only expresses a *reference-level* skip (drop the FK, keep the row), not an operator "skip these
+  N rows" outcome. Reserved for a later wave.
+
+Out of this wave (per #633): HTTP controllers, the `import:run` permission, runtime authz, the GC
+sweeper, and the frontend — all wave 4b.
+
 ## Consequences
 
 - **Positive:** ships the #1 real bootstrap need (bulk asset onboarding); proves every hard subsystem
