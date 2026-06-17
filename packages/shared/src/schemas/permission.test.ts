@@ -43,8 +43,18 @@ describe("Permission catalog", () => {
     expect(new Set(PERMISSIONS).size).toBe(PERMISSIONS.length);
   });
 
-  test("every domain contributes at least a `:read` permission", () => {
+  test("every domain contributes at least one permission, and every read-surfaced domain a `:read`", () => {
+    // Every domain must contribute at least one catalog literal.
     for (const domain of PERMISSION_DOMAINS) {
+      expect(PERMISSIONS.some((p) => p.startsWith(`${domain}:`))).toBe(true);
+    }
+    // Every domain EXCEPT `import` exposes a `:read` (the readable surface of the app). `import`
+    // (the guided Migrator, ADR-0069) is deliberately RUN-ONLY: it has a single coarse `import:run`
+    // verb and no browse surface — an import session is owner-scoped transient scratch, not a listable
+    // domain — so it intentionally has no `import:read`.
+    const RUN_ONLY_DOMAINS = new Set<string>(["import"]);
+    for (const domain of PERMISSION_DOMAINS) {
+      if (RUN_ONLY_DOMAINS.has(domain)) continue;
       expect(PERMISSIONS).toContain(`${domain}:read` as Permission);
     }
   });
@@ -158,6 +168,27 @@ describe("Secret permissions (human Secret Manager, ADR-0061)", () => {
       expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain(p);
       expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain(p);
     }
+  });
+});
+
+describe("Import permission (guided bulk Migrator, ADR-0069 §11)", () => {
+  test("the `import` domain is in the catalog with a SINGLE coarse `:run` verb", () => {
+    expect(PERMISSION_DOMAINS).toContain("import");
+    expect(PERMISSIONS).toContain("import:run" as Permission);
+    // Run-only: no read/write/delete — the import wizard's only catalog gate is `import:run`; the
+    // session is owner-scoped transient scratch (no browse surface) and the actual writes are
+    // AND-checked at commit against the TARGET entity permissions.
+    expect(PERMISSIONS).not.toContain("import:read" as Permission);
+    expect(PERMISSIONS).not.toContain("import:write" as Permission);
+    expect(PERMISSIONS).not.toContain("import:delete" as Permission);
+  });
+
+  test("SAFE DEFAULT: import:run is ADMIN-only — MEMBER/VIEWER hold none", () => {
+    // A coarse verb (neither `:read` nor `:write`) is ADMIN-only by construction of the seed — it
+    // never enters the MEMBER/VIEWER default sets. This MUST hold so a non-admin can't bulk-import.
+    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain("import:run" as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain("import:run" as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain("import:run" as Permission);
   });
 });
 
