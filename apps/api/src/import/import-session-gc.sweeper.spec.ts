@@ -8,17 +8,30 @@ jest.mock('../../generated/prisma/client', () => ({
 
 /**
  * The migrator session GC sweep (ADR-0069 §2, #635). Proves the sweep hard-deletes sessions past their
- * 24h TTL (cascading to rows + runs via the schema FK), never reaps a mid-commit (COMMITTING) session,
- * is re-entrancy guarded, is best-effort (a DB error never throws), and is a no-op under NODE_ENV=test.
+ * 24h TTL (cascading ONLY to `ImportRow`s via the schema FK — the `ImportRun` ledger is NOT cascaded and
+ * the sweeper never touches it: ADR-0069 §9 / ADR-0006 append-only), never reaps a mid-commit
+ * (COMMITTING) session, is re-entrancy guarded, is best-effort (a DB error never throws), and is a no-op
+ * under NODE_ENV=test.
  */
 describe('ImportSessionGcSweeper', () => {
   let importSession: { deleteMany: jest.Mock };
+  let importRun: { deleteMany: jest.Mock };
   let sweeper: ImportSessionGcSweeper;
 
   beforeEach(() => {
     importSession = { deleteMany: jest.fn().mockResolvedValue({ count: 3 }) };
-    const prisma = { importSession };
+    // Present on the mock only to PROVE the sweeper never calls it (the ledger must survive GC).
+    importRun = { deleteMany: jest.fn() };
+    const prisma = { importSession, importRun };
     sweeper = new ImportSessionGcSweeper(prisma as never);
+  });
+
+  it('NEVER deletes ImportRun ledger rows — the append-only audit-of-record survives session GC (ADR-0069 §9)', async () => {
+    await sweeper.sweep();
+    expect(importSession.deleteMany).toHaveBeenCalledTimes(1);
+    // The ledger is correlated by a durable plain `sessionId` (NOT a cascading FK), so reaping a session
+    // can never reap its run. The sweeper must touch ONLY ImportSession (its rows cascade); the run stays.
+    expect(importRun.deleteMany).not.toHaveBeenCalled();
   });
 
   it('hard-deletes sessions past expiresAt, excluding any mid-commit (COMMITTING) session', async () => {
