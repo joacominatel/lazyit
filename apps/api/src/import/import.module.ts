@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ImportSessionService } from './import-session.service';
+import { ImportDryRunService } from './dry-run.service';
 import {
   IMPORT_PARSE_QUEUE,
   parseChildHeapMb,
@@ -14,7 +15,7 @@ import {
  * (SEC-002, mirroring the article-import harness). Concurrency 1 keeps memory pressure bounded.
  *
  * No controllers yet: the upload/map/dry-run/commit HTTP surface + the `import:run` permission land
- * in wave 4. The session service is driven by a method + the worker for now.
+ * in wave 4. The session + dry-run services are driven by methods + the worker for now.
  */
 @Module({
   imports: [
@@ -31,7 +32,7 @@ import {
       ],
     }),
   ],
-  providers: [ImportSessionService],
-  exports: [ImportSessionService],
+  providers: [ImportSessionService, ImportDryRunService],
+  exports: [ImportSessionService, ImportDryRunService],
 })
 export class ImportModule {}

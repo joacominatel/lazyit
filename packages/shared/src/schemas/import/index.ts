@@ -3,5 +3,7 @@ export * from "./session";
 export * from "./mapping";
 export * from "./resolution";
 export * from "./result";
+export * from "./dry-run";
 export * from "./coerce";
+export * from "./coerce-row";
 export * from "./descriptor";
