@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { ImportController } from './import.controller';
 import { ImportSessionService } from './import-session.service';
 import { ImportDryRunService } from './dry-run.service';
 import { ImportCommitService } from './import-commit.service';
 import { ImportCommitWorker } from './import-commit.worker';
+import { ImportSessionGcSweeper } from './import-session-gc.sweeper';
 import { AssetsModule } from '../assets/assets.module';
 import { AssetModelsModule } from '../asset-models/asset-models.module';
 import { LocationsModule } from '../locations/locations.module';
@@ -24,8 +26,11 @@ import { IMPORT_COMMIT_QUEUE } from './import-commit.constants';
  *   asset-tag invariants) which a DI-less forked child can't reach. There is no file-bomb surface at
  *   commit time (the bytes were discarded after parse), so the parse child's isolation isn't needed.
  *
- * The HTTP controllers + the `import:run` permission + runtime authz land in wave 4b; the session,
- * dry-run and commit services are driven by methods + the workers (and by Jest) for now.
+ * Wave 4b (#635) adds the HTTP surface ({@link ImportController}), the `import:run` permission + the
+ * runtime per-target authz at commit, and the expired-session GC sweeper ({@link ImportSessionGcSweeper}).
+ * The `import:run` route guard + the human-only guard live on the controller; the runtime AND-check
+ * lives in {@link ImportCommitService}. The `PermissionResolverService` it injects comes from the
+ * `@Global()` AuthModule (no explicit import needed).
  */
 @Module({
   imports: [
@@ -47,11 +52,13 @@ import { IMPORT_COMMIT_QUEUE } from './import-commit.constants';
     // In-process commit queue — no `processors:` array (the @Processor class is a DI provider below).
     BullModule.registerQueue({ name: IMPORT_COMMIT_QUEUE }),
   ],
+  controllers: [ImportController],
   providers: [
     ImportSessionService,
     ImportDryRunService,
     ImportCommitService,
     ImportCommitWorker,
+    ImportSessionGcSweeper,
   ],
   exports: [ImportSessionService, ImportDryRunService, ImportCommitService],
 })
