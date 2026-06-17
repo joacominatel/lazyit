@@ -158,6 +158,7 @@ export function SecretChipReveal({
             type="button"
             onClick={handleCopy}
             title={t("chip.copy")}
+            aria-label={t("chip.copy")}
             className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
           >
             {copied ? (
@@ -170,6 +171,7 @@ export function SecretChipReveal({
             type="button"
             onClick={mask}
             title={t("chip.hide")}
+            aria-label={t("chip.hide")}
             className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
           >
             <EyeSlashIcon className="size-3" aria-hidden />
