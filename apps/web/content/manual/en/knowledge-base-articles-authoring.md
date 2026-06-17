@@ -1,0 +1,76 @@
+---
+title: Articles and authoring
+category: knowledge-base
+subcategory: articles-authoring
+order: 1
+---
+
+# Articles and authoring
+
+The Knowledge Base is where your team keeps its **runbooks, procedures and notes** — your own
+estate's documentation. It is separate from this Manual: the Manual documents *lazyit itself*, the
+Knowledge Base documents *your servers, your apps, your processes*.
+
+An **article** is a single Markdown document. You write it in plain Markdown, preview it as you go,
+and publish it when it is ready.
+
+## Writing an article
+
+Open the Knowledge Base and choose **New article**. The form is short:
+
+- **Title** — the article's name. The URL **slug** is derived from the title automatically (a short
+  `lowercase-with-hyphens` form); you do not type it.
+- **Category** — the article's home folder. Every article lives in **exactly one** folder. If you
+  have not created any folders yet, use the **+** button to make one without leaving the form. See
+  [Folders and access](/help/knowledge-base-folders-access).
+- **Excerpt** *(optional)* — a one-line summary shown in listings.
+- **Content** — the body, in Markdown.
+
+The editor is a plain Markdown editor with a live preview — there is no rich-text/WYSIWYG mode by
+design. Fenced code blocks are syntax-highlighted on the published page, each with a copy button,
+and a ` ```mermaid ` block renders as a diagram. You write raw Markdown; the formatting appears when
+the article is viewed.
+
+While typing, two helpers offer autocomplete:
+
+- Typing `[[` starts a **wiki-link** to another article — see
+  [Linking and discovery](/help/knowledge-base-linking-discovery).
+- Secret references to the Secret Manager are also supported inline; you only ever see and pick a
+  handle, never a secret value.
+
+## Drafts and publishing
+
+Every new article is born a **Draft**. A draft is **private to its author** — no one else can see
+it, and a teammate who guesses its address gets an "article not found" page, not a permission error,
+so the draft's very existence stays hidden.
+
+Publish from the article itself:
+
+- **Publish** — makes the article **Published** and visible to the team (subject to its folder's
+  access rules). The first publish stamps a publish date that is never cleared.
+- **Unpublish** — moves a published article **back to Draft**, hiding it from everyone but the
+  author again.
+
+A **Draft** badge marks unpublished articles on their page. Editing the body never changes the
+published/draft state — publishing and unpublishing are their own explicit actions.
+
+## Editing and deleting
+
+- **Edit** opens the same form on the existing article. Saving updates the body; it does not change
+  whether the article is published. Every edit that changes the title, body or excerpt is captured
+  in the article's history — see [Versioning](/help/knowledge-base-versioning).
+- **Delete** removes the article from the Knowledge Base. This is a **soft delete**: the row is
+  retained, not erased, so it can be restored from the database if needed. Its slug is also freed so
+  a new article can reuse the name.
+
+## Who can do what
+
+Authoring is gated by Knowledge Base permissions, and the API additionally enforces **authorship**:
+
+- Reading the Knowledge Base needs the article-read permission, which every role holds by default.
+- Creating, importing, editing, publishing, unpublishing and linking need the article-write
+  permission — and **only the article's author** may edit, publish or delete their own article. A
+  permission holder who is not the author still gets a permission error.
+- Administrators can always see every article, including drafts, regardless of folder restrictions.
+
+See [Roles and permissions](/help/permissions) for the full capability set.
