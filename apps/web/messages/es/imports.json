@@ -1,0 +1,148 @@
+{
+  "nav": "Importador",
+  "title": "Importador masivo",
+  "subtitle": "Carga tu inventario existente desde un archivo CSV o JSON — revisa cada fila antes de escribir nada.",
+  "gate": {
+    "title": "El importador es solo para administradores",
+    "description": "La importación masiva requiere el permiso import:run, otorgado a los administradores por defecto. Consulta con un administrador si necesitas cargar un inventario."
+  },
+  "steps": {
+    "upload": "Subir",
+    "summary": "Resumen",
+    "mapping": "Mapeo",
+    "preview": "Vista previa",
+    "conflicts": "Conflictos",
+    "commit": "Confirmar"
+  },
+  "common": {
+    "back": "Atrás",
+    "startOver": "Empezar de nuevo"
+  },
+  "upload": {
+    "title": "Elige un archivo",
+    "description": "La importación de activos ya está disponible. La importación de usuarios, consumibles e historial llegará más adelante.",
+    "entityLabel": "¿Qué vas a importar?",
+    "entityAsset": "Activos",
+    "fileLabel": "Archivo CSV o JSON",
+    "fileHint": "Exporta tu hoja de cálculo como CSV (UTF-8) o proporciona un arreglo JSON. .xlsx no se acepta — expórtalo a CSV primero.",
+    "chooseFile": "Elige un archivo para continuar.",
+    "submit": "Subir y analizar",
+    "uploading": "Subiendo…",
+    "parsing": "Analizando tu archivo…",
+    "parsingHint": "Tu archivo se está analizando en segundo plano. Suele tardar unos segundos."
+  },
+  "summary": {
+    "title": "Archivo analizado",
+    "description": "Confirma la estructura detectada antes de mapear las columnas.",
+    "rowCount": "Registros",
+    "encoding": "Codificación",
+    "delimiter": "Delimitador",
+    "delimiterNone": "n/d (JSON)",
+    "bom": "Marca de orden de bytes",
+    "bomYes": "Presente",
+    "bomNo": "Ausente",
+    "headers": "Columnas detectadas",
+    "noHeaders": "No se detectaron columnas en este archivo.",
+    "noRows": "No se encontraron registros en este archivo. Revísalo y súbelo de nuevo.",
+    "continue": "Mapear columnas"
+  },
+  "mapping": {
+    "title": "Mapea las columnas a los campos",
+    "description": "Asocia cada campo de lazyit a una columna de origen, o fija un valor constante para todas las filas. Los campos obligatorios deben mapearse o fijarse antes de continuar.",
+    "field": {
+      "name": "Nombre",
+      "serial": "Número de serie",
+      "assetTag": "Etiqueta de activo",
+      "status": "Estado",
+      "model": "Modelo",
+      "location": "Ubicación"
+    },
+    "constantColumn": "O una constante",
+    "required": "Obligatorio",
+    "selectColumn": "Selecciona una columna",
+    "noColumn": "— sin mapear —",
+    "constantPlaceholder": "Fija un valor para todas las filas",
+    "fkNote": "Se resuelve a un registro existente por nombre (o se crea al confirmar si lo eliges).",
+    "statusTitle": "Valores de estado",
+    "statusDescription": "Asocia cada valor de estado encontrado en tu archivo a un estado de lazyit. Los valores sin mapear se resuelven durante la validación.",
+    "statusUnmapped": "— dejar tal cual —",
+    "missingRequired": "Mapea o fija un valor para: {fields}.",
+    "submit": "Ejecutar simulación",
+    "running": "Ejecutando simulación…"
+  },
+  "preview": {
+    "title": "Vista previa de la simulación",
+    "description": "No se ha escrito nada. Revisa los resultados por fila y resuelve los conflictos a continuación.",
+    "counts": {
+      "total": "Total",
+      "valid": "Válidas",
+      "invalid": "Inválidas"
+    },
+    "rowsTitle": "Filas",
+    "rowIndex": "Fila {index}",
+    "rowValid": "Válida",
+    "rowInvalid": "Inválida",
+    "fieldError": "{field}: {message}",
+    "wholeRowError": "{message}",
+    "showAllRows": "Mostrar las {count} filas",
+    "collapseRows": "Mostrar menos",
+    "allInvalid": "Ninguna fila es válida. Vuelve y revisa el mapeo o el archivo.",
+    "tagCollisionTitle": "Colisiones de etiqueta de activo",
+    "tagCollisionDescription": "{count, plural, one {# fila lleva una etiqueta de activo que ya existe en un activo vigente} other {# filas llevan una etiqueta de activo que ya existe en un activo vigente}}. Resuelve la etiqueta duplicada en tu archivo antes de confirmar esas filas.",
+    "tagCollisionRow": "Fila {index}: etiqueta {tag}",
+    "continue": "Resolver conflictos"
+  },
+  "conflicts": {
+    "title": "Resolver conflictos",
+    "description": "Para cada registro referenciado que encontramos abajo, elige cómo resolverlo. Nunca elegimos por ti cuando hay más de una coincidencia.",
+    "none": "No se encontraron conflictos. Continúa para confirmar.",
+    "entityField": "{entity} · {field}",
+    "value": "Valor: {value}",
+    "blastRadius": "{count, plural, one {Afecta a # fila} other {Afecta a # filas}}",
+    "sampleRows": "p. ej. filas {rows}",
+    "ambiguous": "Varias coincidencias — debes elegir una.",
+    "candidateCategory": "Categoría: {category}",
+    "outcome": {
+      "match": "Vincular a un registro existente",
+      "restore": "Restaurar un registro archivado",
+      "create": "Crear un registro nuevo",
+      "skip": "Omitir — dejar sin vincular"
+    },
+    "outcomeLabel": "Cómo resolver",
+    "chooseCandidate": "Elige un registro",
+    "createNote": "Se crea un registro nuevo al confirmar con valores por defecto de fase 1 que puedes editar después.",
+    "skipNote": "Las filas que referencian este valor se importan sin el vínculo.",
+    "unresolved": "Resuelve todos los conflictos antes de continuar: quedan {count}.",
+    "submit": "Guardar y confirmar",
+    "saving": "Guardando plan…"
+  },
+  "commit": {
+    "running": "Confirmando tus filas…",
+    "runningHint": "Esto se ejecuta en segundo plano y puede tardar un momento con archivos grandes. Puedes mantener esta página abierta.",
+    "resultTitle": "Importación completada",
+    "counts": {
+      "committed": "Creadas",
+      "failed": "Fallidas",
+      "skipped": "Omitidas"
+    },
+    "partialNote": "Algunas filas no se pudieron importar. Las filas correctas se conservan — corrige los fallos de abajo y vuelve a ejecutar si es necesario.",
+    "allCommitted": "Todas las filas se importaron correctamente.",
+    "runId": "Ejecución de importación n.º {id}",
+    "importMore": "Importar otro archivo",
+    "viewAssets": "Ver activos"
+  },
+  "errors": {
+    "upload": "No pudimos iniciar la importación. Revisa el tipo y el tamaño del archivo e inténtalo de nuevo.",
+    "tooLarge": "Ese archivo es demasiado grande para importarlo. Divídelo o reduce su tamaño e inténtalo de nuevo.",
+    "forbidden": "No tienes permiso para ejecutar importaciones.",
+    "notFound": "Esta sesión de importación ya no existe. Puede haber expirado (las sesiones duran 24 horas). Inicia una importación nueva.",
+    "conflict": "Esta importación no puede continuar desde su paso actual. Empieza de nuevo.",
+    "parse": "No pudimos analizar este archivo. Asegúrate de que sea CSV válido (UTF-8) o un arreglo JSON, y súbelo de nuevo.",
+    "mapping": "No pudimos guardar el mapeo. Revisa los campos obligatorios e inténtalo de nuevo.",
+    "dryRun": "La simulación falló. Vuelve y revisa el mapeo, luego inténtalo de nuevo.",
+    "plan": "No pudimos guardar el plan de resolución. Inténtalo de nuevo.",
+    "commit": "No se pudo iniciar la confirmación. Puede que te falte un permiso de escritura para un registro que crea el plan.",
+    "result": "No pudimos cargar el resultado de la importación. Actualiza para reintentar.",
+    "expired": "Esta sesión de importación expiró. Inicia una importación nueva."
+  }
+}
