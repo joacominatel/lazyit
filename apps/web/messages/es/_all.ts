@@ -13,6 +13,7 @@ import help from "./help.json";
 import reports from "./reports.json";
 import kb from "./kb.json";
 import locations from "./locations.json";
+import marketing from "./marketing.json";
 import nav from "./nav.json";
 import notifications from "./notifications.json";
 import settings from "./settings.json";
@@ -25,6 +26,7 @@ import workflow from "./workflow.json";
 const messages = {
   common,
   nav,
+  marketing,
   shared,
   dashboard,
   assets,
