@@ -116,6 +116,10 @@ export class SearchService {
   /**
    * Add or replace a document in an index (Meili upsert by primary key). Fire-and-forget: returns
    * immediately, never throws, and logs (CRITICAL) on failure. No-op when disabled.
+   *
+   * NOTE (ADR-0069 §10): there is NO process-wide write suppression here. The bulk migrator commit
+   * suppresses ONLY its own per-row asset upserts via `AssetsService.create({ suppressSearch: true })`
+   * and runs one post-bulk reconcile — so a concurrent non-import write is never silently dropped.
    */
   upsert(index: SearchIndex, doc: SearchDocument): void {
     if (!this.client) return;
