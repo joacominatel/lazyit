@@ -80,3 +80,12 @@ legitimate choice. Administrator, by contrast, is never editable.
 > control as a general feature — if a role can read assets, it can read all assets. (The Knowledge
 > Base folders and the Secret Manager vaults are the two deliberate exceptions, where access is
 > scoped to a folder or a vault.)
+
+## More in this section
+
+- [Roles](/help/users-permissions-roles) — the three fixed roles and how they're assigned.
+- [Permission configuration](/help/users-permissions-permission-configuration) — editing the
+  Member/Viewer permission sets.
+- [Service accounts](/help/users-permissions-service-accounts) — scoped, non-human API credentials.
+- [User lifecycle](/help/users-permissions-user-lifecycle) — create, clone, offboard and restore
+  people.

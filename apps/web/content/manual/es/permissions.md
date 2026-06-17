@@ -82,3 +82,13 @@ eliminar es una decisión legítima. El Administrador, en cambio, nunca es edita
 > registro como función general — si un rol puede leer activos, puede leer todos los activos. (Las
 > carpetas de la Base de Conocimiento y las bóvedas del Gestor de Secretos son las dos excepciones
 > deliberadas, donde el acceso se acota a una carpeta o a una bóveda.)
+
+## Más en esta sección
+
+- [Roles](/help/users-permissions-roles) — los tres roles fijos y cómo se asignan.
+- [Configuración de permisos](/help/users-permissions-permission-configuration) — editar los conjuntos
+  de permisos de Miembro y Lector.
+- [Cuentas de servicio](/help/users-permissions-service-accounts) — credenciales de API no humanas y
+  acotadas.
+- [Ciclo de vida del usuario](/help/users-permissions-user-lifecycle) — crear, clonar, dar de baja y
+  restaurar personas.
