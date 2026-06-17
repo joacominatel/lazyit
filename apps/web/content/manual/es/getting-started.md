@@ -1,15 +1,15 @@
 ---
-title: Primeros pasos
+title: Configuración inicial
 order: 1
 category: getting-started
 subcategory: initial-setup
 ---
 
-# Primeros pasos
+# Configuración inicial
 
-Bienvenido a lazyit — una herramienta autoalojada de inventario y accesos para equipos de IT
-pequeños. Esta página te guía por el primer arranque: elegir cómo inician sesión las personas, crear
-el primer administrador y dar de alta a tu equipo.
+Esta página te guía por el primer arranque de una instancia nueva de lazyit: elegir cómo inician
+sesión las personas, crear el primer administrador y dar de alta a tu equipo. ¿Empiezas con lazyit?
+Lee primero [Introducción](/help/getting-started-introduction).
 
 > Este Manual es la documentación propia del producto, publicada junto con el código y servida desde
 > una página pública, sin inicio de sesión. Es distinto de la Base de Conocimiento: el Manual
@@ -68,8 +68,9 @@ muestra como una insignia bloqueada, no como un campo editable.
 
 - Con el **inicio de sesión integrado**, aquí también defines una **contraseña inicial**, con una
   lista de verificación en vivo de las reglas de la contraseña. lazyit define esa contraseña en el
-  servicio de inicio de sesión integrado para que el nuevo administrador pueda entrar. Se le pedirá
-  que elija la suya en el primer inicio de sesión.
+  servicio de inicio de sesión integrado para que el nuevo administrador pueda entrar de inmediato —
+  a este primer administrador no se le obliga a cambiarla en el primer inicio de sesión (ese cambio
+  obligatorio aplica a los miembros del equipo que agregues después).
 - Con **tu propio proveedor**, no se pide ni se envía ninguna contraseña — tu proveedor es el dueño
   de la credencial.
 
@@ -79,30 +80,13 @@ El asistente confirma que se creó el administrador y te lleva a la **página de
 cuenta nueva aún no tiene sesión — inicia sesión como ese administrador para empezar. Una vez dentro,
 aparecen los controles de administrador.
 
-## Dar de alta al resto del equipo
-
-Tras la configuración, un administrador agrega a los miembros del equipo desde el área de
-**Usuarios**. Usa **Nuevo usuario** para abrir el formulario de alta completo, que recoge:
-
-- **Identidad** — correo, nombre y apellido, y campos opcionales como el nombre de usuario y el
-  responsable.
-- **Credencial de inicio de sesión** — con el **inicio de sesión integrado**, defines una
-  **contraseña temporal** de un solo uso para entregársela a la persona; ella elige la suya en el
-  primer inicio de sesión. lazyit nunca la almacena — se define en el servicio de inicio de sesión y
-  se reemplaza cuando el usuario inicia sesión. Con **tu propio proveedor**, esto queda oculto; tu
-  proveedor es el dueño de la credencial.
-- **Ventaja inicial (opcional)** — puedes asignar un activo o conceder acceso a una aplicación a la
-  persona nueva directamente desde el formulario de creación.
-
-Después de crear el usuario, lazyit muestra la contraseña temporal **una sola vez** para que puedas
-entregarla — no se vuelve a mostrar.
-
-> Si una persona inicia sesión a través de tu proveedor de identidad antes de darla de alta en
-> lazyit, lazyit puede aprovisionar su cuenta automáticamente en ese primer inicio de sesión y
-> vincularla a un registro coincidente por correo verificado.
-
 ## Qué sigue
 
+- **Da de alta a tu equipo** — una vez que inicies sesión como administrador, consulta
+  [Usuarios y equipo](/help/getting-started-users-team) para agregar personas, entregar contraseñas
+  temporales y entender qué ocurre en el primer inicio de sesión.
+- **Cambia el idioma** — lazyit viene en inglés y español; consulta
+  [Idiomas](/help/getting-started-languages) para cambiarlo.
 - **Permisos** — consulta [Permisos](/help/permissions) para saber quién puede hacer qué y cómo
   ajustar lo que pueden hacer los miembros y los lectores.
 - **Gestor de Secretos** — consulta [Gestor de Secretos](/help/secret-manager) para conocer las
