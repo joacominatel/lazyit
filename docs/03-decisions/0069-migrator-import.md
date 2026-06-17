@@ -187,8 +187,8 @@ including the bilingual UX copy for the conflict menu, ghost-restore, partial-su
 
 ## Implementation notes (wave 4a — commit engine, #633)
 
-The write path (§8/§10) landed in `apps/api/src/import/import-commit.{service,worker}.ts`. Two
-decisions worth recording, both consistent with the ADR:
+The write path (§8/§10) landed in `apps/api/src/import/import-commit.{service,worker}.ts`. Several
+decisions worth recording, all consistent with the ADR:
 
 - **The commit worker is IN-PROCESS, not a sandboxed forked child** (unlike the parse worker). The
   commit MUST route every write through the Nest-DI `AssetsService.create()` to preserve the CREATED
@@ -201,10 +201,27 @@ decisions worth recording, both consistent with the ADR:
   `manufacturer: 'Unknown'` (the natural-key value is the only create input the dry-run captures). The
   operator can edit these later; nothing is silently dropped. Upgrade path: thread richer per-reference
   fields through the plan when the wizard lets the operator fill them.
-- **Side-effect suppression** is a depth-counter bracket on `SearchService.runSuppressed(fn)` — the
-  per-row Meili upserts are muted for the whole bulk and ONE `rebuildIndex('assets', …)` reconcile runs
-  after (§10), without touching the `AssetsService.create()` hot path's signature beyond an optional
-  CREATED-event provenance payload (`{ source:'import', importRunId }`, §8 — no history-enum migration).
+- **Side-effect suppression is SCOPED to the import's own asset writes** (§10): each commit `create()`
+  is passed `suppressSearch: true` so it skips ITS OWN per-row Meili upsert, and ONE
+  `rebuildIndex('assets', …)` reconcile runs after the bulk. There is **no process-wide suppression** —
+  an earlier global `SearchService` depth-counter was retired because it silently dropped EVERY
+  concurrent non-import write (articles, users…) for the duration of a multi-second commit while the
+  post-commit reconcile only rebuilt `assets`. The `create()` signature gains an optional
+  CREATED-event provenance payload (`{ source:'import', sessionId, rowIndex }`, §8/§9 — no history-enum
+  migration).
+- **Integrity hardening (wave-4a review).** A rigorous PR review tightened the write path before merge,
+  all within the ADR: **(a)** `enqueueCommit`/`commit` are status-gated — a non-`DRY_RUN` (and
+  non-resuming-`COMMITTING`) session is rejected with `ConflictException`, and the enqueue uses a
+  deterministic `jobId = sessionId` so a double-enqueue can't mint a second `ImportRun` + duplicate
+  assets. **(b)** The `ImportRun` ledger is written **once, after the loop, with final counts** (true
+  append-only per [[0006-soft-delete-and-auditing]]) — never inserted-zeroed-then-updated, so a
+  mid-batch worker throw never leaves stale counts; asset→import correlation rides the stable
+  `sessionId` stamped into CREATED provenance (not the autoincrement run id, unknown until after the
+  loop). **(c)** The two-write `create()`→`markRow('COMMITTED')` window is closed: on resume, before
+  re-creating a non-COMMITTED row we probe the CREATED provenance for an asset already created for
+  `(sessionId, rowIndex)` and reconcile the row instead of duplicating. **(d)** `createReference` is now
+  **find-or-create by natural key** (live-row lookup first) — idempotent across the `attempts:3` retry
+  budget — plus a per-run **negative memo** so a doomed create is attempted once, not per dependent row.
 - **Row-level `skipped`** is in the `ImportCounts`/`ImportRun` shape but stays 0 in phase 1: the wave-3
   plan only expresses a *reference-level* skip (drop the FK, keep the row), not an operator "skip these
   N rows" outcome. Reserved for a later wave.
