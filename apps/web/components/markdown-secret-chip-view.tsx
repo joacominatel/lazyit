@@ -154,6 +154,7 @@ export function SecretChip({ handle }: { handle?: string }) {
           type="button"
           onClick={() => setRevealing(true)}
           title={t("chip.reveal")}
+          aria-label={t("chip.reveal")}
           className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
         >
           <EyeIcon className="size-3" aria-hidden />

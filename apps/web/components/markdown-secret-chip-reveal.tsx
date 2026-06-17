@@ -11,7 +11,10 @@ import { useEffect, useRef, useState } from "react";
 import { useVaultDek } from "@/app/(app)/secrets/_components/use-vault-dek";
 import { useSecretSession } from "@/app/(app)/secrets/_components/secret-session";
 import { UnlockGate } from "@/app/(app)/secrets/_components/unlock-gate";
-import { copyText } from "@/lib/secret-manager/clipboard";
+import {
+  CLIPBOARD_CLEAR_MS,
+  copyTextWithAutoClear,
+} from "@/lib/secret-manager/clipboard";
 import { openItem } from "@/lib/secret-manager/crypto";
 import {
   Dialog,
@@ -72,6 +75,8 @@ export function SecretChipReveal({
   const [copyFailed, setCopyFailed] = useState(false);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const maskTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // #607: cancel handle for the pending best-effort clipboard auto-clear from the last copy.
+  const clipboardClearRef = useRef<(() => void) | undefined>(undefined);
 
   function decrypt(dek: Uint8Array) {
     try {
@@ -109,6 +114,8 @@ export function SecretChipReveal({
     }
     return () => {
       clearTimeout(maskTimerRef.current);
+      // #607: cancel any pending clipboard auto-clear when the chip unmounts.
+      clipboardClearRef.current?.();
       setPlaintext(undefined);
     };
     // Mount-only: ensureDek/decrypt are stable enough for a one-shot; re-running would re-decrypt.
@@ -117,10 +124,14 @@ export function SecretChipReveal({
 
   async function handleCopy() {
     if (!plaintext) return;
-    // SECW-06: copyText reports failure (insecure context — no clipboard API) instead of silently
+    // #607: copy, then schedule a BEST-EFFORT clipboard auto-clear (compare-then-clear) so the plaintext
+    // does not linger in the OS clipboard indefinitely — mirroring the on-screen auto-mask posture.
+    // SECW-06: the helper still reports failure (insecure context — no clipboard API) instead of silently
     // no-opping. On failure, surface a "select & copy manually" hint rather than a false success.
-    const ok = await copyText(plaintext);
+    clipboardClearRef.current?.(); // cancel any prior pending clear before re-arming
+    const { ok, cancel } = await copyTextWithAutoClear(plaintext);
     if (ok) {
+      clipboardClearRef.current = cancel;
       setCopyFailed(false);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -158,6 +169,7 @@ export function SecretChipReveal({
             type="button"
             onClick={handleCopy}
             title={t("chip.copy")}
+            aria-label={t("chip.copy")}
             className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
           >
             {copied ? (
@@ -170,10 +182,17 @@ export function SecretChipReveal({
             type="button"
             onClick={mask}
             title={t("chip.hide")}
+            aria-label={t("chip.hide")}
             className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
           >
             <EyeSlashIcon className="size-3" aria-hidden />
           </button>
+          {/* #607: subtle best-effort "copied — clears in Ns" hint (see clipboard.ts for the limits). */}
+          {copied ? (
+            <span className="ml-0.5 text-[0.65rem] text-muted-foreground">
+              {t("chip.copiedClears", { seconds: CLIPBOARD_CLEAR_MS / 1000 })}
+            </span>
+          ) : null}
           {/* SECW-06: clipboard unavailable (insecure context) — tell the user to copy manually.
               The value above is `select-all`, so a manual selection still works. */}
           {copyFailed ? (

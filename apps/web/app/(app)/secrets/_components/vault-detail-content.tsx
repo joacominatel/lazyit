@@ -37,7 +37,10 @@ import { ApiError } from "@/lib/api/client";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useUsers } from "@/lib/api/hooks/use-users";
-import { copyText } from "@/lib/secret-manager/clipboard";
+import {
+  CLIPBOARD_CLEAR_MS,
+  copyTextWithAutoClear,
+} from "@/lib/secret-manager/clipboard";
 import {
   openItem,
   sealItem,
@@ -125,7 +128,12 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
   const [addMemberOpen, setAddMemberOpen] = useState(false);
 
   return (
-    <div className="space-y-8">
+    // #616: cap the content to a centered column matching the app's other detail views
+    // (users/applications/locations all use `mx-auto max-w-4xl`). A secret row is a compact object;
+    // letting it span a wide monitor reads poorly and leaves the screen feeling empty. The column
+    // keeps one-item and many-item vaults both looking intentional. Frontend-only — no change to the
+    // decrypt/data flow.
+    <div className="mx-auto max-w-4xl space-y-8">
       <PageHeader
         title={
           vaultLoading ? (
@@ -287,9 +295,17 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const maskTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // #607: cancel handle for the pending best-effort clipboard auto-clear from the last copy.
+  const clipboardClearRef = useRef<(() => void) | undefined>(undefined);
 
-  // Cleanup the auto-mask timer on unmount.
-  useEffect(() => () => clearTimeout(maskTimerRef.current), []);
+  // Cleanup the auto-mask timer + any pending clipboard auto-clear on unmount.
+  useEffect(
+    () => () => {
+      clearTimeout(maskTimerRef.current);
+      clipboardClearRef.current?.();
+    },
+    [],
+  );
 
   // SECW-04 (lens1): when the session locks (isUnlocked → false), immediately cancel the pending auto-mask
   // timer and re-mask any revealed value. An explicit Lock must re-hide every revealed item at once.
@@ -338,10 +354,14 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
 
   async function handleCopy() {
     if (!plaintext) return;
-    // SECW-06: copyText reports failure (insecure context — no clipboard API) instead of silently
+    // #607: copy, then schedule a BEST-EFFORT clipboard auto-clear (compare-then-clear) so the plaintext
+    // does not linger in the OS clipboard indefinitely — mirroring the on-screen auto-mask posture.
+    // SECW-06: the helper still reports failure (insecure context — no clipboard API) instead of silently
     // no-opping. On failure, prompt the user to select & copy the value manually (it is `select-all`).
-    const ok = await copyText(plaintext);
+    clipboardClearRef.current?.(); // cancel any prior pending clear before re-arming
+    const { ok, cancel } = await copyTextWithAutoClear(plaintext);
     if (ok) {
+      clipboardClearRef.current = cancel;
       setCopyFailed(false);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -349,6 +369,17 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
       setCopyFailed(true);
     }
   }
+
+  // a11y (#606): the reveal/mask action's label depends on membership + reveal state. Compute it once so
+  // both `title` (hover tooltip) and `aria-label` (accessible name) share a single source of truth.
+  const revealLabel =
+    membershipState === "not-member"
+      ? t("items.notMember")
+      : membershipState === "loading"
+        ? t("items.preparingKey")
+        : plaintext !== undefined
+          ? t("items.mask")
+          : t("items.reveal");
 
   return (
     <li className="flex items-center gap-3 rounded-lg bg-card p-3 ring-1 ring-foreground/10">
@@ -371,6 +402,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
                 type="button"
                 onClick={handleCopy}
                 title={t("items.copy")}
+                aria-label={t("items.copy")}
                 className="shrink-0 text-muted-foreground hover:text-foreground"
               >
                 {copied ? (
@@ -379,6 +411,13 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
                   <ClipboardIcon className="size-3.5" aria-hidden />
                 )}
               </button>
+              {/* #607: a subtle "copied — clears in Ns" hint. The clear is best-effort (see clipboard.ts);
+                  this signals the intent without promising a guarantee the browser may not honour. */}
+              {copied ? (
+                <span className="text-xs text-muted-foreground">
+                  {t("items.copiedClears", { seconds: CLIPBOARD_CLEAR_MS / 1000 })}
+                </span>
+              ) : null}
               {/* SECW-06: clipboard unavailable (insecure context). Prompt manual copy — the value
                   above is `select-all`, so a manual selection still works. */}
               {copyFailed ? (
@@ -411,19 +450,14 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
 
       {/* Row actions */}
       <div className="flex shrink-0 items-center gap-1">
+        {/* a11y (#606): icon-only button — carry the same i18n string in `aria-label` so screen-reader
+            and keyboard users get a name (a `title` alone is not a reliable accessible name). */}
         <button
           type="button"
           onClick={handleReveal}
           disabled={membershipState !== "member"}
-          title={
-            membershipState === "not-member"
-              ? t("items.notMember")
-              : membershipState === "loading"
-                ? t("items.preparingKey")
-                : plaintext !== undefined
-                  ? t("items.mask")
-                  : t("items.reveal")
-          }
+          title={revealLabel}
+          aria-label={revealLabel}
           className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
         >
           {plaintext !== undefined ? (
@@ -439,6 +473,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
               type="button"
               onClick={() => setEditOpen(true)}
               title={t("items.edit")}
+              aria-label={t("items.edit")}
               className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <PencilIcon className="size-4" aria-hidden />
@@ -447,6 +482,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
               type="button"
               onClick={() => setDeleteOpen(true)}
               title={t("items.delete")}
+              aria-label={t("items.delete")}
               className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
             >
               <TrashIcon className="size-4" aria-hidden />
@@ -536,7 +572,9 @@ function MemberRow({
             onClick={() => setConfirmOpen(true)}
             // SM-WEB-06: explain WHY the button is disabled when it's the last member, instead of the stale
             // "Remove access" tooltip that implies the action is available.
+            // a11y (#606): mirror the same string into `aria-label` so this icon-only button has a name.
             title={membersCount <= 1 ? t("members.cannotRemoveLast") : t("members.revoke")}
+            aria-label={membersCount <= 1 ? t("members.cannotRemoveLast") : t("members.revoke")}
             className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-40"
             disabled={membersCount <= 1}
           >

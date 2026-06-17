@@ -51,8 +51,12 @@ Open a vault and choose **Add secret**. Each secret has:
 - a **Secret value** — the credential itself.
 
 The value is encrypted in your browser before it is stored. To read a secret later, open the vault and
-choose **Reveal value**; **Copy value** puts it on your clipboard. You can edit a secret's label or
-handle, replace its value, or delete it.
+choose **Reveal value**; **Copy value** puts it on your clipboard. A revealed value hides itself again
+after a few seconds, and a copied value is **cleared from the clipboard automatically after about 30
+seconds** so the plaintext does not linger after you paste it. This auto-clear is **best-effort**: your
+browser may not allow it (for example over plain HTTP, or if another app or a clipboard manager has
+already captured the value), so treat it as a convenience, not a guarantee — paste promptly. You can
+edit a secret's label or handle, replace its value, or delete it.
 
 ## Adding and revoking members
 

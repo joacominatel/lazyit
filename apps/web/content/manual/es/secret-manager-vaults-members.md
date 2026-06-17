@@ -52,8 +52,13 @@ Abre una bóveda y elige **Agregar secreto**. Cada secreto tiene:
 - un **valor secreto** — la credencial en sí.
 
 El valor se cifra en tu navegador antes de almacenarse. Para leer un secreto más tarde, abre la bóveda y
-elige **Revelar valor**; **Copiar valor** lo coloca en tu portapapeles. Puedes editar la etiqueta o el
-identificador de un secreto, reemplazar su valor o eliminarlo.
+elige **Revelar valor**; **Copiar valor** lo coloca en tu portapapeles. Un valor revelado se vuelve a
+ocultar a los pocos segundos, y un valor copiado se **borra del portapapeles automáticamente a los 30
+segundos aproximadamente** para que el texto plano no quede ahí después de pegarlo. Este borrado
+automático es de **mejor esfuerzo**: tu navegador puede no permitirlo (por ejemplo sobre HTTP plano, o si
+otra app o un gestor de portapapeles ya capturó el valor), así que considéralo una comodidad, no una
+garantía — pega cuanto antes. Puedes editar la etiqueta o el identificador de un secreto, reemplazar su
+valor o eliminarlo.
 
 ## Agregar y revocar miembros
 
