@@ -4,6 +4,7 @@ export * from "./mapping";
 export * from "./resolution";
 export * from "./result";
 export * from "./dry-run";
+export * from "./wire";
 export * from "./coerce";
 export * from "./coerce-row";
 export * from "./descriptor";
