@@ -1840,8 +1840,10 @@ model ImportSession {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // ImportRow cascade-deletes with the session (transient scratch). ImportRun does NOT — it is the
+  // append-only audit ledger and survives session GC (it correlates back via the durable `sessionId`
+  // plain column, not an FK), so there is no `runs` back-relation here. See the ImportRun model doc.
   rows ImportRow[]
-  runs ImportRun[]
 
   @@index([ownerId])
   @@index([expiresAt])
@@ -1876,12 +1878,17 @@ model ImportRow {
 /// Migrator import — the APPEND-ONLY audit ledger of a commit (ADR-0069 §9, #627). Records who/what/
 /// when, the counts and conflict summary, and the file HASH (never contents) for audit + a future undo
 /// correlation id. Append-only (ADR-0006): autoincrement id, `createdAt` ONLY — no updatedAt/deletedAt.
-/// `sessionId` keeps the FK (a run belongs to its session); `actorId` is SetNull so the ledger survives
-/// the actor's deletion. NOT in `SOFT_DELETABLE_MODELS`.
+/// `sessionId` is a DURABLE PLAIN STRING — deliberately NOT an FK to ImportSession: the session is
+/// transient (24h TTL, GC-hard-deleted) but this ledger must SURVIVE that deletion (ADR-0006: an
+/// append-only ledger is never deleted). A cascading FK would let the session GC reap the ledger, so the
+/// correlation is kept as a retained value (the asset→import correlation also rides the CREATED-event
+/// `sessionId` provenance — ADR-0069 §8/§9). `actorId` is SetNull so the ledger survives the actor's
+/// deletion. NOT in `SOFT_DELETABLE_MODELS`.
 model ImportRun {
-  id        Int           @id @default(autoincrement())
+  id        Int    @id @default(autoincrement())
+  // Durable correlation to the originating session. NOT an FK (see model doc): the value is retained
+  // after the session row is GC-deleted, so the ledger outlives its transient session.
   sessionId String
-  session   ImportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   entity    ImportEntity
   // Who ran the commit (ADR-0022). SetNull: the audit row survives the actor's deletion. @db.Uuid.
   actorId String? @db.Uuid
