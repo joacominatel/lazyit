@@ -150,6 +150,15 @@ describe("CreateServiceAccountSchema — INV-SA-3 ceiling (SEC-011)", () => {
     ).toBe(false);
   });
 
+  test("rejects import:run (human-only by design — ADR-0069; the import controller forbids bots)", () => {
+    expect(
+      CreateServiceAccountSchema.safeParse({
+        name: "evil-bot",
+        permissions: ["import:run"],
+      }).success,
+    ).toBe(false);
+  });
+
   test("still accepts a normal (non-meta) grant set — guard against over-blocking", () => {
     expect(
       CreateServiceAccountSchema.safeParse({
