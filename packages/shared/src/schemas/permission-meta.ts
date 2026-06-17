@@ -142,6 +142,14 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
     pillar: "inventory",
     tier: "delete",
   },
+  "import:run": {
+    // The guided bulk Migrator (ADR-0069). A coarse verb (the import wizard's route gate), ADMIN-only
+    // by default — bulk-creating estate is an admin-level action, and the commit ALSO AND-checks the
+    // target write permissions at runtime. Bucketed under Inventory: phase 1 imports assets.
+    label: "Run bulk imports",
+    pillar: "inventory",
+    tier: "coarse",
+  },
   // ── Access ─────────────────────────────────────────────────────────────────
   "application:read": { label: "View applications", pillar: "access", tier: "view" },
   "application:write": {
@@ -292,6 +300,7 @@ export const CAPABILITY_IDS = [
   "inventory.view",
   "inventory.edit",
   "inventory.delete",
+  "inventory.import",
   // Access
   "application.view",
   "application.edit",
@@ -385,6 +394,18 @@ export const CAPABILITIES: readonly Capability[] = [
       "category:delete",
       "location:delete",
     ],
+  },
+  {
+    // The guided bulk Migrator (ADR-0069). Above-default tier (coarse) — the ⚠ admin-level marker —
+    // and on its own toggle because it is a distinct, consequential capability (bulk-creating estate).
+    // The commit ALSO requires the target write permissions at runtime, so granting this alone does
+    // not bypass the per-entity write gates.
+    id: "inventory.import",
+    label: "Run bulk imports",
+    description:
+      "Use the guided Migrator to bulk-import assets from a CSV/JSON file. Also requires the relevant write permissions (assets, models, categories, locations), checked per row at commit.",
+    pillar: "inventory",
+    permissions: ["import:run"],
   },
   // ── Access ─────────────────────────────────────────────────────────────────
   {
