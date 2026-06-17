@@ -8,6 +8,10 @@ import type {
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
+import {
+  LIKE_ESCAPE_CHAR,
+  escapeLikePattern,
+} from '../common/escape-like-pattern';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** AssetStatus enum values, in schema order — used to zero-fill the `byStatus` buckets. */
@@ -262,7 +266,8 @@ export class DashboardService {
    *
    * `q` is matched case-insensitively (`ILIKE`) against the row summary and the resolved actor display
    * name; the wildcards wrap the bound value, so the user text stays a parameter (no LIKE-metachar
-   * injection into the query structure). The `[from, to)` window is closed-open on `occurredAt`.
+   * injection into the query structure). LIKE metachars in `q` are escaped + paired with `ESCAPE '\'`
+   * so a literal `%`/`_`/`\` matches literally (issue #593). The `[from, to)` window is closed-open.
    */
   private buildActivityWhere(query: RecentActivityQuery): Prisma.Sql {
     const conditions: Prisma.Sql[] = [];
@@ -292,9 +297,11 @@ export class DashboardService {
       );
     }
     if (query.q !== undefined) {
-      const pattern = `%${query.q}%`;
+      // Escape LIKE metachars (`%`, `_`, `\`) in the user text so they match literally, then pair
+      // the bound pattern with `ESCAPE '\'` (issue #593). Without this, `q="50%"` matches every row.
+      const pattern = `%${escapeLikePattern(query.q)}%`;
       conditions.push(
-        Prisma.sql`(ra."summary" ILIKE ${pattern} OR (u."firstName" || ' ' || u."lastName") ILIKE ${pattern})`,
+        Prisma.sql`(ra."summary" ILIKE ${pattern} ESCAPE ${LIKE_ESCAPE_CHAR} OR (u."firstName" || ' ' || u."lastName") ILIKE ${pattern} ESCAPE ${LIKE_ESCAPE_CHAR})`,
       );
     }
 
