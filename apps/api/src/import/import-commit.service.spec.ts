@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
   ImportMappingSchema,
   ImportResolutionPlanSchema,
@@ -66,6 +66,7 @@ interface FixtureRow {
 interface PrismaState {
   session: {
     id: string;
+    status: string;
     entity: 'ASSET';
     mapping: unknown;
     resolutionPlan: unknown;
@@ -73,6 +74,8 @@ interface PrismaState {
     rows: FixtureRow[];
   } | null;
   user?: { id: string } | null;
+  /** Stand-in for AssetHistory rows the resume-detect probe (`assetExistsForRow`) looks up. */
+  assetHistory?: { eventType: string; payload: Record<string, unknown> }[];
 }
 
 /** A Prisma double recording every write so the spec can assert the contract. */
@@ -134,6 +137,30 @@ function makePrisma(state: PrismaState) {
     asset: {
       findMany: async () => assets,
     },
+    // The resume-detect probe: matches a CREATED import event by (sessionId, rowIndex) (fix 2).
+    assetHistory: {
+      findFirst: async (args: any) => {
+        const conds: any[] = args.where.AND ?? [];
+        const want: Record<string, unknown> = {};
+        for (const c of conds) want[c.payload.path[0]] = c.payload.equals;
+        const hit = (state.assetHistory ?? []).find(
+          (h) =>
+            h.eventType === args.where.eventType &&
+            h.payload.source === want.source &&
+            h.payload.sessionId === want.sessionId &&
+            h.payload.rowIndex === want.rowIndex,
+        );
+        return hit ? { id: 1 } : null;
+      },
+    },
+    // Find-or-create natural-key probes (fix 3): default to "not found" so create() runs; a test can
+    // seed an existing row by overriding these doubles.
+    location: {
+      findFirst: async () => null,
+    },
+    assetModel: {
+      findFirst: async () => null,
+    },
   };
 }
 
@@ -165,9 +192,13 @@ function makeRefService(prefix: string) {
   };
 }
 
-/** A search double with a REAL suppression counter, recording upserts + reconciles. */
+/**
+ * A search double recording upserts + reconciles. There is NO process-wide suppression here anymore
+ * (it was retired — see fix 1): per-row suppression now rides `AssetsService.create({ suppressSearch })`,
+ * so the commit service must never call `search.upsert` directly during the bulk; the reconcile runs
+ * once after via `rebuildIndex`.
+ */
 function makeSearch(enabled = true) {
-  let depth = 0;
   const upserts: any[] = [];
   const reconciles: any[] = [];
   return {
@@ -176,16 +207,7 @@ function makeSearch(enabled = true) {
     get enabled() {
       return enabled;
     },
-    runSuppressed: async (fn: () => Promise<any>) => {
-      depth += 1;
-      try {
-        return await fn();
-      } finally {
-        depth -= 1;
-      }
-    },
     upsert: (_index: string, doc: any) => {
-      if (depth > 0) return; // mirrors the real suppression gate
       upserts.push(doc);
     },
     rebuildIndex: async (_index: string, docs: any[]) => {
@@ -200,7 +222,9 @@ function makeService(state: PrismaState, doubles?: any) {
   const models = doubles?.models ?? makeRefService('model');
   const locations = doubles?.locations ?? makeRefService('location');
   const search = doubles?.search ?? makeSearch();
-  const queue = { add: jest.fn(async () => ({})) };
+  const queue = {
+    add: jest.fn(async (_name: string, _data: unknown, _opts: any) => ({})),
+  };
   const service = new ImportCommitService(
     queue as any,
     prisma as any,
@@ -225,10 +249,15 @@ const ASSET_MAPPING = mapping({
   ],
 });
 
-function sessionWith(rows: FixtureRow[], resolutionPlan: ImportResolutionPlan): PrismaState {
+function sessionWith(
+  rows: FixtureRow[],
+  resolutionPlan: ImportResolutionPlan,
+  status = 'DRY_RUN',
+): PrismaState {
   return {
     session: {
       id: 'sess-1',
+      status,
       entity: 'ASSET',
       mapping: ASSET_MAPPING,
       resolutionPlan,
@@ -254,13 +283,17 @@ describe('ImportCommitService.commit', () => {
     expect(result.committed).toBe(2);
     expect(result.failed).toBe(0);
     expect(assets.create).toHaveBeenCalledTimes(2);
-    // Every create stamps { source:'import', importRunId } into the CREATED event payload (§8).
-    for (const call of assets._calls) {
+    // Every create stamps { source:'import', sessionId, rowIndex } into the CREATED event payload and
+    // suppresses its own per-row search upsert (§8/§9/§10). The provenance uses the STABLE sessionId,
+    // not the autoincrement run id (which doesn't exist until after the loop).
+    assets._calls.forEach((call: { data: any; options: any }, i: number) => {
       expect(call.options.createdPayload).toEqual({
         source: 'import',
-        importRunId: result.importRunId,
+        sessionId: 'sess-1',
+        rowIndex: i,
       });
-    }
+      expect(call.options.suppressSearch).toBe(true);
+    });
     expect(assets._calls[0].data.status).toBe('OPERATIONAL');
     expect(assets._calls[1].data.status).toBe('RETIRED');
     expect(prisma._rowStatuses.get(1)?.status).toBe('COMMITTED');
@@ -442,8 +475,8 @@ describe('ImportCommitService.commit', () => {
       ],
       plan({ conflicts: [] }),
     );
-    // The fake AssetsService doesn't call search.upsert (the real one does, inside runSuppressed);
-    // assert no upsert escaped and exactly one reconcile ran.
+    // The real AssetsService suppresses its own per-row upsert when passed `suppressSearch:true`; the
+    // commit service itself never upserts during the bulk. Assert no upsert escaped + one reconcile ran.
     const { service, search } = makeService(state);
 
     await service.commit('sess-1', OWNER);
@@ -477,5 +510,112 @@ describe('ImportCommitService.commit', () => {
     noPlan.session!.resolutionPlan = null;
     const { service: svc2 } = makeService(noPlan);
     await expect(svc2.commit('sess-1', OWNER)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  // ===== Integrity fixes (wave-4a review) ======================================================
+
+  it('resume: create() landed but markRow threw → the asset is NOT re-created (no duplicate) [fix 2]', async () => {
+    // Simulate the dual-write window: row 0 was created in a prior attempt (its CREATED provenance
+    // exists) but its markRow('COMMITTED') never landed, so the row is still 'VALID'. On resume the
+    // commit must DETECT the existing asset and reconcile the row to COMMITTED — never re-create it.
+    const state = sessionWith(
+      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+      plan({ conflicts: [] }),
+    );
+    state.assetHistory = [
+      { eventType: 'CREATED', payload: { source: 'import', sessionId: 'sess-1', rowIndex: 0 } },
+    ];
+    const { service, assets, prisma } = makeService(state);
+
+    const result = await service.commit('sess-1', OWNER);
+
+    expect(assets.create).not.toHaveBeenCalled(); // no duplicate asset minted
+    expect(result.committed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(prisma._rowStatuses.get(1)?.status).toBe('COMMITTED'); // row reconciled
+  });
+
+  it('commit() rejects a non-DRY_RUN session with ConflictException (no re-commit) [fix 4]', async () => {
+    const committed = sessionWith(
+      [{ id: 1, rowIndex: 0, status: 'COMMITTED', raw: { Name: 'A', Status: 'active' } }],
+      plan({ conflicts: [] }),
+      'COMMITTED',
+    );
+    const { service, prisma } = makeService(committed);
+
+    await expect(service.commit('sess-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
+    // It never wrote a second ImportRun ledger row.
+    expect(prisma._runs).toHaveLength(0);
+  });
+
+  it('enqueueCommit rejects a non-DRY_RUN session and never enqueues, with a deterministic jobId [fix 4]', async () => {
+    const committed = sessionWith(
+      [{ id: 1, rowIndex: 0, status: 'COMMITTED', raw: { Name: 'A', Status: 'active' } }],
+      plan({ conflicts: [] }),
+      'COMMITTED',
+    );
+    const { service, queue } = makeService(committed);
+
+    await expect(service.enqueueCommit('sess-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
+    expect(queue.add).not.toHaveBeenCalled();
+
+    // A DRY_RUN session DOES enqueue, with jobId === sessionId (BullMQ dedup of concurrent enqueues).
+    const dryRun = sessionWith(
+      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+      plan({ conflicts: [] }),
+    );
+    const { service: svc2, queue: q2 } = makeService(dryRun);
+    await svc2.enqueueCommit('sess-1', OWNER);
+    expect(q2.add).toHaveBeenCalledTimes(1);
+    expect(q2.add.mock.calls[0][2].jobId).toBe('sess-1');
+  });
+
+  it('ImportRun counts are never zeroed/stale after a mid-batch throw (ledger written once, after the loop) [fix 5]', async () => {
+    const state = sessionWith(
+      [
+        { id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } },
+        { id: 2, rowIndex: 1, status: 'VALID', raw: { Name: 'B', Status: 'active' } },
+      ],
+      plan({ conflicts: [] }),
+    );
+    const prisma = makePrisma(state);
+    // Force an UNEXPECTED orchestration fault mid-batch: the row-status write throws on row 2. The
+    // catch path's markRow throws too, so the fault escapes the loop and commit() rejects.
+    const realUpdate = prisma.importRow.update;
+    prisma.importRow.update = async (args: any) => {
+      if (args.where.id === 2) throw new Error('db blip mid-batch');
+      return realUpdate(args);
+    };
+    const { service } = makeService(state, { prisma });
+
+    await expect(service.commit('sess-1', OWNER)).rejects.toThrow('db blip mid-batch');
+    // The ledger is written ONCE, AFTER the loop — a mid-batch throw means it is NEVER written, so
+    // there is no row left holding misleading zeroed counts (true append-only, ADR-0006).
+    expect(prisma._runs).toHaveLength(0);
+  });
+
+  it('createReference is find-or-create: an existing live ref by natural key is reused, not re-created [fix 3]', async () => {
+    const state = sessionWith(
+      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active', Location: 'HQ' } }],
+      plan({
+        conflicts: [
+          { entity: 'Location', field: 'locationId', normalizedValue: 'HQ', outcome: 'create', targetId: null },
+        ],
+      }),
+    );
+    const prisma = makePrisma(state);
+    // A live Location named 'HQ' already exists (e.g. created by a prior retried run) — find-or-create
+    // must REUSE it rather than minting a duplicate (Location.name is not unique, so nothing else would
+    // stop the dupe). Idempotency across the attempts:3 retry budget (ADR-0069 §9).
+    prisma.location.findFirst = (async () => ({
+      id: 'clocexistinghq0000000001',
+    })) as unknown as typeof prisma.location.findFirst;
+    const { service, assets, locations } = makeService(state, { prisma });
+
+    const result = await service.commit('sess-1', OWNER);
+
+    expect(result.committed).toBe(1);
+    expect(locations.create).not.toHaveBeenCalled(); // reused, not re-created
+    expect(assets._calls[0].data.locationId).toBe('clocexistinghq0000000001');
   });
 });
