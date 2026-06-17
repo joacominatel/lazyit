@@ -37,7 +37,10 @@ import { ApiError } from "@/lib/api/client";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useUsers } from "@/lib/api/hooks/use-users";
-import { copyText } from "@/lib/secret-manager/clipboard";
+import {
+  CLIPBOARD_CLEAR_MS,
+  copyTextWithAutoClear,
+} from "@/lib/secret-manager/clipboard";
 import {
   openItem,
   sealItem,
@@ -292,9 +295,17 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const maskTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // #607: cancel handle for the pending best-effort clipboard auto-clear from the last copy.
+  const clipboardClearRef = useRef<(() => void) | undefined>(undefined);
 
-  // Cleanup the auto-mask timer on unmount.
-  useEffect(() => () => clearTimeout(maskTimerRef.current), []);
+  // Cleanup the auto-mask timer + any pending clipboard auto-clear on unmount.
+  useEffect(
+    () => () => {
+      clearTimeout(maskTimerRef.current);
+      clipboardClearRef.current?.();
+    },
+    [],
+  );
 
   // SECW-04 (lens1): when the session locks (isUnlocked → false), immediately cancel the pending auto-mask
   // timer and re-mask any revealed value. An explicit Lock must re-hide every revealed item at once.
@@ -343,10 +354,14 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
 
   async function handleCopy() {
     if (!plaintext) return;
-    // SECW-06: copyText reports failure (insecure context — no clipboard API) instead of silently
+    // #607: copy, then schedule a BEST-EFFORT clipboard auto-clear (compare-then-clear) so the plaintext
+    // does not linger in the OS clipboard indefinitely — mirroring the on-screen auto-mask posture.
+    // SECW-06: the helper still reports failure (insecure context — no clipboard API) instead of silently
     // no-opping. On failure, prompt the user to select & copy the value manually (it is `select-all`).
-    const ok = await copyText(plaintext);
+    clipboardClearRef.current?.(); // cancel any prior pending clear before re-arming
+    const { ok, cancel } = await copyTextWithAutoClear(plaintext);
     if (ok) {
+      clipboardClearRef.current = cancel;
       setCopyFailed(false);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -396,6 +411,13 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
                   <ClipboardIcon className="size-3.5" aria-hidden />
                 )}
               </button>
+              {/* #607: a subtle "copied — clears in Ns" hint. The clear is best-effort (see clipboard.ts);
+                  this signals the intent without promising a guarantee the browser may not honour. */}
+              {copied ? (
+                <span className="text-xs text-muted-foreground">
+                  {t("items.copiedClears", { seconds: CLIPBOARD_CLEAR_MS / 1000 })}
+                </span>
+              ) : null}
               {/* SECW-06: clipboard unavailable (insecure context). Prompt manual copy — the value
                   above is `select-all`, so a manual selection still works. */}
               {copyFailed ? (
