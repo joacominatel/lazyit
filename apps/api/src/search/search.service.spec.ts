@@ -196,30 +196,14 @@ describe('SearchService', () => {
       expect(logger.error).toHaveBeenCalledTimes(1);
     });
 
-    it('runSuppressed mutes upsert/remove for the bracket then restores them (ADR-0069 §10)', async () => {
-      await service.runSuppressed(async () => {
-        service.upsert('assets', { id: 'a1', name: 'x' });
-        service.remove('assets', 'a2');
-      });
-      // No write reached the client while suppressed.
-      expect(index.addDocuments).not.toHaveBeenCalled();
-      expect(index.deleteDocument).not.toHaveBeenCalled();
-
-      // After the bracket, writes flow again.
-      service.upsert('assets', { id: 'a3', name: 'y' });
-      expect(index.addDocuments).toHaveBeenCalledTimes(1);
-    });
-
-    it('runSuppressed restores writes even when the bracketed fn throws', async () => {
-      await expect(
-        service.runSuppressed(async () => {
-          throw new Error('boom');
-        }),
-      ).rejects.toThrow('boom');
-
-      // The finally decremented the depth — a subsequent write is NOT muted.
-      service.upsert('assets', { id: 'a4', name: 'z' });
-      expect(index.addDocuments).toHaveBeenCalledTimes(1);
+    it('has NO process-wide write suppression — every write reaches the client (ADR-0069 §10)', async () => {
+      // The migrator bulk commit used to flip a global suppressDepth, silently dropping EVERY
+      // concurrent non-import write. That global is retired: suppression is now scoped to the
+      // import's own asset writes via AssetsService.create({ suppressSearch }). So a concurrent
+      // article/user/location upsert is always indexed — nothing is ever globally muted.
+      service.upsert('users', { id: 'u1', name: 'x' });
+      service.upsert('articles', { id: 'art1', name: 'y' });
+      expect(index.addDocuments).toHaveBeenCalledTimes(2);
     });
 
     it('search runs a multiSearch over the requested indexes and maps the results', async () => {
