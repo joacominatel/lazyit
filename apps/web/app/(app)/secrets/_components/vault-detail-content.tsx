@@ -125,7 +125,12 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
   const [addMemberOpen, setAddMemberOpen] = useState(false);
 
   return (
-    <div className="space-y-8">
+    // #616: cap the content to a centered column matching the app's other detail views
+    // (users/applications/locations all use `mx-auto max-w-4xl`). A secret row is a compact object;
+    // letting it span a wide monitor reads poorly and leaves the screen feeling empty. The column
+    // keeps one-item and many-item vaults both looking intentional. Frontend-only — no change to the
+    // decrypt/data flow.
+    <div className="mx-auto max-w-4xl space-y-8">
       <PageHeader
         title={
           vaultLoading ? (
