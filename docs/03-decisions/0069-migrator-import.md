@@ -151,6 +151,14 @@ mapped (the only asset natural key) — the UI **warns loudly**. An append-only 
 who/what/when, counts, conflict summary, and the file **hash** (never contents) for audit and a future undo
 correlation id.
 
+The ledger is **durable beyond its session** ([[0006-soft-delete-and-auditing]] — an append-only ledger is
+never deleted). The `ImportSession`/`ImportRow` scratch is GC-hard-deleted 24h after upload, but `ImportRun`
+**survives** that sweep: its `sessionId` is a **plain durable String column, deliberately NOT a cascading
+FK** (an `onDelete: Cascade` FK would let the session GC reap the audit-of-record). The session→run
+correlation rides that retained value, and the asset→import correlation rides the CREATED-event `sessionId`
+provenance (§8) — so reaping the transient session loses no audit. The GC sweeper therefore deletes only
+`ImportSession` (cascading to `ImportRow`), **never `ImportRun`**.
+
 ### 10. Async, scale & side-effects
 
 Parse runs in the **sandboxed forked child** (heap cap + record-count quota; inherits the multer cap and the
@@ -165,6 +173,15 @@ import** — the per-asset Meili upsert is skipped and a **single search reconci
   **runtime per-target check at commit** (`asset:write`, plus `category:write` / `assetModel:write` /
   `location:write` for each create-new conflict action) via a `PermissionResolver` call inside the commit
   service — `@RequirePermission` can't express the AND because the target isn't known until after analyze.
+  - **TOCTOU (accepted):** the per-target AND-check runs once at `enqueueCommit` (initiation), not
+    re-checked inside the async worker. If the actor is downgraded between enqueue and processing, the
+    worker still commits under the authorization captured at initiation. Acceptable for an async job
+    (the commit is additive + audited, the actor is captured at enqueue, and the job runs in seconds);
+    re-resolving the actor's role per chunk in the worker is a deferred hardening, not a phase-1 need.
+  - **`import:run` is also human-only at Layer 1:** it is in `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS`
+    (`@lazyit/shared`), so an admin can't even persist a (non-functional, guard-blocked) `import:run`
+    grant on a service account — mirroring the #555 SA-ungrantable pattern. Layer 2 (the
+    `ServicePrincipalForbiddenGuard` on the import controller) is the runtime backstop.
 - **Mass-assignment closed by construction:** mappable fields are **only** `CreateAssetSchema` keys;
   `id`, `externalId`, actor/lifecycle columns are non-mappable because they are absent from the schema.
 - CSV-formula leading chars neutralized on free-text fields; session id **owner-scoped** (no IDOR); no
@@ -228,6 +245,48 @@ decisions worth recording, all consistent with the ADR:
 
 Out of this wave (per #633): HTTP controllers, the `import:run` permission, runtime authz, the GC
 sweeper, and the frontend — all wave 4b.
+
+## Implementation notes (wave 4b — HTTP + RBAC surface, #635)
+
+The wizard's HTTP surface + its authorization landed in `apps/api/src/import/import.controller.ts`,
+with the catalog change in `@lazyit/shared`. All consistent with §1/§11:
+
+- **Endpoints (all owner-scoped, `import:run`-gated, human-only).** `POST /imports` (multipart, multer
+  size cap → 202 + sessionId), `GET /imports/:id` (status + detected shape + rows), `POST
+  /imports/:id/mapping` (confirm mapping → MAPPED), `POST /imports/:id/dry-run` (writes nothing → the
+  report), `POST /imports/:id/plan` (freeze the resolution plan → DRY_RUN), `POST /imports/:id/commit`
+  (→ `enqueueCommit`, 202), `GET /imports/:id/result` (the `ImportRun` ledger view). Mirrors the KB
+  article-import upload (`FileInterceptor` + `limits.fileSize`, SEC-001) and its human-only gate.
+- **Human-only is the existing `ServicePrincipalForbiddenGuard`** at the controller class level — a
+  service account is 403'd outright on every route regardless of grants (so `import:run` is never
+  exploitable by a bot), plus a defence-in-depth `ownerId()` check inside the controller. The actor is
+  always the principal's `user.id`; never a body/header field.
+- **`import:run` is a new RUN-ONLY domain in the frozen catalog** (ADR-0046). The `import` domain has a
+  single coarse `import:run` verb — no `:read`/`:write`/`:delete` (a session is owner-scoped transient
+  scratch, not a browsable domain). As a coarse verb it is **ADMIN-only by construction of the seed**
+  (it never enters the MEMBER/VIEWER default sets), so no seed/golden-matrix value changes — only the
+  catalog grows. Two `@lazyit/shared` covering-set tests were updated to admit the new domain: the
+  "every domain has a `:read`" invariant became "every domain has ≥1 permission, and every
+  read-surfaced domain a `:read`" (with `import` the explicit run-only exception), and the exact
+  coarse-verb list gained `import:run`. **This is the only behavior-relevant catalog change** and is
+  the one authorized by §11.
+- **Runtime per-target AND-check** lives in `ImportCommitService.enqueueCommit` (the committable seam):
+  it derives the exact write-permission set the frozen plan needs — `asset:write` always, plus
+  `assetModel:write`/`location:write`/`category:write` for each `create`/`restore` conflict outcome (a
+  `match` links a live row and needs no write) — and AND-checks the actor's DB-resolved role via
+  `PermissionResolverService.hasAll`, 403'ing a gap **before any row is written**. ADMIN short-circuits
+  to the full catalog (so ADMIN always passes); a missing/deleted actor fails closed.
+- **GC sweeper** (`import-session-gc.sweeper.ts`) mirrors `NotificationsRetentionSweeper`: a plain
+  `setInterval` (unref'd, re-entrancy guarded, skipped under `NODE_ENV=test`, best-effort) that
+  hard-deletes sessions past `expiresAt`, **excluding any mid-commit (`COMMITTING`) session**. The FK
+  cascade (`onDelete: Cascade`) reaps the session's `ImportRow`s **only**. The **`ImportRun` ledger is
+  NOT reaped** — it is the append-only audit-of-record (§9, [[0006-soft-delete-and-auditing]]), so it must
+  outlive the transient session it describes. To make that survive, `ImportRun.sessionId` is a **durable
+  plain String column, NOT a cascading FK** (migration `…_import_run_ledger_survives_session_gc` drops the
+  original `import_runs_sessionId_fkey`); the session→run correlation is the retained value, and the
+  asset→import correlation rides each created asset's `CREATED` `AssetHistory` provenance
+  (`{ source:'import', sessionId, rowIndex }`). The sweeper touches only `ImportSession` (its rows
+  cascade), never `ImportRun`.
 
 ## Consequences
 
