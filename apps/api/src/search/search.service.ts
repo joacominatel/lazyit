@@ -89,6 +89,15 @@ export type SearchResults = Partial<Record<SearchIndex, SearchEntityResult>> & {
 export class SearchService {
   private readonly client: Meilisearch | undefined;
 
+  /**
+   * Side-effect suppression depth (ADR-0069 §10). A bulk operation (the migrator commit) brackets its
+   * run with {@link runSuppressed} so the thousands of per-row `create()` calls don't each fire a Meili
+   * `upsert`/`remove` — the writes are dropped while the depth is > 0, and the caller runs ONE post-bulk
+   * {@link rebuildIndex} reconcile instead. A counter (not a boolean) keeps nested brackets safe; reads
+   * ({@link search}) are NEVER suppressed, only writes.
+   */
+  private suppressDepth = 0;
+
   constructor(
     @InjectPinoLogger(SearchService.name)
     private readonly logger: PinoLogger,
@@ -114,11 +123,26 @@ export class SearchService {
   }
 
   /**
+   * Run `fn` with per-document search writes SUPPRESSED (ADR-0069 §10 — bulk import side-effect policy).
+   * While the returned promise is in flight, {@link upsert}/{@link remove} are no-ops; the caller is
+   * responsible for one post-bulk {@link rebuildIndex} reconcile. The depth counter is decremented in a
+   * `finally` so a throw inside `fn` never leaves writes permanently muted. Reads are unaffected.
+   */
+  async runSuppressed<T>(fn: () => Promise<T>): Promise<T> {
+    this.suppressDepth += 1;
+    try {
+      return await fn();
+    } finally {
+      this.suppressDepth -= 1;
+    }
+  }
+
+  /**
    * Add or replace a document in an index (Meili upsert by primary key). Fire-and-forget: returns
    * immediately, never throws, and logs (CRITICAL) on failure. No-op when disabled.
    */
   upsert(index: SearchIndex, doc: SearchDocument): void {
-    if (!this.client) return;
+    if (!this.client || this.suppressDepth > 0) return;
     this.client
       .index(index)
       .addDocuments([doc], { primaryKey: 'id' })
@@ -137,7 +161,7 @@ export class SearchService {
    * immediately, never throws, and logs (CRITICAL) on failure. No-op when disabled.
    */
   remove(index: SearchIndex, id: string): void {
-    if (!this.client) return;
+    if (!this.client || this.suppressDepth > 0) return;
     this.client
       .index(index)
       .deleteDocument(id)
