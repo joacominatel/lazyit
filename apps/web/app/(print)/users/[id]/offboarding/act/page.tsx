@@ -1,6 +1,6 @@
 "use client";
 
-import { PrinterIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, PrinterIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -42,8 +42,15 @@ export default function OffboardingActPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
 
-  const { data: user, isLoading: userLoading, isError } = useUser(id);
-  const { assets, grants, isLoading: dataLoading, isEmpty } = useOffboardingData(id);
+  const { data: user, isLoading: userLoading, isError: userError } = useUser(id);
+  const {
+    assets,
+    grants,
+    isLoading: dataLoading,
+    isError: dataError,
+    isEmpty,
+    refetch,
+  } = useOffboardingData(id);
   const [orgName, , orgMounted] = useLocalStorage(ORG_NAME_KEY, DEFAULT_ORG_NAME);
   const [message, , msgMounted] = useLocalStorage(
     OFFBOARDING_MESSAGE_KEY,
@@ -71,10 +78,34 @@ export default function OffboardingActPage() {
     };
   }, [user, t]);
 
-  if (isError) {
+  // The user couldn't be loaded at all — the act has no subject. Existing terminal message.
+  if (userError) {
     return (
       <main className="mx-auto max-w-2xl px-8 py-16 text-sm text-muted-foreground">
         {t("loadError")}
+      </main>
+    );
+  }
+
+  // The user loaded but a return/access read failed: `assets`/`grants` silently collapse to empty,
+  // so we MUST refuse to render the act — a printed "nothing to return" built on a transient fetch
+  // failure would under-report on a compliance document. Distinct message + retry. See issue #601.
+  if (dataError) {
+    return (
+      <main className="mx-auto max-w-2xl px-8 py-16">
+        <div
+          role="alert"
+          className="space-y-4 rounded-lg border border-destructive/30 bg-destructive/5 px-6 py-6 text-sm"
+        >
+          <p className="font-heading text-base font-medium text-foreground">
+            {t("dataError.title")}
+          </p>
+          <p className="text-muted-foreground">{t("dataError.body")}</p>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <ArrowPathIcon />
+            {t("dataError.retry")}
+          </Button>
+        </div>
       </main>
     );
   }

@@ -223,10 +223,8 @@ export function OffboardingSheet({
   const tc = useTranslations("common");
   const router = useRouter();
   const offboard = useOffboardUser();
-  const { assets, grants, isLoading, isEmpty } = useOffboardingData(
-    user.id,
-    open,
-  );
+  const { assets, grants, isLoading, isError, isEmpty, refetch } =
+    useOffboardingData(user.id, open);
   // App-level reusable handover template (not per-user); SSR-safe so it never trips hydration.
   const [message, setMessage, mounted] = useLocalStorage(
     OFFBOARDING_MESSAGE_KEY,
@@ -308,6 +306,10 @@ export function OffboardingSheet({
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground">
                 {isLoading ? (
                   <Skeleton className="h-4 w-56" />
+                ) : isError ? (
+                  <span className="text-muted-foreground">
+                    {t("loadError.impact")}
+                  </span>
                 ) : (
                   <>
                     <span className="inline-flex items-center gap-1.5">
@@ -331,51 +333,79 @@ export function OffboardingSheet({
             </SheetHeader>
 
             <div className="flex-1 space-y-6 px-4">
-              {/* Assets to return */}
-              <section className="space-y-2">
-                <h3 className="text-label uppercase text-muted-foreground">
-                  {t("assetsToReturn")}
-                </h3>
-                {isLoading ? (
-                  <ListSkeleton />
-                ) : assets.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    {t("nothingToReturn")}
+              {/* A failed read silently collapses the lists to empty, so we refuse to show the
+                  asset/access sections (or the "nothing to return" empty state) on error — that
+                  would under-report on an offboarding artifact. Surface the failure + a retry
+                  instead, and the act stays disabled below. See issue #601. */}
+              {isError ? (
+                <div
+                  role="alert"
+                  className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm"
+                >
+                  <p className="font-medium text-foreground">
+                    {t("loadError.title")}
                   </p>
-                ) : (
-                  <ul className="divide-y">
-                    {assets.map((asset) => (
-                      <AssetLine key={asset.assignmentId} asset={asset} />
-                    ))}
-                  </ul>
-                )}
-              </section>
-
-              {/* Access to revoke */}
-              <section className="space-y-2">
-                <h3 className="text-label uppercase text-muted-foreground">
-                  {t("accessToRevoke")}
-                </h3>
-                {isLoading ? (
-                  <ListSkeleton />
-                ) : grants.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    {t("noActiveAccess")}
+                  <p className="text-muted-foreground">
+                    {t("loadError.body")}
                   </p>
-                ) : (
-                  <ul className="divide-y">
-                    {grants.map((grant) => (
-                      <GrantLine key={grant.grantId} grant={grant} />
-                    ))}
-                  </ul>
-                )}
-              </section>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => refetch()}
+                  >
+                    <ArrowPathIcon />
+                    {t("loadError.retry")}
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  {/* Assets to return */}
+                  <section className="space-y-2">
+                    <h3 className="text-label uppercase text-muted-foreground">
+                      {t("assetsToReturn")}
+                    </h3>
+                    {isLoading ? (
+                      <ListSkeleton />
+                    ) : assets.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        {t("nothingToReturn")}
+                      </p>
+                    ) : (
+                      <ul className="divide-y">
+                        {assets.map((asset) => (
+                          <AssetLine key={asset.assignmentId} asset={asset} />
+                        ))}
+                      </ul>
+                    )}
+                  </section>
 
-              {isEmpty ? (
-                <p className="text-sm text-muted-foreground">
-                  {t("emptyNote")}
-                </p>
-              ) : null}
+                  {/* Access to revoke */}
+                  <section className="space-y-2">
+                    <h3 className="text-label uppercase text-muted-foreground">
+                      {t("accessToRevoke")}
+                    </h3>
+                    {isLoading ? (
+                      <ListSkeleton />
+                    ) : grants.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        {t("noActiveAccess")}
+                      </p>
+                    ) : (
+                      <ul className="divide-y">
+                        {grants.map((grant) => (
+                          <GrantLine key={grant.grantId} grant={grant} />
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+
+                  {isEmpty ? (
+                    <p className="text-sm text-muted-foreground">
+                      {t("emptyNote")}
+                    </p>
+                  ) : null}
+                </>
+              )}
 
               {/* Editable handover message — persisted as a reusable template. */}
               <section className="space-y-2">
@@ -478,7 +508,7 @@ export function OffboardingSheet({
               <Button
                 variant="outline"
                 onClick={openAct}
-                disabled={pending}
+                disabled={pending || isError}
               >
                 <PrinterIcon />
                 {t("printAct")}
