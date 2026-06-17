@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   ImportMappingSchema,
   ImportResolutionPlanSchema,
@@ -73,7 +77,7 @@ interface PrismaState {
     fileHash: string | null;
     rows: FixtureRow[];
   } | null;
-  user?: { id: string } | null;
+  user?: { id: string; role?: string } | null;
   /** Stand-in for AssetHistory rows the resume-detect probe (`assetExistsForRow`) looks up. */
   assetHistory?: { eventType: string; payload: Record<string, unknown> }[];
 }
@@ -216,12 +220,22 @@ function makeSearch(enabled = true) {
   };
 }
 
+/**
+ * A PermissionResolverService double for the runtime per-target AND-check (ADR-0069 §11). Defaults to
+ * "allowed" (hasAll → true) so the existing commit/enqueue tests are unaffected; an authz test passes
+ * `{ hasAll: jest.fn(...) }` to deny a specific permission set.
+ */
+function makePermissions(hasAll: (...args: any[]) => Promise<boolean> = async () => true) {
+  return { hasAll: jest.fn(hasAll) };
+}
+
 function makeService(state: PrismaState, doubles?: any) {
   const prisma = doubles?.prisma ?? makePrisma(state);
   const assets = doubles?.assets ?? makeAssets();
   const models = doubles?.models ?? makeRefService('model');
   const locations = doubles?.locations ?? makeRefService('location');
   const search = doubles?.search ?? makeSearch();
+  const permissions = doubles?.permissions ?? makePermissions();
   const queue = {
     add: jest.fn(async (_name: string, _data: unknown, _opts: any) => ({})),
   };
@@ -232,8 +246,9 @@ function makeService(state: PrismaState, doubles?: any) {
     models as any,
     locations as any,
     search as any,
+    permissions as any,
   );
-  return { service, prisma, assets, models, locations, search, queue };
+  return { service, prisma, assets, models, locations, search, permissions, queue };
 }
 
 /** A minimal mapping: name+status by column, model+location as FK references. */
@@ -568,6 +583,90 @@ describe('ImportCommitService.commit', () => {
     await svc2.enqueueCommit('sess-1', OWNER);
     expect(q2.add).toHaveBeenCalledTimes(1);
     expect(q2.add.mock.calls[0][2].jobId).toBe('sess-1');
+  });
+
+  // ── Runtime per-target authz AND-check at commit (ADR-0069 §11) ────────────────────────────────
+  describe('enqueueCommit runtime per-target permission AND-check', () => {
+    it('always requires asset:write — denies (403) and never enqueues when the actor lacks it', async () => {
+      const dryRun = sessionWith(
+        [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+        plan({ conflicts: [] }),
+      );
+      // The actor holds import:run (route guard, not modeled here) but NOT asset:write.
+      const permissions = makePermissions(async (_role, required: string[]) => {
+        return !required.includes('asset:write');
+      });
+      const { service, queue } = makeService(dryRun, { permissions });
+
+      await expect(service.enqueueCommit('sess-1', OWNER)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(queue.add).not.toHaveBeenCalled();
+      // The AND-check asked for exactly asset:write (no create/restore conflicts in this plan).
+      expect(permissions.hasAll).toHaveBeenCalledTimes(1);
+      const required = permissions.hasAll.mock.calls[0][1] as string[];
+      expect([...required].sort()).toEqual(['asset:write']);
+    });
+
+    it('requires the reference write for each create/restore conflict (assetModel:write + location:write)', async () => {
+      const dryRun = sessionWith(
+        [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+        plan({
+          conflicts: [
+            { entity: 'AssetModel', field: 'modelId', normalizedValue: 'X1', outcome: 'create', targetId: null },
+            { entity: 'Location', field: 'locationId', normalizedValue: 'HQ', outcome: 'restore', targetId: 'cloc000000000000000000001' },
+            // A `match` outcome links an existing live row → no write needed, so it must NOT be required.
+            { entity: 'Location', field: 'locationId', normalizedValue: 'Lab', outcome: 'match', targetId: 'cloc000000000000000000002' },
+          ],
+        }),
+      );
+      const permissions = makePermissions(async () => true);
+      const { service, queue } = makeService(dryRun, { permissions });
+
+      await service.enqueueCommit('sess-1', OWNER);
+
+      expect(queue.add).toHaveBeenCalledTimes(1);
+      const required = permissions.hasAll.mock.calls[0][1] as string[];
+      expect([...required].sort()).toEqual(
+        ['asset:write', 'assetModel:write', 'location:write'].sort(),
+      );
+    });
+
+    it('denies (403) when the actor holds asset:write but not the reference write a create needs', async () => {
+      const dryRun = sessionWith(
+        [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+        plan({
+          conflicts: [
+            { entity: 'AssetModel', field: 'modelId', normalizedValue: 'X1', outcome: 'create', targetId: null },
+          ],
+        }),
+      );
+      // Holds everything EXCEPT assetModel:write.
+      const permissions = makePermissions(async (_role, required: string[]) => {
+        return !required.includes('assetModel:write');
+      });
+      const { service, queue } = makeService(dryRun, { permissions });
+
+      await expect(service.enqueueCommit('sess-1', OWNER)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(queue.add).not.toHaveBeenCalled();
+    });
+
+    it('fails closed (403) when the actor user is missing/deleted', async () => {
+      const dryRun = sessionWith(
+        [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+        plan({ conflicts: [] }),
+      );
+      const prisma = makePrisma(dryRun);
+      prisma.user.findFirst = (async () => null) as never; // actor no longer exists
+      const { service, queue } = makeService(dryRun, { prisma });
+
+      await expect(service.enqueueCommit('sess-1', OWNER)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(queue.add).not.toHaveBeenCalled();
+    });
   });
 
   it('ImportRun counts are never zeroed/stale after a mid-batch throw (ledger written once, after the loop) [fix 5]', async () => {
