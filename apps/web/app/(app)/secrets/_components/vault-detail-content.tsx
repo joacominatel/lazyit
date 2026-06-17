@@ -355,6 +355,17 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
     }
   }
 
+  // a11y (#606): the reveal/mask action's label depends on membership + reveal state. Compute it once so
+  // both `title` (hover tooltip) and `aria-label` (accessible name) share a single source of truth.
+  const revealLabel =
+    membershipState === "not-member"
+      ? t("items.notMember")
+      : membershipState === "loading"
+        ? t("items.preparingKey")
+        : plaintext !== undefined
+          ? t("items.mask")
+          : t("items.reveal");
+
   return (
     <li className="flex items-center gap-3 rounded-lg bg-card p-3 ring-1 ring-foreground/10">
       <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-pillar-knowledge/10 text-pillar-knowledge">
@@ -376,6 +387,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
                 type="button"
                 onClick={handleCopy}
                 title={t("items.copy")}
+                aria-label={t("items.copy")}
                 className="shrink-0 text-muted-foreground hover:text-foreground"
               >
                 {copied ? (
@@ -416,19 +428,14 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
 
       {/* Row actions */}
       <div className="flex shrink-0 items-center gap-1">
+        {/* a11y (#606): icon-only button — carry the same i18n string in `aria-label` so screen-reader
+            and keyboard users get a name (a `title` alone is not a reliable accessible name). */}
         <button
           type="button"
           onClick={handleReveal}
           disabled={membershipState !== "member"}
-          title={
-            membershipState === "not-member"
-              ? t("items.notMember")
-              : membershipState === "loading"
-                ? t("items.preparingKey")
-                : plaintext !== undefined
-                  ? t("items.mask")
-                  : t("items.reveal")
-          }
+          title={revealLabel}
+          aria-label={revealLabel}
           className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
         >
           {plaintext !== undefined ? (
@@ -444,6 +451,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
               type="button"
               onClick={() => setEditOpen(true)}
               title={t("items.edit")}
+              aria-label={t("items.edit")}
               className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <PencilIcon className="size-4" aria-hidden />
@@ -452,6 +460,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
               type="button"
               onClick={() => setDeleteOpen(true)}
               title={t("items.delete")}
+              aria-label={t("items.delete")}
               className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
             >
               <TrashIcon className="size-4" aria-hidden />
@@ -541,7 +550,9 @@ function MemberRow({
             onClick={() => setConfirmOpen(true)}
             // SM-WEB-06: explain WHY the button is disabled when it's the last member, instead of the stale
             // "Remove access" tooltip that implies the action is available.
+            // a11y (#606): mirror the same string into `aria-label` so this icon-only button has a name.
             title={membersCount <= 1 ? t("members.cannotRemoveLast") : t("members.revoke")}
+            aria-label={membersCount <= 1 ? t("members.cannotRemoveLast") : t("members.revoke")}
             className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-40"
             disabled={membersCount <= 1}
           >
