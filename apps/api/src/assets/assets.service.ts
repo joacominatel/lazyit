@@ -229,7 +229,11 @@ export class AssetsService {
    * — gaps are accepted, never back-filled. OFF by default: with no scheme / a disabled scheme / an
    * explicit tag, `allocateTag` returns undefined and this path is byte-for-byte today's behaviour.
    */
-  async create(data: CreateAsset, principal?: Principal) {
+  async create(
+    data: CreateAsset,
+    principal?: Principal,
+    options?: { createdPayload?: Prisma.InputJsonValue },
+  ) {
     const actor = this.actor.resolveActor(principal);
     const { specs, assetTag, ...rest } = data;
 
@@ -276,6 +280,12 @@ export class AssetsService {
             assetId: created.id,
             eventType: 'CREATED',
             actor,
+            // Optional provenance for the CREATED event's jsonb payload (ADR-0069 §8): the migrator
+            // commit stamps `{ source: 'import', importRunId }` so an imported asset is auditable to
+            // its run without a new history enum value (mirrors the SPECS_CHANGED-reuse precedent).
+            ...(options?.createdPayload !== undefined
+              ? { payload: options.createdPayload }
+              : {}),
           });
           return created;
         });
