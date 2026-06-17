@@ -1,7 +1,7 @@
 ---
 title: Authoring the Help / Manual
 tags: [development, web, frontend, docs, help, i18n]
-status: draft
+status: active
 created: 2026-06-16
 updated: 2026-06-16
 ---
@@ -17,9 +17,20 @@ DB-backed, access-controlled content about *your estate*. The Manual is the prod
 *lazyit itself* — markdown in the repo, public, read-only in the app, versioned with the code. A typo fix is a
 PR, not an in-app edit. See ADR-0062 for the full rationale.
 
-> The page route, loader and switcher are the **scaffold** (#535). The real content (getting started,
-> permissions, the Secret Manager, …) is tracked in **#536**. This doc is the convention; the placeholder
-> `getting-started.md` only proves the pipeline.
+The surface is **live**: the route/loader/sidebar/search scaffold (#535/#560), the nested IA (#563), and
+the full ratified content — the 13 categories of ADR-0062 §5, en + es (#564) — are all shipped.
+
+## When to update the Manual (the rule)
+
+**Any user-facing change or addition updates the Manual in the same change.** New feature, changed
+behavior, renamed setting, new screen → the matching Manual page must be created or edited (en + es)
+as part of that work, not later. A user-facing change isn't *done* until its Manual page is — the same
+discipline as keeping `docs/` in sync ([[claude-workflow]] §5, and `CLAUDE.md` "How we work" #7). If
+you're unsure which page, find the category/subcategory in `_nav.ts`; if the topic is genuinely new,
+add the page (and, if needed, the manifest key + i18n label) per "How to add a Help page" below.
+
+What does **not** need a Manual update: internal refactors, dev-tooling, tests, infra/CI, or anything
+an operator never sees. When in doubt, ask: *would a person using lazyit notice this?* If yes, document it here.
 
 ## Where pages live
 

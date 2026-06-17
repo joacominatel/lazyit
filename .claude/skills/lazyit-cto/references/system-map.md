@@ -145,7 +145,7 @@ Zitadel). The seven non-negotiables are codified in `docs/06-security/INVARIANTS
 
 - `(app)` — authenticated app (Auth.js session; sidebar layout in `app/(app)/layout.tsx`). Sidebar is grouped into **3 product pillars + Manage** (#100): **Inventory** (Assets, Consumables) · **Access** (Applications) · **Knowledge** (KB) · **Manage** (Users, Locations, Settings [ADMIN-only])
 - `(auth)` — login flow (functional; redirects to IdP). **First-run onboarding gate**: login + marketing surfaces read `GET /config/status` and, when `isConfigured === false`, surface a prominent "Set up lazyit" link to `/setup` (fail-safe — no link if the API is down) so a fresh operator is never stranded
-- `(marketing)` — landing / public surface (minimal; carries the same first-run "Set up lazyit" gate)
+- `(marketing)` — landing / public surface (minimal; carries the same first-run "Set up lazyit" gate). Also hosts the **public Help/Manual** at `/help` (ADR-0062, #535/#560/#563/#564): login-free product docs from markdown in `apps/web/content/manual/{en,es}/`, nested IA (Category→Subcategory, manifest `_nav.ts`), sidebar + simple client-side search. **Standing rule:** every user-facing change updates its Manual page (en+es) — see `manual-authoring.md` / `CLAUDE.md` #7
 - `app/setup` — full-screen first-run wizard (top-level, outside `(app)`; ADR-0043)
 - `app/api/auth/[...nextauth]` — Auth.js route handler
 

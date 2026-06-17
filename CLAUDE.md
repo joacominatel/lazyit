@@ -31,6 +31,12 @@ Default operating procedure for **every** change. Full version:
    verify the docs don't reference removed files or a changed philosophy.**
 6. **External libraries → latest docs.** Check current official docs (e.g. Context7 / web)
    before using or upgrading a library — don't rely on memory.
+7. **Public Manual stays in sync.** Any **user-facing** change or addition (a new feature, a
+   changed behavior, a new setting) must **also update the in-app Manual** — the public `/help`
+   surface at `apps/web/content/manual/` (en + es) — in the same change, per ADR-0062 and
+   `docs/04-development/manual-authoring.md`. The Manual documents *lazyit itself* for operators;
+   a user-facing change isn't done until its Manual page is. This is distinct from #5 (the dev
+   `docs/` vault) — update **both** when a change is both core and user-facing.
 
 ## Git workflow (READ FIRST)
 
