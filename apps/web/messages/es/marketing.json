@@ -1,0 +1,122 @@
+{
+  "meta": {
+    "title": "lazyit — gestión de IT self-hosted para equipos chicos",
+    "description": "Un sistema de registro self-hosted para equipos de IT chicos: activos, accesos, consumibles y base de conocimiento. Centrado en el activo, auditable por defecto y con un secret manager zero-knowledge."
+  },
+  "nav": {
+    "manual": "Manual",
+    "signIn": "Iniciar sesión",
+    "github": "GitHub"
+  },
+  "hero": {
+    "badge": "Self-hosted · Sin telemetría",
+    "title": "Todo lo que tu equipo de IT administra, registrado.",
+    "subtitle": "Un sistema de registro self-hosted para equipos chicos: activos, accesos, consumibles y conocimiento. Centrado en el activo, auditable por defecto y tuyo para operar.",
+    "ctaSetup": "Configurar lazyit",
+    "ctaDashboard": "Ir al panel",
+    "ctaSignIn": "Iniciar sesión"
+  },
+  "thesis": {
+    "title": "Los activos perduran. Las personas rotan.",
+    "body": "La mayoría de las herramientas cuelgan la propiedad del usuario. lazyit lo invierte: el activo es el ciudadano de primera clase, y la propiedad es un registro con fecha — quién lo tiene, desde cuándo y todo lo que cambió. Alguien se va; el historial queda intacto.",
+    "p1": "La propiedad es una relación con fecha, nunca una columna — el historial es automático.",
+    "p2": "Cada asignación, devolución y cambio de estado queda en la línea de tiempo.",
+    "p3": "Nada se borra de verdad; el registro siempre responde “quién lo tuvo y cuándo”."
+  },
+  "showcase": {
+    "title": "Toda tu operación, de un vistazo.",
+    "subtitle": "Inventario, accesos y actividad en una vista densa y tranquila — pensada para operadores, no para decorar dashboards."
+  },
+  "pillars": {
+    "title": "Una herramienta con criterio. Cuatro trabajos.",
+    "subtitle": "Capacidades curadas en lugar de un muro de opciones.",
+    "inventory": {
+      "name": "Inventario",
+      "desc": "Activos y consumibles juntos — modelos, ubicaciones, specs y stock con un ledger de movimientos append-only."
+    },
+    "access": {
+      "name": "Accesos",
+      "desc": "Quién puede acceder a qué aplicación — otorgado y revocado con auditoría completa."
+    },
+    "knowledge": {
+      "name": "Conocimiento",
+      "desc": "Una base de conocimiento versionada y buscable para runbooks y guías."
+    },
+    "manage": {
+      "name": "Gestión",
+      "desc": "Usuarios y ubicaciones, con roles y un offboarding que devuelve cada activo."
+    }
+  },
+  "secrets": {
+    "badge": "Zero-knowledge",
+    "title": "Secretos que el servidor no puede leer.",
+    "body": "El Secret Manager cifra todo en tu navegador. lazyit guarda sólo el texto cifrado y nunca tiene tus llaves — el servidor literalmente no puede descifrar tus vaults.",
+    "p1": "Cifrado del lado del cliente — el servidor sólo ve texto cifrado.",
+    "p2": "Membresía por vault y acceso granular.",
+    "p3": "Para credenciales demasiado sensibles para un doc compartido."
+  },
+  "selfhost": {
+    "title": "Corre dentro de tu empresa.",
+    "body": "Una instancia por organización, en tu hardware. El inventario, los accesos y los registros cercanos a credenciales son sensibles — su lugar es on-premise, no la nube de otro.",
+    "p1": "Docker Compose up — Postgres, Valkey, listo.",
+    "p2": "Sin telemetría, sin phone-home, sin cobro por asiento.",
+    "p3": "Tus datos siguen siendo tuyos, de punta a punta.",
+    "command": "docker compose up -d"
+  },
+  "cta": {
+    "title": "Levantá lazyit en una tarde.",
+    "body": "Self-hosted, con criterio, IT-native. Configuralo y mirá cómo toma forma tu inventario.",
+    "secondary": "Leer el Manual"
+  },
+  "footer": {
+    "tagline": "Gestión de IT self-hosted para equipos chicos.",
+    "groupProduct": "Producto",
+    "groupStart": "Empezar",
+    "groupProject": "Proyecto",
+    "manual": "Manual",
+    "signIn": "Iniciar sesión",
+    "setup": "Configurar",
+    "dashboard": "Panel",
+    "github": "GitHub",
+    "rights": "lazyit — operalo vos.",
+    "note": "Sin telemetría · Tus datos son tuyos."
+  },
+  "frames": {
+    "asset": {
+      "tag": "SRV#1010",
+      "status": "Operativo",
+      "model": "MacBook Air 13″ M2",
+      "ownerLine": "En poder de Diego Fernández",
+      "activityTitle": "Actividad",
+      "ev1": "Activo creado",
+      "ev2": "Asignado a Carla Ruiz",
+      "ev3": "Devuelto — offboarding",
+      "ev4": "Asignado a Diego Fernández",
+      "t1": "10m",
+      "t2": "10m",
+      "t3": "3sem",
+      "t4": "3sem"
+    },
+    "secret": {
+      "vault": "Secretos de producción",
+      "meta": "12 ítems · 4 miembros",
+      "locked": "Cifrado en el cliente",
+      "item1": "DATABASE_URL",
+      "item2": "STRIPE_SECRET_KEY",
+      "item3": "ZITADEL_SA_KEY"
+    },
+    "dashboard": {
+      "assets": "Activos",
+      "assigned": "Asignados",
+      "grants": "Accesos activos",
+      "lowStock": "Stock bajo",
+      "byStatus": "Activos por estado",
+      "operational": "Operativos",
+      "maintenance": "Mantenimiento",
+      "storage": "En depósito"
+    },
+    "access": {
+      "title": "Accesos otorgados"
+    }
+  }
+}
