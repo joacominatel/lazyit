@@ -1,0 +1,122 @@
+{
+  "meta": {
+    "title": "lazyit — self-hosted IT management for small teams",
+    "description": "A self-hosted system of record for small IT teams: assets, access, consumables and a knowledge base. Asset-centric, auditable by default, with a zero-knowledge secret manager."
+  },
+  "nav": {
+    "manual": "Manual",
+    "signIn": "Sign in",
+    "github": "GitHub"
+  },
+  "hero": {
+    "badge": "Self-hosted · No telemetry",
+    "title": "Everything your IT team owns, on the record.",
+    "subtitle": "A self-hosted system of record for small teams — assets, access, consumables and knowledge. Asset-centric, auditable by default, and yours to run.",
+    "ctaSetup": "Set up lazyit",
+    "ctaDashboard": "Go to dashboard",
+    "ctaSignIn": "Sign in"
+  },
+  "thesis": {
+    "title": "Assets persist. People rotate.",
+    "body": "Most tools hang ownership off a user. lazyit inverts it: the asset is the first-class citizen, and ownership is a timestamped record — who holds it, since when, and everything that changed. Someone leaves; the history stays intact.",
+    "p1": "Ownership is a dated relation, never a column — so history is automatic.",
+    "p2": "Every assignment, return and status change is on the timeline.",
+    "p3": "Nothing is hard-deleted; the record can always answer “who had this, when”."
+  },
+  "showcase": {
+    "title": "The whole estate, at a glance.",
+    "subtitle": "Inventory, access and activity in one calm, dense view — built for operators, not dashboards-as-decoration."
+  },
+  "pillars": {
+    "title": "One opinionated tool. Four jobs.",
+    "subtitle": "Curated capability over a wall of toggles.",
+    "inventory": {
+      "name": "Inventory",
+      "desc": "Assets and consumables together — models, locations, specs, and stock with an append-only movement ledger."
+    },
+    "access": {
+      "name": "Access",
+      "desc": "Who can reach which application — granted and revoked with a full audit trail."
+    },
+    "knowledge": {
+      "name": "Knowledge",
+      "desc": "A searchable, versioned knowledge base for runbooks and how-tos."
+    },
+    "manage": {
+      "name": "Manage",
+      "desc": "Users and locations, with roles and offboarding that returns every asset."
+    }
+  },
+  "secrets": {
+    "badge": "Zero-knowledge",
+    "title": "Secrets the server can't read.",
+    "body": "The Secret Manager encrypts everything in your browser. lazyit stores only ciphertext and never holds your keys — the server literally cannot decrypt your vaults.",
+    "p1": "Client-side encryption — the server only ever sees ciphertext.",
+    "p2": "Per-vault membership and granular access.",
+    "p3": "For credentials too sensitive for a shared doc."
+  },
+  "selfhost": {
+    "title": "Runs inside your shop.",
+    "body": "One instance per organization, on your hardware. Inventory, access and credential-adjacent records are sensitive — they belong on-premises, not in someone else's cloud.",
+    "p1": "Docker Compose up — Postgres, Valkey, done.",
+    "p2": "No telemetry, no phone-home, no per-seat billing.",
+    "p3": "Your data stays yours, end to end.",
+    "command": "docker compose up -d"
+  },
+  "cta": {
+    "title": "Stand up lazyit in an afternoon.",
+    "body": "Self-hosted, opinionated, IT-native. Set it up and watch your inventory take shape.",
+    "secondary": "Read the Manual"
+  },
+  "footer": {
+    "tagline": "Self-hosted IT management for small teams.",
+    "groupProduct": "Product",
+    "groupStart": "Get started",
+    "groupProject": "Project",
+    "manual": "Manual",
+    "signIn": "Sign in",
+    "setup": "Set up",
+    "dashboard": "Dashboard",
+    "github": "GitHub",
+    "rights": "lazyit — run it yourself.",
+    "note": "No telemetry · Your data stays yours."
+  },
+  "frames": {
+    "asset": {
+      "tag": "SRV#1010",
+      "status": "Operational",
+      "model": "MacBook Air 13″ M2",
+      "ownerLine": "Owned by Diego Fernández",
+      "activityTitle": "Activity",
+      "ev1": "Asset created",
+      "ev2": "Assigned to Carla Ruiz",
+      "ev3": "Returned — offboarding",
+      "ev4": "Assigned to Diego Fernández",
+      "t1": "10mo",
+      "t2": "10mo",
+      "t3": "3w",
+      "t4": "3w"
+    },
+    "secret": {
+      "vault": "Production secrets",
+      "meta": "12 items · 4 members",
+      "locked": "Encrypted client-side",
+      "item1": "DATABASE_URL",
+      "item2": "STRIPE_SECRET_KEY",
+      "item3": "ZITADEL_SA_KEY"
+    },
+    "dashboard": {
+      "assets": "Assets",
+      "assigned": "Assigned",
+      "grants": "Active grants",
+      "lowStock": "Low stock",
+      "byStatus": "Assets by status",
+      "operational": "Operational",
+      "maintenance": "Maintenance",
+      "storage": "In storage"
+    },
+    "access": {
+      "title": "Access grants"
+    }
+  }
+}

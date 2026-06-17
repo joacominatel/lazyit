@@ -1,0 +1,53 @@
+/* ---------------------------------------------------------------------------
+   Landing-only motion + texture. Scoped to the public (marketing) home and
+   imported by its page — kept OUT of globals.css to keep the blast radius small
+   (ADR-0049 motion stays CSS-only; zero JS, zero new deps).
+
+   Scroll reveals are PROGRESSIVE ENHANCEMENT: the hidden initial state is applied
+   ONLY where the browser supports `animation-timeline` AND the user has not asked
+   for reduced motion. Everywhere else the content is visible by default — it is
+   never gated on a class that might not fire (headless renderers, unsupported
+   browsers, reduced-motion all show the finished page).
+--------------------------------------------------------------------------- */
+
+@keyframes lz-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .lz-reveal {
+      animation: lz-rise linear both;
+      animation-timeline: view();
+      /* Settle as the element enters; finished well before it reaches center. */
+      animation-range: entry 0% cover 30%;
+    }
+  }
+}
+
+/* A quiet instrument texture behind the hero: a faint neutral dot grid in the
+   foreground hue. Neutral on purpose — the One Voice Rule reserves indigo for
+   action/selection, so the hero atmosphere is carried by texture + depth, not
+   colour. Fades out toward the bottom so it never competes with the copy. */
+.lz-grid {
+  background-image: radial-gradient(
+    var(--color-foreground) 0.5px,
+    transparent 0.5px
+  );
+  background-size: 22px 22px;
+  opacity: 0.04;
+  /* Mask reads only the alpha channel — the token's hue is irrelevant; using a
+     palette var (not a literal) keeps this inside the design system. */
+  mask-image: radial-gradient(
+    120% 90% at 50% 0%,
+    var(--color-foreground) 35%,
+    transparent 80%
+  );
+}
