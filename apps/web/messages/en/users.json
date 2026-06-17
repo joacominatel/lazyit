@@ -348,6 +348,12 @@
     "nothingToReturn": "Nothing to return.",
     "accessToRevoke": "Access to revoke",
     "noActiveAccess": "No active application access.",
+    "loadError": {
+      "impact": "Impact unavailable — couldn't load.",
+      "title": "Couldn't load what to return",
+      "body": "We couldn't load this person's assets and access, so we can't show what to return or revoke. This is not an empty list — don't offboard or print the act until it loads.",
+      "retry": "Retry"
+    },
     "emptyNote": "This person holds no assets and has no active access. The act is still valid as a record of their departure.",
     "handoverNote": "Handover note",
     "handoverPlaceholder": "A short note printed on the return act…",
@@ -372,6 +378,11 @@
   "act": {
     "documentTitle": "Return Act — {name}",
     "loadError": "This user could not be loaded — they may have been removed, or the API is unreachable.",
+    "dataError": {
+      "title": "Return Act unavailable",
+      "body": "We couldn't load this person's assets and access, so this act can't be issued. It is not blank — printing it now could under-report what's owed. Retry, and only print once it loads.",
+      "retry": "Retry"
+    },
     "print": "Print",
     "titleEn": "Asset Return & Access Acknowledgment",
     "titleEs": "Acta de baja y devolución de activos",
