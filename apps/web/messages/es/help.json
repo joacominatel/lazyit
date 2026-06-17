@@ -1,0 +1,128 @@
+{
+  "nav": {
+    "title": "Ayuda",
+    "backToIndex": "Volver a Ayuda",
+    "sidebarLabel": "Secciones de Ayuda",
+    "openMenu": "Abrir el menú de Ayuda",
+    "browse": "Explorar"
+  },
+  "search": {
+    "placeholder": "Buscar en la Ayuda…",
+    "label": "Buscar en la Ayuda",
+    "clear": "Limpiar búsqueda",
+    "noResults": "No hay páginas de ayuda que coincidan.",
+    "resultsLabel": "Resultados de búsqueda"
+  },
+  "index": {
+    "title": "Ayuda",
+    "subtitle": "Documentación de producto de lazyit — pública y publicada junto con la app.",
+    "empty": "Todavía no hay páginas de ayuda disponibles."
+  },
+  "page": {
+    "fallbackNotice": "Esta página aún no está traducida a tu idioma, por lo que se muestra en inglés."
+  },
+  "notFound": {
+    "title": "Página de ayuda no encontrada",
+    "description": "La página que buscas no existe en el Manual.",
+    "backToIndex": "Volver a Ayuda"
+  },
+  "categories": {
+    "getting-started": "Primeros pasos",
+    "assets": "Activos e inventario",
+    "users-permissions": "Usuarios y permisos",
+    "applications-access": "Aplicaciones y accesos",
+    "knowledge-base": "Base de conocimiento",
+    "secret-manager": "Gestor de secretos",
+    "consumables": "Consumibles",
+    "access-automation": "Automatización de accesos",
+    "notifications-activity": "Notificaciones y actividad",
+    "configuration": "Configuración y ajustes",
+    "deployment-operations": "Despliegue y operación",
+    "security-best-practices": "Seguridad y buenas prácticas",
+    "reference": "Referencia"
+  },
+  "subcategories": {
+    "getting-started": {
+      "introduction": "Introducción",
+      "initial-setup": "Configuración inicial",
+      "users-team": "Usuarios y equipo",
+      "languages": "Idiomas"
+    },
+    "assets": {
+      "asset-basics": "Conceptos de activos",
+      "models-categories": "Modelos y categorías",
+      "locations": "Ubicaciones",
+      "assignments-history": "Asignaciones e historial",
+      "asset-tags": "Etiquetas de activos"
+    },
+    "users-permissions": {
+      "roles": "Roles",
+      "permissions": "Permisos",
+      "permission-configuration": "Configuración de permisos",
+      "service-accounts": "Cuentas de servicio",
+      "user-lifecycle": "Ciclo de vida del usuario"
+    },
+    "applications-access": {
+      "applications": "Aplicaciones",
+      "access-grants": "Concesiones de acceso",
+      "criticality-alerts": "Criticidad y alertas",
+      "access-requests": "Solicitudes de acceso"
+    },
+    "knowledge-base": {
+      "articles-authoring": "Artículos y redacción",
+      "folders-access": "Carpetas y acceso",
+      "linking-discovery": "Enlaces y descubrimiento",
+      "versioning": "Versionado",
+      "import": "Importación"
+    },
+    "secret-manager": {
+      "vaults-members": "Bóvedas y miembros",
+      "passwords-recovery-keys": "Contraseñas y claves de recuperación",
+      "security-model": "Modelo de seguridad",
+      "secret-references": "Referencias a secretos"
+    },
+    "consumables": {
+      "consumables-categories": "Consumibles y categorías",
+      "stock-movements": "Movimientos de stock",
+      "low-stock-alerts": "Alertas de stock bajo"
+    },
+    "access-automation": {
+      "concepts": "Conceptos",
+      "building-a-workflow": "Crear un flujo de trabajo",
+      "manual-tasks": "Tareas manuales",
+      "testing-observability": "Pruebas y observabilidad",
+      "permissions": "Permisos",
+      "troubleshooting": "Resolución de problemas"
+    },
+    "notifications-activity": {
+      "notification-bell": "Campana de notificaciones",
+      "activity-reports": "Actividad e informes",
+      "global-search": "Búsqueda global"
+    },
+    "configuration": {
+      "instance-settings": "Ajustes de la instancia",
+      "taxonomies": "Taxonomías",
+      "asset-tag-scheme": "Esquema de etiquetas de activos",
+      "time-zone-formats": "Zona horaria y formatos",
+      "search-index": "Índice de búsqueda"
+    },
+    "deployment-operations": {
+      "self-hosting": "Autoalojamiento",
+      "services": "Servicios",
+      "backups-restore": "Copias de seguridad y restauración",
+      "identity-provider": "Proveedor de identidad",
+      "reverse-proxy-tls": "Proxy inverso y TLS",
+      "troubleshooting": "Resolución de problemas",
+      "upgrades": "Actualizaciones"
+    },
+    "security-best-practices": {
+      "security-model": "Modelo de seguridad",
+      "access-control-principles": "Principios de control de acceso",
+      "operational-security": "Seguridad operativa",
+      "recommended-patterns": "Patrones recomendados"
+    },
+    "reference": {
+      "glossary": "Glosario"
+    }
+  }
+}

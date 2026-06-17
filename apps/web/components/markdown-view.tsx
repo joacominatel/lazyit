@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentPropsWithoutRef } from "react";
+import type { ComponentProps, ComponentPropsWithoutRef } from "react";
 import Markdown, { type Components } from "react-markdown";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -123,15 +123,44 @@ const ALL_COMPONENTS: Components = {
  * safe against stored XSS regardless of the Markdown source. Fenced code blocks are
  * syntax-highlighted with a per-block copy button (issue #200); the highlighter runs in
  * React after sanitize, so the schema stays untouched. Used by the KB detail view and the
- * editor preview (ADR-0021 — simple wiki, no heavy editor).
+ * editor preview (ADR-0021 — simple wiki, no heavy editor), and by the public Help/Manual
+ * surface (ADR-0062) via `disableKbExtensions`.
+ *
+ * @param disableKbExtensions When `true`, the two KB-only render passes —
+ *   `rehypeWikiLinks` (`[[slug]]` → `Article` lookup) and `rehypeSecretChips`
+ *   (`{{ lazyit_secret.* }}` → masked chip) — are NOT applied, so those tokens render as
+ *   literal text. Used by the public Help/Manual pages (ADR-0062 §2): they are secret-free
+ *   and have no `Article` rows to resolve against, so the KB passes would be meaningless
+ *   (and a chip there must never imply a vault binding). Defaults to `false`, so every
+ *   existing KB call site behaves identically — this prop is purely additive.
  */
 export function MarkdownView({
   content,
   className,
+  disableKbExtensions = false,
 }: {
   content: string;
   className?: string;
+  disableKbExtensions?: boolean;
 }) {
+  // LOAD-BEARING plugin order (SEC-003 / ADR-0029 / ADR-0059 §3): `rehypeSanitize` MUST run FIRST —
+  // it strips all untrusted HTML before any trusted post-sanitize pass adds markup the schema never
+  // has to allow. The KB-only passes (`rehypeWikiLinks`, `rehypeSecretChips`) live in that
+  // post-sanitize slot and are appended ONLY when KB extensions are enabled. For the Manual
+  // (`disableKbExtensions`) the pipeline is sanitize-only, so `[[slug]]` and `{{ lazyit_secret.* }}`
+  // survive untouched as plain text. NEVER reorder: sanitize stays first in both branches.
+  // Typed via the component's own prop so the conditional's two array shapes both narrow to the
+  // expected `PluggableList` (re-exported by react-markdown from `unified`) without a fragile
+  // transitive import.
+  const rehypePlugins: ComponentProps<typeof Markdown>["rehypePlugins"] =
+    disableKbExtensions
+      ? [[rehypeSanitize, SANITIZE_SCHEMA]]
+      : [[rehypeSanitize, SANITIZE_SCHEMA], rehypeWikiLinks, rehypeSecretChips];
+
+  // With the KB passes off, the wiki-link / secret-chip elements can never be minted, so the
+  // components map is the plain HTML-only set — keeping the rendered tree free of any KB element.
+  const components = disableKbExtensions ? MARKDOWN_COMPONENTS : ALL_COMPONENTS;
+
   return (
     <div
       className={cn(
@@ -146,11 +175,8 @@ export function MarkdownView({
     >
       <Markdown
         remarkPlugins={[remarkGfm]}
-        // `rehypeWikiLinks` runs AFTER `rehypeSanitize` (ADR-0029 / ADR-0059 §3): the sanitizer first
-        // strips all untrusted HTML, then the trusted wiki-link pass adds `[[slug]]` link markup the
-        // schema never has to allow — the same post-sanitize slot the mermaid/code renderers use.
-        rehypePlugins={[[rehypeSanitize, SANITIZE_SCHEMA], rehypeWikiLinks, rehypeSecretChips]}
-        components={ALL_COMPONENTS}
+        rehypePlugins={rehypePlugins}
+        components={components}
       >
         {content}
       </Markdown>

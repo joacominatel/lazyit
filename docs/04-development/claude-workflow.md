@@ -73,6 +73,13 @@ and merges → the user promotes `dev` to `master`.** The step-by-step with real
   conventions, diagrams).
 - **Before committing**, verify the docs don't reference **removed files** or a **changed
   philosophy**. Stale docs are a bug.
+- **The public Manual too.** If the change is **user-facing** (a feature, a changed behavior, a
+  new setting), update the in-app **Manual** as well — the public `/help` surface at
+  `apps/web/content/manual/` (en + es) — in the **same change**, per [[manual-authoring]] /
+  [[0062-in-app-help-manual-surface]]. The Manual documents *lazyit itself* for operators;
+  shipping a user-facing change without its Manual page is the same bug as stale `docs/`. (This
+  is **separate** from the dev `docs/` vault above — a change that is both core and user-facing
+  updates both.)
 
 ## 6. External libraries → latest docs
 
@@ -83,7 +90,8 @@ and merges → the user promotes `dev` to `master`.** The step-by-step with real
 ## Definition of done
 
 A change is done when: code is in place, **tests** exist per [[0012-testing-strategy]] (unit
-always; core/complex logic thoroughly), `docs/` is updated and consistent, and commits are
-file-scoped with a correct prefix.
+always; core/complex logic thoroughly), `docs/` is updated and consistent, **the public Manual
+is updated for any user-facing change** ([[manual-authoring]]), and commits are file-scoped with
+a correct prefix.
 
 Related: [[git-workflow]] · [[workflows]] · [[code-conventions]] · [[0012-testing-strategy]] · [[shared-package]]

@@ -97,6 +97,7 @@
     "signOut": "Cerrar sesión",
     "openNavigationMenu": "Abrir menú de navegación",
     "toggleTheme": "Cambiar tema",
+    "changeLanguage": "Cambiar idioma",
     "devMode": "Modo desarrollo",
     "production": "Producción",
     "dismissModeBanner": "Descartar aviso de modo",
