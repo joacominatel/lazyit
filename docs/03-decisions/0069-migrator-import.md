@@ -229,6 +229,45 @@ decisions worth recording, all consistent with the ADR:
 Out of this wave (per #633): HTTP controllers, the `import:run` permission, runtime authz, the GC
 sweeper, and the frontend — all wave 4b.
 
+## Implementation notes (wave 4b — HTTP + RBAC surface, #635)
+
+The wizard's HTTP surface + its authorization landed in `apps/api/src/import/import.controller.ts`,
+with the catalog change in `@lazyit/shared`. All consistent with §1/§11:
+
+- **Endpoints (all owner-scoped, `import:run`-gated, human-only).** `POST /imports` (multipart, multer
+  size cap → 202 + sessionId), `GET /imports/:id` (status + detected shape + rows), `POST
+  /imports/:id/mapping` (confirm mapping → MAPPED), `POST /imports/:id/dry-run` (writes nothing → the
+  report), `POST /imports/:id/plan` (freeze the resolution plan → DRY_RUN), `POST /imports/:id/commit`
+  (→ `enqueueCommit`, 202), `GET /imports/:id/result` (the `ImportRun` ledger view). Mirrors the KB
+  article-import upload (`FileInterceptor` + `limits.fileSize`, SEC-001) and its human-only gate.
+- **Human-only is the existing `ServicePrincipalForbiddenGuard`** at the controller class level — a
+  service account is 403'd outright on every route regardless of grants (so `import:run` is never
+  exploitable by a bot), plus a defence-in-depth `ownerId()` check inside the controller. The actor is
+  always the principal's `user.id`; never a body/header field.
+- **`import:run` is a new RUN-ONLY domain in the frozen catalog** (ADR-0046). The `import` domain has a
+  single coarse `import:run` verb — no `:read`/`:write`/`:delete` (a session is owner-scoped transient
+  scratch, not a browsable domain). As a coarse verb it is **ADMIN-only by construction of the seed**
+  (it never enters the MEMBER/VIEWER default sets), so no seed/golden-matrix value changes — only the
+  catalog grows. Two `@lazyit/shared` covering-set tests were updated to admit the new domain: the
+  "every domain has a `:read`" invariant became "every domain has ≥1 permission, and every
+  read-surfaced domain a `:read`" (with `import` the explicit run-only exception), and the exact
+  coarse-verb list gained `import:run`. **This is the only behavior-relevant catalog change** and is
+  the one authorized by §11.
+- **Runtime per-target AND-check** lives in `ImportCommitService.enqueueCommit` (the committable seam):
+  it derives the exact write-permission set the frozen plan needs — `asset:write` always, plus
+  `assetModel:write`/`location:write`/`category:write` for each `create`/`restore` conflict outcome (a
+  `match` links a live row and needs no write) — and AND-checks the actor's DB-resolved role via
+  `PermissionResolverService.hasAll`, 403'ing a gap **before any row is written**. ADMIN short-circuits
+  to the full catalog (so ADMIN always passes); a missing/deleted actor fails closed.
+- **GC sweeper** (`import-session-gc.sweeper.ts`) mirrors `NotificationsRetentionSweeper`: a plain
+  `setInterval` (unref'd, re-entrancy guarded, skipped under `NODE_ENV=test`, best-effort) that
+  hard-deletes sessions past `expiresAt`, **excluding any mid-commit (`COMMITTING`) session**. The FK
+  cascade (`onDelete: Cascade`) reaps the session's `ImportRow`s **and its `ImportRun` ledger rows** —
+  consistent with the schema's deliberate cascade and §2 ("`ImportSession`/`ImportRow` are transient").
+  The durable asset→import correlation survives independently on each created asset's `CREATED`
+  `AssetHistory` provenance (`{ source:'import', sessionId, rowIndex }`), so reaping the transient run
+  ledger loses no audit-of-record. No schema/migration change in this wave.
+
 ## Consequences
 
 - **Positive:** ships the #1 real bootstrap need (bulk asset onboarding); proves every hard subsystem
