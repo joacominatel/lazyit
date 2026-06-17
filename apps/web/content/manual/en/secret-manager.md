@@ -1,85 +1,93 @@
 ---
-title: Secret Manager
-order: 1
+title: Security model
+order: 3
 category: secret-manager
 subcategory: security-model
 ---
 
-# Secret Manager
+# Security model
 
-The Secret Manager is where your team keeps **shared secrets** — the kind of thing an IT team passes
-around: a shared root password, a VPN pre-shared key, a registrar login. It is separate from the
-Knowledge Base: the Knowledge Base holds your runbooks, the Secret Manager holds the credentials
-those runbooks need.
+The Secret Manager keeps your team's **shared secrets** in **vaults** that only their members can read.
+What makes it different from anywhere else you might stash a password is the security guarantee behind
+it. This page explains that guarantee, what it protects you from, and the one case it cannot save you
+from.
 
-Secrets live in **vaults**. A vault is a named container with a list of **members**. Only members of
-a vault can read the secrets inside it.
+For day-to-day tasks, see [Vaults & members](/help/secret-manager-vaults-members) and
+[Passwords & recovery keys](/help/secret-manager-passwords-recovery-keys).
 
-> **lazyit cannot read your secrets.** The Secret Manager is end-to-end encrypted. Secret values are
-> only ever readable in your browser by a member of the vault — lazyit stores them in a form it
-> cannot decrypt. Not the server, not an administrator, and not a database backup can reveal a secret
-> value. This is the point of the feature, and it shapes how recovery works (below).
+## lazyit cannot read your secrets
 
-## Your password and your recovery key
+> **The Secret Manager is end-to-end encrypted.** Secret values are only ever readable in your browser,
+> by a member of the vault. lazyit stores them in a form it **cannot** decrypt — not the server, not an
+> administrator, and not a database backup can reveal a secret value. This is the whole point of the
+> feature, and it shapes how recovery works.
 
-To use the Secret Manager you set up two credentials, **once**, the first time you open it. They are
-specific to the Secret Manager and are **not** your sign-in password.
+Encryption and decryption happen **on your device**. Your password and your recovery key never leave
+your browser. The server's job is to **store and serve** the encrypted data and to enforce *who may
+fetch which vault*; it is structurally incapable of producing a plaintext value.
 
-- **Password** — your **daily key**. You enter it to unlock the Secret Manager in a session. You can
-  **change** it whenever you like (you need your current password to do so).
-- **Recovery key** — your **backup key**. It is a long, one-time code shown in the format
-  `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`. Its only job is to **reset your password** if you forget it. It is
-  not a second daily key — you do not use it to unlock day to day.
+This is a deliberate trade-off. Because there is no master key on the server, there is **no back door** —
+and that is exactly what makes the guarantee trustworthy.
 
-> **The recovery key is shown exactly once.** lazyit displays it when you first set up the Secret
-> Manager and **never shows it again** — it is not stored anywhere lazyit can read. Save it somewhere
-> safe and off the system: a password manager, or a printed copy in a secure place. If you lose your
-> password and you do not have your recovery key, no one can reset it for you.
+## What is and isn't hidden from lazyit
 
-Think of it as: the **password is the door you use every day**, and the **recovery key is the master
-key in the safe** that lets you fit a new lock if you ever lose your daily key.
+Not everything is hidden — some labels have to be visible so the app can show you a list and so
+administrators can manage access.
 
-## Day-to-day use
+| Visible to lazyit (labels / metadata) | Never readable by lazyit |
+| --- | --- |
+| Vault **names** and **member lists** | Secret **values** |
+| Secret **labels** and **handles** | Your **password** and **recovery key** |
 
-- **Unlock** — enter your password to unlock the Secret Manager for your session.
-- **Change your password** — enter your current password, then a new one. Your access to every vault
-  carries over; nothing else changes.
-- **Reset your password** — if you have forgotten your password, use your **recovery key** to set a
-  new one. After a reset you are unlocked straight away.
+Because names, members and handles are visible, **name vaults and secrets plainly — never put a secret
+value in a label or a name.**
 
-## Sharing a vault
+## Two layers of access
 
-Vaults are shared by adding **members**:
+Reaching the Secret Manager and decrypting a vault are **two separate things**:
 
-- **Add a member** — any current member of a vault can grant access to another person. You can only
-  add someone to a vault you can read yourself — you cannot share access you do not have.
-- **Revoke a member** — remove someone from a vault and they can no longer read its secrets.
+1. **Permission to enter** — an administrator grants the Secret Manager capability. This lets you reach
+   the Secret Manager and see that vaults exist (their names and members). On its own it reveals **no**
+   secret values.
+2. **Vault membership** — to actually **decrypt** a vault's secrets, you must be a **member** of that
+   vault (see [Vaults & members](/help/secret-manager-vaults-members)).
 
-> Revoking a member stops future access through lazyit. It does not "un-tell" a secret someone
-> already read. If a credential may have been exposed, the real fix is the same as it has always been:
-> **change the underlying credential** (for example, rotate the actual password).
+These can disagree, and one consequence matters: **removing someone's permission to enter does not
+cryptographically lock them out of a vault they were already a member of.** The server will refuse
+their requests, but the only way to truly cut off a vault is to **revoke their membership** — and, for
+a real compromise, to **rotate the underlying credential**. An administrator can see every vault's name
+and members and manage who may enter, but an administrator who was never made a member of a vault
+**cannot read its secrets**.
 
 ## Recovering access — and the one case you can't
 
 Because lazyit cannot read your secrets, recovery is something you and your team do, not something the
 server can do for you. There are three situations:
 
-- **You lost your password but have your recovery key.** Use the recovery key to reset your password.
-  You are back in.
-- **You lost both, but the vault has other members.** Another member can **restore your access** to
-  each vault: you set up a fresh password and recovery key, and a peer re-shares each vault with you.
-  No one ever learns your password to do this.
-- **You lost both, and you were the vault's only member.** This is the one case with no way back. If
-  the **only** member of a vault loses **both** their password and their recovery key, **the vault
-  cannot be recovered** — not by a teammate, not by an administrator, not by lazyit. There is no back
-  door; that is what makes the encryption trustworthy.
+- **You lost your password but have your recovery key.** Use the recovery key to **reset your password**
+  ([Passwords & recovery keys](/help/secret-manager-passwords-recovery-keys)). You are back in, and your
+  vault access is intact.
+- **You lost both, but the vault has other members.** Set yourself up with a fresh password and
+  recovery key, and a current member of each vault **grants you access again**. No one ever learns your
+  password to do this — they simply re-share the vault with your new identity.
+- **You lost both, and you were the vault's only member.** This is the one case with no way back. If the
+  **only** member of a vault loses **both** their password and their recovery key, **the vault cannot be
+  recovered** — not by a teammate, not by an administrator, not by lazyit. There is no back door; that
+  is what makes the encryption trustworthy.
 
-### Protect yourself from permanent loss
+## Protect yourself from permanent loss
 
 Two simple habits prevent the unrecoverable case:
 
 - **Keep your recovery key safe and off the system.** It is your personal backup — store it where a
-  server breach or a database loss cannot touch it.
-- **Don't leave a vault that matters with only one member.** Add a second member to any important
-  vault so a teammate can restore access if you ever lose your keys. lazyit warns you when a vault
-  has only one member — take the hint before it is too late.
+  server breach or a database loss cannot touch it. It is shown only once, at setup.
+- **Don't leave a vault that matters with only one member.** Add a second member to any important vault
+  so a teammate can restore your access if you ever lose your keys. lazyit warns you when a vault has
+  only one member — take the hint before it is too late.
+
+## When a secret may be exposed
+
+Removing a member, or even deleting a secret, stops **future** reads through lazyit — it does not
+"un-tell" a value someone already saw. If you suspect a credential has been exposed, the real
+remediation is the one it has always been: **change the underlying credential** (rotate the actual
+password, re-issue the key) at its source.
