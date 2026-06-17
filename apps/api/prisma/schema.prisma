@@ -1828,6 +1828,12 @@ model ImportSession {
   mapping        Json?
   // Frozen per-conflict resolution plan (ImportResolutionPlanSchema) — null until the dry-run step.
   resolutionPlan Json?
+  // Detected source shape from the parse step (wave 2, #629): { headers, dialect, encoding, rowCount }.
+  // Null until PARSED; lets the map step render columns without re-reading the (discarded) file.
+  detected  Json?
+  // Session-level failure detail when status is FAILED (e.g. a malformed file) — PII-free (§11). A
+  // ROW-level error lives on ImportRow.error; this is the whole-file error that prevented any rows.
+  error     Json?
   // SHA-256 of the uploaded file (never its contents) for the audit/idempotency correlation (§9).
   fileHash  String?
   expiresAt DateTime
