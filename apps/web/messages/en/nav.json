@@ -3,6 +3,7 @@
   "inventory": "Inventory",
   "assets": "Assets",
   "consumables": "Consumables",
+  "imports": "Importer",
   "access": "Access",
   "applications": "Applications",
   "knowledge": "Knowledge",

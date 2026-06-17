@@ -10,6 +10,7 @@ import common from "./common.json";
 import consumables from "./consumables.json";
 import dashboard from "./dashboard.json";
 import help from "./help.json";
+import imports from "./imports.json";
 import reports from "./reports.json";
 import kb from "./kb.json";
 import locations from "./locations.json";
@@ -43,6 +44,7 @@ const messages = {
   workflow,
   notifications,
   secrets,
+  imports,
 };
 
 export default messages;

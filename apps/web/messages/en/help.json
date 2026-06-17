@@ -53,7 +53,8 @@
       "models-categories": "Models & categories",
       "locations": "Locations",
       "assignments-history": "Assignments & history",
-      "asset-tags": "Asset tags"
+      "asset-tags": "Asset tags",
+      "bulk-import": "Bulk import"
     },
     "users-permissions": {
       "roles": "Roles",

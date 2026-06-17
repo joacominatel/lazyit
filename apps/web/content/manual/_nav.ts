@@ -42,6 +42,7 @@ export const MANUAL_NAV: readonly ManualNavCategory[] = [
       "locations",
       "assignments-history",
       "asset-tags",
+      "bulk-import",
     ],
   },
   {
