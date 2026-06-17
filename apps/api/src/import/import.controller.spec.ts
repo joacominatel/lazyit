@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
 // Mock the generated Prisma client so importing the controller's deps never loads the real one.
@@ -73,6 +73,29 @@ describe('ImportController — authorization wiring', () => {
   it('the controller is human-only (ServicePrincipalForbiddenGuard at class level)', () => {
     const guards = Reflect.getMetadata(GUARDS_METADATA, ImportController) ?? [];
     expect(guards).toContain(ServicePrincipalForbiddenGuard);
+  });
+
+  it('BEHAVIORAL: a service principal hitting an import route is 403d by the bound guard', () => {
+    // Run the guard ACTUALLY bound to ImportController against a request carrying a service principal —
+    // proving the human-only refusal at runtime, not just at the metadata level. The guard short-circuits
+    // before any handler runs, so the SA never reaches the import wizard regardless of its grants.
+    const guard = new ServicePrincipalForbiddenGuard();
+    const ctx = {
+      switchToHttp: () => ({ getRequest: () => ({ principal: SERVICE }) }),
+      getHandler: () => ImportController.prototype.commit,
+      getClass: () => ImportController,
+    } as never;
+    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+  });
+
+  it('BEHAVIORAL: a human principal passes the bound guard (humans are never blocked)', () => {
+    const guard = new ServicePrincipalForbiddenGuard();
+    const ctx = {
+      switchToHttp: () => ({ getRequest: () => ({ principal: HUMAN }) }),
+      getHandler: () => ImportController.prototype.commit,
+      getClass: () => ImportController,
+    } as never;
+    expect(guard.canActivate(ctx)).toBe(true);
   });
 });
 
