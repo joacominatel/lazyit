@@ -94,11 +94,44 @@ describe('parseImport — CSV', () => {
     expect(result.reason).toMatch(/no data rows/i);
   });
 
-  it('fails gracefully on duplicate headers', () => {
-    const result = parseImport(buf('name,name\n1,2\n'), 'csv');
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toMatch(/duplicate/i);
+  it('de-dups duplicate headers deterministically (no data loss) [REDESIGN §4.1]', () => {
+    // Two columns literally named "name" — the old parser hard-rejected; now the 2nd becomes "name (2)"
+    // so BOTH columns survive as distinct keys (the CEO's Snipe-IT export has Dirección ×4, Notas ×2).
+    const result = parseImport(buf('name,name\nA,B\n'), 'csv');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.headers).toEqual(['name', 'name (2)']);
+    expect(result.rows[0]).toEqual({ name: 'A', 'name (2)': 'B' });
+  });
+
+  it('de-dup never collides when the source ALREADY contains the suffixed form [REDESIGN §4.1]', () => {
+    // The dangerous case: the file already has a literal "addr (2)" AND two "addr" columns. A naive
+    // "rename the 2nd to addr (2)" would collapse two distinct columns into one key (silent data loss).
+    // The while-until-unique de-dup checks the FULL seen set, so every column keeps a UNIQUE key.
+    const result = parseImport(buf('addr,addr,addr (2)\nx,y,z\n'), 'csv');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // 3 source columns → 3 distinct keys, none overwriting another.
+    expect(result.headers).toEqual(['addr', 'addr (2)', 'addr (2) (2)']);
+    expect(new Set(result.headers).size).toBe(3);
+    expect(result.rows[0]).toEqual({
+      addr: 'x',
+      'addr (2)': 'y',
+      'addr (2) (2)': 'z',
+    });
+  });
+
+  it('de-dups four identical headers (Snipe-IT Dirección ×4) into four unique keys [REDESIGN §4.1]', () => {
+    const result = parseImport(buf('Dir,Dir,Dir,Dir\n1,2,3,4\n'), 'csv');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.headers).toEqual(['Dir', 'Dir (2)', 'Dir (3)', 'Dir (4)']);
+    expect(result.rows[0]).toEqual({
+      Dir: '1',
+      'Dir (2)': '2',
+      'Dir (3)': '3',
+      'Dir (4)': '4',
+    });
   });
 });
 
