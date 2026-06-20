@@ -322,4 +322,45 @@ describe("coerceRow — directory person → person bucket (ADR-0069 REDESIGN §
     expect(row.person).toBeUndefined();
     expect("person" in row).toBe(false);
   });
+
+  test("the person bucket has a NULL prototype (parity with specs, E2-AUTH-01)", () => {
+    const m = mapping({
+      columns: [],
+      person: {
+        fields: [
+          { field: "name", column: "Owner" },
+          { field: "email", column: "Email" },
+        ],
+      },
+    });
+    const { person } = coerceRow({ Owner: "Hana", Email: "hana@x.com" }, m, desc);
+    expect(person).toEqual({ name: "Hana", email: "hana@x.com" });
+    // null-proto person bucket has no inherited Object machinery (no prototype-pollution surface).
+    expect(Object.getPrototypeOf(person)).toBeNull();
+  });
+
+  test("the person WRITER skips prototype-pollution keys even if a corrupt mapping bypasses the refine", () => {
+    // A persisted/corrupt mapping that never went through the superRefine — the write-time guard must
+    // still refuse to pollute the prototype (defense-in-depth parity with the specs writer, E2-AUTH-01).
+    const corrupt = {
+      columns: [],
+      enums: [],
+      references: [],
+      custom: [],
+      person: {
+        fields: [
+          { field: "__proto__", column: "Evil", constant: null },
+          { field: "email", column: "Email", constant: null },
+        ],
+      },
+    } as unknown as ImportMapping;
+    const { person } = coerceRow(
+      { Evil: "{polluted:true}", Email: "z@x.com" },
+      corrupt,
+      desc,
+    );
+    expect(person).toEqual({ email: "z@x.com" });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf(person)).toBeNull();
+  });
 });
