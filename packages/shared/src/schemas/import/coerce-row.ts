@@ -39,8 +39,9 @@ export interface CoercedRow {
   specs?: Record<string, unknown>;
   /**
    * The directory-person sub-payload for the asset's "assigned to" (ADR-0069 REDESIGN §5.4 / §4.5). Built
-   * from `mapping.person.fields` with empty cells OMITTED — and only present when an IDENTITY KEY is
-   * present (CEO Q5: `email` OR `legajo` OR `username` has a value). If none of the three is mapped/filled,
+   * from `mapping.person.fields` with empty cells OMITTED, a NULL prototype + reserved-key skip (parity
+   * with `specs`, E2-AUTH-01 defense-in-depth) — and only present when an IDENTITY KEY is present (CEO Q5:
+   * `email` OR `legajo` OR `username` has a value). If none of the three is mapped/filled,
    * `person` stays `undefined` and the asset imports UNASSIGNED (REDESIGN §0 #1) — a person is NEVER built
    * from a name alone (an unsafe match that would leak inventory to the wrong person, REDESIGN §7). The
    * commit re-validates this bucket against `CreateDirectoryPersonSchema` (strict).
@@ -178,9 +179,10 @@ export function coerceRow(
   let person: Record<string, unknown> | undefined;
   let hasIdentity = false;
   for (const pf of mapping.person?.fields ?? []) {
+    if (PROTO_POLLUTION_KEYS.has(pf.field)) continue; // ponytail: defense-in-depth — refine rejects it.
     const value = coerceAbsent(sourceValue(raw, pf));
     if (value === undefined) continue; // omit-empty: absent cell → no person entry.
-    if (person === undefined) person = {};
+    if (person === undefined) person = Object.create(null) as Record<string, unknown>;
     person[pf.field] = value;
     if (PERSON_IDENTITY_FIELDS.has(pf.field)) hasIdentity = true;
   }
