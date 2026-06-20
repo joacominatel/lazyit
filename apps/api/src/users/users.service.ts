@@ -86,6 +86,13 @@ type ManagerWrite =
 export interface UserFilters {
   /** Case-insensitive substring over firstName / lastName / email (OR). */
   q?: string;
+  /**
+   * Directory-person filter (ADR-0069 REDESIGN §0 #2).
+   * true  → only directory-only persons (no login).
+   * false → only login-backed accounts.
+   * absent/undefined → all users (default; no filter).
+   */
+  directoryOnly?: boolean;
 }
 
 /**
@@ -231,16 +238,20 @@ export class UsersService {
   }
 
   /** The shared `where` for the user list — used identically by findPage and its count. */
-  private buildWhere({ q }: UserFilters): Prisma.UserWhereInput {
-    return q
-      ? {
-          OR: [
-            { firstName: { contains: q, mode: 'insensitive' } },
-            { lastName: { contains: q, mode: 'insensitive' } },
-            { email: { contains: q, mode: 'insensitive' } },
-          ],
-        }
-      : {};
+  private buildWhere({ q, directoryOnly }: UserFilters): Prisma.UserWhereInput {
+    return {
+      ...(q
+        ? {
+            OR: [
+              { firstName: { contains: q, mode: 'insensitive' } },
+              { lastName: { contains: q, mode: 'insensitive' } },
+              { email: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+      // directoryOnly filter (ADR-0069 REDESIGN §0 #2): absent → no filter (show all).
+      ...(directoryOnly !== undefined ? { directoryOnly } : {}),
+    };
   }
 
   // --- manager read-descriptor resolution (ADR-0058) ----------------------
