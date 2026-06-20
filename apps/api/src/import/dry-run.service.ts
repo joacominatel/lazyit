@@ -111,11 +111,24 @@ export class ImportDryRunService {
     >();
 
     for (const { rowIndex, raw } of rows) {
-      const { payload, references, enumMisses } = coerceRow(
-        raw,
-        mapping,
-        IMPORT_DESCRIPTORS.asset,
-      );
+      // Per-row isolation (mirrors `commitRow`'s catch): `coerceRow` is pure but a malformed/hostile
+      // mapping or cell could still throw — and one bad row must NEVER 500 the whole preview. Record it
+      // as an invalid row and move on (the operator fixes it), exactly like the commit's keep-partial.
+      let coerced: ReturnType<typeof coerceRow>;
+      try {
+        coerced = coerceRow(raw, mapping, IMPORT_DESCRIPTORS.asset);
+      } catch {
+        rowResults.push({
+          rowIndex,
+          status: 'invalid',
+          errors: [{ field: null, message: 'This row could not be processed.' }],
+          entityId: null,
+        });
+        // Still emit a tag decision so the per-row arrays stay index-aligned with rowResults.
+        tagDecisions.push({ rowIndex, mode: 'none', tag: null, collision: false });
+        continue;
+      }
+      const { payload, references, enumMisses } = coerced;
 
       const errors: RowFieldError[] = enumMisses.map((m) => ({
         field: m.field,
