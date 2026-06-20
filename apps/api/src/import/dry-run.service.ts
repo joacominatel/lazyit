@@ -77,6 +77,12 @@ export class ImportDryRunService {
       raw: r.raw as Record<string, string>,
     }));
 
+    // NOTE (ADR-0069 REDESIGN §4.4 / §5.2): the created-model brand + category live on
+    // `mapping.modelConfig` (the corrected design — they do NOT travel through the resolution plan / a
+    // ConflictResolution). The mapping is persisted whole on the session, so `modelConfig` reaches the
+    // commit's `createReference` directly via the loaded mapping; the dry-run neither resolves nor
+    // creates an `AssetCategory` here (the dry-run is READ-ONLY on domain data — a category is
+    // find-or-created idempotently at COMMIT, never in the preview). No plan/preview shape change.
     return this.analyze(rows, mapping);
   }
 
