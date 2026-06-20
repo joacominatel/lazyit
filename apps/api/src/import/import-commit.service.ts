@@ -13,12 +13,13 @@ import {
   CreateAssetSchema,
   CreateAssetModelSchema,
   CreateAssetCategorySchema,
+  CreateDirectoryPersonSchema,
   ImportResolutionPlanSchema,
   ImportMappingSchema,
   IMPORT_DESCRIPTORS,
   normalizeMatchKey,
   type ConflictResolution,
-  type CreateAsset,
+  type CreateDirectoryPerson,
   type ImportMapping,
   type ModelConfig,
   type ImportResolutionPlan,
@@ -30,6 +31,11 @@ import { AssetsService } from '../assets/assets.service';
 import { AssetModelsService } from '../asset-models/asset-models.service';
 import { AssetCategoriesService } from '../asset-categories/asset-categories.service';
 import { LocationsService } from '../locations/locations.service';
+import {
+  UsersService,
+  DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN,
+} from '../users/users.service';
+import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { SearchService } from '../search/search.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import type { Principal } from '../auth/principal';
@@ -100,7 +106,10 @@ function modelCreateConfigFor(
     return trimmed ? trimmed : undefined;
   };
   return {
-    manufacturer: pick(modelConfig.manufacturerConst, modelConfig.manufacturerColumn),
+    manufacturer: pick(
+      modelConfig.manufacturerConst,
+      modelConfig.manufacturerColumn,
+    ),
     categoryName: pick(modelConfig.categoryConst, modelConfig.categoryColumn),
   };
 }
@@ -132,8 +141,13 @@ const SPECS_RESERVED_KEYS: ReadonlySet<string> = new Set([
  * bypassed the mapping `superRefine` still can't reach `Object.prototype`. `Object.create(null)` means
  * even a literal `__proto__` key (were it not skipped) lands as an own data property, never the proto.
  */
-function sanitizeSpecs(specs: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+function sanitizeSpecs(
+  specs: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
   for (const [key, value] of Object.entries(specs)) {
     if (SPECS_RESERVED_KEYS.has(key)) continue;
     out[key] = value;
@@ -142,7 +156,11 @@ function sanitizeSpecs(specs: Record<string, unknown>): Record<string, unknown> 
 }
 
 /** Resolution lookup key — mirrors the dry-run's `(entity, field, normalizedValue)` conflict identity. */
-function resolutionKey(entity: string, field: string, normalizedValue: string): string {
+function resolutionKey(
+  entity: string,
+  field: string,
+  normalizedValue: string,
+): string {
   return `${entity}\u0000${field}\u0000${normalizedValue}`;
 }
 
@@ -166,6 +184,9 @@ export class ImportCommitService {
     private readonly models: AssetModelsService,
     private readonly categories: AssetCategoriesService,
     private readonly locations: LocationsService,
+    // ADR-0069 REDESIGN §4.5/§4.6 (Etapa 2): create directory-only persons + open their assignments.
+    private readonly users: UsersService,
+    private readonly assignments: AssetAssignmentsService,
     private readonly search: SearchService,
     private readonly permissions: PermissionResolverService,
   ) {}
@@ -183,7 +204,7 @@ export class ImportCommitService {
   ): Promise<{ sessionId: string }> {
     const session = await this.prisma.importSession.findFirst({
       where: { id: sessionId, ownerId: actorUserId },
-      select: { id: true, status: true, resolutionPlan: true },
+      select: { id: true, status: true, resolutionPlan: true, mapping: true },
     });
     if (!session || session.resolutionPlan === null) {
       throw new NotFoundException(`Import session ${sessionId} not found`);
@@ -209,7 +230,15 @@ export class ImportCommitService {
     // creates a model) is denied BEFORE any row is written. The plan was validated at save time
     // (ImportResolutionPlanSchema); we re-parse defensively here.
     const plan = ImportResolutionPlanSchema.parse(session.resolutionPlan);
-    await this.assertActorCanCommit(actorUserId, plan);
+    // ADR-0069 REDESIGN §7 (Etapa 2): the plan alone doesn't reveal whether this commit will create
+    // DIRECTORY PERSONS + assignments — that lives in the mapping (`person.fields`). Parse it (defensive,
+    // validated at save time) so the AND-check can additionally require `user:manage` when persons are in
+    // play. A null mapping (shouldn't reach here past the commit gate) → no person creation implied.
+    const impliesPersons =
+      session.mapping !== null &&
+      (ImportMappingSchema.parse(session.mapping).person?.fields.length ?? 0) >
+        0;
+    await this.assertActorCanCommit(actorUserId, plan, impliesPersons);
 
     const data: CommitJobData = { sessionId, actorUserId };
     try {
@@ -247,8 +276,18 @@ export class ImportCommitService {
   private async assertActorCanCommit(
     actorUserId: string,
     plan: ImportResolutionPlan,
+    impliesPersons = false,
   ): Promise<void> {
     const required = new Set<Permission>(['asset:write']);
+    // ADR-0069 REDESIGN §7 (Etapa 2): a commit that creates DIRECTORY PERSONS + opens their assignments
+    // additionally mutates Users — so require `user:manage` (the user-administration verb that the Users
+    // controller's create gates on) explicitly, fail-closed. The assignment itself is `asset:write`
+    // (already required; AssetAssignments are an asset mutation). Today `import:run` is ADMIN-only and an
+    // ADMIN holds everything, so this is a no-op for the current RBAC; it is added NOW so opening import
+    // to MEMBER later (§10 #8) cannot silently let a non-admin mint Users/assignments without the gate.
+    if (impliesPersons) {
+      required.add('user:manage');
+    }
     for (const conflict of plan.conflicts) {
       if (conflict.outcome !== 'create' && conflict.outcome !== 'restore') {
         continue; // `match`/`skip` mutate no reference entity.
@@ -273,7 +312,7 @@ export class ImportCommitService {
       (await this.permissions.hasAll(actor.role, [...required]));
     if (!allowed) {
       throw new ForbiddenException(
-        'You do not hold all the permissions this import requires. A bulk import needs the write permission for every entity it creates (assets, plus any new models/locations/categories).',
+        'You do not hold all the permissions this import requires. A bulk import needs the write permission for every entity it creates (assets, plus any new models/locations/categories, and user administration when it creates directory persons).',
       );
     }
   }
@@ -315,14 +354,15 @@ export class ImportCommitService {
       orderBy: { id: 'desc' },
       select: { id: true, counts: true },
     });
-    const counts = (run?.counts as {
-      total: number;
-      valid: number;
-      invalid: number;
-      committed: number;
-      failed: number;
-      skipped: number;
-    } | null) ?? null;
+    const counts =
+      (run?.counts as {
+        total: number;
+        valid: number;
+        invalid: number;
+        committed: number;
+        failed: number;
+        skipped: number;
+      } | null) ?? null;
     // The commit ledger records total/committed/failed/skipped; valid/invalid are a dry-run notion.
     // Normalize to the full ImportCounts shape so the wire contract is satisfied (default 0).
     const normalized = run
@@ -408,7 +448,9 @@ export class ImportCommitService {
 
     // The actor we attribute every write to — a minimal human principal carrying the loaded User so
     // the actor service resolves `{ userId }` (import is human-only, ADMIN — ADR-0069 §11).
-    const user = await this.prisma.user.findFirst({ where: { id: actorUserId } });
+    const user = await this.prisma.user.findFirst({
+      where: { id: actorUserId },
+    });
     const principal: Principal | undefined = user
       ? { kind: 'human', user }
       : undefined;
@@ -522,22 +564,49 @@ export class ImportCommitService {
     principal: Principal | undefined,
   ): Promise<{ kind: 'committed' | 'failed' }> {
     try {
+      const raw = row.raw as Record<string, string>;
+      const { payload, references, specs, person } = coerceRow(
+        raw,
+        mapping,
+        IMPORT_DESCRIPTORS.asset,
+      );
+
       // Resume-detect: was an asset already created for this row in a prior (crashed) attempt? If so,
       // reconcile the row to COMMITTED rather than minting a duplicate. ponytail: one extra lookup per
       // non-COMMITTED row; a later wave could gate it behind an explicit `isResume` flag if it shows up
       // in commit latency, but at concurrency-1 chunked commits it is negligible and unconditionally
       // correct.
-      if (await this.assetExistsForRow(sessionId, row.rowIndex)) {
+      const resumedAssetId = await this.assetExistsForRow(
+        sessionId,
+        row.rowIndex,
+      );
+      if (resumedAssetId !== null) {
+        // EXTENDED RESUME PROBE (ADR-0069 REDESIGN §4.6, critical): the asset was created last run, but
+        // the process may have crashed BETWEEN `assets.create` and the assignment — so do NOT blindly
+        // mark COMMITTED. If the row had a person, re-resolve them (dedup finds the one created last run)
+        // and complete the assignment via the same idempotent path BEFORE committing — otherwise the
+        // assignment, the CEO's entry deliverable (REDESIGN §0 #1), is lost in silence. ponytail: this
+        // is NOT a shared transaction with the asset create — a crash strictly between the two probes
+        // re-narrows the window but doesn't fully close it. Ceiling: full-row atomicity. Upgrade path:
+        // a shared tx (refactor of assets.create) if the CEO won't tolerate the residual window.
+        if (person !== undefined) {
+          const actorId =
+            principal?.kind === 'human' ? principal.user.id : undefined;
+          const personId = await this.resolveOrCreateDirectoryPerson(
+            person,
+            actorId,
+            sessionId,
+            row.rowIndex,
+          );
+          await this.openAssignmentIdempotent(
+            resumedAssetId,
+            personId,
+            principal,
+          );
+        }
         await this.markRow(row.id, 'COMMITTED', null);
         return { kind: 'committed' };
       }
-
-      const raw = row.raw as Record<string, string>;
-      const { payload, references, specs } = coerceRow(
-        raw,
-        mapping,
-        IMPORT_DESCRIPTORS.asset,
-      );
 
       // The brand/category for a Model this row may create (ADR-0069 REDESIGN §4.4) — resolved from the
       // mapping's modelConfig + this row's cells, carried into createReference (used only on a `create`).
@@ -592,15 +661,39 @@ export class ImportCommitService {
         return { kind: 'failed' };
       }
 
-      await this.assets.create(parsed.data as CreateAsset, principal, {
+      const asset = await this.assets.create(parsed.data, principal, {
         // Stamp the STABLE sessionId (known upfront) + rowIndex — not the autoincrement ImportRun id,
         // which doesn't exist until after the loop (ADR-0069 §8/§9). This is the provenance the resume
         // probe matches on, and the asset→import correlation key (via ImportRun.sessionId).
-        createdPayload: { source: 'import', sessionId, rowIndex: row.rowIndex },
+        createdPayload: {
+          source: 'import',
+          sessionId,
+          rowIndex: row.rowIndex,
+        },
         // Per-row search upsert is suppressed (ADR-0069 §10) — one reconcile runs after the bulk. This
         // is SCOPED to the import's own asset writes, not a process-wide mute.
         suppressSearch: true,
       });
+
+      // COMMIT ORDER asset → person → assignment (ADR-0069 REDESIGN §4.5): asset-first so an invalid
+      // asset aborts the row cheaply ABOVE (no orphan person). Only now, with a durable asset, do we
+      // resolve/create the directory person and open its assignment. `person` is built by coerceRow ONLY
+      // when an identity key (email ∨ legajo ∨ username) is present — a row with none imports the asset
+      // UNASSIGNED (REDESIGN §0 #1). A throw here is caught by commitRow's catch → the row is FAILED.
+      if (person !== undefined) {
+        // The actor attributed to a freshly-created person's CREATED UserHistory (import is human-only,
+        // ADR-0069 §11; `principal` is the loaded ADMIN). undefined → a system/unknown actor.
+        const actorId =
+          principal?.kind === 'human' ? principal.user.id : undefined;
+        const personId = await this.resolveOrCreateDirectoryPerson(
+          person,
+          actorId,
+          sessionId,
+          row.rowIndex,
+        );
+        await this.openAssignmentIdempotent(asset.id, personId, principal);
+      }
+
       await this.markRow(row.id, 'COMMITTED', null);
       return { kind: 'committed' };
     } catch (err) {
@@ -611,6 +704,151 @@ export class ImportCommitService {
         reason: this.failureReason(err),
       });
       return { kind: 'failed' };
+    }
+  }
+
+  /**
+   * Resolve an EXISTING live directory person by an identity key, or CREATE a new directory-only one
+   * (ADR-0069 REDESIGN §4.5). Returns the person's User id (the AssetAssignment.userId).
+   *
+   * DEDUP IS LIVE-ONLY (REDESIGN §7, security-critical): we `findFirst` through the NORMAL soft-delete-
+   * filtered client (NOT `includeSoftDeleted`) so a soft-deleted person is NEVER resurrected or re-linked
+   * — mirroring the email-link rule in jwt-auth.guard.ts. We match on whichever identity keys the row
+   * supplies (email ∨ legajo ∨ username), OR-ed. The schema already guaranteed at least one is present.
+   *
+   * On a miss we create via UsersService.create with `skipIdpWriteBack` (no Zitadel mirror) + the import
+   * provenance, role FORCED to VIEWER, `externalId` null. We re-validate against CreateDirectoryPersonSchema
+   * first (defense-in-depth: the coerced bucket is re-checked strict at commit time). The single `name`
+   * is split into the required firstName/lastName; jobTitle/department → directoryAttrs (jsonb); supervisor
+   * → managerName free-text (managerId only when it matches a LIVE non-directory User).
+   */
+  private async resolveOrCreateDirectoryPerson(
+    person: Record<string, unknown>,
+    actorId: string | undefined,
+    sessionId: string,
+    rowIndex: number,
+  ): Promise<string> {
+    // Strict re-validation at the commit seam (the coerce layer already gated on identity; this is the
+    // defense-in-depth re-check, and it normalizes email/legajo/username exactly like the HTTP path).
+    const data: CreateDirectoryPerson =
+      CreateDirectoryPersonSchema.parse(person);
+
+    // LIVE dedup by identity key (no includeSoftDeleted — a ghost must never be resurrected/linked).
+    const identityOr: Prisma.UserWhereInput[] = [];
+    if (data.email !== undefined) identityOr.push({ email: data.email });
+    if (data.legajo !== undefined) identityOr.push({ legajo: data.legajo });
+    if (data.username !== undefined)
+      identityOr.push({ username: data.username });
+    if (identityOr.length > 0) {
+      const existing = await this.prisma.user.findFirst({
+        where: { OR: identityOr },
+        select: { id: true },
+      });
+      if (existing) return existing.id;
+    }
+
+    // No live match → create a fresh directory-only person. Split the single `name` into the required
+    // firstName/lastName: first whitespace token → firstName, the rest → lastName. ponytail: a single-
+    // token name (no space) has no surname, so lastName falls back to the firstName token (firstName/
+    // lastName are both required .min(1) — a non-empty fallback keeps the row valid). Ceiling: no
+    // structured given/family parsing. Upgrade path: map separate firstName/lastName person columns.
+    const trimmedName = data.name.trim();
+    const spaceIdx = trimmedName.indexOf(' ');
+    const firstName =
+      spaceIdx === -1 ? trimmedName : trimmedName.slice(0, spaceIdx);
+    const lastName =
+      spaceIdx === -1 ? trimmedName : trimmedName.slice(spaceIdx + 1).trim();
+
+    // supervisor → manager. managerId ONLY when the supervisor name matches a LIVE NON-directory User
+    // (REDESIGN §3.6 / §10 #9): a directory person must never become a manager in the approval hierarchy
+    // (a request routed to a login-less manager would hang). Otherwise the supervisor stays free-text
+    // managerName. The match is a BOUNDED query (split the supervisor into first/last and filter in SQL,
+    // case-insensitive citext) — never a full-table scan per row. A single unambiguous live non-directory
+    // hit wins; zero or many → free-text. ponytail: exact first+last only (no fuzzy/middle-name); upgrade
+    // path: a dedicated supervisor-resolution index if name-matching needs to be richer.
+    let managerId: string | undefined;
+    let managerName: string | undefined;
+    if (data.supervisor !== undefined) {
+      const sup = data.supervisor.trim();
+      const supSpace = sup.indexOf(' ');
+      const supFirst = supSpace === -1 ? sup : sup.slice(0, supSpace);
+      const supLast = supSpace === -1 ? '' : sup.slice(supSpace + 1).trim();
+      const hits =
+        supLast.length > 0
+          ? await this.prisma.user.findMany({
+              where: {
+                directoryOnly: false,
+                firstName: { equals: supFirst, mode: 'insensitive' },
+                lastName: { equals: supLast, mode: 'insensitive' },
+              },
+              select: { id: true },
+              take: 2, // only need to know "exactly one" vs "ambiguous".
+            })
+          : [];
+      if (hits.length === 1) managerId = hits[0].id;
+      else managerName = sup;
+    }
+
+    // jobTitle/department → directoryAttrs (jsonb). Only the present keys; omit-empty so a directory
+    // person with no extra attributes stores null (not `{}`).
+    const directoryAttrs: Record<string, unknown> = {};
+    if (data.jobTitle !== undefined) directoryAttrs.jobTitle = data.jobTitle;
+    if (data.department !== undefined)
+      directoryAttrs.department = data.department;
+
+    // The DB `email` column is required (non-null citext); a directory person identified ONLY by legajo/
+    // username has no real email. ponytail: synthesize a per-row, non-routable `@directory.local`
+    // placeholder so the row is valid and live-unique (sessionId+rowIndex is unique). Ceiling: it is NOT
+    // a real mailbox, so this person can NEVER auto-promote by verified-email OIDC login (REDESIGN §3.5,
+    // documented "personas sin email nunca se auto-promocionan") — manual merge is the only path. Upgrade
+    // path: a nullable email column if a reader needs to distinguish "no email" from this placeholder.
+    const email =
+      data.email ??
+      `${sessionId}-${rowIndex}${DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN}`;
+    const created = await this.users.create(
+      {
+        email,
+        firstName,
+        lastName,
+        ...(data.legajo !== undefined ? { legajo: data.legajo } : {}),
+        ...(data.username !== undefined ? { username: data.username } : {}),
+        ...(managerId !== undefined
+          ? { manager: { managerId } }
+          : managerName !== undefined
+            ? { manager: { managerName } }
+            : {}),
+      },
+      actorId,
+      {
+        skipIdpWriteBack: true,
+        createdPayload: { source: 'import', sessionId, rowIndex },
+        ...(Object.keys(directoryAttrs).length > 0
+          ? { directoryAttrs: directoryAttrs as Prisma.InputJsonValue }
+          : {}),
+      },
+    );
+    return created.id;
+  }
+
+  /**
+   * Open the AssetAssignment, treating an ALREADY-ACTIVE pair as an IDEMPOTENT no-op (ADR-0069 REDESIGN
+   * §4.6). `AssetAssignmentsService.create` does a friendly pre-check `findFirst({assetId,userId,
+   * releasedAt:null})` and throws `ConflictException` (409) BEFORE the insert — it does NOT surface a
+   * P2002 (asset-assignments.service.ts:84-91). On a re-import the asset already exists AND so does the
+   * active assignment; that 409 would otherwise fall to commitRow's catch and mark a GOOD row FAILED. So
+   * we swallow the ConflictException: the active assignment already exists → the row is COMMITTED, not
+   * FAILED, and no duplicate is written. Any OTHER error propagates (e.g. an asset/user liveness 400).
+   */
+  private async openAssignmentIdempotent(
+    assetId: string,
+    userId: string,
+    principal: Principal | undefined,
+  ): Promise<void> {
+    try {
+      await this.assignments.create({ assetId, userId }, principal);
+    } catch (err) {
+      if (err instanceof ConflictException) return; // idempotent: active assignment already exists.
+      throw err;
     }
   }
 
@@ -785,7 +1023,9 @@ export class ImportCommitService {
   // ===== Helpers ===============================================================================
 
   /** Index the frozen plan by `(entity, field, normalizedValue)` for O(1) per-reference replay. */
-  private indexPlan(plan: ImportResolutionPlan): Map<string, ConflictResolution> {
+  private indexPlan(
+    plan: ImportResolutionPlan,
+  ): Map<string, ConflictResolution> {
     const map = new Map<string, ConflictResolution>();
     for (const c of plan.conflicts) {
       map.set(resolutionKey(c.entity, c.field, c.normalizedValue), c);
@@ -808,14 +1048,14 @@ export class ImportCommitService {
   /**
    * Resume-detect (ADR-0069 §8): has an asset already been created for this `(sessionId, rowIndex)`?
    * Looks for a `CREATED` `AssetHistory` event whose import provenance payload matches both keys (a jsonb
-   * path filter per key, AND-ed). Returns true iff a prior attempt created the asset but its `markRow`
-   * never landed — so the caller reconciles the row instead of minting a duplicate. False on any other
-   * row, so the happy path is unaffected.
+   * path filter per key, AND-ed). Returns the asset's id iff a prior attempt created the asset but its
+   * `markRow` never landed — so the caller reconciles the row (and its assignment) instead of minting a
+   * duplicate. Null on any other row, so the happy path is unaffected.
    */
   private async assetExistsForRow(
     sessionId: string,
     rowIndex: number,
-  ): Promise<boolean> {
+  ): Promise<string | null> {
     const existing = await this.prisma.assetHistory.findFirst({
       where: {
         eventType: 'CREATED',
@@ -825,14 +1065,15 @@ export class ImportCommitService {
           { payload: { path: ['rowIndex'], equals: rowIndex } },
         ],
       },
-      select: { id: true },
+      select: { assetId: true },
     });
-    return existing !== null;
+    return existing?.assetId ?? null;
   }
 
   /** Classify a caught error into a PII-free reason code for the row's recorded failure. */
   private failureReason(err: unknown): string {
-    if (err instanceof ReferenceCreateFailedError) return 'reference-create-failed';
+    if (err instanceof ReferenceCreateFailedError)
+      return 'reference-create-failed';
     if (err instanceof Prisma.PrismaClientKnownRequestError) {
       if (err.code === 'P2002') return 'unique-taken-since-preview';
       if (err.code === 'P2003') return 'reference-missing-since-preview';
