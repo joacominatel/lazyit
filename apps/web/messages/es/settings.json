@@ -14,6 +14,10 @@
       "title": "Ubicaciones",
       "description": "Gestiona los lugares donde residen físicamente tus activos — oficinas, centros de datos, racks y depósitos."
     },
+    "imports": {
+      "title": "Importación masiva",
+      "description": "Carga un inventario de activos existente desde un archivo CSV o JSON — una acción de administrador guiada y ocasional para una instancia nueva."
+    },
     "roles": {
       "title": "Roles",
       "description": "Mira quién tiene cada rol RBAC en el equipo. Los cambios de rol se hacen en la sección de Usuarios."
