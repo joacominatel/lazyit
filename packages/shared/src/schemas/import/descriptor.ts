@@ -71,6 +71,8 @@ export const assetImportDescriptor: ImportDescriptor<CreateAsset> = {
     { field: "status", i18nKey: "import.asset.field.status", required: true },
     { field: "modelId", i18nKey: "import.asset.field.model", required: false },
     { field: "locationId", i18nKey: "import.asset.field.location", required: false },
+    { field: "purchaseDate", i18nKey: "import.asset.field.purchaseDate", required: false },
+    { field: "warrantyEnd", i18nKey: "import.asset.field.warrantyEnd", required: false },
   ],
   naturalKey: "serial",
   references: {
@@ -111,3 +113,20 @@ export const assetImportDescriptor: ImportDescriptor<CreateAsset> = {
 export const IMPORT_DESCRIPTORS: Record<ImportEntity, ImportDescriptor<unknown>> = {
   asset: assetImportDescriptor as ImportDescriptor<unknown>,
 };
+
+/**
+ * UI target catalog for the assisted (column-centric) mapping step (ADR-0069 REDESIGN §5.5). The
+ * operator maps each CSV column to one of these targets (or to a custom specs field, or ignores it).
+ * The `asset` group IS the typed descriptor's `mappableFields` — so it cannot drift from the create
+ * schema. `model` exposes the brand + category for newly-created `AssetModel`s (NOT `CreateAsset` keys —
+ * resolved through the model at commit, see `ModelConfigSchema`), which is exactly why they live here as
+ * plain UI targets and NOT in `assetImportDescriptor.mappableFields` (that would break the
+ * `MappableField<keyof TCreate>` schema↔descriptor invariant). The `person` group is Etapa 2.
+ */
+export const IMPORT_UI_TARGETS = {
+  asset: assetImportDescriptor.mappableFields,
+  model: [
+    { field: "manufacturer", i18nKey: "import.model.field.manufacturer" },
+    { field: "category", i18nKey: "import.model.field.category" },
+  ],
+} as const;
