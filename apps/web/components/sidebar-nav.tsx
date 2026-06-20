@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowUpTrayIcon,
   BookOpenIcon,
   ChevronRightIcon,
   ClockIcon,
@@ -118,14 +117,8 @@ const NAV: NavSection[] = [
     items: [
       { labelKey: "assets", href: "/assets", icon: ServerStackIcon },
       { labelKey: "consumables", href: "/consumables", icon: CubeIcon },
-      // The guided bulk Migrator (ADR-0069). ADMIN-only by default via the coarse `import:run`
-      // permission — hidden for anyone without it (the API enforces the same gate server-side).
-      {
-        labelKey: "imports",
-        href: "/imports",
-        icon: ArrowUpTrayIcon,
-        permission: "import:run",
-      },
+      // The guided bulk Migrator (ADR-0069) is NOT in the primary nav: it is an occasional ADMIN action,
+      // so it is surfaced from Settings (a "Bulk import" card, same `import:run` gate) — issue #639.
     ],
   },
   {
