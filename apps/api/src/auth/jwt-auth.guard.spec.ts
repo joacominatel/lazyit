@@ -587,6 +587,16 @@ describe('JwtAuthGuard', () => {
         update: {},
       });
       expect((req.user as { role?: string }).role).toBe('ADMIN');
+      // ADR-0069 REDESIGN §3.6 / §7: the bootstrap count EXCLUDES directory persons (so a bulk import
+      // of login-less rows can never make the first real login fall to VIEWER), while still counting
+      // soft-deleted real users (includeSoftDeleted) so an offboarded-then-reprovisioned install can't
+      // silently hand ADMIN to the next signup.
+      expect(prismaUser.count).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { directoryOnly: false },
+          includeSoftDeleted: true,
+        }),
+      );
     });
 
     it('JIT-provisions a NON-first user (User count > 0) as VIEWER (ADR-0043 default flip)', async () => {
@@ -679,6 +689,9 @@ describe('JwtAuthGuard', () => {
           },
           data: {
             externalId: 'zitadel-sub-operator',
+            // ADR-0069 REDESIGN §3.5: the claim PROMOTES a directory person (and is a no-op for a row
+            // that was already a real account) — directoryOnly is always set false on the bind.
+            directoryOnly: false,
             // Seed placeholder "Admin User" + real claims → name refreshed.
             firstName: 'Real',
             lastName: 'Operator',
@@ -732,10 +745,11 @@ describe('JwtAuthGuard', () => {
           makeCtx({ headers: { authorization: 'Bearer t' } }),
         );
 
-        // The real name is not a seed placeholder → only externalId is written.
+        // The real name is not a seed placeholder → only externalId + the directoryOnly promotion are
+        // written (ADR-0069 REDESIGN §3.5), never the name.
         expect(prismaUser.updateMany).toHaveBeenCalledWith({
           where: { id: liveMember.id, externalId: null },
-          data: { externalId: 'zitadel-sub-jordan' },
+          data: { externalId: 'zitadel-sub-jordan', directoryOnly: false },
         });
         expect(prismaUser.upsert).not.toHaveBeenCalled();
       });
@@ -890,7 +904,8 @@ describe('JwtAuthGuard', () => {
           routeFindFirst({
             byExternalId: () => null,
             byEmail: () => ({ ...SEED_ADMIN, externalId: null }),
-            byId: () => (claimed ? claimedRow : { ...SEED_ADMIN, externalId: null }),
+            byId: () =>
+              claimed ? claimedRow : { ...SEED_ADMIN, externalId: null },
           }),
         );
         prismaUser.updateMany.mockImplementation(() => {
@@ -910,6 +925,8 @@ describe('JwtAuthGuard', () => {
           where: { id: SEED_ADMIN.id, externalId: null },
           data: {
             externalId: 'legit-operator-sub',
+            // ADR-0069 REDESIGN §3.5: directoryOnly flipped false on the claim/promotion.
+            directoryOnly: false,
             firstName: 'Real',
             lastName: 'Operator',
           },
@@ -939,7 +956,8 @@ describe('JwtAuthGuard', () => {
           routeFindFirst({
             byExternalId: () => null,
             byEmail: () => ({ ...SEED_ADMIN, externalId: null }),
-            byId: () => (claimed ? claimedRow : { ...SEED_ADMIN, externalId: null }),
+            byId: () =>
+              claimed ? claimedRow : { ...SEED_ADMIN, externalId: null },
           }),
         );
         prismaUser.updateMany.mockImplementation(() => {
