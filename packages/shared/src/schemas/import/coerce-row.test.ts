@@ -119,3 +119,94 @@ describe("coerceRow — dates", () => {
     expect(coerceRow({ D: "not-a-date" }, m, desc).payload.purchaseDate).toBe("not-a-date");
   });
 });
+
+describe("coerceRow — custom fields → specs (ADR-0069 REDESIGN §5.4)", () => {
+  test("a custom field with a value lands under specs[key], trimmed", () => {
+    const m = mapping({
+      columns: [{ field: "name", column: "Name" }],
+      custom: [
+        { column: "RAM", key: "ram" },
+        { column: "Disk", key: "disk" },
+      ],
+    });
+    const { payload, specs } = coerceRow({ Name: "PC", RAM: " 16GB ", Disk: "512GB" }, m, desc);
+    expect(payload).toEqual({ name: "PC" });
+    expect(specs).toEqual({ ram: "16GB", disk: "512GB" });
+  });
+
+  test("an empty custom cell is omitted (no specs entry)", () => {
+    const m = mapping({
+      columns: [{ field: "name", column: "Name" }],
+      custom: [
+        { column: "RAM", key: "ram" },
+        { column: "Disk", key: "disk" },
+      ],
+    });
+    const { specs } = coerceRow({ Name: "PC", RAM: "16GB", Disk: "" }, m, desc);
+    expect(specs).toEqual({ ram: "16GB" });
+    expect("disk" in (specs ?? {})).toBe(false);
+  });
+
+  test("an empty specs object is NEVER emitted (all custom cells absent → specs undefined)", () => {
+    const m = mapping({
+      columns: [{ field: "name", column: "Name" }],
+      custom: [{ column: "RAM", key: "ram" }],
+    });
+    const row = coerceRow({ Name: "PC", RAM: "  " }, m, desc);
+    expect(row.specs).toBeUndefined();
+    expect("specs" in row).toBe(false);
+  });
+
+  test("no custom mapping → no specs key on the result", () => {
+    const m = mapping({ columns: [{ field: "name", column: "Name" }] });
+    const row = coerceRow({ Name: "PC" }, m, desc);
+    expect(row.specs).toBeUndefined();
+    expect("specs" in row).toBe(false);
+  });
+
+  test("ImportMappingSchema REJECTS a custom key colliding with a native Asset field (mass-assignment)", () => {
+    for (const key of ["status", "modelId", "specs", "id", "deletedAt"]) {
+      const parsed = ImportMappingSchema.safeParse({
+        columns: [{ field: "name", column: "Name" }],
+        custom: [{ column: "X", key }],
+      });
+      expect(parsed.success).toBe(false);
+    }
+  });
+
+  test("ImportMappingSchema REJECTS a prototype-pollution custom key and duplicate keys", () => {
+    for (const key of ["__proto__", "constructor", "prototype"]) {
+      expect(
+        ImportMappingSchema.safeParse({ columns: [], custom: [{ column: "X", key }] }).success,
+      ).toBe(false);
+    }
+    expect(
+      ImportMappingSchema.safeParse({
+        columns: [],
+        custom: [
+          { column: "A", key: "dup" },
+          { column: "B", key: "dup" },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("the specs WRITER skips prototype-pollution keys even if a corrupt mapping bypasses the refine", () => {
+    // A persisted/corrupt mapping that never went through the superRefine — the write-time guard must
+    // still refuse to pollute the prototype (defense-in-depth, ADR-0069 REDESIGN §4.3).
+    const corrupt = {
+      columns: [{ field: "name", column: "Name", constant: null }],
+      enums: [],
+      references: [],
+      custom: [
+        { column: "Evil", key: "__proto__" },
+        { column: "RAM", key: "ram" },
+      ],
+    } as unknown as ImportMapping;
+    const { specs } = coerceRow({ Name: "PC", Evil: "{polluted:true}", RAM: "16GB" }, corrupt, desc);
+    expect(specs).toEqual({ ram: "16GB" });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // null-proto specs has no inherited Object machinery.
+    expect(Object.getPrototypeOf(specs)).toBeNull();
+  });
+});
