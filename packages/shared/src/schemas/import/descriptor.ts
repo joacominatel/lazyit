@@ -143,3 +143,44 @@ export const IMPORT_UI_TARGETS = {
     { field: "supervisor", i18nKey: "import.person.field.supervisor" },
   ],
 } as const;
+
+/**
+ * Header auto-detection aliases (ADR-0069 — column intelligence, #647). Maps a UI target token
+ * (`entity:field`, see {@link IMPORT_UI_TARGETS}) to source-header SYNONYMS so the assisted mapping step
+ * auto-seeds a column even when its header is in Spanish or a snipe-it-style export — not only on an exact
+ * English field-name match. Compared NORMALIZED (case-folded, non-alphanumerics stripped — accents drop
+ * on BOTH sides, so "Categoría" ≈ "categora") on both ends, exactly like {@link enumValueMaps} status
+ * synonyms. The operator ALWAYS confirms; this only pre-selects. The first column claiming a target wins
+ * (the mapping-step seed), so an exact field-name match still takes precedence over an alias.
+ *
+ * ponytail: a flat synonym table mirroring `enumValueMaps.status.synonyms` — no fuzzy/ML. Ceiling:
+ * exact-after-normalize only (so "Modelo No." never collides with "Modelo"). Upgrade path: add aliases
+ * here as new locales/exports surface.
+ */
+export const HEADER_ALIASES: Record<string, readonly string[]> = {
+  // Asset direct fields
+  "asset:name": ["Nombre del activo", "Asset Name"],
+  "asset:serial": ["Número de serie", "Serial Number", "Serial No"],
+  "asset:assetTag": ["Placa del activo", "Asset Tag", "Asset Tag Number"],
+  "asset:status": ["Estado", "Status"],
+  "asset:modelId": ["Modelo", "Model"],
+  "asset:locationId": ["Ubicación", "Location"],
+  "asset:purchaseDate": ["Comprado", "Fecha de compra", "Purchase Date", "Purchased"],
+  "asset:warrantyEnd": [
+    "Vencimiento de la garantía",
+    "Fin Garantía",
+    "Warranty Expiration",
+    "Warranty Expiry",
+  ],
+  // Model (brand/category → resolved through the created AssetModel)
+  "model:manufacturer": ["Fabricante", "Manufacturer", "Marca"],
+  "model:category": ["Categoría", "Category"],
+  // Directory person (the asset's "assigned to")
+  "person:name": ["Asignado a", "Assigned To", "Asignado"],
+  "person:email": ["Email", "Correo", "Correo electrónico", "E-mail"],
+  "person:legajo": ["Employee No.", "Employee Number", "Legajo", "Número de empleado"],
+  "person:username": ["Username", "Usuario", "User Name"],
+  "person:jobTitle": ["Cargo", "Job Title", "Title", "Puesto"],
+  "person:department": ["Departamento", "Department", "Área"],
+  "person:supervisor": ["Supervisor", "Manager", "Jefe"],
+};
