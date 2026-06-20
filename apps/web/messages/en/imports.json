@@ -63,12 +63,8 @@
       "category": "Category"
     },
     "mapToLabel": "Map this column to",
-    "columnLabel": "Column",
     "sampleValues": "Example values from your file",
-    "showSamples": "Show example values",
-    "hideSamples": "Hide example values",
     "noSamples": "This column is empty in the sampled rows.",
-    "required": "Required",
     "targetIgnore": "Ignore",
     "targetCustom": "Create a custom field…",
     "targetCustomNamed": "Custom: {name}",
@@ -76,6 +72,9 @@
     "customNamePlaceholder": "e.g. RAM, IMEI, Purchase cost",
     "customNote": "Saved to the asset's details (specs) under this name. Only rows with a value get it.",
     "customNameMissing": "Name every custom field, or change it back to Ignore.",
+    "customNameDuplicate": "“{name}” is already used by another custom field. Use a unique name.",
+    "customNameReserved": "“{name}” is a reserved field name. Pick a different name or map this column to that field directly.",
+    "duplicateTarget": "Two columns map to “{field}”. Only one can — change this one or the other.",
     "group": {
       "asset": "Asset",
       "model": "Model"
