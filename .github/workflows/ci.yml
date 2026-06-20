@@ -157,7 +157,7 @@ jobs:
       # exit-code "0" keeps the step non-blocking while the baseline is being established.
       # To promote to blocking: change exit-code to "1" and drop the comment. Resolves #590.
       - name: Trivy vulnerability scan (${{ matrix.image }})
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: lazyit-${{ matrix.image }}:ci
           format: table
