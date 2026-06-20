@@ -103,6 +103,8 @@ describe("CloneUserResultSchema (ADR-0058)", () => {
     legajo: null,
     username: null,
     manager: null,
+    // ADR-0069 REDESIGN §3/§5.5 — directoryOnly is now required on the read UserSchema (server default false).
+    directoryOnly: false,
     createdAt: "2026-06-01T00:00:00.000Z",
     updatedAt: "2026-06-01T00:00:00.000Z",
     deletedAt: null,
