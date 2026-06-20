@@ -210,3 +210,116 @@ describe("coerceRow — custom fields → specs (ADR-0069 REDESIGN §5.4)", () =
     expect(Object.getPrototypeOf(specs)).toBeNull();
   });
 });
+
+describe("coerceRow — directory person → person bucket (ADR-0069 REDESIGN §5.4, CEO Q5)", () => {
+  test("builds the person bucket when email is present (identity key)", () => {
+    const m = mapping({
+      columns: [{ field: "name", column: "Name" }],
+      person: {
+        fields: [
+          { field: "name", column: "Owner" },
+          { field: "email", column: "Email" },
+          { field: "jobTitle", column: "Title" },
+        ],
+      },
+    });
+    const { person } = coerceRow(
+      { Name: "PC", Owner: "  Ana Pérez ", Email: "ana@x.com", Title: "Engineer" },
+      m,
+      desc,
+    );
+    expect(person).toEqual({ name: "Ana Pérez", email: "ana@x.com", jobTitle: "Engineer" });
+  });
+
+  test("builds the person bucket when only legajo is present (no email)", () => {
+    const m = mapping({
+      columns: [],
+      person: {
+        fields: [
+          { field: "name", column: "Owner" },
+          { field: "legajo", column: "Legajo" },
+        ],
+      },
+    });
+    const { person } = coerceRow({ Owner: "Bob", Legajo: "12345" }, m, desc);
+    expect(person).toEqual({ name: "Bob", legajo: "12345" });
+  });
+
+  test("builds the person bucket when only username is present (3rd identity key, Q5)", () => {
+    const m = mapping({
+      columns: [],
+      person: {
+        fields: [
+          { field: "name", column: "Owner" },
+          { field: "username", column: "User" },
+        ],
+      },
+    });
+    const { person } = coerceRow({ Owner: "Carol", User: "carol.x" }, m, desc);
+    expect(person).toEqual({ name: "Carol", username: "carol.x" });
+  });
+
+  test("NO person bucket when none of email/legajo/username is present (even with name + jobTitle)", () => {
+    const m = mapping({
+      columns: [],
+      person: {
+        fields: [
+          { field: "name", column: "Owner" },
+          { field: "jobTitle", column: "Title" },
+          { field: "department", column: "Dept" },
+          { field: "supervisor", column: "Boss" },
+        ],
+      },
+    });
+    const row = coerceRow(
+      { Owner: "Dave", Title: "Engineer", Dept: "IT", Boss: "Eve" },
+      m,
+      desc,
+    );
+    expect(row.person).toBeUndefined();
+    expect("person" in row).toBe(false);
+  });
+
+  test("omit-empty: blank person sub-field cells are dropped from the bucket", () => {
+    const m = mapping({
+      columns: [],
+      person: {
+        fields: [
+          { field: "name", column: "Owner" },
+          { field: "email", column: "Email" },
+          { field: "legajo", column: "Legajo" },
+          { field: "department", column: "Dept" },
+        ],
+      },
+    });
+    const { person } = coerceRow(
+      { Owner: "Frank", Email: "frank@x.com", Legajo: "  ", Dept: "" },
+      m,
+      desc,
+    );
+    expect(person).toEqual({ name: "Frank", email: "frank@x.com" });
+    expect("legajo" in (person ?? {})).toBe(false);
+    expect("department" in (person ?? {})).toBe(false);
+  });
+
+  test("identity gate: an empty identity cell does NOT count — name-only blank-email → no bucket", () => {
+    const m = mapping({
+      columns: [],
+      person: {
+        fields: [
+          { field: "name", column: "Owner" },
+          { field: "email", column: "Email" },
+        ],
+      },
+    });
+    const row = coerceRow({ Owner: "Grace", Email: "   " }, m, desc);
+    expect(row.person).toBeUndefined();
+  });
+
+  test("no person mapping → no person key on the result", () => {
+    const m = mapping({ columns: [{ field: "name", column: "Name" }] });
+    const row = coerceRow({ Name: "PC" }, m, desc);
+    expect(row.person).toBeUndefined();
+    expect("person" in row).toBe(false);
+  });
+});
