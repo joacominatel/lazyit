@@ -67,6 +67,20 @@ export const CustomFieldMappingSchema = z.object({
 });
 
 /**
+ * Person sub-mapping (ADR-0069 REDESIGN §5.1): the column → directory-person sub-field bindings the
+ * operator confirms for the asset's "assigned to". Lives in its OWN bucket (NOT in `columns`) because a
+ * person sub-field is NOT a key of `CreateAssetSchema` — routing it through `columns` would either be
+ * dropped as an unknown target or mis-flagged by the asset reserved/duplicate-target checks. Each binding
+ * is a `ColumnFieldMappingSchema` whose `field` is a person sub-field token (`name`/`email`/`legajo`/
+ * `username`/`jobTitle`/`department`/`supervisor` — see `IMPORT_UI_TARGETS.person`). The commit re-validates
+ * the built bucket against `CreateDirectoryPersonSchema` (strict). Defaults to `[]` so omitting it is "no
+ * person mapped" (the asset imports unassigned — REDESIGN §0 #1).
+ */
+export const PersonSubMappingSchema = z.object({
+  fields: z.array(ColumnFieldMappingSchema).default([]),
+});
+
+/**
  * Model config (ADR-0069 REDESIGN §5.1): brand (manufacturer) + category for newly-created
  * `AssetModel`s. Bound at the MAPPING level (session/column), NOT per `ConflictResolution` — read by
  * the commit's `createReference`. Each is either a column (per-row value) or a pinned constant; all
@@ -123,6 +137,7 @@ export const ImportMappingSchema = z
     enums: z.array(EnumFieldMappingSchema).default([]),
     references: z.array(FkFieldMappingSchema).default([]),
     custom: z.array(CustomFieldMappingSchema).default([]), // → Asset.specs
+    person: PersonSubMappingSchema.optional(), // → directory person sub-payload (ADR-0069 REDESIGN §5.1)
     modelConfig: ModelConfigSchema, // → created AssetModel brand + category
   })
   .superRefine((m, ctx) => {
@@ -212,5 +227,6 @@ export type EnumValueMapping = z.infer<typeof EnumValueMappingSchema>;
 export type EnumFieldMapping = z.infer<typeof EnumFieldMappingSchema>;
 export type FkFieldMapping = z.infer<typeof FkFieldMappingSchema>;
 export type CustomFieldMapping = z.infer<typeof CustomFieldMappingSchema>;
+export type PersonSubMapping = z.infer<typeof PersonSubMappingSchema>;
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;
 export type ImportMapping = z.infer<typeof ImportMappingSchema>;
