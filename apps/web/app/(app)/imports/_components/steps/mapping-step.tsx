@@ -2,9 +2,11 @@
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import {
+  AssetSchema,
   AssetStatusSchema,
   IMPORT_UI_TARGETS,
   assetImportDescriptor,
+  coerceAbsent,
   type ColumnFieldMapping,
   type CustomFieldMapping,
   type EnumValueMapping,
@@ -116,8 +118,10 @@ export function MappingStep({
       }
       const seen = new Set<string>();
       for (const row of session.rows) {
-        const raw = row.raw[h];
-        if (raw && raw.trim()) seen.add(raw.trim());
+        // Filter samples exactly like the backend's `collectSamples` — `coerceAbsent` drops
+        // ''/whitespace AND null-tokens (`n/a`/`-`/`none`/`null`) so the preview can't lie.
+        const v = coerceAbsent(row.raw[h]);
+        if (v !== undefined) seen.add(v);
         if (seen.size >= 4) break;
       }
       out[h] = [...seen];
@@ -204,8 +208,56 @@ export function MappingStep({
     (h) => choices[h]?.target === CUSTOM && !choices[h]?.customName.trim(),
   );
 
+  // --- per-column issues: duplicate target + custom-key duplicate/reserved (mirrors the backend's
+  // ImportMappingSchema superRefine; first line of the same defense). Inline `role=alert` per card. ---
+  const reservedKeys = useMemo(
+    () => new Set([...Object.keys(AssetSchema.shape), "__proto__", "constructor", "prototype"]),
+    [],
+  );
+  const columnError = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = {};
+
+    // Duplicate lazyit-field target (two columns mapping to the same `entity:field`) — last-write-wins
+    // in coerceRow would silently drop one column's data, so block + name the conflict (MUST-FIX 1).
+    const targetCount = new Map<string, number>();
+    for (const h of headers) {
+      const tgt = choices[h]?.target;
+      if (!tgt || tgt === IGNORE || tgt === CUSTOM) continue;
+      targetCount.set(tgt, (targetCount.get(tgt) ?? 0) + 1);
+    }
+
+    // Duplicate custom keys (case-/whitespace-folded the same way the backend trims).
+    const customKeyCount = new Map<string, number>();
+    for (const h of headers) {
+      if (choices[h]?.target !== CUSTOM) continue;
+      const key = choices[h]?.customName.trim();
+      if (key) customKeyCount.set(key, (customKeyCount.get(key) ?? 0) + 1);
+    }
+
+    for (const h of headers) {
+      const tgt = choices[h]?.target;
+      if (!tgt) continue;
+      if (tgt !== IGNORE && tgt !== CUSTOM && (targetCount.get(tgt) ?? 0) > 1) {
+        out[h] = t("mapping.duplicateTarget", { field: targetLabel(tgt) });
+        continue;
+      }
+      if (tgt === CUSTOM) {
+        const key = choices[h]?.customName.trim();
+        if (key && reservedKeys.has(key)) {
+          out[h] = t("mapping.customNameReserved", { name: key });
+        } else if (key && (customKeyCount.get(key) ?? 0) > 1) {
+          out[h] = t("mapping.customNameDuplicate", { name: key });
+        }
+      }
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [headers, choices, reservedKeys]);
+  const hasColumnError = Object.keys(columnError).length > 0;
+
   const isBusy = setMapping.isPending || dryRun.isPending;
-  const canContinue = missingRequired.length === 0 && !unnamedCustom && !isBusy;
+  const canContinue =
+    missingRequired.length === 0 && !unnamedCustom && !hasColumnError && !isBusy;
 
   function buildMapping(): ImportMapping {
     const columns: ColumnFieldMapping[] = [];
@@ -415,6 +467,13 @@ export function MappingStep({
                       />
                       <p className="text-xs text-muted-foreground">{t("mapping.customNote")}</p>
                     </div>
+                  )}
+
+                  {/* Inline conflict: duplicate target or custom-key duplicate/reserved (blocks Continue) */}
+                  {columnError[header] && (
+                    <p className="text-xs text-destructive" role="alert">
+                      {columnError[header]}
+                    </p>
                   )}
 
                   {/* Status value → enum map (lives inside the status column's card) */}
