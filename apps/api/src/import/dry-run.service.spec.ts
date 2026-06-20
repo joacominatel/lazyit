@@ -139,6 +139,35 @@ describe('ImportDryRunService.analyze — coercion + validation', () => {
     expect(report.tags).toHaveLength(2);
   });
 
+  it('surfaces a directory-person validation error (identity key but NO name) as a person.* error — fix #647', async () => {
+    // The row carries an email (identity key) but no `name`, so coerceRow builds a `person` bucket that
+    // fails CreateDirectoryPersonSchema (name is required). The dry-run previously validated only the
+    // asset, so this passed preview then FAILED every row at commit (orphaning the asset). The dry-run
+    // must now surface it as an `invalid` row with a `person.*` field error so the operator fixes it first.
+    prisma = makePrisma({});
+    const service = new ImportDryRunService(prisma);
+    const m = mapping({
+      columns: [
+        { field: 'name', column: 'Name' },
+        { field: 'status', constant: 'active' },
+      ],
+      person: {
+        fields: [
+          // The person NAME column is intentionally NOT mapped; only the email identity key is.
+          { field: 'email', column: 'Email' },
+        ],
+      },
+    });
+    const report = await service.analyze(
+      [{ rowIndex: 0, raw: { Name: 'Laptop', Email: 'ada@corp.test' } }],
+      m,
+    );
+    expect(report.result.rows[0].status).toBe('invalid');
+    expect(
+      report.result.rows[0].errors.some((e) => e.field?.startsWith('person')),
+    ).toBe(true);
+  });
+
   it('maps status synonyms via the descriptor value-map', async () => {
     prisma = makePrisma({});
     const service = new ImportDryRunService(prisma);

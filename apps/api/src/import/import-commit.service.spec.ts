@@ -1708,6 +1708,51 @@ describe('ImportCommitService.commit', () => {
       expect(assignments.create).toHaveBeenCalledTimes(1);
     });
 
+    it('a person with an identity key but NO name FAILS the row WITHOUT creating an orphan asset — fix #647', async () => {
+      // The mapping maps the person email (identity key) but NOT the person name. coerceRow builds a
+      // `person` bucket (email present) that FAILS CreateDirectoryPersonSchema (name required). Validating
+      // UP FRONT, BEFORE assets.create, fails the ROW with no orphan asset — the bug was: asset-first
+      // order created the asset, THEN threw at the person seam, leaving a FAILED row + a durable orphan.
+      const noNamePersonMapping = mapping({
+        columns: [
+          { field: 'name', column: 'Name' },
+          { field: 'status', column: 'Status' },
+        ],
+        enums: [],
+        references: [],
+        person: {
+          fields: [{ field: 'email', column: 'Email' }],
+        },
+      });
+      const state = sessionWith(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'Orphan-prone Asset',
+              Status: 'active',
+              Email: 'ada@corp.test',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      state.session!.mapping = noNamePersonMapping;
+      const { service, assets, users, assignments, prisma } = makeService(state);
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(result.failed).toBe(1);
+      expect(result.committed).toBe(0);
+      expect(prisma._rowStatuses.get(1)?.status).toBe('FAILED');
+      // No orphan: the asset is NEVER created when the person validation fails up front.
+      expect(assets.create).not.toHaveBeenCalled();
+      expect(users.create).not.toHaveBeenCalled();
+      expect(assignments.create).not.toHaveBeenCalled();
+    });
+
     it('a row with NO identity key creates NO person — the asset imports unassigned', async () => {
       // The mapping maps a person NAME column but the cell is blank AND there is no legajo/email → coerceRow
       // builds no `person` bucket (identity gate). The asset still imports; no person, no assignment.

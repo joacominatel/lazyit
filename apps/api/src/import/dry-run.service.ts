@@ -4,6 +4,7 @@ import {
   coerceRow,
   IMPORT_DESCRIPTORS,
   CreateAssetSchema,
+  CreateDirectoryPersonSchema,
   normalizeMatchKey,
   type AssetTagDecision,
   type ConflictCandidate,
@@ -142,6 +143,22 @@ export class ImportDryRunService {
             field: issue.path.length > 0 ? String(issue.path[0]) : null,
             message: issue.message,
           });
+        }
+      }
+
+      // Validate the directory-person bucket too (fix #647). The commit creates a User from it via
+      // CreateDirectoryPersonSchema, but the dry-run previously validated ONLY the asset — so a person
+      // with an identity key (email/legajo/username) but no `name` passed preview, then FAILED every
+      // row at commit and orphaned the asset. Surface those issues HERE so the operator fixes them first.
+      if (coerced.person !== undefined) {
+        const personParsed = CreateDirectoryPersonSchema.safeParse(coerced.person);
+        if (!personParsed.success) {
+          for (const issue of personParsed.error.issues) {
+            errors.push({
+              field: issue.path.length > 0 ? `person.${String(issue.path[0])}` : "person",
+              message: issue.message,
+            });
+          }
         }
       }
 

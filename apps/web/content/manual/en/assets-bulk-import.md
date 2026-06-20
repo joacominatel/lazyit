@@ -89,9 +89,17 @@ A few fields behave specially:
 - **Model** and **Location** are **references**, matched to existing records by name (see *Conflicts*).
 
 The importer **pre-fills a best guess** for each column, but it never decides for you — you confirm
-every column, and nothing is dropped silently.
+every column, and nothing is dropped silently. The guess understands more than exact English
+headers: it recognises **Spanish and Snipe-IT-style names** too (for example *Nombre*, *Número de
+serie*, *Asignado a*, *Modelo*), so a typical export lands mostly pre-mapped. You still confirm each
+column — the auto-detection only proposes the target.
 
 ### Model brand and category
+
+**A model is created from its name.** To have the import create models, map a column to **Model**
+(under the *Asset* group). Mapping only **Manufacturer** or **Category** does *not* create a model —
+those two only **enrich** a model that already comes from a mapped **Model** column. The category is
+attached **through the model**, not directly to the asset.
 
 When the import creates a new **Model**, it needs a **manufacturer** and a **category**. You can set
 these two ways:
@@ -110,10 +118,13 @@ asset to them** — the assignment is recorded the same way it would be in the a
 - **An imported person has no login.** They are a **directory** person: a real entry in your Users list
   (badged **Directory**), but without an account in your identity provider. They exist so the asset has
   an owner on record; they cannot sign in until they get an account.
-- **Identify them by Email, Employee no. or Username.** The import needs at least one of these to know
-  *who* a row belongs to (and to avoid creating the same person twice). **If you map a Person field, you
-  must also map one of these identity fields** — the wizard won't let you continue otherwise. A row with
-  none of them imports the asset **unassigned**, with a warning.
+- **To assign, map the person's Name *and* one identity key.** **Name** (the *Assigned to* column) is
+  **required** to assign an asset, plus at least one of **Email**, **Employee no.** or **Username** to
+  know *who* a row belongs to (and to avoid creating the same person twice). **If you map any Person
+  field, the wizard won't let you continue until both the Name and an identity key are mapped.** A row
+  that's missing the name is flagged as an **invalid row** in the preview, so you fix it before
+  committing — it never fails silently at the end. A row with a name but no identity key imports the
+  asset **unassigned**, with a warning.
 - **They link to a real account automatically — only with a matching email.** When that person later
   signs in through your identity provider (OIDC) using the **same verified email**, lazyit links the two:
   the directory entry becomes their account and the **Directory** badge disappears. **A person imported

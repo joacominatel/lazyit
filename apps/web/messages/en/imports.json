@@ -87,6 +87,7 @@
       "person": "Person"
     },
     "personIdentityRequired": "You started mapping a person. Map Email, Employee no. or Username too so we can identify who the asset belongs to.",
+    "personNameRequired": "Map the person's name (\"Assigned to\") so the assigned user can be created.",
     "statusTitle": "Status values",
     "statusInColumnNote": "Map each status value in this column to a lazyit status. Common synonyms are filled in for you.",
     "statusNoValues": "No status values were found in the sampled rows.",

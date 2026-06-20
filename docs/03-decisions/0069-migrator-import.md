@@ -443,5 +443,26 @@ flag on `UserSchema`. The `GET /users` endpoint accepts an optional `?directoryO
 directory persons. The web applies a "Directorio" badge on directory-only rows. `UserSchema` in
 `@lazyit/shared` gains `directoryOnly: z.boolean()` and `directoryAttrs: z.record(z.string(), z.unknown()).nullable().optional()` (`.nullable()` because the jsonb column reads back `null` for non-directory accounts).
 
+### A.6 Fix #647 — column intelligence + person-validation hardening (2026-06-20)
+
+Post-Etapa-2 corrections, all within the existing design (no contract change):
+
+- **Header auto-detection beyond exact English (column intelligence).** Auto-suggest (§4 "column →
+  field", still suggestion-only / operator-confirmed) now matches via a `HEADER_ALIASES` table that
+  recognises Spanish and Snipe-IT-style headers (e.g. *Nombre*, *Número de serie*, *Asignado a*,
+  *Modelo*) on top of the normalized-header match. A typical export lands mostly pre-mapped; the
+  operator still confirms every column.
+- **Person `name` is required in the UI to assign.** The mapping step now blocks completion unless a
+  person **Name** (*Assigned to*) is mapped **in addition to** an identity key (email ∨ legajo ∨
+  username). A row missing the name is surfaced as an **invalid row** in the dry-run preview instead
+  of failing silently at commit.
+- **Dry-run validates the person (§1.4).** The dry-run now runs the person validation, so the
+  preview's valid/invalid counts reflect assignment readiness — the preview cannot lie about a row
+  that would later fail person resolution.
+- **Commit validates the person before creating the asset (no orphans).** Refines the A.3
+  "asset → person → assignment" order: the person is now validated **before** the asset write, so a
+  row with an invalid/incomplete person never produces an orphan asset. (A.3's order still holds for
+  *creation*; #647 moves person *validation* ahead of the asset write.)
+
 **Related:** [[0069-migrator-import.REDESIGN]] · [[0038-jit-user-provisioning]] · [[user]] ·
 [[INVARIANTS]] · [[SEC-072]] · [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]]

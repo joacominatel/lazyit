@@ -581,6 +581,16 @@ export class ImportCommitService {
         IMPORT_DESCRIPTORS.asset,
       );
 
+      // Validate the directory-person bucket UP FRONT — BEFORE any asset create — so a person that fails
+      // CreateDirectoryPersonSchema (e.g. an identity key but no `name`) fails the ROW WITHOUT leaving an
+      // ORPHAN asset (asset-first order would otherwise create the asset, then throw at the person seam →
+      // FAILED row + durable orphan asset). The dry-run surfaces this in preview too (fix #647).
+      // ponytail: resolveOrCreateDirectoryPerson re-parses at its own seam (cheap) — one redundant parse,
+      // not worth threading the parsed value through both the resume and fresh-create paths.
+      if (person !== undefined) {
+        CreateDirectoryPersonSchema.parse(person);
+      }
+
       // Resume-detect: was an asset already created for this row in a prior (crashed) attempt? If so,
       // reconcile the row to COMMITTED rather than minting a duplicate. ponytail: one extra lookup per
       // non-COMMITTED row; a later wave could gate it behind an explicit `isResume` flag if it shows up
