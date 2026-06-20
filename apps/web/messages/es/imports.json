@@ -87,6 +87,7 @@
       "person": "Persona"
     },
     "personIdentityRequired": "Empezaste a mapear una persona. Mapea también Correo, Legajo o Usuario para poder identificar de quién es el activo.",
+    "personNameRequired": "Mapea el nombre de la persona (\"Asignado a\") para poder crear el usuario asignado.",
     "statusTitle": "Valores de estado",
     "statusInColumnNote": "Asocia cada valor de estado de esta columna a un estado de lazyit. Los sinónimos comunes se completan por ti.",
     "statusNoValues": "No se encontraron valores de estado en las filas de muestra.",
