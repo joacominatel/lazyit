@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-13
+updated: 2026-06-20
 ---
 
 # Security invariants — auth & authorization
@@ -490,9 +490,79 @@ reach.
   clear; plaintext keys/values/passwords/recovery-keys are NEVER persisted or logged ([[0031-logging-strategy]]).
 - Decision + data model: [[0061-secret-manager-zero-knowledge]] · [[secret-manager-crypto-design]].
 
+## INV-DIR-1 — `directoryOnly = true` ⇒ never login / never administrative role / excluded from bootstrap and last-admin counts
+
+**Rule.** A row with `directoryOnly = true` (a **directory person** created by the bulk import,
+[[0069-migrator-import]] §A.3):
+
+1. **Never authenticates.** It has `externalId = null` (never set by the import) and a `role` that
+   is forced VIEWER. The JIT guard (`jwt-auth.guard.ts`) can promote it to a full account on a verified
+   email match — but only then does it become a normal `User`; until promotion it has no login.
+2. **Never holds an administrative role.** `CreateDirectoryPersonSchema` (strict, in `@lazyit/shared`)
+   rejects any `role` field. The import path forces VIEWER unconditionally; the regular `PATCH /users`
+   path can change the role, but only AFTER the person is promoted (`directoryOnly = false`) — a
+   VIEWER directory person can never reach ADMIN status while it remains directory-only.
+3. **Excluded from the bootstrap first-user→ADMIN count** and the **last-admin guard count.**
+   - `jwt-auth.guard.ts` bootstrap count: `where: { directoryOnly: false, includeSoftDeleted: true }`.
+     Importing 200 directory persons cannot hand ADMIN to the first OIDC login.
+   - `users.service.ts` last-admin guard: filters `role: ADMIN`. A VIEWER directory person is already
+     excluded by the role filter — no extra clause needed.
+   - `config.service.ts` setup path: filters `role: ADMIN` — same reasoning.
+
+**Why.** The "is User" shortcut (no `Person` model) means directory persons sit in the `users` table
+and would, without this invariant, be counted as "users" in the bootstrap / last-admin logic —
+allowing a bulk import to gift ADMIN to the first real login or to block the last-admin guard.
+
+**Where enforced.**
+- `apps/api/src/auth/jwt-auth.guard.ts` — bootstrap count gains `where: { directoryOnly: false }`.
+- `apps/api/prisma/schema.prisma` — `User.directoryOnly Boolean @default(false)`.
+- `packages/shared/src/schemas/user.ts` — `CreateDirectoryPersonSchema` strict (no `role`, no
+  `externalId`); `UserSchema` exposes `directoryOnly: z.boolean()`.
+- `apps/api/src/import/import-commit.service.ts` — forces `directoryOnly: true`, calls
+  `users.service.create` with `skipIdpWriteBack: true` (never calls `idp.createUser` at import time).
+
+## INV-DIR-2 — `directoryOnly = true` ⇒ NEVER the subject of an AccessGrant or IdP provisioning
+
+**Rule.** A directory person (`directoryOnly = true`) cannot be granted access to an application and
+cannot be written back to the IdP at import time. Specifically:
+
+1. **No `AccessGrant`.** `AccessGrantsService.assertUserUsable` (enforced before every grant creation
+   or renewal) checks `user.directoryOnly` and returns **400** ("a directory person has no account; no
+   access can be granted until they log in or are provisioned"). This closes the "is a User → FK works"
+   shortcut: the FK to `User` is structurally valid, but the capability is explicitly blocked.
+2. **No IdP write-back at import time.** `users.service.create` called with `skipIdpWriteBack: true`
+   bypasses the entire Zitadel Management API block. No `idp.createUser`, no `grantRole`, no Zitadel
+   user is created. The person exists only in lazyit's DB.
+3. **`POST /users/:id/provision-account` is the sole IdP write path** for a directory person. It is
+   ADMIN-only, requires a real email (not `@directory.local`), and follows the no-split-brain pattern
+   (INV-5): IdP first, local update second; local failure after IdP success is reconcilable via the
+   next JIT login.
+
+**Enumerated FK paths to `User` that imply capability (verified against schema):**
+
+| Table / FK | Blocked for directoryOnly? | How |
+| --- | --- | --- |
+| `AccessGrant.userId` | YES | `assertUserUsable` → 400 |
+| `AssetAssignment.userId` | **ALLOWED** (the purpose of directory persons) | — |
+| `AccessRequest.requesterId` | Not applicable — directory persons cannot authenticate | No request can be submitted |
+| `UserHistory.userId` | Structural — no capability | — |
+| External IdP (Zitadel) | YES at import | `skipIdpWriteBack`; only `provision-account` writes to IdP |
+
+**Why.** Without this invariant, an `AccessGrant` created for a directory person would sit permanently
+`revokedAt: null` with no way for the person to authenticate and no workflow step to receive it — an
+irrevocable, dangling grant. The `assertUserUsable` guard prevents the orphan from being created.
+
+**Where enforced.**
+- `apps/api/src/access-grants/access-grants.service.ts` — `assertUserUsable` gains `select { directoryOnly }` + `if (user.directoryOnly) throw 400`.
+- `apps/api/src/users/users.service.ts` — `create()` internal opt `{ skipIdpWriteBack?: boolean }` branches before the IdP block when `true`.
+- `apps/api/src/users/users.controller.ts` — `provision-account` endpoint (ADMIN-only, `user:manage`).
+- Tests: `access-grants.service.spec.ts` — `assertUserUsable` with `directoryOnly=true` → 400.
+  `users.service.spec.ts` — `skipIdpWriteBack=true` with `supportsManagement=true` does NOT call `idp.createUser`.
+
 ---
 
 Related: [[0043-zitadel-source-of-truth]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] ·
 [[0060-kb-folder-access-control]] · [[0061-secret-manager-zero-knowledge]] · [[0031-logging-strategy]] ·
 [[auth-zitadel-sot]] · [[0038-jit-user-provisioning]] · [[0040-rbac-roles]] ·
-[[0041-soft-delete-reuse-and-restore]] · [[0028-secrets-and-config]] · [[deferred]] · [[summary]] · [[_MOC]]
+[[0041-soft-delete-reuse-and-restore]] · [[0028-secrets-and-config]] · [[deferred]] · [[summary]] · [[_MOC]] ·
+[[0069-migrator-import]] · [[user]]
