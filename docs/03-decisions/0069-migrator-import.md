@@ -441,7 +441,7 @@ linkable via the next JIT login — the reconcile is safe.
 Directory persons appear in `GET /users` **mixed with accounts**, identified by a `directoryOnly: true`
 flag on `UserSchema`. The `GET /users` endpoint accepts an optional `?directoryOnly` filter to list only
 directory persons. The web applies a "Directorio" badge on directory-only rows. `UserSchema` in
-`@lazyit/shared` gains `directoryOnly: z.boolean()` and `directoryAttrs: z.record(z.string(), z.unknown()).optional()`.
+`@lazyit/shared` gains `directoryOnly: z.boolean()` and `directoryAttrs: z.record(z.string(), z.unknown()).nullable().optional()` (`.nullable()` because the jsonb column reads back `null` for non-directory accounts).
 
 **Related:** [[0069-migrator-import.REDESIGN]] · [[0038-jit-user-provisioning]] · [[user]] ·
 [[INVARIANTS]] · [[SEC-072]] · [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]]
