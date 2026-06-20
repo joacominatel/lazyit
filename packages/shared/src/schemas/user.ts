@@ -124,6 +124,16 @@ export const UserSchema = z.object({
   // The resolved manager descriptor (ADR-0058) — NOT the raw managerId/managerName columns. Always
   // present (null = no manager recorded); a soft-deleted linked manager surfaces isOffboarded=true.
   manager: ManagerDescriptorSchema.nullable(),
+  // Directory-only person flag (ADR-0069 REDESIGN §3). TRUE = a User created by the bulk import for an
+  // asset's "assigned to" that has NO login and NO Zitadel mirror (externalId stays null, role stays
+  // VIEWER). Flips to false when the person first signs in via OIDC and the verified-email claim links
+  // this row (ADR-0038). Always present on the wire (server default false); a directory person shows a
+  // "Directory" badge and can be filtered via `?directoryOnly` (CEO §0 #2).
+  directoryOnly: z.boolean(),
+  // Free-form directory attributes for a directory-only person (jobTitle, department, phone, and any
+  // person sub-field with no native home — ADR-0069 REDESIGN §3). Same posture as Asset.specs (jsonb,
+  // unvalidated per-field in this MVP); null/absent for normal accounts.
+  directoryAttrs: z.record(z.string(), z.unknown()).nullable().optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
@@ -190,6 +200,57 @@ export const CreateUserSchema = z.strictObject({
 });
 
 /**
+ * Payload to create a DIRECTORY-ONLY person (ADR-0069 REDESIGN §5.5) — a User WITHOUT a login, created
+ * by the bulk import for an asset's "assigned to". DISTINCT from `CreateUserSchema` and deliberately
+ * NARROWER: it is `strictObject` (rejects every unknown key) and — by construction — NEVER accepts `role`
+ * (the import forces VIEWER server-side) nor `externalId` (the IdP `sub` linkage, SEC-006). Those two keys
+ * simply do not exist here, so a directory person can never be used for role-escalation or identity
+ * pre-linking, even via a crafted/corrupt mapping.
+ *
+ * Field routing (done by the backend, NOT here):
+ *   - `name`     — a single display name; the backend SPLITS it into the required `firstName`/`lastName`.
+ *   - `email`    — normalized via {@link EmailSchema}; the OIDC promotion key (ADR-0038) when present.
+ *   - `legajo` / `username` — normalized (ADR-0058), the other live-unique identity keys.
+ *   - `jobTitle` / `department` — routed into `directoryAttrs` (jsonb); `supervisor` → `managerName`.
+ *
+ * IDENTITY GUARANTEE (CEO Q5): at least ONE of `email` / `legajo` / `username` MUST be present — a
+ * directory person is NEVER keyed by name alone (an unsafe match, REDESIGN §7). The `superRefine` below
+ * enforces it; a row with none of the three imports the asset UNASSIGNED upstream (it never reaches here).
+ */
+export const CreateDirectoryPersonSchema = z
+  .strictObject({
+    // A single display name the backend splits into firstName/lastName (there is no single `name` column).
+    name: z.string().trim().min(1).max(200),
+    // Normalized (trim + lowercase) so the stored value matches the citext column (ADR-0041). The OIDC
+    // account-linking key when present (ADR-0038); optional because a row may identify by legajo/username.
+    email: EmailSchema.optional(),
+    // Employee/file number (ADR-0058). Optional + normalized; live-unique. An identity key (CEO Q5).
+    legajo: LegajoSchema.optional(),
+    // Directory/display handle (ADR-0058). Optional + normalized; live-unique. An identity key (CEO Q5).
+    username: UsernameSchema.optional(),
+    // Free-form directory attributes routed into `directoryAttrs` (jsonb) by the backend.
+    jobTitle: z.string().trim().min(1).max(200).optional(),
+    department: z.string().trim().min(1).max(200).optional(),
+    // The supervisor's name, routed into `managerName` (free-text) by the backend — `managerId` only when
+    // it matches a live non-directory User (REDESIGN §3.6 / §10 #9).
+    supervisor: z.string().trim().min(1).max(200).optional(),
+  })
+  .superRefine((p, ctx) => {
+    // Identity guarantee (CEO Q5): a directory person MUST be keyed by email ∨ legajo ∨ username — never
+    // by name alone. Without an identity key, dedup/linking is unsafe (it would leak inventory to the
+    // wrong person), so the row never assigns. The coerce layer already gates the bucket on this; the
+    // strict schema re-enforces it at commit time (defense-in-depth).
+    if (p.email === undefined && p.legajo === undefined && p.username === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["email"],
+        message:
+          "A directory person requires at least one identity key: email, legajo, or username.",
+      });
+    }
+  });
+
+/**
  * Partial update (an empty body is rejected); `isActive` toggles activation / offboarding. `role`
  * changes a user's RBAC role.
  *
@@ -230,4 +291,5 @@ export const UpdateUserSchema = requireAtLeastOneKey(
 
 export type User = z.infer<typeof UserSchema>;
 export type CreateUser = z.infer<typeof CreateUserSchema>;
+export type CreateDirectoryPerson = z.infer<typeof CreateDirectoryPersonSchema>;
 export type UpdateUser = z.infer<typeof UpdateUserSchema>;
