@@ -60,7 +60,13 @@
       "purchaseDate": "Fecha de compra",
       "warrantyEnd": "Fin de garantía",
       "manufacturer": "Fabricante",
-      "category": "Categoría"
+      "category": "Categoría",
+      "email": "Correo",
+      "legajo": "Legajo",
+      "username": "Usuario",
+      "jobTitle": "Cargo",
+      "department": "Departamento",
+      "supervisor": "Supervisor"
     },
     "mapToLabel": "Mapear esta columna a",
     "sampleValues": "Valores de ejemplo de tu archivo",
@@ -77,8 +83,10 @@
     "duplicateTarget": "Dos columnas se mapean a «{field}». Solo una puede — cambia esta o la otra.",
     "group": {
       "asset": "Activo",
-      "model": "Modelo"
+      "model": "Modelo",
+      "person": "Persona"
     },
+    "personIdentityRequired": "Empezaste a mapear una persona. Mapea también Correo, Legajo o Usuario para poder identificar de quién es el activo.",
     "statusTitle": "Valores de estado",
     "statusInColumnNote": "Asocia cada valor de estado de esta columna a un estado de lazyit. Los sinónimos comunes se completan por ti.",
     "statusNoValues": "No se encontraron valores de estado en las filas de muestra.",
