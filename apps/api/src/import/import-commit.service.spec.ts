@@ -165,6 +165,11 @@ function makePrisma(state: PrismaState) {
     assetModel: {
       findFirst: async () => null,
     },
+    // AssetCategory find-or-create probe (ADR-0069 REDESIGN §4.4): default "not found" so create() runs;
+    // a test seeds an existing live category by overriding this double.
+    assetCategory: {
+      findFirst: async () => null,
+    },
   };
 }
 
@@ -229,10 +234,22 @@ function makePermissions(hasAll: (...args: any[]) => Promise<boolean> = async ()
   return { hasAll: jest.fn(hasAll) };
 }
 
+/** A category double recording create() calls, with cuid-shaped ids (find-or-create §4.4). */
+function makeCategories() {
+  let seq = 0;
+  return {
+    create: jest.fn(async (data: any) => ({
+      id: `ccategorycreated00000000${seq++}`,
+      ...data,
+    })),
+  };
+}
+
 function makeService(state: PrismaState, doubles?: any) {
   const prisma = doubles?.prisma ?? makePrisma(state);
   const assets = doubles?.assets ?? makeAssets();
   const models = doubles?.models ?? makeRefService('model');
+  const categories = doubles?.categories ?? makeCategories();
   const locations = doubles?.locations ?? makeRefService('location');
   const search = doubles?.search ?? makeSearch();
   const permissions = doubles?.permissions ?? makePermissions();
@@ -244,11 +261,12 @@ function makeService(state: PrismaState, doubles?: any) {
     prisma as any,
     assets as any,
     models as any,
+    categories as any,
     locations as any,
     search as any,
     permissions as any,
   );
-  return { service, prisma, assets, models, locations, search, permissions, queue };
+  return { service, prisma, assets, models, categories, locations, search, permissions, queue };
 }
 
 /** A minimal mapping: name+status by column, model+location as FK references. */
@@ -716,5 +734,211 @@ describe('ImportCommitService.commit', () => {
     expect(result.committed).toBe(1);
     expect(locations.create).not.toHaveBeenCalled(); // reused, not re-created
     expect(assets._calls[0].data.locationId).toBe('clocexistinghq0000000001');
+  });
+
+  // ===== Etapa 1: real Model manufacturer + category, find-or-create category, specs ===========
+
+  /** A mapping that maps name/status, model as an FK ref, plus a modelConfig (manufacturer+category). */
+  const MODEL_CONFIG_MAPPING = mapping({
+    columns: [
+      { field: 'name', column: 'Name' },
+      { field: 'status', column: 'Status' },
+    ],
+    enums: [],
+    references: [{ field: 'modelId', column: 'Model' }],
+    modelConfig: {
+      manufacturerColumn: 'Manufacturer',
+      categoryColumn: 'Category',
+    },
+  });
+
+  function sessionWithMapping(
+    rows: FixtureRow[],
+    resolutionPlan: ImportResolutionPlan,
+    mappingBlob: ImportMapping,
+  ): PrismaState {
+    return {
+      session: {
+        id: 'sess-1',
+        status: 'DRY_RUN',
+        entity: 'ASSET',
+        mapping: mappingBlob,
+        resolutionPlan,
+        fileHash: 'deadbeef',
+        rows,
+      },
+    };
+  }
+
+  it('createReference creates a Model with the REAL manufacturer + category from modelConfig [§4.4]', async () => {
+    const state = sessionWithMapping(
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active', Model: 'MacBook Pro', Manufacturer: 'Apple', Category: 'Laptop' },
+        },
+      ],
+      plan({
+        conflicts: [
+          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'MacBook Pro', outcome: 'create', targetId: null },
+        ],
+      }),
+      MODEL_CONFIG_MAPPING,
+    );
+    const { service, models, categories, assets } = makeService(state);
+
+    const result = await service.commit('sess-1', OWNER);
+
+    expect(result.committed).toBe(1);
+    // The category is find-or-created first (none existed → created once), then its id rides the model.
+    expect(categories.create).toHaveBeenCalledTimes(1);
+    expect(categories.create.mock.calls[0][0]).toEqual({ name: 'Laptop' });
+    expect(models.create).toHaveBeenCalledTimes(1);
+    expect(models.create.mock.calls[0][0]).toEqual({
+      name: 'MacBook Pro',
+      manufacturer: 'Apple',
+      categoryId: 'ccategorycreated000000000',
+    });
+    expect(assets._calls[0].data.modelId).toMatch(/^cmodelcreated/);
+  });
+
+  it('falls back to the Unknown manufacturer and OMITS category when modelConfig has neither [§4.4]', async () => {
+    const state = sessionWithMapping(
+      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active', Model: 'Mystery' } }],
+      plan({
+        conflicts: [
+          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'Mystery', outcome: 'create', targetId: null },
+        ],
+      }),
+      // A mapping with NO modelConfig at all.
+      mapping({
+        columns: [
+          { field: 'name', column: 'Name' },
+          { field: 'status', column: 'Status' },
+        ],
+        references: [{ field: 'modelId', column: 'Model' }],
+      }),
+    );
+    const { service, models, categories } = makeService(state);
+
+    await service.commit('sess-1', OWNER);
+
+    expect(categories.create).not.toHaveBeenCalled();
+    expect(models.create.mock.calls[0][0]).toEqual({ name: 'Mystery', manufacturer: 'Unknown' });
+  });
+
+  it('AssetCategory find-or-create is idempotent: two models, same category name → ONE category [§4.4]', async () => {
+    const state = sessionWithMapping(
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active', Model: 'Model One', Manufacturer: 'Dell', Category: 'Laptop' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'B', Status: 'active', Model: 'Model Two', Manufacturer: 'HP', Category: 'Laptop' },
+        },
+      ],
+      plan({
+        conflicts: [
+          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'Model One', outcome: 'create', targetId: null },
+          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'Model Two', outcome: 'create', targetId: null },
+        ],
+      }),
+      MODEL_CONFIG_MAPPING,
+    );
+    const prisma = makePrisma(state);
+    // After the first row creates the 'Laptop' category, the find-first must SEE it on the second row so
+    // it reuses the same id instead of minting a duplicate (the cross-/within-run idempotency window).
+    let created: { id: string } | null = null;
+    const realCreate = (id: string) => {
+      created = { id };
+    };
+    prisma.assetCategory.findFirst = (async () => created) as never;
+    const categories = makeCategories();
+    categories.create = jest.fn(async (data: any) => {
+      const row = { id: 'ccategorylaptop0000000001', ...data };
+      realCreate(row.id);
+      return row;
+    }) as never;
+    const { service, models } = makeService(state, { prisma, categories });
+
+    const result = await service.commit('sess-1', OWNER);
+
+    expect(result.committed).toBe(2);
+    // Two DISTINCT models created, but the 'Laptop' category created exactly ONCE (find-or-create).
+    expect(models.create).toHaveBeenCalledTimes(2);
+    expect(categories.create).toHaveBeenCalledTimes(1);
+    // Both models point at the SAME (reused) category id.
+    expect(models.create.mock.calls[0][0].categoryId).toBe('ccategorylaptop0000000001');
+    expect(models.create.mock.calls[1][0].categoryId).toBe('ccategorylaptop0000000001');
+  });
+
+  it('reuses an EXISTING live category by name (no duplicate) when one is already present [§4.4]', async () => {
+    const state = sessionWithMapping(
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active', Model: 'Srv1', Manufacturer: 'Dell', Category: 'Server' },
+        },
+      ],
+      plan({
+        conflicts: [
+          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'Srv1', outcome: 'create', targetId: null },
+        ],
+      }),
+      MODEL_CONFIG_MAPPING,
+    );
+    const prisma = makePrisma(state);
+    prisma.assetCategory.findFirst = (async () => ({
+      id: 'ccategoryexistingsrv00001',
+    })) as never;
+    const { service, models, categories } = makeService(state, { prisma });
+
+    await service.commit('sess-1', OWNER);
+
+    expect(categories.create).not.toHaveBeenCalled(); // reused the live one
+    expect(models.create.mock.calls[0][0].categoryId).toBe('ccategoryexistingsrv00001');
+  });
+
+  it('persists custom fields to Asset.specs (omit-empty, never {}) and null-proto at the write site [§4.3]', async () => {
+    const state = sessionWithMapping(
+      [
+        // Row 1 has a RAM cell → specs.ram; row 2's RAM cell is blank → NO specs at all (omit-empty).
+        { id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active', RAM: '16GB' } },
+        { id: 2, rowIndex: 1, status: 'VALID', raw: { Name: 'B', Status: 'active', RAM: '' } },
+      ],
+      plan({ conflicts: [] }),
+      mapping({
+        columns: [
+          { field: 'name', column: 'Name' },
+          { field: 'status', column: 'Status' },
+        ],
+        custom: [{ column: 'RAM', key: 'ram' }],
+      }),
+    );
+    const { service, assets } = makeService(state);
+
+    const result = await service.commit('sess-1', OWNER);
+
+    expect(result.committed).toBe(2);
+    // Row 1: specs carries the custom key with the cell value (the value the strict CreateAssetSchema
+    // revalidated and passed through to create()).
+    expect(assets._calls[0].data.specs).toEqual({ ram: '16GB' });
+    // Row 2: an empty cell never emits specs — the key is ABSENT (so CreateAssetSchema.specs.optional()
+    // fires), never an empty {}.
+    expect('specs' in assets._calls[1].data).toBe(false);
+    // The global prototype is never polluted by the specs write path (null-proto build + reserved-key
+    // skip, ADR-0069 REDESIGN §4.3). (The object create() receives is zod's re-validated copy; the
+    // pollution vector was neutralized at the null-proto build site before validation.)
+    expect(({} as Record<string, unknown>).ram).toBeUndefined();
   });
 });
