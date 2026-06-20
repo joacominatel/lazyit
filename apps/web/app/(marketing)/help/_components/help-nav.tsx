@@ -64,9 +64,12 @@ export function HelpNav({
 }
 
 /**
- * One collapsible subcategory: a `<details>` whose `<summary>` is the localized subcategory label
- * and whose body is the page links. Open by default; forced open when it contains the active page so
- * a deep-linked route never lands inside a collapsed group.
+ * One subcategory in the nav. Single-leaf subcategories (`pages.length === 1`) have no real
+ * sub-tree, so a collapsible disclosure would be needless friction — they render as a plain,
+ * active-aware `<Link>` straight to that page (issue #621). Subcategories with multiple pages keep
+ * the collapsible `<details>`: `<summary>` is the localized subcategory label and the body is the
+ * page links. Open by default; forced open when it contains the active page so a deep-linked route
+ * never lands inside a collapsed group.
  */
 function SubcategoryGroup({
   category,
@@ -83,6 +86,30 @@ function SubcategoryGroup({
   const hasActive = subcategory.pages.some(
     (page) => pathname === `/help/${page.slug}`,
   );
+
+  // Single leaf page → render a direct clickable link, not a needless disclosure (issue #621).
+  if (subcategory.pages.length === 1) {
+    const page = subcategory.pages[0];
+    const href = `/help/${page.slug}`;
+    const active = pathname === href;
+    return (
+      <Link
+        href={href}
+        aria-current={active ? "page" : undefined}
+        onClick={onNavigate}
+        className={cn(
+          "flex min-h-8 items-center rounded-md px-3 py-1 text-xs font-medium transition-colors",
+          active
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <span className="truncate">
+          {t(`subcategories.${category}.${subcategory.subcategory}` as never)}
+        </span>
+      </Link>
+    );
+  }
 
   return (
     <details open={hasActive || undefined} className="group/sub">

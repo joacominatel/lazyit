@@ -53,7 +53,8 @@
       "models-categories": "Modelos y categorías",
       "locations": "Ubicaciones",
       "assignments-history": "Asignaciones e historial",
-      "asset-tags": "Etiquetas de activos"
+      "asset-tags": "Etiquetas de activos",
+      "bulk-import": "Importación masiva"
     },
     "users-permissions": {
       "roles": "Roles",

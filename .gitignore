@@ -26,6 +26,9 @@ impeccable/
 
 api_example/
 
+# local import test data (employee PII — never commit; use anonymized fixtures for tests)
+prueba-import.csv
+
 # SonarQube
 .scannerwork/
 coverage.out

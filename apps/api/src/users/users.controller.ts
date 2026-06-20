@@ -116,6 +116,13 @@ export class UsersController {
     description:
       'Soft-delete slice. active (default) = live users; only = offboarded (soft-deleted) users — ADMIN only (403 otherwise). (ADR-0041)',
   })
+  @ApiQuery({
+    name: 'directoryOnly',
+    required: false,
+    type: Boolean,
+    description:
+      'Directory-person filter (ADR-0069 REDESIGN §0 #2). true = only directory persons (no login); false = only login-backed accounts; absent = all (default).',
+  })
   @ApiOkResponse({ type: UserListPageDto })
   findAll(
     @Query('q') q?: string,
@@ -125,6 +132,7 @@ export class UsersController {
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
     @Query('deleted') deleted?: string,
+    @Query('directoryOnly') directoryOnly?: string,
     @CurrentUser() user?: User,
   ) {
     const pageQuery = parsePageQuery({
@@ -138,7 +146,12 @@ export class UsersController {
     // The list route carries no @Roles (any authenticated user may list ACTIVE users), so gate the
     // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
     assertCanListDeleted(pageQuery.deleted, user);
-    return this.users.findPage({ q }, pageQuery);
+    // directoryOnly is tri-state: absent → undefined (no filter); present → parsed boolean.
+    const directoryOnlyFilter =
+      directoryOnly !== undefined
+        ? parseBooleanQuery(directoryOnly, true)
+        : undefined;
+    return this.users.findPage({ q, directoryOnly: directoryOnlyFilter }, pageQuery);
   }
 
   // INTENTIONALLY NOT gated with `user:read` (ADR-0046 P3): a VIEWER must read its OWN record + role
@@ -399,5 +412,30 @@ export class UsersController {
     // Resolve the principal so the RESTORED history row (DEBT-2, issue #185) names the right actor —
     // a human → performedById, an SA holding user:manage → serviceAccountId (CHECK-safe; ADR-0048).
     return this.users.restore(id, this.actor.resolveActor(principal));
+  }
+
+  // The manual "Crear cuenta OIDC" promotion (ADR-0069 REDESIGN §0 #3): take an existing DIRECTORY
+  // person (no login) and provision its IdP account NOW — the explicit counterpart to the auto-claim by
+  // verified-email login (ADR-0038). ADMIN-only (same `user:manage` gate as every other user mutation).
+  @Post(':id/provision-account')
+  @RequirePermission('user:manage')
+  @ApiOperation({
+    summary:
+      'Provision an OIDC account for a directory person — ADMIN only (ADR-0069 REDESIGN)',
+    description:
+      'Promotes a directory-only person (created by the bulk import, no login) into a real account: ' +
+      'creates the user in the bundled identity provider (Zitadel), sets externalId and flips ' +
+      'directoryOnly to false, all without a split-brain (IdP first, then the local update + audit in ' +
+      'one transaction). 400 if the target is not a directory person, already has an account, or has no ' +
+      'email (Zitadel requires one); 503 if the IdP create fails. Only the bundled-management IdP can ' +
+      'provision here.',
+  })
+  @ApiCreatedResponse({ type: UserDto })
+  provisionAccount(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor?: User,
+  ) {
+    // Pass the actor so the service attributes the audited UPDATED history row + the IdP write-back line.
+    return this.users.provisionAccount(id, this.actor.resolve(actor));
   }
 }

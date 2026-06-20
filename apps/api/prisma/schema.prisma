@@ -57,6 +57,22 @@ model User {
   // Free-text fallback when the manager is NOT a lazyit user — ADR-0058 (the manager is in HR's system,
   // not IT's). Normalized (trim). Mutually exclusive with `managerId`.
   managerName String?
+  // Directory-only person (ADR-0069 amendment / ADR-0038 amendment): a row created by the bulk import
+  // for an asset's "assigned to" that has NO login and NO Zitadel mirror (externalId stays null, role
+  // stays VIEWER). It IS a User so AssetAssignment.userId (uuid FK) points at it with zero schema churn.
+  // EXCLUDED from the bootstrap first-user→ADMIN count (jwt-auth.guard.ts:365) so importing people can
+  // never hand ADMIN to a non-login row. Flips to false when the person first signs in via OIDC and the
+  // verified-email claim links this row (ADR-0038). HARD RULE: a directoryOnly row is NEVER the subject
+  // of an AccessGrant / external provisioning (access-grants.assertUserUsable rejects it) — see INVARIANTS.
+  // ponytail: User and a directory person share one table on purpose — a directory person is a User
+  // without a login, not a new entity. Ceiling: no per-attribute validation on directoryAttrs, no SQL
+  // filter/sort by department. Upgrade path: promote directoryAttrs keys to real columns if a reader needs
+  // to query them; fork a Person model only if directory semantics ever truly diverge.
+  directoryOnly  Boolean   @default(false)
+  // Free-form directory attributes for a directory-only person (cargo/jobTitle, departamento, teléfono,
+  // and any person sub-field with no native home). Same posture as Asset.specs (ADR-0007): jsonb,
+  // optional, only populated on directory rows. NOT validated per-field in this MVP.
+  directoryAttrs Json?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
@@ -135,6 +151,12 @@ model User {
   keypair          UserKeypair?
   vaultMemberships VaultMembership[] @relation("VaultMembershipUser")
   secretAuditActed SecretAuditLog[]  @relation("SecretAuditActor")
+
+  // Migrator import (ADR-0069, #627): the import sessions this user owns (Restrict — don't orphan an
+  // in-flight import) and the commit runs this user triggered (ImportRun.actorId, SetNull — the audit
+  // ledger survives the actor's deletion).
+  importSessions ImportSession[] @relation("ImportSessionOwner")
+  importRuns     ImportRun[]     @relation("ImportRunActor")
 
   @@map("users")
 }
@@ -1802,4 +1824,129 @@ model SecretAuditLog {
   @@index([vaultId])
   @@index([createdAt])
   @@map("secret_audit_logs")
+}
+
+/// Migrator import — the stateful wizard session (ADR-0069 wave 1, #627). TRANSIENT: deliberately
+/// EXCLUDED from `SOFT_DELETABLE_MODELS` (soft-delete.extension.ts) and hard-deleted by a GC sweep on
+/// `expiresAt` (the sweeper is a later wave). cuid id (operator-facing in the wizard URL — ADR-0005),
+/// owner-scoped (no IDOR — ADR-0069 §11). `mapping`/`resolutionPlan` are the confirmed mapping and
+/// frozen resolution-plan blobs (jsonb; @lazyit/shared zod wire shapes). The raw file is parsed once
+/// and discarded — only the coerced rows persist, under TTL. See docs/03-decisions/0069-migrator-import.md.
+model ImportSession {
+  id      String              @id @default(cuid())
+  entity  ImportEntity
+  status  ImportSessionStatus @default(PENDING)
+  // The human operator who started the import (ADR-0022). Restrict: do not orphan an in-flight import
+  // by deleting its owner; the session is short-lived and GC-swept anyway. @db.Uuid to match User.id.
+  ownerId String              @db.Uuid
+  owner   User                @relation("ImportSessionOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  // Confirmed column/value/FK mapping blob (ImportMappingSchema) — null until the map step.
+  mapping        Json?
+  // Frozen per-conflict resolution plan (ImportResolutionPlanSchema) — null until the dry-run step.
+  resolutionPlan Json?
+  // Detected source shape from the parse step (wave 2, #629): { headers, dialect, encoding, rowCount }.
+  // Null until PARSED; lets the map step render columns without re-reading the (discarded) file.
+  detected  Json?
+  // Session-level failure detail when status is FAILED (e.g. a malformed file) — PII-free (§11). A
+  // ROW-level error lives on ImportRow.error; this is the whole-file error that prevented any rows.
+  error     Json?
+  // SHA-256 of the uploaded file (never its contents) for the audit/idempotency correlation (§9).
+  fileHash  String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // ImportRow cascade-deletes with the session (transient scratch). ImportRun does NOT — it is the
+  // append-only audit ledger and survives session GC (it correlates back via the durable `sessionId`
+  // plain column, not an FK), so there is no `runs` back-relation here. See the ImportRun model doc.
+  rows ImportRow[]
+
+  @@index([ownerId])
+  @@index([expiresAt])
+  @@map("import_sessions")
+}
+
+/// Migrator import — one parsed-and-coerced source row (ADR-0069 wave 1, #627). TRANSIENT: EXCLUDED
+/// from `SOFT_DELETABLE_MODELS`, hard-deleted with its session. autoincrement id (thousands per
+/// session, never exposed externally — ADR-0005). `raw` is the parsed source values; `coerced` is the
+/// pre-pass output that feeds the unchanged CreateAssetSchema. `rowIndex` is the stable 0-based source
+/// index the row-keyed result schema keys on. Carries `updatedAt` because a row's status mutates
+/// across the wizard (PENDING→COERCED→VALID/INVALID→COMMITTED/...).
+model ImportRow {
+  id        Int             @id @default(autoincrement())
+  sessionId String
+  session   ImportSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  rowIndex  Int
+  status    ImportRowStatus @default(PENDING)
+  // Parsed source values (column → string) and the coercion-pre-pass output (field → coerced value).
+  raw     Json
+  coerced Json?
+  // Field-level / row error detail when status is INVALID/FAILED (PII-free in logs — §11).
+  error     Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sessionId, rowIndex])
+  @@index([sessionId, status])
+  @@map("import_rows")
+}
+
+/// Migrator import — the APPEND-ONLY audit ledger of a commit (ADR-0069 §9, #627). Records who/what/
+/// when, the counts and conflict summary, and the file HASH (never contents) for audit + a future undo
+/// correlation id. Append-only (ADR-0006): autoincrement id, `createdAt` ONLY — no updatedAt/deletedAt.
+/// `sessionId` is a DURABLE PLAIN STRING — deliberately NOT an FK to ImportSession: the session is
+/// transient (24h TTL, GC-hard-deleted) but this ledger must SURVIVE that deletion (ADR-0006: an
+/// append-only ledger is never deleted). A cascading FK would let the session GC reap the ledger, so the
+/// correlation is kept as a retained value (the asset→import correlation also rides the CREATED-event
+/// `sessionId` provenance — ADR-0069 §8/§9). `actorId` is SetNull so the ledger survives the actor's
+/// deletion. NOT in `SOFT_DELETABLE_MODELS`.
+model ImportRun {
+  id        Int    @id @default(autoincrement())
+  // Durable correlation to the originating session. NOT an FK (see model doc): the value is retained
+  // after the session row is GC-deleted, so the ledger outlives its transient session.
+  sessionId String
+  entity    ImportEntity
+  // Who ran the commit (ADR-0022). SetNull: the audit row survives the actor's deletion. @db.Uuid.
+  actorId String? @db.Uuid
+  actor   User?   @relation("ImportRunActor", fields: [actorId], references: [id], onDelete: SetNull)
+  // Counts (ImportCountsSchema) and the distinct-conflict summary (ImportResolutionPlanSchema) — jsonb.
+  counts          Json
+  conflictSummary Json?
+  // SHA-256 of the imported file (never contents) for audit / undo correlation.
+  fileHash  String?
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, id])
+  @@index([actorId])
+  @@map("import_runs")
+}
+
+/// The entity an import targets — Asset is the only member in phase 1 (ADR-0069). Mirrors the
+/// @lazyit/shared `ImportEntitySchema`; new entities are added here AND to that enum + a descriptor.
+enum ImportEntity {
+  ASSET
+}
+
+/// Lifecycle of an ImportSession — mirrors @lazyit/shared `ImportSessionStatusSchema`.
+enum ImportSessionStatus {
+  PENDING
+  PARSING
+  PARSED
+  MAPPED
+  DRY_RUN
+  COMMITTING
+  COMMITTED
+  FAILED
+  EXPIRED
+}
+
+/// Per-row lifecycle — mirrors @lazyit/shared `ImportRowStatusSchema`.
+enum ImportRowStatus {
+  PENDING
+  COERCED
+  VALID
+  INVALID
+  COMMITTED
+  FAILED
+  SKIPPED
 }

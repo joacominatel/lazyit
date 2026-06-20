@@ -18,7 +18,7 @@ COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
-RUN bun install --frozen-lockfile
+RUN ok=0; for i in 1 2 3; do bun install --frozen-lockfile && ok=1 && break || { echo "bun install failed (attempt $i/3), retrying in 5s..."; sleep 5; }; done; [ "$ok" -eq 1 ]
 
 # Sources needed to build the API (shared is a workspace dependency).
 COPY packages/shared/ packages/shared/
@@ -40,7 +40,7 @@ COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
-RUN bun install --production --linker hoisted --filter "@lazyit/api"
+RUN ok=0; for i in 1 2 3; do bun install --production --linker hoisted --filter "@lazyit/api" && ok=1 && break || { echo "bun install failed (attempt $i/3), retrying in 5s..."; sleep 5; }; done; [ "$ok" -eq 1 ]
 
 # ---- Runtime: minimal Node (Alpine) ----
 # node:26-alpine — pinned by digest (26-alpine is a ROLLING tag; this closes the ADR-0025 follow-up).

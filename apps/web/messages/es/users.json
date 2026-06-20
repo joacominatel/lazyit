@@ -14,7 +14,8 @@
     "loadErrorTitle": "No se pudieron cargar los usuarios",
     "chips": {
       "search": "Búsqueda: “{query}”",
-      "status": "Estado: {status}"
+      "status": "Estado: {status}",
+      "directory": "{directory}"
     },
     "status": {
       "all": "Todos los estados",
@@ -25,6 +26,12 @@
       "ALL": "Todos",
       "ACTIVE": "Activo",
       "INACTIVE": "Inactivo"
+    },
+    "directoryFilter": {
+      "label": "Filtro de directorio",
+      "ALL": "Todos",
+      "directory": "Solo directorio",
+      "accounts": "Solo cuentas"
     },
     "columns": {
       "avatar": "Avatar",
@@ -75,6 +82,17 @@
     "byoi": {
       "title": "Los usuarios y roles se gestionan localmente",
       "description": "Estás iniciando sesión con tu propio proveedor de identidad, por lo que los cambios aquí no se sincronizan con él. Crea, deshabilita y asigna roles a las cuentas en tu proveedor de identidad; lazyit mantiene su propia copia para la autorización."
+    }
+  },
+  "directoryBadge": "Directorio",
+  "directory": {
+    "provision": {
+      "action": "Crear cuenta OIDC",
+      "title": "Persona de directorio",
+      "description": "Esta persona la agregó la importación masiva y todavía no tiene acceso. Crea su cuenta en el proveedor de identidad para que pueda iniciar sesión.",
+      "needsEmail": "Esta persona necesita un correo real antes de poder tener una cuenta. Edita la persona y agrégalo primero.",
+      "success": "{name} ya tiene una cuenta OIDC.",
+      "error": "No se pudo crear la cuenta. Inténtalo de nuevo."
     }
   },
   "empty": {
@@ -348,6 +366,12 @@
     "nothingToReturn": "Nada que devolver.",
     "accessToRevoke": "Accesos a revocar",
     "noActiveAccess": "Sin acceso activo a aplicaciones.",
+    "loadError": {
+      "impact": "Impacto no disponible — no se pudo cargar.",
+      "title": "No se pudo cargar qué devolver",
+      "body": "No pudimos cargar los activos y accesos de esta persona, así que no podemos mostrar qué devolver ni revocar. Esto no es una lista vacía — no des de baja ni imprimas el acta hasta que cargue.",
+      "retry": "Reintentar"
+    },
     "emptyNote": "Esta persona no tiene activos en posesión ni accesos activos. El acta sigue siendo válida como registro de su baja.",
     "handoverNote": "Nota de entrega",
     "handoverPlaceholder": "Una nota breve que se imprime en el acta de devolución…",
@@ -372,6 +396,11 @@
   "act": {
     "documentTitle": "Acta de devolución — {name}",
     "loadError": "No se pudo cargar este usuario — es posible que haya sido eliminado, o que la API no esté disponible.",
+    "dataError": {
+      "title": "Acta de devolución no disponible",
+      "body": "No pudimos cargar los activos y accesos de esta persona, así que esta acta no puede emitirse. No está en blanco — imprimirla ahora podría subreportar lo pendiente. Reintenta e imprime solo cuando cargue.",
+      "retry": "Reintentar"
+    },
     "print": "Imprimir",
     "titleEn": "Asset Return & Access Acknowledgment",
     "titleEs": "Acta de baja y devolución de activos",

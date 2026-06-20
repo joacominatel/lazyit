@@ -117,6 +117,8 @@ const NAV: NavSection[] = [
     items: [
       { labelKey: "assets", href: "/assets", icon: ServerStackIcon },
       { labelKey: "consumables", href: "/consumables", icon: CubeIcon },
+      // The guided bulk Migrator (ADR-0069) is NOT in the primary nav: it is an occasional ADMIN action,
+      // so it is surfaced from Settings (a "Bulk import" card, same `import:run` gate) — issue #639.
     ],
   },
   {

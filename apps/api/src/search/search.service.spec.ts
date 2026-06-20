@@ -196,6 +196,16 @@ describe('SearchService', () => {
       expect(logger.error).toHaveBeenCalledTimes(1);
     });
 
+    it('has NO process-wide write suppression — every write reaches the client (ADR-0069 §10)', async () => {
+      // The migrator bulk commit used to flip a global suppressDepth, silently dropping EVERY
+      // concurrent non-import write. That global is retired: suppression is now scoped to the
+      // import's own asset writes via AssetsService.create({ suppressSearch }). So a concurrent
+      // article/user/location upsert is always indexed — nothing is ever globally muted.
+      service.upsert('users', { id: 'u1', name: 'x' });
+      service.upsert('articles', { id: 'art1', name: 'y' });
+      expect(index.addDocuments).toHaveBeenCalledTimes(2);
+    });
+
     it('search runs a multiSearch over the requested indexes and maps the results', async () => {
       client.multiSearch.mockResolvedValue({
         results: [

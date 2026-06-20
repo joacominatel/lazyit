@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
@@ -36,6 +37,15 @@ import {
   PasswordResetUnsupportedError,
   type IdentityProvider,
 } from '../auth/identity/identity-provider.interface';
+
+/**
+ * The reserved, non-routable email DOMAIN the bulk import synthesizes for a directory person identified
+ * ONLY by legajo/username (no real email) — ADR-0069 REDESIGN §4.5. The DB `email` column is non-null,
+ * so the import mints `<sessionId>-<rowIndex>@directory.local` to keep the row valid + live-unique. Such
+ * an address is NOT a real mailbox: a person carrying it can never auto-promote by verified-email login
+ * AND cannot be manually provisioned an account (Zitadel needs a usable email) — both paths reject it.
+ */
+export const DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN = '@directory.local';
 
 /** The manager-bearing columns a user row carries (ADR-0058) — the subset the read descriptor needs. */
 type ManagerColumns = { managerId: string | null; managerName: string | null };
@@ -76,6 +86,13 @@ type ManagerWrite =
 export interface UserFilters {
   /** Case-insensitive substring over firstName / lastName / email (OR). */
   q?: string;
+  /**
+   * Directory-person filter (ADR-0069 REDESIGN §0 #2).
+   * true  → only directory-only persons (no login).
+   * false → only login-backed accounts.
+   * absent/undefined → all users (default; no filter).
+   */
+  directoryOnly?: boolean;
 }
 
 /**
@@ -221,16 +238,20 @@ export class UsersService {
   }
 
   /** The shared `where` for the user list — used identically by findPage and its count. */
-  private buildWhere({ q }: UserFilters): Prisma.UserWhereInput {
-    return q
-      ? {
-          OR: [
-            { firstName: { contains: q, mode: 'insensitive' } },
-            { lastName: { contains: q, mode: 'insensitive' } },
-            { email: { contains: q, mode: 'insensitive' } },
-          ],
-        }
-      : {};
+  private buildWhere({ q, directoryOnly }: UserFilters): Prisma.UserWhereInput {
+    return {
+      ...(q
+        ? {
+            OR: [
+              { firstName: { contains: q, mode: 'insensitive' } },
+              { lastName: { contains: q, mode: 'insensitive' } },
+              { email: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+      // directoryOnly filter (ADR-0069 REDESIGN §0 #2): absent → no filter (show all).
+      ...(directoryOnly !== undefined ? { directoryOnly } : {}),
+    };
   }
 
   // --- manager read-descriptor resolution (ADR-0058) ----------------------
@@ -454,18 +475,58 @@ export class UsersService {
   async create(
     data: CreateUser,
     actorId?: string,
-    opts?: { createdPayload?: Prisma.InputJsonValue },
+    opts?: {
+      createdPayload?: Prisma.InputJsonValue;
+      // ADR-0069 REDESIGN §4.5: the bulk-import DIRECTORY branch. When true, this create is a
+      // directory-only person (no login, no Zitadel mirror) — the ENTIRE IdP write-back block is
+      // skipped (we branch BEFORE it below) and `directoryOnly`/`directoryAttrs` are stamped on the
+      // row. NEVER client-supplied: the public Users controller never passes it; only the import
+      // commit engine (a trusted server caller) does. The role is FORCED to VIEWER here regardless of
+      // payload (role-escalation closed) — CreateDirectoryPersonSchema doesn't even carry `role`.
+      skipIdpWriteBack?: boolean;
+      directoryAttrs?: Prisma.InputJsonValue;
+    },
   ): Promise<SerializedUser> {
     // RBAC default (ADR-0040, flipped to VIEWER by ADR-0043): an omitted role lands the least-
     // privileged read-only role. We set it explicitly here (rather than leaning on the Prisma column
     // default) so the service is the authoritative default for app-created users and the behaviour is
     // testable without a DB. The Users controller is ADMIN-gated, so an ADMIN may still pass any role.
-    const role = data.role ?? Role.VIEWER;
+    // A directory-only person is ALWAYS VIEWER — never trust the payload (which can't carry role anyway).
+    const role = opts?.skipIdpWriteBack
+      ? Role.VIEWER
+      : (data.role ?? Role.VIEWER);
     // Resolve the manager either/or → DB columns (ADR-0058). On create there is no subject yet, so no
     // cycle is possible; the FK-live + at-most-one checks still apply. Then build the explicit create
     // data (manager/legajo/username are columns; `manager` the input union is NOT — strip + translate).
     const managerWrite = await this.resolveManagerWrite(data.manager, null);
     const createData = this.buildProfileCreateData(data, role, managerWrite);
+
+    // ADR-0069 REDESIGN §4.5: the DIRECTORY branch. A directory-only person has NO login and NO IdP
+    // mirror, so we MUST branch BEFORE the IdP write-back block below — NOT reuse the BYOI path, which
+    // (with supportsManagement=true) still enters the `try`, calls `idp.createUser` and returns early
+    // (~513-529). We stamp `directoryOnly`/`directoryAttrs`, persist the row, record its CREATED
+    // history (correlated to the import session via `createdPayload`), sync search, and return — never
+    // touching the IdP. `externalId` stays null (SEC-006); `role` is VIEWER (forced above).
+    if (opts?.skipIdpWriteBack) {
+      const directoryUser = await this.prisma.user.create({
+        data: {
+          ...createData,
+          directoryOnly: true,
+          ...(opts.directoryAttrs !== undefined
+            ? { directoryAttrs: opts.directoryAttrs }
+            : {}),
+        },
+      });
+      await this.recordHistory(
+        this.prisma,
+        directoryUser.id,
+        'CREATED',
+        actorId,
+        opts.createdPayload,
+      );
+      this.search.upsert('users', projectUser(directoryUser));
+      return this.serializeUser(directoryUser);
+    }
     // Temporary-password provisioning (ADR-0064, issue #411) is a MANAGEMENT-path carve-out: lazyit only
     // ever sets a credential on the bundled Zitadel it owns. Under BYOI (`!supportsManagement`) the
     // operator's own IdP owns the credential, so a supplied password has nowhere valid to go — reject it
@@ -550,6 +611,101 @@ export class UsersService {
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search.upsert('users', projectUser(user));
     return this.serializeUser(user);
+  }
+
+  /**
+   * PROMOTE a directory-only person to a real OIDC account — the manual "Crear cuenta OIDC" action
+   * (ADR-0069 REDESIGN §0 #3). The counterpart to the auto-claim by verified-email login (ADR-0038):
+   * an ADMIN takes an existing directory person (`directoryOnly=true`, `externalId=null`) and provisions
+   * its IdP account NOW. Requires an email (Zitadel needs it) → 400 if missing. Rejects a target that is
+   * NOT a directory person or already has an account (`externalId` set) → 400 (nothing to provision).
+   *
+   * NO SPLIT-BRAIN ordering: create the IdP user FIRST, then the local update (`externalId` + flip
+   * `directoryOnly=false`) + the audited history row IN ONE transaction. If the local update fails AFTER
+   * the IdP account exists, we surface a clear error and do NOT half-update the row — the IdP account is
+   * left, but the next sign-in by that verified email JIT-links it (ADR-0038) and reconciles, so no
+   * orphan and no double account. We don't roll back the IdP user (deleting it would be the riskier
+   * compensation; JIT linking is the durable backstop). 503 if the IdP create itself fails (no local
+   * change happened — fully back-out-able). Only the bundled-management IdP can mint an account here.
+   */
+  async provisionAccount(
+    id: string,
+    actorId?: string,
+  ): Promise<SerializedUser> {
+    const target = await this.findOne(id); // 404 if missing or soft-deleted
+    if (!target.directoryOnly) {
+      throw new BadRequestException(
+        'This user already has an account; only a directory person can be provisioned.',
+      );
+    }
+    if (target.externalId !== null) {
+      throw new BadRequestException(
+        'This directory person is already linked to an identity.',
+      );
+    }
+    // Zitadel NEEDS a usable email. A directory person identified only by legajo/username carries the
+    // synthesized non-routable `@directory.local` placeholder (REDESIGN §4.5) — treat that as "no email"
+    // and 400, rather than mint a broken IdP user. (The UI disables / prompts for an email; this is the
+    // server-side backstop.)
+    if (target.email.endsWith(DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN)) {
+      throw new BadRequestException(
+        'This directory person has no email address; add one before provisioning an account.',
+      );
+    }
+    if (!this.idp.supportsManagement) {
+      throw new BadRequestException(
+        'Provisioning an account is only available with the bundled identity provider.',
+      );
+    }
+
+    // IdP FIRST (no local change yet → a failure here leaves the row a pure directory person, fully
+    // recoverable). A Management failure surfaces as 503 to the caller.
+    let ref;
+    try {
+      ref = await this.idp.createUser({
+        email: target.email,
+        firstName: target.firstName,
+        lastName: target.lastName,
+        role: target.role,
+      });
+    } catch (err) {
+      this.logger.error(
+        { op: 'provisionAccount', actor: actorId, subjectUserId: id },
+        `IdP createUser failed provisioning a directory person (${err instanceof Error ? err.message : String(err)})`,
+      );
+      throw new ServiceUnavailableException(
+        'Could not create the account in the identity provider. Please try again.',
+      );
+    }
+    if (!ref.externalId) {
+      // The bundled-management IdP must return a real sub; an empty ref means a misconfigured provider.
+      throw new ServiceUnavailableException(
+        'The identity provider did not return an account identifier.',
+      );
+    }
+
+    // Local update + audit in ONE transaction (atomic state flip). If THIS fails after the IdP account
+    // exists, the row stays a directory person; first login by the verified email JIT-links it (ADR-0038)
+    // — no orphan, no double account. We surface the failure honestly rather than half-updating.
+    this.auditWriteBack('provisionAccount', actorId, id, {
+      email: target.email,
+      role: target.role,
+    });
+    const linked = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id },
+        data: { externalId: ref.externalId, directoryOnly: false },
+      });
+      // Reuse UPDATED (no new enum/migration): the row transitions from a login-less directory person to
+      // a real account. The payload names the action so the audit trail is unambiguous.
+      await this.recordHistory(tx, id, 'UPDATED', actorId, {
+        action: 'provisionAccount',
+        directoryOnly: false,
+      });
+      return updated;
+    });
+    this.search.upsert('users', projectUser(linked));
+    return this.serializeUser(linked);
   }
 
   /**

@@ -104,7 +104,9 @@ share one WHERE in a single `$transaction`, so they can't drift):
 - `action` — one known verb from the closed `RECENT_ACTIVITY_ACTIONS` allowlist; an unknown verb → 400.
 - `from` / `to` — a closed-open `[from, to)` window over `occurredAt` (ISO-8601 datetimes).
 - `q` — free text matched case-insensitively (`ILIKE`) against `summary` **and** the resolved actor
-  name; trimmed and capped at 200 chars.
+  name; trimmed and capped at 200 chars. LIKE metacharacters (`%`, `_`, `\`) in the term are escaped
+  (paired with `ESCAPE '\'`) so a literal `%`/`_`/`\` matches itself rather than acting as a wildcard
+  (issue #593) — the escape helper `common/escape-like-pattern.ts` is shared for future `ILIKE` filters.
 
 > [!note] Access: the feed is ADMIN-only, now enforced at the endpoint (issue #181, DEBT-1 resolved)
 > The feed is the cross-pillar "who-did-what" stream, so it is treated as sensitive. Both surfaces

@@ -362,7 +362,13 @@ export class JwtAuthGuard implements CanActivate {
     // check-then-create window is acceptable: it only matters on a truly empty DB, and the worst case
     // (two genuinely-concurrent first logins) makes both ADMIN — strictly safer than locking everyone
     // out, and an ADMIN can demote.
+    // ADR-0069 REDESIGN §3.6 / §7: EXCLUDE directory-only persons from the bootstrap count. A bulk
+    // import can mint hundreds of `directoryOnly` rows (no login, role VIEWER); without this filter the
+    // FIRST real OIDC login would see a non-empty table and fall to VIEWER, leaving the instance with no
+    // ADMIN. A directory person is never administrative and never logs in, so excluding it is correct.
+    // `includeSoftDeleted: true` is KEPT (an offboarded real user still counts — no silent ADMIN reset).
     const userCount = await this.prisma.user.count({
+      where: { directoryOnly: false },
       includeSoftDeleted: true,
     } as Prisma.UserCountArgs);
     const role: Role = userCount === 0 ? Role.ADMIN : Role.VIEWER;
@@ -427,7 +433,8 @@ export class JwtAuthGuard implements CanActivate {
     // Some IdPs emit the boolean true; others emit the string "true". Only those two values are
     // treated as verified — anything else (false, "false", absent) is unverified.
     const emailVerified =
-      profile['email_verified'] === true || profile['email_verified'] === 'true';
+      profile['email_verified'] === true ||
+      profile['email_verified'] === 'true';
 
     // Account linking by verified email (ADR-0038 addendum, trusted-IdP model). The externalId
     // lookup above missed, so this `sub` has never logged in. Before minting a fresh row, check
@@ -466,7 +473,13 @@ export class JwtAuthGuard implements CanActivate {
       // externalId IS NULL → claim it for this sub. Preserve the existing role (this is how the
       // seeded ADMIN's role is inherited by the operator's IdP identity). Optionally refresh the
       // name only when the existing values look like a seed placeholder AND we have real claims.
-      const data: Prisma.UserUpdateManyMutationInput = { externalId: sub };
+      // ADR-0069 REDESIGN §3.5: PROMOTE a directory-only person on first login — set directoryOnly=false
+      // so the linked row becomes a normal account (verified email is the only linking key, INV-2). A
+      // no-op for a row that was already a real account (directoryOnly was already false).
+      const data: Prisma.UserUpdateManyMutationInput = {
+        externalId: sub,
+        directoryOnly: false,
+      };
       if (namesFromClaims && this.looksLikeSeedPlaceholder(emailOwner)) {
         data.firstName = firstName;
         data.lastName = lastName;

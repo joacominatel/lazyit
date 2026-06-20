@@ -14,6 +14,10 @@
       "title": "Locations",
       "description": "Manage the places your assets physically live — offices, datacenters, racks and storage."
     },
+    "imports": {
+      "title": "Bulk import",
+      "description": "Load an existing estate of assets from a CSV or JSON file — a guided, occasional admin action for a new instance."
+    },
     "roles": {
       "title": "Roles",
       "description": "See who has which RBAC role across the team. Role changes happen in the Users section."

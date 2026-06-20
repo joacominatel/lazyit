@@ -1,0 +1,183 @@
+{
+  "nav": "Importer",
+  "title": "Bulk importer",
+  "subtitle": "Onboard your existing estate from a CSV or JSON file — preview every row before anything is written.",
+  "gate": {
+    "title": "Importer is admin-only",
+    "description": "Bulk import needs the import:run permission, granted to administrators by default. Ask an administrator if you need to onboard an estate."
+  },
+  "steps": {
+    "upload": "Upload",
+    "summary": "Summary",
+    "mapping": "Mapping",
+    "preview": "Preview",
+    "conflicts": "Conflicts",
+    "commit": "Commit"
+  },
+  "common": {
+    "back": "Back",
+    "startOver": "Start over"
+  },
+  "upload": {
+    "title": "Choose a file",
+    "description": "Asset import is available now. Users, consumables and history import are coming later.",
+    "entityLabel": "What are you importing?",
+    "entityAsset": "Assets",
+    "fileLabel": "CSV or JSON file",
+    "fileHint": "Export your spreadsheet as CSV (UTF-8) or provide a JSON array. .xlsx is not accepted — export it to CSV first.",
+    "chooseFile": "Choose a file to continue.",
+    "submit": "Upload & parse",
+    "uploading": "Uploading…",
+    "parsing": "Parsing your file…",
+    "parsingHint": "Your file is being parsed in the background. This usually takes a few seconds."
+  },
+  "summary": {
+    "title": "Parsed file",
+    "description": "Confirm the detected shape before mapping the columns.",
+    "rowCount": "Records",
+    "encoding": "Encoding",
+    "delimiter": "Delimiter",
+    "delimiterNone": "n/a (JSON)",
+    "bom": "Byte-order mark",
+    "bomYes": "Present",
+    "bomNo": "Absent",
+    "headers": "Detected columns",
+    "noHeaders": "No columns were detected in this file.",
+    "noRows": "No records were found in this file. Check the file and upload again.",
+    "continue": "Map columns"
+  },
+  "mapping": {
+    "title": "Map your columns",
+    "description": "Each card below is a column from your file, with example values. For every column, pick the lazyit field it fills, create a custom field saved to the asset's details, or ignore it. You need a column mapped to Name and one to Status.",
+    "piiNote": "These cards show real values from your file, including any employee data (names, emails). Nothing is saved until you commit.",
+    "field": {
+      "name": "Name",
+      "serial": "Serial number",
+      "assetTag": "Asset tag",
+      "status": "Status",
+      "model": "Model",
+      "location": "Location",
+      "purchaseDate": "Purchase date",
+      "warrantyEnd": "Warranty end",
+      "manufacturer": "Manufacturer",
+      "category": "Category",
+      "email": "Email",
+      "legajo": "Employee no.",
+      "username": "Username",
+      "jobTitle": "Job title",
+      "department": "Department",
+      "supervisor": "Supervisor"
+    },
+    "mapToLabel": "Map this column to",
+    "sampleValues": "Example values from your file",
+    "noSamples": "This column is empty in the sampled rows.",
+    "targetIgnore": "Ignore",
+    "targetCustom": "Create a custom field…",
+    "targetCustomNamed": "Custom: {name}",
+    "customNameLabel": "Custom field name",
+    "customNamePlaceholder": "e.g. RAM, IMEI, Purchase cost",
+    "customNote": "Saved to the asset's details (specs) under this name. Only rows with a value get it.",
+    "customNameMissing": "Name every custom field, or change it back to Ignore.",
+    "customNameDuplicate": "“{name}” is already used by another custom field. Use a unique name.",
+    "customNameReserved": "“{name}” is a reserved field name. Pick a different name or map this column to that field directly.",
+    "duplicateTarget": "Two columns map to “{field}”. Only one can — change this one or the other.",
+    "group": {
+      "asset": "Asset",
+      "model": "Model",
+      "person": "Person"
+    },
+    "personIdentityRequired": "You started mapping a person. Map Email, Employee no. or Username too so we can identify who the asset belongs to.",
+    "personNameRequired": "Map the person's name (\"Assigned to\") so the assigned user can be created.",
+    "statusTitle": "Status values",
+    "statusInColumnNote": "Map each status value in this column to a lazyit status. Common synonyms are filled in for you.",
+    "statusNoValues": "No status values were found in the sampled rows.",
+    "statusUnmapped": "— leave as-is —",
+    "modelConfig": {
+      "title": "Model brand and category",
+      "description": "Map a column to Manufacturer or Category above to set them per row, or pin a value here to apply it to every model the import creates.",
+      "manufacturerLabel": "Manufacturer for all models",
+      "manufacturerPlaceholder": "e.g. Apple",
+      "categoryLabel": "Category for all models",
+      "categoryPlaceholder": "e.g. Laptop",
+      "fromColumn": "Taken from the column “{column}”."
+    },
+    "missingRequired": "Map a column to: {fields}.",
+    "submit": "Run dry-run",
+    "running": "Running dry-run…"
+  },
+  "preview": {
+    "title": "Dry-run preview",
+    "description": "Nothing has been written. Review the per-row outcomes and resolve any conflicts below.",
+    "counts": {
+      "total": "Total",
+      "valid": "Valid",
+      "invalid": "Invalid"
+    },
+    "rowsTitle": "Rows",
+    "rowIndex": "Row {index}",
+    "rowValid": "Valid",
+    "rowInvalid": "Invalid",
+    "fieldError": "{field}: {message}",
+    "wholeRowError": "{message}",
+    "showAllRows": "Show all {count} rows",
+    "collapseRows": "Show fewer",
+    "allInvalid": "No rows are valid. Go back and review the mapping or the file.",
+    "tagCollisionTitle": "Asset-tag collisions",
+    "tagCollisionDescription": "{count, plural, one {# row carries an asset tag that already exists on a live asset} other {# rows carry an asset tag that already exists on a live asset}}. Resolve the duplicate tag in your file before committing those rows.",
+    "tagCollisionRow": "Row {index}: tag {tag}",
+    "continue": "Resolve conflicts"
+  },
+  "conflicts": {
+    "title": "Resolve conflicts",
+    "description": "For each referenced record we found below, choose how to resolve it. We never pick for you when more than one match exists.",
+    "none": "No conflicts found. Continue to commit.",
+    "entityField": "{entity} · {field}",
+    "value": "Value: {value}",
+    "blastRadius": "{count, plural, one {Affects # row} other {Affects # rows}}",
+    "sampleRows": "e.g. rows {rows}",
+    "ambiguous": "Multiple matches — you must choose one.",
+    "candidateCategory": "Category: {category}",
+    "outcome": {
+      "match": "Link to an existing record",
+      "restore": "Restore an archived record",
+      "create": "Create a new record",
+      "skip": "Skip — leave unlinked"
+    },
+    "outcomeLabel": "How to resolve",
+    "chooseCandidate": "Choose a record",
+    "createNote": "A new record is created on commit with phase-1 defaults you can edit afterward.",
+    "skipNote": "Rows referencing this value are imported without the link.",
+    "unresolved": "Resolve every conflict before continuing: {count} left.",
+    "submit": "Save & commit",
+    "saving": "Saving plan…"
+  },
+  "commit": {
+    "running": "Committing your rows…",
+    "runningHint": "This runs in the background and may take a moment for large files. You can keep this page open.",
+    "resultTitle": "Import complete",
+    "counts": {
+      "committed": "Created",
+      "failed": "Failed",
+      "skipped": "Skipped"
+    },
+    "partialNote": "Some rows could not be imported. Successful rows are kept — fix the failures below and re-run if needed.",
+    "allCommitted": "All rows were imported successfully.",
+    "runId": "Import run #{id}",
+    "importMore": "Import another file",
+    "viewAssets": "View assets"
+  },
+  "errors": {
+    "upload": "We could not start the import. Check the file type and size, then try again.",
+    "tooLarge": "That file is too large to import. Split it or reduce its size and try again.",
+    "forbidden": "You do not have permission to run imports.",
+    "notFound": "This import session no longer exists. It may have expired (sessions last 24 hours). Start a new import.",
+    "conflict": "This import can't continue from its current step. Start over.",
+    "parse": "We couldn't parse this file. Make sure it's valid CSV (UTF-8) or a JSON array, then upload again.",
+    "mapping": "We couldn't save the mapping. Review the required fields and try again.",
+    "dryRun": "The dry-run failed. Go back and review the mapping, then try again.",
+    "plan": "We couldn't save the resolution plan. Try again.",
+    "commit": "The commit could not be started. You may be missing a write permission for a record the plan creates.",
+    "result": "We couldn't load the import result. Refresh to retry.",
+    "expired": "This import session expired. Start a new import."
+  }
+}

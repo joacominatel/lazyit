@@ -504,6 +504,23 @@ describe('DashboardService', () => {
       expect(page.values).toContain('%laptop%');
     });
 
+    it('escapes LIKE wildcards in q (%, _, \\) so they match literally, with an ESCAPE clause (issue #593)', async () => {
+      await service.getActivity({
+        limit: 20,
+        offset: 0,
+        deleted: 'active',
+        q: '50%_a\\b',
+      });
+      const page = pageSql();
+      // The `%`/`_`/`\` typed by the user are escaped INSIDE the bound pattern, so only the outer
+      // wrapping `%...%` are real wildcards — a literal `50%_a\b` matches itself, not every row.
+      expect(page.values).toContain('%50\\%\\_a\\\\b%');
+      expect(page.values).not.toContain('%50%_a\\b%');
+      // The composed SQL pairs the ILIKE with an ESCAPE clause so Postgres reads `\%`/`\_`/`\\`
+      // as the literal characters.
+      expect(page.text).toContain('ESCAPE');
+    });
+
     it('the count query carries the SAME filtered WHERE as the page query (total = filtered count)', async () => {
       await service.getActivity({
         limit: 20,
@@ -520,8 +537,14 @@ describe('DashboardService', () => {
       // Identical WHERE binds on both halves → the total can't drift from the page. The page also
       // binds the trailing LIMIT/OFFSET (take, skip), so compare the leading WHERE values only.
       expect(page.values.slice(0, count.values.length)).toEqual(count.values);
-      // entityType bind, then the q pattern bound twice (summary + actor-name ILIKE).
-      expect(count.values).toEqual(['asset', '%created%', '%created%']);
+      // entityType bind, then the q pattern + ESCAPE char bound twice (summary + actor-name ILIKE).
+      expect(count.values).toEqual([
+        'asset',
+        '%created%',
+        '\\',
+        '%created%',
+        '\\',
+      ]);
     });
   });
 });

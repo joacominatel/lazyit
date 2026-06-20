@@ -8,6 +8,7 @@ import {
   createUser,
   deleteUser,
   offboardUser,
+  provisionUserAccount,
   resetUserPassword,
   restoreUser,
   updateUser,
@@ -139,5 +140,23 @@ export function useRestoreUser() {
 export function useResetUserPassword() {
   return useMutation({
     mutationFn: (id: string) => resetUserPassword(id),
+  });
+}
+
+/**
+ * Promote a directory person into a real OIDC account (`POST /users/:id/provision-account`, `user:manage`
+ * — ADR-0069 REDESIGN §0 #3). On success the person stops being directory-only (the "Directory" badge
+ * disappears and they become a normal login account), so this invalidates the users list AND the user's
+ * detail so both reflect the promotion. Toasts and the honest 400 (no real email) / 503 (IdP failed)
+ * handling are owned by the calling component (mapped on the {@link ApiError}'s `.status`).
+ */
+export function useProvisionUserAccount() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => provisionUserAccount(id),
+    onSuccess: (_user, id) => {
+      queryClient.invalidateQueries({ queryKey: userKeys.all });
+      queryClient.invalidateQueries({ queryKey: userKeys.detail(id) });
+    },
   });
 }

@@ -229,6 +229,18 @@ describe('AccessGrantsService', () => {
     expect(accessGrant.create).not.toHaveBeenCalled();
   });
 
+  it('rejects (400) when the grantee is a DIRECTORY person (INV-2, ADR-0069 REDESIGN §7)', async () => {
+    // A directory-only person has no account → it must NEVER be the subject of an AccessGrant (orphan,
+    // irrevocable access). The block lifts the moment they sign in (directoryOnly flips to false).
+    user.findFirst.mockResolvedValue({ id: USER_ID, directoryOnly: true });
+    application.findFirst.mockResolvedValue({ id: APP_ID });
+
+    await expect(
+      service.create({ userId: USER_ID, applicationId: APP_ID }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(accessGrant.create).not.toHaveBeenCalled();
+  });
+
   // --- findAll ------------------------------------------------------------
   it('findAll defaults to active-only + include-expired, newest first', async () => {
     accessGrant.findMany.mockResolvedValue([]);

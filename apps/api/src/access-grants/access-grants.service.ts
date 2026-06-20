@@ -242,7 +242,10 @@ export class AccessGrantsService {
           entityType: 'application',
           entityId: grant.applicationId,
           targetUserId: grant.userId,
-          metadata: { applicationName: application.name, accessGrantId: grant.id },
+          metadata: {
+            applicationName: application.name,
+            accessGrantId: grant.id,
+          },
         });
       }
 
@@ -508,15 +511,28 @@ export class AccessGrantsService {
 
   // --- internals -----------------------------------------------------------
 
-  /** 400 if userId doesn't reference a live (non-soft-deleted) user. */
+  /**
+   * 400 if userId doesn't reference a live (non-soft-deleted) user, OR if it references a directory-only
+   * person (ADR-0069 REDESIGN §7, INV-2): a directory person has NO account (no login, no IdP mirror),
+   * so it must NEVER be the subject of an AccessGrant / external provisioning — that would mint orphan,
+   * irrevocable access for a row that may never become a real account. The block lifts automatically the
+   * moment the person signs in via OIDC (the verified-email claim flips directoryOnly to false). An asset
+   * assignment is still allowed for a directory person (that is the import's use case) — only access
+   * grants are gated here.
+   */
   private async assertUserUsable(userId: string): Promise<void> {
     const user = await this.prisma.user.findFirst({
       where: { id: userId },
-      select: { id: true },
+      select: { id: true, directoryOnly: true },
     });
     if (!user) {
       throw new BadRequestException(
         `userId ${userId} does not reference a live user`,
+      );
+    }
+    if (user.directoryOnly) {
+      throw new BadRequestException(
+        'A directory person has no account; grant access only after they sign in.',
       );
     }
   }

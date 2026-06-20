@@ -3,7 +3,7 @@ title: "ADR-0038: JIT user provisioning on first OIDC login"
 tags: [adr, auth, oidc]
 status: accepted
 created: 2026-05-27
-updated: 2026-06-12
+updated: 2026-06-20
 deciders: [Joaquín Minatel]
 ---
 
@@ -199,3 +199,44 @@ the Future option below.
 
 Related: [[0016-auth-strategy-deferred]] · [[0022-draft-visibility-auth-shim]] ·
 [[0024-asset-assignment-actor-shim]] · [[0037-idp-choice-zitadel-byoi]] · [[user]] · [[auth-bootstrap]]
+
+---
+
+## Amendment — directory-person promotion (Etapa 2, 2026-06-20)
+
+> Amends the "Account linking by verified email" section. The import (ADR-0069 Etapa 2) creates `User`
+> rows with `directoryOnly = true` (persons without login, without Zitadel mirror). This amendment
+> extends the JIT linking path so that an OIDC first-login that hits one of these rows **promotes** it
+> to a full account.
+
+### Directory-person promotion path
+
+When the `externalId = sub` lookup misses and the email-link lookup finds a **live row** with
+`externalId IS NULL`, the standard claim logic applies — but the row may now be a directory person.
+The `updateMany` that binds `externalId = sub` gains an additional field: **`directoryOnly: false`**.
+The promoted row inherits its existing `role` (VIEWER, the forced default for directory persons) and
+all existing `AssetAssignment`s and history. No other changes to the claim logic.
+
+**Key rules (unchanged from ADR-0038 / INV-2):**
+
+- Linking is claim-only: `externalId IS NULL` rows only; soft-deleted rows are invisible.
+- Verified email is still the **sole linking key** (`email_verified === true` enforced by the guard).
+- `username` and `legajo` are **NOT** linking keys. A person identified only by legajo or username has
+  a synthesized `@directory.local` placeholder email and can **never** auto-promote via OIDC.
+- A row already linked to a different `sub` is refused (409) — no re-bind.
+
+### Manual provision-account path
+
+An ADMIN can promote a directory person explicitly without waiting for a first login via
+`POST /users/:id/provision-account` (ADR-0069 §A.4). This takes a **real email** (required — Zitadel
+will not accept a `@directory.local` placeholder), writes to the IdP first, then sets `externalId` and
+`directoryOnly = false` locally. If the local step fails after a successful IdP write, the next JIT
+login with the same verified email will reconcile (the unclaimed row is now email-linkable).
+
+### No change to INV-2
+
+Email remains the **only** account-linking key. `username` and `legajo` are directory/display handles
+(ADR-0058) — they allow dedup within the import session but confer no OIDC linking capability. A
+directory person without a real email is permanently non-promotable via the auto-JIT path.
+
+**Related:** [[0069-migrator-import]] · [[0069-migrator-import.REDESIGN]] · [[user]] · [[INVARIANTS]]

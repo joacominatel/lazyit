@@ -15,6 +15,7 @@ import { AssetTagSchemeModule } from './asset-tag-scheme/asset-tag-scheme.module
 import { AssetAssignmentsModule } from './asset-assignments/asset-assignments.module';
 import { ArticleCategoriesModule } from './article-categories/article-categories.module';
 import { ArticlesModule } from './articles/articles.module';
+import { ImportModule } from './import/import.module';
 import { ApplicationCategoriesModule } from './application-categories/application-categories.module';
 import { ApplicationsModule } from './applications/applications.module';
 import { AccessGrantsModule } from './access-grants/access-grants.module';
@@ -90,6 +91,10 @@ import { buildLoggerParams } from './logging/logging.config';
     // ⟂ per-vault crypto membership), human-only. The server stores wrapped blobs + ciphertext and can
     // NEVER decrypt a value (INV-10): no reveal(), no env key, no cipher anywhere in the module.
     SecretManagerModule,
+    // Migrator INGEST engine (ADR-0069 wave 2, #629): the CSV/JSON parse step. Registers the
+    // `import-parse` queue + sandboxed parse worker (SEC-002) and the owner-scoped ImportSession
+    // service. No HTTP surface / `import:run` permission yet — those land in wave 4.
+    ImportModule,
   ],
   controllers: [AppController],
   providers: [

@@ -43,6 +43,7 @@ export const PERMISSION_DOMAINS = [
   "workflow", // the Applications Workflow Engine (epic #248) — pre-provisioned RBAC; NO routes yet
   "notification", // the in-app notification bell (ADR-0056) — operational nudges; read is ADMIN-only
   "secret", // the human Secret Manager (ADR-0061) — zero-knowledge vaults; ALL ADMIN-only by default
+  "import", // the guided bulk Migrator (ADR-0069) — a single coarse `:run` verb; ADMIN-only by default
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
 
@@ -148,6 +149,18 @@ export const PERMISSIONS = [
   // `workflow:manage` (ADR-0061 §7). Neither is ever seeded to MEMBER or VIEWER.
   "secret:read",
   "secret:manage",
+  // import (guided bulk Migrator, ADR-0069 §11) — a SINGLE coarse verb `import:run`, ADMIN-only by
+  // default. It is the route gate for the whole import wizard (upload → map → dry-run → commit). The
+  // `import` domain is deliberately RUN-ONLY: there is no `import:read`/`import:write`/`import:delete`
+  // — a session is owner-scoped transient scratch (no cross-user browse surface), and the actual
+  // writes a commit performs are AND-checked at commit time against the TARGET entity permissions
+  // (`asset:write` + `category:write`/`assetModel:write`/`location:write`) via a runtime
+  // PermissionResolver call (ADR-0069 §11) — `import:run` alone is necessary but not sufficient.
+  // As a coarse verb it is ADMIN-only by construction of the seed (neither `:read` nor `:write`, so
+  // it never enters the MEMBER/VIEWER default sets) and, like every coarse verb, is admin-grantable
+  // from the role matrix but MUST NOT be auto-granted to service accounts (import is human-only —
+  // enforced at the controller by the human-only guard, independent of this permission).
+  "import:run",
 ] as const;
 
 /**
