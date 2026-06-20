@@ -3,7 +3,7 @@ title: "ADR-0069: Migrator — guided bulk import (phase 1: Asset slice, JSON + 
 tags: [adr, migrator, import, asset, backend, frontend, shared, settings]
 status: accepted
 created: 2026-06-17
-updated: 2026-06-17
+updated: 2026-06-20
 deciders: [Joaquín Minatel]
 ---
 
@@ -311,3 +311,137 @@ with the catalog change in `@lazyit/shared`. All consistent with §1/§11:
 **Related:** #620 · the pre-ADR analysis doc · [[0063-configurable-asset-tag-scheme]] ·
 [[0068-asset-tag-existing-estate-awareness]] · [[0007-flexible-asset-specs-jsonb]] ·
 [[0006-soft-delete-and-auditing]] · [[0053-async-workers-bullmq-valkey]] · [[0046-rbac-v2]]
+
+---
+
+## Amendment — Etapa 2: directory persons, AssetAssignment, specs passthrough (2026-06-20)
+
+> Amends §11 and §12 (the two explicit deferrals of phase 1): specs passthrough and asset
+> ownership/assignment are **partially lifted**. The "hardened User import path" remains deferred;
+> this path is a **directory-only** record that never writes to the IdP and carries no credentials.
+> Supersedes the notes at §12 for the items listed here; everything else in §12 stays deferred.
+> Reference: [[0069-migrator-import.REDESIGN]] (the design document, as-built analysis + CEO decisions).
+> Also amends [[0038-jit-user-provisioning]] (JIT promotion of a directory person).
+
+### A.1 Specs passthrough (lifting §12 "specs/metadata free mapping")
+
+Custom columns that have no native `Asset` field are mapped by the operator to **custom keys** and
+written to `Asset.specs` (jsonb). The mapping step exposes them as a separate `custom` bucket in
+`ImportMappingSchema` so they never touch any `CreateAssetSchema` field. Constraints:
+
+- **Anti-mass-assignment:** custom keys are validated by a `superRefine` in `ImportMappingSchema`
+  against an allow-list. A key that collides with any native `CreateAssetSchema` field (`name`,
+  `serialNumber`, `assetTag`, `status`, `modelId`, `locationId`, `specs`, `id`, `deletedAt`, …) or
+  any prototype-pollution sentinel (`__proto__`, `constructor`, `prototype`) is rejected at mapping
+  time (400). Duplicate custom keys are also rejected.
+- **Session cap:** ≤64 custom keys per session (enforced by the `superRefine`). The global structural
+  bound on `AssetSpecsSchema` (depth/key count/scalar caps) is **not yet enforced globally** — it is
+  tracked as [[SEC-072]] (an independent finding), and that finding also covers the `jsonDeepEqual`
+  depth guard.
+- **Defense-in-depth:** the backend's coerce-row path builds the `specs` object with `Object.create(null)`
+  and skips the same reserved keys during write, so a persisted/corrupt mapping cannot bypass the
+  refine at commit time.
+- **Omit-empty:** a custom field with no value in a row produces no key in `specs`. An empty `specs`
+  object is never written (`{}` is treated as absent).
+- **Native date fields promoted:** `purchaseDate` and `warrantyEnd` are added to `assetImportDescriptor.mappableFields` so the operator can map them to `Asset` native fields (not custom keys).
+- **Ceiling:** per-category specs validation (ADR-0007 follow-up) remains deferred. Custom key = free-text string; no type hints in this MVP.
+
+### A.2 Model, Manufacturer, and Category (lifting §12 "applications / AccessGrant")
+
+`createReference` now resolves `AssetModel` creation with a **real manufacturer and category** taken
+from `ImportMapping.modelConfig` (not per-conflict — set at the mapping step for the whole session).
+Category is found-or-created by normalized name (idempotent `findFirst` — same pattern as Location and
+Model, closes the cross-run window). `'Unknown'` remains the last-resort fallback manufacturer when no
+column or constant is configured. Ghost (soft-deleted) categories are invisible to the find-first and
+produce a new live row (same accepted trade-off as for Location/Model).
+
+### A.3 Directory persons + AssetAssignment (lifting §12 "asset ownership/assignment")
+
+**Domain model.** A "person" in the import is NOT a new entity. It is a `User` row with
+`directoryOnly = true` — a `User` without a login and without an IdP mirror. No `Person` model;
+`AssetAssignment.userId` is unchanged. See [[user]] for the fields.
+
+**Identity keys.** A directory person is deduped by **email, legajo, or username** (three keys, checked
+in that order of preference). However, **username and legajo are NOT account-linking keys** — OIDC
+auto-linking (JIT) stays on **verified email only** (INV-2 unchanged, [[0038-jit-user-provisioning]]).
+
+**Placeholder email.** Because `User.email` is `NOT NULL`, a row whose identity key is legajo or
+username only (no real email) gets a synthesized placeholder:
+`<sessionId>-<rowIndex>@directory.local`. Consequence: such a person can **never** auto-promote via
+OIDC (the JIT path matches on verified email; `@directory.local` is not an IdP email). The
+`POST /users/:id/provision-account` endpoint also rejects a placeholder email.
+
+**Ambiguous identity.** If an import row's identity keys match two or more distinct live `User` rows,
+the asset is imported **unassigned** with an `ambiguous-identity` warning. The row is COMMITTED (never
+failed), and no person is linked. The operator must resolve the ambiguity manually.
+
+**Dedup is LIVE-only.** The person find-first filters `deletedAt: null` — a soft-deleted person is
+never resurrected or linked. This follows the same posture as the JIT email-linking path (INV-2).
+
+**Commit order: asset → person → assignment.** The `commitRow` path creates the asset first so a
+schema validation failure aborts the row before any person is created, avoiding orphan directory
+records. Person dedup and assignment creation follow only after a successful asset write.
+
+**`skipIdpWriteBack`.** A new internal opt on `users.service.create()` — `{ skipIdpWriteBack: true }`.
+When set, the entire IdP block (Zitadel write-back) is bypassed before it executes; the path goes
+directly to `recordHistory` + search upsert + return. This opt is **server-side only** — never
+accepted from the HTTP request body. The `CreateDirectoryPersonSchema` (strict, in `@lazyit/shared`)
+rejects `role`, `externalId`, and `password`, so none of those fields can be set via the import path.
+
+**`directoryOnly = true` is forced.** The import sets it; the operator has no control.
+`role = VIEWER` is the only permitted role (forced by the schema, not configurable at import time).
+
+**Offboarding.** A directory person participates in the **same offboarding cycle** as any `User`:
+soft-deleting it releases its active `AssetAssignment`s via the normal `releaseAllForUser` path. No
+special handling.
+
+**AssetAssignment idempotency.**
+
+`AssetAssignmentsService.create` does an explicit pre-check `findFirst` before inserting (`:84-91`)
+and throws `ConflictException` (409) if the active pair already exists. The import's `commitRow`
+wraps this call and treats **both** `ConflictException` AND a raw `P2002` (race) as a no-op
+idempotent: the row is marked COMMITTED, never FAILED. A re-import of a previously committed file
+never marks good rows as failures and never duplicates an assignment.
+
+**Resume probe extended.** The resume probe (`assetExistsForRow`) originally marked a row COMMITTED
+as soon as it found the asset's CREATED provenance. If the process crashed between the asset write
+and the assignment write, the assignment would be silently missing. The extended probe: when the
+asset exists **and the row had a person**, the probe also checks for the active assignment; if absent,
+it **completes the assignment** before marking COMMITTED. This closes the silent-crash window for
+CEO requirement #1 (the assignment is the deliverable).
+
+**Bootstrap ADMIN guard.** `jwt-auth.guard.ts` bootstrap count now filters `directoryOnly: false`
+(while retaining `includeSoftDeleted: true`). Importing 200 directory persons can never hand ADMIN
+to the first OIDC login.
+
+**`assertUserUsable` guard.** `AccessGrantsService.assertUserUsable` gains a check for
+`directoryOnly: true` → 400. A directory person cannot be the subject of an `AccessGrant` or IdP
+provisioning. `AssetAssignment.create` does NOT apply this guard — directory persons are valid
+assignment targets (the core use case).
+
+**AND-check at commit.** `assertActorCanCommit` gains explicit assertions for the
+`user:manage`-equivalent verbs needed to create persons and assignments, so opening the import to
+MEMBER in a future wave does not silently inherit User-creation rights.
+
+### A.4 Manual provision-account endpoint
+
+`POST /users/:id/provision-account` — ADMIN-only. Takes a directory person (`directoryOnly=true`,
+`externalId=null`) and a **real email** (required; Zitadel requires a valid email), calls
+`idp.createUser` (write-back to Zitadel first), then sets `externalId` and flips
+`directoryOnly = false` locally. If the local step fails after the IdP write, a re-run of JIT login
+will reconcile (the JIT path will find the row by verified email and bind it). The endpoint is
+disabled (400) when the supplied email is a `@directory.local` placeholder.
+
+**IdP-first posture.** The endpoint follows the pattern of the existing user-create path: IdP first,
+local update second. A failure in the local step after a successful IdP write leaves the person
+linkable via the next JIT login — the reconcile is safe.
+
+### A.5 Visibility and filtering
+
+Directory persons appear in `GET /users` **mixed with accounts**, identified by a `directoryOnly: true`
+flag on `UserSchema`. The `GET /users` endpoint accepts an optional `?directoryOnly` filter to list only
+directory persons. The web applies a "Directorio" badge on directory-only rows. `UserSchema` in
+`@lazyit/shared` gains `directoryOnly: z.boolean()` and `directoryAttrs: z.record(z.string(), z.unknown()).optional()`.
+
+**Related:** [[0069-migrator-import.REDESIGN]] · [[0038-jit-user-provisioning]] · [[user]] ·
+[[INVARIANTS]] · [[SEC-072]] · [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]]
