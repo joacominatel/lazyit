@@ -18,6 +18,7 @@ import {
   type ConflictResolution,
   type CreateAsset,
   type ImportMapping,
+  type ModelConfig,
   type ImportResolutionPlan,
   type Permission,
 } from '@lazyit/shared';
@@ -25,6 +26,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssetsService } from '../assets/assets.service';
 import { AssetModelsService } from '../asset-models/asset-models.service';
+import { AssetCategoriesService } from '../asset-categories/asset-categories.service';
 import { LocationsService } from '../locations/locations.service';
 import { SearchService } from '../search/search.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
@@ -65,6 +67,43 @@ const IMPORT_LOCATION_DEFAULT_TYPE = 'OTHER' as const;
 const IMPORT_MODEL_DEFAULT_MANUFACTURER = 'Unknown';
 
 /**
+ * The brand + category resolved for ONE created `AssetModel` (ADR-0069 REDESIGN §4.4). Both are
+ * optional: an absent `manufacturer` falls back to {@link IMPORT_MODEL_DEFAULT_MANUFACTURER}; an absent
+ * `categoryName` means the created model gets no category link. Built per-row from `mapping.modelConfig`
+ * (a pinned constant or the row's column cell), then carried into `createReference` — but a Model is
+ * created AT MOST ONCE per natural-key value (memoized), so the FIRST row that triggers the create wins.
+ *
+ * ponytail: two flat fields, not a generic multi-level sub-descriptor. Ceiling: the brand/category of a
+ * created model come from whichever row first mints it (deterministic at the value granularity since the
+ * value IS the model name). Upgrade path: a richer per-reference field bag in the resolution plan.
+ */
+interface ModelCreateConfig {
+  manufacturer?: string;
+  categoryName?: string;
+}
+
+/**
+ * Resolve the brand/category for a created model from the mapping's `modelConfig` + this row's cells
+ * (ADR-0069 REDESIGN §4.4 / §5.1). A pinned `*Const` wins over the `*Column` cell; an empty/absent value
+ * yields no entry. Trimmed; empty strings dropped so a blank cell never becomes a `''` manufacturer.
+ */
+function modelCreateConfigFor(
+  modelConfig: ModelConfig,
+  raw: Record<string, string>,
+): ModelCreateConfig {
+  if (!modelConfig) return {};
+  const pick = (constVal?: string, column?: string): string | undefined => {
+    const value = constVal ?? (column !== undefined ? raw[column] : undefined);
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : undefined;
+  };
+  return {
+    manufacturer: pick(modelConfig.manufacturerConst, modelConfig.manufacturerColumn),
+    categoryName: pick(modelConfig.categoryConst, modelConfig.categoryColumn),
+  };
+}
+
+/**
  * Maps a resolution-plan reference `entity` to the write permission a CREATE-NEW / RESTORE outcome
  * needs (ADR-0069 §11 — the runtime per-target AND-check). A `match` outcome links an existing live
  * row and needs no write on the reference; only `create`/`restore` mutate the reference entity, so only
@@ -76,6 +115,29 @@ const REFERENCE_WRITE_PERMISSION: Record<string, Permission> = {
   Location: 'location:write',
   Category: 'category:write',
 };
+
+/** Prototype-pollution sentinels re-guarded at the specs write site (ADR-0069 REDESIGN §4.3 / §7). */
+const SPECS_RESERVED_KEYS: ReadonlySet<string> = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+]);
+
+/**
+ * Re-build a specs object with a NULL prototype and the reserved prototype-pollution keys skipped
+ * (ADR-0069 REDESIGN §4.3 defense-in-depth). `coerceRow` already does this in shared (first line, UX);
+ * this is the second line at the backend write site, so a corrupt/malicious persisted mapping that
+ * bypassed the mapping `superRefine` still can't reach `Object.prototype`. `Object.create(null)` means
+ * even a literal `__proto__` key (were it not skipped) lands as an own data property, never the proto.
+ */
+function sanitizeSpecs(specs: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(specs)) {
+    if (SPECS_RESERVED_KEYS.has(key)) continue;
+    out[key] = value;
+  }
+  return out;
+}
 
 /** Resolution lookup key — mirrors the dry-run's `(entity, field, normalizedValue)` conflict identity. */
 function resolutionKey(entity: string, field: string, normalizedValue: string): string {
@@ -100,6 +162,7 @@ export class ImportCommitService {
     private readonly prisma: PrismaService,
     private readonly assets: AssetsService,
     private readonly models: AssetModelsService,
+    private readonly categories: AssetCategoriesService,
     private readonly locations: LocationsService,
     private readonly search: SearchService,
     private readonly permissions: PermissionResolverService,
@@ -468,11 +531,15 @@ export class ImportCommitService {
       }
 
       const raw = row.raw as Record<string, string>;
-      const { payload, references } = coerceRow(
+      const { payload, references, specs } = coerceRow(
         raw,
         mapping,
         IMPORT_DESCRIPTORS.asset,
       );
+
+      // The brand/category for a Model this row may create (ADR-0069 REDESIGN §4.4) — resolved from the
+      // mapping's modelConfig + this row's cells, carried into createReference (used only on a `create`).
+      const modelCreateConfig = modelCreateConfigFor(mapping.modelConfig, raw);
 
       // Resolve every declared FK reference against the frozen plan. A `skip` cascade drops the link
       // (import without it); a row whose reference must be created mints the ref once (memoized).
@@ -492,9 +559,20 @@ export class ImportCommitService {
           refIdMemo,
           failedRefs,
           principal,
+          modelCreateConfig,
         );
         if (resolved === null) continue; // skip cascade: omit the FK, keep the row.
         payload[field] = resolved;
+      }
+
+      // Custom fields → Asset.specs (ADR-0069 REDESIGN §4.3): coerceRow already built `specs` null-proto
+      // (omit-empty, never `{}`, reserved keys skipped). Re-build it null-proto + re-guard reserved keys
+      // AT THE WRITE SITE (defense-in-depth) so a corrupt/malicious persisted mapping that somehow reached
+      // here can't pollute the prototype. The strict CreateAssetSchema (`specs: record(string,unknown)`)
+      // still revalidates it below — a custom key colliding with a native top-level field was already
+      // rejected by the mapping superRefine.
+      if (specs !== undefined) {
+        payload.specs = sanitizeSpecs(specs);
       }
 
       // RE-VALIDATE against the unchanged strict schema (estate may have drifted; validating BEFORE
@@ -553,6 +631,7 @@ export class ImportCommitService {
     refIdMemo: Map<string, string | null>,
     failedRefs: Set<string>,
     principal: Principal | undefined,
+    modelCreateConfig: ModelCreateConfig = {},
   ): Promise<string | null> {
     const key = resolutionKey(entity, field, normalizedValue);
     if (refIdMemo.has(key)) return refIdMemo.get(key)!;
@@ -577,7 +656,12 @@ export class ImportCommitService {
         : null;
     } else if (resolution.outcome === 'create') {
       try {
-        id = await this.createReference(entity, normalizedValue, principal);
+        id = await this.createReference(
+          entity,
+          normalizedValue,
+          principal,
+          modelCreateConfig,
+        );
       } catch (err) {
         // Doomed create: remember it so the next dependent row fails fast, then propagate so THIS row
         // is recorded FAILED with a PII-free reason by commitRow's catch.
@@ -615,18 +699,22 @@ export class ImportCommitService {
    * the ACROSS-run window.
    *
    * Required fields the value can't supply get an audit-honest phase-1 default the operator can edit
-   * later — never a silent drop.
+   * later — never a silent drop. An `AssetModel` create now reads its REAL manufacturer + category from
+   * the row's `modelCreateConfig` (ADR-0069 REDESIGN §4.4): manufacturer falls back to `'Unknown'` only
+   * as a last resort; a category NAME is resolved to a `categoryId` via the SAME idempotent find-first
+   * pattern (find-or-create `AssetCategory` by name) so a concurrent/retried run reuses it instead of
+   * minting a duplicate.
    *
-   * ponytail: the natural-key value is the only create input here (location/model → name);
-   * `Location.type` and `AssetModel.manufacturer` are required-no-default, so they default to `OTHER` /
-   * `'Unknown'`. Ceiling: the dry-run's `create` outcome doesn't capture richer per-reference fields.
-   * Upgrade path: if the wizard ever lets the operator fill a created reference's other fields, thread
-   * them through the resolution plan and pass them here instead of the defaults.
+   * ponytail: brand/category are two flat fields from the mapping's modelConfig, not a generic
+   * sub-descriptor. Ceiling: the create's richer per-reference fields still aren't captured by the
+   * dry-run's `create` outcome (only model brand/category are). Upgrade path: thread a richer per-
+   * reference field bag through the resolution plan and pass it here.
    */
   private async createReference(
     entity: string,
     normalizedValue: string,
     principal: Principal | undefined,
+    modelCreateConfig: ModelCreateConfig = {},
   ): Promise<string> {
     if (entity === 'Location') {
       const found = await this.prisma.location.findFirst({
@@ -646,14 +734,41 @@ export class ImportCommitService {
         select: { id: true },
       });
       if (found) return found.id;
+      // Resolve the category NAME → id first (find-or-create). CreateAssetModelSchema takes
+      // `categoryId: z.cuid()`, NOT a name, so the name→id resolution is mandatory (REDESIGN §4.4).
+      const categoryId = modelCreateConfig.categoryName
+        ? await this.findOrCreateCategory(modelCreateConfig.categoryName)
+        : undefined;
       const m = await this.models.create({
         name: normalizedValue,
-        manufacturer: IMPORT_MODEL_DEFAULT_MANUFACTURER,
+        manufacturer:
+          modelCreateConfig.manufacturer ?? IMPORT_MODEL_DEFAULT_MANUFACTURER,
+        ...(categoryId !== undefined ? { categoryId } : {}),
       });
       return m.id;
     }
     // Unknown phase-1 entity — should never happen with the asset descriptor.
     throw new Error(`Cannot create reference for unknown entity ${entity}`);
+  }
+
+  /**
+   * FIND-OR-CREATE an `AssetCategory` by name → id (ADR-0069 REDESIGN §4.4). Same idempotent find-first
+   * pattern as Model/Location: a live category with this name is reused; only when absent do we create.
+   * The in-memory `refIdMemo` doesn't cover categories (they're resolved THROUGH the model, not a plan
+   * conflict), so this find-first is what closes the cross-run/within-run duplicate window — a 200-row
+   * import that all maps to the "Laptop" category creates it ONCE. `AssetCategory.name` is uniquely
+   * indexed on the LIVE set, so the find-first matches a live ghost-free row; a soft-deleted ghost of
+   * the same name isn't seen (a new live one is created — the accepted ghost edge, same as Model).
+   */
+  private async findOrCreateCategory(name: string): Promise<string> {
+    const trimmed = name.trim();
+    const found = await this.prisma.assetCategory.findFirst({
+      where: { name: trimmed },
+      select: { id: true },
+    });
+    if (found) return found.id;
+    const created = await this.categories.create({ name: trimmed });
+    return created.id;
   }
 
   // ===== Helpers ===============================================================================
