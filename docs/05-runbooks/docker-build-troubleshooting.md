@@ -131,7 +131,7 @@ host using 80/443 this is a non-issue.
 ## `bun install` fails with tarball/extraction error mid-build
 
 Transient network or registry hiccup (e.g. `Fail extracting tarball for "@prisma/studio-core@..."`).
-Both Dockerfiles auto-retry `bun install` up to **3 times with a 5-second backoff** — the build
+All three build Dockerfiles (api, web, migrate) auto-retry `bun install` up to **3 times with a 5-second backoff** — the build
 recovers on its own. If all 3 attempts fail, the build exits non-zero with the original error;
 a stale lockfile or a genuinely missing package will fail all retries and surface the real error.
 
