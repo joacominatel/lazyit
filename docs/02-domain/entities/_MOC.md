@@ -3,7 +3,7 @@ title: Entities — MOC
 tags: [moc, domain]
 status: draft
 created: 2026-05-25
-updated: 2026-06-16
+updated: 2026-06-20
 ---
 
 # Entities — Map of Content
@@ -28,6 +28,7 @@ updated: 2026-06-16
 - 🟢 [[location]] — where an asset physically lives.
 - 🟢 [[asset-assignment]] — join entity: who owns an asset, with history.
 - 🟢 [[asset-history]] — append-only log of asset state changes.
+- 🟢 [[asset-tag-scheme]] — singleton instance-config: opt-in auto-tag scheme (monotonic counter, gaps accepted). [[0063-configurable-asset-tag-scheme]] · [[0068-asset-tag-existing-estate-awareness]]
 
 ## People
 
