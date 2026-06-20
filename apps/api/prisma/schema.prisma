@@ -57,6 +57,22 @@ model User {
   // Free-text fallback when the manager is NOT a lazyit user — ADR-0058 (the manager is in HR's system,
   // not IT's). Normalized (trim). Mutually exclusive with `managerId`.
   managerName String?
+  // Directory-only person (ADR-0069 amendment / ADR-0038 amendment): a row created by the bulk import
+  // for an asset's "assigned to" that has NO login and NO Zitadel mirror (externalId stays null, role
+  // stays VIEWER). It IS a User so AssetAssignment.userId (uuid FK) points at it with zero schema churn.
+  // EXCLUDED from the bootstrap first-user→ADMIN count (jwt-auth.guard.ts:365) so importing people can
+  // never hand ADMIN to a non-login row. Flips to false when the person first signs in via OIDC and the
+  // verified-email claim links this row (ADR-0038). HARD RULE: a directoryOnly row is NEVER the subject
+  // of an AccessGrant / external provisioning (access-grants.assertUserUsable rejects it) — see INVARIANTS.
+  // ponytail: User and a directory person share one table on purpose — a directory person is a User
+  // without a login, not a new entity. Ceiling: no per-attribute validation on directoryAttrs, no SQL
+  // filter/sort by department. Upgrade path: promote directoryAttrs keys to real columns if a reader needs
+  // to query them; fork a Person model only if directory semantics ever truly diverge.
+  directoryOnly  Boolean   @default(false)
+  // Free-form directory attributes for a directory-only person (cargo/jobTitle, departamento, teléfono,
+  // and any person sub-field with no native home). Same posture as Asset.specs (ADR-0007): jsonb,
+  // optional, only populated on directory rows. NOT validated per-field in this MVP.
+  directoryAttrs Json?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?

@@ -65,6 +65,22 @@ handover note and print a **return act** (with company name and signature lines)
 hand-off. Offboarding is valid even when the person holds nothing — it still stands as a record of
 their departure.
 
+## Directory people
+
+A **directory** person is a User without a login — created by the [bulk import](/help/assets-bulk-import)
+as an asset's "assigned to", with no account in your identity provider. They give an asset an owner on
+record before that owner can sign in.
+
+- **In the Users list** a directory person carries a **Directory** badge next to their name, and the
+  **directory filter** (next to the status filter) narrows the list to *Directory only*, *Accounts
+  only*, or everyone.
+- **They link to a real account on first sign-in** through your identity provider, when the verified
+  email matches — at which point the badge disappears and they become a normal account. A directory
+  person imported **without a real email never links automatically**.
+- **Create their account now.** On a directory person's page, **Create OIDC account** provisions them in
+  the identity provider immediately. The provider requires a real email, so the button is disabled until
+  the person has one — edit the person and add a real email first. This is admin-only (Manage users).
+
 ## Restore a user
 
 Offboarded users are archived, not deleted. To bring one back, show archived users in the Users list

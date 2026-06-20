@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  CreateDirectoryPersonSchema,
   CreateUserSchema,
   ManagerInputSchema,
   RoleSchema,
@@ -22,6 +23,9 @@ const READ_BASE = {
   legajo: null,
   username: null,
   manager: null,
+  // ADR-0069 REDESIGN §3/§5.5 — directoryOnly is required on the wire (server default false);
+  // directoryAttrs is optional/nullable so it can be omitted by a normal account.
+  directoryOnly: false,
   createdAt: "2026-06-01T00:00:00.000Z",
   updatedAt: "2026-06-01T00:00:00.000Z",
   deletedAt: null,
@@ -307,5 +311,98 @@ describe("UserSchema.manager read descriptor (ADR-0058)", () => {
     expect(UserSchema.safeParse({ ...READ_BASE, manager: m }).success).toBe(
       false,
     );
+  });
+
+  test("accepts the directory-only flag + free-form directoryAttrs on the read shape", () => {
+    expect(
+      UserSchema.safeParse({
+        ...READ_BASE,
+        directoryOnly: true,
+        directoryAttrs: { jobTitle: "Engineer", department: "IT" },
+      }).success,
+    ).toBe(true);
+    // directoryAttrs is optional/nullable — both omitted and null are valid.
+    expect(
+      UserSchema.safeParse({ ...READ_BASE, directoryAttrs: null }).success,
+    ).toBe(true);
+  });
+
+  test("requires directoryOnly to be present on the wire (server default false)", () => {
+    const { directoryOnly: _d, ...withoutFlag } = READ_BASE;
+    expect(UserSchema.safeParse(withoutFlag).success).toBe(false);
+  });
+});
+
+// ADR-0069 REDESIGN §5.5 — a directory person is a User WITHOUT a login. CreateDirectoryPersonSchema is
+// strict (no role / no externalId) and demands at least one identity key (CEO Q5: email ∨ legajo ∨ username).
+describe("CreateDirectoryPersonSchema (SEC-006 + identity guarantee, CEO Q5)", () => {
+  test("accepts a person identified by email", () => {
+    expect(
+      CreateDirectoryPersonSchema.safeParse({ name: "Ada Lovelace", email: "a@b.com" }).success,
+    ).toBe(true);
+  });
+
+  test("accepts a person identified by legajo only (no email)", () => {
+    expect(
+      CreateDirectoryPersonSchema.safeParse({ name: "Bob", legajo: "12345" }).success,
+    ).toBe(true);
+  });
+
+  test("accepts a person identified by username only (3rd identity key, Q5)", () => {
+    expect(
+      CreateDirectoryPersonSchema.safeParse({ name: "Carol", username: "carol.x" }).success,
+    ).toBe(true);
+  });
+
+  test("accepts the directory attribute sub-fields (jobTitle / department / supervisor)", () => {
+    expect(
+      CreateDirectoryPersonSchema.safeParse({
+        name: "Dave",
+        legajo: "777",
+        jobTitle: "Engineer",
+        department: "IT",
+        supervisor: "Eve Manager",
+      }).success,
+    ).toBe(true);
+  });
+
+  test("REJECTS a person with NO identity key (name alone — even with attributes)", () => {
+    expect(
+      CreateDirectoryPersonSchema.safeParse({
+        name: "Frank",
+        jobTitle: "Engineer",
+        department: "IT",
+      }).success,
+    ).toBe(false);
+  });
+
+  test("REJECTS a client-supplied role (strict, never role-escalation)", () => {
+    expect(
+      CreateDirectoryPersonSchema.safeParse({
+        name: "Grace",
+        email: "g@x.com",
+        role: "ADMIN",
+      }).success,
+    ).toBe(false);
+  });
+
+  test("REJECTS a client-supplied externalId (strict, never identity pre-linking)", () => {
+    expect(
+      CreateDirectoryPersonSchema.safeParse({
+        name: "Heidi",
+        email: "h@x.com",
+        externalId: "victim-idp-sub",
+      }).success,
+    ).toBe(false);
+  });
+
+  test("REJECTS a person with no name", () => {
+    expect(CreateDirectoryPersonSchema.safeParse({ email: "a@b.com" }).success).toBe(false);
+  });
+
+  test("normalizes email (trim + lowercase) like the write path (ADR-0041)", () => {
+    const parsed = CreateDirectoryPersonSchema.safeParse({ name: "Ivan", email: "  Bob@X.COM " });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.email).toBe("bob@x.com");
   });
 });

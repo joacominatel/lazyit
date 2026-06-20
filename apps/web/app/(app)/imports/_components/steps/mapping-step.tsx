@@ -103,6 +103,7 @@ export function MappingStep({
     const byToken = new Map<string, string>();
     for (const f of IMPORT_UI_TARGETS.asset) byToken.set(token("asset", f.field), fieldLabel(f.i18nKey));
     for (const f of IMPORT_UI_TARGETS.model) byToken.set(token("model", f.field), fieldLabel(f.i18nKey));
+    for (const f of IMPORT_UI_TARGETS.person) byToken.set(token("person", f.field), fieldLabel(f.i18nKey));
     return (target: string): string => byToken.get(target) ?? target;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -134,9 +135,10 @@ export function MappingStep({
   const initialChoices = useMemo<Record<string, ColumnChoice>>(() => {
     const out: Record<string, ColumnChoice> = {};
     const claimed = new Set<string>();
-    const candidates: { entity: "asset" | "model"; field: string }[] = [
+    const candidates: { entity: "asset" | "model" | "person"; field: string }[] = [
       ...IMPORT_UI_TARGETS.asset.map((f) => ({ entity: "asset" as const, field: f.field })),
       ...IMPORT_UI_TARGETS.model.map((f) => ({ entity: "model" as const, field: f.field })),
+      ...IMPORT_UI_TARGETS.person.map((f) => ({ entity: "person" as const, field: f.field })),
     ];
     for (const h of headers) {
       const norm = normalize(h);
@@ -208,6 +210,17 @@ export function MappingStep({
     (h) => choices[h]?.target === CUSTOM && !choices[h]?.customName.trim(),
   );
 
+  // --- person-identity guard (ADR-0069 REDESIGN §6.2): the moment ANY column is mapped to a person
+  // sub-field, the row needs a natural key (email/legajo/username — CEO Q5) so the directory person can
+  // be created/deduped; otherwise the asset imports unassigned. If a person is started but no identity
+  // column is mapped, block Continue and say which keys to add. ---
+  const PERSON_IDENTITY_FIELDS = ["email", "legajo", "username"] as const;
+  const personMapped = headers.some((h) => choices[h]?.target.startsWith("person:"));
+  const personHasIdentity = headers.some((h) =>
+    PERSON_IDENTITY_FIELDS.some((f) => choices[h]?.target === token("person", f)),
+  );
+  const personIdentityMissing = personMapped && !personHasIdentity;
+
   // --- per-column issues: duplicate target + custom-key duplicate/reserved (mirrors the backend's
   // ImportMappingSchema superRefine; first line of the same defense). Inline `role=alert` per card. ---
   const reservedKeys = useMemo(
@@ -257,12 +270,17 @@ export function MappingStep({
 
   const isBusy = setMapping.isPending || dryRun.isPending;
   const canContinue =
-    missingRequired.length === 0 && !unnamedCustom && !hasColumnError && !isBusy;
+    missingRequired.length === 0 &&
+    !unnamedCustom &&
+    !personIdentityMissing &&
+    !hasColumnError &&
+    !isBusy;
 
   function buildMapping(): ImportMapping {
     const columns: ColumnFieldMapping[] = [];
     const references: FkFieldMapping[] = [];
     const custom: CustomFieldMapping[] = [];
+    const personFields: ColumnFieldMapping[] = [];
 
     for (const h of headers) {
       const choice = choices[h];
@@ -277,6 +295,12 @@ export function MappingStep({
       const [entity, field] = choice.target.split(":");
       // Model brand/category are NOT CreateAsset keys — they drive `modelConfig`, handled below.
       if (entity === "model") continue;
+      // Person sub-fields go to the directory-person sub-payload (`mapping.person.fields`), NOT to the
+      // asset columns/references — the commit splits them into a directory User (ADR-0069 REDESIGN §6.2).
+      if (entity === "person") {
+        personFields.push({ field, column: h, constant: null });
+        continue;
+      }
 
       if (FK_FIELDS.has(field)) {
         references.push({ field, column: h, constant: null });
@@ -305,7 +329,11 @@ export function MappingStep({
     else if (categoryConst.trim()) mc.categoryConst = categoryConst.trim();
     const modelConfig = Object.keys(mc).length > 0 ? mc : undefined;
 
-    return { columns, references, enums, custom, modelConfig };
+    // Only send `person` when the operator actually started one — an empty sub-payload would tell the
+    // backend nothing and the schema keeps it optional.
+    const person = personFields.length > 0 ? { fields: personFields } : undefined;
+
+    return { columns, references, enums, custom, person, modelConfig };
   }
 
   function handleSubmit() {
@@ -448,6 +476,14 @@ export function MappingStep({
                             </SelectItem>
                           ))}
                         </SelectGroup>
+                        <SelectGroup>
+                          <SelectLabel>{t("mapping.group.person")}</SelectLabel>
+                          {IMPORT_UI_TARGETS.person.map((f) => (
+                            <SelectItem key={f.field} value={token("person", f.field)}>
+                              {fieldLabel(f.i18nKey)}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                         <SelectSeparator />
                         <SelectItem value={CUSTOM}>{t("mapping.targetCustom")}</SelectItem>
                       </SelectContent>
@@ -584,6 +620,11 @@ export function MappingStep({
       {missingRequired.length === 0 && unnamedCustom && (
         <p className="text-sm text-destructive" role="alert">
           {t("mapping.customNameMissing")}
+        </p>
+      )}
+      {missingRequired.length === 0 && !unnamedCustom && personIdentityMissing && (
+        <p className="text-sm text-destructive" role="alert">
+          {t("mapping.personIdentityRequired")}
         </p>
       )}
 

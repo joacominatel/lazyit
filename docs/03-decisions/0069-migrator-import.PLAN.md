@@ -222,7 +222,7 @@ Operativas y de modelo que quedaron sin cerrar:
 
 | # | Riesgo | Mitigación |
 |---|---|---|
-| R1 | `bun install` falla por extracción de tarball (transitorio, ya pasó con `@prisma/studio-core`) | reintentar; es local, no Docker. (Issue de auto-reintento pendiente para cuando se habilite `gh`.) |
+| R1 | `bun install` falla por extracción de tarball (transitorio, ya pasó con `@prisma/studio-core`) | auto-reintento **Docker-side** (3 intentos + backoff) en los Dockerfiles api/web/migrate — issue #642, PR #643. El install local por worktree sigue siendo un caso aparte (reintentar a mano). |
 | R2 | Cambios en `packages/shared/user.ts` rompen maps exhaustivos del web | `tsc` del web + CI **antes** de mergear el lane SHARED (memoria `shared-changes-need-web-typecheck`). |
 | R3 | Etapa 2 toca auth/bootstrap/access-grants (superficie de seguridad) | merge separado, tests Jest dedicados, pase por `lazyit-sentinel`. |
 | R4 | Mass-assignment vía custom fields/specs | allow-list en `superRefine` (shared) **y** null-proto en el writer backend (defense-in-depth). |

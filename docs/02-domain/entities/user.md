@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-06-20
 ---
 
 # User
@@ -95,6 +95,8 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | Soft delete — `null` while live; reads filter `deletedAt: null` ([[0006-soft-delete-and-auditing]]). |
+| `directoryOnly` | `boolean` | `@default(false)`. `true` = a **directory person** created by the bulk import ([[0069-migrator-import]] §A.3): no login, no Zitadel mirror, role forced VIEWER, `externalId` stays `null`. Flips to `false` on first OIDC login (JIT promotion, [[0038-jit-user-provisioning]] amendment) or via `POST /users/:id/provision-account` (ADMIN manual promotion). See **Directory mode** note below. |
+| `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column) for `directoryOnly = true` rows. Same posture as `Asset.specs` (ADR-0007): jsonb, optional, only populated on directory rows. Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. |
 
 > [!note] Manager identity graph + clone-with-chosen-actions ([[0058-user-manager-and-clone-actions]])
 > The read `UserSchema` resolves the manager FK to a **redaction-safe descriptor** —
@@ -118,16 +120,56 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > record is **soft-deleted** (hidden from normal queries). A user can be inactive yet not
 > deleted. Creation always starts active; deactivation is a `PATCH`.
 
+> [!note] Directory mode — `directoryOnly = true` ([[0069-migrator-import]] §A.3 / [[INVARIANTS]] INV-DIR)
+>
+> A **directory person** is a `User` row created by the bulk import for an asset's "Assigned to" field.
+> It has no login and no Zitadel mirror. Key rules:
+>
+> - `role = VIEWER` (forced; the import schema rejects any other value).
+> - `externalId = null` always (the import never sets it; SEC-006 blocks it from the API too).
+> - `isActive = true` (set on creation; offboarding proceeds normally — see below).
+> - Email: may be a real address OR a synthesized `<sessionId>-<rowIndex>@directory.local` placeholder
+>   when the row's only identity key is legajo or username. A placeholder email means the person can
+>   **never** auto-promote via OIDC.
+> - Identity dedup: the import deduplicates by **email, legajo, or username** (in that priority order)
+>   against **live rows only** (`deletedAt: null`). Soft-deleted rows are invisible and are never
+>   resurrected.
+> - **Ambiguous identity:** if the import row's keys match two or more distinct live users, the asset
+>   is imported unassigned with an `ambiguous-identity` warning. No person is linked.
+>
+> **Capability rules (enforced as invariants — see [[INVARIANTS]] INV-DIR):**
+> - A directory person is **never** the subject of an `AccessGrant` or IdP provisioning.
+>   `AccessGrantsService.assertUserUsable` rejects `directoryOnly = true` rows with 400.
+> - A directory person is **never** counted in the bootstrap first-user→ADMIN logic
+>   (`jwt-auth.guard.ts` filters `directoryOnly: false` in the bootstrap count).
+> - A directory person **IS** a valid target for `AssetAssignment` (that is its purpose).
+> - A directory person participates in the **same offboarding cycle** as any User: soft-deleting it
+>   releases its active assignments via `releaseAllForUser`.
+>
+> **Promotion to a full account:**
+> - **Auto (JIT):** when the person logs in via OIDC with the same verified email, the standard JIT
+>   claim path (`jwt-auth.guard.ts`) binds `externalId = sub` and sets `directoryOnly = false`.
+>   The person inherits their existing `role` (VIEWER) and all prior assignments.
+> - **Manual (ADMIN):** `POST /users/:id/provision-account` takes a real email (required), writes
+>   to Zitadel first, then sets `externalId` + `directoryOnly = false`. The endpoint rejects
+>   `@directory.local` placeholder emails.
+>
+> **Visibility:** directory persons appear in `GET /users` mixed with accounts, tagged `directoryOnly: true`.
+> The web shows a "Directorio" badge. `GET /users?directoryOnly=true` lists only directory persons.
+
 ## Endpoints
 
-`apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted), `GET /users/me`
+`apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted; accepts `?directoryOnly`
+filter), `GET /users/me`
 (the current authenticated caller, **including their role** — declared before `:id` so the literal
 `me` isn't parsed as a uuid; the OIDC token doesn't carry the lazyit role, so the web reads it here),
 `GET /users/:id`, `POST /users`, `POST /users/:id/clone` (clone-with-chosen-actions —
 [[0058-user-manager-and-clone-actions]]; see the manager/clone note above), `PATCH /users/:id`,
 `DELETE /users/:id` (soft delete), `POST /users/:id/offboard`, `POST /users/:id/restore` (re-onboard:
 clears `deletedAt`; does NOT re-grant access or re-assign assets — [[0041-soft-delete-reuse-and-restore]]),
-and `POST /users/:id/reset-password` (admin-triggered password reset — see the IdP write-back note below).
+`POST /users/:id/reset-password` (admin-triggered password reset — see the IdP write-back note below),
+and `POST /users/:id/provision-account` (ADMIN manual promotion of a directory person — see **Directory
+mode** note above; [[0069-migrator-import]] §A.4).
 All **write** endpoints (create / update incl. name/email/role / delete / offboard / restore /
 reset-password) are gated `@RequirePermission('user:manage')` — ADMIN-only in the seed, **not**
 `user:write` (which MEMBER holds) ([[0046-roles-permissions-v2]] P4). The directory **reads** `GET /users` and `GET /users/:id` (and the
@@ -204,4 +246,5 @@ detail) — it composes the two nested reads above plus the user's authored [[ar
 Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] ·
 [[role-permission]] · [[service-account]] · [[asset-centric]] · [[shared-package]] ·
 [[0013-zod-validation-pipe]] · [[0016-auth-strategy-deferred]] · [[0038-jit-user-provisioning]] ·
-[[0040-rbac-roles]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[INVARIANTS]]
+[[0040-rbac-roles]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[INVARIANTS]] ·
+[[0069-migrator-import]]

@@ -33,6 +33,8 @@ import { ArticleStatusBadge } from "../../kb/_components/article-status-badge";
 import { CloneUserWizard } from "../_components/clone-user-wizard";
 import { ManagerDisplay } from "../_components/manager-display";
 import { OffboardingSheet } from "../_components/offboarding-sheet";
+import { ProvisionAccountButton } from "../_components/provision-account-button";
+import { UserDirectoryBadge } from "../_components/user-directory-badge";
 import { UserFormDialog } from "../_components/user-form-dialog";
 import { UserPasswordResetButton } from "../_components/user-password-reset-button";
 import { UserRoleSelect } from "../_components/user-role-select";
@@ -135,7 +137,12 @@ export default function UserDetailPage() {
           </span>
         }
         subtitle={user.email}
-        badge={<UserStatusBadge isActive={user.isActive} />}
+        badge={
+          <span className="flex items-center gap-2">
+            <UserStatusBadge isActive={user.isActive} />
+            {user.directoryOnly && <UserDirectoryBadge />}
+          </span>
+        }
         actions={
           canManage ? (
             <>
@@ -201,6 +208,19 @@ export default function UserDetailPage() {
           </DetailField>
         </dl>
       </DetailPanel>
+
+      {/* Directory person (ADR-0069 REDESIGN §0 #3): no login yet. Offer the ADMIN-only manual OIDC
+          promotion — the explicit counterpart to the auto-claim on first verified-email login. */}
+      {user.directoryOnly && canManage && (
+        <DetailPanel title={t("directory.provision.title")}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <p className="max-w-prose text-sm text-muted-foreground">
+              {t("directory.provision.description")}
+            </p>
+            <ProvisionAccountButton user={user} />
+          </div>
+        </DetailPanel>
+      )}
 
       <DetailPanel title={t("detail.assets.title")}>
         {activeAssignments.length === 0 ? (

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AssetSchema, CreateAssetSchema } from "../asset";
+import { IMPORT_UI_TARGETS } from "./descriptor";
 
 /**
  * Migrator import — the three-layer mapping model (ADR-0069 §4, #627).
@@ -67,6 +68,20 @@ export const CustomFieldMappingSchema = z.object({
 });
 
 /**
+ * Person sub-mapping (ADR-0069 REDESIGN §5.1): the column → directory-person sub-field bindings the
+ * operator confirms for the asset's "assigned to". Lives in its OWN bucket (NOT in `columns`) because a
+ * person sub-field is NOT a key of `CreateAssetSchema` — routing it through `columns` would either be
+ * dropped as an unknown target or mis-flagged by the asset reserved/duplicate-target checks. Each binding
+ * is a `ColumnFieldMappingSchema` whose `field` is a person sub-field token (`name`/`email`/`legajo`/
+ * `username`/`jobTitle`/`department`/`supervisor` — see `IMPORT_UI_TARGETS.person`). The commit re-validates
+ * the built bucket against `CreateDirectoryPersonSchema` (strict). Defaults to `[]` so omitting it is "no
+ * person mapped" (the asset imports unassigned — REDESIGN §0 #1).
+ */
+export const PersonSubMappingSchema = z.object({
+  fields: z.array(ColumnFieldMappingSchema).default([]),
+});
+
+/**
  * Model config (ADR-0069 REDESIGN §5.1): brand (manufacturer) + category for newly-created
  * `AssetModel`s. Bound at the MAPPING level (session/column), NOT per `ConflictResolution` — read by
  * the commit's `createReference`. Each is either a column (per-row value) or a pinned constant; all
@@ -113,6 +128,19 @@ const RESERVED_TARGET_KEYS: ReadonlySet<string> = new Set(
   [...RESERVED_CUSTOM_KEYS].filter((k) => !CREATE_ASSET_KEYS.has(k)),
 );
 
+/**
+ * The ALLOWLIST a `person.fields[].field` target must be one of (E2-AUTH-01, defense-in-depth parity with
+ * the asset/specs path). Derived from `IMPORT_UI_TARGETS.person` (the single UI source of truth —
+ * `name`/`email`/`legajo`/`username`/`jobTitle`/`department`/`supervisor`) so it can't drift. A person
+ * sub-field becomes a key on the coerced directory-person bucket (`coerce-row.ts`), then is re-validated
+ * strict by `CreateDirectoryPersonSchema.parse`; that strict parse already rejects smuggled keys, so this
+ * is NOT live-exploitable today — it closes the asymmetry with `RESERVED_TARGET_KEYS` (which guards the
+ * asset target path) so a non-allowlist or proto-pollution person target is rejected at MAPPING time too.
+ */
+const PERSON_ALLOWED_TARGET_KEYS: ReadonlySet<string> = new Set(
+  IMPORT_UI_TARGETS.person.map((t) => t.field),
+);
+
 /** Max number of custom (specs) fields per session — a local DoS/abuse cap (ADR-0069 REDESIGN §5.1). */
 const MAX_CUSTOM_FIELDS = 64;
 
@@ -123,6 +151,7 @@ export const ImportMappingSchema = z
     enums: z.array(EnumFieldMappingSchema).default([]),
     references: z.array(FkFieldMappingSchema).default([]),
     custom: z.array(CustomFieldMappingSchema).default([]), // → Asset.specs
+    person: PersonSubMappingSchema.optional(), // → directory person sub-payload (ADR-0069 REDESIGN §5.1)
     modelConfig: ModelConfigSchema, // → created AssetModel brand + category
   })
   .superRefine((m, ctx) => {
@@ -205,6 +234,23 @@ export const ImportMappingSchema = z
       }
       seenReferenceFields.add(r.field);
     });
+
+    // Anti mass-assignment + anti prototype-pollution at the PERSON-TARGET layer (E2-AUTH-01, parity).
+    // A `person.fields[].field` becomes a key on the coerced directory-person bucket. Unlike the asset
+    // path (whose legitimate targets ARE arbitrary create-schema fields), a person sub-field's legitimate
+    // values are a CLOSED allowlist (`IMPORT_UI_TARGETS.person`) — so reject any field NOT on it (which
+    // also rejects `__proto__`/`constructor`/`prototype` since they're not allowlisted). NOT live-
+    // exploitable today (`CreateDirectoryPersonSchema.parse` strips smuggled keys), but this closes the
+    // asymmetry with `rejectReservedTarget` so a corrupt/malicious persisted mapping is rejected here too.
+    (m.person?.fields ?? []).forEach((p, i) => {
+      if (!PERSON_ALLOWED_TARGET_KEYS.has(p.field)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["person", "fields", i, "field"],
+          message: `"${p.field}" is not an allowed person mapping target`,
+        });
+      }
+    });
   });
 
 export type ColumnFieldMapping = z.infer<typeof ColumnFieldMappingSchema>;
@@ -212,5 +258,6 @@ export type EnumValueMapping = z.infer<typeof EnumValueMappingSchema>;
 export type EnumFieldMapping = z.infer<typeof EnumFieldMappingSchema>;
 export type FkFieldMapping = z.infer<typeof FkFieldMappingSchema>;
 export type CustomFieldMapping = z.infer<typeof CustomFieldMappingSchema>;
+export type PersonSubMapping = z.infer<typeof PersonSubMappingSchema>;
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;
 export type ImportMapping = z.infer<typeof ImportMappingSchema>;

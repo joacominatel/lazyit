@@ -15,9 +15,10 @@ lateral.
 El importador es **solo para administradores** — requiere el permiso `import:run`, que los
 administradores tienen por defecto. Si no lo ves, pídele a un administrador que haga la importación.
 
-> **Qué puedes importar hoy.** Solo activos. La importación de usuarios, consumibles e historial aún no
-> está disponible a propósito, y se indica como *próximamente* en el asistente. La
-> **asignación/propietario** de un activo también queda fuera de esta primera fase.
+> **Qué puedes importar hoy.** Activos, las **personas** a las que está asignado cada uno, y esa
+> **asignación**. Cuando tu archivo tiene una columna de "asignado a", el importador crea la persona y
+> le entrega el activo (consulta *Asignar activos a personas* más abajo). La importación de consumibles
+> e historial aún no está disponible a propósito, y se indica como *próximamente* en el asistente.
 
 ## El flujo de un vistazo
 
@@ -69,6 +70,9 @@ Para cada columna, ábrela y elige un destino en el desplegable:
     **Etiqueta de activo**, **Fecha de compra**, **Fin de garantía**, **Modelo** y **Ubicación**.
   - **Modelo** — **Fabricante** y **Categoría** para los modelos de activo que cree la importación
     (consulta *Marca y categoría del modelo* más abajo).
+  - **Persona** — la persona a la que está **asignado** el activo: **Nombre**, **Correo**, **Legajo**,
+    **Usuario**, **Cargo**, **Departamento** y **Supervisor** (consulta *Asignar activos a personas*
+    más abajo).
 - **Crear un campo personalizado…** — para una columna sin hogar nativo (RAM, IMEI, pulgadas, costo,
   una URL externa…). Le das un nombre y su valor se guarda en los **detalles** del activo (`specs`).
   Un campo personalizado se guarda **solo en las filas que realmente tienen un valor** — las celdas
@@ -105,6 +109,32 @@ definirlos de dos maneras:
   marca), fija un único **Fabricante** y/o **Categoría** en el recuadro *Marca y categoría del modelo*;
   se aplica a todos los modelos que cree la importación. Una columna mapeada siempre gana sobre un
   valor fijado.
+
+### Asignar activos a personas
+
+Mapea cualquier campo de **Persona** y la importación, para cada fila, buscará o creará esa persona y le
+**asignará el activo** — la asignación se registra igual que se haría en la app, con historial.
+
+- **Una persona importada no tiene acceso.** Es una persona de **directorio**: una entrada real en tu
+  lista de Usuarios (con la insignia **Directorio**), pero sin cuenta en tu proveedor de identidad.
+  Existe para que el activo tenga un propietario registrado; no puede iniciar sesión hasta tener cuenta.
+- **Identifícala por Correo, Legajo o Usuario.** La importación necesita al menos uno de estos para
+  saber *de quién* es una fila (y para no crear dos veces a la misma persona). **Si mapeas un campo de
+  Persona, también debes mapear uno de estos campos de identidad** — de lo contrario el asistente no te
+  deja continuar. Una fila sin ninguno importa el activo **sin asignar**, con una advertencia.
+- **Se vinculan a una cuenta real automáticamente — solo con un correo que coincida.** Cuando esa
+  persona inicie sesión más tarde a través de tu proveedor de identidad (OIDC) usando el **mismo correo
+  verificado**, lazyit vincula ambas: la entrada de directorio pasa a ser su cuenta y la insignia
+  **Directorio** desaparece. **Una persona importada sin un correo real nunca se vincula
+  automáticamente** — no hay correo con el que coincidir. Promuévela a mano (siguiente punto) cuando
+  necesite iniciar sesión.
+- **Puedes crear su cuenta ahora.** Un administrador puede abrir la página de la persona y elegir
+  **Crear cuenta OIDC** para aprovisionarla en el proveedor de identidad de inmediato, en vez de esperar
+  a un inicio de sesión. El proveedor de identidad exige un correo real, así que el botón está
+  **deshabilitado hasta que la persona tenga uno** — edita la persona y agrega un correo real primero.
+
+El activo siempre se importa de cualquier modo; solo la **asignación** depende de identificar a la
+persona.
 
 ## 4. Vista previa (la simulación)
 

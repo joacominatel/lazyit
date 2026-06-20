@@ -441,10 +441,14 @@ describe('UsersService', () => {
         passwordChangeRequired: true,
       });
       // NEVER persisted: `password` is not a User column — the Prisma create carries no password field.
-      const createArg = (user.create.mock.calls as Array<[{ data: object }]>)[0][0];
+      const createArg = (
+        user.create.mock.calls as Array<[{ data: object }]>
+      )[0][0];
       expect(createArg.data).not.toHaveProperty('password');
       // NEVER echoed back: the indexed/search projection carries no credential either.
-      const upsertArg = (search.upsert.mock.calls as Array<[string, object]>)[0][1];
+      const upsertArg = (
+        search.upsert.mock.calls as Array<[string, object]>
+      )[0][1];
       expect(upsertArg).not.toHaveProperty('password');
     });
 
@@ -485,7 +489,9 @@ describe('UsersService', () => {
       await service.create(dto);
 
       // Back-compat: the createUser call carries no password and no passwordChangeRequired key.
-      const arg = (idp.createUser.mock.calls as Array<[Record<string, unknown>]>)[0][0];
+      const arg = (
+        idp.createUser.mock.calls as Array<[Record<string, unknown>]>
+      )[0][0];
       expect(arg).not.toHaveProperty('password');
       expect(arg).not.toHaveProperty('passwordChangeRequired');
     });
@@ -518,6 +524,178 @@ describe('UsersService', () => {
       expect(user.delete).toHaveBeenCalledWith({ where: { id: 'uuid-w' } });
       expect(user.update).not.toHaveBeenCalled();
       expect(search.upsert).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+  });
+
+  // ADR-0069 REDESIGN §4.5 (Etapa 2): the directory-only create branch (`skipIdpWriteBack`). The whole
+  // point is that — even with a supports-management IdP (the combination that NORMALLY calls
+  // idp.createUser) — a directory person is created WITHOUT any IdP write-back.
+  describe('directory-only create (skipIdpWriteBack, ADR-0069 REDESIGN §4.5)', () => {
+    it('creates a directory person WITHOUT calling idp.createUser even when supportsManagement=TRUE', async () => {
+      // The default idp has supportsManagement=true (the normal path calls idp.createUser + links the
+      // externalId). The directory branch must SKIP that block entirely.
+      expect(idp.supportsManagement).toBe(true);
+      const dto = { email: 'dir@b.com', firstName: 'Dir', lastName: 'Person' };
+      const created = {
+        id: 'uuid-dir',
+        ...dto,
+        role: 'VIEWER',
+        externalId: null,
+        directoryOnly: true,
+        directoryAttrs: { jobTitle: 'Tech' },
+        deletedAt: null,
+      };
+      user.create.mockResolvedValue(created);
+
+      const result = await service.create(dto, 'actor-1', {
+        skipIdpWriteBack: true,
+        createdPayload: { source: 'import', sessionId: 's1', rowIndex: 0 },
+        directoryAttrs: { jobTitle: 'Tech' },
+      });
+
+      // The IdP block is NEVER reached — no account is minted in Zitadel for a login-less person.
+      expect(idp.createUser).not.toHaveBeenCalled();
+      // The row is created with directoryOnly=true + the routed directoryAttrs, role forced VIEWER.
+      expect(user.create).toHaveBeenCalledWith({
+        data: {
+          ...dto,
+          role: 'VIEWER',
+          directoryOnly: true,
+          directoryAttrs: { jobTitle: 'Tech' },
+        },
+      });
+      // The CREATED history row is emitted on the NON-tx client (no IdP link tx) with the import
+      // provenance payload, attributed to the actor.
+      expect(history.record).toHaveBeenCalledWith(prismaMock, {
+        userId: 'uuid-dir',
+        eventType: 'CREATED',
+        payload: { source: 'import', sessionId: 's1', rowIndex: 0 },
+        actor: { userId: 'actor-1' },
+      });
+      expect(search.upsert).toHaveBeenCalledWith(
+        'users',
+        expect.objectContaining({ id: 'uuid-dir' }),
+      );
+      expect(result).toEqual(expect.objectContaining({ id: 'uuid-dir' }));
+    });
+
+    it('forces VIEWER even if a role somehow reached the payload (role-escalation closed)', async () => {
+      const dto = {
+        email: 'dir2@b.com',
+        firstName: 'D',
+        lastName: 'P',
+        role: 'ADMIN' as const,
+      };
+      user.create.mockResolvedValue({ id: 'uuid-d2', ...dto, role: 'VIEWER' });
+
+      await service.create(dto, undefined, { skipIdpWriteBack: true });
+
+      const createArg = (
+        user.create.mock.calls as Array<
+          [{ data: { role: string; directoryOnly: boolean } }]
+        >
+      )[0][0];
+      expect(createArg.data.role).toBe('VIEWER');
+      expect(createArg.data.directoryOnly).toBe(true);
+      expect(idp.createUser).not.toHaveBeenCalled();
+    });
+  });
+
+  // ADR-0069 REDESIGN §0 #3 (Etapa 2): the manual "Crear cuenta OIDC" promotion endpoint.
+  describe('provisionAccount (manual OIDC promotion, ADR-0069 REDESIGN §0 #3)', () => {
+    const DIRECTORY = {
+      id: 'uuid-prov',
+      email: 'real@b.com',
+      firstName: 'Real',
+      lastName: 'Hire',
+      role: 'VIEWER',
+      externalId: null,
+      directoryOnly: true,
+      deletedAt: null,
+    };
+
+    it('happy path: creates the IdP account then links externalId + flips directoryOnly (no split-brain)', async () => {
+      user.findFirst.mockResolvedValue(DIRECTORY);
+      idp.createUser.mockResolvedValue({ externalId: 'zitadel-prov-1' });
+      const linked = {
+        ...DIRECTORY,
+        externalId: 'zitadel-prov-1',
+        directoryOnly: false,
+      };
+      user.update.mockResolvedValue(linked);
+
+      const result = await service.provisionAccount('uuid-prov', 'admin-1');
+
+      // IdP FIRST with the directory person's profile + role.
+      expect(idp.createUser).toHaveBeenCalledWith({
+        email: 'real@b.com',
+        firstName: 'Real',
+        lastName: 'Hire',
+        role: 'VIEWER',
+      });
+      // THEN the local update flips both columns in one tx (the externalId + directoryOnly=false).
+      expect(user.update).toHaveBeenCalledWith({
+        where: { id: 'uuid-prov' },
+        data: { externalId: 'zitadel-prov-1', directoryOnly: false },
+      });
+      // The transition is audited (UPDATED, no new enum) with the provisionAccount action payload.
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'uuid-prov',
+        eventType: 'UPDATED',
+        payload: { action: 'provisionAccount', directoryOnly: false },
+        actor: { userId: 'admin-1' },
+      });
+      expect(result).toEqual(
+        expect.objectContaining({ externalId: 'zitadel-prov-1' }),
+      );
+    });
+
+    it('400 when the directory person has only a placeholder email (no real mailbox)', async () => {
+      user.findFirst.mockResolvedValue({
+        ...DIRECTORY,
+        email: 'sess-1-3@directory.local',
+      });
+
+      await expect(
+        service.provisionAccount('uuid-prov'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      // No IdP account is minted for an unusable email.
+      expect(idp.createUser).not.toHaveBeenCalled();
+    });
+
+    it('400 when the target is NOT a directory person (already a real account)', async () => {
+      user.findFirst.mockResolvedValue({
+        ...DIRECTORY,
+        directoryOnly: false,
+      });
+
+      await expect(
+        service.provisionAccount('uuid-prov'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(idp.createUser).not.toHaveBeenCalled();
+    });
+
+    it('400 when the directory person is already linked to an identity', async () => {
+      user.findFirst.mockResolvedValue({
+        ...DIRECTORY,
+        externalId: 'already-linked',
+      });
+
+      await expect(
+        service.provisionAccount('uuid-prov'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(idp.createUser).not.toHaveBeenCalled();
+    });
+
+    it('503 when the IdP create fails — NO local change happened (fully recoverable)', async () => {
+      user.findFirst.mockResolvedValue(DIRECTORY);
+      idp.createUser.mockRejectedValue(new Error('zitadel down'));
+
+      await expect(
+        service.provisionAccount('uuid-prov'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(user.update).not.toHaveBeenCalled();
       expect(history.record).not.toHaveBeenCalled();
     });
   });
@@ -988,6 +1166,49 @@ describe('UsersService', () => {
         expect(prismaMock.assetAssignment.groupBy).not.toHaveBeenCalled();
         expect(prismaMock.accessGrant.groupBy).not.toHaveBeenCalled();
       });
+    });
+
+    // ADR-0069 REDESIGN §0 #2 — directoryOnly filter
+    it('directoryOnly=true scopes where to { directoryOnly: true }', async () => {
+      user.findMany.mockResolvedValue([{ id: 'dir-1' }]);
+      user.count.mockResolvedValue(1);
+
+      await service.findPage(
+        { directoryOnly: true },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      expect(call.where).toMatchObject({ directoryOnly: true });
+    });
+
+    it('directoryOnly=false scopes where to { directoryOnly: false }', async () => {
+      user.findMany.mockResolvedValue([{ id: 'login-1' }]);
+      user.count.mockResolvedValue(1);
+
+      await service.findPage(
+        { directoryOnly: false },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      expect(call.where).toMatchObject({ directoryOnly: false });
+    });
+
+    it('absent directoryOnly adds no directoryOnly clause (shows all users)', async () => {
+      user.findMany.mockResolvedValue([{ id: 'any-1' }]);
+      user.count.mockResolvedValue(1);
+
+      await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      expect(call.where).not.toHaveProperty('directoryOnly');
     });
   });
 
@@ -2007,7 +2228,12 @@ describe('UsersService', () => {
       const G1 = 'clxgrant1aaaaaaaaaaaaaaaa';
       const G2 = 'clxgrant2bbbbbbbbbbbbbbbb';
       prismaRef().accessGrant.findMany.mockResolvedValue([
-        { id: G1, applicationId: 'app-1', accessLevel: 'admin', expiresAt: null },
+        {
+          id: G1,
+          applicationId: 'app-1',
+          accessLevel: 'admin',
+          expiresAt: null,
+        },
         { id: G2, applicationId: 'app-2', accessLevel: null, expiresAt: null },
       ]);
 

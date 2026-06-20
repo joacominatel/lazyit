@@ -108,3 +108,31 @@ describe("ImportMappingSchema — reserved mapping targets (MUST-FIX 2)", () => 
     expect(r.success).toBe(true);
   });
 });
+
+describe("ImportMappingSchema — person mapping targets (E2-AUTH-01)", () => {
+  test.each(["role", "__proto__", "constructor", "prototype", "id", "deletedAt"])(
+    "rejects a person field that is not on the allowlist: %p",
+    (key) => {
+      const r = ImportMappingSchema.safeParse({
+        ...base,
+        person: { fields: [{ field: key, column: "X" }] },
+      });
+      expect(r.success).toBe(false);
+      expect(
+        r.success === false &&
+          r.error.issues.some((i) => /not an allowed person mapping target/.test(i.message)),
+      ).toBe(true);
+    },
+  );
+
+  test.each(["name", "email", "legajo", "username", "jobTitle", "department", "supervisor"])(
+    "ACCEPTS an allowlisted person target: %p",
+    (key) => {
+      const r = ImportMappingSchema.safeParse({
+        ...base,
+        person: { fields: [{ field: key, column: "X" }] },
+      });
+      expect(r.success).toBe(true);
+    },
+  );
+});

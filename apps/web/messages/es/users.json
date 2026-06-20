@@ -14,7 +14,8 @@
     "loadErrorTitle": "No se pudieron cargar los usuarios",
     "chips": {
       "search": "Búsqueda: “{query}”",
-      "status": "Estado: {status}"
+      "status": "Estado: {status}",
+      "directory": "{directory}"
     },
     "status": {
       "all": "Todos los estados",
@@ -25,6 +26,12 @@
       "ALL": "Todos",
       "ACTIVE": "Activo",
       "INACTIVE": "Inactivo"
+    },
+    "directoryFilter": {
+      "label": "Filtro de directorio",
+      "ALL": "Todos",
+      "directory": "Solo directorio",
+      "accounts": "Solo cuentas"
     },
     "columns": {
       "avatar": "Avatar",
@@ -75,6 +82,17 @@
     "byoi": {
       "title": "Los usuarios y roles se gestionan localmente",
       "description": "Estás iniciando sesión con tu propio proveedor de identidad, por lo que los cambios aquí no se sincronizan con él. Crea, deshabilita y asigna roles a las cuentas en tu proveedor de identidad; lazyit mantiene su propia copia para la autorización."
+    }
+  },
+  "directoryBadge": "Directorio",
+  "directory": {
+    "provision": {
+      "action": "Crear cuenta OIDC",
+      "title": "Persona de directorio",
+      "description": "Esta persona la agregó la importación masiva y todavía no tiene acceso. Crea su cuenta en el proveedor de identidad para que pueda iniciar sesión.",
+      "needsEmail": "Esta persona necesita un correo real antes de poder tener una cuenta. Edita la persona y agrégalo primero.",
+      "success": "{name} ya tiene una cuenta OIDC.",
+      "error": "No se pudo crear la cuenta. Inténtalo de nuevo."
     }
   },
   "empty": {

@@ -14,7 +14,8 @@
     "loadErrorTitle": "Could not load users",
     "chips": {
       "search": "Search: “{query}”",
-      "status": "Status: {status}"
+      "status": "Status: {status}",
+      "directory": "{directory}"
     },
     "status": {
       "all": "All statuses",
@@ -25,6 +26,12 @@
       "ALL": "All",
       "ACTIVE": "Active",
       "INACTIVE": "Inactive"
+    },
+    "directoryFilter": {
+      "label": "Directory filter",
+      "ALL": "Everyone",
+      "directory": "Directory only",
+      "accounts": "Accounts only"
     },
     "columns": {
       "avatar": "Avatar",
@@ -75,6 +82,17 @@
     "byoi": {
       "title": "Users and roles are managed locally",
       "description": "You're signing in with your own identity provider, so changes here are not synced to it. Create, disable and assign roles to accounts in your IdP; lazyit keeps its own copy for authorization."
+    }
+  },
+  "directoryBadge": "Directory",
+  "directory": {
+    "provision": {
+      "action": "Create OIDC account",
+      "title": "Directory person",
+      "description": "This person was added by the bulk import and has no login yet. Create their account in the identity provider so they can sign in.",
+      "needsEmail": "This person needs a real email before they can get an account. Edit the person and add one first.",
+      "success": "{name} now has an OIDC account.",
+      "error": "Couldn't create the account. Try again."
     }
   },
   "empty": {

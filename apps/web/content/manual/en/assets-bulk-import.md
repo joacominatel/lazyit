@@ -14,9 +14,10 @@ a legacy tool. You drive it from **Importer** in the sidebar.
 The importer is **administrator-only** — it needs the `import:run` permission, which administrators
 hold by default. If you can't see it, ask an administrator to run the import for you.
 
-> **What you can import today.** Assets only. Users, consumables and history import are deliberately
-> not available yet and are noted as *coming later* in the wizard. Asset **ownership/assignment** is
-> also out of this first phase.
+> **What you can import today.** Assets, the **people** each one is assigned to, and that **assignment**.
+> When your file has an "assigned to" column, the importer creates the person and hands them the asset
+> (see *Assign assets to people* below). Consumables and history import are deliberately not available
+> yet and are noted as *coming later* in the wizard.
 
 ## The flow at a glance
 
@@ -66,6 +67,9 @@ For each column, open it and pick one target from the dropdown:
     **Purchase date**, **Warranty end**, **Model** and **Location**.
   - **Model** — **Manufacturer** and **Category** for the asset models the import creates (see
     *Model brand and category* below).
+  - **Person** — the person the asset is **assigned to**: **Name**, **Email**, **Employee no.**,
+    **Username**, **Job title**, **Department** and **Supervisor** (see *Assign assets to people*
+    below).
 - **Create a custom field…** — for a column with no native home (RAM, IMEI, screen size, cost, an
   external URL…). You give it a name, and its value is saved to the asset's **details** (`specs`).
   A custom field is stored **only on rows that actually have a value** — empty cells add nothing.
@@ -97,6 +101,30 @@ these two ways:
 - **For every model** — if your file has no such column (or all your assets are the same brand), pin a
   single **Manufacturer** and/or **Category** in the *Model brand and category* box; it applies to
   every model the import creates. A mapped column always wins over a pinned value.
+
+### Assign assets to people
+
+Map any **Person** field and the import will, for each row, find or create that person and **assign the
+asset to them** — the assignment is recorded the same way it would be in the app, with history.
+
+- **An imported person has no login.** They are a **directory** person: a real entry in your Users list
+  (badged **Directory**), but without an account in your identity provider. They exist so the asset has
+  an owner on record; they cannot sign in until they get an account.
+- **Identify them by Email, Employee no. or Username.** The import needs at least one of these to know
+  *who* a row belongs to (and to avoid creating the same person twice). **If you map a Person field, you
+  must also map one of these identity fields** — the wizard won't let you continue otherwise. A row with
+  none of them imports the asset **unassigned**, with a warning.
+- **They link to a real account automatically — only with a matching email.** When that person later
+  signs in through your identity provider (OIDC) using the **same verified email**, lazyit links the two:
+  the directory entry becomes their account and the **Directory** badge disappears. **A person imported
+  without a real email never links automatically** — there's no email to match on. Promote them by hand
+  (next point) when they need to sign in.
+- **You can create their account now.** An administrator can open the person's page and choose **Create
+  OIDC account** to provision them in the identity provider immediately, instead of waiting for a login.
+  The identity provider requires a real email, so the button is **disabled until the person has one** —
+  edit the person and add a real email first.
+
+The asset always imports either way; only the **assignment** depends on identifying the person.
 
 ## 4. Preview (the dry run)
 

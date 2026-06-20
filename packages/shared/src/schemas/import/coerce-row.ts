@@ -37,7 +37,24 @@ export interface CoercedRow {
    * first line; this writer is the second so a bypassed refine still can't pollute the prototype).
    */
   specs?: Record<string, unknown>;
+  /**
+   * The directory-person sub-payload for the asset's "assigned to" (ADR-0069 REDESIGN §5.4 / §4.5). Built
+   * from `mapping.person.fields` with empty cells OMITTED, a NULL prototype + reserved-key skip (parity
+   * with `specs`, E2-AUTH-01 defense-in-depth) — and only present when an IDENTITY KEY is present (CEO Q5:
+   * `email` OR `legajo` OR `username` has a value). If none of the three is mapped/filled,
+   * `person` stays `undefined` and the asset imports UNASSIGNED (REDESIGN §0 #1) — a person is NEVER built
+   * from a name alone (an unsafe match that would leak inventory to the wrong person, REDESIGN §7). The
+   * commit re-validates this bucket against `CreateDirectoryPersonSchema` (strict).
+   */
+  person?: Record<string, unknown>;
 }
+
+/**
+ * The person sub-fields that satisfy the identity gate (CEO Q5: email ∨ legajo ∨ username). The `person`
+ * bucket is only emitted when at least one of these is present — the other sub-fields (name/jobTitle/…)
+ * are display/attribute data and can NEVER, on their own, key a directory person.
+ */
+const PERSON_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["email", "legajo", "username"]);
 
 /**
  * Keys a custom field must never write to `specs` — the prototype-pollution sentinels (mirrors the
@@ -156,8 +173,25 @@ export function coerceRow(
     specs[key] = value;
   }
 
+  // 4. Person sub-fields → directory-person bucket (ADR-0069 REDESIGN §5.4 / §4.5). Empty cells omitted;
+  //    the bucket is built ONLY when an identity key is present (email ∨ legajo ∨ username — CEO Q5).
+  //    Without an identity key the asset imports unassigned (REDESIGN §0 #1) — never key a person by name.
+  let person: Record<string, unknown> | undefined;
+  let hasIdentity = false;
+  for (const pf of mapping.person?.fields ?? []) {
+    if (PROTO_POLLUTION_KEYS.has(pf.field)) continue; // ponytail: defense-in-depth — refine rejects it.
+    const value = coerceAbsent(sourceValue(raw, pf));
+    if (value === undefined) continue; // omit-empty: absent cell → no person entry.
+    if (person === undefined) person = Object.create(null) as Record<string, unknown>;
+    person[pf.field] = value;
+    if (PERSON_IDENTITY_FIELDS.has(pf.field)) hasIdentity = true;
+  }
+  // identity gate: no email/legajo/username → drop the whole bucket (asset stays unassigned).
+  if (!hasIdentity) person = undefined;
+
   // omit-empty-record: never emit `specs: {}` (so CreateAssetSchema.specs `.optional()` fires).
-  return specs === undefined
-    ? { payload, references, enumMisses }
-    : { payload, references, enumMisses, specs };
+  const result: CoercedRow = { payload, references, enumMisses };
+  if (specs !== undefined) result.specs = specs;
+  if (person !== undefined) result.person = person;
+  return result;
 }

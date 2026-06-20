@@ -10,6 +10,8 @@ import { AssetsModule } from '../assets/assets.module';
 import { AssetModelsModule } from '../asset-models/asset-models.module';
 import { AssetCategoriesModule } from '../asset-categories/asset-categories.module';
 import { LocationsModule } from '../locations/locations.module';
+import { UsersModule } from '../users/users.module';
+import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.module';
 import {
   IMPORT_PARSE_QUEUE,
   parseChildHeapMb,
@@ -39,6 +41,10 @@ import { IMPORT_COMMIT_QUEUE } from './import-commit.constants';
     AssetModelsModule,
     AssetCategoriesModule,
     LocationsModule,
+    // ADR-0069 REDESIGN §4.5/§4.6 (Etapa 2): the commit engine creates directory-only persons through
+    // UsersService (skipIdpWriteBack) and opens AssetAssignments through AssetAssignmentsService.
+    UsersModule,
+    AssetAssignmentsModule,
     BullModule.registerQueue({
       name: IMPORT_PARSE_QUEUE,
       processors: [

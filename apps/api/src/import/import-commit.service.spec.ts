@@ -21,7 +21,10 @@ jest.mock('../../generated/prisma/client', () => {
   class PrismaClientKnownRequestError extends Error {
     code: string;
     meta?: Record<string, unknown>;
-    constructor(message: string, opts: { code: string; meta?: Record<string, unknown> }) {
+    constructor(
+      message: string,
+      opts: { code: string; meta?: Record<string, unknown> },
+    ) {
       super(message);
       this.code = opts.code;
       this.meta = opts.meta;
@@ -79,7 +82,38 @@ interface PrismaState {
   } | null;
   user?: { id: string; role?: string } | null;
   /** Stand-in for AssetHistory rows the resume-detect probe (`assetExistsForRow`) looks up. */
-  assetHistory?: { eventType: string; payload: Record<string, unknown> }[];
+  assetHistory?: {
+    eventType: string;
+    payload: Record<string, unknown>;
+    assetId?: string;
+  }[];
+  /**
+   * The directory-person LIVE dedup (REDESIGN §4.5 / E2-INTEG-02): given the OR identity clauses, return
+   * the live users that match (a `findMany` so the service can DETECT an ambiguous cross-user collision).
+   * A single `{ id }` (or the legacy `{ id }`) → one distinct match → link; an array of >1 distinct ids →
+   * AMBIGUOUS → asset imports unassigned; null/[] → no live match → create. A test scripts it; default
+   * absent = always-miss (create). A soft-deleted ghost test returns [] (the live-filtered read never sees
+   * the ghost) to prove no resurrection. Returned rows may carry `email`/`legajo`/`username` for the
+   * precedence assertion (the single-match path).
+   */
+  directoryDedup?: (
+    or: any[],
+  ) =>
+    | {
+        id: string;
+        email?: string;
+        legajo?: string;
+        username?: string;
+      }
+    | {
+        id: string;
+        email?: string;
+        legajo?: string;
+        username?: string;
+      }[]
+    | null;
+  /** Live non-directory Users the supervisor→managerId match scans (REDESIGN §3.6). */
+  liveManagers?: { id: string; firstName: string; lastName: string }[];
 }
 
 /** A Prisma double recording every write so the spec can assert the contract. */
@@ -136,7 +170,23 @@ function makePrisma(state: PrismaState) {
       },
     },
     user: {
-      findFirst: async () => state.user ?? { id: OWNER },
+      // The actor lookup `findFirst({ where: { id } })` returns the principal. (The directory-person dedup
+      // is a `findMany({ where: { OR } })` now — see below — so it can detect a cross-user collision.)
+      findFirst: async (_args: any) => {
+        return state.user ?? { id: OWNER };
+      },
+      // Two findMany callers: (1) the directory-person dedup `findMany({ where: { OR, deletedAt:null } })`
+      // (REDESIGN §4.5 / E2-INTEG-02 — consults `state.directoryDedup`, default null = no live match →
+      // create), and (2) the supervisor→managerId match `findMany({ where: { firstName, lastName } })`
+      // (REDESIGN §3.6 — `state.liveManagers`, default empty → managerName free-text).
+      findMany: async (args: any) => {
+        if (args?.where?.OR) {
+          const got = state.directoryDedup?.(args.where.OR) ?? null;
+          if (got === null) return [];
+          return (Array.isArray(got) ? got : [got]) as any;
+        }
+        return state.liveManagers ?? [];
+      },
     },
     asset: {
       findMany: async () => assets,
@@ -154,7 +204,11 @@ function makePrisma(state: PrismaState) {
             h.payload.sessionId === want.sessionId &&
             h.payload.rowIndex === want.rowIndex,
         );
-        return hit ? { id: 1 } : null;
+        // The resume probe (assetExistsForRow) now selects `assetId` (REDESIGN §4.6) so it can verify the
+        // assignment on resume — echo a stable id (the fixture's `assetId` if set, else a synthetic one).
+        return hit
+          ? { assetId: (hit as any).assetId ?? 'asset-resumed' }
+          : null;
       },
     },
     // Find-or-create natural-key probes (fix 3): default to "not found" so create() runs; a test can
@@ -230,7 +284,9 @@ function makeSearch(enabled = true) {
  * "allowed" (hasAll → true) so the existing commit/enqueue tests are unaffected; an authz test passes
  * `{ hasAll: jest.fn(...) }` to deny a specific permission set.
  */
-function makePermissions(hasAll: (...args: any[]) => Promise<boolean> = async () => true) {
+function makePermissions(
+  hasAll: (...args: any[]) => Promise<boolean> = async () => true,
+) {
   return { hasAll: jest.fn(hasAll) };
 }
 
@@ -245,12 +301,53 @@ function makeCategories() {
   };
 }
 
+/**
+ * A UsersService double for the directory-person branch (ADR-0069 REDESIGN §4.5). Records every create()
+ * call (payload + opts) and mints a uuid-shaped id. The commit only ever calls it with
+ * `{ skipIdpWriteBack: true }`.
+ */
+function makeUsers() {
+  const calls: { data: any; actorId: any; opts: any }[] = [];
+  let seq = 0;
+  return {
+    _calls: calls,
+    create: jest.fn(async (data: any, actorId: any, opts: any) => {
+      calls.push({ data, actorId, opts });
+      return { id: `00000000-0000-4000-8000-00000000000${seq++}` };
+    }),
+  };
+}
+
+/**
+ * An AssetAssignmentsService double (ADR-0069 REDESIGN §4.6). Records create() calls. A test can script a
+ * ConflictException (the active-pair pre-check, asset-assignments.service.ts:84-91) via `conflictOn`.
+ */
+function makeAssignments(opts?: { conflictOn?: (data: any) => boolean }) {
+  const calls: any[] = [];
+  return {
+    _calls: calls,
+    create: jest.fn(async (data: any, _principal: any) => {
+      calls.push(data);
+      if (opts?.conflictOn?.(data)) {
+        throw new ConflictException(
+          'An active assignment already exists for this asset and user',
+        );
+      }
+      return { id: `assignment-${calls.length}`, ...data };
+    }),
+  };
+}
+
 function makeService(state: PrismaState, doubles?: any) {
   const prisma = doubles?.prisma ?? makePrisma(state);
   const assets = doubles?.assets ?? makeAssets();
   const models = doubles?.models ?? makeRefService('model');
   const categories = doubles?.categories ?? makeCategories();
   const locations = doubles?.locations ?? makeRefService('location');
+  // ADR-0069 REDESIGN §4.5/§4.6 (Etapa 2): the directory-person + assignment doubles. Defaults are
+  // no-op enough that the Etapa-1 tests (no `person` in their mapping) never touch them.
+  const users = doubles?.users ?? makeUsers();
+  const assignments = doubles?.assignments ?? makeAssignments();
   const search = doubles?.search ?? makeSearch();
   const permissions = doubles?.permissions ?? makePermissions();
   const queue = {
@@ -263,10 +360,24 @@ function makeService(state: PrismaState, doubles?: any) {
     models as any,
     categories as any,
     locations as any,
+    users as any,
+    assignments as any,
     search as any,
     permissions as any,
   );
-  return { service, prisma, assets, models, categories, locations, search, permissions, queue };
+  return {
+    service,
+    prisma,
+    assets,
+    models,
+    categories,
+    locations,
+    users,
+    assignments,
+    search,
+    permissions,
+    queue,
+  };
 }
 
 /** A minimal mapping: name+status by column, model+location as FK references. */
@@ -300,12 +411,50 @@ function sessionWith(
   };
 }
 
+/** Asset mapping + a directory-PERSON sub-mapping (ADR-0069 REDESIGN §4.5): name + legajo identity. */
+const PERSON_MAPPING = mapping({
+  columns: [
+    { field: 'name', column: 'Name' },
+    { field: 'status', column: 'Status' },
+  ],
+  enums: [],
+  references: [],
+  person: {
+    fields: [
+      { field: 'name', column: 'AssignedTo' },
+      { field: 'legajo', column: 'EmployeeNo' },
+      { field: 'email', column: 'Email' },
+    ],
+  },
+});
+
+/** A session whose mapping carries the person sub-mapping (so coerceRow emits a `person` bucket). */
+function sessionWithPerson(
+  rows: FixtureRow[],
+  resolutionPlan: ImportResolutionPlan,
+  status = 'DRY_RUN',
+): PrismaState {
+  const state = sessionWith(rows, resolutionPlan, status);
+  state.session!.mapping = PERSON_MAPPING;
+  return state;
+}
+
 describe('ImportCommitService.commit', () => {
   it('creates each asset via AssetsService.create with import provenance + CREATED history path', async () => {
     const state = sessionWith(
       [
-        { id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'Laptop A', Status: 'active' } },
-        { id: 2, rowIndex: 1, status: 'VALID', raw: { Name: 'Laptop B', Status: 'retired' } },
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'Laptop A', Status: 'active' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'Laptop B', Status: 'retired' },
+        },
       ],
       plan({ conflicts: [] }),
     );
@@ -336,16 +485,60 @@ describe('ImportCommitService.commit', () => {
   it('applies the plan: match → resolved FK, create → memoized once, skip → drops the link', async () => {
     const state = sessionWith(
       [
-        { id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active', Model: 'SKU-1', Location: 'HQ' } },
-        { id: 2, rowIndex: 1, status: 'VALID', raw: { Name: 'B', Status: 'active', Model: 'SKU-1', Location: 'HQ' } },
-        { id: 3, rowIndex: 2, status: 'VALID', raw: { Name: 'C', Status: 'active', Model: 'SKU-NEW', Location: 'Annex' } },
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active', Model: 'SKU-1', Location: 'HQ' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'B', Status: 'active', Model: 'SKU-1', Location: 'HQ' },
+        },
+        {
+          id: 3,
+          rowIndex: 2,
+          status: 'VALID',
+          raw: {
+            Name: 'C',
+            Status: 'active',
+            Model: 'SKU-NEW',
+            Location: 'Annex',
+          },
+        },
       ],
       plan({
         conflicts: [
-          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'SKU-1', outcome: 'match', targetId: 'cmodelexisting00000000001' },
-          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'SKU-NEW', outcome: 'create', targetId: null },
-          { entity: 'Location', field: 'locationId', normalizedValue: 'HQ', outcome: 'match', targetId: 'clocexisting000000000001' },
-          { entity: 'Location', field: 'locationId', normalizedValue: 'Annex', outcome: 'skip', targetId: null },
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'SKU-1',
+            outcome: 'match',
+            targetId: 'cmodelexisting00000000001',
+          },
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'SKU-NEW',
+            outcome: 'create',
+            targetId: null,
+          },
+          {
+            entity: 'Location',
+            field: 'locationId',
+            normalizedValue: 'HQ',
+            outcome: 'match',
+            targetId: 'clocexisting000000000001',
+          },
+          {
+            entity: 'Location',
+            field: 'locationId',
+            normalizedValue: 'Annex',
+            outcome: 'skip',
+            targetId: null,
+          },
         ],
       }),
     );
@@ -359,7 +552,10 @@ describe('ImportCommitService.commit', () => {
     expect(assets._calls[1].data.modelId).toBe('cmodelexisting00000000001');
     // Row 3's new model is CREATED exactly once (memoized), with the natural-key value as the name.
     expect(models.create).toHaveBeenCalledTimes(1);
-    expect(models.create.mock.calls[0][0]).toEqual({ name: 'SKU-NEW', manufacturer: 'Unknown' });
+    expect(models.create.mock.calls[0][0]).toEqual({
+      name: 'SKU-NEW',
+      manufacturer: 'Unknown',
+    });
     // Locations: 'HQ' matched (never created); 'Annex' was skip → the FK is OMITTED on row 3.
     expect(locations.create).not.toHaveBeenCalled();
     expect(assets._calls[0].data.locationId).toBe('clocexisting000000000001');
@@ -369,10 +565,23 @@ describe('ImportCommitService.commit', () => {
 
   it('restore → restores the soft-deleted reference once and uses its id', async () => {
     const state = sessionWith(
-      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active', Location: 'Ghost Room' } }],
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active', Location: 'Ghost Room' },
+        },
+      ],
       plan({
         conflicts: [
-          { entity: 'Location', field: 'locationId', normalizedValue: 'Ghost Room', outcome: 'restore', targetId: 'cghostloc00000000000000001' },
+          {
+            entity: 'Location',
+            field: 'locationId',
+            normalizedValue: 'Ghost Room',
+            outcome: 'restore',
+            targetId: 'cghostloc00000000000000001',
+          },
         ],
       }),
     );
@@ -380,16 +589,33 @@ describe('ImportCommitService.commit', () => {
 
     await service.commit('sess-1', OWNER);
 
-    expect(locations.restore).toHaveBeenCalledWith('cghostloc00000000000000001');
+    expect(locations.restore).toHaveBeenCalledWith(
+      'cghostloc00000000000000001',
+    );
     expect(assets._calls[0].data.locationId).toBe('cghostloc00000000000000001');
   });
 
   it('keep-partial: a mid-batch P2002 is a per-row FAILED row, the batch continues, COMMITTED rows persist', async () => {
     const state = sessionWith(
       [
-        { id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } },
-        { id: 2, rowIndex: 1, status: 'VALID', raw: { Name: 'COLLIDE', Status: 'active' } },
-        { id: 3, rowIndex: 2, status: 'VALID', raw: { Name: 'C', Status: 'active' } },
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'COLLIDE', Status: 'active' },
+        },
+        {
+          id: 3,
+          rowIndex: 2,
+          status: 'VALID',
+          raw: { Name: 'C', Status: 'active' },
+        },
       ],
       plan({ conflicts: [] }),
     );
@@ -398,7 +624,9 @@ describe('ImportCommitService.commit', () => {
       clientVersion: 'test',
       meta: { target: 'assets_serial_active_key' },
     });
-    const assets = makeAssets({ failOn: (d) => (d.name === 'COLLIDE' ? p2002 : undefined) });
+    const assets = makeAssets({
+      failOn: (d) => (d.name === 'COLLIDE' ? p2002 : undefined),
+    });
     const { service, prisma } = makeService(state, { assets });
 
     const result = await service.commit('sess-1', OWNER);
@@ -409,12 +637,21 @@ describe('ImportCommitService.commit', () => {
     expect(prisma._rowStatuses.get(2)?.status).toBe('FAILED');
     expect(prisma._rowStatuses.get(3)?.status).toBe('COMMITTED'); // batch continued past the failure
     // PII-free reason — a code, never the colliding value.
-    expect((prisma._rowStatuses.get(2)?.error as any).reason).toBe('unique-taken-since-preview');
+    expect((prisma._rowStatuses.get(2)?.error as any).reason).toBe(
+      'unique-taken-since-preview',
+    );
   });
 
   it('a P2003 (missing reference since preview) is a per-row FAILED row, never a 500/abort', async () => {
     const state = sessionWith(
-      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active' },
+        },
+      ],
       plan({ conflicts: [] }),
     );
     const p2003 = new Prisma.PrismaClientKnownRequestError('fk', {
@@ -427,14 +664,26 @@ describe('ImportCommitService.commit', () => {
     const result = await service.commit('sess-1', OWNER);
 
     expect(result.failed).toBe(1);
-    expect((prisma._rowStatuses.get(1)?.error as any).reason).toBe('reference-missing-since-preview');
+    expect((prisma._rowStatuses.get(1)?.error as any).reason).toBe(
+      'reference-missing-since-preview',
+    );
   });
 
   it('resumable: a re-run skips COMMITTED rows (never re-creates them)', async () => {
     const state = sessionWith(
       [
-        { id: 1, rowIndex: 0, status: 'COMMITTED', raw: { Name: 'A', Status: 'active' } },
-        { id: 2, rowIndex: 1, status: 'VALID', raw: { Name: 'B', Status: 'active' } },
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'COMMITTED',
+          raw: { Name: 'A', Status: 'active' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'B', Status: 'active' },
+        },
       ],
       plan({ conflicts: [] }),
     );
@@ -451,8 +700,18 @@ describe('ImportCommitService.commit', () => {
     const state = sessionWith(
       [
         // status maps to nothing valid → the row fails CreateAssetSchema BEFORE any create()/tag alloc.
-        { id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'frobnicated' } },
-        { id: 2, rowIndex: 1, status: 'VALID', raw: { Name: 'B', Status: 'active' } },
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'frobnicated' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'B', Status: 'active' },
+        },
       ],
       plan({ conflicts: [] }),
     );
@@ -463,7 +722,9 @@ describe('ImportCommitService.commit', () => {
     expect(result.failed).toBe(1);
     expect(result.committed).toBe(1);
     expect(prisma._rowStatuses.get(1)?.status).toBe('FAILED');
-    expect((prisma._rowStatuses.get(1)?.error as any).reason).toBe('validation');
+    expect((prisma._rowStatuses.get(1)?.error as any).reason).toBe(
+      'validation',
+    );
     // create() was reached ONLY for the valid row — the doomed row never entered the tag allocator.
     expect(assets.create).toHaveBeenCalledTimes(1);
     expect(assets._calls[0].data.name).toBe('B');
@@ -472,13 +733,35 @@ describe('ImportCommitService.commit', () => {
   it('writes the append-only ImportRun ledger with PII-free counts + conflict summary', async () => {
     const state = sessionWith(
       [
-        { id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active', Location: 'HQ' } },
-        { id: 2, rowIndex: 1, status: 'VALID', raw: { Name: 'B', Status: 'active', Location: 'New' } },
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active', Location: 'HQ' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'B', Status: 'active', Location: 'New' },
+        },
       ],
       plan({
         conflicts: [
-          { entity: 'Location', field: 'locationId', normalizedValue: 'HQ', outcome: 'match', targetId: 'clocexisting000000000001' },
-          { entity: 'Location', field: 'locationId', normalizedValue: 'New', outcome: 'create', targetId: null },
+          {
+            entity: 'Location',
+            field: 'locationId',
+            normalizedValue: 'HQ',
+            outcome: 'match',
+            targetId: 'clocexisting000000000001',
+          },
+          {
+            entity: 'Location',
+            field: 'locationId',
+            normalizedValue: 'New',
+            outcome: 'create',
+            targetId: null,
+          },
         ],
       }),
     );
@@ -493,8 +776,18 @@ describe('ImportCommitService.commit', () => {
     expect(run.fileHash).toBe('deadbeef');
     expect(run.entity).toBe('ASSET');
     // Final counts patched in (append-only INSERT-then-finalize of the same row).
-    expect(run.counts).toEqual({ total: 2, committed: 2, failed: 0, skipped: 0 });
-    expect(run.conflictSummary).toEqual({ match: 1, restore: 0, create: 1, skip: 0 });
+    expect(run.counts).toEqual({
+      total: 2,
+      committed: 2,
+      failed: 0,
+      skipped: 0,
+    });
+    expect(run.conflictSummary).toEqual({
+      match: 1,
+      restore: 0,
+      create: 1,
+      skip: 0,
+    });
     expect(result.importRunId).toBe(run.id);
     // The conflict summary carries NO source values — only outcome counts (PII-free).
     expect(JSON.stringify(run.conflictSummary)).not.toContain('HQ');
@@ -503,8 +796,18 @@ describe('ImportCommitService.commit', () => {
   it('suppresses per-row search upserts during the bulk and runs ONE reconcile after', async () => {
     const state = sessionWith(
       [
-        { id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } },
-        { id: 2, rowIndex: 1, status: 'VALID', raw: { Name: 'B', Status: 'active' } },
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'B', Status: 'active' },
+        },
       ],
       plan({ conflicts: [] }),
     );
@@ -520,7 +823,14 @@ describe('ImportCommitService.commit', () => {
 
   it('advances the session COMMITTING → COMMITTED', async () => {
     const state = sessionWith(
-      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active' },
+        },
+      ],
       plan({ conflicts: [] }),
     );
     const { service, prisma } = makeService(state);
@@ -534,15 +844,26 @@ describe('ImportCommitService.commit', () => {
 
   it('404s an unknown / non-owned session and one with no resolution plan', async () => {
     const { service } = makeService({ session: null });
-    await expect(service.commit('nope', OWNER)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.commit('nope', OWNER)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
 
     const noPlan = sessionWith(
-      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active' },
+        },
+      ],
       plan({ conflicts: [] }),
     );
     noPlan.session!.resolutionPlan = null;
     const { service: svc2 } = makeService(noPlan);
-    await expect(svc2.commit('sess-1', OWNER)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(svc2.commit('sess-1', OWNER)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   // ===== Integrity fixes (wave-4a review) ======================================================
@@ -552,11 +873,21 @@ describe('ImportCommitService.commit', () => {
     // exists) but its markRow('COMMITTED') never landed, so the row is still 'VALID'. On resume the
     // commit must DETECT the existing asset and reconcile the row to COMMITTED — never re-create it.
     const state = sessionWith(
-      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active' },
+        },
+      ],
       plan({ conflicts: [] }),
     );
     state.assetHistory = [
-      { eventType: 'CREATED', payload: { source: 'import', sessionId: 'sess-1', rowIndex: 0 } },
+      {
+        eventType: 'CREATED',
+        payload: { source: 'import', sessionId: 'sess-1', rowIndex: 0 },
+      },
     ];
     const { service, assets, prisma } = makeService(state);
 
@@ -570,31 +901,56 @@ describe('ImportCommitService.commit', () => {
 
   it('commit() rejects a non-DRY_RUN session with ConflictException (no re-commit) [fix 4]', async () => {
     const committed = sessionWith(
-      [{ id: 1, rowIndex: 0, status: 'COMMITTED', raw: { Name: 'A', Status: 'active' } }],
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'COMMITTED',
+          raw: { Name: 'A', Status: 'active' },
+        },
+      ],
       plan({ conflicts: [] }),
       'COMMITTED',
     );
     const { service, prisma } = makeService(committed);
 
-    await expect(service.commit('sess-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.commit('sess-1', OWNER)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     // It never wrote a second ImportRun ledger row.
     expect(prisma._runs).toHaveLength(0);
   });
 
   it('enqueueCommit rejects a non-DRY_RUN session and never enqueues, with a deterministic jobId [fix 4]', async () => {
     const committed = sessionWith(
-      [{ id: 1, rowIndex: 0, status: 'COMMITTED', raw: { Name: 'A', Status: 'active' } }],
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'COMMITTED',
+          raw: { Name: 'A', Status: 'active' },
+        },
+      ],
       plan({ conflicts: [] }),
       'COMMITTED',
     );
     const { service, queue } = makeService(committed);
 
-    await expect(service.enqueueCommit('sess-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.enqueueCommit('sess-1', OWNER)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     expect(queue.add).not.toHaveBeenCalled();
 
     // A DRY_RUN session DOES enqueue, with jobId === sessionId (BullMQ dedup of concurrent enqueues).
     const dryRun = sessionWith(
-      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active' },
+        },
+      ],
       plan({ conflicts: [] }),
     );
     const { service: svc2, queue: q2 } = makeService(dryRun);
@@ -607,7 +963,14 @@ describe('ImportCommitService.commit', () => {
   describe('enqueueCommit runtime per-target permission AND-check', () => {
     it('always requires asset:write — denies (403) and never enqueues when the actor lacks it', async () => {
       const dryRun = sessionWith(
-        [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: { Name: 'A', Status: 'active' },
+          },
+        ],
         plan({ conflicts: [] }),
       );
       // The actor holds import:run (route guard, not modeled here) but NOT asset:write.
@@ -616,9 +979,9 @@ describe('ImportCommitService.commit', () => {
       });
       const { service, queue } = makeService(dryRun, { permissions });
 
-      await expect(service.enqueueCommit('sess-1', OWNER)).rejects.toBeInstanceOf(
-        ForbiddenException,
-      );
+      await expect(
+        service.enqueueCommit('sess-1', OWNER),
+      ).rejects.toBeInstanceOf(ForbiddenException);
       expect(queue.add).not.toHaveBeenCalled();
       // The AND-check asked for exactly asset:write (no create/restore conflicts in this plan).
       expect(permissions.hasAll).toHaveBeenCalledTimes(1);
@@ -628,13 +991,38 @@ describe('ImportCommitService.commit', () => {
 
     it('requires the reference write for each create/restore conflict (assetModel:write + location:write)', async () => {
       const dryRun = sessionWith(
-        [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: { Name: 'A', Status: 'active' },
+          },
+        ],
         plan({
           conflicts: [
-            { entity: 'AssetModel', field: 'modelId', normalizedValue: 'X1', outcome: 'create', targetId: null },
-            { entity: 'Location', field: 'locationId', normalizedValue: 'HQ', outcome: 'restore', targetId: 'cloc000000000000000000001' },
+            {
+              entity: 'AssetModel',
+              field: 'modelId',
+              normalizedValue: 'X1',
+              outcome: 'create',
+              targetId: null,
+            },
+            {
+              entity: 'Location',
+              field: 'locationId',
+              normalizedValue: 'HQ',
+              outcome: 'restore',
+              targetId: 'cloc000000000000000000001',
+            },
             // A `match` outcome links an existing live row → no write needed, so it must NOT be required.
-            { entity: 'Location', field: 'locationId', normalizedValue: 'Lab', outcome: 'match', targetId: 'cloc000000000000000000002' },
+            {
+              entity: 'Location',
+              field: 'locationId',
+              normalizedValue: 'Lab',
+              outcome: 'match',
+              targetId: 'cloc000000000000000000002',
+            },
           ],
         }),
       );
@@ -652,10 +1040,23 @@ describe('ImportCommitService.commit', () => {
 
     it('denies (403) when the actor holds asset:write but not the reference write a create needs', async () => {
       const dryRun = sessionWith(
-        [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: { Name: 'A', Status: 'active' },
+          },
+        ],
         plan({
           conflicts: [
-            { entity: 'AssetModel', field: 'modelId', normalizedValue: 'X1', outcome: 'create', targetId: null },
+            {
+              entity: 'AssetModel',
+              field: 'modelId',
+              normalizedValue: 'X1',
+              outcome: 'create',
+              targetId: null,
+            },
           ],
         }),
       );
@@ -665,24 +1066,31 @@ describe('ImportCommitService.commit', () => {
       });
       const { service, queue } = makeService(dryRun, { permissions });
 
-      await expect(service.enqueueCommit('sess-1', OWNER)).rejects.toBeInstanceOf(
-        ForbiddenException,
-      );
+      await expect(
+        service.enqueueCommit('sess-1', OWNER),
+      ).rejects.toBeInstanceOf(ForbiddenException);
       expect(queue.add).not.toHaveBeenCalled();
     });
 
     it('fails closed (403) when the actor user is missing/deleted', async () => {
       const dryRun = sessionWith(
-        [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } }],
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: { Name: 'A', Status: 'active' },
+          },
+        ],
         plan({ conflicts: [] }),
       );
       const prisma = makePrisma(dryRun);
       prisma.user.findFirst = (async () => null) as never; // actor no longer exists
       const { service, queue } = makeService(dryRun, { prisma });
 
-      await expect(service.enqueueCommit('sess-1', OWNER)).rejects.toBeInstanceOf(
-        ForbiddenException,
-      );
+      await expect(
+        service.enqueueCommit('sess-1', OWNER),
+      ).rejects.toBeInstanceOf(ForbiddenException);
       expect(queue.add).not.toHaveBeenCalled();
     });
   });
@@ -690,8 +1098,18 @@ describe('ImportCommitService.commit', () => {
   it('ImportRun counts are never zeroed/stale after a mid-batch throw (ledger written once, after the loop) [fix 5]', async () => {
     const state = sessionWith(
       [
-        { id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active' } },
-        { id: 2, rowIndex: 1, status: 'VALID', raw: { Name: 'B', Status: 'active' } },
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'B', Status: 'active' },
+        },
       ],
       plan({ conflicts: [] }),
     );
@@ -705,7 +1123,9 @@ describe('ImportCommitService.commit', () => {
     };
     const { service } = makeService(state, { prisma });
 
-    await expect(service.commit('sess-1', OWNER)).rejects.toThrow('db blip mid-batch');
+    await expect(service.commit('sess-1', OWNER)).rejects.toThrow(
+      'db blip mid-batch',
+    );
     // The ledger is written ONCE, AFTER the loop — a mid-batch throw means it is NEVER written, so
     // there is no row left holding misleading zeroed counts (true append-only, ADR-0006).
     expect(prisma._runs).toHaveLength(0);
@@ -713,10 +1133,23 @@ describe('ImportCommitService.commit', () => {
 
   it('createReference is find-or-create: an existing live ref by natural key is reused, not re-created [fix 3]', async () => {
     const state = sessionWith(
-      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active', Location: 'HQ' } }],
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active', Location: 'HQ' },
+        },
+      ],
       plan({
         conflicts: [
-          { entity: 'Location', field: 'locationId', normalizedValue: 'HQ', outcome: 'create', targetId: null },
+          {
+            entity: 'Location',
+            field: 'locationId',
+            normalizedValue: 'HQ',
+            outcome: 'create',
+            targetId: null,
+          },
         ],
       }),
     );
@@ -777,12 +1210,24 @@ describe('ImportCommitService.commit', () => {
           id: 1,
           rowIndex: 0,
           status: 'VALID',
-          raw: { Name: 'A', Status: 'active', Model: 'MacBook Pro', Manufacturer: 'Apple', Category: 'Laptop' },
+          raw: {
+            Name: 'A',
+            Status: 'active',
+            Model: 'MacBook Pro',
+            Manufacturer: 'Apple',
+            Category: 'Laptop',
+          },
         },
       ],
       plan({
         conflicts: [
-          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'MacBook Pro', outcome: 'create', targetId: null },
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'MacBook Pro',
+            outcome: 'create',
+            targetId: null,
+          },
         ],
       }),
       MODEL_CONFIG_MAPPING,
@@ -806,10 +1251,23 @@ describe('ImportCommitService.commit', () => {
 
   it('falls back to the Unknown manufacturer and OMITS category when modelConfig has neither [§4.4]', async () => {
     const state = sessionWithMapping(
-      [{ id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active', Model: 'Mystery' } }],
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active', Model: 'Mystery' },
+        },
+      ],
       plan({
         conflicts: [
-          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'Mystery', outcome: 'create', targetId: null },
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'Mystery',
+            outcome: 'create',
+            targetId: null,
+          },
         ],
       }),
       // A mapping with NO modelConfig at all.
@@ -826,7 +1284,10 @@ describe('ImportCommitService.commit', () => {
     await service.commit('sess-1', OWNER);
 
     expect(categories.create).not.toHaveBeenCalled();
-    expect(models.create.mock.calls[0][0]).toEqual({ name: 'Mystery', manufacturer: 'Unknown' });
+    expect(models.create.mock.calls[0][0]).toEqual({
+      name: 'Mystery',
+      manufacturer: 'Unknown',
+    });
   });
 
   it('AssetCategory find-or-create is idempotent: two models, same category name → ONE category [§4.4]', async () => {
@@ -836,19 +1297,43 @@ describe('ImportCommitService.commit', () => {
           id: 1,
           rowIndex: 0,
           status: 'VALID',
-          raw: { Name: 'A', Status: 'active', Model: 'Model One', Manufacturer: 'Dell', Category: 'Laptop' },
+          raw: {
+            Name: 'A',
+            Status: 'active',
+            Model: 'Model One',
+            Manufacturer: 'Dell',
+            Category: 'Laptop',
+          },
         },
         {
           id: 2,
           rowIndex: 1,
           status: 'VALID',
-          raw: { Name: 'B', Status: 'active', Model: 'Model Two', Manufacturer: 'HP', Category: 'Laptop' },
+          raw: {
+            Name: 'B',
+            Status: 'active',
+            Model: 'Model Two',
+            Manufacturer: 'HP',
+            Category: 'Laptop',
+          },
         },
       ],
       plan({
         conflicts: [
-          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'Model One', outcome: 'create', targetId: null },
-          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'Model Two', outcome: 'create', targetId: null },
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'Model One',
+            outcome: 'create',
+            targetId: null,
+          },
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'Model Two',
+            outcome: 'create',
+            targetId: null,
+          },
         ],
       }),
       MODEL_CONFIG_MAPPING,
@@ -876,8 +1361,12 @@ describe('ImportCommitService.commit', () => {
     expect(models.create).toHaveBeenCalledTimes(2);
     expect(categories.create).toHaveBeenCalledTimes(1);
     // Both models point at the SAME (reused) category id.
-    expect(models.create.mock.calls[0][0].categoryId).toBe('ccategorylaptop0000000001');
-    expect(models.create.mock.calls[1][0].categoryId).toBe('ccategorylaptop0000000001');
+    expect(models.create.mock.calls[0][0].categoryId).toBe(
+      'ccategorylaptop0000000001',
+    );
+    expect(models.create.mock.calls[1][0].categoryId).toBe(
+      'ccategorylaptop0000000001',
+    );
   });
 
   it('reuses an EXISTING live category by name (no duplicate) when one is already present [§4.4]', async () => {
@@ -887,12 +1376,24 @@ describe('ImportCommitService.commit', () => {
           id: 1,
           rowIndex: 0,
           status: 'VALID',
-          raw: { Name: 'A', Status: 'active', Model: 'Srv1', Manufacturer: 'Dell', Category: 'Server' },
+          raw: {
+            Name: 'A',
+            Status: 'active',
+            Model: 'Srv1',
+            Manufacturer: 'Dell',
+            Category: 'Server',
+          },
         },
       ],
       plan({
         conflicts: [
-          { entity: 'AssetModel', field: 'modelId', normalizedValue: 'Srv1', outcome: 'create', targetId: null },
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'Srv1',
+            outcome: 'create',
+            targetId: null,
+          },
         ],
       }),
       MODEL_CONFIG_MAPPING,
@@ -906,15 +1407,27 @@ describe('ImportCommitService.commit', () => {
     await service.commit('sess-1', OWNER);
 
     expect(categories.create).not.toHaveBeenCalled(); // reused the live one
-    expect(models.create.mock.calls[0][0].categoryId).toBe('ccategoryexistingsrv00001');
+    expect(models.create.mock.calls[0][0].categoryId).toBe(
+      'ccategoryexistingsrv00001',
+    );
   });
 
   it('persists custom fields to Asset.specs (omit-empty, never {}) and null-proto at the write site [§4.3]', async () => {
     const state = sessionWithMapping(
       [
         // Row 1 has a RAM cell → specs.ram; row 2's RAM cell is blank → NO specs at all (omit-empty).
-        { id: 1, rowIndex: 0, status: 'VALID', raw: { Name: 'A', Status: 'active', RAM: '16GB' } },
-        { id: 2, rowIndex: 1, status: 'VALID', raw: { Name: 'B', Status: 'active', RAM: '' } },
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active', RAM: '16GB' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'B', Status: 'active', RAM: '' },
+        },
       ],
       plan({ conflicts: [] }),
       mapping({
@@ -940,5 +1453,450 @@ describe('ImportCommitService.commit', () => {
     // skip, ADR-0069 REDESIGN §4.3). (The object create() receives is zod's re-validated copy; the
     // pollution vector was neutralized at the null-proto build site before validation.)
     expect(({} as Record<string, unknown>).ram).toBeUndefined();
+  });
+
+  // ===== Etapa 2: directory person + AssetAssignment (ADR-0069 REDESIGN §4.5/§4.6) ===============
+  describe('directory person + assignment (Etapa 2)', () => {
+    it('creates a directory person (skipIdpWriteBack) and opens its assignment', async () => {
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'Laptop A',
+              Status: 'active',
+              AssignedTo: 'Ada Lovelace',
+              EmployeeNo: 'E-001',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      const { service, users, assignments } = makeService(state);
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(result.committed).toBe(1);
+      expect(result.failed).toBe(0);
+      // The person is created via UsersService with skipIdpWriteBack + import provenance + directoryOnly.
+      expect(users.create).toHaveBeenCalledTimes(1);
+      const { data, opts } = users._calls[0] as any;
+      expect(opts.skipIdpWriteBack).toBe(true);
+      expect(opts.createdPayload).toEqual({
+        source: 'import',
+        sessionId: 'sess-1',
+        rowIndex: 0,
+      });
+      // name → firstName/lastName split (first token vs the rest); legajo routed through.
+      expect(data.firstName).toBe('Ada');
+      expect(data.lastName).toBe('Lovelace');
+      expect(data.legajo).toBe('E-001');
+      // The assignment is opened against the created asset + the person's id.
+      expect(assignments.create).toHaveBeenCalledTimes(1);
+      expect(assignments._calls[0]).toEqual(
+        expect.objectContaining({ userId: expect.any(String) }),
+      );
+    });
+
+    it('a single-token name falls back to a non-empty lastName (both required)', async () => {
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'A',
+              Status: 'active',
+              AssignedTo: 'Madonna',
+              EmployeeNo: 'E-007',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      const { service, users } = makeService(state);
+
+      await service.commit('sess-1', OWNER);
+
+      const { data } = users._calls[0] as any;
+      expect(data.firstName).toBe('Madonna');
+      expect(data.lastName).toBe('Madonna'); // fallback keeps lastName .min(1) satisfied
+    });
+
+    it('re-import is idempotent: a 409 ConflictException is a no-op success (row NOT FAILED)', async () => {
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'A',
+              Status: 'active',
+              AssignedTo: 'Ada L',
+              EmployeeNo: 'E-001',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      // The person ALREADY exists live (dedup links it), and the active assignment ALREADY exists → the
+      // assignment service throws ConflictException (the pre-check at asset-assignments.service.ts:84-91).
+      state.directoryDedup = () => ({ id: 'existing-person' });
+      const assignments = makeAssignments({ conflictOn: () => true });
+      const { service, prisma, users } = makeService(state, { assignments });
+
+      const result = await service.commit('sess-1', OWNER);
+
+      // The 409 is swallowed as idempotent → the row is COMMITTED, not FAILED, and no duplicate person
+      // was created (dedup found the live one).
+      expect(result.committed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(prisma._rowStatuses.get(1)?.status).toBe('COMMITTED');
+      expect(users.create).not.toHaveBeenCalled();
+    });
+
+    it('E2-INTEG-02: an AMBIGUOUS identity (email→A, legajo→B) imports the asset UNASSIGNED + a warning, never re-linking either user', async () => {
+      // The row's email matches live user A and its legajo matches a DIFFERENT live user B. A single OR
+      // findFirst would nondeterministically link the asset to A or B; the conflict-detecting findMany
+      // returns BOTH distinct ids → AMBIGUOUS. The asset still imports (asset-first), the row is COMMITTED
+      // (NOT FAILED), no assignment is opened, and no person is created.
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'Laptop X',
+              Status: 'active',
+              AssignedTo: 'Ada Lovelace',
+              EmployeeNo: 'E-B', // legajo → user B
+              Email: 'ada@corp.test', // email → user A
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      // Two DISTINCT live users match the row's identity keys → ambiguous.
+      state.directoryDedup = () => [
+        { id: 'user-A', email: 'ada@corp.test' },
+        { id: 'user-B', legajo: 'E-B' },
+      ];
+      const { service, users, assignments, assets, prisma } =
+        makeService(state);
+
+      const result = await service.commit('sess-1', OWNER);
+
+      // The asset DID import, the row is COMMITTED with the PII-free warning, neither A nor B is linked.
+      expect(result.committed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(assets.create).toHaveBeenCalledTimes(1);
+      expect(users.create).not.toHaveBeenCalled(); // no new person
+      expect(assignments.create).not.toHaveBeenCalled(); // UNASSIGNED — neither A nor B reassigned
+      const row = prisma._rowStatuses.get(1);
+      expect(row?.status).toBe('COMMITTED');
+      expect(row?.error).toEqual(
+        expect.objectContaining({ reason: 'ambiguous-identity', warning: true }),
+      );
+    });
+
+    it('E2-INTEG-02: two identity keys that point at the SAME single live user → an unambiguous link (not ambiguous)', async () => {
+      // Both the email and the legajo resolve to the SAME live user → one distinct id → link (precedence
+      // email > legajo > username). The asset is assigned to that user; no warning, no new person.
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'Laptop Y',
+              Status: 'active',
+              AssignedTo: 'Ada Lovelace',
+              EmployeeNo: 'E-1',
+              Email: 'ada@corp.test',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      state.directoryDedup = () => [
+        { id: 'user-A', email: 'ada@corp.test', legajo: 'E-1' },
+      ];
+      const { service, users, assignments } = makeService(state);
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(result.committed).toBe(1);
+      expect(users.create).not.toHaveBeenCalled(); // existing user, no create
+      expect(assignments.create).toHaveBeenCalledTimes(1);
+      expect(assignments._calls[0]).toEqual(
+        expect.objectContaining({ userId: 'user-A' }),
+      );
+    });
+
+    it('E2-IDEM-01: a raw P2002 on the assignment (active-pair race) is the SAME idempotent no-op as the 409 — the row COMMITS, not FAILED', async () => {
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'A',
+              Status: 'active',
+              AssignedTo: 'Ada L',
+              EmployeeNo: 'E-001',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      // The person exists live (dedup links it); the assignment write races past the pre-check and the DB's
+      // active-pair partial unique index raises a RAW Prisma P2002 (NOT a ConflictException). The commit
+      // must treat it as already-assigned → COMMITTED, not FAILED (mirrors the 409 idempotency test).
+      state.directoryDedup = () => ({ id: 'existing-person' });
+      const p2002 = new Prisma.PrismaClientKnownRequestError('dupe', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: 'asset_assignments_active_pair_key' },
+      });
+      const assignments = makeAssignments();
+      assignments.create = jest.fn(async (_data: any, _principal: any) => {
+        throw p2002;
+      });
+      const { service, prisma, users } = makeService(state, { assignments });
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(result.committed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(prisma._rowStatuses.get(1)?.status).toBe('COMMITTED');
+      expect(users.create).not.toHaveBeenCalled();
+    });
+
+    it('dedup is LIVE-only: a soft-deleted ghost is NOT resurrected/linked (a fresh person is created)', async () => {
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'A',
+              Status: 'active',
+              AssignedTo: 'Ghost Gone',
+              EmployeeNo: 'E-DEAD',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      // The soft-delete-filtered findFirst never sees the ghost → dedup returns null → a NEW live person
+      // is created (the ghost is never linked).
+      state.directoryDedup = () => null;
+      const { service, users, assignments } = makeService(state);
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(result.committed).toBe(1);
+      expect(users.create).toHaveBeenCalledTimes(1); // a fresh person, not the ghost
+      expect(assignments.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('a row with NO identity key creates NO person — the asset imports unassigned', async () => {
+      // The mapping maps a person NAME column but the cell is blank AND there is no legajo/email → coerceRow
+      // builds no `person` bucket (identity gate). The asset still imports; no person, no assignment.
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'Orphan Asset',
+              Status: 'active',
+              AssignedTo: '',
+              EmployeeNo: '',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      const { service, users, assignments, assets } = makeService(state);
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(result.committed).toBe(1);
+      expect(assets.create).toHaveBeenCalledTimes(1); // the asset DID import
+      expect(users.create).not.toHaveBeenCalled(); // no person
+      expect(assignments.create).not.toHaveBeenCalled(); // unassigned
+    });
+
+    it('resume completes a MISSING assignment when the asset was created but the assignment was not', async () => {
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'A',
+              Status: 'active',
+              AssignedTo: 'Ada L',
+              EmployeeNo: 'E-001',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      // The asset was created last run (its provenance exists) but the process crashed before the
+      // assignment → on resume, the extended probe must re-resolve the person and complete the assignment
+      // BEFORE marking COMMITTED, never minting a duplicate asset.
+      state.assetHistory = [
+        {
+          eventType: 'CREATED',
+          payload: { source: 'import', sessionId: 'sess-1', rowIndex: 0 },
+          assetId: 'asset-resumed',
+        },
+      ];
+      state.directoryDedup = () => ({ id: 'existing-person' });
+      const { service, assets, assignments, prisma } = makeService(state);
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(assets.create).not.toHaveBeenCalled(); // no duplicate asset
+      // The missing assignment is completed on the resumed asset.
+      expect(assignments.create).toHaveBeenCalledTimes(1);
+      expect(assignments._calls[0]).toEqual({
+        assetId: 'asset-resumed',
+        userId: 'existing-person',
+      });
+      expect(result.committed).toBe(1);
+      expect(prisma._rowStatuses.get(1)?.status).toBe('COMMITTED');
+    });
+
+    it('routes supervisor → managerId on a single live non-directory match, else managerName free-text', async () => {
+      const supMapping = mapping({
+        columns: [
+          { field: 'name', column: 'Name' },
+          { field: 'status', column: 'Status' },
+        ],
+        person: {
+          fields: [
+            { field: 'name', column: 'AssignedTo' },
+            { field: 'legajo', column: 'EmployeeNo' },
+            { field: 'supervisor', column: 'Boss' },
+          ],
+        },
+      });
+      // Row 1's supervisor "Grace Hopper" matches exactly one live non-directory User → managerId.
+      // Row 2's supervisor "Nobody Here" matches none → free-text managerName.
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'A',
+              Status: 'active',
+              AssignedTo: 'Ada L',
+              EmployeeNo: 'E-1',
+              Boss: 'Grace Hopper',
+            },
+          },
+          {
+            id: 2,
+            rowIndex: 1,
+            status: 'VALID',
+            raw: {
+              Name: 'B',
+              Status: 'active',
+              AssignedTo: 'Bob M',
+              EmployeeNo: 'E-2',
+              Boss: 'Nobody Here',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      state.session!.mapping = supMapping;
+      const prisma = makePrisma(state);
+      // The supervisor match is a bounded findMany filtered by first/last; echo one hit for Grace, none
+      // for Nobody.
+      prisma.user.findMany = (async (args: any) =>
+        args?.where?.firstName?.equals === 'Grace'
+          ? [{ id: 'mgr-grace' }]
+          : []) as any;
+      const { service, users } = makeService(state, { prisma });
+
+      await service.commit('sess-1', OWNER);
+
+      const callA = (users._calls[0] as any).data;
+      const callB = (users._calls[1] as any).data;
+      expect(callA.manager).toEqual({ managerId: 'mgr-grace' });
+      expect(callB.manager).toEqual({ managerName: 'Nobody Here' });
+    });
+  });
+
+  // ===== Etapa 2: AND-check requires user:manage when persons are created (REDESIGN §7) ==========
+  describe('enqueueCommit AND-check for directory persons', () => {
+    it('requires user:manage when the mapping creates persons — denies (403) when the actor lacks it', async () => {
+      const dryRun = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'A',
+              Status: 'active',
+              AssignedTo: 'Ada L',
+              EmployeeNo: 'E-001',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      // The actor holds asset:write but NOT user:manage.
+      const permissions = makePermissions(async (_role, required: string[]) => {
+        return !required.includes('user:manage');
+      });
+      const { service, queue } = makeService(dryRun, { permissions });
+
+      await expect(
+        service.enqueueCommit('sess-1', OWNER),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(queue.add).not.toHaveBeenCalled();
+      // The required set INCLUDED user:manage (the person AND-check fired).
+      const lastCall = permissions.hasAll.mock.calls.at(-1) as any;
+      expect(lastCall[1]).toContain('user:manage');
+    });
+
+    it('does NOT require user:manage when the mapping has no person fields', async () => {
+      const dryRun = sessionWith(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: { Name: 'A', Status: 'active' },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      const permissions = makePermissions(async () => true);
+      const { service } = makeService(dryRun, { permissions });
+
+      await service.enqueueCommit('sess-1', OWNER);
+
+      const lastCall = permissions.hasAll.mock.calls.at(-1) as any;
+      expect(lastCall[1]).not.toContain('user:manage');
+    });
   });
 });

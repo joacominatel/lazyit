@@ -66,18 +66,31 @@ import { cn } from "@/lib/utils";
 import { ByoiBanner } from "./_components/byoi-banner";
 import { CloneUserWizard } from "./_components/clone-user-wizard";
 import { ManagerDisplay } from "./_components/manager-display";
+import { UserDirectoryBadge } from "./_components/user-directory-badge";
 import { OffboardingSheet } from "./_components/offboarding-sheet";
 import { UserFormDialog } from "./_components/user-form-dialog";
 import { UserRoleSelect } from "./_components/user-role-select";
 import { UserStatusBadge } from "./_components/user-status-badge";
 
 type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
+/**
+ * Directory filter (ADR-0069 REDESIGN §0 #2). Directory people (no login, created by the bulk import)
+ * are mixed into the list and badged "Directory"; this slice lets an operator focus on one kind.
+ * `ALL` → both (default, omitted from the query), `directory` → only directory people
+ * (`directoryOnly=true`), `accounts` → only real login accounts (`directoryOnly=false`).
+ */
+type DirectoryFilter = "ALL" | "directory" | "accounts";
 
 /**
  * Filter param defaults. `status` (active/inactive) is filtered client-side over the page.
- * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
+ * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL. `directory`
+ * ("ALL" | "directory" | "accounts") drives the server-side `directoryOnly` slice.
  */
-const FILTER_DEFAULTS = { status: "ALL", archived: "ALL" } as const;
+const FILTER_DEFAULTS = {
+  status: "ALL",
+  archived: "ALL",
+  directory: "ALL",
+} as const;
 
 /**
  * The Users-table columns an operator can show/hide via the column picker (#368, extended in #386).
@@ -178,6 +191,14 @@ export default function UsersPage() {
   const statusFilter = filters.status as StatusFilter;
   // The archived view is ADMIN-only.
   const archived = isAdmin && filters.archived === "only";
+  const directoryFilter = filters.directory as DirectoryFilter;
+  // Map the three-way segmented filter to the server's optional `directoryOnly` slice (omit for "ALL").
+  const directoryOnly =
+    directoryFilter === "directory"
+      ? true
+      : directoryFilter === "accounts"
+        ? false
+        : undefined;
 
   // Forward only the server-supported params; `status` is filtered client-side over the page below.
   const { data: page, isLoading, isFetching, isError, error, refetch } =
@@ -188,6 +209,7 @@ export default function UsersPage() {
       limit,
       offset,
       deleted: archived ? "only" : undefined,
+      directoryOnly,
     });
   const restoreUserMutation = useRestoreUser();
 
@@ -407,6 +429,17 @@ export default function UsersPage() {
           },
         ]
       : []),
+    ...(directoryFilter !== "ALL"
+      ? [
+          {
+            key: "directory",
+            label: t("list.chips.directory", {
+              directory: t(`list.directoryFilter.${directoryFilter}`),
+            }),
+            onClear: () => setFilter("directory", FILTER_DEFAULTS.directory),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -485,6 +518,28 @@ export default function UsersPage() {
                 <SelectItem value="ACTIVE">{t("list.status.active")}</SelectItem>
                 <SelectItem value="INACTIVE">
                   {t("list.status.inactive")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={directoryFilter}
+              onValueChange={(value) => setFilter("directory", value)}
+            >
+              <SelectTrigger
+                className="sm:w-44"
+                aria-label={t("list.directoryFilter.label")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">
+                  {t("list.directoryFilter.ALL")}
+                </SelectItem>
+                <SelectItem value="directory">
+                  {t("list.directoryFilter.directory")}
+                </SelectItem>
+                <SelectItem value="accounts">
+                  {t("list.directoryFilter.accounts")}
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -568,6 +623,7 @@ export default function UsersPage() {
                       email={user.email}
                     />
                     {user.firstName} {user.lastName}
+                    {user.directoryOnly && <UserDirectoryBadge />}
                   </span>
                 }
                 badge={<UserStatusBadge isActive={user.isActive} />}
@@ -624,12 +680,15 @@ export default function UsersPage() {
                 ),
                 name: (
                   <TableCell key="name" className="font-medium">
-                    <Link
-                      href={`/users/${user.id}`}
-                      className="hover:underline"
-                    >
-                      {user.firstName} {user.lastName}
-                    </Link>
+                    <span className="flex items-center gap-2">
+                      <Link
+                        href={`/users/${user.id}`}
+                        className="hover:underline"
+                      >
+                        {user.firstName} {user.lastName}
+                      </Link>
+                      {user.directoryOnly && <UserDirectoryBadge />}
+                    </span>
                   </TableCell>
                 ),
                 email: (
