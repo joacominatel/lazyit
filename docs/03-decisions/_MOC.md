@@ -3,7 +3,7 @@ title: Decisions (ADRs) — MOC
 tags: [moc, adr]
 status: draft
 created: 2026-05-25
-updated: 2026-06-16
+updated: 2026-06-20
 ---
 
 <!-- updated 2026-06-01: ADR-0043 (Zitadel source-of-truth) accepted + validated live end-to-end
@@ -104,7 +104,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0035-search-architecture]] | Cross-cutting search architecture (Meilisearch) | accepted |
 | [[0036-int4-bounded-integers]] | Integer fields bounded to the Postgres int4 range in shared schemas | accepted |
 | [[0037-idp-choice-zitadel-byoi]] | IdP choice — Zitadel, BYOI strategy, own Postgres | accepted (extended by [[0043-zitadel-source-of-truth]]) |
-| [[0038-jit-user-provisioning]] | JIT user provisioning on first OIDC login | accepted (extended by [[0043-zitadel-source-of-truth]]) |
+| [[0038-jit-user-provisioning]] | JIT user provisioning on first OIDC login | accepted (extended by [[0043-zitadel-source-of-truth]]; amended 2026-06-20: directory-person promotion on JIT claim + manual `provision-account` path) |
 | [[0039-authjs-v5-frontend-oidc]] | Auth.js v5 for frontend OIDC login | accepted |
 | [[0040-rbac-roles]] | Minimal RBAC — ADMIN/MEMBER/VIEWER role on User | accepted (default-role + bootstrap extended by [[0043-zitadel-source-of-truth]]; authZ MECHANISM superseded by [[0046-roles-permissions-v2]] — the 3 roles stay fixed) |
 | [[0042-article-versioning-and-linking]] | KB depth — append-only ArticleVersion + article↔asset/application linking + content search | accepted |
@@ -134,6 +134,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0066-secret-manager-password-vs-recovery-root]] | Secret Manager — password is the daily entry credential, recovery key is the root that resets it (ADR-0066): renames the "passphrase" to **vault password** (mutable, user-changeable); elevates the **recovery key** as the root-only reset credential (shown once, used only when password is lost); clarifies that `POST /secret-manager/keypair/recovery` changes the password, not the recovery key; supersedes the locked-in terminology of [[0065-secret-manager-regenerate-recovery-key]] | **accepted** (2026-06-15) — built in #526/#527 + frontend #528 |
 | [[0067-server-prefetch-ssr-strategy]] | Server-prefetch + hydration rendering strategy — targeted pilot on the 6 highest-traffic routes (`/dashboard` + 5 entity list pages): thin async Server Component pages using `prefetchQuery` + `dehydrate` + `<HydrationBoundary>` (TanStack Query v5); eliminates the skeleton→hydrate→fetch waterfall; keeps TanStack Query as the client cache; adds group-level `loading.tsx` + per-group `error.tsx`; must sequence after #498 (session-seeding fix); builds on [[0039-authjs-v5-frontend-oidc]] §6a; resolves the deferred debt noted in [[0020-frontend-data-layer]]; #500 | **accepted** (2026-06-16, CEO ratification; implementation deferred to #537) |
 | [[0068-asset-tag-existing-estate-awareness]] | Asset Tag Scheme — existing-estate awareness (extends [[0063-configurable-asset-tag-scheme]]): a **skip-existing allocation invariant** (an auto-tag is NEVER a tag that already exists on a live asset — the counter always advances to the next free rendered tag, by construction + the `assets_assetTag_active_key` index for races; no false 409 under dense occupancy), a **seed suggestion** (`startNumber = max(existing matching)+1`), and an explicit **backfill** (`settings:manage`) with a **read-only paginated preview** (AssetModel filter + per-row deselect) + two modes — default `untagged-only`, opt-in `normalize-non-conforming` behind a warning — forward-only & audited via `AssetHistory` ([[0006-soft-delete-and-auditing]]); #547 | **accepted** (2026-06-16) |
+| [[0069-migrator-import]] | Guided bulk import — phase 1 (Asset slice, JSON + CSV) with Etapa-2 amendment: directory persons (`directoryOnly` User mode) + AssetAssignment + specs passthrough | **accepted** (2026-06-17); amended 2026-06-20 (Etapa 2: §A.1–A.5) |
 
 > **Amendments in this batch (no renumber):** [[0035-search-architecture]] gains a **periodic
 > drift-reconcile sweeper** (unref'd `setInterval` mirroring the notifications retention sweeper, reusing
