@@ -45,6 +45,12 @@ export interface DetectedShape {
   dialect: { delimiter: string | null; hadBom: boolean };
   encoding: string;
   rowCount: number;
+  /**
+   * Per-column example values for the assisted mapping UI (ADR-0069 REDESIGN §4.2): header → up to 1-4
+   * distinct non-empty cells. Real file data (incl. PII) — never logged (it rides the owner-scoped read
+   * only). Optional because sessions parsed before this field landed have no `samples` key.
+   */
+  samples?: Record<string, string[]>;
 }
 
 /** A session read with its rows + an at-a-glance summary (owner-scoped). */
@@ -56,6 +62,8 @@ export interface ImportSessionWithRows {
   error: { phase: string; message: string } | null;
   rowCount: number;
   headers: string[];
+  /** Per-column example values (header → 1-4 distinct non-empty strings); see {@link DetectedShape}. */
+  samples: Record<string, string[]>;
   rows: { rowIndex: number; status: string; raw: Record<string, string> }[];
 }
 
@@ -166,6 +174,9 @@ export class ImportSessionService {
       error: (session.error as { phase: string; message: string } | null) ?? null,
       rowCount: session.rows.length,
       headers: detected?.headers ?? [],
+      // Surface the per-column samples from the detected blob (ADR-0069 REDESIGN §4.2); default to {}
+      // for a pre-samples session so the wire shape (samples is required) is always satisfied.
+      samples: detected?.samples ?? {},
       rows: session.rows.map((r) => ({
         rowIndex: r.rowIndex,
         status: r.status,
