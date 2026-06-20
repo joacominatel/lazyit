@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AssetSchema } from "../asset";
+import { AssetSchema, CreateAssetSchema } from "../asset";
 
 /**
  * Migrator import — the three-layer mapping model (ADR-0069 §4, #627).
@@ -100,6 +100,19 @@ const RESERVED_CUSTOM_KEYS: ReadonlySet<string> = new Set([
   "prototype",
 ]);
 
+/**
+ * The set of keys a mapping TARGET (`columns[].field` / `references[].field`) must NEVER be (MUST-FIX 2).
+ * Unlike a custom (specs) key — which must avoid EVERY native field — a target's legitimate values ARE
+ * the native create-schema fields (`name`/`serial`/`status`/`modelId`/…). So this is the prototype-
+ * pollution sentinels PLUS the persisted-only Asset fields that are NOT in `CreateAssetSchema`
+ * (`id`/`createdAt`/`updatedAt`/`deletedAt`) — keys that would either pollute the coerced payload's
+ * prototype or mass-assign a non-mappable field. Derived from the schema shapes so it can't drift.
+ */
+const CREATE_ASSET_KEYS: ReadonlySet<string> = new Set(Object.keys(CreateAssetSchema.shape));
+const RESERVED_TARGET_KEYS: ReadonlySet<string> = new Set(
+  [...RESERVED_CUSTOM_KEYS].filter((k) => !CREATE_ASSET_KEYS.has(k)),
+);
+
 /** Max number of custom (specs) fields per session — a local DoS/abuse cap (ADR-0069 REDESIGN §5.1). */
 const MAX_CUSTOM_FIELDS = 64;
 
@@ -143,6 +156,54 @@ export const ImportMappingSchema = z
         });
       }
       seen.add(key);
+    });
+
+    // Anti mass-assignment + anti prototype-pollution at the MAPPING-TARGET layer (MUST-FIX 2). A
+    // `columns[].field`/`references[].field` becomes a top-level key on the coerced create payload
+    // (`payload[field] = …`) — so a crafted `__proto__`/`constructor`/`prototype` would write to the
+    // payload's prototype, and any other reserved/native non-mappable key (`id`/`deletedAt`/…) would be
+    // mass-assignable into the strict create schema. A legitimate target is a real descriptor field;
+    // a reserved key must NEVER appear as a target. (`coerceRow` is unguarded here — it just assigns —
+    // so the contract is enforced at the schema, with the dry-run wrapping each row defensively too.)
+    const rejectReservedTarget = (
+      field: string,
+      where: "columns" | "references",
+      i: number,
+    ) => {
+      if (RESERVED_TARGET_KEYS.has(field)) {
+        ctx.addIssue({
+          code: "custom",
+          path: [where, i, "field"],
+          message: `"${field}" is a reserved field and cannot be a mapping target`,
+        });
+      }
+    };
+    // Duplicate-target dedup (MUST-FIX 1, belt-and-suspenders): two columns/references mapping to the
+    // same field is last-write-wins in `coerceRow` — one column's data is silently dropped. Reject it
+    // here so no caller can persist an ambiguous mapping (the FE blocks Continue as the first line).
+    const seenColumnFields = new Set<string>();
+    m.columns.forEach((c, i) => {
+      rejectReservedTarget(c.field, "columns", i);
+      if (seenColumnFields.has(c.field)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["columns", i, "field"],
+          message: `duplicate column target "${c.field}"`,
+        });
+      }
+      seenColumnFields.add(c.field);
+    });
+    const seenReferenceFields = new Set<string>();
+    m.references.forEach((r, i) => {
+      rejectReservedTarget(r.field, "references", i);
+      if (seenReferenceFields.has(r.field)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["references", i, "field"],
+          message: `duplicate reference target "${r.field}"`,
+        });
+      }
+      seenReferenceFields.add(r.field);
     });
   });
 
