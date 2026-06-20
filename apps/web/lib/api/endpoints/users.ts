@@ -38,6 +38,12 @@ export interface UserListParams {
   limit?: number;
   offset?: number;
   deleted?: "only";
+  /**
+   * Directory-person filter (ADR-0069 REDESIGN §0 #2). `true` → only directory people (no login, created
+   * by the bulk import); `false` → only real accounts; omitted → both. A directory person IS a User (the
+   * list mixes them, badged "Directory"), so this is the optional slice that lets an operator focus on one.
+   */
+  directoryOnly?: boolean;
 }
 
 /**
@@ -61,6 +67,8 @@ export function getUsers(
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   if (params.deleted) qs.set("deleted", params.deleted);
+  if (params.directoryOnly !== undefined)
+    qs.set("directoryOnly", String(params.directoryOnly));
   const search = qs.toString();
   return apiFetch<UserListPage>(search ? `${BASE}?${search}` : BASE, { signal });
 }
@@ -122,6 +130,22 @@ export function offboardUser(id: string): Promise<OffboardResult> {
  */
 export function restoreUser(id: string): Promise<User> {
   return apiFetch<User>(`${BASE}/${id}/restore`, { method: "POST" });
+}
+
+/**
+ * Provision an OIDC account for a directory person (`POST /users/:id/provision-account`, `user:manage` —
+ * ADR-0069 REDESIGN §0 #3). The manual counterpart to the auto-claim-by-verified-email login (ADR-0038):
+ * it takes an existing directory-only person (no login, `externalId == null`), creates them in the
+ * bundled identity provider (Zitadel), sets `externalId` and flips `directoryOnly` to false. Resolves to
+ * the now-promoted {@link User}. The honest non-success cases come back as an {@link ApiError} the caller
+ * maps on its `.status`:
+ *   - **400** — the target is not a directory person, is already linked, OR has no real email (Zitadel
+ *     requires one; a synthesized `…@directory.local` placeholder counts as "no email"). The operator
+ *     must edit the person and give them a real email first.
+ *   - **503** — the IdP create failed.
+ */
+export function provisionUserAccount(id: string): Promise<User> {
+  return apiFetch<User>(`${BASE}/${id}/provision-account`, { method: "POST" });
 }
 
 /**
