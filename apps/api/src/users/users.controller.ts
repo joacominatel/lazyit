@@ -116,6 +116,13 @@ export class UsersController {
     description:
       'Soft-delete slice. active (default) = live users; only = offboarded (soft-deleted) users — ADMIN only (403 otherwise). (ADR-0041)',
   })
+  @ApiQuery({
+    name: 'directoryOnly',
+    required: false,
+    type: Boolean,
+    description:
+      'Directory-person filter (ADR-0069 REDESIGN §0 #2). true = only directory persons (no login); false = only login-backed accounts; absent = all (default).',
+  })
   @ApiOkResponse({ type: UserListPageDto })
   findAll(
     @Query('q') q?: string,
@@ -125,6 +132,7 @@ export class UsersController {
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
     @Query('deleted') deleted?: string,
+    @Query('directoryOnly') directoryOnly?: string,
     @CurrentUser() user?: User,
   ) {
     const pageQuery = parsePageQuery({
@@ -138,7 +146,12 @@ export class UsersController {
     // The list route carries no @Roles (any authenticated user may list ACTIVE users), so gate the
     // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
     assertCanListDeleted(pageQuery.deleted, user);
-    return this.users.findPage({ q }, pageQuery);
+    // directoryOnly is tri-state: absent → undefined (no filter); present → parsed boolean.
+    const directoryOnlyFilter =
+      directoryOnly !== undefined
+        ? parseBooleanQuery(directoryOnly, true)
+        : undefined;
+    return this.users.findPage({ q, directoryOnly: directoryOnlyFilter }, pageQuery);
   }
 
   // INTENTIONALLY NOT gated with `user:read` (ADR-0046 P3): a VIEWER must read its OWN record + role
