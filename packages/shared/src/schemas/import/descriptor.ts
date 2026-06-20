@@ -121,12 +121,25 @@ export const IMPORT_DESCRIPTORS: Record<ImportEntity, ImportDescriptor<unknown>>
  * schema. `model` exposes the brand + category for newly-created `AssetModel`s (NOT `CreateAsset` keys —
  * resolved through the model at commit, see `ModelConfigSchema`), which is exactly why they live here as
  * plain UI targets and NOT in `assetImportDescriptor.mappableFields` (that would break the
- * `MappableField<keyof TCreate>` schema↔descriptor invariant). The `person` group is Etapa 2.
+ * `MappableField<keyof TCreate>` schema↔descriptor invariant). The `person` group (Etapa 2) is the
+ * directory-person sub-fields the operator maps for the asset's "assigned to" — also plain UI targets, NOT
+ * `CreateAsset` keys: the commit routes them into a directory `User` (`CreateDirectoryPersonSchema`), where
+ * `name` is split into firstName/lastName, `email`/`legajo`/`username` are the identity keys (CEO Q5), and
+ * `jobTitle`/`department`/`supervisor` land in `directoryAttrs`/`managerName`.
  */
 export const IMPORT_UI_TARGETS = {
   asset: assetImportDescriptor.mappableFields,
   model: [
     { field: "manufacturer", i18nKey: "import.model.field.manufacturer" },
     { field: "category", i18nKey: "import.model.field.category" },
+  ],
+  person: [
+    { field: "name", i18nKey: "import.person.field.name" },
+    { field: "email", i18nKey: "import.person.field.email" },
+    { field: "legajo", i18nKey: "import.person.field.legajo" },
+    { field: "username", i18nKey: "import.person.field.username" },
+    { field: "jobTitle", i18nKey: "import.person.field.jobTitle" },
+    { field: "department", i18nKey: "import.person.field.department" },
+    { field: "supervisor", i18nKey: "import.person.field.supervisor" },
   ],
 } as const;
