@@ -68,6 +68,25 @@ de entrega e imprimir un **acta de baja** (con el nombre de la empresa y líneas
 papel en la entrega. Dar de baja es válido incluso cuando la persona no tiene nada — sigue valiendo como
 constancia de su salida.
 
+## Personas de directorio
+
+Una persona de **directorio** es un usuario sin acceso — creada por la
+[importación masiva](/help/assets-bulk-import) como el "asignado a" de un activo, sin cuenta en tu
+proveedor de identidad. Le dan un propietario registrado a un activo antes de que ese propietario pueda
+iniciar sesión.
+
+- **En la lista de Usuarios** una persona de directorio lleva una insignia **Directorio** junto a su
+  nombre, y el **filtro de directorio** (junto al filtro de estado) acota la lista a *Solo directorio*,
+  *Solo cuentas*, o todos.
+- **Se vinculan a una cuenta real en el primer inicio de sesión** a través de tu proveedor de identidad,
+  cuando el correo verificado coincide — momento en el que la insignia desaparece y pasan a ser una
+  cuenta normal. Una persona de directorio importada **sin un correo real nunca se vincula
+  automáticamente**.
+- **Crea su cuenta ahora.** En la página de una persona de directorio, **Crear cuenta OIDC** la
+  aprovisiona en el proveedor de identidad de inmediato. El proveedor exige un correo real, así que el
+  botón está deshabilitado hasta que la persona tenga uno — edita la persona y agrega un correo real
+  primero. Esto es solo para administradores (Gestionar usuarios).
+
 ## Restaurar un usuario
 
 Los usuarios dados de baja quedan archivados, no eliminados. Para recuperar uno, muestra los usuarios
