@@ -91,6 +91,16 @@ interface ModelCreateConfig {
 }
 
 /**
+ * The outcome of resolving a row's directory person (ADR-0069 REDESIGN §4.5, E2-INTEG-02). Either a
+ * concrete `personId` to link (an existing live match or a freshly-created directory person), or
+ * `ambiguous` — the row's identity keys resolve to MORE THAN ONE distinct live user, so linking either
+ * would be a wrong link; the caller imports the asset UNASSIGNED with an `ambiguous-identity` warning.
+ */
+type DirectoryPersonResolution =
+  | { kind: 'resolved'; personId: string }
+  | { kind: 'ambiguous' };
+
+/**
  * Resolve the brand/category for a created model from the mapping's `modelConfig` + this row's cells
  * (ADR-0069 REDESIGN §4.4 / §5.1). A pinned `*Const` wins over the `*Column` cell; an empty/absent value
  * yields no entry. Trimmed; empty strings dropped so a blank cell never becomes a `''` manufacturer.
@@ -592,15 +602,26 @@ export class ImportCommitService {
         if (person !== undefined) {
           const actorId =
             principal?.kind === 'human' ? principal.user.id : undefined;
-          const personId = await this.resolveOrCreateDirectoryPerson(
+          const resolved = await this.resolveOrCreateDirectoryPerson(
             person,
             actorId,
             sessionId,
             row.rowIndex,
           );
+          // AMBIGUOUS identity (E2-INTEG-02): the row's identity keys point at TWO different live users
+          // — linking either would be wrong. The asset already exists (resume), so we leave it UNASSIGNED
+          // and COMMIT the row with a PII-free warning, never FAILED (REDESIGN §0 #1: the asset imports).
+          if (resolved.kind === 'ambiguous') {
+            await this.markRow(row.id, 'COMMITTED', {
+              phase: 'commit',
+              reason: 'ambiguous-identity',
+              warning: true,
+            });
+            return { kind: 'committed' };
+          }
           await this.openAssignmentIdempotent(
             resumedAssetId,
-            personId,
+            resolved.personId,
             principal,
           );
         }
@@ -685,13 +706,30 @@ export class ImportCommitService {
         // ADR-0069 §11; `principal` is the loaded ADMIN). undefined → a system/unknown actor.
         const actorId =
           principal?.kind === 'human' ? principal.user.id : undefined;
-        const personId = await this.resolveOrCreateDirectoryPerson(
+        const resolved = await this.resolveOrCreateDirectoryPerson(
           person,
           actorId,
           sessionId,
           row.rowIndex,
         );
-        await this.openAssignmentIdempotent(asset.id, personId, principal);
+        // AMBIGUOUS identity (E2-INTEG-02): the row's identity keys resolve to TWO different live users
+        // (e.g. its email matches user A, its legajo matches user B) — linking either is a wrong link that
+        // would leak inventory to the wrong employee. The asset is already durable (asset-first order), so
+        // we import it UNASSIGNED and COMMIT the row with a PII-free `ambiguous-identity` warning, NEVER
+        // marking it FAILED (REDESIGN §0 #1: the asset must import). A human resolves the link later.
+        if (resolved.kind === 'ambiguous') {
+          await this.markRow(row.id, 'COMMITTED', {
+            phase: 'commit',
+            reason: 'ambiguous-identity',
+            warning: true,
+          });
+          return { kind: 'committed' };
+        }
+        await this.openAssignmentIdempotent(
+          asset.id,
+          resolved.personId,
+          principal,
+        );
       }
 
       await this.markRow(row.id, 'COMMITTED', null);
@@ -709,12 +747,20 @@ export class ImportCommitService {
 
   /**
    * Resolve an EXISTING live directory person by an identity key, or CREATE a new directory-only one
-   * (ADR-0069 REDESIGN §4.5). Returns the person's User id (the AssetAssignment.userId).
+   * (ADR-0069 REDESIGN §4.5). Returns a {@link DirectoryPersonResolution}: `{ kind:'resolved', personId }`
+   * (the AssetAssignment.userId) or `{ kind:'ambiguous' }` when the row's identity keys collide across
+   * two different live users (E2-INTEG-02) — the caller then imports the asset unassigned + a warning.
    *
-   * DEDUP IS LIVE-ONLY (REDESIGN §7, security-critical): we `findFirst` through the NORMAL soft-delete-
-   * filtered client (NOT `includeSoftDeleted`) so a soft-deleted person is NEVER resurrected or re-linked
-   * — mirroring the email-link rule in jwt-auth.guard.ts. We match on whichever identity keys the row
-   * supplies (email ∨ legajo ∨ username), OR-ed. The schema already guaranteed at least one is present.
+   * DEDUP IS LIVE-ONLY (REDESIGN §7, security-critical): we read through the NORMAL soft-delete-filtered
+   * client (NOT `includeSoftDeleted`, and `deletedAt: null` stated explicitly) so a soft-deleted person is
+   * NEVER resurrected or re-linked — mirroring the email-link rule in jwt-auth.guard.ts. We match on
+   * whichever identity keys the row supplies (email ∨ legajo ∨ username), OR-ed; the schema already
+   * guaranteed at least one is present.
+   *
+   * CONFLICT DETECTION, NOT a silent pick (E2-INTEG-02): a single OR `findFirst` would nondeterministically
+   * link the asset to the WRONG employee when two of the row's keys belong to two different live users. So
+   * we `findMany` the matching live users and branch on the DISTINCT id count: >1 → ambiguous (don't link);
+   * exactly 1 → link (precedence email > legajo > username for the multi-key single-user case); 0 → create.
    *
    * On a miss we create via UsersService.create with `skipIdpWriteBack` (no Zitadel mirror) + the import
    * provenance, role FORCED to VIEWER, `externalId` null. We re-validate against CreateDirectoryPersonSchema
@@ -727,7 +773,7 @@ export class ImportCommitService {
     actorId: string | undefined,
     sessionId: string,
     rowIndex: number,
-  ): Promise<string> {
+  ): Promise<DirectoryPersonResolution> {
     // Strict re-validation at the commit seam (the coerce layer already gated on identity; this is the
     // defense-in-depth re-check, and it normalizes email/legajo/username exactly like the HTTP path).
     const data: CreateDirectoryPerson =
@@ -740,11 +786,39 @@ export class ImportCommitService {
     if (data.username !== undefined)
       identityOr.push({ username: data.username });
     if (identityOr.length > 0) {
-      const existing = await this.prisma.user.findFirst({
-        where: { OR: identityOr },
-        select: { id: true },
+      // CONFLICT-DETECTING dedup (E2-INTEG-02): fetch ALL live users matching ANY present identity key,
+      // not a single nondeterministic `findFirst`. A row can carry two keys that belong to two DIFFERENT
+      // live users (its email matches user A, its legajo matches user B) — an OR `findFirst` would link
+      // the asset to whichever the planner happened to return. So we collect the DISTINCT matched user ids
+      // and branch on the count. `deletedAt: null` is explicit (the client extension already scopes to
+      // live, but stating it keeps this read's intent unambiguous and ghost-safe).
+      const matches = await this.prisma.user.findMany({
+        where: { OR: identityOr, deletedAt: null },
+        select: { id: true, email: true, legajo: true, username: true },
       });
-      if (existing) return existing.id;
+      const distinctIds = new Set(matches.map((m) => m.id));
+      if (distinctIds.size > 1) {
+        // > 1 distinct live user → AMBIGUOUS. Do NOT link (linking either is a wrong link). The caller
+        // imports the asset UNASSIGNED + a PII-free `ambiguous-identity` warning.
+        return { kind: 'ambiguous' };
+      }
+      if (distinctIds.size === 1) {
+        // Exactly one distinct user → unambiguous link. DETERMINISTIC PRECEDENCE email > legajo > username
+        // (commented so the single-match path is stable even if a future change widens the OR): with one
+        // distinct id the precedence is moot, but the ordering is the contract a multi-key single-user row
+        // resolves by. Existing behavior: link to it.
+        const matched =
+          matches.find((m) => data.email !== undefined && m.email === data.email) ??
+          matches.find(
+            (m) => data.legajo !== undefined && m.legajo === data.legajo,
+          ) ??
+          matches.find(
+            (m) => data.username !== undefined && m.username === data.username,
+          ) ??
+          matches[0];
+        return { kind: 'resolved', personId: matched.id };
+      }
+      // distinctIds.size === 0 → no live match → fall through to create (existing behavior).
     }
 
     // No live match → create a fresh directory-only person. Split the single `name` into the required
@@ -827,7 +901,7 @@ export class ImportCommitService {
           : {}),
       },
     );
-    return created.id;
+    return { kind: 'resolved', personId: created.id };
   }
 
   /**
@@ -838,6 +912,11 @@ export class ImportCommitService {
    * active assignment; that 409 would otherwise fall to commitRow's catch and mark a GOOD row FAILED. So
    * we swallow the ConflictException: the active assignment already exists → the row is COMMITTED, not
    * FAILED, and no duplicate is written. Any OTHER error propagates (e.g. an asset/user liveness 400).
+   *
+   * E2-IDEM-01: the pre-check is best-effort — two writes can race PAST it (a controller retry, or a
+   * future >1-worker pool), and the DB's active-pair partial unique index then raises a RAW Prisma `P2002`
+   * (not a ConflictException). That P2002 means the same thing — already assigned — so we treat it as the
+   * SAME idempotent no-op, otherwise a perfectly good row would be marked FAILED on a benign race.
    */
   private async openAssignmentIdempotent(
     assetId: string,
@@ -848,6 +927,16 @@ export class ImportCommitService {
       await this.assignments.create({ assetId, userId }, principal);
     } catch (err) {
       if (err instanceof ConflictException) return; // idempotent: active assignment already exists.
+      // E2-IDEM-01: the active-pair partial unique index raises a raw Prisma P2002 (NOT a
+      // ConflictException) when two writes race PAST the service's friendly pre-check (or under a future
+      // >1-worker concurrency). That race means the active assignment already exists — the SAME idempotent
+      // no-op as the 409, so swallow it too rather than mark a good row FAILED.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        return;
+      }
       throw err;
     }
   }
