@@ -63,12 +63,8 @@
       "category": "Categoría"
     },
     "mapToLabel": "Mapear esta columna a",
-    "columnLabel": "Columna",
     "sampleValues": "Valores de ejemplo de tu archivo",
-    "showSamples": "Mostrar valores de ejemplo",
-    "hideSamples": "Ocultar valores de ejemplo",
     "noSamples": "Esta columna está vacía en las filas de muestra.",
-    "required": "Obligatorio",
     "targetIgnore": "Ignorar",
     "targetCustom": "Crear un campo personalizado…",
     "targetCustomNamed": "Personalizado: {name}",
@@ -76,6 +72,9 @@
     "customNamePlaceholder": "p. ej. RAM, IMEI, Costo de compra",
     "customNote": "Se guarda en los detalles del activo (specs) con este nombre. Solo las filas con valor lo reciben.",
     "customNameMissing": "Nombra cada campo personalizado, o vuelve a ponerlo en Ignorar.",
+    "customNameDuplicate": "«{name}» ya lo usa otro campo personalizado. Usa un nombre único.",
+    "customNameReserved": "«{name}» es un nombre de campo reservado. Elige otro nombre o mapea esta columna directamente a ese campo.",
+    "duplicateTarget": "Dos columnas se mapean a «{field}». Solo una puede — cambia esta o la otra.",
     "group": {
       "asset": "Activo",
       "model": "Modelo"
