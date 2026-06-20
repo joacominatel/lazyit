@@ -1167,6 +1167,49 @@ describe('UsersService', () => {
         expect(prismaMock.accessGrant.groupBy).not.toHaveBeenCalled();
       });
     });
+
+    // ADR-0069 REDESIGN §0 #2 — directoryOnly filter
+    it('directoryOnly=true scopes where to { directoryOnly: true }', async () => {
+      user.findMany.mockResolvedValue([{ id: 'dir-1' }]);
+      user.count.mockResolvedValue(1);
+
+      await service.findPage(
+        { directoryOnly: true },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      expect(call.where).toMatchObject({ directoryOnly: true });
+    });
+
+    it('directoryOnly=false scopes where to { directoryOnly: false }', async () => {
+      user.findMany.mockResolvedValue([{ id: 'login-1' }]);
+      user.count.mockResolvedValue(1);
+
+      await service.findPage(
+        { directoryOnly: false },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      expect(call.where).toMatchObject({ directoryOnly: false });
+    });
+
+    it('absent directoryOnly adds no directoryOnly clause (shows all users)', async () => {
+      user.findMany.mockResolvedValue([{ id: 'any-1' }]);
+      user.count.mockResolvedValue(1);
+
+      await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      expect(call.where).not.toHaveProperty('directoryOnly');
+    });
   });
 
   // ADR-0043 §3 — IdP write-back (DB-first + mirror), no-split-brain, 503 on Management failure.
