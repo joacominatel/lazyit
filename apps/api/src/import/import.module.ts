@@ -8,6 +8,7 @@ import { ImportCommitWorker } from './import-commit.worker';
 import { ImportSessionGcSweeper } from './import-session-gc.sweeper';
 import { AssetsModule } from '../assets/assets.module';
 import { AssetModelsModule } from '../asset-models/asset-models.module';
+import { AssetCategoriesModule } from '../asset-categories/asset-categories.module';
 import { LocationsModule } from '../locations/locations.module';
 import {
   IMPORT_PARSE_QUEUE,
@@ -36,6 +37,7 @@ import { IMPORT_COMMIT_QUEUE } from './import-commit.constants';
   imports: [
     AssetsModule,
     AssetModelsModule,
+    AssetCategoriesModule,
     LocationsModule,
     BullModule.registerQueue({
       name: IMPORT_PARSE_QUEUE,

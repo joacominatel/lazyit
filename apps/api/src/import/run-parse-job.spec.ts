@@ -88,6 +88,24 @@ describe('runParseJob', () => {
     expect(fake.insertedRows).toHaveLength(2);
   });
 
+  it('collects up to 4 distinct non-empty sample values per column [REDESIGN §4.2]', async () => {
+    const fake = makeFakePrisma();
+    // colA has 5 distinct values (capped at 4) + a repeat + a blank; colB has a blank + repeats.
+    await runParseJob(
+      job(
+        b64('colA,colB\na1,b1\na2,b1\na3,\na4,b2\na5,b1\na1, \n'),
+        'csv',
+      ),
+      fake.prisma,
+    );
+    const last = fake.sessionUpdates[fake.sessionUpdates.length - 1].data;
+    const samples = (last.detected as { samples: Record<string, string[]> }).samples;
+    // colA: first 4 DISTINCT non-empty values, in first-seen order (a5 + the a1 repeat are dropped).
+    expect(samples.colA).toEqual(['a1', 'a2', 'a3', 'a4']);
+    // colB: blank + whitespace cells are skipped (coerceAbsent); only distinct non-empty values kept.
+    expect(samples.colB).toEqual(['b1', 'b2']);
+  });
+
   it('records FAILED (never throws) on malformed input — a non-array JSON', async () => {
     const fake = makeFakePrisma();
     const result = await runParseJob(job(b64('42'), 'json'), fake.prisma);

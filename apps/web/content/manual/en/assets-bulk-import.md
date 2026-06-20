@@ -25,7 +25,8 @@ even then every row is checked one more time before it is saved.
 
 1. **Upload** — pick what you're importing (Assets) and choose your file.
 2. **Summary** — confirm the detected record count, encoding and columns.
-3. **Mapping** — match each lazyit field to a column in your file.
+3. **Mapping** — go column by column: send each one to a lazyit field, save it as a custom field, or
+   ignore it.
 4. **Preview** — a *dry run* that validates every row without writing anything.
 5. **Conflicts** — resolve any references that matched (or didn't match) existing records.
 6. **Commit** — the import runs, and you get a result report.
@@ -50,23 +51,52 @@ you spend time mapping. If it found zero rows, go back and check the file.
 
 ## 3. Map your columns
 
-For each lazyit field you can either point it at a **source column** or pin a **constant** value that
-applies to every row:
+Mapping is **column-first**: the importer lists **every column from your file**, each as its own card
+showing the column name and a few **example values** pulled from your file, so you always know what
+you're looking at before you decide where it goes.
 
-- **Name** — *required*. Your label for the asset.
-- **Status** — *required*. The asset's lifecycle status. Each distinct status value in your file is
-  mapped to a lazyit status (for example `active → OPERATIONAL`, `retired → RETIRED`). Common
-  synonyms are suggested automatically; you can change any of them.
-- **Serial number** — optional, but **important**: it is the asset's only natural key. If you map it,
-  re-uploading the same file won't create duplicates for those rows. Without it, a re-upload is **not
-  de-duplicated** (you'd get a second copy).
-- **Asset tag** — optional. A tag from your file is used as-is; a blank one is auto-assigned later if
-  your instance has an asset-tag scheme enabled.
-- **Model** and **Location** — optional **references**: they are matched to existing records by name
-  (see *Conflicts* below).
+> **Heads up — this screen shows your real data.** The example values are taken straight from the
+> file, so they can include employee data such as names and emails. Nothing is written anywhere until
+> the final commit; the values are only shown to you, the operator running the import.
 
-Required fields must be mapped or pinned before you can continue. Columns you don't map are simply
-ignored.
+For each column, open it and pick one target from the dropdown:
+
+- **A lazyit field**, grouped by entity:
+  - **Asset** — **Name** (*required*), **Status** (*required*), **Serial number**, **Asset tag**,
+    **Purchase date**, **Warranty end**, **Model** and **Location**.
+  - **Model** — **Manufacturer** and **Category** for the asset models the import creates (see
+    *Model brand and category* below).
+- **Create a custom field…** — for a column with no native home (RAM, IMEI, screen size, cost, an
+  external URL…). You give it a name, and its value is saved to the asset's **details** (`specs`).
+  A custom field is stored **only on rows that actually have a value** — empty cells add nothing.
+- **Ignore** — drop the column. **Empty and irrelevant columns default to Ignore**, so a wide export
+  with dozens of unused columns isn't a wall of work; you only touch the ones that matter.
+
+A few fields behave specially:
+
+- **Name** and **Status** are **required**: you must map a column to each before you can continue.
+- **Status** values are reconciled **inside that column's card** — each distinct status value in your
+  file maps to a lazyit status (for example `active → OPERATIONAL`, `retired → RETIRED`). Common
+  synonyms are filled in for you; change any of them.
+- **Serial number** is optional but **important**: it is the asset's only natural key. Map it and a
+  re-upload won't create duplicates for those rows. Without it, a re-upload is **not de-duplicated**.
+- **Asset tag** — a tag from your file is used as-is; a blank one is auto-assigned later if your
+  instance has an asset-tag scheme enabled.
+- **Model** and **Location** are **references**, matched to existing records by name (see *Conflicts*).
+
+The importer **pre-fills a best guess** for each column, but it never decides for you — you confirm
+every column, and nothing is dropped silently.
+
+### Model brand and category
+
+When the import creates a new **Model**, it needs a **manufacturer** and a **category**. You can set
+these two ways:
+
+- **Per row** — map a column to **Manufacturer** or **Category** in the dropdown, and each model takes
+  its value from that row.
+- **For every model** — if your file has no such column (or all your assets are the same brand), pin a
+  single **Manufacturer** and/or **Category** in the *Model brand and category* box; it applies to
+  every model the import creates. A mapped column always wins over a pinned value.
 
 ## 4. Preview (the dry run)
 

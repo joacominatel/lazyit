@@ -147,25 +147,31 @@ function parseCsv(text: string): ParseResult {
   if (records.length === 0) {
     return { ok: false, reason: 'The CSV file is empty.' };
   }
-  const headers = records[0].map((h) => h.trim());
-  if (headers.length === 0 || headers.every((h) => h === '')) {
+  const rawHeaders = records[0].map((h) => h.trim());
+  if (rawHeaders.length === 0 || rawHeaders.every((h) => h === '')) {
     return { ok: false, reason: 'The CSV file has no header row.' };
   }
   if (records.length === 1) {
     return { ok: false, reason: 'The CSV file has a header but no data rows.' };
   }
-  // Reject duplicate headers: a `{ header: value }` map can't represent two columns of the same name
-  // without silently dropping one (a data-loss footgun on import).
+  // De-dup duplicate headers DETERMINISTICALLY so each column is addressable by a unique key (the old
+  // hard-reject — ADR-0069 REDESIGN §4.1 — aborted the whole import on the CEO's Snipe-IT export, which
+  // legitimately ships `Dirección` ×4 and `Notas` ×2). The suffix " (2)", " (3)", … is checked against
+  // the FULL set of already-seen/generated headers, so a literal "Dirección (2)" already in the source
+  // never collapses two distinct columns into one key — that silent data-loss is exactly what the old
+  // reject guarded against. Suffixes are SERVER-generated (no injection); cell values are kept verbatim.
+  // `headers` is the renamed set; `rows[].raw` is keyed by the SAME renamed headers end-to-end (the
+  // samples, the UI Selects and `buildMapping` all read the renamed header — a mismatch = an unmappable
+  // column). `headers` stays the same length as `rawHeaders` (one key per source column), so the
+  // ragged-row reconciliation + the row-count quota downstream are unaffected.
   const seen = new Set<string>();
-  for (const h of headers) {
-    if (seen.has(h)) {
-      return {
-        ok: false,
-        reason: `The CSV file has a duplicate column header ("${h}"). Rename the columns so each is unique.`,
-      };
-    }
-    seen.add(h);
-  }
+  const headers = rawHeaders.map((h) => {
+    let candidate = h;
+    let n = 1;
+    while (seen.has(candidate)) candidate = `${h} (${++n})`;
+    seen.add(candidate);
+    return candidate;
+  });
 
   const rows: RawRow[] = [];
   for (let i = 1; i < records.length; i++) {
@@ -173,7 +179,7 @@ function parseCsv(text: string): ParseResult {
     const row: RawRow = {};
     for (let c = 0; c < headers.length; c++) {
       // Short rows → absent cells become '' (coercion treats '' as absent in wave 3). Extra cells
-      // beyond the header width are dropped (ragged-row tolerance).
+      // beyond the header width are dropped (ragged-row tolerance). Keyed by the de-duped header.
       row[headers[c]] = cells[c] ?? '';
     }
     rows.push(row);

@@ -29,6 +29,12 @@ export const ImportDetectedShapeSchema = z.object({
   }),
   encoding: z.string(),
   rowCount: z.number().int().nonnegative(),
+  /**
+   * Per-column example values for the assisted mapping UI (ADR-0069 REDESIGN §5.3 / §4.2): header → up
+   * to 1-4 distinct non-empty cells from the materialized rows. These ARE real file data (incl. PII) —
+   * they live in the same owner-scoped `ImportSession.detected` and never enter logs or the run ledger.
+   */
+  samples: z.record(z.string(), z.array(z.string())).default({}),
 });
 export type ImportDetectedShape = z.infer<typeof ImportDetectedShapeSchema>;
 
@@ -54,6 +60,8 @@ export const ImportSessionViewSchema = z.object({
     .nullable(),
   rowCount: z.number().int().nonnegative(),
   headers: z.array(z.string()),
+  /** Per-column example values (header → 1-4 distinct non-empty strings); see `ImportDetectedShapeSchema`. */
+  samples: z.record(z.string(), z.array(z.string())).default({}),
   rows: z.array(ImportSessionRowSchema),
 });
 export type ImportSessionView = z.infer<typeof ImportSessionViewSchema>;

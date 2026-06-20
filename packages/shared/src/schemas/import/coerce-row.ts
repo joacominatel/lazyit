@@ -29,7 +29,22 @@ export interface CoercedRow {
   payload: Record<string, unknown>;
   references: Record<string, string>;
   enumMisses: { field: string; value: string }[];
+  /**
+   * Custom fields the operator passes through to `Asset.specs` (ADR-0069 REDESIGN §5.4 / §4.3). Only
+   * present when at least one custom cell has a value — an empty `specs: {}` is NEVER emitted (so the
+   * create schema's `.optional()` fires). Built with a null prototype + reserved-key skip as
+   * defense-in-depth against a corrupt/malicious persisted mapping (the mapping `superRefine` is the
+   * first line; this writer is the second so a bypassed refine still can't pollute the prototype).
+   */
+  specs?: Record<string, unknown>;
 }
+
+/**
+ * Keys a custom field must never write to `specs` — the prototype-pollution sentinels (mirrors the
+ * mapping `superRefine`'s reserved set; ADR-0069 REDESIGN §4.3 defense-in-depth). The native-field
+ * collision is already rejected at mapping time; these three are re-guarded here at write time.
+ */
+const PROTO_POLLUTION_KEYS: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
 
 /** Which create-schema fields are ISO-date fields (re-emitted via `coerceDate`). Phase 1: Asset. */
 const DATE_FIELDS: ReadonlySet<string> = new Set(["purchaseDate", "warrantyEnd"]);
@@ -129,5 +144,20 @@ export function coerceRow(
     if (text !== undefined) payload[field] = text;
   }
 
-  return { payload, references, enumMisses };
+  // 3. Custom fields → Asset.specs (ADR-0069 REDESIGN §5.4 / §4.3). Null-proto object, only present
+  //    cells written, reserved prototype-pollution keys skipped, and an empty record is never emitted.
+  let specs: Record<string, unknown> | undefined;
+  for (const c of mapping.custom ?? []) {
+    const key = c.key.trim();
+    if (PROTO_POLLUTION_KEYS.has(key)) continue; // ponytail: defense-in-depth — refine already rejects.
+    const value = coerceAbsent(raw[c.column]);
+    if (value === undefined) continue; // omit-empty: absent cell → no specs entry.
+    if (specs === undefined) specs = Object.create(null) as Record<string, unknown>;
+    specs[key] = value;
+  }
+
+  // omit-empty-record: never emit `specs: {}` (so CreateAssetSchema.specs `.optional()` fires).
+  return specs === undefined
+    ? { payload, references, enumMisses }
+    : { payload, references, enumMisses, specs };
 }

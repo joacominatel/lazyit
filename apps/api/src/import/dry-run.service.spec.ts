@@ -110,6 +110,35 @@ describe('ImportDryRunService.analyze — coercion + validation', () => {
     expect(report.result.rows[2].errors.some((e) => e.field === 'status')).toBe(true);
   });
 
+  it('a row whose coercion THROWS is recorded invalid — it never 500s the whole preview', async () => {
+    // A persisted/corrupt mapping that bypassed the schema superRefine (a custom entry whose `key`
+    // is not a string) makes `coerceRow` throw `key.trim()`. The dry-run must isolate that one row
+    // (record it invalid) and keep going — mirroring `commitRow`'s per-row catch — never abort.
+    prisma = makePrisma({});
+    const service = new ImportDryRunService(prisma);
+    const hostile = {
+      columns: [{ field: 'name', column: 'Name', constant: null }],
+      enums: [],
+      references: [],
+      // key as an object → `c.key.trim()` throws inside coerceRow.
+      custom: [{ column: 'Name', key: { evil: true } }],
+      modelConfig: undefined,
+    } as unknown as ImportMapping;
+    const report = await service.analyze(
+      [
+        { rowIndex: 0, raw: { Name: 'Laptop' } },
+        { rowIndex: 1, raw: { Name: 'Server' } },
+      ],
+      hostile,
+    );
+    // No throw — both rows are accounted for and recorded invalid (not a 500).
+    expect(report.result.counts.total).toBe(2);
+    expect(report.result.counts.invalid).toBe(2);
+    expect(report.result.rows.every((r) => r.status === 'invalid')).toBe(true);
+    // The tag arrays stay index-aligned (one decision per row).
+    expect(report.tags).toHaveLength(2);
+  });
+
   it('maps status synonyms via the descriptor value-map', async () => {
     prisma = makePrisma({});
     const service = new ImportDryRunService(prisma);
