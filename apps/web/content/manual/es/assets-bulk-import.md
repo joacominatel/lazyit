@@ -26,7 +26,8 @@ confirmación**, e incluso entonces cada fila se vuelve a comprobar antes de gua
 
 1. **Subir** — elige qué vas a importar (Activos) y selecciona tu archivo.
 2. **Resumen** — confirma el número de registros, la codificación y las columnas detectadas.
-3. **Mapeo** — asocia cada campo de lazyit a una columna de tu archivo.
+3. **Mapeo** — ve columna por columna: envía cada una a un campo de lazyit, guárdala como campo
+   personalizado, o ignórala.
 4. **Vista previa** — una *simulación* que valida cada fila sin escribir nada.
 5. **Conflictos** — resuelve las referencias que coincidieron (o no) con registros existentes.
 6. **Confirmar** — la importación se ejecuta y obtienes un informe de resultados.
@@ -52,23 +53,58 @@ archivo.
 
 ## 3. Mapea tus columnas
 
-Para cada campo de lazyit puedes apuntarlo a una **columna de origen** o fijar un valor **constante**
-que se aplica a todas las filas:
+El mapeo es **por columna**: el importador lista **todas las columnas de tu archivo**, cada una como su
+propia tarjeta que muestra el nombre de la columna y algunos **valores de ejemplo** tomados de tu
+archivo, para que sepas siempre qué estás viendo antes de decidir a dónde va.
 
-- **Nombre** — *obligatorio*. Tu etiqueta para el activo.
-- **Estado** — *obligatorio*. El estado del ciclo de vida del activo. Cada valor de estado distinto en
-  tu archivo se asocia a un estado de lazyit (por ejemplo `active → OPERATIONAL`,
-  `retired → RETIRED`). Los sinónimos comunes se sugieren automáticamente; puedes cambiar cualquiera.
-- **Número de serie** — opcional, pero **importante**: es la única clave natural del activo. Si lo
-  mapeas, volver a subir el mismo archivo no creará duplicados de esas filas. Sin él, una nueva subida
-  **no se de-duplica** (obtendrías una segunda copia).
-- **Etiqueta de activo** — opcional. Una etiqueta de tu archivo se usa tal cual; una en blanco se
-  asigna automáticamente más tarde si tu instancia tiene un esquema de etiquetas activado.
-- **Modelo** y **Ubicación** — **referencias** opcionales: se asocian a registros existentes por
-  nombre (consulta *Conflictos* más abajo).
+> **Atención — esta pantalla muestra tus datos reales.** Los valores de ejemplo se toman directamente
+> del archivo, así que pueden incluir datos de empleados como nombres y correos. No se escribe nada en
+> ningún sitio hasta la confirmación final; los valores solo se te muestran a ti, el operador que
+> ejecuta la importación.
 
-Los campos obligatorios deben mapearse o fijarse antes de continuar. Las columnas que no mapees
-simplemente se ignoran.
+Para cada columna, ábrela y elige un destino en el desplegable:
+
+- **Un campo de lazyit**, agrupado por entidad:
+  - **Activo** — **Nombre** (*obligatorio*), **Estado** (*obligatorio*), **Número de serie**,
+    **Etiqueta de activo**, **Fecha de compra**, **Fin de garantía**, **Modelo** y **Ubicación**.
+  - **Modelo** — **Fabricante** y **Categoría** para los modelos de activo que cree la importación
+    (consulta *Marca y categoría del modelo* más abajo).
+- **Crear un campo personalizado…** — para una columna sin hogar nativo (RAM, IMEI, pulgadas, costo,
+  una URL externa…). Le das un nombre y su valor se guarda en los **detalles** del activo (`specs`).
+  Un campo personalizado se guarda **solo en las filas que realmente tienen un valor** — las celdas
+  vacías no añaden nada.
+- **Ignorar** — descartar la columna. **Las columnas vacías e irrelevantes quedan en Ignorar por
+  defecto**, así que una exportación ancha con decenas de columnas sin uso no es un muro de trabajo;
+  solo tocas las que importan.
+
+Algunos campos se comportan de forma especial:
+
+- **Nombre** y **Estado** son **obligatorios**: debes mapear una columna a cada uno antes de continuar.
+- Los valores de **Estado** se concilian **dentro de la tarjeta de esa columna** — cada valor de
+  estado distinto de tu archivo se asocia a un estado de lazyit (por ejemplo `active → OPERATIONAL`,
+  `retired → RETIRED`). Los sinónimos comunes se completan por ti; cambia cualquiera.
+- **Número de serie** es opcional pero **importante**: es la única clave natural del activo. Si lo
+  mapeas, una nueva subida no creará duplicados de esas filas. Sin él, una nueva subida **no se
+  de-duplica**.
+- **Etiqueta de activo** — una etiqueta de tu archivo se usa tal cual; una en blanco se asigna
+  automáticamente más tarde si tu instancia tiene un esquema de etiquetas activado.
+- **Modelo** y **Ubicación** son **referencias**, asociadas a registros existentes por nombre
+  (consulta *Conflictos*).
+
+El importador **pre-rellena una mejor suposición** para cada columna, pero nunca decide por ti —
+confirmas cada columna, y nada se descarta en silencio.
+
+### Marca y categoría del modelo
+
+Cuando la importación crea un **Modelo** nuevo, necesita un **fabricante** y una **categoría**. Puedes
+definirlos de dos maneras:
+
+- **Por fila** — mapea una columna a **Fabricante** o **Categoría** en el desplegable, y cada modelo
+  toma su valor de esa fila.
+- **Para todos los modelos** — si tu archivo no tiene esa columna (o todos tus activos son de la misma
+  marca), fija un único **Fabricante** y/o **Categoría** en el recuadro *Marca y categoría del modelo*;
+  se aplica a todos los modelos que cree la importación. Una columna mapeada siempre gana sobre un
+  valor fijado.
 
 ## 4. Vista previa (la simulación)
 
