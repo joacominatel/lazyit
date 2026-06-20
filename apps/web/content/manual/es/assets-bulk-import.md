@@ -96,9 +96,17 @@ Algunos campos se comportan de forma especial:
   (consulta *Conflictos*).
 
 El importador **pre-rellena una mejor suposición** para cada columna, pero nunca decide por ti —
-confirmas cada columna, y nada se descarta en silencio.
+confirmas cada columna, y nada se descarta en silencio. La suposición entiende más que los encabezados
+exactos en inglés: también reconoce **nombres en español y estilo Snipe-IT** (por ejemplo *Nombre*,
+*Número de serie*, *Asignado a*, *Modelo*), así que una exportación típica llega casi toda
+pre-mapeada. Aun así confirmas cada columna — la auto-detección solo propone el destino.
 
 ### Marca y categoría del modelo
+
+**Un modelo se crea a partir de su nombre.** Para que la importación cree modelos, mapea una columna a
+**Modelo** (dentro del grupo *Activo*). Mapear solo **Fabricante** o **Categoría** *no* crea un modelo
+— esos dos solo **enriquecen** un modelo que ya proviene de una columna **Modelo** mapeada. La
+categoría se vincula **a través del modelo**, no directamente al activo.
 
 Cuando la importación crea un **Modelo** nuevo, necesita un **fabricante** y una **categoría**. Puedes
 definirlos de dos maneras:
@@ -118,10 +126,14 @@ Mapea cualquier campo de **Persona** y la importación, para cada fila, buscará
 - **Una persona importada no tiene acceso.** Es una persona de **directorio**: una entrada real en tu
   lista de Usuarios (con la insignia **Directorio**), pero sin cuenta en tu proveedor de identidad.
   Existe para que el activo tenga un propietario registrado; no puede iniciar sesión hasta tener cuenta.
-- **Identifícala por Correo, Legajo o Usuario.** La importación necesita al menos uno de estos para
-  saber *de quién* es una fila (y para no crear dos veces a la misma persona). **Si mapeas un campo de
-  Persona, también debes mapear uno de estos campos de identidad** — de lo contrario el asistente no te
-  deja continuar. Una fila sin ninguno importa el activo **sin asignar**, con una advertencia.
+- **Para asignar, mapea el Nombre de la persona *y* una clave de identidad.** El **Nombre** (la
+  columna *Asignado a*) es **obligatorio** para asignar un activo, además de al menos uno de **Correo**,
+  **Legajo** o **Usuario** para saber *de quién* es una fila (y para no crear dos veces a la misma
+  persona). **Si mapeas cualquier campo de Persona, el asistente no te deja continuar hasta que mapees
+  tanto el Nombre como una clave de identidad.** Una fila a la que le falta el nombre se marca como
+  **fila inválida** en la vista previa, para que la corrijas antes de confirmar — nunca falla en
+  silencio al final. Una fila con nombre pero sin clave de identidad importa el activo **sin asignar**,
+  con una advertencia.
 - **Se vinculan a una cuenta real automáticamente — solo con un correo que coincida.** Cuando esa
   persona inicie sesión más tarde a través de tu proveedor de identidad (OIDC) usando el **mismo correo
   verificado**, lazyit vincula ambas: la entrada de directorio pasa a ser su cuenta y la insignia
