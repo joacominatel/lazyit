@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AssetSchema, CreateAssetSchema } from "../asset";
+import { IMPORT_UI_TARGETS } from "./descriptor";
 
 /**
  * Migrator import — the three-layer mapping model (ADR-0069 §4, #627).
@@ -127,6 +128,19 @@ const RESERVED_TARGET_KEYS: ReadonlySet<string> = new Set(
   [...RESERVED_CUSTOM_KEYS].filter((k) => !CREATE_ASSET_KEYS.has(k)),
 );
 
+/**
+ * The ALLOWLIST a `person.fields[].field` target must be one of (E2-AUTH-01, defense-in-depth parity with
+ * the asset/specs path). Derived from `IMPORT_UI_TARGETS.person` (the single UI source of truth —
+ * `name`/`email`/`legajo`/`username`/`jobTitle`/`department`/`supervisor`) so it can't drift. A person
+ * sub-field becomes a key on the coerced directory-person bucket (`coerce-row.ts`), then is re-validated
+ * strict by `CreateDirectoryPersonSchema.parse`; that strict parse already rejects smuggled keys, so this
+ * is NOT live-exploitable today — it closes the asymmetry with `RESERVED_TARGET_KEYS` (which guards the
+ * asset target path) so a non-allowlist or proto-pollution person target is rejected at MAPPING time too.
+ */
+const PERSON_ALLOWED_TARGET_KEYS: ReadonlySet<string> = new Set(
+  IMPORT_UI_TARGETS.person.map((t) => t.field),
+);
+
 /** Max number of custom (specs) fields per session — a local DoS/abuse cap (ADR-0069 REDESIGN §5.1). */
 const MAX_CUSTOM_FIELDS = 64;
 
@@ -219,6 +233,23 @@ export const ImportMappingSchema = z
         });
       }
       seenReferenceFields.add(r.field);
+    });
+
+    // Anti mass-assignment + anti prototype-pollution at the PERSON-TARGET layer (E2-AUTH-01, parity).
+    // A `person.fields[].field` becomes a key on the coerced directory-person bucket. Unlike the asset
+    // path (whose legitimate targets ARE arbitrary create-schema fields), a person sub-field's legitimate
+    // values are a CLOSED allowlist (`IMPORT_UI_TARGETS.person`) — so reject any field NOT on it (which
+    // also rejects `__proto__`/`constructor`/`prototype` since they're not allowlisted). NOT live-
+    // exploitable today (`CreateDirectoryPersonSchema.parse` strips smuggled keys), but this closes the
+    // asymmetry with `rejectReservedTarget` so a corrupt/malicious persisted mapping is rejected here too.
+    (m.person?.fields ?? []).forEach((p, i) => {
+      if (!PERSON_ALLOWED_TARGET_KEYS.has(p.field)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["person", "fields", i, "field"],
+          message: `"${p.field}" is not an allowed person mapping target`,
+        });
+      }
     });
   });
 
