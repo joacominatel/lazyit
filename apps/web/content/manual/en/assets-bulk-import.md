@@ -9,7 +9,8 @@ order: 1
 
 The **bulk importer** loads an existing estate of assets into lazyit from a single CSV or JSON file.
 It is built for the first day of a new instance, when your inventory still lives in a spreadsheet or
-a legacy tool. You drive it from **Importer** in the sidebar.
+a legacy tool. You reach it from **Settings → Bulk import** (it's an occasional admin action, so it
+lives in Settings rather than the main sidebar).
 
 The importer is **administrator-only** — it needs the `import:run` permission, which administrators
 hold by default. If you can't see it, ask an administrator to run the import for you.

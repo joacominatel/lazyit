@@ -9,8 +9,9 @@ order: 1
 
 El **importador masivo** carga en lazyit un inventario de activos existente desde un único archivo CSV
 o JSON. Está pensado para el primer día de una instancia nueva, cuando tu inventario todavía vive en
-una hoja de cálculo o en una herramienta heredada. Se controla desde **Importador** en la barra
-lateral.
+una hoja de cálculo o en una herramienta heredada. Se accede desde **Configuración → Importación
+masiva** (es una acción de administrador ocasional, así que vive en Configuración y no en la barra
+lateral principal).
 
 El importador es **solo para administradores** — requiere el permiso `import:run`, que los
 administradores tienen por defecto. Si no lo ves, pídele a un administrador que haga la importación.
