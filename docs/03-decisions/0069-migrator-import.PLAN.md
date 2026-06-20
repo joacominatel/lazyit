@@ -1,17 +1,25 @@
 ---
 title: "ADR-0069 PLAN: Plan de ejecución del rediseño del import masivo (worktrees, lanes, etapas)"
 tags: [adr, migrator, import, plan, execution, worktrees, backend, frontend, shared, docs]
-status: draft-paused
+status: executing
 created: 2026-06-18
-updated: 2026-06-18
+updated: 2026-06-20
 deciders: [Joaquín Minatel]
 companion: 0069-migrator-import.REDESIGN.md
-note: "PAUSADO por el CEO antes de implementar. Este documento captura CÓMO se iba a ejecutar — no se escribió código de feature."
+note: "EN EJECUCIÓN desde 2026-06-20. El CEO respondió §9 (Q1-Q6) y dio GO a la Etapa 1 completa. Cambios vs. el plan original: ahora SÍ se usa gh/push/PR a dev (Q1); worktrees solo para los fixes chicos paralelos, la cadena core va serial (Q4, decisión de CTO); username pasa a 3ª clave de identidad fallback (Q5)."
 ---
 
 # Plan de ejecución — Rediseño del Import Masivo
 
-> **Estado: PAUSADO antes de implementar (2026-06-18).** El CEO pidió dejar el plan documentado y NO empezar a trabajar todavía. Este archivo es el "cómo ejecutar": mecánica de worktrees, etapas, lanes, contratos de los agentes, checkpoints, ideas, riesgos y preguntas abiertas. El "qué/por qué" técnico vive en su compañero [[0069-migrator-import.REDESIGN]] (§0 = decisiones del CEO ya cerradas).
+> **Estado: EN EJECUCIÓN (2026-06-20).** El CEO respondió §9 y dio GO a la **Etapa 1 completa** (no MVP-recortado: la cocinamos entera, después la Etapa 2). El "qué/por qué" técnico vive en su compañero [[0069-migrator-import.REDESIGN]] (§0 = decisiones del CEO ya cerradas).
+>
+> **Respuestas del CEO a §9 (2026-06-20):**
+> - **Q1 →** `gh` habilitado (cuenta `joacominatel`). Trabajamos con ramas, **push y PR a `dev`**. (Anula el "merge local sin gh" del plan original.)
+> - **Q2 →** `prueba-import.csv` va a `.gitignore` (hecho). Fixture anonimizado para el test de §8 sigue siendo el plan.
+> - **Q3 →** Defaults reversibles del REDESIGN §0 **confirmados**.
+> - **Q4 →** Preferencia general = worktrees; **delega en el CTO** la mecánica anti-colisión. **Decisión CTO:** cadena `SHARED→BACKEND→FRONTEND` **serial sobre la rama de integración** (dependencia dura + directorios disjuntos = sin colisión); **worktrees solo para los fixes/feats chicos paralelos**.
+> - **Q5 →** `username` se suma como **3ª clave de identidad** (email ∨ legajo ∨ username), como fallback.
+> - **Q6 →** **Etapa 1 completa** de una; luego Etapa 2 para dejar todo cocinado.
 
 ---
 
