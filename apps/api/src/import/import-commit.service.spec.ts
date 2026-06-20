@@ -88,12 +88,30 @@ interface PrismaState {
     assetId?: string;
   }[];
   /**
-   * The directory-person LIVE dedup (REDESIGN §4.5): given the OR identity clauses, return an existing
-   * live person `{ id }` (a match → link, no create) or null (no live match → create). A test scripts it
-   * to assert dedup behavior; default absent = always-miss (create). A soft-deleted ghost test returns
-   * null here (the soft-delete-filtered findFirst never sees the ghost) to prove no resurrection.
+   * The directory-person LIVE dedup (REDESIGN §4.5 / E2-INTEG-02): given the OR identity clauses, return
+   * the live users that match (a `findMany` so the service can DETECT an ambiguous cross-user collision).
+   * A single `{ id }` (or the legacy `{ id }`) → one distinct match → link; an array of >1 distinct ids →
+   * AMBIGUOUS → asset imports unassigned; null/[] → no live match → create. A test scripts it; default
+   * absent = always-miss (create). A soft-deleted ghost test returns [] (the live-filtered read never sees
+   * the ghost) to prove no resurrection. Returned rows may carry `email`/`legajo`/`username` for the
+   * precedence assertion (the single-match path).
    */
-  directoryDedup?: (or: any[]) => { id: string } | null;
+  directoryDedup?: (
+    or: any[],
+  ) =>
+    | {
+        id: string;
+        email?: string;
+        legajo?: string;
+        username?: string;
+      }
+    | {
+        id: string;
+        email?: string;
+        legajo?: string;
+        username?: string;
+      }[]
+    | null;
   /** Live non-directory Users the supervisor→managerId match scans (REDESIGN §3.6). */
   liveManagers?: { id: string; firstName: string; lastName: string }[];
 }
@@ -152,18 +170,23 @@ function makePrisma(state: PrismaState) {
       },
     },
     user: {
-      // Two callers: the actor lookup `findFirst({ where: { id } })` (returns the principal) and the
-      // directory-person dedup `findFirst({ where: { OR: [...] } })` (REDESIGN §4.5). The dedup consults
-      // `state.directoryDedup` (a fn the person tests script) — default null = no live match → a create.
-      findFirst: async (args: any) => {
-        if (args?.where?.OR) {
-          return (state.directoryDedup?.(args.where.OR) ?? null) as any;
-        }
+      // The actor lookup `findFirst({ where: { id } })` returns the principal. (The directory-person dedup
+      // is a `findMany({ where: { OR } })` now — see below — so it can detect a cross-user collision.)
+      findFirst: async (_args: any) => {
         return state.user ?? { id: OWNER };
       },
-      // The supervisor→managerId match (REDESIGN §3.6): live non-directory Users. Default empty (no
-      // match → managerName free-text); a test seeds `state.liveManagers`.
-      findMany: async () => state.liveManagers ?? [],
+      // Two findMany callers: (1) the directory-person dedup `findMany({ where: { OR, deletedAt:null } })`
+      // (REDESIGN §4.5 / E2-INTEG-02 — consults `state.directoryDedup`, default null = no live match →
+      // create), and (2) the supervisor→managerId match `findMany({ where: { firstName, lastName } })`
+      // (REDESIGN §3.6 — `state.liveManagers`, default empty → managerName free-text).
+      findMany: async (args: any) => {
+        if (args?.where?.OR) {
+          const got = state.directoryDedup?.(args.where.OR) ?? null;
+          if (got === null) return [];
+          return (Array.isArray(got) ? got : [got]) as any;
+        }
+        return state.liveManagers ?? [];
+      },
     },
     asset: {
       findMany: async () => assets,
@@ -1530,6 +1553,126 @@ describe('ImportCommitService.commit', () => {
 
       // The 409 is swallowed as idempotent → the row is COMMITTED, not FAILED, and no duplicate person
       // was created (dedup found the live one).
+      expect(result.committed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(prisma._rowStatuses.get(1)?.status).toBe('COMMITTED');
+      expect(users.create).not.toHaveBeenCalled();
+    });
+
+    it('E2-INTEG-02: an AMBIGUOUS identity (email→A, legajo→B) imports the asset UNASSIGNED + a warning, never re-linking either user', async () => {
+      // The row's email matches live user A and its legajo matches a DIFFERENT live user B. A single OR
+      // findFirst would nondeterministically link the asset to A or B; the conflict-detecting findMany
+      // returns BOTH distinct ids → AMBIGUOUS. The asset still imports (asset-first), the row is COMMITTED
+      // (NOT FAILED), no assignment is opened, and no person is created.
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'Laptop X',
+              Status: 'active',
+              AssignedTo: 'Ada Lovelace',
+              EmployeeNo: 'E-B', // legajo → user B
+              Email: 'ada@corp.test', // email → user A
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      // Two DISTINCT live users match the row's identity keys → ambiguous.
+      state.directoryDedup = () => [
+        { id: 'user-A', email: 'ada@corp.test' },
+        { id: 'user-B', legajo: 'E-B' },
+      ];
+      const { service, users, assignments, assets, prisma } =
+        makeService(state);
+
+      const result = await service.commit('sess-1', OWNER);
+
+      // The asset DID import, the row is COMMITTED with the PII-free warning, neither A nor B is linked.
+      expect(result.committed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(assets.create).toHaveBeenCalledTimes(1);
+      expect(users.create).not.toHaveBeenCalled(); // no new person
+      expect(assignments.create).not.toHaveBeenCalled(); // UNASSIGNED — neither A nor B reassigned
+      const row = prisma._rowStatuses.get(1);
+      expect(row?.status).toBe('COMMITTED');
+      expect(row?.error).toEqual(
+        expect.objectContaining({ reason: 'ambiguous-identity', warning: true }),
+      );
+    });
+
+    it('E2-INTEG-02: two identity keys that point at the SAME single live user → an unambiguous link (not ambiguous)', async () => {
+      // Both the email and the legajo resolve to the SAME live user → one distinct id → link (precedence
+      // email > legajo > username). The asset is assigned to that user; no warning, no new person.
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'Laptop Y',
+              Status: 'active',
+              AssignedTo: 'Ada Lovelace',
+              EmployeeNo: 'E-1',
+              Email: 'ada@corp.test',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      state.directoryDedup = () => [
+        { id: 'user-A', email: 'ada@corp.test', legajo: 'E-1' },
+      ];
+      const { service, users, assignments } = makeService(state);
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(result.committed).toBe(1);
+      expect(users.create).not.toHaveBeenCalled(); // existing user, no create
+      expect(assignments.create).toHaveBeenCalledTimes(1);
+      expect(assignments._calls[0]).toEqual(
+        expect.objectContaining({ userId: 'user-A' }),
+      );
+    });
+
+    it('E2-IDEM-01: a raw P2002 on the assignment (active-pair race) is the SAME idempotent no-op as the 409 — the row COMMITS, not FAILED', async () => {
+      const state = sessionWithPerson(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: {
+              Name: 'A',
+              Status: 'active',
+              AssignedTo: 'Ada L',
+              EmployeeNo: 'E-001',
+            },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      // The person exists live (dedup links it); the assignment write races past the pre-check and the DB's
+      // active-pair partial unique index raises a RAW Prisma P2002 (NOT a ConflictException). The commit
+      // must treat it as already-assigned → COMMITTED, not FAILED (mirrors the 409 idempotency test).
+      state.directoryDedup = () => ({ id: 'existing-person' });
+      const p2002 = new Prisma.PrismaClientKnownRequestError('dupe', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: 'asset_assignments_active_pair_key' },
+      });
+      const assignments = makeAssignments();
+      assignments.create = jest.fn(async (_data: any, _principal: any) => {
+        throw p2002;
+      });
+      const { service, prisma, users } = makeService(state, { assignments });
+
+      const result = await service.commit('sess-1', OWNER);
+
       expect(result.committed).toBe(1);
       expect(result.failed).toBe(0);
       expect(prisma._rowStatuses.get(1)?.status).toBe('COMMITTED');
