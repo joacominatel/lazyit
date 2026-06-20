@@ -4,6 +4,7 @@ import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import {
   AssetSchema,
   AssetStatusSchema,
+  HEADER_ALIASES,
   IMPORT_UI_TARGETS,
   assetImportDescriptor,
   coerceAbsent,
@@ -142,9 +143,14 @@ export function MappingStep({
     ];
     for (const h of headers) {
       const norm = normalize(h);
-      const match = candidates.find(
-        (c) => !claimed.has(token(c.entity, c.field)) && normalize(c.field) === norm,
-      );
+      const match = candidates.find((c) => {
+        if (claimed.has(token(c.entity, c.field))) return false;
+        // Exact field-name match wins; else fall back to a localized header alias (#647).
+        if (normalize(c.field) === norm) return true;
+        return (
+          HEADER_ALIASES[token(c.entity, c.field)]?.some((a) => normalize(a) === norm) ?? false
+        );
+      });
       if (match) {
         const tok = token(match.entity, match.field);
         claimed.add(tok);
@@ -221,6 +227,11 @@ export function MappingStep({
   );
   const personIdentityMissing = personMapped && !personHasIdentity;
 
+  // name is REQUIRED to create the directory person (CreateDirectoryPersonSchema). Mapping person
+  // sub-fields without a name silently failed every row at commit (#647) — block Continue here.
+  const personHasName = headers.some((h) => choices[h]?.target === token("person", "name"));
+  const personNameMissing = personMapped && !personHasName;
+
   // --- per-column issues: duplicate target + custom-key duplicate/reserved (mirrors the backend's
   // ImportMappingSchema superRefine; first line of the same defense). Inline `role=alert` per card. ---
   const reservedKeys = useMemo(
@@ -273,6 +284,7 @@ export function MappingStep({
     missingRequired.length === 0 &&
     !unnamedCustom &&
     !personIdentityMissing &&
+    !personNameMissing &&
     !hasColumnError &&
     !isBusy;
 
@@ -625,6 +637,11 @@ export function MappingStep({
       {missingRequired.length === 0 && !unnamedCustom && personIdentityMissing && (
         <p className="text-sm text-destructive" role="alert">
           {t("mapping.personIdentityRequired")}
+        </p>
+      )}
+      {missingRequired.length === 0 && !unnamedCustom && !personIdentityMissing && personNameMissing && (
+        <p className="text-sm text-destructive" role="alert">
+          {t("mapping.personNameRequired")}
         </p>
       )}
 
