@@ -400,4 +400,29 @@ export class UsersController {
     // a human → performedById, an SA holding user:manage → serviceAccountId (CHECK-safe; ADR-0048).
     return this.users.restore(id, this.actor.resolveActor(principal));
   }
+
+  // The manual "Crear cuenta OIDC" promotion (ADR-0069 REDESIGN §0 #3): take an existing DIRECTORY
+  // person (no login) and provision its IdP account NOW — the explicit counterpart to the auto-claim by
+  // verified-email login (ADR-0038). ADMIN-only (same `user:manage` gate as every other user mutation).
+  @Post(':id/provision-account')
+  @RequirePermission('user:manage')
+  @ApiOperation({
+    summary:
+      'Provision an OIDC account for a directory person — ADMIN only (ADR-0069 REDESIGN)',
+    description:
+      'Promotes a directory-only person (created by the bulk import, no login) into a real account: ' +
+      'creates the user in the bundled identity provider (Zitadel), sets externalId and flips ' +
+      'directoryOnly to false, all without a split-brain (IdP first, then the local update + audit in ' +
+      'one transaction). 400 if the target is not a directory person, already has an account, or has no ' +
+      'email (Zitadel requires one); 503 if the IdP create fails. Only the bundled-management IdP can ' +
+      'provision here.',
+  })
+  @ApiCreatedResponse({ type: UserDto })
+  provisionAccount(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor?: User,
+  ) {
+    // Pass the actor so the service attributes the audited UPDATED history row + the IdP write-back line.
+    return this.users.provisionAccount(id, this.actor.resolve(actor));
+  }
 }
