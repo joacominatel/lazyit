@@ -60,7 +60,13 @@
       "purchaseDate": "Purchase date",
       "warrantyEnd": "Warranty end",
       "manufacturer": "Manufacturer",
-      "category": "Category"
+      "category": "Category",
+      "email": "Email",
+      "legajo": "Employee no.",
+      "username": "Username",
+      "jobTitle": "Job title",
+      "department": "Department",
+      "supervisor": "Supervisor"
     },
     "mapToLabel": "Map this column to",
     "sampleValues": "Example values from your file",
@@ -77,8 +83,10 @@
     "duplicateTarget": "Two columns map to “{field}”. Only one can — change this one or the other.",
     "group": {
       "asset": "Asset",
-      "model": "Model"
+      "model": "Model",
+      "person": "Person"
     },
+    "personIdentityRequired": "You started mapping a person. Map Email, Employee no. or Username too so we can identify who the asset belongs to.",
     "statusTitle": "Status values",
     "statusInColumnNote": "Map each status value in this column to a lazyit status. Common synonyms are filled in for you.",
     "statusNoValues": "No status values were found in the sampled rows.",
