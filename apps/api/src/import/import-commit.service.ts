@@ -11,6 +11,8 @@ import {
   assetImportDescriptor,
   coerceRow,
   CreateAssetSchema,
+  CreateAssetModelSchema,
+  CreateAssetCategorySchema,
   ImportResolutionPlanSchema,
   ImportMappingSchema,
   IMPORT_DESCRIPTORS,
@@ -739,12 +741,17 @@ export class ImportCommitService {
       const categoryId = modelCreateConfig.categoryName
         ? await this.findOrCreateCategory(modelCreateConfig.categoryName)
         : undefined;
-      const m = await this.models.create({
-        name: normalizedValue,
-        manufacturer:
-          modelCreateConfig.manufacturer ?? IMPORT_MODEL_DEFAULT_MANUFACTURER,
-        ...(categoryId !== undefined ? { categoryId } : {}),
-      });
+      // Run the SAME strict schema the HTTP path uses BEFORE the service create, so an import-created
+      // model honors the same caps (`name`/`manufacturer` `.max(200)`) — a long manufacturer cell can't
+      // bypass them via the import seam. A cap violation throws here and is recorded as a FAILED row.
+      const m = await this.models.create(
+        CreateAssetModelSchema.parse({
+          name: normalizedValue,
+          manufacturer:
+            modelCreateConfig.manufacturer ?? IMPORT_MODEL_DEFAULT_MANUFACTURER,
+          ...(categoryId !== undefined ? { categoryId } : {}),
+        }),
+      );
       return m.id;
     }
     // Unknown phase-1 entity — should never happen with the asset descriptor.
@@ -767,7 +774,11 @@ export class ImportCommitService {
       select: { id: true },
     });
     if (found) return found.id;
-    const created = await this.categories.create({ name: trimmed });
+    // Same strict schema as the HTTP path so an import-created category honors `name` `.max(100)` (a
+    // long category cell can't bypass the cap via the import seam). A violation throws → FAILED row.
+    const created = await this.categories.create(
+      CreateAssetCategorySchema.parse({ name: trimmed }),
+    );
     return created.id;
   }
 
