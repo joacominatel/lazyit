@@ -128,5 +128,12 @@ On the high ports (8080/8443), Caddy's automatic HTTP→HTTPS redirect targets t
 (it doesn't know the external host port). Just open **https://localhost:8443** directly. On a real
 host using 80/443 this is a non-issue.
 
+## `bun install` fails with tarball/extraction error mid-build
+
+Transient network or registry hiccup (e.g. `Fail extracting tarball for "@prisma/studio-core@..."`).
+All three build Dockerfiles (api, web, migrate) auto-retry `bun install` up to **3 times with a 5-second backoff** — the build
+recovers on its own. If all 3 attempts fail, the build exits non-zero with the original error;
+a stale lockfile or a genuinely missing package will fail all retries and surface the real error.
+
 Related: [[docker-prod-like-first-boot]] · [[deploy-self-hosted]] · [[backups]] ·
 [[0025-containerization-strategy]] · [[0026-reverse-proxy-tls]]

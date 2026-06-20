@@ -16,7 +16,7 @@ COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
-RUN bun install --frozen-lockfile --linker hoisted --filter "@lazyit/api"
+RUN ok=0; for i in 1 2 3; do bun install --frozen-lockfile --linker hoisted --filter "@lazyit/api" && ok=1 && break || { echo "bun install failed (attempt $i/3), retrying in 5s..."; sleep 5; }; done; [ "$ok" -eq 1 ]
 
 # Sources needed for seeding and build. @lazyit/shared is a workspace dependency
 # that must be built to dist/ before it can be imported (ADR-0014).
