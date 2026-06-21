@@ -159,6 +159,33 @@ describe("CreateServiceAccountSchema — INV-SA-3 ceiling (SEC-011)", () => {
     ).toBe(false);
   });
 
+  test("rejects secret:read (human-only by design — ADR-0061; the Secret Manager is keypair-gated, #555)", () => {
+    expect(
+      CreateServiceAccountSchema.safeParse({
+        name: "evil-bot",
+        permissions: ["secret:read"],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects secret:manage (human-only by design — ADR-0061; a bot has no vault keypair, #555)", () => {
+    expect(
+      CreateServiceAccountSchema.safeParse({
+        name: "evil-bot",
+        permissions: ["secret:manage"],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects secret:* mixed with legitimate permissions (no partial slip-through)", () => {
+    expect(
+      CreateServiceAccountSchema.safeParse({
+        name: "evil-bot",
+        permissions: ["asset:read", "secret:read"],
+      }).success,
+    ).toBe(false);
+  });
+
   test("still accepts a normal (non-meta) grant set — guard against over-blocking", () => {
     expect(
       CreateServiceAccountSchema.safeParse({
@@ -182,6 +209,14 @@ describe("UpdateServiceAccountSchema — INV-SA-3 ceiling (SEC-011)", () => {
     expect(
       UpdateServiceAccountSchema.safeParse({
         permissions: ["settings:manage"],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects secret:manage on update (no escalation into the Secret Manager via a set replacement, #555)", () => {
+    expect(
+      UpdateServiceAccountSchema.safeParse({
+        permissions: ["secret:manage"],
       }).success,
     ).toBe(false);
   });

@@ -85,6 +85,15 @@ Two simple habits prevent the unrecoverable case:
   so a teammate can restore your access if you ever lose your keys. lazyit warns you when a vault has
   only one member — take the hint before it is too late.
 
+## The session locks itself when you step away
+
+Once you unlock the Secret Manager, your key stays available in the browser so you don't have to re-enter
+your password for every secret. To protect an unattended screen, the session **locks itself
+automatically after about 15 minutes of inactivity** — and sooner if you leave the tab hidden for a
+minute or so. When it locks, every revealed value is hidden and the in-memory key is dropped; you simply
+unlock again with your password to continue. Any activity (typing, clicking, scrolling) resets the timer,
+and you can always lock immediately with the **Lock** action.
+
 ## When a secret may be exposed
 
 Removing a member, or even deleting a secret, stops **future** reads through lazyit — it does not

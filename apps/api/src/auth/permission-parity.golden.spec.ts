@@ -12,11 +12,15 @@ import {
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: { defineExtension: (x: unknown) => x },
+  // Some privileged controllers (#555) transitively pull the `Role` enum at module load
+  // (config → permissions-config.service). Provide it so importing the class for metadata works.
+  Role: { ADMIN: 'ADMIN', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
 }));
 jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 import { PERMISSION_KEY } from './require-permission.decorator';
+import { IS_PUBLIC_KEY } from './public.decorator';
 import { AssetsController } from '../assets/assets.controller';
 import { AssetAssignmentsController } from '../asset-assignments/asset-assignments.controller';
 import { ApplicationsController } from '../applications/applications.controller';
@@ -30,6 +34,20 @@ import { ArticleCategoriesController } from '../article-categories/article-categ
 import { ApplicationCategoriesController } from '../application-categories/application-categories.controller';
 import { AccessGrantsController } from '../access-grants/access-grants.controller';
 import { UsersController } from '../users/users.controller';
+// Privileged surfaces added to the parity net (#555): every @RequirePermission route on these must
+// resolve to ADMIN-only — a MEMBER/VIEWER must never reach the Secret Manager, SA management, the
+// permission matrix, or the workflow engine.
+import { VaultsController } from '../secret-manager/vaults.controller';
+import { ItemsController } from '../secret-manager/items.controller';
+import { KeypairController } from '../secret-manager/keypair.controller';
+import { ServiceAccountsController } from '../service-accounts/service-accounts.controller';
+import { ConfigController } from '../config/config.controller';
+import { WorkflowsController } from '../workflow-engine/definitions/workflows.controller';
+import { WorkflowConnectionsController } from '../workflow-engine/definitions/workflow-connections.controller';
+import { WorkflowSecretsController } from '../workflow-engine/definitions/workflow-secrets.controller';
+import { WorkflowRunsController } from '../workflow-engine/runs/workflow-runs.controller';
+import { ManualTasksController } from '../workflow-engine/tasks/manual-tasks.controller';
+import { WorkflowDryRunController } from '../workflow-engine/dry-run/workflow-dry-run.controller';
 
 /**
  * GOLDEN PARITY TEST (ADR-0046 P4) — the safety net for the mechanical @Roles → @RequirePermission
@@ -249,6 +267,96 @@ describe('@RequirePermission parity with the retired @Roles gates (ADR-0046 P4)'
       expect(after.has('MEMBER')).toBe(false);
       expect(after.has('VIEWER')).toBe(false);
       expect(after.has('ADMIN')).toBe(true);
+    }
+  });
+});
+
+/**
+ * ADMIN-ONLY PARITY for the privileged surfaces (#555 — generalising the ADR-0046 P4 net beyond the 13
+ * classic CRUD controllers). The Secret Manager, Service-Accounts management, the permission matrix, and
+ * the workflow engine are all ADMIN-tier by design: `secret:*`, `settings:manage`, and the `workflow:*`
+ * verbs are ADMIN-only in the seed. These controllers had no `@Roles` baseline (they were born on
+ * `@RequirePermission`), so instead of a pre/post diff we assert the security INVARIANT directly: every
+ * `@RequirePermission(perm)` route resolves to EXACTLY `{ADMIN}` — a MEMBER/VIEWER must never reach them.
+ *
+ * Routes intentionally excluded: `@Public()` first-run/setup routes (no auth at all) and the deliberate
+ * `@RequirePermission()` with NO args (e.g. `GET /config/my-permissions` — any authenticated caller).
+ * A future mis-wire of one of these routes to a MEMBER-held verb (`asset:read`, a `:write`, …) FAILS CI.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ADMIN_ONLY_CONTROLLERS: Array<[string, any]> = [
+  ['VaultsController', VaultsController],
+  ['ItemsController', ItemsController],
+  ['KeypairController', KeypairController],
+  ['ServiceAccountsController', ServiceAccountsController],
+  ['ConfigController', ConfigController],
+  ['WorkflowsController', WorkflowsController],
+  ['WorkflowConnectionsController', WorkflowConnectionsController],
+  ['WorkflowSecretsController', WorkflowSecretsController],
+  ['WorkflowRunsController', WorkflowRunsController],
+  ['ManualTasksController', ManualTasksController],
+  ['WorkflowDryRunController', WorkflowDryRunController],
+];
+
+describe('@RequirePermission ADMIN-only parity for privileged surfaces (#555)', () => {
+  const reflector = new Reflector();
+
+  for (const [name, ctrl] of ADMIN_ONLY_CONTROLLERS) {
+    const proto = ctrl.prototype as unknown as Record<string, unknown>;
+    const methods = Object.getOwnPropertyNames(proto).filter(
+      (m) => m !== 'constructor' && typeof proto[m] === 'function',
+    );
+
+    for (const method of methods) {
+      const handler = proto[method] as () => unknown;
+      const isPublic = reflector.get<boolean | undefined>(
+        IS_PUBLIC_KEY,
+        handler,
+      );
+      if (isPublic) {
+        continue; // @Public() — first-run/setup; not permission-gated by design.
+      }
+      const perms = reflector.get<Permission[] | undefined>(
+        PERMISSION_KEY,
+        handler,
+      );
+      // A handler with no @RequirePermission metadata at all, or an EMPTY require (any authenticated),
+      // is not an ADMIN-only route — skip (the empty-require case is e.g. config#myPermissions).
+      if (!perms || perms.length === 0) {
+        continue;
+      }
+
+      it(`${name}#${method}: resolves to ADMIN-only (no MEMBER/VIEWER)`, () => {
+        const after = rolesHolding(perms);
+        expect(after.has('VIEWER')).toBe(false);
+        expect(after.has('MEMBER')).toBe(false);
+        expect(after.has('ADMIN')).toBe(true);
+        // Readable failure if the set ever drifts:
+        expect(`${name}#${method} → ${fmt(after)}`).toBe(
+          `${name}#${method} → ADMIN`,
+        );
+      });
+    }
+  }
+
+  // Coverage guard: each privileged controller actually contributed at least one asserted ADMIN-only
+  // route — catches a controller that silently lost ALL its @RequirePermission gates (or an import typo
+  // resolving to an empty class), which would make the block vacuously pass.
+  it('every privileged controller contributes at least one ADMIN-only route', () => {
+    for (const [name, ctrl] of ADMIN_ONLY_CONTROLLERS) {
+      const proto = ctrl.prototype as unknown as Record<string, unknown>;
+      const gated = Object.getOwnPropertyNames(proto)
+        .filter((m) => m !== 'constructor' && typeof proto[m] === 'function')
+        .filter((m) => {
+          const handler = proto[m] as () => unknown;
+          if (reflector.get<boolean>(IS_PUBLIC_KEY, handler)) return false;
+          const perms = reflector.get<Permission[] | undefined>(
+            PERMISSION_KEY,
+            handler,
+          );
+          return !!perms && perms.length > 0;
+        });
+      expect(`${name}: ${gated.length} gated`).not.toBe(`${name}: 0 gated`);
     }
   });
 });

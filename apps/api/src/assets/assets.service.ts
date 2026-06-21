@@ -507,10 +507,12 @@ export class AssetsService {
           });
         }
       });
-      for (const id of succeeded) {
-        const row = await this.prisma.asset.findFirst({ where: { id } });
-        if (row) this.search.upsert('assets', projectAsset(row));
-      }
+      // One read for the whole batch (not one per id — #596): gather every restored row, then
+      // fire-and-forget a search upsert per row (same contract as the single-item paths).
+      const rows = await this.prisma.asset.findMany({
+        where: { id: { in: succeeded } },
+      });
+      for (const row of rows) this.search.upsert('assets', projectAsset(row));
     }
     return { requested: ids.length, succeeded, skipped };
   }
@@ -557,10 +559,12 @@ export class AssetsService {
           });
         }
       });
-      for (const id of succeeded) {
-        const row = await this.prisma.asset.findFirst({ where: { id } });
-        if (row) this.search.upsert('assets', projectAsset(row));
-      }
+      // One read for the whole batch (not one per id — #596): gather every changed row, then
+      // fire-and-forget a search upsert per row (same contract as the single-item paths).
+      const rows = await this.prisma.asset.findMany({
+        where: { id: { in: succeeded } },
+      });
+      for (const row of rows) this.search.upsert('assets', projectAsset(row));
     }
     return { requested: ids.length, succeeded, skipped };
   }

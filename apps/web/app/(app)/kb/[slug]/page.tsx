@@ -37,6 +37,7 @@ import { ArticleAliasesPanel } from "../_components/article-aliases-panel";
 import { ArticleLinksPanel } from "../_components/article-links-panel";
 import { ArticleReferencesPanel } from "../_components/article-references-panel";
 import { ArticleStatusBadge } from "../_components/article-status-badge";
+import { ArticleVersionHistoryPanel } from "../_components/article-version-history-panel";
 
 export default function ArticleDetailPage() {
   const t = useTranslations("kb");
@@ -220,6 +221,8 @@ export default function ArticleDetailPage() {
       />
 
       <ArticleLinksPanel articleId={article.id} canWrite={canWrite} />
+
+      <ArticleVersionHistoryPanel articleId={article.id} />
 
       <DeleteConfirmDialog
         open={deleteOpen}

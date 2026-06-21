@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  ArrowDownTrayIcon,
   ArrowLeftIcon,
   ArrowPathIcon,
+  ArrowUpTrayIcon,
   CheckIcon,
   ClipboardIcon,
   EyeIcon,
@@ -18,10 +20,11 @@ import {
 import type { SecretItem, User } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Callout } from "@/components/callout";
 import { PageHeader } from "@/components/page-header";
+import { SearchInput } from "@/components/search-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -59,7 +62,13 @@ import {
   useRemoveMember,
 } from "@/lib/secret-manager/hooks/use-members";
 import { useUserPublicKey } from "@/lib/secret-manager/hooks/use-keypair";
-import { useVault } from "@/lib/secret-manager/hooks/use-vaults";
+import { useRecordExport, useVault } from "@/lib/secret-manager/hooks/use-vaults";
+import {
+  type EnvEntry,
+  parseEnv,
+  serializeEnv,
+  splitNewVsExisting,
+} from "@/lib/secret-manager/env-file";
 import { base64ToBytes } from "./crypto-bytes";
 import { useSecretSession } from "./secret-session";
 import { UnlockGate } from "./unlock-gate";
@@ -126,6 +135,23 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
 
   const [addItemOpen, setAddItemOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  // #609: client-side filter over the NON-SECRET metadata (label + handle) only — never the value
+  // (which is ciphertext until revealed). INV-10 preserved: no plaintext is ever a filter input.
+  const [query, setQuery] = useState("");
+
+  const filteredItems = useMemo(() => {
+    if (!items) return items;
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(
+      (it) =>
+        it.label.toLowerCase().includes(q) || it.handle.toLowerCase().includes(q),
+    );
+  }, [items, query]);
+
+  const hasItems = !!items && items.length > 0;
 
   return (
     // #616: cap the content to a centered column matching the app's other detail views
@@ -166,7 +192,33 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
 
       {/* Items section */}
       <section className="space-y-4">
-        <h2 className="text-base font-semibold">{t("items.sectionTitle")}</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-semibold">{t("items.sectionTitle")}</h2>
+          {/* Export/import are deliberate, occasional admin actions — kept secondary and out of the
+              primary "Add secret" path. Import is manager-gated; export needs only a readable vault. */}
+          <div className="flex items-center gap-2">
+            {membershipState === "member" && hasItems ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setExportOpen(true)}
+              >
+                <ArrowDownTrayIcon className="size-4" />
+                {t("export.trigger")}
+              </Button>
+            ) : null}
+            {canManage ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setImportOpen(true)}
+              >
+                <ArrowUpTrayIcon className="size-4" />
+                {t("import.trigger")}
+              </Button>
+            ) : null}
+          </div>
+        </div>
 
         {/* SECW-02: non-member (e.g. ADMIN) banner — values in this vault cannot be decrypted. */}
         {membershipState === "not-member" ? (
@@ -175,15 +227,31 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
           </Callout>
         ) : null}
 
+        {/* #609: client-side search over label/handle (non-secret metadata). Only when it earns its
+            place — a vault with a handful of items doesn't need a filter box. */}
+        {hasItems && (items?.length ?? 0) > 4 ? (
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            label={t("items.searchLabel")}
+            placeholder={t("items.searchPlaceholder")}
+          />
+        ) : null}
+
         {itemsLoading ? (
           <ItemsSkeleton />
         ) : !items || items.length === 0 ? (
           <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
             {t("items.empty")}
           </div>
+        ) : filteredItems && filteredItems.length === 0 ? (
+          // #609: empty-search state (localized) — distinct from the no-items-at-all state above.
+          <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+            {t("items.searchEmpty", { query: query.trim() })}
+          </div>
         ) : (
           <ul className="space-y-2">
-            {items.map((item) => (
+            {(filteredItems ?? []).map((item) => (
               <ItemRow
                 key={item.id}
                 item={item}
@@ -259,7 +327,28 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
             onOpenChange={setAddMemberOpen}
             vaultId={vaultId}
           />
+          {/* #613: bulk import — manager-gated (it creates items). Mounted only while open. */}
+          {importOpen ? (
+            <ImportDialog
+              open={importOpen}
+              onOpenChange={setImportOpen}
+              vaultId={vaultId}
+              vaultName={vault?.name ?? t("detail.unknownVault")}
+              existingItems={items ?? []}
+            />
+          ) : null}
         </>
+      ) : null}
+      {/* #612: export — available to any vault MEMBER (not gated on manage); the browser already holds
+          the DEK. Mounted only while open. */}
+      {exportOpen ? (
+        <ExportDialog
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+          vaultId={vaultId}
+          vaultName={vault?.name ?? t("detail.unknownVault")}
+          items={items ?? []}
+        />
       ) : null}
     </div>
   );
@@ -1011,6 +1100,353 @@ function DeleteItemDialog({
           <Button variant="destructive" onClick={handleDelete} disabled={busy}>
             {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : null}
             {tc("delete")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ExportDialog — #612: client-side decrypt → .env download + metadata-only audit
+// ---------------------------------------------------------------------------
+
+/** Trigger a browser download of `text` as a `.env` file named after the vault. Browser-only, no network. */
+function downloadEnvFile(filename: string, text: string) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke on the next tick so the download has surely started.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/** Slugify a vault name into a safe `.env` filename stem (ASCII, dashes). Non-secret metadata only. */
+function vaultFilename(vaultName: string): string {
+  const stem =
+    vaultName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 60) || "vault";
+  return `${stem}.env`;
+}
+
+/**
+ * ExportDialog (#612). The browser DECRYPTS every readable item with the in-memory DEK, builds a `.env`
+ * text, and triggers a download — ENTIRELY CLIENT-SIDE (INV-10). Only AFTER the file is built do we call
+ * the metadata-only audit endpoint (`useRecordExport`) with `{ itemCount }`. NO plaintext, ciphertext,
+ * or DEK is ever sent — the audit body is a strictObject the server can only read as a count.
+ *
+ * Gated behind a CONFIRM that names the risk in plain language: this writes secrets in PLAINTEXT to disk.
+ */
+function ExportDialog({
+  open,
+  onOpenChange,
+  vaultId,
+  vaultName,
+  items,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  vaultId: string;
+  vaultName: string;
+  items: SecretItem[];
+}) {
+  const t = useTranslations("secrets");
+  const tc = useTranslations("common");
+  const { ensureDek } = useVaultDek(vaultId);
+  const recordExport = useRecordExport();
+  const [busy, setBusy] = useState(false);
+
+  async function handleExport() {
+    if (busy) return;
+    const dek = ensureDek();
+    if (!dek) {
+      // The DEK isn't available (session settling / membership) — surface a friendly error, never a crash.
+      toast.error(t("export.dekUnavailable"));
+      return;
+    }
+    setBusy(true);
+    try {
+      // Decrypt every item in the browser. A single tampered/wrong-DEK item must not abort the whole
+      // export — collect what we can and report any that failed.
+      const entries: EnvEntry[] = [];
+      let failed = 0;
+      for (const item of items) {
+        try {
+          entries.push({
+            key: item.handle,
+            value: openItem(dek, {
+              ciphertext: item.ciphertext,
+              iv: item.iv,
+              authTag: item.authTag,
+              keyVersion: item.keyVersion,
+            }),
+          });
+        } catch {
+          failed += 1;
+        }
+      }
+
+      if (entries.length === 0) {
+        toast.error(t("export.error"));
+        return;
+      }
+
+      downloadEnvFile(vaultFilename(vaultName), serializeEnv(entries));
+
+      // INV-10: metadata-only audit. The body carries ONLY the non-secret count — no value, no DEK.
+      try {
+        await recordExport.mutateAsync({
+          vaultId,
+          audit: { itemCount: entries.length },
+        });
+      } catch {
+        // The file already downloaded; a failed audit write shouldn't read as a failed export. Log-free.
+      }
+
+      toast.success(
+        failed > 0
+          ? t("export.successPartial", { count: entries.length, failed })
+          : t("export.success", { count: entries.length }),
+      );
+      onOpenChange(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => (busy ? null : onOpenChange(o))}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t("export.title")}</DialogTitle>
+          <DialogDescription>
+            {t("export.description", { count: items.length })}
+          </DialogDescription>
+        </DialogHeader>
+
+        <Callout tone="warning" className="text-xs">
+          {t("export.plaintextWarning")}
+        </Callout>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={busy}
+          >
+            {tc("cancel")}
+          </Button>
+          <Button type="button" onClick={handleExport} disabled={busy}>
+            {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : <ArrowDownTrayIcon className="size-4" />}
+            {busy ? t("export.exporting") : t("export.confirm")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ImportDialog — #613: parse .env → preview (new/skipped) → encrypt + create each NEW item
+// ---------------------------------------------------------------------------
+
+/**
+ * ImportDialog (#613). Parse a pasted/uploaded `.env` blob CLIENT-SIDE, preview which keys are NEW vs
+ * already-present (skip-existing collision policy — never overwrite), then for each NEW entry seal the
+ * value with the in-memory DEK (`sealItem`) and create it through the EXISTING create-item endpoint.
+ *
+ * INV-10: parsing + encryption happen in the browser; only the ciphertext envelope (+ non-secret
+ * label/handle) is ever sent — identical to the single-secret create path. No new backend.
+ */
+function ImportDialog({
+  open,
+  onOpenChange,
+  vaultId,
+  vaultName,
+  existingItems,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  vaultId: string;
+  vaultName: string;
+  existingItems: SecretItem[];
+}) {
+  const t = useTranslations("secrets");
+  const tc = useTranslations("common");
+  const { ensureDek } = useVaultDek(vaultId);
+  const createItem = useCreateItem();
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const existingHandles = useMemo(
+    () => existingItems.map((it) => it.handle),
+    [existingItems],
+  );
+
+  // Live preview from the pasted text — pure parse, no crypto, no network.
+  const parsed = useMemo(() => parseEnv(text), [text]);
+  const { toCreate, skipped } = useMemo(
+    () => splitNewVsExisting(parsed.entries, existingHandles),
+    [parsed.entries, existingHandles],
+  );
+
+  function handleOpenChange(next: boolean) {
+    if (busy) return;
+    if (!next) setText("");
+    onOpenChange(next);
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setText(await file.text());
+    e.target.value = ""; // allow re-selecting the same file
+  }
+
+  async function handleImport() {
+    if (busy || toCreate.length === 0) return;
+    const dek = ensureDek();
+    if (!dek) {
+      toast.error(t("import.dekUnavailable"));
+      return;
+    }
+    setBusy(true);
+    let created = 0;
+    let failed = 0;
+    try {
+      for (const entry of toCreate) {
+        try {
+          // Seal in the browser — the plaintext value never leaves the device.
+          const envelope = sealItem(dek, entry.value);
+          await createItem.mutateAsync({
+            vaultId,
+            data: {
+              // handles are lowercased + restricted like the single-add form.
+              label: entry.key,
+              handle: entry.key.toLowerCase().replace(/[^a-z0-9_.-]/g, ""),
+              ...envelope,
+            },
+          });
+          created += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      if (created > 0) {
+        toast.success(
+          failed > 0
+            ? t("import.successPartial", { created, failed })
+            : t("import.success", { created }),
+        );
+      } else {
+        toast.error(t("import.error"));
+      }
+      if (failed === 0) handleOpenChange(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const hasInput = text.trim().length > 0;
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t("import.title")}</DialogTitle>
+          <DialogDescription>
+            {t("import.description", { vault: vaultName })}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <Field>
+            <FieldLabel htmlFor="import-text">{t("import.pasteLabel")}</FieldLabel>
+            <textarea
+              id="import-text"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              disabled={busy}
+              rows={6}
+              spellCheck={false}
+              placeholder={t("import.pastePlaceholder")}
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <FieldDescription>
+              {/* Upload alternative — the file is read in the browser, never sent. */}
+              <label className="cursor-pointer text-primary underline-offset-2 hover:underline">
+                {t("import.uploadLabel")}
+                <input
+                  type="file"
+                  accept=".env,text/plain"
+                  onChange={handleFile}
+                  disabled={busy}
+                  className="sr-only"
+                />
+              </label>
+            </FieldDescription>
+          </Field>
+
+          {/* Preview — appears as soon as there's parseable input. */}
+          {hasInput ? (
+            <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-xs">
+              <p className="font-medium">
+                {t("import.previewSummary", {
+                  create: toCreate.length,
+                  skip: skipped.length,
+                })}
+              </p>
+              {toCreate.length > 0 ? (
+                <p className="text-muted-foreground">
+                  {t("import.previewNew")}{" "}
+                  <span className="font-mono">
+                    {toCreate.map((e) => e.key).join(", ")}
+                  </span>
+                </p>
+              ) : null}
+              {skipped.length > 0 ? (
+                <p className="text-muted-foreground">
+                  {t("import.previewSkipped")}{" "}
+                  <span className="font-mono">
+                    {skipped.map((e) => e.key).join(", ")}
+                  </span>
+                </p>
+              ) : null}
+              {parsed.malformed.length > 0 ? (
+                <p className="text-destructive">
+                  {t("import.previewMalformed", { count: parsed.malformed.length })}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => handleOpenChange(false)}
+            disabled={busy}
+          >
+            {tc("cancel")}
+          </Button>
+          <Button
+            type="button"
+            onClick={handleImport}
+            disabled={busy || toCreate.length === 0}
+          >
+            {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : <ArrowUpTrayIcon className="size-4" />}
+            {busy
+              ? t("import.importing")
+              : t("import.confirm", { count: toCreate.length })}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -71,6 +71,10 @@ export class ServiceAccountsService {
     dto: CreateServiceAccount,
     actorId: string | null,
   ): Promise<ServiceAccountWithSecret> {
+    // The engine SA's reserved name is owned by the engine alone (#555 / #542). Refuse a human-driven
+    // create under that name so an admin can never pre-seat a row a human holds the token to and then
+    // have a workflow run execute AS it — the run actor must stay a non-human, server-minted identity.
+    this.assertNotReservedName(dto.name);
     const expiresAt =
       dto.expiresAt !== undefined
         ? this.parseFutureExpiry(dto.expiresAt)
@@ -153,6 +157,9 @@ export class ServiceAccountsService {
     const account = await this.getLiveOr404(id);
     // The engine SA is system-managed — its name/grants/isActive/expiry are never human-editable (#304).
     this.assertNotSystemManaged(account, 'edited');
+    // …and no OTHER account may be RENAMED into the reserved engine name (#555 / #542) — that would
+    // mint a second "engine" row a human holds the token to and could surface as the run actor.
+    if (dto.name !== undefined) this.assertNotReservedName(dto.name);
 
     const data: PrismaTypes.ServiceAccountUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
@@ -358,6 +365,23 @@ export class ServiceAccountsService {
    */
   static isSystemManaged(row: { name: string }): boolean {
     return row.name === EngineServiceAccountService.ENGINE_SA_NAME;
+  }
+
+  /**
+   * Throw a 409 if `name` is the RESERVED engine-SA name (#555 / #542). The engine SA is the immutable,
+   * server-minted principal a workflow run executes AS ({@link EngineServiceAccountService}); a human
+   * must never be able to create — or rename another account into — a row under that name (it would let
+   * an admin pre-seat a row whose human-held token then backs the run actor). Trimmed + case-sensitive
+   * to match the exact reserved literal (`name` is already `.trim()`'d by the DTO). Audited to the actor
+   * via the surrounding mutation's audit row; this guard runs before any write.
+   */
+  private assertNotReservedName(name: string): void {
+    if (name.trim() === EngineServiceAccountService.ENGINE_SA_NAME) {
+      throw new ConflictException(
+        `"${EngineServiceAccountService.ENGINE_SA_NAME}" is a reserved system name (the workflow ` +
+          `engine's run actor) and cannot be used for a manually-managed service account.`,
+      );
+    }
   }
 
   /**

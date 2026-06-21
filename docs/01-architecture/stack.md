@@ -21,7 +21,7 @@ Versions below are **verified against the repository** as of 2026-06-08, not jus
 | Queue broker | **Valkey** (Redis-compatible) | `8-alpine` | Backs BullMQ; AOF persistence — see [[0053-async-workers-bullmq-valkey]] |
 | Async workers | **BullMQ** + `@nestjs/bullmq` | — | ioredis client; sandboxed processors for heavy/untrusted jobs |
 | Shared types | **`@lazyit/shared`** | `0.0.0` | `packages/shared`; zod schemas/types shared front↔back |
-| Node (for CLIs) | Node | `26` (planned) | Available for tools that require it; `@types/node` is `^24` in api, `^20` in web |
+| Node (for CLIs) | Node | `26` (planned) | Available for tools that require it; `@types/node` is `^24.0.0` in both api and web |
 
 ## Ports
 

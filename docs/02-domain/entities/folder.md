@@ -66,7 +66,9 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
   already deleted or non-existent; an empty folder cascades cleanly (`{ deletedFolders: 1,
   deletedArticles: 0 }`). The author-only article gate is bypassed (ADMIN folder operation). Stale
   `ArticleWikiLink.resolvedTargetId` values pointing at soft-deleted articles are left in place — the
-  read paths already filter these (ADR-0059 §3/§4).
+  read paths already filter these (ADR-0059 §3/§4). Each article the cascade soft-deletes is **deindexed
+  from Meilisearch** post-commit (fire-and-forget, mirroring the single-article delete path), so the
+  cascade never leaves **ghost search hits** behind (#595).
 - **One home folder per article** (the evolved required FK); aliases provide additional, nav-only
   appearances.
 - **Bulk `.zip` import mirrors the archive's tree into folders** (#398, [[0059-kb-folders-links-and-import]]
@@ -87,9 +89,13 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
   [[0022-draft-visibility-auth-shim]]). **Inherit-and-narrow** (§1): a child is at least as restricted
   as its nearest restricted ancestor and can never widen past it (effective rule = own ∩ ancestors').
   ADMIN keeps god-mode (INV-8); a [[service-account]] **fails closed** on a restricted folder (§8). The
-  rules also gate **`/search`** (a per-caller post-filter drops a restricted article hit a non-matching
-  caller may not see) and the **alias** path (no-escalation: you can never alias an article you can't
-  read). **INV-9** ([[0060-kb-folder-access-control]]).
+  rules also gate **`/search`** (the article query is scoped **Meili-side** to the caller's visible
+  folders so readable hits below the `limit` window are no longer dropped, #598; a per-caller in-app
+  post-filter is **retained as a defense-in-depth backstop** for index lag — authz never relies on Meili
+  alone) and the **alias** path (no-escalation: you can never alias an article you can't read). The
+  read-path tree load is **memoized per request** (`FolderTreeCache`) — the static folder tree loads once
+  per request, while the live grant/assignment joins still resolve fresh each call, so a revoked grant
+  drops access on the next read with no staleness (#599). **INV-9** ([[0060-kb-folder-access-control]]).
 - **Setting/clearing a folder's rules is `settings:manage`-gated** (ADMIN-only, `PUT
   /article-categories/:id/access-rules`) — re-scoping WHO may read a folder is an authorization-
   management action, distinct from `category:write` (authoring the folder itself).
@@ -121,6 +127,11 @@ folder's access rules (body `{ accessRules: <rule list> | null }`).
   fail-closed; the article read-path 404-not-403 gate; the no-escalation alias re-check; and the
   `/search` per-caller folder-access post-filter (the search-leak fix). The per-folder rule **editor
   UI** is a separate frontend slice.
+- **Hardened (#598/#599/#595):** the `/search` article query is now scoped **Meili-side**
+  (`categoryId IN [...]`) so readable hits below the `limit` window are returned and `total` is the
+  engine's readable count (the in-app post-filter is kept as a defense-in-depth backstop, #598); the
+  read-path folder-tree load is **memoized per request** while live joins stay dynamic (#599); and a
+  **cascade folder delete deindexes** its soft-deleted articles from Meilisearch (no ghost hits, #595).
 - **Built (#415):** the `?cascade=true` flag on `DELETE /:id` — BFS subtree walk, single-transaction
   soft-delete of all descendant folders + articles, hard-delete of all alias rows in the subtree
   (folder-side and article-side), ADMIN-only (same `category:delete` gate), returns

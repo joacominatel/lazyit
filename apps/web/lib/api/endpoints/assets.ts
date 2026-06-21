@@ -65,6 +65,10 @@ export interface AssetFilters {
 export function getAssets(
   filters: AssetFilters = {},
   signal?: AbortSignal,
+  // Optional Bearer override for SSR server-prefetch (ADR-0067): a Server Component passes
+  // `session.accessToken` from `await auth()`, since the client-side token store is browser-only.
+  // Client callers omit it and `apiFetch` falls back to the session-token store, unchanged.
+  token?: string,
 ): Promise<AssetListPage> {
   const params = new URLSearchParams();
   if (filters.q) params.set("q", filters.q);
@@ -80,7 +84,7 @@ export function getAssets(
     params.set("offset", String(filters.offset));
   if (filters.deleted) params.set("deleted", filters.deleted);
   const qs = params.toString();
-  return apiFetch<AssetListPage>(qs ? `${BASE}?${qs}` : BASE, { signal });
+  return apiFetch<AssetListPage>(qs ? `${BASE}?${qs}` : BASE, { signal, token });
 }
 
 /** A single expanded asset by id. */

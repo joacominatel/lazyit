@@ -242,7 +242,11 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   migrated WRITE route, the role-set its `@RequirePermission` allows (resolved against the seed) must
   EXACTLY equal the role-set the old `@Roles` gate allowed — a mismatch (e.g. an AccessGrant write wired
   to `accessGrant:write` instead of `accessGrant:grant`, or a user-admin route on `user:write` instead of
-  `user:manage`) fails CI. This is the behavior-preservation proof for the mechanism swap.
+  `user:manage`) fails CI. This is the behavior-preservation proof for the mechanism swap. **Generalised
+  (#555):** a second block asserts every `@RequirePermission` route on the privileged surfaces that had
+  no `@Roles` baseline — the Secret Manager, Service-Accounts management, the permission matrix, and the
+  whole workflow engine — resolves to **ADMIN-only** (a MEMBER/VIEWER mis-wire fails CI), with a coverage
+  guard that each such controller contributes at least one gated route.
 - `apps/api/src/config/permissions-config.service.ts` + `apps/api/src/config/config.controller.ts` —
   **the configurable surface (P5):** `GET`/`PUT /config/permissions` (`@RequirePermission('settings:manage')`,
   ADMIN-only) read/replace the MEMBER + VIEWER sets. The **ADMIN-immutable** half of this invariant is
@@ -326,18 +330,26 @@ by a service account, and no bot can accidentally become an administrator.
   Set; the role resolver (`PermissionResolverService`) is **never** consulted for it.
 - **(Code-enforced from 2026-06-12, SEC-011 — two complementary layers):**
   - **Layer 1 — schema ceiling (source of truth):** `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS` (exported
-    from `packages/shared/src/schemas/service-account.ts`) names the two coarse principal/authz-management
-    verbs that a service account may **never** hold: `settings:manage` and `user:manage`. A `.refine` on
-    `ServiceAccountPermissionsSchema` rejects them with `400` at the DTO edge (create + update); the
-    persistence-time `cleanPermissions` also strips them defensively. Golden test:
+    from `packages/shared/src/schemas/service-account.ts`) names the verbs a service account may **never**
+    hold — either ADMIN-equivalent (`settings:manage`, `user:manage`) or HUMAN-ONLY by construction
+    (`import:run`, ADR-0069; and `secret:read` / `secret:manage`, ADR-0061 — a bot has no vault keypair).
+    A `.refine` on `ServiceAccountPermissionsSchema` rejects them with `400` at the DTO edge (create +
+    update); the persistence-time `cleanPermissions` also strips them defensively. Golden test:
     `packages/shared/src/schemas/service-account.test.ts`.
   - **Layer 2 — runtime principal guard (backstop):** `ServicePrincipalForbiddenGuard`
     (`apps/api/src/auth/service-principal-forbidden.guard.ts`) throws `403` when `isServicePrincipal(request.principal)`
     is true. Applied at the **class level** of `ServiceAccountsController` (every management route) and
-    at the **method level** of `GET /config/permissions` and `PUT /config/permissions`. This closes the
-    class for pre-existing rows: Layer 1 stops *new* grants; Layer 2 stops *use* of any pre-existing
-    meta-verb grant. Guard tests: `apps/api/src/auth/service-principal-forbidden.guard.spec.ts` and the
-    e2e block in `apps/api/src/config/config.controller.spec.ts`.
+    at the **method level** of `GET /config/permissions` and `PUT /config/permissions`. The Secret
+    Manager mirrors this with `HumanOnlyGuard` (`apps/api/src/secret-manager/human-only.guard.ts`) at the
+    class level of every Secret-Manager controller, and the import wizard with its own guard. This closes
+    the class for pre-existing rows: Layer 1 stops *new* grants; Layer 2 stops *use* of any pre-existing
+    meta-verb / human-only grant. Guard tests: `apps/api/src/auth/service-principal-forbidden.guard.spec.ts`
+    and the e2e block in `apps/api/src/config/config.controller.spec.ts`.
+  - **Reserved engine-SA name (#555 / #542):** a human can neither create nor rename an account into the
+    reserved `lazyit-workflow-engine` name (`EngineServiceAccountService.ENGINE_SA_NAME`) — the immutable
+    principal a workflow run executes AS. `ServiceAccountsService.assertNotReservedName` 409's create()
+    and update(name), so an admin can never pre-seat a human-token-backed row as the run actor. Test:
+    `apps/api/src/service-accounts/service-accounts.service.spec.ts` ("reserved engine-SA name guard").
   - **Residual risk (unchanged):** the SA-actor audit gap (`actorId = null` for SA-performed management
     actions, issue #141) is narrowed by Layer 2 — SAs can no longer perform those management actions at
     all — but the `actorSaId` column is still the clean long-term fix; tracked separately.

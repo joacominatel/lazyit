@@ -1,5 +1,6 @@
 import type {
   CreateSecretVaultWithMembership,
+  ExportSecretsAudit,
   SecretVault,
   SecretVaultDetail,
   UpdateSecretVault,
@@ -56,4 +57,23 @@ export function updateVault(
 /** Soft-delete a vault. Returns the soft-deleted vault (`deletedAt` set). */
 export function deleteVault(vaultId: string): Promise<SecretVault> {
   return apiFetch<SecretVault>(`${BASE}/${vaultId}`, { method: "DELETE" });
+}
+
+/**
+ * Record a vault secret EXPORT (`POST /secret-vaults/:id/export`, #612). The export itself — DECRYPTING
+ * the items and building the `.env` file — happens ENTIRELY CLIENT-SIDE (the browser already holds the
+ * unwrapped DEK after unlock); this call only writes the metadata-only audit row (`ITEMS_EXPORTED`).
+ *
+ * INV-10 / ADR-0061: the body is the strict `ExportSecretsAudit` (at most an optional non-secret
+ * `itemCount`). NO plaintext, NO ciphertext, NO DEK, NO key material is ever sent — the server is
+ * structurally incapable of producing a plaintext export, and the strictObject rejects any smuggled key.
+ */
+export function recordExport(
+  vaultId: string,
+  audit: ExportSecretsAudit = {},
+): Promise<void> {
+  return apiFetch<void>(`${BASE}/${vaultId}/export`, {
+    method: "POST",
+    body: audit,
+  });
 }

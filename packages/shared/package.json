@@ -23,7 +23,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun run scripts/build.ts"
+    "build": "bun run scripts/build.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "@noble/ciphers": "2.2.0",

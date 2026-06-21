@@ -11,6 +11,7 @@ import type {
   CreateSecretVaultWithMembership,
   CreateUserKeypair,
   CreateVaultMembership,
+  ExportSecretsAudit,
   HandleSuggestion,
   ResetUserKeypair,
   ResolvedHandle,
@@ -525,6 +526,37 @@ export class SecretManagerService {
       return row;
     });
     return this.itemToWire(deleted);
+  }
+
+  /**
+   * Record a vault secret EXPORT (#612). The export itself — DECRYPTING the values and building the
+   * `.env`/JSON file — happens ENTIRELY CLIENT-SIDE after the member unlocks the vault; the server is
+   * structurally incapable of producing a plaintext export (INV-10 / ADR-0061). This method takes NO
+   * secret material (the `ExportSecretsAudit` body is a strictObject with at most an optional non-secret
+   * `itemCount`) and only appends ONE metadata-only {@link SecretAuditLog} row (ITEMS_EXPORTED): WHO
+   * exported WHICH vault, when. Requires LIVE membership — exporting decryptable values is a member-only
+   * action (an ADMIN without a membership has nothing to decrypt, INV-10), mirroring the item reads. The
+   * strict `ExportSecretsAudit` body is the GUARANTEE that no secret material is smuggled in: it permits
+   * ONLY an optional non-secret `itemCount`, and any unknown key is rejected (400) at the DTO edge. The
+   * SecretAuditLog row schema has no count column, so the count is not persisted — the row stays identical
+   * to every other audit row (no blob, no value); the count is echoed back in the ack for the client.
+   */
+  async recordExport(
+    principal: Principal | undefined,
+    vaultId: string,
+    audit?: ExportSecretsAudit,
+  ): Promise<{ ok: true; itemCount: number | null }> {
+    const userId = this.requireHumanId(principal);
+    await this.getLiveVaultOr404(vaultId);
+    await this.assertLiveMembership(userId, vaultId);
+    await this.prisma.$transaction(async (tx) => {
+      await this.writeAudit(tx, {
+        action: 'ITEMS_EXPORTED',
+        actorId: userId,
+        vaultId,
+      });
+    });
+    return { ok: true, itemCount: audit?.itemCount ?? null };
   }
 
   // ── Members ──────────────────────────────────────────────────────────────────

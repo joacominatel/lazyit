@@ -82,6 +82,10 @@ function harness(
         error: state.runError,
         workflowVersion: { steps },
       })),
+      // Used by emitManualTaskNotification (post-commit bell nudge) to resolve the app name.
+      findUnique: jest.fn(async () => ({
+        application: { name: 'App' },
+      })),
       update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         state.runUpdates.push(data);
         if (typeof data.status === 'string') {
@@ -201,7 +205,7 @@ function harness(
     trigger as never,
     notifications as never,
   );
-  return { orchestrator, prisma, state, sleeper, trigger };
+  return { orchestrator, prisma, state, sleeper, trigger, notifications };
 }
 
 const restStep = (key: string, extra: Record<string, unknown> = {}) => ({
@@ -450,6 +454,43 @@ describe('WorkflowRunOrchestrator — the DAG walk (ADR-0054 §8)', () => {
     // Resume at the manual step's onSuccess (the next step s2).
     await orchestrator.resume('run1', 's2');
     expect(state.runStatus).toBe('SUCCEEDED');
+  });
+
+  it('#555: the manual-task bell nudge NEVER echoes the ctx-interpolated prompt (no PII broadcast)', async () => {
+    const steps = [
+      {
+        kind: 'MANUAL',
+        key: 'm1',
+        // The prompt is rendered against ctx — here it embeds a grantee email (PII).
+        prompt: 'Provision for {{ grantee.email }}',
+        inputFields: [{ name: 'team', label: 'Team', type: 'text' }],
+      },
+      restStep('s2'),
+    ];
+    const renderedPrompt = 'Provision for alice@example.com';
+    const manual = {
+      kind: 'MANUAL',
+      execute: jest.fn(async () => ({
+        status: 'AWAITING_INPUT' as const,
+        manualTask: { stepKey: 'm1', prompt: renderedPrompt, inputFields: [] },
+      })),
+    };
+    const { orchestrator, notifications } = harness(steps, {
+      MANUAL: manual,
+      REST: scripted('REST', [ok()]),
+    });
+
+    await orchestrator.start('run1');
+
+    // The bell nudge fired, but its summary is a GENERIC pointer — never the rendered prompt/PII.
+    expect(notifications.emit).toHaveBeenCalledTimes(1);
+    const payload = (notifications.emit as jest.Mock).mock.calls[0][0] as {
+      summary: string;
+      title: string;
+    };
+    expect(payload.summary).not.toContain('alice@example.com');
+    expect(payload.summary).not.toContain(renderedPrompt);
+    expect(payload.title).not.toContain('alice@example.com');
   });
 
   it('CCOR-2 pause is transactional: a MANUAL pause flips AWAITING_INPUT atomically with the resolvable task (TOCTOU-safe)', async () => {

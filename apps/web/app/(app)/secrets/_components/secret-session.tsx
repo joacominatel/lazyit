@@ -1,6 +1,27 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+/**
+ * Idle / inactivity auto-lock window (#605). After this many ms with NO user activity (pointer, key,
+ * scroll, touch) the session auto-locks — the private key and every cached DEK are dropped, exactly as
+ * an explicit Lock. A password-manager-grade default; not yet a user/instance preference (deferred).
+ */
+const IDLE_LOCK_MS = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * Grace period after the tab is HIDDEN (`visibilitychange`) before auto-locking (#605). A brief hide
+ * (alt-tab to copy a value, switch to a password field) should not nuke the session; a walk-away should.
+ */
+const HIDDEN_LOCK_MS = 60 * 1000; // 1 minute
 
 /**
  * SecretManagerProvider — the zero-knowledge in-memory SESSION (ADR-0061, INV-10 on the client).
@@ -103,6 +124,57 @@ export function SecretManagerProvider({ children }: { children: React.ReactNode 
     setIsUnlocked(false);
     setDekVersion((v) => v + 1);
   }, []);
+
+  // ── Idle / inactivity auto-lock (#605) ───────────────────────────────────────────────────────────
+  // While the session is unlocked, an inactivity timer drops the private key + every DEK after
+  // IDLE_LOCK_MS of no user input — the dominant real-world threat for a password manager is a walked-
+  // away, still-unlocked screen. Any pointer/keyboard/scroll/touch activity resets the timer. A hidden
+  // tab arms a shorter HIDDEN_LOCK_MS timer. Pure client-side teardown via `lock()` — INV-10 intact
+  // (no plaintext/DEK leaves the browser; the timer only DROPS in-memory material).
+  useEffect(() => {
+    if (!isUnlocked) return; // only run the timer while there is material to protect
+    if (typeof window === "undefined") return;
+
+    let idleTimer: ReturnType<typeof setTimeout>;
+
+    const armIdle = (ms: number) => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => lock(), ms);
+    };
+
+    const onActivity = () => {
+      // Only meaningful while visible; a hidden tab uses its own (shorter) timer.
+      if (document.visibilityState === "visible") armIdle(IDLE_LOCK_MS);
+    };
+
+    const onVisibility = () => {
+      armIdle(document.visibilityState === "hidden" ? HIDDEN_LOCK_MS : IDLE_LOCK_MS);
+    };
+
+    // `passive` — these listeners never call preventDefault, so they stay off the scroll/input hot path.
+    const activityEvents = [
+      "pointerdown",
+      "keydown",
+      "scroll",
+      "touchstart",
+      "mousemove",
+    ] as const;
+    for (const ev of activityEvents) {
+      window.addEventListener(ev, onActivity, { passive: true });
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+
+    // Arm immediately on unlock (respecting current visibility).
+    onVisibility();
+
+    return () => {
+      clearTimeout(idleTimer);
+      for (const ev of activityEvents) {
+        window.removeEventListener(ev, onActivity);
+      }
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [isUnlocked, lock]);
 
   const session = useMemo<SecretSession>(
     () => ({ isUnlocked, setPrivateKey, getPrivateKey, lock }),

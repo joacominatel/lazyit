@@ -166,7 +166,11 @@ export class AssetTagSchemeService {
       suffix: scheme.suffix,
       width: scheme.width,
     };
-    const allocated = await this.consumeNextFreeNumber(affixes);
+    // #597: the scheme row was JUST read here, so hand its counter to consume — no second read on the
+    // create hot path. The atomic increment inside still re-bases against the live row, so a concurrent
+    // racer that advanced the counter between this read and the consume is handled (the increment wins,
+    // and the jump's `nextNumber < target` guard never moves it back).
+    const allocated = await this.consumeNextFreeNumber(affixes, scheme.nextNumber);
     return renderAssetTag(affixes, allocated);
   }
 
@@ -175,11 +179,14 @@ export class AssetTagSchemeService {
    * `n >= nextNumber` whose rendered tag is not already on a LIVE asset — and durably advance the
    * counter past it. Concurrency- AND dense-occupancy-safe:
    *
-   *   1. Read the current counter (`from`).
+   *   1. Determine the current counter (`from`) — either passed in by a caller that JUST read the row
+   *      (the create path, #597 — no second read) or read here (the backfill loop, where the counter
+   *      advances per iteration and a fresh read is required).
    *   2. Build the set of occupied numbers `>= from` by parsing live tags that match the scheme
    *      affixes (bounded by {@link OCCUPIED_SCAN_LIMIT}); walk forward to the first free `n`.
    *   3. JUMP the counter forward to `n` in ONE atomic `updateMany` (guarded by `nextNumber < n` so it
-   *      only ever moves forward, never back under a concurrent racer that already advanced further).
+   *      only ever moves forward, never back under a concurrent racer that already advanced further) —
+   *      SKIPPED in the steady state where the counter already sits past the occupied range (#597).
    *   4. CONSUME atomically with the existing `{ increment: 1 }` single-row update; the value BEFORE
    *      the increment is what we allocated. Because the increment is atomic, two concurrent callers
    *      that both jumped to the same `n` get DISTINCT values (`n` and `n+1`) — never a duplicate.
@@ -187,17 +194,29 @@ export class AssetTagSchemeService {
    * The pre-skip is why the {@link MAX_ALLOCATION_ATTEMPTS} cap can't false-409 under dense occupancy:
    * a whole occupied block is skipped in step 3 in one shot, not one P2002 at a time. The freeze at
    * the int4 ceiling (ADR-0063) is preserved — a clean 400 rather than an overflow.
+   *
+   * @param knownNextNumber the caller's already-read counter; when omitted the row is read here. Only a
+   *   FLOOR for the skip walk — the atomic increment is what durably allocates, so a slightly stale hint
+   *   (a concurrent racer advanced after the caller's read) still allocates a unique number, never a dup.
    */
-  private async consumeNextFreeNumber(affixes: {
-    prefix: string | null;
-    suffix: string | null;
-    width: number | null;
-  }): Promise<number> {
-    const current = await this.prisma.assetTagScheme.findFirst({
-      where: { id: AssetTagSchemeService.SINGLETON_ID },
-      select: { nextNumber: true },
-    });
-    const from = current?.nextNumber ?? 1;
+  private async consumeNextFreeNumber(
+    affixes: {
+      prefix: string | null;
+      suffix: string | null;
+      width: number | null;
+    },
+    knownNextNumber?: number,
+  ): Promise<number> {
+    let from: number;
+    if (knownNextNumber !== undefined) {
+      from = knownNextNumber; // create path: reuse the row allocateTag just read (#597 — no second read).
+    } else {
+      const current = await this.prisma.assetTagScheme.findFirst({
+        where: { id: AssetTagSchemeService.SINGLETON_ID },
+        select: { nextNumber: true },
+      });
+      from = current?.nextNumber ?? 1;
+    }
     const occupied = await this.occupiedNumbersFrom(affixes, from);
     const target = nextFreeNumber(occupied, from);
     if (target > INT4_MAX) {
@@ -206,7 +225,10 @@ export class AssetTagSchemeService {
         'Asset-tag counter exhausted (reached the maximum sequence value).',
       );
     }
-    // JUMP forward in one shot (only if still behind — concurrency-safe, never moves the counter back).
+    // JUMP forward in one shot — only when there is a contiguous occupied block to skip. In the steady
+    // state (counter already past the occupied range → target === from) this is SKIPPED, leaving the
+    // atomic increment as the single write (#597). Guarded by `nextNumber < target` so it only ever
+    // moves forward, never back under a concurrent racer that already advanced further.
     if (target > from) {
       await this.prisma.assetTagScheme.updateMany({
         where: { id: AssetTagSchemeService.SINGLETON_ID, nextNumber: { lt: target } },

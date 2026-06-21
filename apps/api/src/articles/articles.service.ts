@@ -31,6 +31,7 @@ import { projectArticle, type ArticleRow } from '../search/search.documents';
 import {
   FolderAccessService,
   folderVisible,
+  type FolderTreeCache,
   type VisibleFolders,
 } from '../article-categories/folder-access.service';
 
@@ -313,7 +314,15 @@ export class ArticlesService {
    * most-restrictive-wins (folder access AND draft visibility, both 404 on failure). `article:read`
    * (the frozen capability) is enforced upstream by the route guard.
    */
-  async findOne(id: string, currentUser?: User, principal?: Principal) {
+  async findOne(
+    id: string,
+    currentUser?: User,
+    principal?: Principal,
+    // Optional request-scoped folder-tree memo (#599): when a caller invokes findOne AND its own
+    // visibleFolderIds in the same request (e.g. backlinks), it threads one cache through both so the
+    // folder tree is loaded once. Live joins still resolve per call — zero staleness.
+    cache?: FolderTreeCache,
+  ) {
     const cu = this.resolveCurrentUser(currentUser);
     const article = await this.prisma.article.findFirst({
       where: { id },
@@ -321,9 +330,14 @@ export class ArticlesService {
     if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
       throw new NotFoundException(`Article ${id} not found`);
     }
-    await this.assertFolderVisible(article.categoryId, principal, () => {
-      throw new NotFoundException(`Article ${id} not found`);
-    });
+    await this.assertFolderVisible(
+      article.categoryId,
+      principal,
+      () => {
+        throw new NotFoundException(`Article ${id} not found`);
+      },
+      cache,
+    );
     return article;
   }
 
@@ -671,15 +685,18 @@ export class ArticlesService {
     currentUser?: User,
     principal?: Principal,
   ): Promise<ArticleBacklink[]> {
+    // One request-scoped folder-tree memo (#599) shared by the two folder-access resolutions below
+    // (the findOne target check + the source-visibility pin), so the folder tree loads once this request.
+    const cache: FolderTreeCache = {};
     // 404 if the target itself isn't readable (missing, soft-deleted, a draft the caller can't see, or
     // a home folder the caller can't see — ADR-0022/0060) — the backlinks of an article you can't read
     // must not be revealed.
-    await this.findOne(id, currentUser, principal);
+    await this.findOne(id, currentUser, principal, cache);
     const cu = this.resolveCurrentUser(currentUser);
     // The SOURCE must also be readable by the caller — both its draft visibility (PUBLISHED for all;
     // own DRAFTs) AND its home folder (ADR-0060 §4): a source in a folder the caller can't see must not
     // surface its slug/title. ADMIN ('ALL') gets no folder pin.
-    const visible = await this.folderAccess.visibleFolderIds(principal);
+    const visible = await this.folderAccess.visibleFolderIds(principal, cache);
     const folderClause = this.folderWhere(visible);
     const sourceWhere: Prisma.ArticleWhereInput = folderClause
       ? { AND: [this.visibilityWhere(cu), folderClause] }
@@ -932,8 +949,9 @@ export class ArticlesService {
     folderId: string,
     principal: Principal | undefined,
     onHidden: () => never,
+    cache?: FolderTreeCache,
   ): Promise<void> {
-    const visible = await this.folderAccess.visibleFolderIds(principal);
+    const visible = await this.folderAccess.visibleFolderIds(principal, cache);
     if (!folderVisible(visible, folderId)) {
       onHidden();
     }

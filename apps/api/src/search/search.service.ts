@@ -7,6 +7,7 @@ import { reindexIndex, type ReindexClient } from './reindex';
 import {
   FolderAccessService,
   folderVisible,
+  type VisibleFolders,
 } from '../article-categories/folder-access.service';
 import type { Principal } from '../auth/principal';
 
@@ -41,6 +42,32 @@ const RETRIEVE: Record<SearchIndex, string[]> = {
 
 /** The internal-only article-hit field stripped before a hit ships (the post-filter's folder key). */
 const ARTICLE_INTERNAL_FIELD = 'categoryId';
+
+/**
+ * Build the Meili-side article folder filter (#598, ADR-0060 §5). Pins the article query to the caller's
+ * visible home folders so readable hits ranking below the naive `limit` window are no longer dropped:
+ *
+ *  - ADMIN (`'ALL'`) → `undefined`: no filter, every article is in scope (§5).
+ *  - any other caller → `categoryId IN ['f1','f2',...]` over their visible set.
+ *  - an EMPTY visible set → a never-match filter (`categoryId IN []` is invalid in Meili), so a fully-
+ *    restricted caller gets ZERO article hits — fail closed, never match-all.
+ *
+ * Folder ids are quoted so a value can never break the filter expression (cuids are alnum, but the quote
+ * is defensive). The in-app post-filter remains the authoritative authz backstop on top of this (INV-9).
+ */
+export function articleFolderFilter(
+  visible: VisibleFolders,
+): string | undefined {
+  if (visible === 'ALL') return undefined;
+  const ids = [...visible];
+  if (ids.length === 0) {
+    // `categoryId IN []` is a syntax error in Meili; an existence check that can never hold matches no
+    // document, which is exactly the fail-closed semantics we want for a caller with no visible folders.
+    return 'categoryId IS NULL AND categoryId IS NOT NULL';
+  }
+  const quoted = ids.map((id) => `'${id.replace(/'/g, "\\'")}'`).join(', ');
+  return `categoryId IN [${quoted}]`;
+}
 
 /** Per-index result block returned to the caller: the raw hits and Meili's total estimate. */
 export interface SearchEntityResult {
@@ -179,15 +206,34 @@ export class SearchService {
       return this.emptyResults(requested);
     }
 
+    // ADR-0060 §5 (#598): resolve the caller's visible folders ONCE, up front, when articles are in
+    // scope — used BOTH to push a Meili-side `categoryId IN [...]` filter into the article query (so
+    // readable hits that rank below the naive `limit` window are no longer silently dropped) AND, as a
+    // defense-in-depth backstop, by the in-app post-filter below (INV-9 — never rely on Meili for authz;
+    // the index can lag a just-revoked grant, the live evaluator is authoritative).
+    const articleVisible = requested.includes('articles')
+      ? await this.folderAccess.visibleFolderIds(principal)
+      : undefined;
+
     const params: MultiSearchParams = {
-      queries: requested.map((indexUid) => ({
-        indexUid,
-        q,
-        limit,
-        // cap the per-hit payload to the documented hit fields (SEC-061). For articles this includes
-        // the internal `categoryId` (the folder-access post-filter key), stripped before shipping.
-        attributesToRetrieve: RETRIEVE[indexUid],
-      })),
+      queries: requested.map((indexUid) => {
+        const query: MultiSearchParams['queries'][number] = {
+          indexUid,
+          q,
+          limit,
+          // cap the per-hit payload to the documented hit fields (SEC-061). For articles this includes
+          // the internal `categoryId` (the folder-access post-filter key), stripped before shipping.
+          attributesToRetrieve: RETRIEVE[indexUid],
+        };
+        // Meili-side folder scoping (#598): pin the article query to the caller's visible folders.
+        // ADMIN ('ALL') gets no filter (sees everything, §5); any other caller gets a `categoryId IN`
+        // filter (an empty visible set yields a never-match, so a fully-restricted caller gets 0 hits).
+        if (indexUid === 'articles' && articleVisible !== undefined) {
+          const filter = articleFolderFilter(articleVisible);
+          if (filter !== undefined) query.filter = filter;
+        }
+        return query;
+      }),
     };
 
     try {
@@ -206,13 +252,14 @@ export class SearchService {
           total: result.estimatedTotalHits ?? result.hits.length,
         };
       }
-      // ADR-0060 §5 (INV-9): the search-leak fix. Re-run the §4 folder-access evaluator and DROP any
-      // article hit whose home folder the caller may not see, so a restricted article NEVER surfaces to
-      // a non-matching caller (ADMIN sees all; SA fails closed; anonymous → PUBLIC only). Done AFTER the
-      // Meili read because access is DB-first (the index is a denormalized cache that can lag a just-
-      // revoked grant; the live evaluator is authoritative).
-      if (requested.includes('articles')) {
-        await this.applyArticleFolderFilter(results, principal);
+      // ADR-0060 §5 (INV-9): the search-leak BACKSTOP. The Meili-side `categoryId IN` filter above
+      // already scopes the article query, so `total` is the engine's count of READABLE matches (#598).
+      // We STILL re-run the §4 evaluator in-app and DROP any hit whose home folder the caller may not
+      // see — defense in depth: the index is a denormalized cache that can lag a just-revoked grant, so
+      // we never trust Meili alone for authz. Reuses the `articleVisible` resolved up front (no second
+      // DB walk). A drop here means index lag; `total` is decremented per dropped hit to stay honest.
+      if (articleVisible !== undefined) {
+        this.applyArticleFolderFilter(results, articleVisible);
       }
       return results;
     } catch (err: unknown) {
@@ -257,38 +304,50 @@ export class SearchService {
   }
 
   /**
-   * The ADR-0060 §5 article folder-access post-filter (INV-9 — closes the search leak). Mutates the
-   * `articles` block in place: resolve the caller's visible folders DB-first, DROP every hit whose
+   * The ADR-0060 §5 article folder-access in-app BACKSTOP (INV-9 — defense in depth over the Meili-side
+   * filter, #598). Mutates the `articles` block in place over the ALREADY-RESOLVED `visible` set (no DB
+   * walk here — the caller resolves it once and shares it with the Meili filter): DROP every hit whose
    * `categoryId` (home folder) is not visible, and STRIP the internal `categoryId` from each surviving
-   * hit so it never ships to the client. `total` is re-counted to the kept hits so the UI count matches
-   * what it can see. ADMIN ('ALL') keeps every hit; an SA / anonymous keeps only PUBLIC-folder hits.
+   * hit so it never ships to the client. ADMIN ('ALL') keeps every hit; an SA / anonymous keeps only
+   * PUBLIC-folder hits.
+   *
+   * `total` is the engine's count of the (already folder-filtered) readable matches (#598) — preserved,
+   * NOT clobbered to the page size. It is only DECREMENTED per hit this backstop drops (a drop means the
+   * index lagged a just-revoked grant), so the count never overstates what the caller may actually read.
    *
    * A hit missing its `categoryId` (a stale doc indexed before this field landed) is DROPPED for a
    * non-admin — fail closed: better to under-return than leak a restricted article whose folder we
    * can't resolve.
    */
-  private async applyArticleFolderFilter(
+  private applyArticleFolderFilter(
     results: SearchResults,
-    principal?: Principal,
-  ): Promise<void> {
+    visible: VisibleFolders,
+  ): void {
     const block = results.articles;
     if (block === undefined || block.hits.length === 0) return;
 
-    const visible = await this.folderAccess.visibleFolderIds(principal);
     const kept: unknown[] = [];
+    let dropped = 0;
     for (const hit of block.hits) {
       const record = hit as Record<string, unknown>;
       const categoryId = record[ARTICLE_INTERNAL_FIELD];
       const allowed =
         visible === 'ALL' ||
         (typeof categoryId === 'string' && folderVisible(visible, categoryId));
-      if (!allowed) continue;
+      if (!allowed) {
+        dropped += 1;
+        continue;
+      }
       // Strip the internal folder key — the wire ArticleHit carries no categoryId.
       const { [ARTICLE_INTERNAL_FIELD]: _omit, ...shipped } = record;
       void _omit;
       kept.push(shipped);
     }
-    results.articles = { hits: kept, total: kept.length };
+    // Preserve the engine's filtered total (#598); only subtract what the backstop actually dropped.
+    results.articles = {
+      hits: kept,
+      total: Math.max(0, block.total - dropped),
+    };
   }
 
   /** A `{ hits: [], total: 0 }` block for each requested index (disabled mode / seed for search). */

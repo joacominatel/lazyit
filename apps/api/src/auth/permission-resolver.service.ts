@@ -6,6 +6,22 @@ import { PrismaService } from '../prisma/prisma.service';
 const ALL_PERMISSIONS: ReadonlySet<Permission> = new Set(PERMISSIONS);
 
 /**
+ * ponytail: process-local TTL cache; per-node, bounded staleness — add Valkey pub/sub invalidation
+ * if horizontal scaling becomes real (ADR-0046 §single-instance assumption).
+ *
+ * After a matrix edit via `PUT /config/permissions`, cached entries expire within this window and are
+ * re-read from the DB on the next authZ decision. 60 s is short enough that an admin revoke self-heals
+ * quickly on a single node, yet long enough to eliminate per-request DB reads under normal load.
+ */
+const PERMISSION_CACHE_TTL_MS = 60_000; // 60 s
+
+/** A cached entry: the resolved permission set + a wall-clock expiry timestamp (Date.now() + TTL). */
+interface CacheEntry {
+  permissions: ReadonlySet<Permission>;
+  expiresAt: number;
+}
+
+/**
  * Resolves the fine-grained PERMISSIONS a {@link Role} holds (Roles & Permissions v2, ADR-0046, P2).
  *
  * DB-FIRST (INV-1 / INV-8): the source of truth is the `RolePermission` table — permissions resolve
@@ -17,9 +33,12 @@ const ALL_PERMISSIONS: ReadonlySet<Permission> = new Set(PERMISSIONS);
  * lock ADMIN out. The role itself still comes from the DB-resolved `request.user` (never a token), so
  * this short-circuit trusts the DB role, not the token.
  *
- * CACHE: the matrix is static today (no permission-write endpoint exists yet — that is P5), so a lazy
- * in-process `Map<Role, Set<Permission>>` (at most 3 keys) is sufficient. {@link invalidate} is the
- * hook the future config endpoint (P5) will call after writing the matrix; nothing calls it yet.
+ * CACHE: a lazy in-process `Map<Role, CacheEntry>` (at most 3 keys), where each entry carries an
+ * expiry timestamp (`Date.now() + PERMISSION_CACHE_TTL_MS`). After the TTL the entry is treated as a
+ * miss and re-resolved from the DB. {@link invalidate} drops entries immediately (the P5 config
+ * endpoint calls it after a matrix write so the SAME instance self-heals without waiting for the TTL).
+ * The TTL bounds staleness for ALL nodes — including nodes that did NOT receive the matrix write.
+ * See ADR-0046 §single-instance assumption.
  *
  * FAIL-CLOSED: if the DB yields NO rows for a non-ADMIN role (an empty/missing seed), {@link resolve}
  * returns an EMPTY set — so the guard denies. It never widens access on a resolution gap. Resolution
@@ -27,16 +46,17 @@ const ALL_PERMISSIONS: ReadonlySet<Permission> = new Set(PERMISSIONS);
  */
 @Injectable()
 export class PermissionResolverService {
-  /** Lazy per-role cache of the resolved permission set. ADMIN is never cached from the DB (always full). */
-  private readonly cache = new Map<Role, ReadonlySet<Permission>>();
+  /** Lazy per-role TTL cache of the resolved permission set. ADMIN is never cached from the DB (always full). */
+  private readonly cache = new Map<Role, CacheEntry>();
 
   constructor(private readonly prisma: PrismaService) {}
 
   /**
    * The set of permissions the given role holds. ADMIN → the complete catalog (immutable/full, never a
-   * DB read). Any other role → its `RolePermission` rows, lazily loaded and cached. Catalog-foreign
-   * rows (a permission string not in the frozen catalog) are ignored, so a stray DB row can never mint
-   * a capability the code doesn't know about.
+   * DB read). Any other role → its `RolePermission` rows, lazily loaded and cached for
+   * {@link PERMISSION_CACHE_TTL_MS}. An expired entry is treated as a miss and re-read from the DB.
+   * Catalog-foreign rows (a permission string not in the frozen catalog) are ignored, so a stray DB
+   * row can never mint a capability the code doesn't know about.
    */
   async resolve(role: Role): Promise<ReadonlySet<Permission>> {
     // ADMIN is immutable/full by decision (ADR-0046 / INV-8): never trust the DB to scope it down.
@@ -45,8 +65,8 @@ export class PermissionResolverService {
     }
 
     const cached = this.cache.get(role);
-    if (cached) {
-      return cached;
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.permissions;
     }
 
     const rows = await this.prisma.rolePermission.findMany({
@@ -62,7 +82,10 @@ export class PermissionResolverService {
       }
     }
 
-    this.cache.set(role, resolved);
+    this.cache.set(role, {
+      permissions: resolved,
+      expiresAt: Date.now() + PERMISSION_CACHE_TTL_MS,
+    });
     return resolved;
   }
 
@@ -79,9 +102,10 @@ export class PermissionResolverService {
   }
 
   /**
-   * Drop the cached permission set(s). The invalidation HOOK the future config endpoint (P5) calls
-   * after editing the matrix so the next request re-reads the DB. With no argument, clears every role.
-   * Nothing calls this yet — the seed is static in P2/P3.
+   * Drop the cached permission set(s) immediately (bypasses the TTL). The P5 config endpoint calls
+   * this after editing the matrix so the SAME instance self-heals on the very next authZ decision
+   * without waiting for the TTL to expire. Other nodes self-heal via the TTL. With no argument,
+   * clears every role.
    */
   invalidate(role?: Role): void {
     if (role) {

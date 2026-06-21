@@ -162,7 +162,8 @@ bun run check:manual-parity     # exits 1 if any page lacks a counterpart in ano
 ```
 
 Run it before pushing Manual changes. It is wired as the `check:manual-parity` package script
-(`apps/web/scripts/check-manual-parity.ts`). (CI wiring is a follow-up — see the script header.)
+(`apps/web/scripts/check-manual-parity.ts`) and runs as a **blocking CI step** in the `verify`
+job (`.github/workflows/ci.yml`) — a PR with locale drift will fail CI.
 
 ## How to add a Help page
 

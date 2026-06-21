@@ -75,6 +75,9 @@ The wizard confirms the administrator was created and sends you to the **sign-in
 account does not have a session yet — sign in as that administrator to get started. Once you are
 signed in, the administrator controls appear.
 
+> **If your session expires**, lazyit returns you to the sign-in page so you can sign in again —
+> just sign back in to pick up where you left off.
+
 ## What's next
 
 - **Add your team** — once you are signed in as the administrator, see

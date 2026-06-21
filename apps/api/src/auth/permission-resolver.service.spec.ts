@@ -129,7 +129,7 @@ describe('PermissionResolverService (ADR-0046 P2)', () => {
     await expect(service.hasAll('VIEWER', ['asset:read'])).resolves.toBe(false);
   });
 
-  // ── Cache + invalidation hook (the seam P5 will use) ───────────────────────────────────────────
+  // ── Cache + invalidation hook ───────────────────────────────────────────────────────────────────
 
   it('caches a resolved role — the second resolve does not re-hit the DB', async () => {
     findMany.mockResolvedValue(rowsFor('VIEWER'));
@@ -156,5 +156,72 @@ describe('PermissionResolverService (ADR-0046 P2)', () => {
     await service.resolve('VIEWER');
     // 2 initial + 2 after the full clear.
     expect(findMany).toHaveBeenCalledTimes(4);
+  });
+
+  // ── TTL: entries expire and re-resolve from the DB (ADR-0046 §single-instance assumption) ──────
+
+  describe('TTL-bounded cache (PERMISSION_CACHE_TTL_MS = 60 s)', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('a cached entry is served without a DB hit before the TTL expires', async () => {
+      findMany.mockResolvedValue(rowsFor('VIEWER'));
+      await service.resolve('VIEWER');
+
+      // Advance almost to the TTL boundary — still within TTL.
+      jest.advanceTimersByTime(59_999);
+      await service.resolve('VIEWER');
+
+      expect(findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('a cached entry expires after PERMISSION_CACHE_TTL_MS and is re-resolved from the DB', async () => {
+      findMany.mockResolvedValue(rowsFor('VIEWER'));
+      await service.resolve('VIEWER'); // first resolve → DB hit, cache populated
+
+      // Advance past the 60 s TTL.
+      jest.advanceTimersByTime(60_001);
+
+      // Second resolve after expiry → must re-hit the DB.
+      await service.resolve('VIEWER');
+
+      expect(findMany).toHaveBeenCalledTimes(2);
+    });
+
+    it('TTL expiry re-resolves an updated matrix (self-heal without explicit invalidate)', async () => {
+      // First matrix: VIEWER has asset:read only.
+      findMany.mockResolvedValue([{ permission: 'asset:read' }]);
+      const first = await service.resolve('VIEWER');
+      expect(first.has('asset:read')).toBe(true);
+      expect(first.has('consumable:read')).toBe(false);
+
+      // Admin edits the matrix on ANOTHER node — this node never receives an invalidate().
+      // After TTL the stale entry is dropped and the new matrix is picked up.
+      findMany.mockResolvedValue([
+        { permission: 'asset:read' },
+        { permission: 'consumable:read' },
+      ]);
+      jest.advanceTimersByTime(60_001);
+
+      const second = await service.resolve('VIEWER');
+      expect(second.has('asset:read')).toBe(true);
+      expect(second.has('consumable:read')).toBe(true);
+      expect(findMany).toHaveBeenCalledTimes(2);
+    });
+
+    it('ADMIN is never cached and is unaffected by the TTL (always returns full catalog)', async () => {
+      const set1 = await service.resolve('ADMIN');
+      jest.advanceTimersByTime(120_000); // 2× TTL
+      const set2 = await service.resolve('ADMIN');
+
+      expect(set1.size).toBe(PERMISSIONS.length);
+      expect(set2.size).toBe(PERMISSIONS.length);
+      expect(findMany).not.toHaveBeenCalled();
+    });
   });
 });

@@ -112,6 +112,13 @@ jobs:
       - name: Build all workspaces
         run: bunx turbo build --cache-dir=.turbo
 
+      # Verify the Help/Manual en↔es parity invariant (ADR-0062 §4 / CLAUDE.md rule #7).
+      # Exits 1 when any slug exists in one locale tree but lacks a counterpart in the other.
+      # No DB or generated client needed — pure filesystem check. Resolves #589.
+      - name: Manual en↔es parity check
+        working-directory: apps/web
+        run: bun run check:manual-parity
+
   # The three images are built in PARALLEL (one matrix job per image, each on its own runner)
   # instead of sequentially in one job — docker wall-clock drops from the SUM of the three builds
   # to the MAX. This job is NOT gated on `verify` (no `needs:`): the image build and the quality
@@ -143,3 +150,17 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          load: true
+          tags: lazyit-${{ matrix.image }}:ci
+
+      # Report-only Trivy scan — HIGH+CRITICAL findings are surfaced but do not block the build.
+      # exit-code "0" keeps the step non-blocking while the baseline is being established.
+      # To promote to blocking: change exit-code to "1" and drop the comment. Resolves #590.
+      - name: Trivy vulnerability scan (${{ matrix.image }})
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: lazyit-${{ matrix.image }}:ci
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          vuln-type: os,library

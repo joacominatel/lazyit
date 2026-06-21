@@ -2,6 +2,8 @@
 
 import {
   isServer,
+  MutationCache,
+  QueryCache,
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query";
@@ -11,10 +13,24 @@ import { NextIntlClientProvider } from "next-intl";
 import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
+import { handleAuthExpiry } from "@/lib/api/handle-auth-expiry";
 import { DEFAULT_TIME_ZONE, SHARED_FORMATS } from "@/i18n/config";
 
 function makeQueryClient() {
   return new QueryClient({
+    // Global auth-expiry reaction (issue #600): any query/mutation that 401s means the IdP
+    // access token behind the still-valid app cookie has expired — a stuck "signed-in but
+    // broken" state. `handleAuthExpiry` signs the dead session out and redirects to /login
+    // exactly once (it is idempotent and no-ops on auth routes), so users recover instead of
+    // drowning in 401 toasts. Wired here once for the whole app; no per-call wiring needed.
+    // NB: the deferred follow-up is the full Auth.js rotating-refresh (offline_access) that
+    // keeps the token alive transparently; this lazy redirect is the agreed first step.
+    queryCache: new QueryCache({
+      onError: (error) => handleAuthExpiry(error),
+    }),
+    mutationCache: new MutationCache({
+      onError: (error) => handleAuthExpiry(error),
+    }),
     defaultOptions: {
       queries: {
         // Avoid an immediate refetch of freshly fetched/prefetched data.

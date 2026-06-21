@@ -235,8 +235,14 @@ NEXTAUTH_URL=http://localhost:3000
   encrypted cookie. Depending on the token size this may approach browser cookie limits for
   very large tokens with many claims. Mitigation: keep token claims minimal in the IdP config.
 - **Token refresh not implemented**: Auth.js v5 JWT sessions do not automatically refresh the
-  access token when it expires. The user will be redirected to sign in again once the session
-  expires. Token rotation / silent refresh is a future work item.
+  IdP access token when it expires (no `offline_access`, no rotating-refresh in the `jwt`
+  callback). The app cookie (default 30-day `maxAge`) outlives the short-lived access token, so
+  once it expires every API call 401s. To avoid the resulting "signed-in but broken" stuck state
+  (issue #600), a global TanStack Query/Mutation `onError` handler
+  (`apps/web/lib/api/handle-auth-expiry.ts`) reacts to any 401 from `apiFetch` by signing the
+  dead session out and redirecting to `/login` — once, idempotently, and never on auth routes
+  (loop-guard). The full rotating-refresh (silently renewing the token via `offline_access`) is
+  a tracked follow-up; it depends on the IdP granting `offline_access`.
 - **`canWrite` is now optimistic**: the article edit controls are shown to any authenticated
   user. The API returns 403 if they are not the author. This is acceptable UX — the error is
   surfaced via the existing toast system.

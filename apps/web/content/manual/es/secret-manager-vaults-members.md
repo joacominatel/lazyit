@@ -60,6 +60,38 @@ otra app o un gestor de portapapeles ya capturó el valor), así que considéral
 garantía — pega cuanto antes. Puedes editar la etiqueta o el identificador de un secreto, reemplazar su
 valor o eliminarlo.
 
+## Buscar en una bóveda
+
+Una bóveda con más de unos pocos secretos muestra un **cuadro de búsqueda** sobre la lista. Filtra por
+**etiqueta** y **handle** a medida que escribes — los nombres no secretos, nunca los valores. La búsqueda
+no descifra nada; solo acota lo que se ve en pantalla.
+
+## Importar en masa desde un archivo .env
+
+Para incorporar los secretos de una aplicación de una sola vez en lugar de uno por uno, abre una bóveda y
+elige **Importar**. Pega tus líneas `CLAVE=valor` (o **sube un archivo `.env`**) y lazyit muestra una
+**vista previa** antes de guardar nada:
+
+- cuántas claves son **nuevas** y se importarán;
+- cuántas se **omiten** porque ya existe un secreto con ese handle — la importación **nunca sobrescribe**
+  un secreto existente;
+- las líneas que no se pudieron interpretar (se ignoran).
+
+Entiende el formato `.env` habitual: `CLAVE=valor`, `export CLAVE=...`, valores entre comillas simples o
+dobles, `# comentarios` y líneas en blanco. Cada valor importado se **cifra en tu navegador** antes de
+almacenarse — igual que al agregar un secreto a mano, así lazyit nunca ve el texto plano.
+
+## Exportar una bóveda a un archivo .env
+
+Para respaldar una bóveda, sembrar el `.env` de una app o entregar secretos a una persona desarrolladora,
+abre una bóveda y elige **Exportar**. lazyit **descifra los secretos en tu navegador** y los descarga como
+un archivo `.env`.
+
+> **Exportar escribe tus secretos en TEXTO PLANO en tu dispositivo.** Cualquiera que pueda leer el archivo
+> descargado puede leer los secretos. Guárdalo en un lugar seguro y elimínalo cuando termines. lazyit
+> registra *que* exportaste (quién, qué bóveda, cuándo) para la auditoría — pero, fiel al modelo de
+> seguridad, nunca ve los valores en sí.
+
 ## Agregar y revocar miembros
 
 Las bóvedas se comparten gestionando **miembros**:

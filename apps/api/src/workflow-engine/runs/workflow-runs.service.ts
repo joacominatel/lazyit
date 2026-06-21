@@ -142,13 +142,15 @@ export class WorkflowRunsService {
    *
    *   1. Load the source run. It MUST be terminal `FAILED` (→ {@link ReplayNotFailedError} → 409) and MUST
    *      carry a grant id (a replay re-fires a grant event; a grant-less run has nothing to re-fire).
-   *   2. FAIL-CLOSED double-provision guard (the security-critical gate, ADR-0057 Decision 3): refuse if
-   *      the source run already SUCCEEDED a NON-idempotent create on/before the failed step
+   *   2. Resolve the LATEST version via {@link WorkflowTriggerService.planForTrigger} (NEVER re-implement
+   *      version selection) — this is the version the clone will execute.
+   *   3. FAIL-CLOSED double-provision guard (the security-critical gate, ADR-0057 Decision 3, #555): refuse
+   *      if the source run already SUCCEEDED a NON-idempotent create on/before the failed step, evaluated
+   *      against the LATEST version's step definitions (what re-fires), NOT the source's pinned version
    *      ({@link assertReplaySafe} → {@link ReplayNotIdempotentError} → 422). No warn-and-proceed.
-   *   3. Resolve the LATEST version via {@link WorkflowTriggerService.planForTrigger} (NEVER re-implement
-   *      version selection). Compute `seq = max(replaySeq for this (trigger, accessGrantId)) + 1`.
-   *   4. Build the new PENDING run via {@link WorkflowTriggerService.buildReplayRunData} (the parent's id
-   *      as `supersedesRunId`), CREATE it, and enqueue via the normal {@link WorkflowTriggerService.enqueue}.
+   *   4. Compute `seq = max(replaySeq for this (trigger, accessGrantId)) + 1`, build the new PENDING run via
+   *      {@link WorkflowTriggerService.buildReplayRunData} (the parent's id as `supersedesRunId`), CREATE
+   *      it, and enqueue via the normal {@link WorkflowTriggerService.enqueue}.
    *
    * Idempotency-key race: two concurrent replays can compute the same `seq`; the unique `idempotencyKey`
    * makes the second `create` throw P2002. We catch it and retry with a freshly-recomputed `seq` (bounded);
@@ -157,7 +159,6 @@ export class WorkflowRunsService {
   async replayLatest(runId: string, principal?: Principal) {
     const source = await this.prisma.workflowRun.findFirst({
       where: { id: runId },
-      include: { workflowVersion: { select: { steps: true } } },
     });
     if (!source) {
       throw new NotFoundException(`WorkflowRun ${runId} not found`);
@@ -175,20 +176,8 @@ export class WorkflowRunsService {
     }
     const accessGrantId = source.accessGrantId;
 
-    // FAIL-CLOSED guard (ADR-0057 Decision 3). Inspect the source run's append-only SUCCEEDED step rows
-    // against the pinned version's steps: refuse the moment a non-idempotent create already succeeded
-    // on/before the failed step (re-firing from the entry node would double-provision it).
-    const steps = WorkflowStepsSchema.parse(source.workflowVersion.steps);
-    const failedStepKey = resolveFailedStepKey(source.error, steps);
-    const succeeded = await this.prisma.workflowStepRun.findMany({
-      where: { runId, status: 'SUCCEEDED' },
-      select: { stepKey: true },
-    });
-    // Throws ReplayNotIdempotentError (→ 422) when unsafe; returns when every completed provisioning step
-    // up to and including the failed step is idempotent.
-    assertReplaySafe(steps, failedStepKey, succeeded);
-
-    // Resolve the LATEST version for this (application, trigger) — the SAME selection a real grant uses.
+    // Resolve the LATEST version for this (application, trigger) — the SAME selection a real grant uses —
+    // BEFORE the guard, because the clone re-fires THAT version (not the source's pinned one).
     const plan = await this.trigger.planForTrigger(
       source.trigger,
       source.applicationId,
@@ -199,6 +188,33 @@ export class WorkflowRunsService {
         'No enabled workflow version exists to replay this run against',
       );
     }
+
+    // FAIL-CLOSED guard (ADR-0057 Decision 3, #555). The clone re-fires the LATEST version from the entry
+    // node, so the double-provision hazard is defined by the LATEST version's step definitions — NOT the
+    // source run's pinned version. Evaluate the guard against the latest steps: a step that the source run
+    // already SUCCEEDED (matched by stable `stepKey`) and that is a NON-idempotent provisioning step in
+    // the latest version would double-provision on re-fire. (A step idempotent-in-source-but-not-in-latest
+    // is now correctly caught; a step removed from the latest version is correctly skipped.)
+    const latest = await this.prisma.workflowVersion.findUnique({
+      where: { id: plan.workflowVersionId },
+      select: { steps: true },
+    });
+    if (!latest) {
+      // The resolved version vanished between planForTrigger and this read — treat as "nothing to run".
+      throw new UnprocessableEntityException(
+        'No enabled workflow version exists to replay this run against',
+      );
+    }
+    const steps = WorkflowStepsSchema.parse(latest.steps);
+    const failedStepKey = resolveFailedStepKey(source.error, steps);
+    const succeeded = await this.prisma.workflowStepRun.findMany({
+      where: { runId, status: 'SUCCEEDED' },
+      select: { stepKey: true },
+    });
+    // Throws ReplayNotIdempotentError (→ 422) when unsafe; returns when every completed provisioning step
+    // up to and including the failed step is idempotent.
+    assertReplaySafe(steps, failedStepKey, succeeded);
+
     const actor = this.actor.resolveActor(principal);
 
     // Create + enqueue, retrying the seq on a unique-key race (a concurrent replay took the same seq).

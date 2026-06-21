@@ -46,6 +46,8 @@ export interface LocationListParams {
 export function getLocations(
   params: LocationListParams = {},
   signal?: AbortSignal,
+  // Optional Bearer override for SSR server-prefetch (ADR-0067) — see `getAssets`.
+  token?: string,
 ): Promise<Page<Location>> {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
@@ -59,7 +61,7 @@ export function getLocations(
   const search = qs.toString();
   return apiFetch<Page<Location>>(
     search ? `${BASE}?${search}` : BASE,
-    { signal },
+    { signal, token },
   );
 }
 export const getLocation = locations.get;

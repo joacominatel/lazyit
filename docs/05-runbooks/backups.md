@@ -131,17 +131,52 @@ BACKUP_RETENTION_DAYS=14     # prune dumps older than this many days. Default: 1
 # OPTIONAL offsite copy — OFF unless set. Runs once per dump with the dump path as "$1".
 # Example (rclone to a remote named "offsite"): BACKUP_OFFSITE_CMD='rclone copy "$1" offsite:lazyit/'
 BACKUP_OFFSITE_CMD=
+# OPTIONAL failure alert hook — OFF unless set. Runs when a dump (or the offsite copy) fails,
+# with a one-line reason as "$1". Lets you wire your own notifier; there is no built-in vendor
+# integration. A failed run is loud in the logs and exits non-zero even without this.
+# Example: BACKUP_ON_FAILURE_CMD='curl -fsS -d "$1" https://hooks.example/lazyit-backup'
+BACKUP_ON_FAILURE_CMD=
 ```
 
 The sidecar writes `app-<ts>.dump` and `zitadel-<ts>.dump` into `./backups` (repo root). **It does
 NOT back up `.env.prod`** — copy that off-host yourself. Offsite is OFF by default (respects the
 "no mandatory cloud" stance, [[0028-secrets-and-config]]); wire `BACKUP_OFFSITE_CMD` only if you
-want it. Check it ran:
+want it.
+
+### How the sidecar fails (it fails LOUD, never silent)
+
+Each dump is written to a `*.partial` temp file, then verified **non-empty and restorable**
+(`pg_restore -l` reads the `-Fc` archive's table of contents — this fails on a truncated archive)
+and only then **atomically renamed** onto the final `app-<ts>.dump` / `zitadel-<ts>.dump` path. So:
+
+- **A failing `pg_dump` (DB down, disk full, OOM, network blip) never leaves a file matching the
+  final glob.** The half-written `*.partial` is removed; your **last good dump stays untouched**.
+  (Before this fix a plain `> final.dump` redirect truncated the final path *before* pg_dump ran,
+  leaving a 0-byte/corrupt file that the retention sweep treated as a real backup — issue #588.)
+- **A failed run logs a distinct, greppable line** — `[lazyit-backup] FAILED run <ts>: <reason>`
+  on **stderr** — and the sidecar process **exits non-zero**, so it surfaces in `docker logs` and
+  to any container/cron monitoring you run. If `BACKUP_ON_FAILURE_CMD` is set, it also fires your
+  alert hook with the reason as `$1`.
+- The **offsite copy** runs only on dumps that already verified and promoted; an offsite failure
+  is loud + non-zero too (the local dump is intact; the offsite copy did not happen).
+
+Check it ran (and catch failures):
 
 ```sh
-$DC logs backup   # "[lazyit-backup] run ... complete"
-ls -lh backups/
+$DC logs backup | grep '\[lazyit-backup\]'           # success ends with "run ... complete"
+$DC logs backup | grep 'FAILED'                       # any failed run shows here — investigate
+ls -lh backups/                                        # only verified, restorable dumps appear here
 ```
+
+> [!warning] Present is not the same as restorable — verify, don't just `ls`
+> The sidecar now guarantees a *present* dump is non-empty and passed `pg_restore -l`, but a
+> tested restore (below) is still the only proof your DR actually works. Periodically confirm the
+> latest dump is restorable — at minimum re-run the same integrity check the sidecar uses:
+> ```sh
+> pg_restore -l "backups/$(ls -t backups/ | grep '^app-' | head -1)" >/dev/null \
+>   && echo "latest app dump: restorable" || echo "latest app dump: CORRUPT"
+> ```
+> and run a full **Restore + Verify** (next sections) against a throwaway database on a schedule.
 
 ## Restore
 

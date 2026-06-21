@@ -1,0 +1,24 @@
+version: 2
+
+updates:
+  # npm/bun workspace — covers apps/web, apps/api, packages/shared and the root lockfile.
+  # Dependabot uses the "npm" ecosystem for bun-managed workspaces (bun.lock is compatible).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # Dockerfiles in infra/docker/ (api, web, migrate, zitadel-bootstrap).
+  - package-ecosystem: docker
+    directory: /infra/docker
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # GitHub Actions — keeps action versions (e.g. actions/checkout, oven-sh/setup-bun) current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
