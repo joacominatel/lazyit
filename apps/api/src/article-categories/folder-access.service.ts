@@ -47,6 +47,21 @@ interface FolderNode {
   rules: FolderAccessRule[];
 }
 
+/**
+ * A REQUEST-SCOPED memo for the folder-tree load (#599). A single mutable holder a caller creates ONCE
+ * per request and threads through the {@link FolderAccessService.visibleFolderIds} calls of that request
+ * (e.g. `findOne` + the list/backlinks call). When passed, the full `articleCategory.findMany` runs at
+ * most once per request instead of per call. It memoizes ONLY the static folder TREE (id/parentId/rules)
+ * — the caller's live joins (active grants / current assignments) are STILL resolved fresh on every call,
+ * so a just-revoked grant or released asset drops access on the next read (zero staleness, ADR-0060 §3).
+ *
+ * Deliberately NOT a cross-request TTL cache: a fresh `{}` is created per request and discarded after it,
+ * so there is no shared mutable state to drift between requests (that would need an ADR-0060 amendment).
+ */
+export interface FolderTreeCache {
+  folders?: FolderNode[];
+}
+
 /** True iff a resolved {@link VisibleFolders} grants access to `folderId` (ADMIN `'ALL'` always does). */
 export function folderVisible(
   visible: VisibleFolders,
@@ -91,7 +106,10 @@ export class FolderAccessService {
    * subquery (the common case pays nothing extra). The dynamic-rule lookups are skipped entirely unless
    * a restricted folder actually uses that rule kind.
    */
-  async visibleFolderIds(principal?: Principal): Promise<VisibleFolders> {
+  async visibleFolderIds(
+    principal?: Principal,
+    cache?: FolderTreeCache,
+  ): Promise<VisibleFolders> {
     // §5 ADMIN god-mode (INV-8): an ADMIN sees every folder — short-circuit, no per-folder evaluation.
     if (principal !== undefined && !isServicePrincipal(principal)) {
       if (principal.user.role === 'ADMIN') {
@@ -99,7 +117,7 @@ export class FolderAccessService {
       }
     }
 
-    const folders = await this.loadFolders();
+    const folders = await this.loadFolders(cache);
 
     // PUBLIC fast-path: if NO folder is restricted, every folder is visible to any authenticated caller
     // (and to a fail-closed SA holding article:read) — one scan, no live-join queries.
@@ -231,15 +249,29 @@ export class FolderAccessService {
     return true;
   }
 
-  /** All LIVE folders with the columns the walk needs. `accessRules` jsonb → parsed `isPublic`/`rules`. */
-  private async loadFolders(): Promise<FolderNode[]> {
+  /**
+   * All LIVE folders with the columns the walk needs. `accessRules` jsonb → parsed `isPublic`/`rules`.
+   *
+   * When a request-scoped {@link FolderTreeCache} is passed (#599), the full `findMany` runs at most
+   * ONCE per request: the first call populates `cache.folders`, later calls reuse it. The tree is the
+   * only thing memoized — the live-join lookups in {@link visibleFolderIds} still run per call, so
+   * access stays dynamic-by-construction (a revoked grant / released asset drops on the next read).
+   */
+  private async loadFolders(cache?: FolderTreeCache): Promise<FolderNode[]> {
+    if (cache?.folders !== undefined) {
+      return cache.folders;
+    }
     const rows = await this.prisma.articleCategory.findMany({
       select: { id: true, parentId: true, accessRules: true },
     });
-    return rows.map((r) => {
+    const folders = rows.map((r) => {
       const { isPublic, rules } = this.resolveRules(r.accessRules);
       return { id: r.id, parentId: r.parentId, isPublic, rules };
     });
+    if (cache !== undefined) {
+      cache.folders = folders;
+    }
+    return folders;
   }
 
   /**
