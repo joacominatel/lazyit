@@ -302,11 +302,17 @@ const restStep = (key: string, extra: Record<string, unknown> = {}) => ({
 
 interface ReplayHarnessOpts {
   source?: Record<string, unknown> | null;
+  /**
+   * The LATEST version's steps — what the clone re-fires, and (since #555) what the FAIL-CLOSED guard is
+   * evaluated against. Fed to the `workflowVersion.findUnique` mock, NOT the source run.
+   */
   steps?: unknown[];
   succeeded?: Array<{ stepKey: string }>;
   /** The highest existing replaySeq for (trigger, accessGrantId); the next run gets +1. */
   maxReplaySeq?: number | null;
   plan?: Record<string, unknown> | null;
+  /** Simulate the LATEST version vanishing between planForTrigger and the steps read (→ 422). */
+  latestVersionMissing?: boolean;
   /** When set, `create` throws this many P2002 collisions before succeeding (the seq race). */
   collisionsBeforeSuccess?: number;
 }
@@ -321,18 +327,18 @@ function buildForReplay(opts: ReplayHarnessOpts = {}) {
           applicationId: 'cjld2cjxh0000qzrmn831i7rn',
           accessGrantId: 'cjld2cjxh0001qzrmn831i7rn',
           error: { stepKey: 's2', errorClass: 'step-failed' },
-          workflowVersion: {
-            steps: opts.steps ?? [
-              restStep('s1', { idempotent: true }),
-              restStep('s2', { idempotent: false }),
-            ],
-          },
         }
       : opts.source;
 
+  // The LATEST version's steps (#555: the guard is evaluated against THIS, read via workflowVersion.findUnique).
+  const latestSteps = opts.steps ?? [
+    restStep('s1', { idempotent: true }),
+    restStep('s2', { idempotent: false }),
+  ];
+
   const findFirst = jest.fn(
     async (args: { orderBy?: { replaySeq?: string } }) => {
-      // The seq query (orderBy replaySeq desc) vs the initial source load (include workflowVersion).
+      // The seq query (orderBy replaySeq desc) vs the initial source load.
       if (args.orderBy?.replaySeq === 'desc') {
         return opts.maxReplaySeq == null
           ? null
@@ -340,6 +346,11 @@ function buildForReplay(opts: ReplayHarnessOpts = {}) {
       }
       return source;
     },
+  );
+
+  // The LATEST version lookup (by plan.workflowVersionId). `null` to simulate a version that vanished.
+  const findUniqueVersion = jest.fn(async () =>
+    opts.latestVersionMissing === true ? null : { steps: latestSteps },
   );
 
   // create() optionally throws N P2002 collisions, then returns the new run. The returned seq mirrors what
@@ -365,6 +376,7 @@ function buildForReplay(opts: ReplayHarnessOpts = {}) {
   const findManyStepRuns = jest.fn().mockResolvedValue(opts.succeeded ?? []);
   const prisma = {
     workflowRun: { findFirst, create },
+    workflowVersion: { findUnique: findUniqueVersion },
     workflowStepRun: { findMany: findManyStepRuns },
   } as unknown as PrismaService;
 
@@ -527,6 +539,49 @@ describe('WorkflowRunsService.replayLatest — clone-to-new-run (ADR-0057 Option
       replaySeq: 1,
     });
     expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('#555: evaluates the guard against the LATEST version — a step idempotent in the source but NON-idempotent in the latest version is REFUSED', async () => {
+    const { service, create, prisma } = buildForReplay({
+      // The LATEST version (what re-fires) marks s1 NON-idempotent; the source run SUCCEEDED s1.
+      // Before #555 the guard read the source's pinned steps and would have ALLOWED — now it refuses.
+      steps: [restStep('s1', { idempotent: false }), restStep('s2')],
+      succeeded: [{ stepKey: 's1' }],
+    });
+    await expect(service.replayLatest('src')).rejects.toBeInstanceOf(
+      ReplayNotIdempotentError,
+    );
+    // The guard read the LATEST version's steps (the plan's workflowVersionId), not the source run.
+    expect(
+      (prisma.workflowVersion as unknown as { findUnique: jest.Mock })
+        .findUnique,
+    ).toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('#555: a step removed from the LATEST version no longer re-fires — its source success cannot trigger the guard', async () => {
+    const { service, create } = buildForReplay({
+      // The source SUCCEEDED a non-idempotent step "old" that the LATEST version no longer contains.
+      steps: [restStep('s2', { idempotent: false })],
+      succeeded: [{ stepKey: 'old' }],
+      maxReplaySeq: 0,
+    });
+    // "old" is not in the latest version → not a re-fire hazard → allowed.
+    await expect(service.replayLatest('src')).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('422s when the LATEST version vanishes between resolution and the steps read', async () => {
+    const { service, create } = buildForReplay({
+      latestVersionMissing: true,
+      maxReplaySeq: 0,
+    });
+    await expect(service.replayLatest('src')).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('survives the seq-allocation RACE: a P2002 unique-violation recomputes the seq and retries (never a 500)', async () => {
