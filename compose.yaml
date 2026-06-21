@@ -486,6 +486,12 @@ services:
       # OPTIONAL offsite copy — OFF unless set. Receives the dump path as $1 (e.g. an rclone/scp
       # one-liner). Leave unset to keep backups local-disk only (no mandatory cloud).
       BACKUP_OFFSITE_CMD: ${BACKUP_OFFSITE_CMD:-}
+      # OPTIONAL failure alert hook — OFF unless set. Runs when a dump fails (non-zero pg_dump,
+      # or an empty/unrestorable dump) or the offsite hook fails. Receives a one-line reason as $1.
+      # Mirrors BACKUP_OFFSITE_CMD so a self-hosted operator can wire their own notifier — there is
+      # no built-in vendor integration (ADR-0028 "no mandatory cloud"). A failed run is ALWAYS loud
+      # in the logs ("[lazyit-backup] FAILED ...") and exits non-zero whether or not this is set.
+      BACKUP_ON_FAILURE_CMD: ${BACKUP_ON_FAILURE_CMD:-}
     volumes:
       # Dumps land on the host (repo-root ./backups) so they survive `down`/recreate and can be
       # copied off-host. ./backups is gitignored.
@@ -509,23 +515,71 @@ services:
         mkdir -p /backups
         cat > /usr/local/bin/lazyit-backup <<'SCRIPT'
         #!/bin/sh
+        # Fail-loud backup. The corrupt-dump trap this guards against: a plain `pg_dump > final.dump`
+        # truncates the FINAL path before pg_dump runs, so a mid-run failure (DB down, disk full, OOM,
+        # network blip) leaves a 0-byte/truncated file matching the app-*.dump glob — the retention
+        # sweep and an `ls` then treat it as a real backup, and a partial -Fc dump is unrestorable.
+        # Fix (issue #588): dump to a *.partial temp path, verify it's non-empty AND restorable
+        # (pg_restore -l reads the -Fc archive's table of contents — fails on a truncated archive),
+        # and only THEN atomically rename onto the final path. Any failure removes the partial,
+        # leaves the last good dump untouched, logs a greppable "[lazyit-backup] FAILED" line to
+        # stderr, optionally fires BACKUP_ON_FAILURE_CMD, and exits non-zero so cron + monitoring see it.
         set -eu
         TS="$$(date +%Y%m%d-%H%M%S)"
         echo "[lazyit-backup] starting run $$TS"
+
+        # fail REASON: loud, greppable, actionable. Stderr + non-zero exit so the failure is never
+        # mistaken for success; runs the optional alert hook (its own failure must not mask the
+        # original reason). A failed run intentionally aborts here — a partial dump is never promoted.
+        fail() {
+          echo "[lazyit-backup] FAILED run $$TS: $$1" >&2
+          if [ -n "$${BACKUP_ON_FAILURE_CMD:-}" ]; then
+            sh -c "$$BACKUP_ON_FAILURE_CMD \"\$$1\"" _ "[lazyit-backup] run $$TS: $$1" \
+              || echo "[lazyit-backup] on-failure hook itself failed for run $$TS" >&2
+          fi
+          exit 1
+        }
+
+        # dump_db LABEL FINAL_PATH PGPASSWORD HOST USER DB: dump to FINAL_PATH.partial, verify, then
+        # atomically promote. Same filesystem (the /backups mount), so mv is atomic — a reader/glob
+        # never sees a half-written final file.
+        dump_db() {
+          label="$$1"; final="$$2"; pw="$$3"; host="$$4"; user="$$5"; db="$$6"
+          partial="$${final}.partial"
+          rm -f "$$partial"
+          if ! PGPASSWORD="$$pw" pg_dump -h "$$host" -U "$$user" -d "$$db" -Fc > "$$partial"; then
+            rm -f "$$partial"
+            fail "$$label pg_dump exited non-zero (DB unreachable / disk full / OOM?); $$final NOT written, last good dump kept"
+          fi
+          if [ ! -s "$$partial" ]; then
+            rm -f "$$partial"
+            fail "$$label dump is empty; $$final NOT written, last good dump kept"
+          fi
+          if ! pg_restore -l "$$partial" > /dev/null 2>&1; then
+            rm -f "$$partial"
+            fail "$$label dump is truncated/corrupt (pg_restore -l could not read it); $$final NOT written, last good dump kept"
+          fi
+          mv "$$partial" "$$final"
+          echo "[lazyit-backup] $$label DB -> $$final ($$(wc -c < "$$final") bytes, restorable)"
+        }
+
         # App DB — POSTGRES_USER/PASSWORD/DB come from the shared .env.prod (env_file).
-        PGPASSWORD="$$POSTGRES_PASSWORD" pg_dump -h "$$PGHOST" -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc \
-          > "/backups/app-$${TS}.dump"
-        echo "[lazyit-backup] app DB -> /backups/app-$${TS}.dump"
+        dump_db "app" "/backups/app-$${TS}.dump" "$$POSTGRES_PASSWORD" "$$PGHOST" "$$POSTGRES_USER" "$$POSTGRES_DB"
         # Zitadel DB — its own credentials.
-        PGPASSWORD="$$ZITADEL_DB_PASSWORD" pg_dump -h "$$ZITADEL_DB_HOST" -U "$$ZITADEL_DB_USER" -d "$$ZITADEL_DB_NAME" -Fc \
-          > "/backups/zitadel-$${TS}.dump"
-        echo "[lazyit-backup] zitadel DB -> /backups/zitadel-$${TS}.dump"
-        # Retention sweep — delete dumps older than BACKUP_RETENTION_DAYS.
+        dump_db "zitadel" "/backups/zitadel-$${TS}.dump" "$$ZITADEL_DB_PASSWORD" "$$ZITADEL_DB_HOST" "$$ZITADEL_DB_USER" "$$ZITADEL_DB_NAME"
+
+        # Retention sweep — delete dumps older than BACKUP_RETENTION_DAYS. Only ever matches *.dump
+        # (verified, promoted) files; *.partial temp files are never left behind on the happy path
+        # and are removed on failure, so a corrupt run can never be retained as a "real" backup.
         find /backups -name '*.dump' -type f -mtime "+$${BACKUP_RETENTION_DAYS}" -print -delete || true
-        # Optional offsite hook (OFF unless BACKUP_OFFSITE_CMD is set). Receives each dump path as $$1.
+
+        # Optional offsite hook (OFF unless BACKUP_OFFSITE_CMD is set). Runs only on dumps that were
+        # already verified + promoted above. Receives each dump path as $$1. An offsite failure is
+        # loud + non-zero (the local dumps are safe, but the offsite copy didn't happen).
         if [ -n "$${BACKUP_OFFSITE_CMD:-}" ]; then
           for f in "/backups/app-$${TS}.dump" "/backups/zitadel-$${TS}.dump"; do
-            sh -c "$$BACKUP_OFFSITE_CMD \"\$$1\"" _ "$$f" || echo "[lazyit-backup] offsite hook failed for $$f"
+            sh -c "$$BACKUP_OFFSITE_CMD \"\$$1\"" _ "$$f" \
+              || fail "offsite hook failed for $$f (local dump is intact; offsite copy did NOT happen)"
           done
         fi
         echo "[lazyit-backup] run $$TS complete"
