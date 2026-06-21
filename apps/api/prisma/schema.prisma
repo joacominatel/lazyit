@@ -1435,6 +1435,10 @@ model WorkflowStepRun {
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (runId, id) serves the per-run step timeline.
   @@index([runId, id])
+  // The orchestrator's hot idempotency/attempt lookups (#594): the retry idempotency guard filters by
+  // (runId, stepKey, attempt) and nextAttemptFor orders (runId, stepKey) by attempt desc — this covers
+  // both so neither falls back to scanning the run's rows under the (runId, id) prefix.
+  @@index([runId, stepKey, attempt])
   @@map("workflow_step_runs")
 }
 

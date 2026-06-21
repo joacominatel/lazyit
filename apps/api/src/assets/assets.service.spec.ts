@@ -866,12 +866,13 @@ describe('AssetsService', () => {
 
   it('batchRestore restores soft-deleted ids, skips already-live, emits a PER-ITEM RESTORED event', async () => {
     // a1 soft-deleted (restored), a2 already live (skipped), a3 missing (skipped).
-    asset.findMany.mockResolvedValue([
-      { id: 'a1', deletedAt: new Date() },
-      { id: 'a2', deletedAt: null },
-    ]);
+    asset.findMany
+      .mockResolvedValueOnce([
+        { id: 'a1', deletedAt: new Date() },
+        { id: 'a2', deletedAt: null },
+      ])
+      .mockResolvedValueOnce([{ id: 'a1' }]); // single batched re-index read after commit (#596)
     tx.update.mockResolvedValue({});
-    asset.findFirst.mockResolvedValue({ id: 'a1' }); // re-index read after commit
 
     const result = await service.batchRestore(['a1', 'a2', 'a3']);
 
@@ -892,14 +893,40 @@ describe('AssetsService', () => {
     });
   });
 
+  it('batchRestore gathers re-index rows in ONE findMany regardless of batch size — #596 N+1 collapse', async () => {
+    // 3 soft-deleted ids all restore. The re-index must be a SINGLE findMany({ id: { in } }), not 1/id.
+    const deleted = [
+      { id: 'a1', deletedAt: new Date() },
+      { id: 'a2', deletedAt: new Date() },
+      { id: 'a3', deletedAt: new Date() },
+    ];
+    asset.findMany
+      .mockResolvedValueOnce(deleted) // gather pass (with includeSoftDeleted)
+      .mockResolvedValueOnce([{ id: 'a1' }, { id: 'a2' }, { id: 'a3' }]); // ONE batched re-index read
+    tx.update.mockResolvedValue({});
+
+    await service.batchRestore(['a1', 'a2', 'a3']);
+
+    // Exactly two findMany: the gather + ONE re-index read (never one per succeeded id).
+    expect(asset.findMany).toHaveBeenCalledTimes(2);
+    expect(asset.findFirst).not.toHaveBeenCalled();
+    const reindexArgs = (
+      asset.findMany.mock.calls as Array<[{ where?: Record<string, unknown> }]>
+    )[1][0];
+    expect(reindexArgs.where).toEqual({ id: { in: ['a1', 'a2', 'a3'] } });
+    // Search doc upserted once per mutated row (3 rows → 3 upserts).
+    expect(search.upsert).toHaveBeenCalledTimes(3);
+  });
+
   it('batchSetStatus changes only differing ids, skips same-status, emits PER-ITEM STATUS_CHANGED', async () => {
     // a1 OPERATIONAL → RETIRED (changes), a2 already RETIRED (skipped), a3 missing (skipped).
-    asset.findMany.mockResolvedValue([
-      { id: 'a1', status: 'OPERATIONAL' },
-      { id: 'a2', status: 'RETIRED' },
-    ]);
+    asset.findMany
+      .mockResolvedValueOnce([
+        { id: 'a1', status: 'OPERATIONAL' },
+        { id: 'a2', status: 'RETIRED' },
+      ])
+      .mockResolvedValueOnce([{ id: 'a1' }]); // single batched re-index read after commit (#596)
     tx.update.mockResolvedValue({});
-    asset.findFirst.mockResolvedValue({ id: 'a1' }); // re-index read after commit
 
     const result = await service.batchSetStatus(['a1', 'a2', 'a3'], 'RETIRED');
 
@@ -927,6 +954,30 @@ describe('AssetsService', () => {
         { id: 'a3', reason: 'not_found' },
       ],
     });
+  });
+
+  it('batchSetStatus gathers re-index rows in ONE findMany regardless of batch size — #596 N+1 collapse', async () => {
+    // 3 ids all change status. The re-index must be a SINGLE findMany({ id: { in } }), not 1/id.
+    asset.findMany
+      .mockResolvedValueOnce([
+        { id: 'a1', status: 'OPERATIONAL' },
+        { id: 'a2', status: 'OPERATIONAL' },
+        { id: 'a3', status: 'OPERATIONAL' },
+      ]) // gather pass
+      .mockResolvedValueOnce([{ id: 'a1' }, { id: 'a2' }, { id: 'a3' }]); // ONE batched re-index read
+    tx.update.mockResolvedValue({});
+
+    await service.batchSetStatus(['a1', 'a2', 'a3'], 'RETIRED');
+
+    // Exactly two findMany: the gather + ONE re-index read (never one per succeeded id).
+    expect(asset.findMany).toHaveBeenCalledTimes(2);
+    expect(asset.findFirst).not.toHaveBeenCalled();
+    const reindexArgs = (
+      asset.findMany.mock.calls as Array<[{ where?: Record<string, unknown> }]>
+    )[1][0];
+    expect(reindexArgs.where).toEqual({ id: { in: ['a1', 'a2', 'a3'] } });
+    // Search doc upserted once per mutated row (3 rows → 3 upserts).
+    expect(search.upsert).toHaveBeenCalledTimes(3);
   });
 
   it('batch actions stamp a HUMAN principal onto every per-item event', async () => {

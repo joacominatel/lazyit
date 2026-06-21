@@ -298,6 +298,31 @@ describe('AssetTagSchemeService', () => {
     expect(result).toBe('LAZY-00042-X');
   });
 
+  it('allocateTag reads the scheme row ONCE and writes ONCE in the steady state — #597', async () => {
+    // Steady state: counter at 42, nothing live at/above it (no occupied scan match). allocateTag must
+    // read the scheme row a SINGLE time (its own read is reused by consume — no second read) and, with
+    // no gap to jump, do exactly ONE write (the atomic increment) — the jump updateMany is skipped.
+    assetTagScheme.findFirst.mockResolvedValue({
+      id: SINGLETON,
+      enabled: true,
+      prefix: 'IT-',
+      suffix: null,
+      width: null,
+      nextNumber: 42,
+    });
+    asset.findMany.mockResolvedValue([]); // nothing occupied at/above the counter
+    assetTagScheme.update.mockResolvedValue({ nextNumber: 43 });
+
+    const result = await service.allocateTag(undefined);
+
+    expect(result).toBe('IT-42');
+    // ONE scheme-row read (no redundant re-read inside consume).
+    expect(assetTagScheme.findFirst).toHaveBeenCalledTimes(1);
+    // ONE write: the atomic increment. No forward JUMP in the steady state.
+    expect(assetTagScheme.updateMany).not.toHaveBeenCalled();
+    expect(assetTagScheme.update).toHaveBeenCalledTimes(1);
+  });
+
   // --- skip-existing invariant (ADR-0068 §1) ------------------------------
 
   it('SKIP-EXISTING: dense occupancy 1000,1002,1005 → allocations 1001,1003,1004,1006…', async () => {
