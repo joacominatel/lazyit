@@ -15,6 +15,7 @@ import {
   CreateSecretItemSchema,
   CreateSecretVaultWithMembershipSchema,
   CreateVaultMembershipSchema,
+  ExportSecretsAuditSchema,
   SecretItemSchema,
   SecretVaultSchema,
   UpdateSecretItemSchema,
@@ -44,6 +45,7 @@ class CreateVaultMembershipDto extends createZodDto(
   CreateVaultMembershipSchema,
 ) {}
 class VaultMembershipDto extends createZodDto(VaultMembershipSchema) {}
+class ExportSecretsAuditDto extends createZodDto(ExportSecretsAuditSchema) {}
 
 /**
  * Secret Manager — vaults, items, and members (ADR-0061). EVERY route is HUMAN-ONLY (`HumanOnlyGuard`)
@@ -189,6 +191,24 @@ export class VaultsController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.secrets.deleteItem(principal, vaultId, itemId);
+  }
+
+  @Post(':vaultId/export')
+  @RequirePermission('secret:read')
+  @ApiOperation({
+    summary:
+      'Record a vault secret EXPORT (audit-only; decryption + .env build happen client-side, INV-10)',
+  })
+  @ApiOkResponse({
+    description:
+      'Audit row written (ITEMS_EXPORTED). The server NEVER receives, sees, or stores a plaintext value.',
+  })
+  recordExport(
+    @Param('vaultId') vaultId: string,
+    @Body() dto: ExportSecretsAuditDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.secrets.recordExport(principal, vaultId, dto);
   }
 
   // ── Members ─────────────────────────────────────────────────────────────────

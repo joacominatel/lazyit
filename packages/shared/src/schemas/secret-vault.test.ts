@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   CreateSecretVaultSchema,
+  ExportSecretsAuditSchema,
   SecretVaultSchema,
   UpdateSecretVaultSchema,
 } from "./secret-vault";
@@ -93,5 +94,41 @@ describe("UpdateSecretVaultSchema", () => {
 
   it("rejects an empty body (name is required)", () => {
     expect(UpdateSecretVaultSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe("ExportSecretsAuditSchema — audit-only body, NO secret material (#612, INV-10)", () => {
+  it("accepts an empty body (itemCount is optional)", () => {
+    expect(ExportSecretsAuditSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("accepts a non-negative integer itemCount", () => {
+    expect(ExportSecretsAuditSchema.safeParse({ itemCount: 0 }).success).toBe(
+      true,
+    );
+    expect(ExportSecretsAuditSchema.safeParse({ itemCount: 7 }).success).toBe(
+      true,
+    );
+  });
+
+  it("rejects a negative or non-integer itemCount", () => {
+    expect(ExportSecretsAuditSchema.safeParse({ itemCount: -1 }).success).toBe(
+      false,
+    );
+    expect(ExportSecretsAuditSchema.safeParse({ itemCount: 1.5 }).success).toBe(
+      false,
+    );
+  });
+
+  it("rejects ANY extra field — no plaintext value/key/blob can be smuggled through (strictObject)", () => {
+    expect(
+      ExportSecretsAuditSchema.safeParse({ value: "super-secret" }).success,
+    ).toBe(false);
+    expect(
+      ExportSecretsAuditSchema.safeParse({ itemCount: 1, dek: "YWJj" }).success,
+    ).toBe(false);
+    expect(
+      ExportSecretsAuditSchema.safeParse({ plaintext: "x", iv: "y" }).success,
+    ).toBe(false);
   });
 });

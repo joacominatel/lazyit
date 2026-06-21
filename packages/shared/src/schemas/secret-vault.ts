@@ -47,3 +47,16 @@ export const UpdateSecretVaultSchema = z.strictObject({
   name: z.string().trim().min(1).max(VAULT_NAME_MAX),
 });
 export type UpdateSecretVault = z.infer<typeof UpdateSecretVaultSchema>;
+
+/**
+ * Record a vault secret EXPORT (`POST /secret-vaults/:id/export`, #612). The export itself — decrypting
+ * the values and building the `.env`/JSON file — happens ENTIRELY CLIENT-SIDE after the member unlocks the
+ * vault (INV-10 / ADR-0061: the server never sees plaintext). This endpoint only writes the metadata-only
+ * audit row (action `ITEMS_EXPORTED`). The body therefore carries NO secret material whatsoever — it is a
+ * `strictObject` so any unknown key (a smuggled value/key/blob) is rejected with a 400. The only field is
+ * an OPTIONAL non-secret `itemCount` (how many items the client exported), kept for the audit trail.
+ */
+export const ExportSecretsAuditSchema = z.strictObject({
+  itemCount: z.number().int().nonnegative().optional(),
+});
+export type ExportSecretsAudit = z.infer<typeof ExportSecretsAuditSchema>;
