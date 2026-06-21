@@ -35,9 +35,9 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { lift } from "@/lib/recipes";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
-import { useAssetStatusLabel } from "../assets/_components/asset-status-badge";
-import { PulseRail, type QuickAction } from "./_components/pulse-rail";
-import { RecentActivityPanel } from "./_components/recent-activity-panel";
+import { useAssetStatusLabel } from "../../assets/_components/asset-status-badge";
+import { PulseRail, type QuickAction } from "./pulse-rail";
+import { RecentActivityPanel } from "./recent-activity-panel";
 
 /**
  * Dashboard landing — live metrics across lazyit's three pillars (Inventory / Access / Knowledge).
@@ -48,7 +48,7 @@ import { RecentActivityPanel } from "./_components/recent-activity-panel";
  * deep-links into a PRE-FILTERED list (using the same URL filter params the lists read), and ADMIN
  * callers get quick write actions. No writes happen on this page itself.
  */
-export default function DashboardPage() {
+export function DashboardView() {
   const t = useTranslations("dashboard");
   const tc = useTranslations("common");
   const { dateTime, relative } = useFormatters();
