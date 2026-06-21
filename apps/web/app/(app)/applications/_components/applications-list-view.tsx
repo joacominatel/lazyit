@@ -43,7 +43,7 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { cn } from "@/lib/utils";
-import { StackedUserAvatars } from "./_components/stacked-user-avatars";
+import { StackedUserAvatars } from "./stacked-user-avatars";
 
 type CriticalityFilter = "ALL" | "CRITICAL" | "NORMAL";
 
@@ -53,7 +53,7 @@ type CriticalityFilter = "ALL" | "CRITICAL" | "NORMAL";
  */
 const FILTER_DEFAULTS = { category: "ALL", criticality: "ALL" } as const;
 
-export default function ApplicationsPage() {
+export function ApplicationsListView() {
   const t = useTranslations("applications");
   const { date } = useFormatters();
   const router = useRouter();
