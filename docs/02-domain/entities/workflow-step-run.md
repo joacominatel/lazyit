@@ -87,7 +87,12 @@ in `@lazyit/shared` (`packages/shared/src/schemas/workflow.ts`, [[shared-package
 | `metadata` | `jsonb?` | **redacted** outcome data only (status, duration, error class, field *names*, transition taken). |
 | `createdAt` | `datetime` | `@default(now())`. |
 
-Index: `@@index([runId, id])` (the per-run step timeline).
+Indexes:
+- `@@index([runId, id])` — the per-run step timeline (run-detail ordering).
+- `@@index([runId, stepKey, attempt])` — the orchestrator's hot idempotency/attempt lookups (#594): the
+  retry idempotency guard filters by `(runId, stepKey, attempt)` and `nextAttemptFor` orders
+  `(runId, stepKey)` by `attempt desc`; this composite covers both instead of scanning the run's rows
+  under the `(runId, id)` prefix.
 
 ## Endpoints
 
