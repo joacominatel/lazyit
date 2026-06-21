@@ -58,6 +58,37 @@ browser may not allow it (for example over plain HTTP, or if another app or a cl
 already captured the value), so treat it as a convenience, not a guarantee — paste promptly. You can
 edit a secret's label or handle, replace its value, or delete it.
 
+## Searching a vault
+
+A vault with more than a handful of secrets shows a **search box** above the list. It filters by
+**label** and **handle** as you type — the non-secret names, never the values. Searching never decrypts
+anything; it just narrows what's on screen.
+
+## Bulk-importing from a .env file
+
+To onboard an application's secrets all at once instead of one at a time, open a vault and choose
+**Import**. Paste your `KEY=value` lines (or **upload a `.env` file**) and lazyit shows a **preview**
+before anything is saved:
+
+- how many keys are **new** and will be imported;
+- how many are **skipped** because a secret with that handle already exists — import **never overwrites**
+  an existing secret;
+- any lines it couldn't parse (these are ignored).
+
+It understands the common `.env` shape: `KEY=value`, `export KEY=...`, single- or double-quoted values,
+`# comments` and blank lines. Each imported value is **encrypted in your browser** before it is stored —
+the same as adding a secret by hand, so lazyit never sees the plaintext.
+
+## Exporting a vault to a .env file
+
+To back up a vault, seed an app's `.env`, or hand secrets to a developer, open a vault and choose
+**Export**. lazyit **decrypts the secrets in your browser** and downloads them as a `.env` file.
+
+> **Export writes your secrets in PLAINTEXT to your device.** Anyone who can read the downloaded file
+> can read the secrets. Store it somewhere safe and delete it once you're done. lazyit records *that*
+> you exported (who, which vault, when) for the audit trail — but, true to the security model, it never
+> sees the values themselves.
+
 ## Adding and revoking members
 
 Vaults are shared by managing **members**:
