@@ -61,6 +61,8 @@ export interface ConsumableListParams {
 export function getConsumables(
   params: ConsumableListParams = {},
   signal?: AbortSignal,
+  // Optional Bearer override for SSR server-prefetch (ADR-0067) — see `getAssets`.
+  token?: string,
 ): Promise<ConsumableListPage> {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
@@ -75,7 +77,7 @@ export function getConsumables(
   const search = qs.toString();
   return apiFetch<ConsumableListPage>(
     search ? `${BASE}?${search}` : BASE,
-    { signal },
+    { signal, token },
   );
 }
 

@@ -45,6 +45,8 @@ export interface ApplicationListParams {
 export function getApplications(
   params: ApplicationListParams = {},
   signal?: AbortSignal,
+  // Optional Bearer override for SSR server-prefetch (ADR-0067) — see `getAssets`.
+  token?: string,
 ): Promise<Page<Application>> {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
@@ -58,7 +60,7 @@ export function getApplications(
   const search = qs.toString();
   return apiFetch<Page<Application>>(
     search ? `${BASE}?${search}` : BASE,
-    { signal },
+    { signal, token },
   );
 }
 export const getApplication = crud.get;
