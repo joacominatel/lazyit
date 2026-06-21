@@ -302,9 +302,118 @@ describe('SearchService', () => {
       ]);
       // The internal folder key is stripped from the shipped hit (wire ArticleHit has no categoryId).
       expect(result.articles?.hits[0]).not.toHaveProperty('categoryId');
-      // total is re-counted to what the caller can actually see.
+      // total reflects the engine's filtered count minus what the backstop dropped (2 - 1).
       expect(result.articles?.total).toBe(1);
+      // Resolved exactly ONCE per search: the SAME visible set feeds the Meili filter AND the backstop.
       expect(folderAccess.visibleFolderIds).toHaveBeenCalledTimes(1);
+    });
+
+    // --- #598: Meili-SIDE folder filter (readable hits below the limit window are no longer dropped) ---
+
+    it('pushes a categoryId IN filter into the article query for a non-admin (and only articles)', async () => {
+      const folderAccess = folderAccessMock(new Set(['f1', 'f2']));
+      const scopedService = await buildService(logger, folderAccess);
+      client.multiSearch.mockResolvedValue({ results: [] });
+
+      await scopedService.search({
+        q: 'x',
+        entities: ['articles', 'assets'],
+        limit: 10,
+        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+      });
+
+      const [params] = client.multiSearch.mock.calls[0] as [
+        { queries: Array<{ indexUid: string; filter?: string }> },
+      ];
+      const byIndex = new Map(params.queries.map((q) => [q.indexUid, q]));
+      // The article query carries the Meili-side folder scope...
+      expect(byIndex.get('articles')?.filter).toBe(
+        "categoryId IN ['f1', 'f2']",
+      );
+      // ...and no other index does (folder access is article-only).
+      expect(byIndex.get('assets')?.filter).toBeUndefined();
+    });
+
+    it('an ADMIN omits the article filter entirely (sees everything, §5)', async () => {
+      const folderAccess = folderAccessMock('ALL');
+      const scopedService = await buildService(logger, folderAccess);
+      client.multiSearch.mockResolvedValue({ results: [] });
+
+      await scopedService.search({
+        q: 'x',
+        entities: ['articles'],
+        limit: 10,
+        principal: { kind: 'human', user: { id: 'admin', role: 'ADMIN' } } as never,
+      });
+
+      const [params] = client.multiSearch.mock.calls[0] as [
+        { queries: Array<{ indexUid: string; filter?: string }> },
+      ];
+      expect(params.queries[0].filter).toBeUndefined();
+    });
+
+    it('a caller with NO visible folders gets a never-match filter (fail closed, zero hits)', async () => {
+      const folderAccess = folderAccessMock(new Set<string>());
+      const scopedService = await buildService(logger, folderAccess);
+      client.multiSearch.mockResolvedValue({ results: [] });
+
+      await scopedService.search({
+        q: 'x',
+        entities: ['articles'],
+        limit: 10,
+        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+      });
+
+      const [params] = client.multiSearch.mock.calls[0] as [
+        { queries: Array<{ filter?: string }> },
+      ];
+      // `categoryId IN []` is invalid in Meili; a contradiction matches no document instead.
+      expect(params.queries[0].filter).toBe(
+        'categoryId IS NULL AND categoryId IS NOT NULL',
+      );
+    });
+
+    it('returns a readable hit that ranks BELOW the naive limit window because the filter is applied Meili-side (#598)', async () => {
+      // The regression: K restricted articles rank above L readable ones, limit < K. Pre-fix, the naive
+      // query fetched `limit` raw hits (all restricted) then post-dropped them → the readable ones, which
+      // ranked below `limit` and were NEVER fetched, were silently lost. With the Meili-side filter the
+      // engine returns only readable docs within `limit`, so the readable hit surfaces. We simulate the
+      // engine HONOURING the filter: the restricted docs are absent from the response.
+      const folderAccess = folderAccessMock(new Set(['readable-folder']));
+      const scopedService = await buildService(logger, folderAccess);
+      client.multiSearch.mockResolvedValue({
+        results: [
+          {
+            indexUid: 'articles',
+            // Only the readable doc comes back — the restricted ones were excluded by the filter, so
+            // the readable hit is no longer crowded out of the `limit` window.
+            hits: [
+              {
+                id: 'readable1',
+                slug: 'readable',
+                title: 'Readable runbook',
+                categoryId: 'readable-folder',
+              },
+            ],
+            // The engine's estimatedTotalHits is the count of FILTERED (readable) matches (#598).
+            estimatedTotalHits: 1,
+          },
+        ],
+      });
+
+      const result = await scopedService.search({
+        q: 'runbook',
+        entities: ['articles'],
+        limit: 2,
+        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+      });
+
+      // The readable article is returned (it would have been dropped by the old post-filter-only path).
+      expect(result.articles?.hits).toEqual([
+        { id: 'readable1', slug: 'readable', title: 'Readable runbook' },
+      ]);
+      // total reflects the engine's count of readable matches, not the kept page size by coincidence.
+      expect(result.articles?.total).toBe(1);
     });
 
     it('an ADMIN (visibleFolderIds = ALL) keeps every article hit (categoryId still stripped)', async () => {
