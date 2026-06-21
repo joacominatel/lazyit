@@ -18,7 +18,7 @@
 #   docker pull alpine:3.21 && docker inspect alpine:3.21 --format '{{index .RepoDigests 0}}'
 
 # alpine:3.21 — pinned by digest.
-FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 
 # curl (HTTP to the Management API + healthcheck), jq (JSON build/parse), openssl (RS256 JWT signing),
 # coreutils (base64 -w0 / printf %s for the JWT), ca-certificates (TLS to any external issuer). No bash:
