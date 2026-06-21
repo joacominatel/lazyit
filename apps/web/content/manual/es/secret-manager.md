@@ -88,6 +88,16 @@ Dos hábitos sencillos evitan el caso irrecuperable:
   relevante para que un compañero pueda restaurar tu acceso si alguna vez pierdes tus llaves. lazyit te
   avisa cuando una bóveda tiene un solo miembro — hazle caso antes de que sea tarde.
 
+## La sesión se bloquea sola cuando te alejas
+
+Una vez que desbloqueas el Gestor de Secretos, tu clave queda disponible en el navegador para que no
+tengas que reingresar tu contraseña en cada secreto. Para proteger una pantalla desatendida, la sesión
+**se bloquea automáticamente tras unos 15 minutos de inactividad** — y antes si dejas la pestaña oculta
+durante un minuto aproximadamente. Al bloquearse, todo valor revelado se oculta y la clave en memoria se
+descarta; simplemente vuelves a desbloquear con tu contraseña para continuar. Cualquier actividad
+(escribir, hacer clic, desplazarte) reinicia el temporizador, y siempre puedes bloquear de inmediato con
+la acción **Bloquear**.
+
 ## Cuando un secreto puede haber quedado expuesto
 
 Quitar a un miembro, o incluso eliminar un secreto, detiene las lecturas **futuras** a través de lazyit
