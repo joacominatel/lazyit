@@ -34,12 +34,16 @@ const BASE = "/dashboard";
  */
 export function getDashboardSummary(
   expiringWithinDays?: number,
+  // Optional Bearer override for SSR server-prefetch (ADR-0067): a Server Component passes
+  // `session.accessToken` from `await auth()`, since the client-side token store is browser-only.
+  // Client callers omit it and `apiFetch` falls back to the session-token store, unchanged.
+  token?: string,
 ): Promise<DashboardSummary> {
   const qs =
     expiringWithinDays !== undefined
       ? `?expiringWithinDays=${expiringWithinDays}`
       : "";
-  return apiFetch<DashboardSummary>(`${BASE}/summary${qs}`);
+  return apiFetch<DashboardSummary>(`${BASE}/summary${qs}`, { token });
 }
 
 /**
