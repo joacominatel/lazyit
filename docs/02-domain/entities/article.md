@@ -92,12 +92,18 @@ deferred.
 - **Search** ([[0035-search-architecture]] / [[0042]] / [[0060-kb-folder-access-control]] §5): a
   PUBLISHED article is indexed in Meilisearch including its **`content`** (runbook bodies are findable).
   A DRAFT is never indexed (author-private), so its content can't leak via search. The home folder
-  (`categoryId`) is carried into the index as a **filterable** attribute and the `/search` endpoint runs
-  a **per-caller folder-access post-filter** (re-running the read evaluator over the returned hits and
-  dropping the ones the caller can't see; ADMIN bypasses, an SA fails closed) — so a **restricted
-  article never surfaces to a non-matching caller** (the search-leak fix, INV-9). `categoryId` is
-  retrieved internally for the filter and **stripped** from the shipped hit.
-- Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
+  (`categoryId`) is carried into the index as a **filterable** attribute, so `/search` scopes the article
+  query **Meili-side** to the caller's visible folders (`categoryId IN [...]`; ADMIN omits the filter, a
+  caller with no visible folders gets a never-match → zero hits). This means readable hits that rank
+  *below* the naive `limit` window are returned and `total` reflects the engine's count of **readable**
+  matches (#598). On top of that, the per-caller folder-access **in-app post-filter is retained as a
+  defense-in-depth backstop** (re-running the read evaluator over the returned hits and dropping any the
+  caller can't see — the index can lag a just-revoked grant, so authz never relies on Meili alone; INV-9)
+  — so a **restricted article never surfaces to a non-matching caller**. `categoryId` is retrieved
+  internally for the filter and **stripped** from the shipped hit.
+- Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`. A **cascade folder
+  delete** ([[folder]]) **deindexes** every article it soft-deletes from Meilisearch (fire-and-forget,
+  post-commit — mirroring the single-article delete path), so a cascade leaves no ghost hits (#595).
 
 > [!warning] Auth is a temporary shim — endpoints are insecure
 > Authorization (draft privacy, author-only writes) is enforced in the service, but the caller is
