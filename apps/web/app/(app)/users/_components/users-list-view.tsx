@@ -63,14 +63,14 @@ import { useListParams } from "@/lib/hooks/use-list-params";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
-import { ByoiBanner } from "./_components/byoi-banner";
-import { CloneUserWizard } from "./_components/clone-user-wizard";
-import { ManagerDisplay } from "./_components/manager-display";
-import { UserDirectoryBadge } from "./_components/user-directory-badge";
-import { OffboardingSheet } from "./_components/offboarding-sheet";
-import { UserFormDialog } from "./_components/user-form-dialog";
-import { UserRoleSelect } from "./_components/user-role-select";
-import { UserStatusBadge } from "./_components/user-status-badge";
+import { ByoiBanner } from "./byoi-banner";
+import { CloneUserWizard } from "./clone-user-wizard";
+import { ManagerDisplay } from "./manager-display";
+import { UserDirectoryBadge } from "./user-directory-badge";
+import { OffboardingSheet } from "./offboarding-sheet";
+import { UserFormDialog } from "./user-form-dialog";
+import { UserRoleSelect } from "./user-role-select";
+import { UserStatusBadge } from "./user-status-badge";
 
 type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
 /**
@@ -160,7 +160,7 @@ function CountCell({ value }: { value?: number }) {
   );
 }
 
-export default function UsersPage() {
+export function UsersListView() {
   const t = useTranslations("users");
   const { date } = useFormatters();
   const tShared = useTranslations("shared");
