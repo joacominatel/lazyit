@@ -11,7 +11,12 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**accepted** — 2026-06-16 (CEO ratification). Implementation deferred to issue #537.
+**accepted** — 2026-06-16 (CEO ratification). **Pilot implemented** — 2026-06-20 (issue #537):
+the six in-scope routes (`/dashboard`, `/assets`, `/applications`, `/consumables`, `/users`,
+`/locations`) are now thin Server Components that prefetch their first-paint query and hydrate the
+interactive client view; `(app)/loading.tsx` and per-segment `error.tsx`
+(`(auth)`/`(marketing)`/`(print)`/`setup`) are added; the reusable per-request server `QueryClient`
+helper lives in `apps/web/lib/api/server-query-client.ts`. See §Implementation notes below.
 
 ## Context
 
@@ -222,16 +227,59 @@ session resolution this pattern builds on; it is already in place.
   available on the server but must be passed explicitly into `prefetchQuery`'s `queryFn` (the
   Option A pattern of ADR-0039 §6a). This is already the convention for server-side reads.
 
-### Follow-ups
+## Implementation notes (pilot — issue #537, 2026-06-20)
 
-- **Ratify this ADR** (proposed → accepted, CEO sign-off) before any implementation begins.
-- **Implementation wave** tracked in a separate issue (to be opened after ratification): convert
-  the six page shells, add `loading.tsx` + `error.tsx` coverage, add a short ADR-0020 amendment
-  noting the server-prefetch extension.
-- **Per-segment loading skeletons** for high-traffic detail pages are a natural next wave once
-  the list pilot proves out.
-- **Documentation update**: add a server-prefetch recipe note to `docs/04-development/` as part
-  of the implementation wave.
+The pilot implements §1–§5 exactly. The reusable mold, repeated per route (no broader abstraction
+than the six routes share — the laziest correct shape):
+
+1. **Reusable server `QueryClient` helper** — `apps/web/lib/api/server-query-client.ts` exports
+   `getServerQueryClient`, a `cache()`-wrapped (request-scoped) `QueryClient` with the same 60s
+   `staleTime` as the client provider, so dehydrated data isn't stale-on-arrival (no client refetch
+   → no double-fetch). It has **no** `QueryCache`/`MutationCache` `onError`: prefetch errors are
+   swallowed by design, so the #600 401 auth-expiry handler stays solely on the client provider in
+   `app/providers.tsx` (untouched).
+2. **Thin server `page.tsx` per route** — each in-scope `page.tsx` is now an `async` Server
+   Component that calls `await auth()`, `prefetchQuery`s the route's **first-paint (unfiltered)**
+   list query into `getServerQueryClient()`, and returns `<HydrationBoundary state={dehydrate(...)}>`
+   wrapping the client view.
+3. **Client view moved to `_components/<name>-(list-)view.tsx`** — the original Client Component
+   page body moved verbatim to a co-located `_components/*-view.tsx` (named export); its `useQuery`
+   hooks are unchanged. On first paint it hits the dehydrated cache and renders immediately.
+4. **Token threading** — the prefetch `queryFn` passes `session.accessToken` from `await auth()`
+   into the existing endpoint getter via a new **optional** trailing `token` param on the six
+   getters (`getAssets`/`getApplications`/`getConsumables`/`getUsers`/`getLocations`/
+   `getDashboardSummary`), forwarded to `apiFetch`'s existing `token` option. The client-side
+   `session-token` store is browser-only, so this is required server-side; client callers omit it
+   and behaviour is unchanged.
+5. **Key parity** — the prefetched `queryKey` is built from the SAME key factory the child hook uses
+   (`assetKeys.list` / `applicationKeys.list` / etc.) with a `DEFAULT_*` filter object replicating
+   the child's first-paint `useListParams` defaults (sort/dir/limit 50/offset 0, all "ALL" filters →
+   `undefined`). Only the unfiltered first paint is prefetched; a filtered/paged/searched URL simply
+   misses the dehydrated cache and the client fetches it — the correct degraded path for the
+   lower-frequency case (no attempt to read `searchParams` on the server and prefetch every combo).
+6. **`loading.tsx` + `error.tsx`** — a group-level `app/(app)/loading.tsx` (generic title+list
+   skeleton) and per-segment `error.tsx` in `(auth)`/`(marketing)`/`(print)`/`setup` (modeled on
+   the existing `(app)/error.tsx`).
+
+### Deferred (a full-rollout follow-up issue, post-pilot)
+
+- **Out-of-scope routes stay client-fetched** (§2): all detail (`/[entity]/[id]`), edit, clone, new,
+  KB, Secret Manager, reports, settings/admin pages. They show the skeleton flash on first paint.
+- **Filtered/paged first paint isn't prefetched** — only the unfiltered default list is. A future
+  wave could read `searchParams` on the server and prefetch the exact filtered key.
+- **Secondary reads on the piloted pages aren't prefetched** — e.g. the assets page's categories /
+  locations lookups and the applications page's grants/directory joins still fetch client-side;
+  only each page's PRIMARY list query is prefetched.
+- **Per-segment shape-matched loading skeletons** for high-traffic detail pages.
+- **A server-prefetch recipe note** in `docs/04-development/` documenting this mold for the next dev.
+- **ADR-0020 amendment** noting the server-prefetch extension to the three-layer data path.
+
+### Follow-ups (historical)
+
+- ~~**Ratify this ADR**~~ — done (accepted 2026-06-16).
+- ~~**Implementation wave**: convert the six page shells, add `loading.tsx` + `error.tsx`~~ — done
+  (pilot, issue #537). The ADR-0020 amendment + the `docs/04-development/` recipe note remain (see
+  Deferred above).
 
 **Related:** #500 · [[0020-frontend-data-layer]] · [[0039-authjs-v5-frontend-oidc]] ·
 [[0010-nextjs-frontend]] · #498
