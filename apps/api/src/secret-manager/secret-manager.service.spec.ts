@@ -1065,6 +1065,73 @@ describe('SecretManagerService', () => {
     });
   });
 
+  // ── export audit (#612) — metadata-only, NO plaintext touches the server ──────────
+  describe('export audit (ITEMS_EXPORTED, #612)', () => {
+    it('a member records an export → exactly one ITEMS_EXPORTED audit row (metadata only, no value)', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      await svc.createItem(alice, vaultId, {
+        handle: 'prod-db',
+        label: 'Prod DB',
+        ...ENVELOPE,
+      });
+      db.audit.length = 0; // isolate the export audit row
+
+      const ack = await svc.recordExport(alice, vaultId, { itemCount: 1 });
+      expect(ack).toEqual({ ok: true, itemCount: 1 });
+
+      expect(db.audit).toHaveLength(1);
+      const row = db.audit[0];
+      expect(row.action).toBe('ITEMS_EXPORTED');
+      expect(row.actorId).toBe('alice');
+      expect(row.vaultId).toBe(vaultId);
+      // METADATA ONLY: the row carries no value/key/blob — only the standard audit columns.
+      expect(Object.keys(row).sort()).toEqual(
+        ['action', 'actorId', 'itemId', 'targetUserId', 'vaultId'].sort(),
+      );
+    });
+
+    it('takes NO secret material: the service signature accepts only an optional non-secret itemCount', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      // No body at all is valid (the count is optional); the audit row is still written, ack count null.
+      const ack = await svc.recordExport(alice, vaultId);
+      expect(ack).toEqual({ ok: true, itemCount: null });
+      // There is no parameter through which a plaintext value/key could reach the server: the only
+      // accepted field is `itemCount`. The strict zod DTO (ExportSecretsAuditSchema) rejects any other
+      // key at the controller edge — proven in the shared schema test.
+    });
+
+    it('a non-member (even with secret:read) cannot record an export (403) — exporting is member-only', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const eve = human('eve');
+      await expect(svc.recordExport(eve, vaultId)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+
+    it('a service-account principal is rejected (403) — human-only', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      await expect(
+        svc.recordExport(serviceAccount(), vaultId),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('exporting a missing/soft-deleted vault is a 404', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      await expect(
+        svc.recordExport(alice, 'cvault00000000000000nope'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
   // ── revoke / rename basics ────────────────────────────────────────────────────
   describe('membership revoke + vault rename', () => {
     it('revoking a non-member is a 404; revoking a member hard-drops the row', async () => {
