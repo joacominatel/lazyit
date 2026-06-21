@@ -247,6 +247,12 @@ The CEO ratified the four open questions as follows. This authorizes implementat
      lost-response retry must not double-fire), and `assertReplaySafe` above. A WEBHOOK_OUT marked
      `idempotent: true` (its receiver dedupes on a stable key) is therefore replay-eligible; left at the
      default it stays single-shot and replay-refused, exactly like a non-idempotent REST create.
+   - **The guard reads the LATEST version, not the source's pinned one (#555).** A clone re-fires the
+     workflow's **latest** version from the entry node, so the double-provision hazard is defined by the
+     latest version's step definitions — `assertReplaySafe` evaluates the `idempotent` flags of the
+     *latest* `steps` (matched to the source run's SUCCEEDED rows by stable `stepKey`), not the source
+     run's pinned snapshot. A step that was idempotent in the source but is non-idempotent in the latest
+     version is correctly refused; a step removed in the latest version is correctly ignored.
 4. **Option 2 — build now** (not deferred), as the request-scoped, never-persisted override channel
    described above (INV-6: the override is merged into the frozen context for one render and discarded;
    only field *names* may ever be recorded).

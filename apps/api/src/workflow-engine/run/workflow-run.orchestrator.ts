@@ -717,7 +717,7 @@ export class WorkflowRunOrchestrator {
     // AFTER commit, best-effort: fire the `workflow.manual_task` bell nudge (ADR-0056 §3) — the run
     // paused for a human. NEVER inside the tx (a notification must not roll back the pause); emit
     // swallows its own errors. The deep-link points at the run; the bell row links to the inbox task.
-    await this.emitManualTaskNotification(runId, taskId, prompt);
+    await this.emitManualTaskNotification(runId, taskId);
   }
 
   /**
@@ -729,7 +729,6 @@ export class WorkflowRunOrchestrator {
   private async emitManualTaskNotification(
     runId: string,
     taskId: string,
-    prompt: string,
   ): Promise<void> {
     try {
       const run = await this.prisma.workflowRun.findUnique({
@@ -742,7 +741,11 @@ export class WorkflowRunOrchestrator {
         dedupeKey: `workflow.manual_task:${taskId}`,
         severity: 'info',
         title: `A workflow task needs a human — ${appName}`,
-        summary: prompt,
+        // GENERIC summary — never the ctx-interpolated prompt (#555). The prompt is rendered against the
+        // run context (`{{ grantee.email }}`, mapped values, etc.), so echoing it verbatim into the bell
+        // nudge would broadcast PII onto a broader notification surface than the authz-gated task read.
+        // The deep-link routes the assignee to the ManualTask, where the full prompt is shown in context.
+        summary: 'Open the task to see what needs doing.',
         entityType: 'workflowRun',
         entityId: runId,
         metadata: { manualTaskId: taskId, applicationName: appName },

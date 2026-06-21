@@ -486,6 +486,55 @@ describe('ServiceAccountsService (ADR-0048)', () => {
     });
   });
 
+  // ── reserved engine-SA name (#555 / #542) ────────────────────────────────────────────────────────
+  // A human must never CREATE — or rename another account INTO — the reserved engine name. Otherwise an
+  // admin could pre-seat a row whose human-held token then backs the immutable workflow run actor.
+  describe('reserved engine-SA name guard (#555)', () => {
+    it('rejects creating a service account under the reserved engine name (409, nothing persisted)', async () => {
+      const before = prisma.accounts.length;
+      await expect(
+        service.create(
+          {
+            name: EngineServiceAccountService.ENGINE_SA_NAME,
+            permissions: ['asset:read'],
+          },
+          ADMIN,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      // No row (and no audit) was created.
+      expect(prisma.accounts.length).toBe(before);
+    });
+
+    it('rejects renaming an existing account INTO the reserved engine name (409, name unchanged)', async () => {
+      const created = await service.create(
+        { name: 'ci-runner', permissions: ['asset:read'] },
+        ADMIN,
+      );
+      await expect(
+        service.update(
+          created.id,
+          { name: EngineServiceAccountService.ENGINE_SA_NAME },
+          ADMIN,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.accounts.find((a) => a.id === created.id)!.name).toBe(
+        'ci-runner',
+      );
+    });
+
+    it('still rejects the reserved name with surrounding whitespace (trim-normalised)', async () => {
+      await expect(
+        service.create(
+          {
+            name: `  ${EngineServiceAccountService.ENGINE_SA_NAME}  `,
+            permissions: ['asset:read'],
+          },
+          ADMIN,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
   // ── INV-SA-3: cleanPermissions defensive strip (SEC-011 belt-and-suspenders) ─────────────────────
   // The schema refinement (Layer 1) rejects new grants at the DTO edge. cleanPermissions is the
   // persistence-time backstop: it must silently drop ungrantable verbs for any non-DTO internal path
