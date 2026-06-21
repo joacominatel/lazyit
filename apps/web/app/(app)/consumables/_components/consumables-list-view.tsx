@@ -54,8 +54,8 @@ import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
-import { QuickAdjustButtons } from "./_components/quick-adjust-buttons";
-import { StockBadge } from "./_components/stock-badge";
+import { QuickAdjustButtons } from "./quick-adjust-buttons";
+import { StockBadge } from "./stock-badge";
 
 /**
  * Filter param defaults. `lowStock` is a server filter ("true"); `category` is client-side over the
@@ -68,7 +68,7 @@ const FILTER_DEFAULTS = {
   archived: "ALL",
 } as const;
 
-export default function ConsumablesPage() {
+export function ConsumablesListView() {
   const t = useTranslations("consumables");
   const { date } = useFormatters();
   const tShared = useTranslations("shared");
