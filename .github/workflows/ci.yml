@@ -30,7 +30,7 @@ jobs:
       # Node is needed to run Jest: jest@30's NodeEnvironment does not initialize under Bun's
       # runtime, so the API test step below invokes jest with Node, not `bun run`.
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
 
