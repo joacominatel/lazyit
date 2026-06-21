@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-06-03
+updated: 2026-06-20
 deciders: [Joaquín Minatel]
 ---
 
@@ -266,6 +266,35 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
   permission.
 - **Fast-follow — service accounts** reuse this same catalog.
 - **Future ADR — dynamic custom roles** (Option B), if ever needed.
+
+### Single-instance assumption + resolver cache TTL (issue #592, 2026-06-20)
+
+The `PermissionResolverService` uses a process-local `Map` to cache resolved permission sets.
+After a matrix edit via `PUT /config/permissions`, the P5 handler calls `invalidate()` to drop
+the cache on the **same API process**. A second API instance (or a future horizontal scale-out)
+would hold a **stale** cached set indefinitely — an authorization-correctness gap on revoke.
+
+**Decision (CEO, 2026-06-20):** add a short TTL (`PERMISSION_CACHE_TTL_MS = 60_000` ms / 60 s)
+to each cache entry. An entry older than 60 s is treated as a miss; the resolver re-reads the DB
+on the next authZ decision. Explicit `invalidate()` still drops entries immediately (the same-node
+fast path remains). No new infrastructure is required.
+
+**Single-instance assumption (documented constraint, not an invariant):** lazyit's production
+topology is a **single API container** (no `replicas`). On a single node, the 60 s TTL bounds
+staleness: any matrix change is visible to every request within 60 s of the edit (or sooner via
+`invalidate()`). This is acceptable for a 5–20-person team.
+
+**Deferred — Valkey pub/sub invalidation:** if horizontal scaling becomes real (multiple API
+replicas behind a load balancer), add a Valkey pub/sub channel: the P5 handler publishes an
+invalidation message after the DB commit; every replica's subscriber calls `invalidate()`. Valkey
+already runs for BullMQ — no new infrastructure is needed. The 60 s TTL acts as a backstop even
+then. This is the only remaining cross-node RBAC gap; track it when `replicas > 1` is introduced
+in the deployment config.
+
+**What does NOT change:** INV-1 (DB-first authZ) and INV-8 (ADMIN-is-full, immutable) are
+unaffected. The TTL only bounds how long a cached answer lives; it does not change what the DB
+resolves. A cache entry expiring during a user's active session causes at most a single extra DB
+read on the next `@RequirePermission` check — no user-visible disruption.
 
 ## Consequences
 
