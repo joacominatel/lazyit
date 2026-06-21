@@ -1799,6 +1799,10 @@ enum SecretAuditAction {
   // The code that wrote this value is removed; the enum value is LEFT in place because dropping a Postgres
   // enum value requires a risky type recreation (not worth it for an unused, harmless value). No row uses it.
   RECOVERY_KEY_REGENERATED
+  // Plaintext (or re-encrypted) export of a vault's secrets (#612). Decryption happens CLIENT-SIDE after
+  // the member unlocks the vault (INV-10: the server never sees plaintext); this row records ONLY that an
+  // export occurred — WHO exported WHICH vault, when, and an optional non-secret item count. NEVER a value.
+  ITEMS_EXPORTED
 }
 
 /// An APPEND-ONLY audit log of Secret Manager actions (ADR-0061 §10, crypto note §8) — records WHO acted
