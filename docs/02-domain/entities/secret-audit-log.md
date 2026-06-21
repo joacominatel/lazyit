@@ -44,7 +44,7 @@ compromising the zero-knowledge guarantee.
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | `Int` — autoincrement() | PK — a log/history table, never exposed externally ([[0005-id-strategy]]). |
-| `action` | `SecretAuditAction` enum | One of: `VAULT_CREATED`, `VAULT_DELETED`, `ITEM_CREATED`, `ITEM_UPDATED`, `ITEM_DELETED`, `MEMBERSHIP_GRANTED`, `MEMBERSHIP_REVOKED`, `KEYPAIR_CREATED`, `KEYPAIR_RESET`. |
+| `action` | `SecretAuditAction` enum | One of: `VAULT_CREATED`, `VAULT_DELETED`, `ITEM_CREATED`, `ITEM_UPDATED`, `ITEM_DELETED`, `MEMBERSHIP_GRANTED`, `MEMBERSHIP_REVOKED`, `KEYPAIR_CREATED`, `KEYPAIR_RESET`, `PASSWORD_CHANGED`, `ITEMS_EXPORTED`. (`RECOVERY_KEY_REGENERATED` is DORMANT — left in the enum but no longer written, ADR-0066.) `ITEMS_EXPORTED` (#612) records a vault secret EXPORT: decryption + the `.env`/JSON build happen entirely client-side (INV-10), so this row is metadata-only — WHO exported WHICH vault, when, never a value. |
 | `actorId` | `String?` (`@db.Uuid`) | FK → `User.id`, `onDelete: SetNull`. Null if the actor was later deleted. |
 | `vaultId` | `String?` | Plain string reference (no FK) — survives vault deletion. |
 | `itemId` | `String?` | Plain string reference (no FK) — survives item deletion. |
