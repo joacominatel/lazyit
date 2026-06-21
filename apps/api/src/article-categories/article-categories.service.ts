@@ -13,6 +13,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { isServicePrincipal, type Principal } from '../auth/principal';
+import { SearchService } from '../search/search.service';
 
 /** Shape returned by a successful cascade delete. */
 export interface CascadeDeleteResult {
@@ -55,6 +56,11 @@ export class ArticleCategoriesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly permissions: PermissionResolverService,
+    // Fire-and-forget Meili sync (#595): resolved from the @Global SearchModule. Used to DEINDEX the
+    // articles a cascade soft-deletes, mirroring the single-article ArticlesService.remove() path so a
+    // cascade never leaves ghost docs in the search index. ArticleCategoriesService is not a dependency
+    // of SearchService, so there is no provider cycle despite SearchModule importing this module.
+    private readonly search: SearchService,
   ) {}
 
   /**
@@ -189,8 +195,8 @@ export class ArticleCategoriesService {
     const subtreeIds = await this.collectSubtreeIds(id);
     const now = new Date();
 
-    const [folderResult, articleResult] = await this.prisma.$transaction(
-      async (tx) => {
+    const [folderResult, articleResult, deletedArticleIds] =
+      await this.prisma.$transaction(async (tx) => {
         // 1. Hard-delete aliases whose home folder is in the subtree (folder-side aliases).
         await tx.articleAlias.deleteMany({
           where: { folderId: { in: subtreeIds } },
@@ -232,9 +238,21 @@ export class ArticleCategoriesService {
           data: { deletedAt: now },
         });
 
-        return [foldersUpdate, articlesUpdate] as const;
-      },
-    );
+        return [
+          foldersUpdate,
+          articlesUpdate,
+          deletedArticles.map((a) => a.id),
+        ] as const;
+      });
+
+    // #595: deindex the cascade-soft-deleted articles from Meili AFTER the tx commits, fire-and-forget
+    // and un-awaited — mirroring the single-article ArticlesService.remove() path. Without this, a
+    // cascade leaves PUBLISHED docs as ghost hits in the `articles` index until a manual reindex:all
+    // (the search backstop is folder-access only, not soft-delete aware). SearchService.remove never
+    // throws (it logs on failure), so a search outage can never fail the already-committed delete.
+    for (const articleId of deletedArticleIds) {
+      this.search.remove('articles', articleId);
+    }
 
     return {
       deletedFolders: folderResult.count,

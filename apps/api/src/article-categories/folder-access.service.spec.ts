@@ -232,6 +232,65 @@ describe('FolderAccessService (ADR-0060 §4)', () => {
     });
   });
 
+  describe('§599 request-scoped folder-tree memo', () => {
+    it('loads the folder tree ONCE when a cache is shared across calls in a request', async () => {
+      wireFolders([
+        { id: 'pub', parentId: null, accessRules: null },
+        {
+          id: 'sec',
+          parentId: null,
+          accessRules: [{ kind: 'appGrant', applicationId: 'appFinance' }],
+        },
+      ]);
+      wireGrants(['appFinance']);
+
+      const cache = {};
+      // Two resolutions in the SAME request (e.g. findOne + backlinks), sharing one cache.
+      const first = await service.visibleFolderIds(human('u1', 'VIEWER'), cache);
+      const second = await service.visibleFolderIds(human('u1', 'VIEWER'), cache);
+
+      // The expensive full folder-tree scan runs exactly once for the whole request...
+      expect(articleCategory.findMany).toHaveBeenCalledTimes(1);
+      // ...but the live-join lookup runs on EVERY call (dynamic-by-construction — zero staleness).
+      expect(accessGrant.findMany).toHaveBeenCalledTimes(2);
+      // Same resolved visibility both times.
+      expect(folderVisible(first, 'sec')).toBe(true);
+      expect(folderVisible(second, 'sec')).toBe(true);
+    });
+
+    it('a revoked grant drops access on the NEXT call even with the tree cached (live joins stay fresh)', async () => {
+      wireFolders([
+        {
+          id: 'sec',
+          parentId: null,
+          accessRules: [{ kind: 'appGrant', applicationId: 'appFinance' }],
+        },
+      ]);
+      const cache = {};
+
+      // First call: active grant → visible.
+      wireGrants(['appFinance']);
+      const granted = await service.visibleFolderIds(human('u1', 'VIEWER'), cache);
+      expect(folderVisible(granted, 'sec')).toBe(true);
+
+      // Grant revoked between calls: the cached TREE is reused, but the live join is re-read → hidden.
+      wireGrants([]);
+      const revoked = await service.visibleFolderIds(human('u1', 'VIEWER'), cache);
+      expect(folderVisible(revoked, 'sec')).toBe(false);
+      // The tree was still loaded only once across both calls.
+      expect(articleCategory.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('without a cache, each call reloads the folder tree (no cross-call memoization)', async () => {
+      wireFolders([{ id: 'pub', parentId: null, accessRules: null }]);
+
+      await service.visibleFolderIds(human('u1', 'VIEWER'));
+      await service.visibleFolderIds(human('u1', 'VIEWER'));
+
+      expect(articleCategory.findMany).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('malformed stored rules fail closed (not silently PUBLIC)', () => {
     it('an unparseable accessRules value hides the folder from a non-admin', async () => {
       wireFolders([

@@ -7,6 +7,7 @@ import {
 import { ArticleCategoriesService } from './article-categories.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { SearchService } from '../search/search.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). `Prisma.DbNull` is
 // the sentinel `setAccessRules(null)` writes to clear the jsonb column, so the mock must expose it.
@@ -14,6 +15,10 @@ jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: { DbNull: 'DbNull' },
 }));
+// The service now injects SearchService (#595, cascade deindex), which imports the ESM `meilisearch`
+// package jest can't transform. SearchService is replaced by a mock provider below; this stub stops
+// the real module from loading when the service file is imported.
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 type CategoryMock = {
   findMany: jest.Mock;
@@ -49,6 +54,9 @@ describe('ArticleCategoriesService', () => {
   // returns true only for a `settings:manage` caller. Defaults to FALSE (no rules) so the pre-#554
   // read tests assert the public shape; the accessRules tests override it per-case.
   let permissions: { hasAll: jest.Mock };
+  // SearchService (#595) — mocked. removeCascade fires search.remove('articles', id) per soft-deleted
+  // article so a cascade leaves no ghost docs in the Meili index.
+  let search: { remove: jest.Mock; upsert: jest.Mock };
 
   beforeEach(async () => {
     articleCategory = {
@@ -84,12 +92,14 @@ describe('ArticleCategoriesService', () => {
     };
 
     permissions = { hasAll: jest.fn().mockResolvedValue(false) };
+    search = { remove: jest.fn(), upsert: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         ArticleCategoriesService,
         { provide: PrismaService, useValue: prisma },
         { provide: PermissionResolverService, useValue: permissions },
+        { provide: SearchService, useValue: search },
       ],
     }).compile();
 
@@ -580,6 +590,38 @@ describe('ArticleCategoriesService', () => {
       // All the side-effecting calls happened through the tx proxy, not the outer prisma mock.
       // (The tx proxy IS the same articleAlias/article/articleCategory mock objects in this test
       // setup, so we simply verify $transaction was the entry point.)
+    });
+
+    // --- #595: deindex cascade-soft-deleted articles from Meili (no ghost hits) ---
+
+    it('deindexes each cascade-soft-deleted article from Meili (search.remove once per id)', async () => {
+      wireTree('root', { root: ['child'] });
+
+      articleAlias.deleteMany.mockResolvedValue({ count: 0 });
+      article.updateMany.mockResolvedValue({ count: 2 });
+      // The two articles soft-deleted by the cascade (ids gathered inside the tx).
+      article.findMany.mockResolvedValue([{ id: 'art1' }, { id: 'art2' }]);
+      articleCategory.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.removeCascade('root');
+
+      // Mirror ArticlesService.remove(): one fire-and-forget Meili removal per soft-deleted article.
+      expect(search.remove).toHaveBeenCalledTimes(2);
+      expect(search.remove).toHaveBeenCalledWith('articles', 'art1');
+      expect(search.remove).toHaveBeenCalledWith('articles', 'art2');
+    });
+
+    it('does not call search.remove when the cascade soft-deletes no articles', async () => {
+      wireTree('root'); // empty subtree
+
+      articleAlias.deleteMany.mockResolvedValue({ count: 0 });
+      article.updateMany.mockResolvedValue({ count: 0 });
+      article.findMany.mockResolvedValue([]);
+      articleCategory.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.removeCascade('root');
+
+      expect(search.remove).not.toHaveBeenCalled();
     });
   });
 });
