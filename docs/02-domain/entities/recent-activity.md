@@ -3,7 +3,7 @@ title: RecentActivity
 tags: [domain, entity, view]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-09
+updated: 2026-06-20
 ---
 
 # RecentActivity
@@ -27,7 +27,7 @@ con una view"). See [[0044-recent-activity-view]] and [[0050-user-history-and-ac
 | [[asset-assignment]] | open / close | `asset` | `assigned` (`assignedAt`) · `released` (`releasedAt`) |
 | [[access-grant]] | open / close | `application` | `granted` (`grantedAt`) · `revoked` (`revokedAt`) |
 | [[consumable-movement]] | each movement | `consumable` | `stock_in` / `stock_out` / `stock_adjustment` |
-| [[user-history]] (DEBT-2, #185) | the event row | `user` | the lowercased `eventType`: `created` · `updated` · `role_changed` · `deleted` · `restored` · `password_reset_sent` |
+| [[user-history]] (DEBT-2, #185 / ADR-0058) | the event row | `user` | the lowercased `eventType`: `created` · `updated` · `role_changed` · `manager_changed` · `deleted` · `restored` · `password_reset_sent` |
 
 The full closed verb set is the single source of truth for the `action` filter's allowlist
 (`RECENT_ACTIVITY_ACTIONS` in `@lazyit/shared`). An unknown verb on the filter is a 400, never a
