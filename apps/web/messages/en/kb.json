@@ -219,6 +219,18 @@
       "removeError": "Couldn't remove from the folder"
     }
   },
+  "versions": {
+    "panelTitle": "Version History",
+    "panelDescription": "Every edit is captured as a numbered snapshot. Open the history to see who changed what and when.",
+    "viewHistory": "History",
+    "sheetTitle": "Version History",
+    "sheetDescription": "Snapshots are newest-first. Click a version to read its full content.",
+    "loading": "Loading version history…",
+    "empty": "No versions yet.",
+    "versionLabel": "Version {n}",
+    "viewVersion": "View",
+    "viewVersionAriaLabel": "View version {n}"
+  },
   "wikiLinks": {
     "unresolvedTooltip": "Document not created yet"
   },

@@ -36,6 +36,19 @@ Esto es **auditabilidad por defecto**. Como el cuerpo anterior siempre se conser
 - Puedes rendir cuentas de lo que decía un procedimiento en cualquier punto del pasado.
 - Nada del artículo vivo corre riesgo cuando alguien lo actualiza.
 
+## Cómo ver el historial de versiones
+
+Abre cualquier artículo y desplázate hasta el panel **Historial de versiones** al final de la página.
+Haz clic en **Historial** para abrir un panel lateral con todas las instantáneas guardadas, de más
+reciente a más antigua. Cada fila muestra:
+
+- El número de versión (1, 2, 3 …)
+- El estado de borrador o publicado en ese momento
+- Quién hizo el cambio y cuándo
+
+Haz clic en **Ver** en cualquier fila para abrir una vista de solo lectura con el título y el
+contenido completo de esa instantánea.
+
 ## Qué puedes y qué no puedes hacer hoy
 
 - **El historial se guarda para cada artículo, automáticamente** — no lo activas, y no puedes

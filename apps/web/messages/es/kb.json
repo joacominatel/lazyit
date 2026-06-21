@@ -219,6 +219,18 @@
       "removeError": "No se pudo quitar de la carpeta"
     }
   },
+  "versions": {
+    "panelTitle": "Historial de versiones",
+    "panelDescription": "Cada edición queda capturada como una instantánea numerada. Abre el historial para ver quién cambió qué y cuándo.",
+    "viewHistory": "Historial",
+    "sheetTitle": "Historial de versiones",
+    "sheetDescription": "Las instantáneas aparecen de más reciente a más antigua. Haz clic en una versión para leer su contenido completo.",
+    "loading": "Cargando historial de versiones…",
+    "empty": "Aún no hay versiones.",
+    "versionLabel": "Versión {n}",
+    "viewVersion": "Ver",
+    "viewVersionAriaLabel": "Ver versión {n}"
+  },
   "wikiLinks": {
     "unresolvedTooltip": "Documento aún no creado"
   },

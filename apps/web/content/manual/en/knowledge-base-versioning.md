@@ -35,6 +35,17 @@ This is **auditability by default**. Because the prior body is always preserved:
 - You can account for what a procedure said at any past point.
 - Nothing about the live article is at risk when someone updates it.
 
+## Viewing version history
+
+Open any article and scroll to the **Version History** panel at the bottom of the page. Click
+**History** to open a side panel listing every saved snapshot, newest first. Each row shows:
+
+- The version number (1, 2, 3 …)
+- The draft or published status at that moment
+- Who made the change and when
+
+Click **View** on any row to open a read-only view of that snapshot's full title and content.
+
 ## What you can and cannot do today
 
 - **History is kept for every article, automatically** — you do not turn it on, and you cannot turn
