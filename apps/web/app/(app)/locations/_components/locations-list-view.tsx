@@ -60,11 +60,11 @@ import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
-import { LocationFormDialog } from "./_components/location-form-dialog";
+import { LocationFormDialog } from "./location-form-dialog";
 import {
   LocationTypeBadge,
   useLocationTypeLabel,
-} from "./_components/location-type-badge";
+} from "./location-type-badge";
 
 /**
  * Filter param defaults for the URL list-state. `type` is filtered client-side over the page.
@@ -72,7 +72,7 @@ import {
  */
 const FILTER_DEFAULTS = { type: "ALL", archived: "ALL" } as const;
 
-export default function LocationsPage() {
+export function LocationsListView() {
   const t = useTranslations("locations");
   const tShared = useTranslations("shared");
   const { date } = useFormatters();
