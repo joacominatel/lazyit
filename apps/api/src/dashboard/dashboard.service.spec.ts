@@ -1,7 +1,10 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { Test } from '@nestjs/testing';
 import {
   DashboardSummarySchema,
   RecentActivityItemSchema,
+  UserHistoryEventTypeSchema,
 } from '@lazyit/shared';
 import { DashboardService } from './dashboard.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -545,6 +548,80 @@ describe('DashboardService', () => {
         '%created%',
         '\\',
       ]);
+    });
+  });
+
+  /**
+   * View summary-branch coverage guard (issue #618). This is a SCHEMA-SYNC test: it reads the
+   * latest `recent_activity` view migration SQL from disk (no DB connection required) and asserts
+   * that every `UserHistoryEventType` enum value has an explicit, non-blank WHEN branch in the
+   * UserHistory summary CASE. The test must stay green whenever a new `UserHistoryEventType` value
+   * is added to the enum: if you add a value without adding a CASE branch to the view, THIS TEST
+   * FAILS — that is the intent. Fix it by updating the view migration and adding the branch.
+   *
+   * Approach: parse the SQL with regex to extract the WHEN … THEN … lines from the summary CASE
+   * in the UserHistory branch (identified by the CASE on "eventType"::text). Each WHEN must have a
+   * non-empty THEN value. Every enum member in UserHistoryEventTypeSchema must appear as a WHEN.
+   */
+  describe('recent_activity view — summary CASE coverage (issue #618)', () => {
+    // Resolve the canonical view migration relative to this spec file (src/dashboard/ → prisma/migrations/).
+    // __dirname is apps/api/src/dashboard; ../../ climbs to apps/api/.
+    const MIGRATION_DIR = path.resolve(
+      __dirname,
+      '../../prisma/migrations/20260621000000_recent_activity_manager_changed',
+    );
+    const MIGRATION_SQL = path.join(MIGRATION_DIR, 'migration.sql');
+
+    let sql: string;
+
+    beforeAll(() => {
+      // Read the migration SQL once — this never touches a DB.
+      sql = fs.readFileSync(MIGRATION_SQL, 'utf8');
+    });
+
+    it('the view migration SQL file is readable', () => {
+      expect(sql.length).toBeGreaterThan(0);
+      expect(sql).toContain('CREATE OR REPLACE VIEW "recent_activity"');
+    });
+
+    it('the UserHistory summary CASE covers every UserHistoryEventType value with a non-blank THEN', () => {
+      // Isolate the UserHistory UNION branch — it follows the last "UNION ALL" in the SQL.
+      // We look for the CASE on eventType::text (the UserHistory summary switch).
+      const caseMatch = sql.match(
+        /CASE\s+uh\."eventType"::text([\s\S]*?)END\s+AS\s+"summary"/,
+      );
+      expect(caseMatch).not.toBeNull();
+      // caseMatch[1] is the body of the CASE: the WHEN … THEN … lines.
+      const caseBody = caseMatch![1];
+
+      // Extract every WHEN 'VALUE' THEN 'text' pair. Both sides are single-quoted SQL literals.
+      // The regex captures: group 1 = the enum string literal, group 2 = the THEN text.
+      const whenThenRegex =
+        /WHEN\s+'([^']+)'\s+THEN\s+'([^']*)'/g;
+      const branches: Record<string, string> = {};
+      let match: RegExpExecArray | null;
+      while ((match = whenThenRegex.exec(caseBody)) !== null) {
+        branches[match[1]] = match[2];
+      }
+
+      // Every UserHistoryEventType value must have a branch.
+      const enumValues = UserHistoryEventTypeSchema.options;
+      for (const value of enumValues) {
+        expect(branches).toHaveProperty(value);
+        // The THEN text must be non-blank — a blank summary is the defect (#618).
+        expect(branches[value]).toBeTruthy();
+      }
+    });
+
+    it('MANAGER_CHANGED specifically renders "User manager changed" (the #618 defect branch)', () => {
+      const caseMatch = sql.match(
+        /CASE\s+uh\."eventType"::text([\s\S]*?)END\s+AS\s+"summary"/,
+      );
+      expect(caseMatch).not.toBeNull();
+      const caseBody = caseMatch![1];
+      expect(caseBody).toMatch(
+        /WHEN\s+'MANAGER_CHANGED'\s+THEN\s+'User manager changed'/,
+      );
     });
   });
 });
