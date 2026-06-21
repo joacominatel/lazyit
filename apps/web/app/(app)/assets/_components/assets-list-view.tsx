@@ -72,8 +72,8 @@ import { cn } from "@/lib/utils";
 import {
   AssetStatusBadge,
   useAssetStatusLabel,
-} from "./_components/asset-status-badge";
-import { StackedOwnerAvatars } from "./_components/stacked-owner-avatars";
+} from "./asset-status-badge";
+import { StackedOwnerAvatars } from "./stacked-owner-avatars";
 
 type OwnershipFilter = "ALL" | "HAS" | "NONE";
 
@@ -97,7 +97,7 @@ const OWNERSHIP_LABEL_KEY: Record<OwnershipFilter, "any" | "has" | "none"> = {
   NONE: "none",
 };
 
-export default function AssetsPage() {
+export function AssetsListView() {
   const router = useRouter();
   const t = useTranslations("assets.list");
   const { date } = useFormatters();
