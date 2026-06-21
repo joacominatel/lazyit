@@ -143,7 +143,7 @@ jobs:
 
       # Per-image GHA cache scope keeps each image's layer cache isolated (unchanged from before).
       - name: Build ${{ matrix.image }} image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: infra/docker/${{ matrix.image }}.Dockerfile
