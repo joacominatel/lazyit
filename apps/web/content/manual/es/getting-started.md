@@ -80,6 +80,9 @@ El asistente confirma que se creó el administrador y te lleva a la **página de
 cuenta nueva aún no tiene sesión — inicia sesión como ese administrador para empezar. Una vez dentro,
 aparecen los controles de administrador.
 
+> **Si tu sesión expira**, lazyit te devuelve a la página de inicio de sesión para que vuelvas a
+> entrar — solo inicia sesión de nuevo para retomar donde lo dejaste.
+
 ## Qué sigue
 
 - **Da de alta a tu equipo** — una vez que inicies sesión como administrador, consulta
