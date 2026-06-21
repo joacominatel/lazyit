@@ -44,7 +44,7 @@ RUN ok=0; for i in 1 2 3; do bun install --production --linker hoisted --filter 
 
 # ---- Runtime: minimal Node (Alpine) ----
 # node:26-alpine — pinned by digest (26-alpine is a ROLLING tag; this closes the ADR-0025 follow-up).
-FROM node:26-alpine@sha256:7c6af15abe4e3de859690e7db171d0d711bf37d27528eddfe625b2fe89e097f8 AS runtime
+FROM node:26-alpine@sha256:a2dc166a387cc6ca1e62d0c8e265e49ca985d6e60abc9fe6e6c3d6ce8e63f606 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 # PORT is read by NestJS (main.ts) and by the healthcheck below; compose overrides it.
