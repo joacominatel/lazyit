@@ -57,6 +57,8 @@ export interface UserListParams {
 export function getUsers(
   params: UserListParams = {},
   signal?: AbortSignal,
+  // Optional Bearer override for SSR server-prefetch (ADR-0067) — see `getAssets`.
+  token?: string,
 ): Promise<UserListPage> {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
@@ -70,7 +72,10 @@ export function getUsers(
   if (params.directoryOnly !== undefined)
     qs.set("directoryOnly", String(params.directoryOnly));
   const search = qs.toString();
-  return apiFetch<UserListPage>(search ? `${BASE}?${search}` : BASE, { signal });
+  return apiFetch<UserListPage>(search ? `${BASE}?${search}` : BASE, {
+    signal,
+    token,
+  });
 }
 export const getUser = users.get;
 export const createUser = users.create;
