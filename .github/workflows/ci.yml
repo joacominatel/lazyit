@@ -35,7 +35,7 @@ jobs:
           node-version: 24
 
       - name: Cache Bun install cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -46,7 +46,7 @@ jobs:
       # restore-key prefix so a partial (older) cache still seeds a faster rebuild. Turbo verifies
       # task inputs itself, so a stale entry is never reused incorrectly — at worst it rebuilds.
       - name: Cache Turborepo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('bun.lock', 'apps/**', 'packages/**', 'turbo.json') }}
