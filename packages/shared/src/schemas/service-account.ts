@@ -39,15 +39,18 @@ export const SERVICE_ACCOUNT_TOKEN_PREFIX = "lzit_sa_" as const;
  * backdoor bots, persist the foothold) AND `PUT /config/permissions` (rewrite the human MEMBER/VIEWER
  * matrix); `user:manage` gates `POST /users` (create a human ADMIN).
  *
- * (b) HUMAN-ONLY: `import:run` (ADR-0069) gates the bulk-import wizard, which is human-only by
- * construction — the import controller carries `ServicePrincipalForbiddenGuard` (Layer 2) so a bot is
- * 403'd outright on every route regardless of grants. A persisted `import:run` grant on an SA is
- * therefore non-functional, but allowing it to persist is misleading; Layer-1 consistency refuses it at
- * the edge (mirrors the #555 SA-ungrantable pattern).
+ * (b) HUMAN-ONLY: `import:run` (ADR-0069) gates the bulk-import wizard, and `secret:read` /
+ * `secret:manage` (ADR-0061) gate the zero-knowledge Secret Manager — all human-only by construction.
+ * The import controller and EVERY Secret-Manager controller carry a runtime guard (Layer 2 —
+ * `ServicePrincipalForbiddenGuard` / `HumanOnlyGuard`) that 403's a bot outright on every route
+ * regardless of grants: a vault's DEK is wrapped to a per-user X25519 keypair a service account can
+ * never hold, so it could never decrypt anything even if granted `secret:*`. A persisted grant of any
+ * of these on an SA is therefore non-functional, but allowing it to persist is misleading; Layer-1
+ * consistency refuses it at the edge (the #555 SA-ungrantable hardening).
  *
  * Code-enforced here as the source of truth so no non-human principal can ever be granted them — Layer 1
- * of the SEC-011 fix. Layer 2 (ServicePrincipalForbiddenGuard) is the runtime backstop that neutralises
- * any pre-existing grant.
+ * of the SEC-011 fix. Layer 2 (ServicePrincipalForbiddenGuard / HumanOnlyGuard) is the runtime backstop
+ * that neutralises any pre-existing grant.
  *
  * Deliberately NOT here: `accessGrant:grant` and the `:delete` family are legitimate for automation bots
  * (a CI bot revoking app access, a cleanup bot) and do not enable self-escalation. Widening the set is a
@@ -57,6 +60,8 @@ export const SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS = [
   "settings:manage",
   "user:manage",
   "import:run",
+  "secret:read",
+  "secret:manage",
 ] as const;
 
 const UNGRANTABLE = new Set<string>(SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS);
@@ -77,7 +82,8 @@ const ServiceAccountPermissionsSchema = z
   .transform((perms) => [...new Set(perms)])
   .refine((perms) => !perms.some((p) => UNGRANTABLE.has(p)), {
     message:
-      "A service account cannot be granted settings:manage or user:manage (INV-SA-3: never ADMIN-equivalent).",
+      "A service account cannot be granted ADMIN-equivalent (settings:manage, user:manage) or " +
+      "human-only (import:run, secret:read, secret:manage) permissions (INV-SA-3: never ADMIN-equivalent).",
   });
 
 /**
