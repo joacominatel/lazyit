@@ -15,7 +15,8 @@
     "chips": {
       "search": "Search: “{query}”",
       "status": "Status: {status}",
-      "directory": "{directory}"
+      "directory": "{directory}",
+      "role": "Role: {role}"
     },
     "status": {
       "all": "All statuses",
@@ -32,6 +33,13 @@
       "ALL": "Everyone",
       "directory": "Directory only",
       "accounts": "Accounts only"
+    },
+    "roleFilter": {
+      "label": "Role filter",
+      "ALL": "All roles",
+      "ADMIN": "Admin",
+      "MEMBER": "Member",
+      "VIEWER": "Viewer"
     },
     "columns": {
       "avatar": "Avatar",
