@@ -205,7 +205,7 @@
       },
       "secret": {
         "title": "Referenciar un secreto",
-        "note": "Muestra un chip enmascarado — solo un miembro del vault puede revelar el valor. Escribe {{ para abrir un selector; eliges un identificador (handle), nunca un valor."
+        "note": "Muestra un chip enmascarado — solo un miembro del vault puede revelar el valor. Escribe '{{' para abrir un selector; eliges un identificador (handle), nunca un valor."
       },
       "links": {
         "title": "Enlace externo",
