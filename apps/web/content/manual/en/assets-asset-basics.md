@@ -85,6 +85,14 @@ The **Filters** button shows a small count of how many of these are active. Ever
 also appears as a removable chip below the toolbar, and the filters live in the page address, so a
 filtered view is easy to undo, share or bookmark.
 
+### Choosing which columns to show
+
+The **Columns** button (next to *Filters*) opens a checklist of the table's columns — asset tag,
+model, category, location, status, owners and updated. Untick the ones you don't care about to slim
+the table down to what matters for you. The **Name** column and the row actions always stay. Your
+choice is remembered in this browser, so the table keeps the same shape next time you visit. (This
+governs the desktop table; the mobile card view always shows the full set.)
+
 ## Editing, cloning and deactivating
 
 - **Edit** updates the asset in place; each meaningful change (status, location, model, custom

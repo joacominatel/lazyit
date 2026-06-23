@@ -9,6 +9,7 @@ import {
   TrashIcon,
   UserMinusIcon,
   UserPlusIcon,
+  ViewColumnsIcon,
 } from "@heroicons/react/24/outline";
 import {
   type AssetListItem,
@@ -19,7 +20,7 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
@@ -54,6 +55,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverContent,
@@ -90,6 +99,7 @@ import type { EntityKey } from "@/lib/entity-key";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
+import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { AssetRowActions } from "./asset-row-actions";
 import {
@@ -122,6 +132,46 @@ const OWNERSHIP_LABEL_KEY: Record<OwnershipFilter, "any" | "has" | "none"> = {
   HAS: "has",
   NONE: "none",
 };
+
+/**
+ * The Assets-table columns an operator can show/hide via the column picker (#695). The `name` identity
+ * column (the row's canonical link) and the row `actions` column are always rendered and intentionally
+ * absent here. Keys match the `ResourceColumn` keys and the per-key body-cell map below, so the header
+ * and body never drift, and the ARRAY ORDER is the canonical left-to-right table order (persistence
+ * re-emits selections in this order). Ported from the Users picker and scoped to this page by CTO
+ * decision (the shared `ResourceTable` stays untouched).
+ */
+const HIDEABLE_COLUMNS = [
+  "assetTag",
+  "model",
+  "category",
+  "location",
+  "status",
+  "owners",
+  "updated",
+] as const;
+type HideableColumn = (typeof HIDEABLE_COLUMNS)[number];
+
+/**
+ * Column-picker grouping — purely presentational structure for the dropdown so the list reads as
+ * labelled sections. The flattened union of `keys` MUST equal `HIDEABLE_COLUMNS` (every hideable
+ * column appears in exactly one group); it drives only the menu, never visibility.
+ */
+const COLUMN_GROUPS: { id: string; keys: readonly HideableColumn[] }[] = [
+  { id: "details", keys: ["assetTag", "model", "category", "location"] },
+  { id: "status", keys: ["status", "owners"] },
+  { id: "activity", keys: ["updated"] },
+];
+
+/** localStorage key persisting the visible hideable-column set (per browser). */
+const COLUMNS_STORAGE_KEY = "lazyit:assets:columns";
+
+/**
+ * The columns shown by default — the picker subtracts from (and adds back to) this set. Every hideable
+ * column is on out of the box, so the table is unchanged for operators who never open the picker; the
+ * picker just lets them turn columns off.
+ */
+const DEFAULT_VISIBLE_COLUMNS: HideableColumn[] = [...HIDEABLE_COLUMNS];
 
 export function AssetsListView() {
   const router = useRouter();
@@ -201,6 +251,36 @@ export function AssetsListView() {
   // The asset whose single active owner is being unassigned, pending confirm (null = closed). The
   // list row already carries `activeAssignments[0].id`, so releasing needs no extra fetch.
   const [unassigning, setUnassigning] = useState<AssetListItem | null>(null);
+
+  // Per-browser column-picker state (#695, ported from Users). `mounted` gates the persisted set so
+  // SSR/first paint always renders the full `DEFAULT_VISIBLE_COLUMNS` (the server snapshot) — no
+  // hydration flash.
+  const [storedColumns, setStoredColumns, columnsMounted] = useLocalStorage<
+    HideableColumn[]
+  >(COLUMNS_STORAGE_KEY, DEFAULT_VISIBLE_COLUMNS);
+  // Defend against stale/garbage storage (renamed/removed keys, or a non-array shape from an older
+  // build): only keep known hideable keys.
+  const visibleColumns = useMemo(() => {
+    if (!columnsMounted || !Array.isArray(storedColumns)) {
+      return new Set<HideableColumn>(DEFAULT_VISIBLE_COLUMNS);
+    }
+    return new Set(storedColumns.filter((key) => HIDEABLE_COLUMNS.includes(key)));
+  }, [columnsMounted, storedColumns]);
+  const isColumnVisible = (key: HideableColumn) => visibleColumns.has(key);
+
+  function toggleColumn(key: HideableColumn, visible: boolean) {
+    setStoredColumns((prev) => {
+      const kept = (Array.isArray(prev) ? prev : DEFAULT_VISIBLE_COLUMNS).filter(
+        (k) => HIDEABLE_COLUMNS.includes(k),
+      );
+      if (visible) {
+        if (kept.includes(key)) return kept;
+        // Re-emit in canonical column order so persistence stays stable regardless of toggle order.
+        return HIDEABLE_COLUMNS.filter((k) => k === key || kept.includes(k));
+      }
+      return kept.filter((k) => k !== key);
+    });
+  }
 
   const rows = useMemo(() => {
     const items = page?.items ?? [];
@@ -327,8 +407,10 @@ export function AssetsListView() {
     );
   }
 
-  const columns = useMemo<ResourceColumn[]>(
-    () => [
+  const columns = useMemo<ResourceColumn[]>(() => {
+    // Entries are `ResourceColumn | false`; a hideable column collapses to `false` when toggled off
+    // and is dropped below, so the rendered set always matches the persisted visible-column set.
+    const defs: (ResourceColumn | false)[] = [
       {
         key: "name",
         header: (
@@ -341,7 +423,7 @@ export function AssetsListView() {
         ),
         skeleton: <Skeleton className="h-4 w-32" />,
       },
-      {
+      isColumnVisible("assetTag") && {
         key: "assetTag",
         header: (
           <SortableHeader
@@ -353,22 +435,22 @@ export function AssetsListView() {
         ),
         skeleton: <Skeleton className="h-4 w-20" />,
       },
-      {
+      isColumnVisible("model") && {
         key: "model",
         header: t("columns.model"),
         skeleton: <Skeleton className="h-4 w-28" />,
       },
-      {
+      isColumnVisible("category") && {
         key: "category",
         header: t("columns.category"),
         skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
       },
-      {
+      isColumnVisible("location") && {
         key: "location",
         header: t("columns.location"),
         skeleton: <Skeleton className="h-4 w-24" />,
       },
-      {
+      isColumnVisible("status") && {
         key: "status",
         header: (
           <SortableHeader
@@ -380,12 +462,12 @@ export function AssetsListView() {
         ),
         skeleton: <Skeleton className="h-5 w-20 rounded-full" />,
       },
-      {
+      isColumnVisible("owners") && {
         key: "owners",
         header: t("columns.owners"),
         skeleton: <Skeleton className="size-6 rounded-full" />,
       },
-      {
+      isColumnVisible("updated") && {
         key: "updated",
         header: (
           <SortableHeader
@@ -404,9 +486,12 @@ export function AssetsListView() {
         headClassName: "w-12 text-right",
         skeleton: <Skeleton className="ml-auto size-7" />,
       },
-    ],
-    [sort, dir, toggleSort, t],
-  );
+    ];
+    return defs.filter((column): column is ResourceColumn => column !== false);
+    // `visibleColumns` is the source of truth for which hideable columns appear; `isColumnVisible`
+    // reads it, so depend on the set itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sort, dir, toggleSort, t, visibleColumns]);
 
   const total = page?.total ?? 0;
   const isEmpty = total === 0;
@@ -684,6 +769,40 @@ export function AssetsListView() {
               onChange={setLimit}
               className="lg:ml-auto lg:w-44"
             />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label={t("columnPicker.label")}
+                  title={t("columnPicker.label")}
+                >
+                  <ViewColumnsIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-48">
+                <DropdownMenuLabel>{t("columnPicker.label")}</DropdownMenuLabel>
+                {COLUMN_GROUPS.map((group) => (
+                  <div key={group.id}>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">
+                      {t(`columnPicker.groups.${group.id}`)}
+                    </DropdownMenuLabel>
+                    {group.keys.map((key) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={isColumnVisible(key)}
+                        // Keep the menu open so several columns can be toggled in one pass.
+                        onSelect={(event) => event.preventDefault()}
+                        onCheckedChange={(checked) => toggleColumn(key, checked)}
+                      >
+                        {t(`columnPicker.columns.${key}`)}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </div>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           <ActiveFilters chips={chips} onClearAll={clearFilters} />
@@ -766,78 +885,120 @@ export function AssetsListView() {
               />
             ))}
           >
-            {rows.map((asset) => (
-              <LinkableRow
-                key={asset.id}
-                href={`/assets/${asset.id}`}
-                data-state={
-                  selectable && selection.isSelected(asset.id)
-                    ? "selected"
-                    : undefined
-                }
-              >
-                {selectable ? (
-                  <SelectCell
-                    checked={selection.isSelected(asset.id)}
-                    onCheckedChange={(on) =>
-                      selection.setSelected(asset.id, on)
-                    }
-                    label={t("selectRowLabel", { name: asset.name })}
-                  />
-                ) : null}
-                <TableCell className="font-medium">
-                  <Link href={`/assets/${asset.id}`} className="hover:underline">
-                    {asset.name}
-                  </Link>
-                </TableCell>
-                <TableCell className="font-mono text-muted-foreground">
-                  {asset.assetTag ?? "—"}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {asset.model?.name ?? "—"}
-                </TableCell>
-                <TableCell>
-                  {asset.model?.category ? (
-                    <Badge variant="outline">{asset.model.category.name}</Badge>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {asset.location?.name ?? "—"}
-                </TableCell>
-                <TableCell>
-                  <AssetStatusBadge status={asset.status} />
-                </TableCell>
-                <TableCell>
-                  <StackedOwnerAvatars assignments={asset.activeAssignments} />
-                </TableCell>
-                <TableCell className="text-muted-foreground tabular-nums">
-                  {date(asset.updatedAt)}
-                </TableCell>
-                <TableCell className="text-right">
-                  {archived ? (
-                    canDelete ? (
-                      <div className="flex justify-end">
-                        <RestoreRowAction
-                          onRestore={() =>
-                            handleRestoreRow(asset.id, asset.name)
-                          }
-                          disabled={restoreAsset.isPending}
-                        />
+            {rows.map((asset) => {
+              // Per-key body cells, keyed to the same column keys as the `columns` memo above. We
+              // render by iterating `columns`, so a hidden column drops from the header AND the body
+              // in lockstep — they can never drift. Structural keys (name/actions) are always present
+              // here; the hideable ones simply won't be looked up when their column is off.
+              const cells: Record<string, ReactNode> = {
+                name: (
+                  <TableCell key="name" className="font-medium">
+                    <Link
+                      href={`/assets/${asset.id}`}
+                      className="hover:underline"
+                    >
+                      {asset.name}
+                    </Link>
+                  </TableCell>
+                ),
+                assetTag: (
+                  <TableCell
+                    key="assetTag"
+                    className="font-mono text-muted-foreground"
+                  >
+                    {asset.assetTag ?? "—"}
+                  </TableCell>
+                ),
+                model: (
+                  <TableCell key="model" className="text-muted-foreground">
+                    {asset.model?.name ?? "—"}
+                  </TableCell>
+                ),
+                category: (
+                  <TableCell key="category">
+                    {asset.model?.category ? (
+                      <Badge variant="outline">
+                        {asset.model.category.name}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                ),
+                location: (
+                  <TableCell key="location" className="text-muted-foreground">
+                    {asset.location?.name ?? "—"}
+                  </TableCell>
+                ),
+                status: (
+                  <TableCell key="status">
+                    <AssetStatusBadge status={asset.status} />
+                  </TableCell>
+                ),
+                owners: (
+                  <TableCell key="owners">
+                    <StackedOwnerAvatars
+                      assignments={asset.activeAssignments}
+                    />
+                  </TableCell>
+                ),
+                updated: (
+                  <TableCell
+                    key="updated"
+                    className="text-muted-foreground tabular-nums"
+                  >
+                    {date(asset.updatedAt)}
+                  </TableCell>
+                ),
+                actions: (
+                  <TableCell key="actions" className="text-right">
+                    {archived ? (
+                      canDelete ? (
+                        <div className="flex justify-end">
+                          <RestoreRowAction
+                            onRestore={() =>
+                              handleRestoreRow(asset.id, asset.name)
+                            }
+                            disabled={restoreAsset.isPending}
+                          />
+                        </div>
+                      ) : null
+                    ) : canWrite || canDelete ? (
+                      <div className="flex items-center justify-end gap-1">
+                        {/* The colored quick action stays visible (a primary affordance); only the
+                            kebab fades in on row hover/focus to keep dense lists calm. */}
+                        {rowQuickAction(asset)}
+                        <span className={rowActionsReveal}>
+                          {rowKebab(asset)}
+                        </span>
                       </div>
-                    ) : null
-                  ) : canWrite || canDelete ? (
-                    <div className="flex items-center justify-end gap-1">
-                      {/* The colored quick action stays visible (a primary affordance); only the
-                          kebab fades in on row hover/focus to keep dense lists calm. */}
-                      {rowQuickAction(asset)}
-                      <span className={rowActionsReveal}>{rowKebab(asset)}</span>
-                    </div>
+                    ) : null}
+                  </TableCell>
+                ),
+              };
+              return (
+                <LinkableRow
+                  key={asset.id}
+                  href={`/assets/${asset.id}`}
+                  data-state={
+                    selectable && selection.isSelected(asset.id)
+                      ? "selected"
+                      : undefined
+                  }
+                >
+                  {selectable ? (
+                    <SelectCell
+                      checked={selection.isSelected(asset.id)}
+                      onCheckedChange={(on) =>
+                        selection.setSelected(asset.id, on)
+                      }
+                      label={t("selectRowLabel", { name: asset.name })}
+                    />
                   ) : null}
-                </TableCell>
-              </LinkableRow>
-            ))}
+                  {columns.map((column) => cells[column.key])}
+                </LinkableRow>
+              );
+            })}
           </ResourceTable>
 
           <BatchActionBar
