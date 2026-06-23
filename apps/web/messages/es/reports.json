@@ -40,11 +40,6 @@
       "rangeCustom": "Rango: {from} → {to}"
     }
   },
-  "view": {
-    "timeline": "Cronología",
-    "table": "Tabla",
-    "viewTitle": "Vista {label}"
-  },
   "table": {
     "columns": {
       "when": "Cuándo",
@@ -67,9 +62,6 @@
     "exportTitle": "Exporta los eventos visibles actualmente (la página filtrada)",
     "print": "Imprimir",
     "printTitle": "Imprimir el informe"
-  },
-  "timeline": {
-    "loadMore": "Cargar más"
   },
   "empty": {
     "errorTitle": "No se pudo cargar el historial de actividad",

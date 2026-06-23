@@ -31,6 +31,7 @@ import {
   SelectCell,
   SortableHeader,
 } from "@/components/resource-table";
+import { RowsPerPageSelect } from "@/components/rows-per-page-select";
 import { SearchInput } from "@/components/search-input";
 import { Button } from "@/components/ui/button";
 import {
@@ -179,6 +180,7 @@ export function UsersListView() {
     setQ,
     toggleSort,
     setFilter,
+    setLimit,
     setOffset,
     clearFilters,
     filtersActive,
@@ -499,7 +501,6 @@ export function UsersListView() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <SearchInput
               value={q}
-              onChange={setQ}
               debounceMs={300}
               onDebouncedChange={setQ}
               label={t("list.searchLabel")}
@@ -543,12 +544,16 @@ export function UsersListView() {
                 </SelectItem>
               </SelectContent>
             </Select>
+            <RowsPerPageSelect
+              value={limit}
+              onChange={setLimit}
+              className="sm:ml-auto sm:w-44"
+            />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="outline"
                   size="icon"
-                  className="sm:ml-auto"
                   aria-label={t("list.columnPicker.label")}
                   title={t("list.columnPicker.label")}
                 >

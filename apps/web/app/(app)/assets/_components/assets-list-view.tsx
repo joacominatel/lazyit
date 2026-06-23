@@ -36,6 +36,7 @@ import {
   SelectCell,
   SortableHeader,
 } from "@/components/resource-table";
+import { RowsPerPageSelect } from "@/components/rows-per-page-select";
 import { SearchInput } from "@/components/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -121,6 +122,7 @@ export function AssetsListView() {
     setQ,
     toggleSort,
     setFilter,
+    setLimit,
     setOffset,
     clearFilters,
     filtersActive,
@@ -395,7 +397,6 @@ export function AssetsListView() {
           <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
             <SearchInput
               value={q}
-              onChange={setQ}
               debounceMs={300}
               onDebouncedChange={setQ}
               label={t("searchLabel")}
@@ -463,6 +464,11 @@ export function AssetsListView() {
                 <SelectItem value="NONE">{t("filters.noOwners")}</SelectItem>
               </SelectContent>
             </Select>
+            <RowsPerPageSelect
+              value={limit}
+              onChange={setLimit}
+              className="lg:ml-auto lg:w-44"
+            />
           </div>
 
           <ActiveFilters chips={chips} onClearAll={clearFilters} />
