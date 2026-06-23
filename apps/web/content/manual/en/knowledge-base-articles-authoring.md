@@ -38,6 +38,22 @@ While typing, two helpers offer autocomplete:
 - Secret references to the Secret Manager are also supported inline; you only ever see and pick a
   handle, never a secret value.
 
+### Formatting help (the `?` button)
+
+A **`?` button** in the editor's toolbar opens a short **formatting cheat sheet** so you never write
+"blind". It covers plain Markdown (headings, bold/italic, code, lists) and — most usefully —
+lazyit's two **reserved tokens**, each with a copyable example:
+
+- **Link another article** — `[[article-slug]]`, or `[[article-slug|Display text]]` for custom link
+  text. A link to an article that does not exist yet stays a forward reference.
+- **Reference a secret** — `{{ lazyit_secret.handle }}`, which renders as a masked chip only a vault
+  member can reveal — see [Secret references](/help/secret-manager-secret-references).
+- **External link** — a standard Markdown `[text](https://…)` link to anywhere outside the
+  Knowledge Base.
+
+Copy an example, paste it into the body, and the live preview shows exactly how the token resolves.
+The same `?` and live preview are available on both the **New article** and **Edit** screens.
+
 ## Drafts and publishing
 
 Every new article is born a **Draft**. A draft is **private to its author** — no one else can see
