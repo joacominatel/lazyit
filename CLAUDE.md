@@ -86,7 +86,7 @@ Every change rides a GitHub branch+PR flow. Full runbook: `docs/05-runbooks/git-
 | --- | --- | --- |
 | Runtime / package manager | Bun | 1.3.14 |
 | Monorepo orchestration | Turborepo | ^2.9 |
-| Frontend | Next.js (App Router) + React + Tailwind v4 | 16.2.6 / 19.2.4 |
+| Frontend | Next.js (App Router) + React + Tailwind v4 | 16.2.9 / 19.2.4 |
 | Backend | NestJS (Express), strict TypeScript | 11.0.1 |
 | ORM | Prisma | 7.8.0 |
 | Database | PostgreSQL (Docker Compose for dev) | 18-alpine |
@@ -104,7 +104,7 @@ apps/web           Next.js frontend (@lazyit/web)
 apps/api           NestJS + Prisma backend (@lazyit/api)
 packages/shared    @lazyit/shared — shared types & zod (leaf: depends on nothing)
 docs/              documentation vault
-compose.yaml        backing services for dev (Postgres, Meili, Zitadel); prod adds a `prod` profile
+compose.yaml        backing services for dev (Postgres, Zitadel + its own DB, Meilisearch, Valkey); prod adds a `prod` profile
 ```
 
 `web` and `api` never import each other — they talk over HTTP. Shared contracts go in
@@ -115,7 +115,8 @@ compose.yaml        backing services for dev (Postgres, Meili, Zitadel); prod ad
 ```sh
 bun install                 # install all workspaces
 bun run dev                 # turbo dev — runs web + api together
-bun run db:up / db:down     # Postgres via docker compose
+bun run db:up / db:down     # backing services (Postgres, Zitadel, Meili, Valkey) via docker compose
+bun run dev:up / dev:fresh  # guided dev bring-up (scripts/dev-setup.ts)
 bun run build / bun run lint
 # Prisma — run inside apps/api:
 bunx prisma migrate dev --name <change>
@@ -143,7 +144,7 @@ bunx prisma generate        # client → apps/api/generated/prisma
 - **Testing:** unit tests always; core/complex logic thoroughly. Jest (api), `bun test`
   (shared); frontend unit tests and e2e deferred; no global coverage gate (rigor on core via
   review). → `docs/03-decisions/0012-testing-strategy.md`
-- **Frontend:** Next.js (App Router) + Tailwind v4 (shadcn/ui planned).
+- **Frontend:** Next.js (App Router) + Tailwind v4 + shadcn/ui (installed, radix-nova preset).
   → `docs/03-decisions/0010-nextjs-frontend.md`, `docs/03-decisions/0011-tailwind-styling.md`
 - **Domain build order:** User + Location → AssetModel + AssetCategory + Asset →
   AssetAssignment + AssetHistory → Application + AccessGrant + AccessRequest →

@@ -3,16 +3,16 @@ title: Entities — MOC
 tags: [moc, domain]
 status: draft
 created: 2026-05-25
-updated: 2026-06-20
+updated: 2026-06-23
 ---
 
 # Entities — Map of Content
 
-> [!info] Conceptual-only
-> Each note describes an entity's **purpose, relationships and business rules** — not its
-> fields. Field-level schemas are deliberately omitted until the entity exists in Prisma,
-> to avoid doc↔schema drift. When a model lands, add a "Fields" section linking to the
-> Prisma model.
+> [!info] Purpose & fields
+> Each note describes an entity's **purpose, relationships and business rules** — and, once the
+> model lands in Prisma, a **Fields/Columns** section mirroring the schema (~36 notes now carry
+> one). Field-level schemas are documented only for entities that exist in `schema.prisma`;
+> not-yet-implemented (⚪) entities stay conceptual until they land, to avoid doc↔schema drift.
 
 | Status legend | |
 | --- | --- |
@@ -90,7 +90,7 @@ The curated, ADMIN-only bell — distinct from the [[recent-activity]] view (whi
 See [[0056-in-app-notification-bell]] · issue #313.
 
 - 🟢 [[notification]] — append-only event store of curated nudges (fan-out-on-read).
-- 🟢 [[notification-read]] — per-user read join for targeted and broadcast notifications.
+- 🟢 [[notification#NotificationRead]] — per-user read join for targeted and broadcast notifications (documented inline in [[notification]]).
 
 ## Secret Manager
 
@@ -105,5 +105,14 @@ a wrapped DEK lets you *decrypt*. Distinct from the server-decryptable [[workflo
 - 🟢 [[vault-membership]] — a crypto member of a vault; the row carries the DEK wrapped to the member's public key (soft-revoke v1 = drop the row). [[0061-secret-manager-zero-knowledge]]
 - 🟢 [[user-keypair]] — one keypair per User; public key in clear + private key wrapped under Argon2id(password) and again under the recovery key. [[0061-secret-manager-zero-knowledge]]
 - 🟢 [[secret-audit-log]] — append-only trail of secret-manager operations (vault create/delete, member add/remove, item write). [[0061-secret-manager-zero-knowledge]]
+
+## Migrator (bulk import)
+
+The guided bulk-import slice — an upload becomes a reviewable session of typed rows, committed in
+one auditable run. See [[0069-migrator-import]] · issue #639.
+
+- 🟢 [[import-session]] — the transient, owner-scoped wizard session (upload → parse → map → dry-run → commit); TTL-GC'd, hard-deleted. [[0069-migrator-import]]
+- 🟢 [[import-row]] — one parsed-and-coerced source row within a session (status + per-row error); transient scratch, hard-deleted with its session. [[0069-migrator-import]]
+- 🟢 [[import-run]] — append-only audit ledger of a commit (actor, target, final counts, file hash); the durable record, never deleted. [[0069-migrator-import]]
 
 Model overview & order: [[02-domain/_MOC|Domain]]. Conventions: [[conventions]].

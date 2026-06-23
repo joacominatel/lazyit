@@ -3,7 +3,7 @@ title: Architecture — MOC
 tags: [moc, architecture]
 status: draft
 created: 2026-05-25
-updated: 2026-06-08
+updated: 2026-06-23
 ---
 
 # Architecture — Map of Content
@@ -16,6 +16,9 @@ How lazyit is built and run.
 - [[shared-package]] — the contract for what may live in `@lazyit/shared`.
 - [[deployment]] — self-hosting target and topology (Caddy + Postgres + **Valkey** on a single
   Compose host; the Zitadel IdP under the bundled flow).
+- **Search (Meilisearch)** — the cross-cutting full-text search engine, documented in [[stack]] +
+  [[deployment]] (the `meilisearch` Compose service). Decision of record:
+  [[0035-search-architecture]].
 - **Async substrate & the Applications Workflow Engine** — the shipped **BullMQ-on-Valkey**
   background-job substrate (the async `.docx` import + the per-application provisioning engine).
   Architecture touchpoints: [[stack]] (the "Async workers & queue" section) + [[deployment]];

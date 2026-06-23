@@ -56,12 +56,13 @@ frontmatter, and internal references use `[[wiki-links]]`.
   `.canvas` files for now — see the gaps section.
 - **Folder indexes:** each folder has a `_MOC.md` that lists and frames its notes.
 
-## Project snapshot (as of 2026-06-16)
+## Project snapshot (as of 2026-06-23)
 
-Verified against the repo, not just the briefing:
+Verified against the repo, not just the briefing. Since the last snapshot: the **Migrator** bulk-import
+slice (ADR-0069) shipped to `master` (promotion #649) and the `#692–708` cleanup epic landed.
 
 - Monorepo: Bun `1.3.14` workspaces + Turborepo `2.9`.
-- `apps/web`: Next.js `16.2.6` + React `19.2.4`, runs on `:3000`.
+- `apps/web`: Next.js `16.2.9` + React `19.2.4`, runs on `:3000`.
 - `apps/api`: NestJS `11.0.1`, runs on `:3001`.
 - ORM: Prisma `7.8.0`; DB: PostgreSQL `18-alpine` via Docker Compose.
 - Shared: `@lazyit/shared` (`packages/shared`) — exports the permission catalog, `Page<T>`, per-entity
