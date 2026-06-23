@@ -49,7 +49,7 @@ describe("enum catalogs", () => {
   });
 
   test("connection kinds reserve SDK/MCP/PREBUILT/CUSTOM", () => {
-    for (const k of ["SDK", "MCP", "PREBUILT", "CUSTOM"]) {
+    for (const k of ["SDK", "MCP", "PREBUILT", "CUSTOM"] as const) {
       expect(WORKFLOW_CONNECTION_KINDS).toContain(k);
     }
   });
