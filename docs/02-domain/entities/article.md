@@ -3,7 +3,7 @@ title: Article
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-06-23
 ---
 
 # Article
@@ -39,7 +39,7 @@ deferred.
   `resolvedTargetId` nullable), powering **backlinks** (`GET /articles/:id/backlinks`, the
   "References" section) + fast resolution. This is **distinct** from the IT-native [[article-link]]
   (article↔asset/application).
-- **aliased into** other [[folder]]s via [[article-alias]] — 🟢 **implemented** (#392, [[0059]] §2): a
+- **aliased into** other [[folder]]s via [[article-alias]] — 🟢 **implemented** (#392, [[0059-kb-folders-links-and-import]] §2): a
   nav-only symlink so one article can appear under several folders (`POST`/`DELETE
   /articles/:id/aliases`). Aliases are presentation only and **never widen access**
   ([[0060-kb-folder-access-control]]).
