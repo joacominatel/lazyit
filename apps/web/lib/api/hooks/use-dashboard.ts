@@ -7,6 +7,7 @@ import {
 import {
   type DashboardActivityFilters,
   getDashboardActivity,
+  getDashboardActivityFilters,
   getDashboardSummary,
 } from "../endpoints/dashboard";
 
@@ -78,6 +79,8 @@ export const dashboardKeys = {
       offset,
       activityFilterKey(filters),
     ] as const,
+  /** The distinct actor/action filter menus (the Reports selects' options, issue #718). */
+  activityFilters: () => [...dashboardKeys.all, "activity-filters"] as const,
 };
 
 /**
@@ -155,5 +158,20 @@ export function useReportsActivityPage(
     queryFn: () =>
       getDashboardActivity({ ...filters, limit: pageSize, offset }),
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * The distinct actor/action filter MENUS for the Reports selects (issue #718): only the actors and
+ * actions that actually produced an activity row, fetched once from `GET /dashboard/activity/filters`.
+ * Replaces the old sources — `useUsers()` (the whole directory) for the actor select and the static
+ * `RECENT_ACTIVITY_ACTIONS` enum (the validation allowlist) for the action select — so each menu offers
+ * only "what happened". The menu is derived from the same feed and changes only as new activity lands;
+ * it shares the default cache behaviour and is invalidated by {@link invalidateDashboard}.
+ */
+export function useReportsActivityFilters() {
+  return useQuery({
+    queryKey: dashboardKeys.activityFilters(),
+    queryFn: getDashboardActivityFilters,
   });
 }
