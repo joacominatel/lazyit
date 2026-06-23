@@ -104,10 +104,13 @@ export function SecretChipReveal({
   // Decrypt on mount: the shell mounts this component on the reveal click. If the session is locked
   // (no DEK yet), open the unlock gate instead of decrypting.
   const onMaskedRef = useRef(onMasked);
-  onMaskedRef.current = onMasked;
+  useEffect(() => {
+    onMaskedRef.current = onMasked;
+  });
   useEffect(() => {
     const dek = ensureDek();
     if (dek) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mount initialization: decrypt sets plaintext once on reveal; this is not a cascading update
       decrypt(dek);
     } else {
       setUnlockOpen(true);
@@ -244,7 +247,9 @@ export function SecretChipReveal({
  */
 function UnlockSuccess({ onClose }: { onClose: () => void }) {
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
   useEffect(() => {
     onCloseRef.current();
   }, []);
