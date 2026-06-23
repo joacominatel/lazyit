@@ -49,9 +49,18 @@ const nodeTypes = { infra: InfraNodeCard };
  */
 export function InfraCanvas({
   onSelectNode,
+  impactRootId = null,
+  affectedIds,
 }: {
   /** Called with the selected node id (or null when cleared). The seam for #742's drill-in panel. */
   onSelectNode?: (nodeId: string | null) => void;
+  /**
+   * The blast-radius root (ADR-0070 §7, issue #755) — the selected node when impact mode is ON, else
+   * null. When set, this node renders as the origin and `affectedIds` highlight; everything else dims.
+   */
+  impactRootId?: string | null;
+  /** The downstream affected set (ids). Empty/undefined when impact mode is off or nothing depends. */
+  affectedIds?: Set<string>;
 }) {
   const t = useTranslations("infra");
   const { data: rawNodes, isLoading, isError, error, refetch } = useInfraNodes();
@@ -77,7 +86,13 @@ export function InfraCanvas({
 
   return (
     <ReactFlowProvider>
-      <CanvasBoard nodes={nodes} edges={rawEdges} onSelectNode={onSelectNode} />
+      <CanvasBoard
+        nodes={nodes}
+        edges={rawEdges}
+        onSelectNode={onSelectNode}
+        impactRootId={impactRootId}
+        affectedIds={affectedIds}
+      />
     </ReactFlowProvider>
   );
 }
@@ -87,10 +102,14 @@ function CanvasBoard({
   nodes: infraNodes,
   edges: infraEdges,
   onSelectNode,
+  impactRootId,
+  affectedIds,
 }: {
   nodes: InfraNode[];
   edges: InfraEdge[];
   onSelectNode?: (nodeId: string | null) => void;
+  impactRootId: string | null;
+  affectedIds?: Set<string>;
 }) {
   const t = useTranslations("infra");
   const canManage = useCan("infra:manage");
@@ -106,6 +125,11 @@ function CanvasBoard({
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [hovered, setHovered] = useState<string | null>(null);
 
+  // Impact mode is on when a root is set (ADR-0070 §7, issue #755). The blast radius is derived
+  // state: each node carries three flags so the (i18n-free) card just toggles classes — the root is
+  // the origin, members of `affectedIds` highlight, and everything else dims. Off ⇒ all flags false.
+  const inImpactMode = impactRootId !== null;
+
   // Sync the React Flow node list from the query. ponytail: a node already on the board keeps its
   // live (possibly mid-drag) position; only data fields refresh — so a background refetch never
   // yanks a node the operator is dragging. Un-positioned nodes get a deterministic grid slot.
@@ -119,6 +143,8 @@ function CanvasBoard({
           (node.x != null && node.y != null
             ? { x: node.x, y: node.y }
             : gridPosition(index));
+        const isOrigin = inImpactMode && node.id === impactRootId;
+        const isAffected = inImpactMode && Boolean(affectedIds?.has(node.id));
         return {
           id: node.id,
           type: "infra",
@@ -130,28 +156,47 @@ function CanvasBoard({
             ipAddress: node.ipAddress,
             kindLabel: kindLabel(node.kind),
             statusLabel: statusLabel(node.status),
+            impactOrigin: isOrigin,
+            impactAffected: isAffected,
+            // Dim only when impact mode is on and this node is neither origin nor affected.
+            impactDimmed: inImpactMode && !isOrigin && !isAffected,
           },
         };
       });
     });
-    // kindLabel/statusLabel are stable per render of `t`; depending on infraNodes is what matters.
+    // kindLabel/statusLabel are stable per render of `t`; the data/flag inputs are what matter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [infraNodes, setRfNodes]);
+  }, [infraNodes, setRfNodes, inImpactMode, impactRootId, affectedIds]);
 
-  // Sync edges from the query, styled by kind.
+  // Sync edges from the query, styled by kind. In impact mode an edge stays full-strength only when
+  // both endpoints are inside the blast radius (origin or affected); every other edge dims with the
+  // unaffected nodes, so the radius reads as one connected region (issue #755).
   useEffect(() => {
+    const inRadius = (id: string) =>
+      id === impactRootId || Boolean(affectedIds?.has(id));
     setRfEdges(
-      infraEdges.map((edge) => ({
-        id: edge.id,
-        source: edge.sourceId,
-        target: edge.targetId,
-        type: "smoothstep",
-        style: { stroke: edgeStroke(edge.kind), strokeWidth: 1.5 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: edgeStroke(edge.kind) },
-        data: { kind: edge.kind },
-      })),
+      infraEdges.map((edge) => {
+        const dimmed =
+          inImpactMode && !(inRadius(edge.sourceId) && inRadius(edge.targetId));
+        return {
+          id: edge.id,
+          source: edge.sourceId,
+          target: edge.targetId,
+          type: "smoothstep",
+          style: {
+            stroke: edgeStroke(edge.kind),
+            strokeWidth: 1.5,
+            opacity: dimmed ? 0.2 : 1,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: edgeStroke(edge.kind),
+          },
+          data: { kind: edge.kind },
+        };
+      }),
     );
-  }, [infraEdges, setRfEdges]);
+  }, [infraEdges, setRfEdges, inImpactMode, impactRootId, affectedIds]);
 
   // One trailing-debounced persister, holding the latest position per node id. ponytail: a single
   // debounced map-flush, not a debounce-per-node, so a flurry of drags collapses to one write each.
