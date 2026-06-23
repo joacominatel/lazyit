@@ -35,6 +35,10 @@
     "CONFIRMED": "Confirmed",
     "PENDING": "Pending"
   },
+  "view": {
+    "map": "Map",
+    "table": "Table"
+  },
   "servers": {
     "title": "Servers",
     "subtitle": "Every node in your topology — filter, search and open one to see its owner, secrets and connections.",
