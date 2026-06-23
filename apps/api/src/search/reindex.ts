@@ -49,6 +49,8 @@ interface ReindexIndex {
  */
 const FILTERABLE_ATTRIBUTES: Partial<Record<SearchIndex, string[]>> = {
   articles: ['categoryId'],
+  // ADR-0070 v1: filter topology nodes by kind/status/state (the canvas/Servers-list filters).
+  infra: ['kind', 'status', 'state'],
 };
 
 /**
