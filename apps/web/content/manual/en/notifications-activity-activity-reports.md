@@ -41,8 +41,10 @@ URL, so a filtered view is shareable and survives Back navigation.
 
 - **Scope tabs** — **All**, **Assets**, **Access**, **Stock**, **Users**, and **My history** (your
   own actions only).
-- **Actor** — narrow to one person's actions (pinned to you on the My-history tab).
-- **Action** — narrow to a single action type.
+- **Actor** — narrow to one person's actions (pinned to you on the My-history tab). The list offers
+  only the people who have actually performed a recorded action, not the whole directory.
+- **Action** — narrow to a single action type. The list offers only the action types that have
+  actually occurred, so you never pick a filter that can return nothing.
 - **Date range** — a quick preset (Today, Last 7 days, Last 30 days) or an exact from/to range.
 - **Search** — free-text match across the visible entries.
 

@@ -3,6 +3,7 @@ import type {
   DashboardSummary,
   RecentActivityActorFilter,
   RecentActivityAction,
+  RecentActivityFilterOptions,
   RecentActivityPage,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
@@ -115,4 +116,14 @@ export function getDashboardActivity(
   return apiFetch<RecentActivityPage>(
     qs ? `${BASE}/activity?${qs}` : `${BASE}/activity`,
   );
+}
+
+/**
+ * Fetch the distinct filter menus for the Reports actor/action selects (`GET /dashboard/activity/filters`,
+ * issue #718): only the actors (id + display name) and actions that ACTUALLY produced a row in the
+ * `recent_activity` feed — not the whole user directory or the full static action allowlist. Read-only,
+ * gated on `logs:read` like the feed itself.
+ */
+export function getDashboardActivityFilters(): Promise<RecentActivityFilterOptions> {
+  return apiFetch<RecentActivityFilterOptions>(`${BASE}/activity/filters`);
 }

@@ -42,8 +42,11 @@ navegación hacia atrás.
 
 - **Pestañas de alcance** — **Todo**, **Activos**, **Acceso**, **Stock**, **Usuarios** y **Mi historial**
   (solo tus propias acciones).
-- **Responsable** — acota a las acciones de una persona (fijado en ti en la pestaña Mi historial).
-- **Acción** — acota a un único tipo de acción.
+- **Responsable** — acota a las acciones de una persona (fijado en ti en la pestaña Mi historial). La
+  lista ofrece solo las personas que realmente han realizado alguna acción registrada, no todo el
+  directorio.
+- **Acción** — acota a un único tipo de acción. La lista ofrece solo los tipos de acción que realmente
+  ocurrieron, así nunca eliges un filtro que no puede devolver nada.
 - **Rango de fechas** — un preajuste rápido (Hoy, Últimos 7 días, Últimos 30 días) o un rango exacto
   desde/hasta.
 - **Buscar** — coincidencia de texto libre sobre las entradas visibles.

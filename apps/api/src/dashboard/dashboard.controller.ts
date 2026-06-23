@@ -12,7 +12,11 @@ import {
   RecentActivityQuerySchema,
 } from '@lazyit/shared';
 import { DashboardService } from './dashboard.service';
-import { DashboardSummaryDto, RecentActivityPageDto } from './dashboard.dto';
+import {
+  DashboardSummaryDto,
+  RecentActivityFilterOptionsDto,
+  RecentActivityPageDto,
+} from './dashboard.dto';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
@@ -45,6 +49,17 @@ export class DashboardController {
     @Query('expiringWithinDays') expiringWithinDays?: string,
   ): Promise<DashboardSummary> {
     return this.dashboard.getSummary(parseExpiringWithinDays(expiringWithinDays));
+  }
+
+  @Get('activity/filters')
+  @RequirePermission('logs:read')
+  @ApiOperation({
+    summary:
+      'Distinct filter menus for the Reports actor/action selects (issue #718): the actors (id + name) and actions actually present in the recent_activity feed, so the UI offers only what happened — not the whole user directory or the full action allowlist. Gated on logs:read like the feed.',
+  })
+  @ApiOkResponse({ type: RecentActivityFilterOptionsDto })
+  async activityFilters() {
+    return this.dashboard.getActivityFilterOptions();
   }
 
   @Get('activity')

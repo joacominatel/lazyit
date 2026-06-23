@@ -108,6 +108,23 @@ share one WHERE in a single `$transaction`, so they can't drift):
   (paired with `ESCAPE '\'`) so a literal `%`/`_`/`\` matches itself rather than acting as a wildcard
   (issue #593) — the escape helper `common/escape-like-pattern.ts` is shared for future `ILIKE` filters.
 
+### Filter options (issue #718)
+
+`GET /dashboard/activity/filters` — same `logs:read` gate, read-only, no schema change. Returns the
+DISTINCT actors + actions actually present in the view, so the Reports actor/action selects offer only
+"what happened" instead of the whole user directory / the full `RECENT_ACTIVITY_ACTIONS` allowlist:
+
+- `actors` — `{ id, name }[]`: the distinct non-null `actorId`s with a resolved display name, ordered
+  by name. Rows with a null actor (system/unknown) are dropped via an **inner** `JOIN "users"` (there's
+  nothing to filter by), unlike the feed's `LEFT JOIN` which keeps system rows.
+- `actions` — a subset of `RECENT_ACTIVITY_ACTIONS`: the distinct verbs the view emits, intersected
+  with the shared allowlist (a stray verb never breaks the typed response).
+
+Shaped by `DashboardService.getActivityFilterOptions` (both reads batched in one `$transaction`), typed
+by `RecentActivityFilterOptionsSchema` in `@lazyit/shared`. The web consumes it via
+`useReportsActivityFilters` ([[0020-frontend-data-layer]]). `RECENT_ACTIVITY_ACTIONS` is unchanged — it
+remains the VALIDATION allowlist for the `action` filter param; only the UI menu source changed.
+
 > [!note] Access: the feed is ADMIN-only, now enforced at the endpoint (issue #181, DEBT-1 resolved)
 > The feed is the cross-pillar "who-did-what" stream, so it is treated as sensitive. Both surfaces
 > (the dashboard `RecentActivityPanel` and the Reports/Informes screen) are UI-gated on `logs:read`
