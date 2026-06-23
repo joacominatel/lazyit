@@ -3,7 +3,7 @@ title: RecentActivity
 tags: [domain, entity, view]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-20
+updated: 2026-06-23
 ---
 
 # RecentActivity
@@ -57,7 +57,7 @@ silent no-match. Keep it in sync with the view if a new source verb is added.
 
 The subject fields turn the generic line ("Access revoked from a user") into a specific, click-through
 headline ("Access to **\<App\>** revoked from **\<User\>**") on both the dashboard panel and the
-Reports/Informes timeline. They are resolved purely from each source's EXISTING relations in the view
+Reports/Informes table. They are resolved purely from each source's EXISTING relations in the view
 (no new access; the feed itself stays gated on `logs:read`), and the web renders the absolute
 `occurredAt` as a tooltip/aria-label alongside the relative time.
 

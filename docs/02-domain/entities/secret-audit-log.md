@@ -3,7 +3,7 @@ title: SecretAuditLog
 tags: [domain, entity, secret-manager, security, audit, append-only]
 status: accepted
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-23
 ---
 
 # SecretAuditLog
@@ -22,8 +22,8 @@ compromising the zero-knowledge guarantee.
 
 - **belongs to** one [[user]] (the actor, `actorId` FK → uuid `User`, `onDelete: SetNull`). The log
   row **survives the actor's deletion** (`SetNull`): the metadata record must outlive the actor, so
-  `actorId = null` means "deleted user" or "system". This mirrors the `SecretAuditLog` precedent for
-  the notification bell.
+  `actorId = null` means "deleted user" or "system". This mirrors the notification-bell soft-target
+  precedent (and `PermissionAuditLog`/`ServiceAccountAuditLog`).
 - References `vaultId`, `itemId`, and `targetUserId` as **plain `String?` columns (NO FK)** — the
   audit row must survive even if the referenced vault, item, or user is later removed. The
   notification-bell soft-target precedent applies here.
