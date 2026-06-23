@@ -3,6 +3,7 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { AssetForm } from "../_components/asset-form";
 
+// ponytail: no data read — empty create form; nothing to SSR-prefetch (ADR-0067 rollout #662).
 export default async function NewAssetPage() {
   const t = await getTranslations("assets");
   return (
