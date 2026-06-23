@@ -2,12 +2,15 @@
 
 import {
   ArrowTopRightOnSquareIcon,
+  BoltIcon,
   BookOpenIcon,
   CubeIcon,
   KeyIcon,
+  ShieldCheckIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import type {
+  InfraImpactResponse,
   InfraNodeChild,
   InfraNodeDetail,
   InfraNodeOwner,
@@ -67,11 +70,23 @@ const STATUS_OPTIONS = InfraNodeStatusSchema.options;
 export function InfraNodePanel({
   nodeId,
   onClose,
+  impactOn,
+  onToggleImpact,
+  impact,
+  impactLoading,
 }: {
   /** The selected node id, or null when nothing is selected (the Sheet is closed). */
   nodeId: string | null;
   /** Called to clear the selection (Sheet dismissed). */
   onClose: () => void;
+  /** Whether blast-radius mode is on for this node (ADR-0070 §7, issue #755). */
+  impactOn: boolean;
+  /** Toggle blast-radius mode for the selected node. */
+  onToggleImpact: () => void;
+  /** The blast-radius result (root + affected set) — present only while impact mode is on. */
+  impact: InfraImpactResponse | undefined;
+  /** Whether the impact query is in flight. */
+  impactLoading: boolean;
 }) {
   const t = useTranslations("infra");
   const canManage = useCan("infra:manage");
@@ -91,7 +106,15 @@ export function InfraNodePanel({
             </SheetHeader>
           </div>
         ) : (
-          <PanelBody node={node} canManage={canManage} onClose={onClose} />
+          <PanelBody
+            node={node}
+            canManage={canManage}
+            onClose={onClose}
+            impactOn={impactOn}
+            onToggleImpact={onToggleImpact}
+            impact={impact}
+            impactLoading={impactLoading}
+          />
         )}
       </SheetContent>
     </Sheet>
@@ -103,10 +126,18 @@ function PanelBody({
   node,
   canManage,
   onClose,
+  impactOn,
+  onToggleImpact,
+  impact,
+  impactLoading,
 }: {
   node: InfraNodeDetail;
   canManage: boolean;
   onClose: () => void;
+  impactOn: boolean;
+  onToggleImpact: () => void;
+  impact: InfraImpactResponse | undefined;
+  impactLoading: boolean;
 }) {
   const t = useTranslations("infra");
   const { date } = useFormatters();
@@ -167,6 +198,16 @@ function PanelBody({
             <dd>{date(node.createdAt)}</dd>
           </div>
         </dl>
+
+        {/* Impact / blast radius (ADR-0070 §7, issue #755) — the query that justifies a graph. The
+            toggle drives the canvas highlight (state lives in diagram-view); this surfaces the count
+            + list. Shown to every reader (the API gates on infra:read). */}
+        <ImpactSection
+          impactOn={impactOn}
+          onToggleImpact={onToggleImpact}
+          impact={impact}
+          impactLoading={impactLoading}
+        />
 
         {/* Status toggle (write — gated). */}
         {canManage ? (
@@ -236,6 +277,88 @@ function Section({
       </p>
       {children}
     </section>
+  );
+}
+
+/**
+ * Impact / blast radius (ADR-0070 §7, issue #755). A toggle that asks the headline graph question —
+ * "if this node goes down, what's affected?" — and, when on, surfaces the count + the affected list
+ * (label + kind + status + hop depth) while the canvas highlights the same set. An empty result is
+ * the *good* news, so it reads as reassurance ("safe to take down"), never a scary empty state.
+ */
+function ImpactSection({
+  impactOn,
+  onToggleImpact,
+  impact,
+  impactLoading,
+}: {
+  impactOn: boolean;
+  onToggleImpact: () => void;
+  impact: InfraImpactResponse | undefined;
+  impactLoading: boolean;
+}) {
+  const t = useTranslations("infra");
+  const affected = impact?.affected ?? [];
+  const count = affected.length;
+  // Shallowest first, then alphabetical — the immediate blast radius reads before the transitive tail.
+  const ordered = [...affected].sort(
+    (a, b) => a.depth - b.depth || a.label.localeCompare(b.label),
+  );
+
+  return (
+    <Section title={t("panel.impactTitle")}>
+      <Button
+        variant={impactOn ? "default" : "outline"}
+        size="sm"
+        className="w-full"
+        onClick={onToggleImpact}
+        aria-pressed={impactOn}
+      >
+        <BoltIcon />
+        {impactOn ? t("panel.impactHide") : t("panel.impactShow")}
+      </Button>
+      <p className="mt-1.5 text-xs text-muted-foreground">
+        {t("panel.impactDescription")}
+      </p>
+
+      {impactOn ? (
+        impactLoading ? (
+          <div className="mt-3 space-y-2" role="status">
+            <Skeleton className="h-5 w-2/3" />
+            <Skeleton className="h-12 w-full" />
+          </div>
+        ) : count === 0 ? (
+          // Empty = reassuring, not alarming (ADR-0070 §7).
+          <div className="mt-3 flex items-start gap-2 rounded-md border border-success/40 bg-success/5 p-3 text-sm text-success">
+            <ShieldCheckIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
+            <span>{t("panel.impactSafe")}</span>
+          </div>
+        ) : (
+          <div className="mt-3 space-y-2">
+            <p className="text-sm font-medium text-destructive">
+              {t("panel.impactCount", { count })}
+            </p>
+            <ul className="space-y-1.5 text-sm">
+              {ordered.map((item) => (
+                <li key={item.id} className="flex items-center gap-2">
+                  <CubeIcon
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-hidden
+                  />
+                  <span className="truncate font-medium">{item.label}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t(`kind.${item.kind}`)}
+                  </span>
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                    {t("panel.impactDepth", { depth: item.depth })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      ) : null}
+    </Section>
   );
 }
 

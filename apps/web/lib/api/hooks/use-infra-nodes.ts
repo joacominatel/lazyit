@@ -7,6 +7,7 @@ import {
 import type {
   CreateInfraEdge,
   InfraEdge,
+  InfraImpactResponse,
   InfraNode,
   InfraNodeDetail,
   UpdateInfraNode,
@@ -20,6 +21,7 @@ import {
   getInfraNodeDetail,
   getInfraNodeEdges,
   getInfraNodeEdgesHistory,
+  getInfraNodeImpact,
   getInfraNodes,
   type InfraNodeFilters,
   restoreInfraNode,
@@ -45,6 +47,7 @@ export const infraKeys = {
   detail: (nodeId: string) => [...infraKeys.all, "detail", nodeId] as const,
   edgeHistory: (nodeId: string) =>
     [...infraKeys.all, "edgeHistory", nodeId] as const,
+  impact: (nodeId: string) => [...infraKeys.all, "impact", nodeId] as const,
 };
 
 /** List topology nodes, optionally filtered. The canvas keeps the fetch client-side (React Flow is
@@ -141,6 +144,21 @@ export function useInfraNodeEdgesHistory(nodeId: string | null) {
   });
 }
 
+/**
+ * Blast radius for the selected node (`GET /infra/nodes/:id/impact`, ADR-0070 §7, issue #755) — the
+ * downstream set affected if it goes down, each with its hop `depth`. `enabled` gates the fetch on
+ * BOTH a selected node and impact mode being on, so the query fires only when the operator asks for
+ * the blast radius — toggling off / selecting another node clears it (a fresh per-node key). The
+ * canvas derives its highlight/dim from `affected` + `rootId`.
+ */
+export function useInfraImpact(nodeId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: infraKeys.impact(nodeId ?? ""),
+    queryFn: ({ signal }) => getInfraNodeImpact(nodeId as string, signal),
+    enabled: enabled && Boolean(nodeId),
+  });
+}
+
 // ── Write mutations (ADR-0070 §5/§3 lifecycle, issue #742) ─────────────────────────────────────────
 //
 // All write mutations share one shape: invalidate `infraKeys.all` on success so the canvas list, the
@@ -217,6 +235,6 @@ export function useCloseInfraEdge() {
   });
 }
 
-// Re-export the detail/edge wire types so panel components can import them from the hook module
-// (the single place the next Servers-list agent reuses) without reaching into endpoints.
-export type { InfraNodeDetail, InfraEdge };
+// Re-export the detail/edge/impact wire types so panel components can import them from the hook
+// module (the single place the next Servers-list agent reuses) without reaching into endpoints.
+export type { InfraNodeDetail, InfraEdge, InfraImpactResponse };

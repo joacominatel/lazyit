@@ -29,6 +29,15 @@ export interface InfraNodeData {
   ipAddress: string | null;
   statusLabel: string;
   kindLabel: string;
+  /**
+   * Blast-radius states (ADR-0070 §7, issue #755). All false unless impact mode is on for some node:
+   * `impactOrigin` = the node whose blast radius is shown (the distinct source), `impactAffected` =
+   * in the downstream set (highlighted), `impactDimmed` = outside the radius (faded back). The canvas
+   * derives these from one impact query + the selected id.
+   */
+  impactOrigin?: boolean;
+  impactAffected?: boolean;
+  impactDimmed?: boolean;
   [key: string]: unknown;
 }
 
@@ -79,9 +88,16 @@ export function InfraNodeCard({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "relative flex min-w-44 max-w-60 items-start gap-2.5 overflow-hidden rounded-lg border border-border bg-card px-3 py-2.5 text-card-foreground shadow-sm transition-shadow",
+        "relative flex min-w-44 max-w-60 items-start gap-2.5 overflow-hidden rounded-lg border border-border bg-card px-3 py-2.5 text-card-foreground shadow-sm transition-[box-shadow,opacity,transform]",
         "hover:shadow-md",
         selected && SELECTED_RING[tone],
+        // Blast radius (issue #755). The origin is the distinct source (brand ring + lift); affected
+        // nodes wear a danger ring + faint tint so the radius pops; unaffected nodes fade back. These
+        // win over the resting selected ring while impact mode is on (a more urgent cue).
+        node.impactOrigin &&
+          "ring-2 ring-primary ring-offset-2 ring-offset-background scale-[1.03] shadow-md",
+        node.impactAffected && "ring-2 ring-destructive bg-destructive/5",
+        node.impactDimmed && "opacity-35 saturate-50",
       )}
     >
       {/* status accent bar on the leading edge — a calm always-on colour cue, not colour-alone */}
