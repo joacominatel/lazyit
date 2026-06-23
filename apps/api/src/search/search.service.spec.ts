@@ -197,7 +197,7 @@ describe('SearchService', () => {
       expect(logger.error).toHaveBeenCalledTimes(1);
     });
 
-    it('has NO process-wide write suppression — every write reaches the client (ADR-0069 §10)', async () => {
+    it('has NO process-wide write suppression — every write reaches the client (ADR-0069 §10)', () => {
       // The migrator bulk commit used to flip a global suppressDepth, silently dropping EVERY
       // concurrent non-import write. That global is retired: suppression is now scoped to the
       // import's own asset writes via AssetsService.create({ suppressSearch }). So a concurrent
@@ -294,7 +294,10 @@ describe('SearchService', () => {
         q: 'runbook',
         entities: ['articles'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'u1', role: 'VIEWER' },
+        } as never,
       });
 
       // Only the public-folder article survives; the restricted one NEVER surfaces.
@@ -320,7 +323,10 @@ describe('SearchService', () => {
         q: 'x',
         entities: ['articles', 'assets'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'u1', role: 'VIEWER' },
+        } as never,
       });
 
       const [params] = client.multiSearch.mock.calls[0] as [
@@ -344,7 +350,10 @@ describe('SearchService', () => {
         q: 'x',
         entities: ['articles'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'admin', role: 'ADMIN' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'admin', role: 'ADMIN' },
+        } as never,
       });
 
       const [params] = client.multiSearch.mock.calls[0] as [
@@ -362,7 +371,10 @@ describe('SearchService', () => {
         q: 'x',
         entities: ['articles'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'u1', role: 'VIEWER' },
+        } as never,
       });
 
       const [params] = client.multiSearch.mock.calls[0] as [
@@ -406,7 +418,10 @@ describe('SearchService', () => {
         q: 'runbook',
         entities: ['articles'],
         limit: 2,
-        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'u1', role: 'VIEWER' },
+        } as never,
       });
 
       // The readable article is returned (it would have been dropped by the old post-filter-only path).
@@ -425,7 +440,12 @@ describe('SearchService', () => {
           {
             indexUid: 'articles',
             hits: [
-              { id: 'sec1', slug: 'secret', title: 'Secret', categoryId: 'secret-folder' },
+              {
+                id: 'sec1',
+                slug: 'secret',
+                title: 'Secret',
+                categoryId: 'secret-folder',
+              },
             ],
             estimatedTotalHits: 1,
           },
@@ -436,7 +456,10 @@ describe('SearchService', () => {
         q: 'secret',
         entities: ['articles'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'admin', role: 'ADMIN' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'admin', role: 'ADMIN' },
+        } as never,
       });
 
       expect(result.articles?.hits).toEqual([
@@ -463,7 +486,10 @@ describe('SearchService', () => {
         q: 'stale',
         entities: ['articles'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'u1', role: 'VIEWER' },
+        } as never,
       });
 
       expect(result.articles?.hits).toEqual([]);
