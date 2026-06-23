@@ -1,59 +1,34 @@
-"use client";
+import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { auth } from "@/auth";
+import { getConsumable } from "@/lib/api/endpoints/consumables";
+import { consumableKeys } from "@/lib/api/hooks/use-consumables";
+import { getServerQueryClient } from "@/lib/api/server-query-client";
+import { ConsumableEditView } from "./_components/consumable-edit-view";
 
-import { useTranslations } from "next-intl";
-import { useParams } from "next/navigation";
-import { Breadcrumb } from "@/components/breadcrumb";
-import { DetailSkeleton } from "@/components/detail-panel";
-import { PageHeader } from "@/components/page-header";
-import { ErrorState } from "@/components/resource-table";
-import { useConsumable } from "@/lib/api/hooks/use-consumables";
-import { ConsumableForm } from "../../_components/consumable-form";
+/**
+ * Edit consumable — ADR-0067 server-prefetch rollout (#662). This thin Server Component prefetches
+ * the consumable's detail (`consumableKeys.detail(id)` via `getConsumable(id, token)`) — the same
+ * read the edit form loads — into a per-request `QueryClient`, dehydrates it, and hydrates the client
+ * `ConsumableEditView` so its `useConsumable(id)` finds the entry already cached on first paint. The
+ * #600 401 handler stays on the client provider.
+ */
+export default async function EditConsumablePage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const session = await auth();
+  const queryClient = getServerQueryClient();
 
-export default function EditConsumablePage() {
-  const t = useTranslations("consumables");
-  const params = useParams<{ id: string }>();
-  const { data: consumable, isLoading, isError, error, refetch } =
-    useConsumable(params.id);
-
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-3xl">
-        <DetailSkeleton panels={1} />
-      </div>
-    );
-  }
-
-  if (isError || !consumable) {
-    return (
-      <div className="mx-auto max-w-3xl">
-        <ErrorState
-          title={t("detail.notFoundTitle")}
-          description={t("detail.notFoundDescription")}
-          onRetry={() => refetch()}
-          error={error}
-        />
-      </div>
-    );
-  }
+  await queryClient.prefetchQuery({
+    queryKey: consumableKeys.detail(id),
+    queryFn: () => getConsumable(id, session?.accessToken),
+  });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: t("list.title"), href: "/consumables" },
-              {
-                label: consumable.name,
-                href: `/consumables/${consumable.id}`,
-              },
-              { label: t("form.breadcrumbEdit") },
-            ]}
-          />
-        }
-        title={t("form.editTitle")}
-      />
-      <ConsumableForm consumable={consumable} />
-    </div>
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <ConsumableEditView id={id} />
+    </HydrationBoundary>
   );
 }
