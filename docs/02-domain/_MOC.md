@@ -101,5 +101,9 @@ The model is built atomic-first (see each entity note for status):
    merged on `feat/secret-manager`. Includes `@lazyit/shared/crypto` subpath, custodian backend
    (`apps/api/src/secret-manager/`), `apps/web` unlock/grant/peer-reset UI, and the KB masked-chip
    (`{{ lazyit_secret.HANDLE }}`).
+10. **Infra topology** (visual CMDB, after the asset surface — it reuses it) — [[infra-node]] +
+    [[infra-edge]], a generic free-move graph of the server estate; a node is Asset-backed by default
+    ([[0070-infra-topology-graph]], #723). **Built** — merged on `feat/topology` (MVP + v1: canvas,
+    drill-in panel, Servers list, impact/blast-radius, Meili search). The reporting agent is v2 (future).
 
 Why asset-centric? → [[0004-asset-centric-design]].

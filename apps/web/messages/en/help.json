@@ -54,6 +54,7 @@
       "locations": "Locations",
       "assignments-history": "Assignments & history",
       "asset-tags": "Asset tags",
+      "topology": "Topology & servers",
       "bulk-import": "Bulk import"
     },
     "users-permissions": {
