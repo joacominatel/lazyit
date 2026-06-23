@@ -37,6 +37,8 @@ export interface AssetFilters {
   status?: AssetStatus;
   /** Case-insensitive substring over name / serial / assetTag (OR). */
   q?: string;
+  /** Restrict to assets with a LIVE assignment (releasedAt null) to this user (User.id is a uuid). */
+  assignedToUserId?: string;
 }
 
 /**
@@ -187,12 +189,22 @@ export class AssetsService {
     locationId,
     status,
     q,
+    assignedToUserId,
   }: AssetFilters): Prisma.AssetWhereInput {
     return {
       ...(locationId ? { locationId } : {}),
       ...(status ? { status } : {}),
       // Category lives on the model, not the asset: match assets whose model is in it.
       ...(categoryId ? { model: { categoryId } } : {}),
+      // Owner: assets with a LIVE (releasedAt null) assignment to this user — ownership is a
+      // timestamped join (asset-centric), never a column, so this filters the relation.
+      ...(assignedToUserId
+        ? {
+            assignments: {
+              some: { userId: assignedToUserId, releasedAt: null },
+            },
+          }
+        : {}),
       ...(q
         ? {
             OR: [

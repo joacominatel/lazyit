@@ -128,9 +128,11 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 `apps/api/src/assets/` (`AssetsModule`):
 
 - `GET /assets` — **expanded** list (`AssetWithRelations[]`, excludes soft-deleted, newest first)
-  with optional filters **`?categoryId=&locationId=&status=&q=`**: `categoryId` matches the asset's
-  **model's** category, `status` is validated against the enum (invalid → `400`), and `q` is a
-  case-insensitive substring over `name` / `serial` / `assetTag`.
+  with optional filters **`?categoryId=&locationId=&status=&q=&assignedToUserId=`**: `categoryId`
+  matches the asset's **model's** category, `status` is validated against the enum (invalid → `400`),
+  `q` is a case-insensitive substring over `name` / `serial` / `assetTag`, and `assignedToUserId`
+  (a [[user]] `uuid`; invalid → `400`) restricts to assets with a **live** assignment
+  (`releasedAt = null`) to that user — the owner filter, over the timestamped-join relation.
 - `GET /assets/:id` — one **expanded** asset (`404` if missing/soft-deleted).
 - `GET /assets/:id/assignments?activeOnly=` — the asset's ownership records, each with its `user`
   inlined (`AssetAssignmentWithUser[]`); `activeOnly` defaults to true, pass `false` for full

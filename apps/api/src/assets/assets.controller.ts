@@ -42,6 +42,7 @@ import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
+import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
@@ -101,6 +102,12 @@ export class AssetsController {
       'Case-insensitive substring match on name, serial and assetTag',
   })
   @ApiQuery({
+    name: 'assignedToUserId',
+    required: false,
+    description:
+      'Restrict to assets currently assigned (live, releasedAt null) to this user (a User uuid). Invalid uuid → 400.',
+  })
+  @ApiQuery({
     name: 'limit',
     required: false,
     type: Number,
@@ -144,6 +151,7 @@ export class AssetsController {
     @Query('locationId') locationId?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('assignedToUserId') assignedToUserId?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -179,6 +187,8 @@ export class AssetsController {
         locationId: parseCuidQuery(locationId, 'locationId'),
         status: parsedStatus,
         q,
+        // User.id is a uuid (ADR-0005) — validate with parseUuidQuery (cf. categoryId/locationId cuid).
+        assignedToUserId: parseUuidQuery(assignedToUserId, 'assignedToUserId'),
       },
       pageQuery,
     );

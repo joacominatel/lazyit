@@ -70,6 +70,21 @@ Add, edit or remove rows in the **Custom fields** section of the form. When you 
 default specs, those values are copied in as a starting point — you can change them for this
 individual unit before saving. Custom fields are shown as a tidy label/value list on the detail page.
 
+## Finding assets in the list
+
+The **Assets** list has a search box and a **Status** dropdown right in the toolbar, plus a
+**Filters** button that opens a small panel for the rest:
+
+- **Category** and **Location** — narrow to one model category or one place.
+- **Owner** — show only the assets currently assigned to a specific person. Start typing a name to
+  pick them; the list then shows just that person's live assignments.
+- **Ownership** — filter by whether an asset has any current owner at all (*Has owners* /
+  *No owners*), regardless of who.
+
+The **Filters** button shows a small count of how many of these are active. Every filter you set
+also appears as a removable chip below the toolbar, and the filters live in the page address, so a
+filtered view is easy to undo, share or bookmark.
+
 ## Editing, cloning and deactivating
 
 - **Edit** updates the asset in place; each meaningful change (status, location, model, custom

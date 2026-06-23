@@ -2,6 +2,7 @@
 
 import {
   ArrowUturnLeftIcon,
+  FunnelIcon,
   PlusIcon,
   ServerStackIcon,
   TrashIcon,
@@ -38,8 +39,14 @@ import {
 } from "@/components/resource-table";
 import { RowsPerPageSelect } from "@/components/rows-per-page-select";
 import { SearchInput } from "@/components/search-input";
+import { UserCombobox } from "@/components/user-combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -51,6 +58,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useAssets } from "@/lib/api/hooks/use-assets";
+import { useUser } from "@/lib/api/hooks/use-users";
 import {
   useBatchDeleteAssets,
   useBatchRestoreAssets,
@@ -80,13 +88,15 @@ type OwnershipFilter = "ALL" | "HAS" | "NONE";
 
 /**
  * Filter param defaults for the URL list-state. `status`/`category`/`location` map to the server's
- * `status`/`categoryId`/`locationId` params; `ownership` is filtered client-side over the page.
- * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
+ * `status`/`categoryId`/`locationId` params; `owner` maps to the server's `assignedToUserId` (a
+ * User uuid, "" = unset); `ownership` (Has/None) is filtered client-side over the page. `archived`
+ * ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
  */
 const FILTER_DEFAULTS = {
   status: "ALL",
   category: "ALL",
   location: "ALL",
+  owner: "",
   ownership: "ALL",
   archived: "ALL",
 } as const;
@@ -135,7 +145,10 @@ export function AssetsListView() {
   const statusFilter = filters.status as AssetStatus | "ALL";
   const categoryFilter = filters.category;
   const locationFilter = filters.location;
+  const ownerFilter = filters.owner; // "" = unset; otherwise a User uuid (server-side filter)
   const ownershipFilter = filters.ownership as OwnershipFilter;
+  // Resolve the owner-filter user's name for its chip, even when not on the current search page.
+  const { data: ownerUser } = useUser(ownerFilter || undefined);
   // The archived view is ADMIN-only; a non-admin can never set it (toggle hidden) and we never send
   // the param for them, so the API stays on the active-only list.
   const archived = isAdmin && filters.archived === "only";
@@ -147,6 +160,7 @@ export function AssetsListView() {
       status: statusFilter === "ALL" ? undefined : statusFilter,
       categoryId: categoryFilter === "ALL" ? undefined : categoryFilter,
       locationId: locationFilter === "ALL" ? undefined : locationFilter,
+      assignedToUserId: ownerFilter || undefined,
       sort,
       dir: sort ? dir : undefined,
       limit,
@@ -286,6 +300,14 @@ export function AssetsListView() {
   const total = page?.total ?? 0;
   const isEmpty = total === 0;
 
+  // Count of the filters living INSIDE the Filters popover (search + status stay inline), for its
+  // trigger badge. The active-filter chip row below remains the full recovery path.
+  const popoverFilterCount =
+    (categoryFilter !== "ALL" ? 1 : 0) +
+    (locationFilter !== "ALL" ? 1 : 0) +
+    (ownerFilter ? 1 : 0) +
+    (ownershipFilter !== "ALL" ? 1 : 0);
+
   const chips = [
     ...(q
       ? [
@@ -326,6 +348,19 @@ export function AssetsListView() {
                 locations?.find((l) => l.id === locationFilter)?.name ?? "—",
             }),
             onClear: () => setFilter("location", FILTER_DEFAULTS.location),
+          },
+        ]
+      : []),
+    ...(ownerFilter
+      ? [
+          {
+            key: "owner",
+            label: t("chips.owner", {
+              value: ownerUser
+                ? `${ownerUser.firstName} ${ownerUser.lastName}`
+                : "…",
+            }),
+            onClear: () => setFilter("owner", FILTER_DEFAULTS.owner),
           },
         ]
       : []),
@@ -419,51 +454,120 @@ export function AssetsListView() {
                 ))}
               </SelectContent>
             </Select>
-            <Select
-              value={categoryFilter}
-              onValueChange={(value) => setFilter("category", value)}
-            >
-              <SelectTrigger className="lg:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{t("filters.allCategories")}</SelectItem>
-                {(categories ?? []).map((category) => (
-                  <SelectItem key={category.id} value={category.id}>
-                    {category.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={locationFilter}
-              onValueChange={(value) => setFilter("location", value)}
-            >
-              <SelectTrigger className="lg:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{t("filters.allLocations")}</SelectItem>
-                {(locations ?? []).map((location) => (
-                  <SelectItem key={location.id} value={location.id}>
-                    {location.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={ownershipFilter}
-              onValueChange={(value) => setFilter("ownership", value)}
-            >
-              <SelectTrigger className="lg:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{t("filters.anyOwnership")}</SelectItem>
-                <SelectItem value="HAS">{t("filters.hasOwners")}</SelectItem>
-                <SelectItem value="NONE">{t("filters.noOwners")}</SelectItem>
-              </SelectContent>
-            </Select>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="justify-start lg:w-auto">
+                  <FunnelIcon />
+                  {t("filters.moreFilters")}
+                  {popoverFilterCount > 0 ? (
+                    <Badge
+                      variant="secondary"
+                      className="ml-1 size-5 justify-center rounded-full p-0 tabular-nums"
+                    >
+                      {popoverFilterCount}
+                    </Badge>
+                  ) : null}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-72 space-y-4">
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="assets-filter-category"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {t("columns.category")}
+                  </label>
+                  <Select
+                    value={categoryFilter}
+                    onValueChange={(value) => setFilter("category", value)}
+                  >
+                    <SelectTrigger id="assets-filter-category" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">
+                        {t("filters.allCategories")}
+                      </SelectItem>
+                      {(categories ?? []).map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="assets-filter-location"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {t("columns.location")}
+                  </label>
+                  <Select
+                    value={locationFilter}
+                    onValueChange={(value) => setFilter("location", value)}
+                  >
+                    <SelectTrigger id="assets-filter-location" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">
+                        {t("filters.allLocations")}
+                      </SelectItem>
+                      {(locations ?? []).map((location) => (
+                        <SelectItem key={location.id} value={location.id}>
+                          {location.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="assets-filter-owner"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {t("filters.ownerLabel")}
+                  </label>
+                  <UserCombobox
+                    id="assets-filter-owner"
+                    value={ownerFilter || undefined}
+                    onValueChange={(value) => setFilter("owner", value)}
+                    placeholder={t("filters.ownerPlaceholder")}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="assets-filter-ownership"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {t("filters.ownershipLabel")}
+                  </label>
+                  <Select
+                    value={ownershipFilter}
+                    onValueChange={(value) => setFilter("ownership", value)}
+                  >
+                    <SelectTrigger
+                      id="assets-filter-ownership"
+                      className="w-full"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">
+                        {t("filters.anyOwnership")}
+                      </SelectItem>
+                      <SelectItem value="HAS">
+                        {t("filters.hasOwners")}
+                      </SelectItem>
+                      <SelectItem value="NONE">
+                        {t("filters.noOwners")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </PopoverContent>
+            </Popover>
             <RowsPerPageSelect
               value={limit}
               onChange={setLimit}
