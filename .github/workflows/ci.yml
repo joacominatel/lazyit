@@ -2,11 +2,14 @@ name: CI
 
 # Quality gate for the integration (dev) and production (master) branches, and every PR
 # targeting them. No deploy (CD is deferred — ADR-0027).
+# `feat/topology` is a temporary long-lived feature branch for the ADR-0070 major (#723): its
+# sub-PRs need the same gate before merging. REMOVE it from both lists when that branch is
+# promoted to dev and deleted.
 on:
   push:
-    branches: [master, dev]
+    branches: [master, dev, feat/topology]
   pull_request:
-    branches: [master, dev]
+    branches: [master, dev, feat/topology]
 
 concurrency:
   group: ci-${{ github.ref }}
