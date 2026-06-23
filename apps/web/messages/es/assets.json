@@ -37,6 +37,23 @@
       "updated": "Actualizado",
       "actions": "Acciones"
     },
+    "columnPicker": {
+      "label": "Columnas",
+      "groups": {
+        "details": "Detalles",
+        "status": "Estado",
+        "activity": "Actividad"
+      },
+      "columns": {
+        "assetTag": "Etiqueta",
+        "model": "Modelo",
+        "category": "Categoría",
+        "location": "Ubicación",
+        "status": "Estado",
+        "owners": "Responsables",
+        "updated": "Actualizado"
+      }
+    },
     "filters": {
       "moreFilters": "Filtros",
       "allStatuses": "Todos los estados",
