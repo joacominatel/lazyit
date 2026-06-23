@@ -3,6 +3,11 @@
   // The base tsconfig.json stays no-emit (editor / Bun direct execution).
   "compilerOptions": {
     "module": "CommonJS",
+    // ponytail: TS6 deprecates moduleResolution=node10 (TS5107). Kept because this CJS bundle
+    // for Node/Jest relies on node10's extensionless relative resolution; the clean fix is
+    // module/moduleResolution "node16"+"nodenext" with explicit .js import extensions across
+    // src/ — a source-wide rewrite deferred to the TS7 prep. Ceiling: stops working in TS 7.0.
+    "ignoreDeprecations": "6.0",
     "moduleResolution": "Node",
     "target": "ES2023",
     "lib": ["ES2023"],

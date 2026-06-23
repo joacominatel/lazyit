@@ -13,8 +13,14 @@
     "target": "ES2023",
     "sourceMap": true,
     "outDir": "./dist",
-    "baseUrl": "./",
+    // TS6 ts-jest emit needs an explicit rootDir when inputs span >1 dir (specs in src/ +
+    // jest.env-setup.ts in test/); "." covers both (→ TS5011). The build (tsconfig.build.json)
+    // inherits this and emits dist/src/main.js — matching the prod Dockerfile CMD (node
+    // apps/api/dist/src/main). NOTE: do NOT pin rootDir to "src" — src/ imports the Prisma
+    // client from ../../generated/prisma (outside src/), which TS6 rejects with TS6059.
+    "rootDir": ".",
     "incremental": true,
+    "types": ["node", "jest", "express", "multer"],
     "skipLibCheck": true,
     "strict": true,
     "forceConsistentCasingInFileNames": true,
