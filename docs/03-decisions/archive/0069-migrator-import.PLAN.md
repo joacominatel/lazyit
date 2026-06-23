@@ -1,13 +1,18 @@
 ---
 title: "ADR-0069 PLAN: Plan de ejecución del rediseño del import masivo (worktrees, lanes, etapas)"
 tags: [adr, migrator, import, plan, execution, worktrees, backend, frontend, shared, docs]
-status: executing
+status: superseded
+superseded-by: "[[0069-migrator-import]]"
 created: 2026-06-18
-updated: 2026-06-20
+updated: 2026-06-23
 deciders: [Joaquín Minatel]
 companion: 0069-migrator-import.REDESIGN.md
 note: "EN EJECUCIÓN desde 2026-06-20. El CEO respondió §9 (Q1-Q6) y dio GO a la Etapa 1 completa. Cambios vs. el plan original: ahora SÍ se usa gh/push/PR a dev (Q1); worktrees solo para los fixes chicos paralelos, la cadena core va serial (Q4, decisión de CTO); username pasa a 3ª clave de identidad fallback (Q5)."
 ---
+
+> **Archived working draft.** Execution plan for the import redesign; the work shipped and this
+> plan is **superseded by** the accepted [[0069-migrator-import]] (its Amendment — Etapa 2
+> section records the as-built outcome). Retained for auditability only.
 
 # Plan de ejecución — Rediseño del Import Masivo
 

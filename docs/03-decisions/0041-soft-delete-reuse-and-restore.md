@@ -3,7 +3,7 @@ title: "ADR-0041: Soft-delete reuse — partial unique indexes, restore, citext 
 tags: [adr, soft-delete, database, prisma]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -96,7 +96,7 @@ Concretely:
   - **User restore does NOT** re-grant the access or re-assign the assets that offboarding
     revoked/released — restore only makes the account exist (and log in) again; re-onboarding access is
     a separate, intentional act.
-  - Restore re-indexes the row for search where the entity is indexed ([[0035-search-meilisearch]]).
+  - Restore re-indexes the row for search where the entity is indexed ([[0035-search-architecture]]).
 
 ## Consequences
 

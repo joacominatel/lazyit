@@ -3,7 +3,7 @@ title: Local Setup
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-06-16
+updated: 2026-06-23
 ---
 
 # Local Setup
@@ -128,7 +128,7 @@ bun run dev              # web → :3000, api → :3001
 > [!info] One env file per scope
 > lazyit uses a **root `.env`** plus **one `.env` per app**; each has a committed
 > `.env.example` to copy from.
-> - **`.env`** (root) — read by `docker-compose.yml`: `POSTGRES_*`, `MEILI_MASTER_KEY`
+> - **`.env`** (root) — read by `compose.yaml`: `POSTGRES_*`, `MEILI_MASTER_KEY`
 >   ([[0035-search-architecture]]), and the **`ZITADEL_*` block** for the bundled dev IdP
 >   ([[0037-idp-choice-zitadel-byoi]]). Zitadel will not boot if its block is unset.
 > - **`apps/api/.env`** — `DATABASE_URL`, `PORT`, `WEB_ORIGIN`, the Meilisearch knobs
@@ -145,7 +145,7 @@ bun run dev              # web → :3000, api → :3001
 
 | Variable | Where | Used by |
 | --- | --- | --- |
-| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | root `.env` | `docker-compose.yml` (`db`) |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | root `.env` | `compose.yaml` (`db`) |
 | `MEILI_MASTER_KEY` | root `.env` + `apps/api/.env` | Meilisearch container + API search client ([[0035-search-architecture]]) |
 | `ZITADEL_*` (DB creds, masterkey, admin, external domain) | root `.env` | Zitadel + `zitadel_db` containers ([[0037-idp-choice-zitadel-byoi]]) |
 | `DATABASE_URL` | `apps/api/.env` | Prisma (`prisma.config.ts`) + API runtime |

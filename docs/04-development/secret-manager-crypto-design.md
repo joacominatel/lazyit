@@ -3,7 +3,7 @@ title: "Secret Manager — crypto design note (build-time primitives)"
 tags: [development, security, secrets, crypto, secret-manager, knowledge-base]
 status: accepted
 created: 2026-06-12
-updated: 2026-06-13
+updated: 2026-06-23
 ---
 
 # Secret Manager — crypto design note (build-time primitives)
@@ -386,6 +386,22 @@ exactly the ADR §3 chain:
   `secret:read`/`secret:manage` + membership existence, ADR §7). DEK / keypair / recovery-key are all
   minted **client-side**, so the server never needs — and never gets — a key that decrypts a value.
   **Decryption capability is never enforced server-side; it cannot be.**
+
+### 6.1 Session lifetime / idle auto-lock (#605)
+
+The unlocked session holds the in-memory **private key + DEK cache** only for as long as someone is
+actively working — an inactivity timer drops them, equivalent to an explicit **Lock**. This is pure
+client-side teardown (INV-10 intact: nothing leaves the browser; the timer only DROPS in-memory
+material). Verified in `apps/web/app/(app)/secrets/_components/secret-session.tsx`:
+
+- **15-minute idle drop** (`IDLE_LOCK_MS = 15 * 60 * 1000`). Any pointer/keyboard/scroll/touch
+  activity resets the timer while the tab is visible — the dominant real-world threat for a password
+  manager is a walked-away, still-unlocked screen.
+- **1-minute hidden-tab grace** (`HIDDEN_LOCK_MS = 60 * 1000`). A backgrounded/hidden tab arms a
+  shorter timer; returning to the tab re-arms the 15-minute idle timer.
+
+Both thresholds are **hard-coded defaults**; an instance- or user-configurable lock timeout is
+**deferred** (not a phase-1 need). See [[0061-secret-manager-zero-knowledge]].
 
 ---
 
