@@ -80,14 +80,21 @@ export function SearchInput({
   // The visible text lives in a LOCAL buffer (issue #692). It updates instantly
   // on every keystroke — spaces persist, fast typing never lags — while the
   // committed query is what the debounced settle writes to the URL. The `value`
-  // prop only SEEDS this buffer and re-syncs it when it changes externally and
-  // differs (a cleared chip, a deep-linked `?q=`, a programmatic reset), never
-  // on the user's own keystroke. ponytail: keep the URL as the source of truth
-  // for the *committed* query; buffer the in-flight keystrokes here.
+  // prop only SEEDS this buffer and re-syncs it when it changes externally (a
+  // cleared chip, a deep-linked `?q=`, a programmatic reset), never on the
+  // user's own keystroke. ponytail: keep the URL as the source of truth for the
+  // *committed* query; buffer the in-flight keystrokes here.
+  //
+  // We adjust the buffer DURING render (React's documented "store info from
+  // previous render" pattern) keyed off the last seen `value`, rather than in an
+  // effect — that re-syncs synchronously (no extra paint of the stale buffer)
+  // and avoids the set-state-in-effect cascade.
   const [buffer, setBuffer] = useState(value);
-  useEffect(() => {
-    setBuffer((current) => (current === value ? current : value));
-  }, [value]);
+  const [lastValue, setLastValue] = useState(value);
+  if (value !== lastValue) {
+    setLastValue(value);
+    setBuffer(value);
+  }
 
   // Self-debounce only when asked. The hook always runs (rules of hooks); when
   // debounceMs is undefined the effect below simply never fires.
