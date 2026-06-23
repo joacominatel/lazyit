@@ -21,6 +21,7 @@ import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { RowsPerPageSelect } from "@/components/rows-per-page-select";
 import {
   ErrorState,
   LinkableRow,
@@ -179,6 +180,7 @@ export function ReportsScreen() {
     setQ,
     setFilter,
     setFilters,
+    setLimit,
     setOffset,
     clearFilters,
     filtersActive,
@@ -500,6 +502,12 @@ export function ReportsScreen() {
             className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
         </div>
+
+        <RowsPerPageSelect
+          value={limit}
+          onChange={setLimit}
+          className="lg:ml-auto lg:w-44"
+        />
       </div>
 
       <div data-print-hide>
