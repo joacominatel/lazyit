@@ -3,7 +3,7 @@ title: IT Terms
 tags: [glossary]
 status: draft
 created: 2026-05-25
-updated: 2026-06-13
+updated: 2026-06-23
 ---
 
 # IT Terms
@@ -99,3 +99,48 @@ server-decryptable [[workflow-secret]] of the Workflow Engine.
 > server-decryptable by design so connectors can authenticate at run time; the Secret Manager is
 > zero-knowledge (the server can never decrypt). Different entity, crypto model and threat model — see
 > [[0061-secret-manager-zero-knowledge]].
+
+## RBAC vocabulary
+
+Terms for lazyit's authorization model — fixed roles + configurable permissions
+([[0046-roles-permissions-v2|Roles & Permissions v2]], building on the original
+[[0040-rbac-roles]]). The load-bearing distinction is **capability vs permission**: a permission
+is the atomic authorization unit the server actually enforces; a capability is only a human label
+in the role-config UI that bundles permissions, and never grants or denies anything by itself.
+
+| Term | Meaning in lazyit's context |
+| --- | --- |
+| **Role** | The assignable authorization bundle a [[user]] *has* — `enum Role { ADMIN MEMBER VIEWER }`, fixed (not dynamic custom roles). What a role *grants* is its permission set, resolved DB-first from [[role-permission]] rows ([[0040-rbac-roles]]). |
+| **Permission** | The **atomic unit of authorization** — a frozen `domain:action` literal (e.g. `asset:write`, `accessGrant:grant`) from a closed catalog-as-code in `@lazyit/shared`. DB-first via [[role-permission]], resolved **server-side**; never read from a token claim (INV-1). The thing `@RequirePermission(...)` actually checks ([[0046-roles-permissions-v2]]). |
+| **Capability** | The operator-facing **toggle** in the role-config UI that bundles one or more permissions under a plain-language label ("Add & edit inventory"). **Presentation only** — it never grants or denies anything (INV-1); the wire `PUT` is still a flat `Permission[]`. The fine-tune view still exposes the raw permissions. |
+| **Permission tier** | The privilege level of a single permission, independent of its domain — `view` / `edit` / `delete` / `coarse`. Drives the "above-default" escalation warning: a role's seed default never includes `delete` or a `coarse` verb, so granting those to MEMBER/VIEWER is flagged as admin-level (allowed with a strong warning, never client-blocked). |
+| **Pillar** | The product-area bucket a permission's domain groups under in the role-config screen — Inventory / Access / Knowledge / Manage / Automation — matching the app's nav mental model rather than the flat domain list. |
+
+> [!note] See [[role-permission]] (the editable role→permission map) and [[permission-audit-log]]
+> (the append-only record of every grant/revoke). The human layer (labels/pillars/tiers/capabilities)
+> lives beside the catalog in `@lazyit/shared`, guarded by a covering-set test so the wording can never
+> drift from the machine catalog ([[0046-roles-permissions-v2]] P7).
+
+## Service account vocabulary
+
+Terms for non-human principals ([[0048-service-accounts|Service Accounts]]).
+
+| Term | Meaning in lazyit's context |
+| --- | --- |
+| **Service account** ([[service-account]]) | A first-class **non-human principal** for automation/integration access (a CI runner, a nightly script). It is a separate entity, **not** a flag on [[user]]: it authenticates by a **lazyit-native bearer token** (`lzit_sa_…`, NOT OIDC) and is authorized by **direct permission grants** ([[service-account-permission]]) from the same frozen catalog humans use — never a `Role`, never ADMIN. It is fail-closed (no human open-by-default), and is **pinned as the actor** on the domain rows it touches (e.g. a [[workflow-run]]) via its own `serviceAccountId` actor column — honest attribution, never a fake `userId` ([[0048-service-accounts]]). |
+
+## Asset-tag scheme vocabulary
+
+Terms for human-readable asset tags ([[0063-configurable-asset-tag-scheme|configurable asset-tag scheme]]).
+
+| Term | Meaning in lazyit's context |
+| --- | --- |
+| **Asset-tag scheme** ([[asset-tag-scheme]]) | The **singleton** instance-config that auto-generates human-readable asset tags on [[asset]] create: optional `prefix` + a zero-padded **monotonic counter** + optional `suffix`. **Opt-in** (`enabled = false` by default), **gap-tolerant** (a rolled-back/retried/deleted number is never back-filled), and **estate-aware** — on backfill it skips tags already on a live asset, so an auto-mint never collides with the existing estate ([[0063-configurable-asset-tag-scheme]], [[0068-asset-tag-existing-estate-awareness]]). |
+
+## Migrator vocabulary
+
+Terms for the guided bulk importer ([[0069-migrator-import|Migrator]]).
+
+| Term | Meaning in lazyit's context |
+| --- | --- |
+| **Migrator (bulk import)** | The guided, field-mapped **bulk importer** for domain data (phase 1: the Asset slice, from JSON + CSV). Its mapping step binds each source field to a target field, an enum value, or an FK resolved by natural key — or to a fixed value via an existing-record picker / constant. A dry-run validates and detects conflicts before any write; the commit replays a frozen plan additively + audited ([[0069-migrator-import]]). Distinct from the KB-specific **Bulk .zip import** (above), which ingests a `.zip` of markdown into KB folders. |
