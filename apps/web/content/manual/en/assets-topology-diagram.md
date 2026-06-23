@@ -110,6 +110,12 @@ it, if any) can be brought back later. lazyit never hard-deletes this data.
 Clicking a node opens a right-hand panel — the reason this beats a static drawing. It gathers, in
 one place:
 
+> **Editing from the panel.** With the manage permission the panel's **Details** section (near the
+> top) is editable in place — no separate page. Click the **title** to rename the node; change its
+> **kind** or **IP address** right there; and the **status** and **shortcuts** are editable too
+> (see below). Edits save as you go and the node's card on the canvas updates immediately. Read-only
+> viewers see the same facts as plain text, with no edit controls.
+
 - **Owner(s)** — who is responsible, pulled from the linked asset's assignments. An owner who has
   left the company but was never released is still shown, marked as such.
 - **Knowledge-base articles** — published articles linked to the node's asset, each a click away.
@@ -117,7 +123,9 @@ one place:
   `{{ lazyit_secret.… }}` handle and a label so you know which credential goes with this machine;
   there is no reveal here and lazyit never exposes the value on this surface. (No asset-to-secret
   link exists yet, so this list is empty for now; the panel is ready for it.)
-- **Shortcuts** — quick links (SSH, web UI, console) that open in a new tab.
+- **Shortcuts** — quick links (SSH, web UI, console) that open in a new tab. With the manage
+  permission you edit them inline: each shortcut is a label + URL pair you can change, add or remove,
+  then **Save** the list (lazyit checks each URL is valid before saving).
 - **IP address** and **added-on** date.
 - **Children** — the nodes hosted on this one (its active *runs on* relationships).
 - **Connections** — this node's active relationships (closable) and its closed history (a *runs on*
