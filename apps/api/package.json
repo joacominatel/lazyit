@@ -12,7 +12,7 @@
     "start": "nest start --env-file .env",
     "start:dev": "nest start --watch --preserveWatchOutput --env-file .env",
     "start:debug": "nest start --debug --watch --env-file .env",
-    "start:prod": "node dist/main",
+    "start:prod": "node dist/src/main",
     "db:generate": "prisma generate",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
