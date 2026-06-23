@@ -41,12 +41,21 @@ Repo facts that shape the pipeline:
 
 ## Decision
 
-`.github/workflows/ci.yml`, triggered on `pull_request` and `push` to `master`:
+`.github/workflows/ci.yml`, triggered on `pull_request` and `push` to `master` and `dev`:
 
-- **Job `verify`** (ordered): checkout → setup-bun `1.3.14` → cache `~/.bun/install/cache` (key on
-  `bun.lock`) → `bun install --frozen-lockfile` → build `@lazyit/shared` → **`prisma generate`**
-  (in `apps/api`) → typecheck (`tsc --noEmit` per workspace) → **lint without `--fix`** (eslint in
-  `apps/api` and `apps/web`) → test (api Jest, no DB; shared `bun test`) → `turbo build`.
+- **Job `verify`** (ordered): checkout (`fetch-depth: 0`, for the diff-lint merge-base) →
+  setup-bun `1.3.14` → cache `~/.bun/install/cache` (key on `bun.lock`) →
+  `bun install --frozen-lockfile` → build `@lazyit/shared` → **`prisma generate`** (in `apps/api`)
+  → typecheck (`tsc --noEmit` per workspace) → **lint** (see below) → test (api Jest, no DB; shared
+  `bun test`) → `turbo build`.
+- **Lint is two-tier (#591).** Full-repo `eslint .` per app is **report-only**
+  (`continue-on-error: true`) because the codebase is not yet eslint-clean — it keeps the legacy
+  backlog visible without failing CI. A separate **blocking** "Lint changed files" step lints
+  **only the files changed vs the merge-base with `origin/dev`** (`git diff` filtered to
+  `.ts/.tsx/.js/.jsx/.mjs/.cjs`, split per app, piped to each app's eslint with
+  `--no-error-on-unmatched-pattern`; no changed files → exit 0). A NEW violation in changed code
+  fails CI; the legacy backlog stays exempt. The diff **is** the ratchet — no baseline file.
+  Promote the report-only step to blocking (drop `continue-on-error`) once the backlog is clean.
 - **Job `docker`** (needs `verify`): build the three images with `docker/build-push-action`,
   **`push: false`**, GHA layer cache — proves the Dockerfiles build. No DB, no registry.
   > **Updated by [[0052-ci-parallel-docker-and-decoupled-verify]]:** `docker` is now a parallel
@@ -59,11 +68,14 @@ Repo facts that shape the pipeline:
 ## Consequences
 
 - **Positive:** consistent gate for humans and AI contributors; no DB needed (fast, simple);
-  Dockerfile breakage is caught in CI; lint actually fails instead of silently rewriting.
+  Dockerfile breakage is caught in CI; lint actually fails instead of silently rewriting; **new
+  lint violations are blocked (diff-lint) without forcing a clean-up of the legacy backlog** (#591).
 - **Trade-offs:** building three images per run adds minutes (mitigated by layer cache); CI lint
-  diverges from the repo's `--fix` script by design — documented so contributors aren't surprised.
+  diverges from the repo's `--fix` script by design — documented so contributors aren't surprised;
+  the diff-lint gate needs full git history (`fetch-depth: 0`) and only covers `apps/api`/`apps/web`
+  (the linted workspaces) — `packages/shared` has no eslint config, so it's not gated.
 - **Follow-ups:** a CD ADR (publish to GHCR + deploy) once a target exists; consider a release
-  workflow with semver tags then.
+  workflow with semver tags then; promote the full-repo lint to blocking once the backlog is clean.
 
 Related: [[0025-containerization-strategy]] · [[0012-testing-strategy]] · [[0015-deployment-model]] ·
 [[deployment]] · [[setup]]
