@@ -204,7 +204,21 @@ function PanelBody({
         {node.assetName ? (
           <p className="text-xs text-muted-foreground">
             {t("panel.inventoryName")}:{" "}
-            <span className="font-medium text-foreground">{node.assetName}</span>
+            {/* Back-link to the inventory record (issue #765) — mirrors the owner→/users/<id> link
+                below, closing the asset↔node round-trip. The asset is the link only when the node is
+                still asset-backed (assetId present); a detached node shows the name as plain text. */}
+            {node.assetId ? (
+              <Link
+                href={`/assets/${node.assetId}`}
+                className="font-medium text-foreground hover:underline"
+              >
+                {node.assetName}
+              </Link>
+            ) : (
+              <span className="font-medium text-foreground">
+                {node.assetName}
+              </span>
+            )}
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">

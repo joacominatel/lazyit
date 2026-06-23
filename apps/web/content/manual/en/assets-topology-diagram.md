@@ -74,7 +74,10 @@ deactivated (it never lingers in inventory owned by nobody); if you had linked a
 asset, it stays untouched and is simply unlinked.
 
 The node's **label always wins for display** on the canvas; the linked asset's name shows in the
-details panel as a secondary *inventory name*, so the two never silently drift.
+details panel as a secondary *inventory name*, so the two never silently drift. That inventory name
+is a **link back to the asset** — click it to open the asset's full record. The asset's own detail
+page closes the loop the other way: it shows an **On topology** badge and a **View in topology**
+button that flies the map to this node (see [Asset basics](/help/assets-asset-basics)).
 
 ## Relationships (connections)
 

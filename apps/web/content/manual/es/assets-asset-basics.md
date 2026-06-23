@@ -102,6 +102,17 @@ mantienen. Tu elección se recuerda en este navegador, así que la tabla conserv
 próxima vez que entres. (Esto rige la tabla de escritorio; la vista de tarjetas en móvil siempre
 muestra el conjunto completo.)
 
+## Activos en el mapa de topología
+
+Si un activo respalda un nodo del [Diagrama de infraestructura](/help/assets-topology-diagram) —por
+ejemplo un host, un NAS o un switch que pusiste en el mapa—, su página de detalle muestra una
+insignia **En la topología** junto al estado, y el mismo indicador aparece como un pequeño ícono de
+compartir al lado del nombre del activo en la lista. Un botón **Ver en la topología** en la página de
+detalle salta directo al mapa, vuela hasta ese nodo y le da un breve resaltado para que reconozcas
+cuál es de un vistazo. (Solo ves esto si tenés permiso para ver la topología.) El enlace inverso
+también existe: el panel de detalle de un nodo enlaza su *nombre de inventario* de vuelta a este
+activo, así te movés entre un activo y su nodo en cualquier dirección.
+
 ## Editar, clonar y desactivar
 
 - **Editar** actualiza el activo en su lugar; cada cambio relevante (estado, ubicación, modelo, campos
