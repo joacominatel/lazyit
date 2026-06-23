@@ -5,7 +5,7 @@ import {
   ChevronDoubleRightIcon,
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { cn } from "@/lib/utils";
@@ -14,12 +14,10 @@ const STORAGE_KEY = "sidebar-collapsed";
 
 export function SidebarShell() {
   const t = useTranslations("shared");
-  const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "true") setCollapsed(true);
-  }, []);
+  // Lazy initializer reads localStorage once at mount — no effect needed.
+  const [collapsed, setCollapsed] = useState(
+    () => typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY) === "true",
+  );
 
   function toggle() {
     setCollapsed((prev) => {
