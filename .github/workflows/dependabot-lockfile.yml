@@ -1,0 +1,59 @@
+name: Dependabot lockfile sync
+
+# Dependabot bumps package.json but never regenerates bun.lock, so CI's frozen
+# `bun install --frozen-lockfile` fails ("lockfile had changes, but lockfile is frozen").
+# This regenerates bun.lock and commits it back onto the Dependabot PR branch (#689).
+#
+# Trigger: workflow_run, NOT pull_request / pull_request_target. Dependabot-triggered
+# pull_request(_target) runs get a READ-ONLY GITHUB_TOKEN (GitHub's security model), so they
+# cannot push back. A workflow_run runs in the base-repo context with a writable token —
+# the only secrets-free way to commit to the branch. It chains off the "CI" workflow.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  sync-lockfile:
+    runs-on: ubuntu-latest
+    # Only Dependabot's own PRs, raised from a branch in THIS repo (Dependabot pushes to the
+    # base repo, not a fork) — guards against a malicious fork run reaching the write step.
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The CI run's head branch is the Dependabot PR branch we commit back to.
+          ref: ${{ github.event.workflow_run.head_branch }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      # Regenerate bun.lock to match the package.json Dependabot bumped (no --frozen).
+      # --ignore-scripts: never run dependency lifecycle scripts on a bot-proposed bump.
+      - name: Regenerate bun.lock
+        run: bun install --ignore-scripts
+
+      - name: Commit bun.lock if it changed
+        run: |
+          if git diff --quiet -- bun.lock; then
+            echo "bun.lock already in sync — nothing to commit."
+            exit 0
+          fi
+          git config user.name  'dependabot[bot]'
+          git config user.email '49699333+dependabot[bot]@users.noreply.github.com'
+          git add bun.lock
+          git commit -m 'chore(deps): sync bun.lock'
+          git push origin HEAD:${{ github.event.workflow_run.head_branch }}
+        # ponytail: a GITHUB_TOKEN-authored push does NOT retrigger required CI checks
+        # (GitHub's loop-prevention). The lockfile lands so the PR stops failing the frozen
+        # install and is mergeable, but CI won't auto-rerun on the sync commit. If auto-rerun
+        # is ever required, swap the checkout token for a PAT/GitHub App identity (the only
+        # mechanism that retriggers workflows). YAGNI until it bites.
