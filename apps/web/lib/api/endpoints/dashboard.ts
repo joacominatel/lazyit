@@ -88,6 +88,11 @@ export interface DashboardActivityParams extends DashboardActivityFilters {
  * caller can compute "has more". Any provided filter is serialized as its own query param next to
  * `limit`/`offset`; an omitted filter is left off entirely, so the no-filter call is byte-for-byte
  * the historical request.
+ *
+ * `token` is the optional SSR Bearer override (ADR-0067), mirroring {@link getDashboardSummary}: the
+ * Reports Server Component passes `session.accessToken` from `await auth()` to prefetch the first
+ * activity page; client callers omit it and `apiFetch` falls back to the browser-only session-token
+ * store, unchanged.
  */
 export function getDashboardActivity(
   {
@@ -101,6 +106,7 @@ export function getDashboardActivity(
     to,
     q,
   }: DashboardActivityParams = {},
+  token?: string,
 ): Promise<RecentActivityPage> {
   const params = new URLSearchParams();
   if (limit !== undefined) params.set("limit", String(limit));
@@ -115,6 +121,7 @@ export function getDashboardActivity(
   const qs = params.toString();
   return apiFetch<RecentActivityPage>(
     qs ? `${BASE}/activity?${qs}` : `${BASE}/activity`,
+    { token },
   );
 }
 
