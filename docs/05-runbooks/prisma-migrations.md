@@ -128,6 +128,24 @@ ALTER TABLE "asset_history" ADD CONSTRAINT "asset_history_one_actor"
 -- asset_assignments (assigned/released) and access_grants (granted/revoked), one CHECK per actor slot.
 ```
 
+For the **infra topology graph** ([[0070-infra-topology-graph]], `infra_topology` migration) the
+`InfraEdge` table carries **two partial uniques** on the *active* edge set (an enum value in a `WHERE`
+must be **cast to its type**). Only `RUNS_ON` and the symmetric `CONNECTS_TO` are constrained — the
+other kinds (`MEMBER_OF`/`DEPENDS_ON`/`BACKS_UP_TO`) are legitimately many:
+
+```sql
+-- (1) One ACTIVE host per source node: at most one open RUNS_ON edge per source (a host migration
+-- closes one — endedAt set — and opens the next, so released rows are exempt).
+CREATE UNIQUE INDEX "infra_edges_source_active_runs_on_key"
+  ON "infra_edges" ("sourceId")
+  WHERE "endedAt" IS NULL AND "kind" = 'RUNS_ON'::"InfraEdgeKind";
+-- (2) Canonical-pair uniqueness for the symmetric CONNECTS_TO: the API stores the lower id as source,
+-- so the pair is unique regardless of input order; this guards the active set at the DB level.
+CREATE UNIQUE INDEX "infra_edges_connects_to_pair_active_key"
+  ON "infra_edges" ("sourceId", "targetId")
+  WHERE "kind" = 'CONNECTS_TO'::"InfraEdgeKind" AND "endedAt" IS NULL;
+```
+
 > [!note] Prisma does not manage what it can't represent
 > A partial index lives only in the migration SQL. Prisma can't model it, so it neither emits it
 > on `migrate diff` nor reports it as **drift** — the `--exit-code` check in §6 stays green. The
