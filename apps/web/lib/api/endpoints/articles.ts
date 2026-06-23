@@ -79,6 +79,10 @@ export interface ArticleFilters {
 export function getArticles(
   filters: ArticleFilters = {},
   signal?: AbortSignal,
+  // Optional Bearer override for SSR server-prefetch (ADR-0067): a Server Component passes
+  // `session.accessToken` from `await auth()`, since the client-side token store is browser-only.
+  // Client callers omit it and `apiFetch` falls back to the session-token store, unchanged.
+  token?: string,
 ): Promise<ArticleListPage> {
   const params = new URLSearchParams();
   // Multi-select filters (#198): comma-encode each non-empty array into its one query param.
@@ -98,12 +102,21 @@ export function getArticles(
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));
   const qs = params.toString();
-  return apiFetch<ArticleListPage>(qs ? `${BASE}?${qs}` : BASE, { signal });
+  return apiFetch<ArticleListPage>(qs ? `${BASE}?${qs}` : BASE, {
+    signal,
+    token,
+  });
 }
 
-/** Fetch a single article by its slug (the public/detail lookup). */
-export function getArticleBySlug(slug: string): Promise<Article> {
-  return apiFetch<Article>(`${BASE}/by-slug/${encodeURIComponent(slug)}`);
+/**
+ * Fetch a single article by its slug (the detail lookup). `token` is the optional SSR Bearer
+ * override (ADR-0067): a Server Component prefetch passes `session.accessToken` from `await auth()`;
+ * client callers omit it and `apiFetch` falls back to the browser-only session-token store.
+ */
+export function getArticleBySlug(slug: string, token?: string): Promise<Article> {
+  return apiFetch<Article>(`${BASE}/by-slug/${encodeURIComponent(slug)}`, {
+    token,
+  });
 }
 
 /** Transition DRAFT -> PUBLISHED (author only). Sets publishedAt on first publish. */
