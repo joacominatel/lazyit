@@ -2,6 +2,7 @@
   "dashboard": "Panel",
   "inventory": "Inventario",
   "assets": "Activos",
+  "servers": "Servidores",
   "diagram": "Topología",
   "consumables": "Consumibles",
   "imports": "Importador",

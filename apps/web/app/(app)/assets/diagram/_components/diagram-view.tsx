@@ -2,6 +2,7 @@
 
 import { PlusIcon, ShareIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -22,11 +23,18 @@ import { InfraNodePanel } from "./infra-node-panel";
  * sets it and opens the {@link InfraNodePanel} (owner/KB/secret-handles/shortcuts/children + the
  * write controls). The header's "Add node" action is gated on `infra:manage` (read-only viewers
  * still get the board + the read-only panel; the API is the real gate).
+ *
+ * A `?node=<id>` query param seeds the initial selection so the Servers list (#743) can deep-link a
+ * row straight into the drill-in panel. ponytail: a one-shot seed via `useState`'s initializer (read
+ * once on mount), not a synced effect — the URL drives the FIRST open, then the user owns the
+ * selection. The panel works from a bare nodeId alone (it fetches its own detail), so no canvas pan
+ * is needed for the payoff to show.
  */
 export function DiagramView() {
   const t = useTranslations("infra");
   const canManage = useCan("infra:manage");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const initialNodeId = useSearchParams().get("node");
+  const [selectedId, setSelectedId] = useState<string | null>(initialNodeId);
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
