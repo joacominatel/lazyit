@@ -3,7 +3,7 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Meilisearch } from 'meilisearch';
 import type { MultiSearchParams } from 'meilisearch';
 import type { SearchDocument } from './search.documents';
-import { reindexIndex, type ReindexClient } from './reindex';
+import { reindexIndex } from './reindex';
 import {
   FolderAccessService,
   folderVisible,
@@ -301,11 +301,14 @@ export class SearchService {
   /**
    * Authoritatively (re)build one index from its full live `docs` set (issue #370 self-heal), reusing
    * the zero-downtime temp-index-swap of {@link reindexIndex}. No-op in disabled mode. The Meili client
-   * structurally satisfies the small {@link ReindexClient} surface the rebuild needs.
+   * structurally satisfies the small `ReindexClient` surface the rebuild needs (no cast required).
    */
-  async rebuildIndex(index: SearchIndex, docs: SearchDocument[]): Promise<void> {
+  async rebuildIndex(
+    index: SearchIndex,
+    docs: SearchDocument[],
+  ): Promise<void> {
     if (!this.client) return;
-    await reindexIndex(this.client as unknown as ReindexClient, index, docs);
+    await reindexIndex(this.client, index, docs);
   }
 
   /**
