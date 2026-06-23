@@ -270,6 +270,19 @@ diagram, so it ships in the MVP, not v1. **React Flow** is adopted as the one ne
 scoped to this screen (confirm version via Context7 before install). Nav: **Assets › Servers** (filtered
 list) and **Assets › Diagram** (the canvas). A static HTML tree is rejected (can't do free-move/pan/edges).
 
+> **UX round (issues #760–#767).** Post-MVP the canvas got a UX pass (design brief pinned on #723).
+> Edges became a *system*, not just colour: each kind reads by **colour + line-style + marker +
+> (DEPENDS_ON only) animated flow**, with an on-edge kind label on hover/select and a collapsible
+> legend — encoded as a pure `edgeStyle(kind)` descriptor + a custom React Flow edge type. A **Tidy /
+> auto-arrange** button runs a layered top-down layout (host→guest hierarchy) via **`@dagrejs/dagre`**
+> — a second, deliberately scoped frontend dependency (small, sync, ships its own types; elkjs
+> rejected as overkill), behind the pure `layoutNodes()` helper. Fresh creates land at the viewport
+> centre with a spiral offset so they don't stack (#761), and a reusable `focusNode(id)` primitive
+> (fit-view + one-shot pulse) backs the `?node=&focus=1` deep-link (#765). All motion honours
+> ADR-0049's budget and `prefers-reduced-motion` (the cinematic deep-link fit-view at ~400ms is the
+> one allowed exception). The pure helpers (`edgeStyle`/`layoutNodes`/`placementOffset`) are
+> unit-tested in `apps/web/lib/infra/canvas.test.ts`.
+
 ### 7. Impact / blast-radius — the query that justifies a graph
 
 A graph beats a picture only if you can ask **"if this node goes down, what is affected?"** v1 ships

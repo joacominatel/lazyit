@@ -29,6 +29,14 @@ Arrastra un nodo para reubicarlo: la nueva posición se guarda automáticamente 
 arrastre, así que la disposición que armes es la que todos verán la próxima vez. Usa los controles
 de la esquina (o tu trackpad/scroll) para hacer zoom y ajustar la vista.
 
+Con el permiso de gestión, un botón **Ordenar** aparece en la esquina superior derecha del tablero.
+Al hacer clic, reorganiza todo el mapa en una disposición limpia de arriba hacia abajo — los hosts
+por encima de las máquinas que corren sobre ellos, los grupos por encima de sus miembros — cada vez
+que el mapa se enreda tras mucho arrastrar y conectar. Las nuevas posiciones se guardan y igual
+puedes arrastrar cualquier nodo después. Un nodo nuevo que creas aparece en el centro de tu vista
+actual (y las creaciones consecutivas se abren en abanico para no apilarse), así que siempre llega
+donde puedes verlo.
+
 Cada nodo es una tarjeta compacta que muestra:
 
 - un **icono de tipo** (host, VM, contenedor, clúster, dispositivo de red, almacenamiento,
@@ -96,6 +104,18 @@ panel te recuerda la dirección. lazyit avisa con suavidad si una combinación p
 ejemplo un contenedor que *corre sobre* un dispositivo de red) pero no la bloquea — el modelo se
 mantiene genérico. Si una conexión rompiera la regla de "un host activo" (o duplicara un vínculo
 existente), recibirás un mensaje claro que explica por qué.
+
+### Leer las líneas
+
+En el mapa cada tipo de relación se dibuja para que las distingas de un vistazo — no solo por color,
+sino por **color, estilo de línea y punta de flecha** juntos: *corre sobre* y *miembro de* son
+sólidas (miembro-de un poco más gruesa, la columna de agrupación), *depende de* es discontinua con
+una animación que fluye suavemente señalando la dirección de la dependencia, *respalda a* es punteada
+y la simétrica *conecta con* es una línea fina y simple, sin flecha. Al pasar el cursor o seleccionar
+una línea aparece una pequeña etiqueta con el nombre de la relación. Una **referencia de conexiones**
+plegable, en la esquina inferior izquierda, asocia cada tipo a su color y estilo — ábrela cuando
+necesites recordarlo. Pasar el cursor sobre un nodo también lo **destaca**: el resto del mapa se
+atenúa para que veas de un vistazo con qué está conectado ese nodo.
 
 ## Estado
 

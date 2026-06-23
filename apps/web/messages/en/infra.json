@@ -39,6 +39,12 @@
     "map": "Map",
     "table": "Table"
   },
+  "tidy": {
+    "action": "Tidy"
+  },
+  "legend": {
+    "title": "Edge legend"
+  },
   "servers": {
     "title": "Servers",
     "subtitle": "Every node in your topology — filter, search and open one to see its owner, secrets and connections.",

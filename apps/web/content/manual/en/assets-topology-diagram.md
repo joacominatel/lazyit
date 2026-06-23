@@ -27,6 +27,13 @@ to reposition it — the new position is saved automatically after the drag sett
 you arrange is the layout everyone sees next time. Use the controls in the corner (or your
 trackpad/scroll) to zoom and fit the view.
 
+With the manage permission, a **Tidy** button sits in the board's top-right corner. Click it to
+auto-arrange the whole map into a clean top-down layout — hosts above the machines that run on them,
+groups above their members — whenever things get tangled after a lot of dragging and connecting. The
+new positions are saved, and you can still drag any node afterwards. A new node you create lands in
+the middle of your current view (and consecutive creates fan out so they don't stack), so it always
+arrives where you can see it.
+
 Each node is a compact card showing:
 
 - a **kind icon** (host, VM, container, cluster, network device, storage, appliance, or other),
@@ -88,6 +95,17 @@ target; the panel reminds you of the direction. lazyit gently warns if a pairing
 example a container said to *run on* a network device) but doesn't block it — the model stays
 generic. If a connection would break the "one active host" rule (or duplicate an existing link),
 you'll get a clear message explaining why.
+
+### Reading the lines
+
+On the map each relationship kind is drawn so you can tell them apart at a glance — not by colour
+alone, but by **colour, line style and arrowhead** together: *runs on* and *member of* are solid
+(member-of a touch heavier, the grouping backbone), *depends on* is dashed with a gently flowing
+animation pointing the way the dependency runs, *backs up to* is dotted, and the symmetric *connects
+to* is a thin plain line with no arrow. Hovering or selecting a line shows a small label naming the
+relationship. A collapsible **edge legend** in the bottom-left corner maps every kind to its colour
+and style — open it whenever you need a reminder. Hovering a node also **spotlights** it: the rest of
+the map dims so you can see at a glance what that node is connected to.
 
 ## Status
 
