@@ -193,6 +193,29 @@
     "viewToggleLabel": "Disposición del editor",
     "viewSplit": "Dividido",
     "viewWrite": "Escribir",
-    "viewPreview": "Vista previa"
+    "viewPreview": "Vista previa",
+    "help": {
+      "trigger": "Ayuda de formato",
+      "title": "Ayuda de formato",
+      "intro": "Escribe en Markdown. lazyit añade dos tokens reservados — copia un ejemplo para probarlo y mira la vista previa.",
+      "copyLabel": "Copiar ejemplo",
+      "wikiLink": {
+        "title": "Enlazar otro artículo",
+        "note": "Escribe [[ para abrir un selector. Usa | para un texto de enlace personalizado. Un enlace a un artículo que aún no existe queda como referencia futura."
+      },
+      "secret": {
+        "title": "Referenciar un secreto",
+        "note": "Muestra un chip enmascarado — solo un miembro del vault puede revelar el valor. Escribe {{ para abrir un selector; eliges un identificador (handle), nunca un valor."
+      },
+      "links": {
+        "title": "Enlace externo",
+        "note": "Enlace Markdown estándar a cualquier URL fuera de la base de conocimiento."
+      },
+      "markdown": {
+        "title": "Markdown básico",
+        "note": "Encabezados, negrita/cursiva, código en línea y listas. Los bloques de código y los diagramas ```mermaid``` también se renderizan."
+      },
+      "manualLink": "Guía completa de redacción"
+    }
   }
 }

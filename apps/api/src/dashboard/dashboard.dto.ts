@@ -1,6 +1,7 @@
 import { createZodDto } from 'nestjs-zod';
 import {
   DashboardSummarySchema,
+  RecentActivityFilterOptionsSchema,
   RecentActivityItemSchema,
   RecentActivityPageSchema,
 } from '@lazyit/shared';
@@ -20,4 +21,9 @@ export class RecentActivityItemDto extends createZodDto(
 /** Paginated `GET /dashboard/activity` envelope ({ items, total, limit, offset }) — ADR-0030. */
 export class RecentActivityPageDto extends createZodDto(
   RecentActivityPageSchema,
+) {}
+
+/** `GET /dashboard/activity/filters` — distinct actors + actions present in the feed (issue #718). */
+export class RecentActivityFilterOptionsDto extends createZodDto(
+  RecentActivityFilterOptionsSchema,
 ) {}

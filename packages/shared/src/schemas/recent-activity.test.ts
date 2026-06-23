@@ -6,6 +6,7 @@ import {
   RECENT_ACTIVITY_ACTIONS,
   RECENT_ACTIVITY_Q_MAX,
   RecentActivityActionSchema,
+  RecentActivityFilterOptionsSchema,
   RecentActivityItemSchema,
   RecentActivityPageSchema,
   RecentActivityQuerySchema,
@@ -153,6 +154,42 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       expect(RecentActivityActionSchema.safeParse(verb).success).toBe(true);
     }
     expect(RecentActivityActionSchema.safeParse("exploded").success).toBe(false);
+  });
+});
+
+describe("RecentActivityFilterOptionsSchema (distinct filter menus, issue #718)", () => {
+  test("accepts a well-formed options envelope", () => {
+    const result = RecentActivityFilterOptionsSchema.safeParse({
+      actors: [
+        { id: "11111111-1111-4111-8111-111111111111", name: "Admin User" },
+      ],
+      actions: ["assigned", "granted"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts empty menus (a feed with no activity yet)", () => {
+    const result = RecentActivityFilterOptionsSchema.safeParse({
+      actors: [],
+      actions: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects a non-uuid actor id", () => {
+    const result = RecentActivityFilterOptionsSchema.safeParse({
+      actors: [{ id: "nope", name: "Admin User" }],
+      actions: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects an action outside the allowlist", () => {
+    const result = RecentActivityFilterOptionsSchema.safeParse({
+      actors: [],
+      actions: ["exploded"],
+    });
+    expect(result.success).toBe(false);
   });
 });
 

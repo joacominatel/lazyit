@@ -143,6 +143,40 @@ export const RECENT_ACTIVITY_ACTIONS = [
 export const RecentActivityActionSchema = z.enum(RECENT_ACTIVITY_ACTIONS);
 export type RecentActivityAction = z.infer<typeof RecentActivityActionSchema>;
 
+/* ──────────────────────────────────────────────────────────────────────────────────────────────
+ * Filter OPTIONS (issue #718) — what the Reports filter selects should OFFER. The actor/action
+ * selects previously listed the whole user directory + the full static {@link RECENT_ACTIVITY_ACTIONS}
+ * allowlist; instead they should offer only the actors/actions that ACTUALLY produced an activity row.
+ * `GET /dashboard/activity/filters` returns the DISTINCT actors + actions present in the
+ * `recent_activity` view (no schema change — the view already exists). This is purely the UI's "what
+ * happened" menu; {@link RECENT_ACTIVITY_ACTIONS} remains the validation allowlist for the `action`
+ * filter param.
+ * ────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** One distinct actor that has produced ≥1 activity row — `id` (uuid) + resolved display name. */
+export const RecentActivityActorOptionSchema = z.object({
+  // The acting user's id (uuid). Rows with a null actor (system/unknown) are omitted from the list.
+  id: z.uuid(),
+  // The actor's resolved display name ("First Last").
+  name: z.string(),
+});
+export type RecentActivityActorOption = z.infer<
+  typeof RecentActivityActorOptionSchema
+>;
+
+/**
+ * The distinct actors + actions actually present in the `recent_activity` view (issue #718) — the
+ * menus the Reports actor/action selects render. `actions` is a subset of {@link RECENT_ACTIVITY_ACTIONS}
+ * (only the verbs that occurred); `actors` omits system/unknown rows (a null `actorId`).
+ */
+export const RecentActivityFilterOptionsSchema = z.object({
+  actors: z.array(RecentActivityActorOptionSchema),
+  actions: z.array(RecentActivityActionSchema),
+});
+export type RecentActivityFilterOptions = z.infer<
+  typeof RecentActivityFilterOptionsSchema
+>;
+
 /** The literal `"me"` — the self-referential actor token resolved to the caller's id SERVER-SIDE. */
 export const ACTIVITY_ACTOR_ME = "me";
 

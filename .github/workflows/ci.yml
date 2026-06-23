@@ -1,12 +1,12 @@
 name: CI
 
-# Quality gate for the integration (dev), staging (stage) and production (master) branches,
-# and every PR targeting them. No deploy (CD is deferred — ADR-0027).
+# Quality gate for the integration (dev) and production (master) branches, and every PR
+# targeting them. No deploy (CD is deferred — ADR-0027).
 on:
   push:
-    branches: [master, dev, stage]
+    branches: [master, dev]
   pull_request:
-    branches: [master, dev, stage]
+    branches: [master, dev]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -20,7 +20,11 @@ jobs:
     name: Typecheck · lint · test · build
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 — full history so the diff-lint step (below) can compute the
+      # merge-base with origin/dev for the changed-files gate (#591).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -75,20 +79,54 @@ jobs:
           bunx tsc --noEmit -p apps/api/tsconfig.json
           bunx tsc --noEmit -p apps/web/tsconfig.json
 
-      # Lint is report-only here (`eslint .`, no --fix) — same as the repo's `lint` script;
+      # Full-repo lint is REPORT-ONLY (`eslint .`, no --fix) — same as the repo's `lint` script;
       # `lint:fix` is the separate mutating fixer (#353). Both need the generated Prisma client,
-      # produced by the "Generate Prisma client" step above. Non-blocking for now: the codebase
-      # is not yet eslint-clean (pre-existing prettier/type-lint findings). Promote to blocking
-      # once it is clean (drop continue-on-error).
-      - name: Lint API
+      # produced by the "Generate Prisma client" step above. Non-blocking: the codebase is not
+      # yet eslint-clean (pre-existing prettier/type-lint findings), so this is a visible report
+      # of the legacy backlog. The diff-lint step below is the BLOCKING gate for NEW code (#591).
+      # Promote this to blocking once the backlog is clean (drop continue-on-error).
+      - name: Lint API (report-only)
         working-directory: apps/api
         continue-on-error: true
         run: bunx eslint .
 
-      - name: Lint Web
+      - name: Lint Web (report-only)
         working-directory: apps/web
         continue-on-error: true
         run: bunx eslint .
+
+      # BLOCKING diff-lint gate (#591): lint ONLY the files changed vs the merge-base with
+      # origin/dev, so a NEW violation in changed code fails CI while the legacy backlog stays
+      # exempt (the report-only steps above keep it visible). No custom ratchet — the diff IS
+      # the ratchet. eslint runs per app in its own dir with that app's flat config, exactly as
+      # the report-only steps do; --no-error-on-unmatched-pattern absorbs paths the config
+      # ignores (generated/dist/cjs) so they don't fail the gate.
+      - name: Lint changed files (blocking)
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --quiet origin dev
+          base="$(git merge-base origin/dev HEAD)"
+          echo "Diffing changed files against merge-base $base"
+          changed="$(git diff --name-only --diff-filter=d "$base" HEAD \
+            | grep -E '\.(ts|tsx|js|jsx|mjs|cjs)$' || true)"
+          if [ -z "$changed" ]; then
+            echo "No changed lintable files — nothing to gate."
+            exit 0
+          fi
+          api_files="$(echo "$changed" | sed -n 's#^apps/api/##p' || true)"
+          web_files="$(echo "$changed" | sed -n 's#^apps/web/##p' || true)"
+          status=0
+          if [ -n "$api_files" ]; then
+            echo "::group::eslint apps/api (changed)"
+            (cd apps/api && echo "$api_files" | xargs bunx eslint --no-error-on-unmatched-pattern) || status=1
+            echo "::endgroup::"
+          fi
+          if [ -n "$web_files" ]; then
+            echo "::group::eslint apps/web (changed)"
+            (cd apps/web && echo "$web_files" | xargs bunx eslint --no-error-on-unmatched-pattern) || status=1
+            echo "::endgroup::"
+          fi
+          exit $status
 
       # API unit tests mock the Prisma client → no database needed (ADR-0027). Run under Node
       # (jest@30 fails to init under Bun's runtime); see the Set up Node step above.

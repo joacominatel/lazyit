@@ -46,8 +46,10 @@ import { TableCell } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { actionLabel, actionTone } from "@/lib/activity-tones";
 import type { DashboardActivityFilters } from "@/lib/api/endpoints/dashboard";
-import { useReportsActivityPage } from "@/lib/api/hooks/use-dashboard";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import {
+  useReportsActivityFilters,
+  useReportsActivityPage,
+} from "@/lib/api/hooks/use-dashboard";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { downloadCsv } from "./reports-csv";
@@ -200,8 +202,13 @@ export function ReportsScreen() {
   const isMyHistory = tab === "me";
   const rangePreset = matchPreset(fromDate, toDate, now);
 
-  // The user directory for the Actor select (small org; whole directory is one page).
-  const { data: users } = useUsers();
+  // The actor/action filter MENUS (issue #718): only the actors + actions that actually produced an
+  // activity row, not the whole directory / the full static action allowlist.
+  const { data: filterOptions } = useReportsActivityFilters();
+  const actorOptions = filterOptions?.actors ?? [];
+  // Until the menu loads, offer nothing (the "All actions"/"Any actor" reset is always present); a
+  // brief empty list beats flashing the full static allowlist that #718 is removing.
+  const actionOptions = filterOptions?.actions ?? [];
 
   // Map the URL filter state → the server-side request filters (issue #183). The My-history tab
   // forces `actorId="me"` and ignores the Actor select; otherwise a concrete actor uuid is sent.
@@ -264,9 +271,9 @@ export function ReportsScreen() {
           {
             key: "actor",
             label: t("filters.chips.actor", {
-              value: users?.find((u) => u.id === actorFilter)
-                ? `${users.find((u) => u.id === actorFilter)?.firstName} ${users.find((u) => u.id === actorFilter)?.lastName}`
-                : t("filters.selectedUser"),
+              value:
+                actorOptions.find((a) => a.id === actorFilter)?.name ??
+                t("filters.selectedUser"),
             }),
             onClear: () => setFilter("actor", FILTER_DEFAULTS.actor),
           },
@@ -421,16 +428,11 @@ export function ReportsScreen() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">{t("filters.anyActor")}</SelectItem>
-              {(users ?? []).map((user) => (
-                <SelectItem key={user.id} value={user.id}>
+              {actorOptions.map((actor) => (
+                <SelectItem key={actor.id} value={actor.id}>
                   <span className="inline-flex min-w-0 items-center gap-1.5">
-                    <ActorAvatar
-                      name={`${user.firstName} ${user.lastName}`}
-                      seed={user.id}
-                    />
-                    <span className="min-w-0 truncate">
-                      {user.firstName} {user.lastName}
-                    </span>
+                    <ActorAvatar name={actor.name} seed={actor.id} />
+                    <span className="min-w-0 truncate">{actor.name}</span>
                   </span>
                 </SelectItem>
               ))}
@@ -447,7 +449,7 @@ export function ReportsScreen() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">{t("filters.allActions")}</SelectItem>
-            {RECENT_ACTIVITY_ACTIONS.map((action) => (
+            {actionOptions.map((action) => (
               <SelectItem key={action} value={action}>
                 {actionLabel(action, tAction)}
               </SelectItem>
@@ -602,11 +604,17 @@ function TableView({
         isFilteredEmpty={items.length === 0}
         filteredEmptyMessage={t("table.filteredEmpty")}
         filteredEmptyAction={<ClearFiltersLink onClick={onClearFilters} />}
-        mobileChildren={items.map((item) => {
+        mobileChildren={items.map((item, i) => {
           const meta = ENTITY_META[item.entityType];
           return (
             <ResourceCard
-              key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}`}
+              // The `recent_activity` view is a UNION ALL with no unique row id, so two rows can
+              // share (entityType, entityId, action, occurredAt-to-the-ms) — e.g. an asset with
+              // multiple assignments created in the same transaction (#719). The page is read-only
+              // and paginated, so the map index is a safe tiebreaker.
+              // ponytail: index-in-key (rung 5, one line) — the proper fix (a stable per-row id in
+              // the view) needs a migration + a widened wire type; not worth it for a read-only list.
+              key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}-${i}`}
               href={meta.href(item.entityId)}
               title={item.summary}
               badge={
@@ -633,12 +641,13 @@ function TableView({
           );
         })}
       >
-        {items.map((item) => {
+        {items.map((item, i) => {
           const meta = ENTITY_META[item.entityType];
           const EntityIcon = meta.icon;
           return (
             <LinkableRow
-              key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}`}
+              // Same UNION-ALL key collision as the mobile cards above (#719) — index tiebreaker.
+              key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}-${i}`}
               href={meta.href(item.entityId)}
             >
               <TableCell

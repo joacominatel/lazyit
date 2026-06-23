@@ -193,6 +193,29 @@
     "viewToggleLabel": "Editor layout",
     "viewSplit": "Split",
     "viewWrite": "Write",
-    "viewPreview": "Preview"
+    "viewPreview": "Preview",
+    "help": {
+      "trigger": "Formatting help",
+      "title": "Formatting help",
+      "intro": "Write in Markdown. lazyit adds two reserved tokens — copy an example to try it, then watch the preview.",
+      "copyLabel": "Copy example",
+      "wikiLink": {
+        "title": "Link another article",
+        "note": "Type [[ for a picker. Use | for custom link text. A link to an article that doesn't exist yet stays as a forward reference."
+      },
+      "secret": {
+        "title": "Reference a secret",
+        "note": "Shows a masked chip — only a vault member can reveal the value. Type {{ for a picker; you pick a handle, never a value."
+      },
+      "links": {
+        "title": "External link",
+        "note": "Standard Markdown link to any URL outside the Knowledge Base."
+      },
+      "markdown": {
+        "title": "Markdown basics",
+        "note": "Headings, bold/italic, inline code and lists. Fenced code blocks and ```mermaid``` diagrams also render."
+      },
+      "manualLink": "Full authoring guide"
+    }
   }
 }

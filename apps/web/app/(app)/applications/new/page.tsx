@@ -3,6 +3,7 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { ApplicationForm } from "../_components/application-form";
 
+// ponytail: no data read — empty create form; nothing to SSR-prefetch (ADR-0067 rollout #662).
 export default async function NewApplicationPage() {
   const t = await getTranslations("applications");
   return (

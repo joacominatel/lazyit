@@ -261,25 +261,47 @@ than the six routes share — the laziest correct shape):
    skeleton) and per-segment `error.tsx` in `(auth)`/`(marketing)`/`(print)`/`setup` (modeled on
    the existing `(app)/error.tsx`).
 
-### Deferred (a full-rollout follow-up issue, post-pilot)
+### Full rollout (issue #662, 2026-06-23)
 
-- **Out-of-scope routes stay client-fetched** (§2): all detail (`/[entity]/[id]`), edit, clone, new,
-  KB, Secret Manager, reports, settings/admin pages. They show the skeleton flash on first paint.
-- **Filtered/paged first paint isn't prefetched** — only the unfiltered default list is. A future
-  wave could read `searchParams` on the server and prefetch the exact filtered key.
-- **Secondary reads on the piloted pages aren't prefetched** — e.g. the assets page's categories /
-  locations lookups and the applications page's grants/directory joins still fetch client-side;
-  only each page's PRIMARY list query is prefetched.
-- **Per-segment shape-matched loading skeletons** for high-traffic detail pages.
-- **A server-prefetch recipe note** in `docs/04-development/` documenting this mold for the next dev.
-- **ADR-0020 amendment** noting the server-prefetch extension to the three-layer data path.
+The post-pilot follow-up extended the **same mold** (no new pattern, no new deps) to the remaining
+routes with a clear single primary read:
+
+- **Detail / edit / clone routes converted** — `assets`/`applications`/`consumables` detail + edit
+  + clone, plus `locations`/`users` detail. Each prefetches the entity's `…Keys.detail(id)` via the
+  detail getter (the shared `createCrudEndpoints.get` and `getAsset` gained an optional `token?`).
+- **KB converted** — `kb` (list), `kb/[slug]` (detail), `kb/[slug]/edit` (`getArticles` /
+  `getArticleBySlug` gained `token?`).
+- **Reports + settings converted** — `reports` (`getDashboardActivity`), `settings/instance`
+  (`getConfigStatus`), `settings/service-accounts` (`getServiceAccounts`),
+  `settings/roles/permissions` (`getPermissionMatrix`). Client permission gates (`logs:read` /
+  `AdminGate`) stay client-side, wrapped inside the hydrated subtree; a denied caller's prefetch
+  error is swallowed → empty cache → the gate denies, unchanged.
+- **Recipe note + ADR-0020 amendment** — [[ssr-prefetch-recipe]] documents the mold; ADR-0020 gained
+  a *Server-prefetch extension* section.
+
+Still deliberately client-fetched (each marked with a `// ponytail:` note where it's a page skip):
+
+- **Secret Manager (`/secrets`, `/secrets/[vaultId]`) — UNCHANGED, by INV-10.** Both pages are
+  `ssr: false` (ADR-0061) to keep the crypto/WASM graph out of the server bundle. The genuinely
+  plaintext metadata reads (vault list, vault detail + member metadata) are inseparable in practice
+  from the ciphertext/wrapped-key reads (`getMyKeypair`, `getItems`, `getMyMembership`) that feed
+  client-side decryption and must NEVER be lifted server-side. Left entirely client-fetched.
+- **Filtered/paged/searched first paint** — still only the unfiltered default is prefetched.
+  Replicating the per-page `useListParams` → API-param derivation server-side risks silent key drift
+  (cache-miss double-fetches); deferred until that derivation is a shared pure function.
+- **Secondary reads** — prefetch stays primary-read-only, for uniformity.
+- **No-data routes skipped** — `*/new` (empty forms), `settings` (link hub),
+  `settings/taxonomies` (tab shell), `settings/roles` (low-traffic counts), `imports` (no first
+  paint read), and the workflows builder/run-detail (polling/no stable primary).
+- **Per-segment shape-matched detail skeletons** — the group-level `(app)/loading.tsx` still covers
+  every segment; bespoke per-detail skeletons remain a low-priority polish item.
 
 ### Follow-ups (historical)
 
 - ~~**Ratify this ADR**~~ — done (accepted 2026-06-16).
 - ~~**Implementation wave**: convert the six page shells, add `loading.tsx` + `error.tsx`~~ — done
-  (pilot, issue #537). The ADR-0020 amendment + the `docs/04-development/` recipe note remain (see
-  Deferred above).
+  (pilot, issue #537).
+- ~~**Full rollout, ADR-0020 amendment, recipe note**~~ — done (issue #662, 2026-06-23; see above).
 
 **Related:** #500 · [[0020-frontend-data-layer]] · [[0039-authjs-v5-frontend-oidc]] ·
 [[0010-nextjs-frontend]] · #498

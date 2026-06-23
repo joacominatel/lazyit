@@ -1,65 +1,34 @@
-"use client";
-
-import { useTranslations } from "next-intl";
-import { useParams } from "next/navigation";
-import { Breadcrumb } from "@/components/breadcrumb";
-import { DetailSkeleton } from "@/components/detail-panel";
-import { PageHeader } from "@/components/page-header";
-import { ErrorState } from "@/components/resource-table";
-import { useAsset } from "@/lib/api/hooks/use-assets";
-import { AssetForm } from "../../_components/asset-form";
+import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { auth } from "@/auth";
+import { getAsset } from "@/lib/api/endpoints/assets";
+import { assetKeys } from "@/lib/api/hooks/use-assets";
+import { getServerQueryClient } from "@/lib/api/server-query-client";
+import { AssetCloneView } from "./_components/asset-clone-view";
 
 /**
- * Clone an Asset: mirrors `/[id]/edit` but renders the create form pre-filled from the source record
- * (issue #125). It fetches the source by id and hands it to {@link AssetForm} as `cloneSource`, so the
- * form stays in CREATE mode (CreateAssetSchema + create mutation) with the unique `serial`/`assetTag`
- * cleared and a " (copy)" name. Submitting goes through the normal create flow.
+ * Clone asset — ADR-0067 server-prefetch rollout (#662). This thin Server Component prefetches the
+ * source asset's detail (`assetKeys.detail(id)` via `getAsset(id, token)`) — the same read the clone
+ * form pre-fills from — into a per-request `QueryClient`, dehydrates it, and hydrates the client
+ * `AssetCloneView` so its `useAsset(id)` finds the entry already cached on first paint. The #600 401
+ * handler stays on the client provider.
  */
-export default function CloneAssetPage() {
-  const params = useParams<{ id: string }>();
-  const t = useTranslations("assets.form");
-  const tList = useTranslations("assets.list");
-  const { data: asset, isLoading, isError, error, refetch } = useAsset(
-    params.id,
-  );
+export default async function CloneAssetPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const session = await auth();
+  const queryClient = getServerQueryClient();
 
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-3xl">
-        <DetailSkeleton panels={1} />
-      </div>
-    );
-  }
-
-  if (isError || !asset) {
-    return (
-      <div className="mx-auto max-w-3xl">
-        <ErrorState
-          title={t("notFoundTitle")}
-          description={t("notFoundDescription")}
-          onRetry={() => refetch()}
-          error={error}
-        />
-      </div>
-    );
-  }
+  await queryClient.prefetchQuery({
+    queryKey: assetKeys.detail(id),
+    queryFn: () => getAsset(id, session?.accessToken),
+  });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: tList("title"), href: "/assets" },
-              { label: asset.name, href: `/assets/${asset.id}` },
-              { label: t("breadcrumbClone") },
-            ]}
-          />
-        }
-        title={t("cloneTitle")}
-        subtitle={t("cloneSubtitle")}
-      />
-      <AssetForm cloneSource={asset} />
-    </div>
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <AssetCloneView id={id} />
+    </HydrationBoundary>
   );
 }

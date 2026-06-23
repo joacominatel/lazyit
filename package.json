@@ -21,6 +21,6 @@
     "turbo": "^2.9.14"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^6"
   }
 }

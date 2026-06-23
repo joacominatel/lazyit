@@ -38,6 +38,25 @@ Mientras escribes, dos ayudas ofrecen autocompletado:
 - También se admiten referencias a secretos del Gestor de secretos de forma inline; solo ves y eliges
   un identificador (handle), nunca un valor secreto.
 
+### Ayuda de formato (el botón `?`)
+
+Un **botón `?`** en la barra de herramientas del editor abre una breve **chuleta de formato** para
+que nunca escribas "a ciegas". Cubre el Markdown plano (encabezados, negrita/cursiva, código, listas)
+y — lo más útil — los dos **tokens reservados** de lazyit, cada uno con un ejemplo copiable:
+
+- **Enlazar otro artículo** — `[[slug-del-articulo]]`, o `[[slug-del-articulo|Texto a mostrar]]` para
+  un texto de enlace personalizado. Un enlace a un artículo que aún no existe queda como referencia
+  futura.
+- **Referenciar un secreto** — `{{ lazyit_secret.handle }}`, que se renderiza como un chip enmascarado
+  que solo un miembro del vault puede revelar: consulta
+  [Referencias a secretos](/help/secret-manager-secret-references).
+- **Enlace externo** — un enlace Markdown estándar `[texto](https://…)` a cualquier sitio fuera de la
+  Base de conocimiento.
+
+Copia un ejemplo, pégalo en el cuerpo y la vista previa en vivo muestra exactamente cómo se resuelve
+el token. El mismo `?` y la vista previa están disponibles tanto en **Nuevo artículo** como en
+**Editar**.
+
 ## Borradores y publicación
 
 Todo artículo nuevo nace como **Borrador**. Un borrador es **privado de su autor**: nadie más puede

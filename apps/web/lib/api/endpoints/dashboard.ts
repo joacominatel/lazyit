@@ -3,6 +3,7 @@ import type {
   DashboardSummary,
   RecentActivityActorFilter,
   RecentActivityAction,
+  RecentActivityFilterOptions,
   RecentActivityPage,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
@@ -87,6 +88,11 @@ export interface DashboardActivityParams extends DashboardActivityFilters {
  * caller can compute "has more". Any provided filter is serialized as its own query param next to
  * `limit`/`offset`; an omitted filter is left off entirely, so the no-filter call is byte-for-byte
  * the historical request.
+ *
+ * `token` is the optional SSR Bearer override (ADR-0067), mirroring {@link getDashboardSummary}: the
+ * Reports Server Component passes `session.accessToken` from `await auth()` to prefetch the first
+ * activity page; client callers omit it and `apiFetch` falls back to the browser-only session-token
+ * store, unchanged.
  */
 export function getDashboardActivity(
   {
@@ -100,6 +106,7 @@ export function getDashboardActivity(
     to,
     q,
   }: DashboardActivityParams = {},
+  token?: string,
 ): Promise<RecentActivityPage> {
   const params = new URLSearchParams();
   if (limit !== undefined) params.set("limit", String(limit));
@@ -114,5 +121,16 @@ export function getDashboardActivity(
   const qs = params.toString();
   return apiFetch<RecentActivityPage>(
     qs ? `${BASE}/activity?${qs}` : `${BASE}/activity`,
+    { token },
   );
+}
+
+/**
+ * Fetch the distinct filter menus for the Reports actor/action selects (`GET /dashboard/activity/filters`,
+ * issue #718): only the actors (id + display name) and actions that ACTUALLY produced a row in the
+ * `recent_activity` feed — not the whole user directory or the full static action allowlist. Read-only,
+ * gated on `logs:read` like the feed itself.
+ */
+export function getDashboardActivityFilters(): Promise<RecentActivityFilterOptions> {
+  return apiFetch<RecentActivityFilterOptions>(`${BASE}/activity/filters`);
 }

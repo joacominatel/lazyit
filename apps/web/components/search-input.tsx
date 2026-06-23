@@ -89,11 +89,20 @@ export function SearchInput({
   // previous render" pattern) keyed off the last seen `value`, rather than in an
   // effect — that re-syncs synchronously (no extra paint of the stale buffer)
   // and avoids the set-state-in-effect cascade.
+  //
+  // One subtlety (issue #692, 1.a): `setQ` trims before it commits, so typing
+  // "foo " writes `?q=foo` and the committed `value` comes back trimmed. If we
+  // re-synced unconditionally, the buffer would snap "foo " → "foo" ~300ms after
+  // the user typed the space — the same "space won't stick" symptom, just delayed.
+  // So we only overwrite the buffer when the committed value is NOT the trimmed
+  // form of what the user already has typed; trailing/leading whitespace the
+  // commit dropped stays visible, while genuine external changes (cleared chip,
+  // deep-linked `?q=`, browser back, programmatic reset) still re-sync.
   const [buffer, setBuffer] = useState(value);
   const [lastValue, setLastValue] = useState(value);
   if (value !== lastValue) {
     setLastValue(value);
-    setBuffer(value);
+    if (value !== buffer.trim()) setBuffer(value);
   }
 
   // Self-debounce only when asked. The hook always runs (rules of hooks); when

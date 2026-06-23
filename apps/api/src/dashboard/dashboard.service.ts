@@ -3,10 +3,12 @@ import type {
   DashboardActivityItem,
   DashboardSummary,
   Page,
+  RecentActivityAction,
+  RecentActivityFilterOptions,
   RecentActivityItem,
   RecentActivityQuery,
 } from '@lazyit/shared';
-import { offsetOf, pageOf } from '@lazyit/shared';
+import { offsetOf, pageOf, RECENT_ACTIVITY_ACTIONS } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import {
   LIKE_ESCAPE_CHAR,
@@ -255,6 +257,47 @@ export class DashboardService {
     }));
 
     return pageOf(items, total, query);
+  }
+
+  /**
+   * Distinct filter MENUS for the Reports actor/action selects (issue #718) — what to OFFER, not the
+   * validation allowlist. The selects previously listed the whole user directory + every verb in
+   * {@link RECENT_ACTIVITY_ACTIONS}; instead they should offer only the actors/actions that actually
+   * produced an activity row. Reads the SAME `recent_activity` view + actor LEFT JOIN as
+   * {@link getActivity} — no schema change, no migration.
+   *
+   * `actors` = the DISTINCT non-null `actorId`s with a resolved display name (system/unknown rows,
+   * whose `actorId` is null, are dropped — there's nothing to filter by), ordered by name for a stable
+   * menu. `actions` = the DISTINCT `action` verbs present, intersected with the allowlist (an unknown
+   * verb in the view would be a data bug, not a filter option). Both run in one `$transaction` for a
+   * single consistent snapshot. Gated on `logs:read` at the controller, same as the feed itself.
+   */
+  async getActivityFilterOptions(): Promise<RecentActivityFilterOptions> {
+    const [actorRows, actionRows] = await this.prisma.$transaction([
+      this.prisma.$queryRaw<{ id: string; name: string }[]>(Prisma.sql`
+        SELECT DISTINCT
+          ra."actorId" AS id,
+          u."firstName" || ' ' || u."lastName" AS name
+        FROM "recent_activity" ra
+        JOIN "users" u ON u."id" = ra."actorId"
+        ORDER BY name ASC
+      `),
+      this.prisma.$queryRaw<{ action: string }[]>(Prisma.sql`
+        SELECT DISTINCT ra."action" AS action
+        FROM "recent_activity" ra
+        ORDER BY action ASC
+      `),
+    ]);
+
+    // Keep only verbs in the shared allowlist so the wire type holds; the view should only emit known
+    // verbs, but defending here means a stray value never breaks the typed response.
+    const allowed = new Set<string>(RECENT_ACTIVITY_ACTIONS);
+    return {
+      actors: actorRows.map((row) => ({ id: row.id, name: row.name })),
+      actions: actionRows
+        .map((row) => row.action)
+        .filter((action): action is RecentActivityAction => allowed.has(action)),
+    };
   }
 
   /**
