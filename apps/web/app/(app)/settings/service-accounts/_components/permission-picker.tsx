@@ -8,6 +8,7 @@ import {
   type PermissionPillar,
   PERMISSIONS,
   PERMISSION_PILLARS,
+  SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
@@ -19,17 +20,23 @@ import {
   pillarLabel,
 } from "../../_lib/permission-labels";
 
+/** Permissions a service account may never be granted (human-only per ADR-0069 / SEC-011). */
+const UNGRANTABLE = new Set<string>(SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS);
+
 /**
  * The catalog grouped by pillar, in catalog order, computed once. A service account is authorized by
  * DIRECT catalog-permission grants (ADR-0048) — never a role and never the capability bundles humans
  * use — so the picker lists the RAW `domain:action` permissions (with their `PERMISSION_META` labels)
  * as individual checkboxes, the most precise grant surface.
+ *
+ * Ungrantable permissions (human-only, `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS`) are excluded so
+ * operators are never presented with a checkbox that the backend will always reject.
  */
 const PERMISSIONS_BY_PILLAR: Record<PermissionPillar, Permission[]> =
   PERMISSION_PILLARS.reduce(
     (acc, pillar) => {
       acc[pillar] = PERMISSIONS.filter(
-        (p) => PERMISSION_META[p].pillar === pillar,
+        (p) => PERMISSION_META[p].pillar === pillar && !UNGRANTABLE.has(p),
       );
       return acc;
     },
