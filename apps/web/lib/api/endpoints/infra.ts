@@ -2,6 +2,7 @@ import type {
   CreateInfraEdge,
   CreateInfraNode,
   InfraEdge,
+  InfraImpactResponse,
   InfraNode,
   InfraNodeDetail,
   UpdateInfraNode,
@@ -122,6 +123,21 @@ export function deleteInfraNode(nodeId: string): Promise<InfraNode> {
 export function restoreInfraNode(nodeId: string): Promise<InfraNode> {
   return apiFetch<InfraNode>(`${BASE}/nodes/${nodeId}/restore`, {
     method: "POST",
+  });
+}
+
+/**
+ * Blast radius (`GET /infra/nodes/:id/impact`, ADR-0070 §7) — the downstream set affected if this
+ * node goes down: a transitive traversal over ACTIVE inverse RUNS_ON/DEPENDS_ON edges, each affected
+ * node carrying its minimum hop `depth`. The query that justifies a graph over a static picture; the
+ * canvas highlights `affected` and dims the rest. Read-gated server-side (`infra:read`).
+ */
+export function getInfraNodeImpact(
+  nodeId: string,
+  signal?: AbortSignal,
+): Promise<InfraImpactResponse> {
+  return apiFetch<InfraImpactResponse>(`${BASE}/nodes/${nodeId}/impact`, {
+    signal,
   });
 }
 
