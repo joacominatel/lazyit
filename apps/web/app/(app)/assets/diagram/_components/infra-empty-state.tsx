@@ -5,9 +5,9 @@ import { useTranslations } from "next-intl";
 import { EmptyState } from "@/components/empty-state";
 
 /**
- * The "no nodes yet" surface for the topology canvas (ADR-0070 §6, issue #741). The create flow
- * (and so the primary action) is issue #742, so this is a friendly invitation without a CTA button
- * for now — it points the operator at where node-creation will live once #742 lands.
+ * The "no nodes yet" surface for the topology canvas (ADR-0070 §6). A friendly invitation with no
+ * inline CTA: the primary "Add node" action (issue #742) lives in the page header (always visible to
+ * callers with `infra:manage`), so this stays a calm placeholder rather than duplicating the button.
  *
  * ponytail: reuses the app-wide `EmptyState` (inventory pillar, matching the Assets section) rather
  * than a bespoke canvas placeholder.
