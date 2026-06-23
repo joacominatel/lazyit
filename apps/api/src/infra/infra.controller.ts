@@ -21,6 +21,7 @@ import {
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
   InfraEdgeSchema,
+  InfraImpactResponseSchema,
   InfraNodeDetailSchema,
   InfraNodeKindSchema,
   InfraNodeSchema,
@@ -37,6 +38,7 @@ import type { Principal } from '../auth/principal';
 
 class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
 class InfraNodeDetailDto extends createZodDto(InfraNodeDetailSchema) {}
+class InfraImpactResponseDto extends createZodDto(InfraImpactResponseSchema) {}
 class UpdateInfraNodeDto extends createZodDto(UpdateInfraNodeSchema) {}
 class InfraEdgeDto extends createZodDto(InfraEdgeSchema) {}
 class CreateInfraEdgeDto extends createZodDto(CreateInfraEdgeSchema) {}
@@ -107,6 +109,17 @@ export class InfraController {
   @ApiOkResponse({ type: InfraNodeDetailDto })
   getNode(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
     return this.infra.getNodeDetail(id, principal);
+  }
+
+  @Get('nodes/:id/impact')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      'Blast radius: the downstream node set affected if this node goes down — transitive over ACTIVE inverse RUNS_ON/DEPENDS_ON edges, each with its minimum hop depth (ADR-0070 §7).',
+  })
+  @ApiOkResponse({ type: InfraImpactResponseDto })
+  getImpact(@Param('id') id: string) {
+    return this.infra.getImpact(id);
   }
 
   @Post('nodes')
