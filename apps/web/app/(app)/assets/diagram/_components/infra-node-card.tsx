@@ -38,6 +38,18 @@ export interface InfraNodeData {
   impactOrigin?: boolean;
   impactAffected?: boolean;
   impactDimmed?: boolean;
+  /**
+   * Hover spotlight (issue #767 delight). When a node is hovered (and impact mode is OFF), every node
+   * outside the hovered node + its direct neighbours dims back — the SAME fade as `impactDimmed`,
+   * reused so the tangle reads without clicking. Impact mode wins (its dim is the more urgent cue).
+   */
+  spotlightDimmed?: boolean;
+  /**
+   * One-shot focus pulse (issue #765). Set true by `focusNode(id)` (a deep-link, a fresh create, or
+   * the future "View in topology" button) then auto-cleared ~600ms later; while true the card plays
+   * the `infra-focus-pulse` breathe + wears a brand ring so the eye lands on the right node.
+   */
+  focusPulse?: boolean;
   [key: string]: unknown;
 }
 
@@ -97,7 +109,13 @@ export function InfraNodeCard({ data, selected }: NodeProps) {
         node.impactOrigin &&
           "ring-2 ring-primary ring-offset-2 ring-offset-background scale-[1.03] shadow-md",
         node.impactAffected && "ring-2 ring-destructive bg-destructive/5",
-        node.impactDimmed && "opacity-35 saturate-50",
+        // Dim when impact mode pushes this node out of the radius OR the hover spotlight pushes it
+        // out of the hovered node's neighbourhood — same fade, two callers (issue #767 reuses #755).
+        (node.impactDimmed || node.spotlightDimmed) && "opacity-35 saturate-50",
+        // One-shot focus pulse (issue #765): a brand ring + the breathe keyframe. Auto-cleared by the
+        // canvas; reduced-motion keeps the ring but freezes the scale (globals.css).
+        node.focusPulse &&
+          "infra-focus-pulse ring-2 ring-primary ring-offset-2 ring-offset-background",
       )}
     >
       {/* status accent bar on the leading edge — a calm always-on colour cue, not colour-alone */}
