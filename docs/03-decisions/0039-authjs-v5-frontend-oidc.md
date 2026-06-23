@@ -3,7 +3,7 @@ title: "ADR-0039: Auth.js v5 for frontend OIDC login"
 tags: [adr, auth, frontend, oidc]
 status: accepted
 created: 2026-05-27
-updated: 2026-05-27
+updated: 2026-06-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -217,6 +217,53 @@ AUTH_CLIENT_SECRET=CHANGE_ME
 NEXTAUTH_URL=http://localhost:3000
 ```
 
+### 10. Rotating refresh-token flow (amendment, issue #658)
+
+This ADR originally deferred token refresh. It is now implemented in `apps/web/auth.ts`
+following the canonical Auth.js v5 "refresh token rotation" recipe, adapted to the generic
+OIDC provider. No new dependency — plain `fetch` against the IdP token endpoint.
+
+- **Scope.** The provider now requests `openid profile email offline_access`. `offline_access`
+  asks the IdP for a `refresh_token`. Zitadel grants it for confidential web clients. **Infra
+  precondition (per the issue): the Zitadel app must allow `offline_access`** — if it does not,
+  the flow degrades gracefully (see below), it does not break.
+- **`jwt` callback (the lifecycle).**
+  1. *Initial sign-in* (`account` present): snapshot `accessToken`, `expiresAt`
+     (seconds-since-epoch, normalised by oauth4webapi from `expires_in`) and `refreshToken`
+     onto the JWT. Missing fields are tolerated (stored as `undefined`) — the callback never
+     throws, so a quirky IdP response cannot break the session.
+  2. *Token still valid* (now `< expiresAt − 30s` skew): returned untouched.
+  3. *Expired/near-expiry with a `refreshToken`*: POST `grant_type=refresh_token` to the IdP
+     `token_endpoint` (discovered from `{issuer}/.well-known/openid-configuration`, so it stays
+     provider-agnostic / BYOI — no hard-coded Zitadel path). Client auth is `client_secret_post`
+     (client_id + secret in the body), which Zitadel advertises and matches the configured
+     confidential client. On success, the access token + expiry are updated and the
+     `refreshToken` is **rotated** when the IdP returns a new one (kept otherwise).
+- **Docker.** The refresh discovery + token POST run server-side through the same
+  external→internal origin rewrite (`AUTH_INTERNAL_ISSUER`) used by the rest of the OIDC flow,
+  so the token endpoint is reachable from inside the container network.
+- **Graceful degradation + fallback (the safety net is kept).** Three paths fall back to the
+  issue-#657 global-401 handler rather than crashing the session:
+  - the IdP returned **no `refresh_token`** (no `offline_access`) → the stale token rides until
+    it 401s;
+  - the IdP returned **no `expires_at`** → refresh can't be timed; the token behaves as pre-#658;
+  - the **refresh request failed** (4xx/5xx, network, rotated-token race) → `error:
+    "RefreshAccessTokenError"` is set on the JWT and surfaced on `session.error`, the stale
+    access token is left attached so the next API call 401s, and the #657 handler signs out +
+    redirects. **#657 is explicitly retained** as the recovery-of-last-resort.
+- **Token plumbing.** No change to `apiFetch` / `SessionTokenSync`: the refreshed
+  `session.accessToken` propagates through `useSession()`, and `SessionTokenSync`'s existing
+  effect (keyed on `session.accessToken`) swaps the new token into the client-side token store —
+  the swap path it was already written to handle (§6a).
+- **Known edge — concurrent refresh.** The stateless-JWT strategy has no shared lock, so two
+  simultaneous expired-token reads could each attempt a refresh; with Zitadel rotating the
+  refresh token, the loser fails and sets `error`. In practice a single browser polls
+  `/api/auth/session` serially, so this is rare; when it does happen the #657 fallback recovers
+  it. A server-side session store would eliminate it but was rejected in this ADR (no session DB)
+  — not worth a lock for a 5–20-person single-org app.
+- **Not user-facing.** The session simply stays alive silently; there is no new setting or UI.
+  Per CLAUDE.md #7 this requires **no Manual change** (the public `/help` surface is unchanged).
+
 ## Consequences
 
 ### Positive
@@ -234,15 +281,11 @@ NEXTAUTH_URL=http://localhost:3000
 - **Session cookie size**: the IdP access token (a JWT itself) is stored in the Auth.js
   encrypted cookie. Depending on the token size this may approach browser cookie limits for
   very large tokens with many claims. Mitigation: keep token claims minimal in the IdP config.
-- **Token refresh not implemented**: Auth.js v5 JWT sessions do not automatically refresh the
-  IdP access token when it expires (no `offline_access`, no rotating-refresh in the `jwt`
-  callback). The app cookie (default 30-day `maxAge`) outlives the short-lived access token, so
-  once it expires every API call 401s. To avoid the resulting "signed-in but broken" stuck state
-  (issue #600), a global TanStack Query/Mutation `onError` handler
-  (`apps/web/lib/api/handle-auth-expiry.ts`) reacts to any 401 from `apiFetch` by signing the
-  dead session out and redirecting to `/login` — once, idempotently, and never on auth routes
-  (loop-guard). The full rotating-refresh (silently renewing the token via `offline_access`) is
-  a tracked follow-up; it depends on the IdP granting `offline_access`.
+- **Token refresh** (implemented — issue #658; see §10 below): the `jwt` callback now silently
+  rotates the IdP access token via `offline_access` before it expires. The global 401 handler
+  (`apps/web/lib/api/handle-auth-expiry.ts`, issue #657) is **kept as the safety net** for when a
+  refresh fails or the IdP grants no `offline_access` — it signs the dead session out and
+  redirects to `/login`, once, idempotently, never on auth routes (loop-guard).
 - **`canWrite` is now optimistic**: the article edit controls are shown to any authenticated
   user. The API returns 403 if they are not the author. This is acceptable UX — the error is
   surfaced via the existing toast system.
@@ -252,8 +295,8 @@ NEXTAUTH_URL=http://localhost:3000
 
 ### Follow-ups
 
-- **Token refresh** (future): implement the `jwt` callback's refresh-token rotation pattern
-  from the Auth.js docs to silently renew expired access tokens.
+- **Token refresh** (DONE — issue #658): implemented the `jwt` callback's refresh-token rotation
+  pattern (Auth.js v5 canonical recipe) to silently renew expired access tokens. See §10.
 - **Explicit token wiring** (future): as the number of TanStack Query hooks grows, consider
   a React context that supplies the session token to all hooks without explicit passing, or a
   `useApiFetch()` wrapper hook.
