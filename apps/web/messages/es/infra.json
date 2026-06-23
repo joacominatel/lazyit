@@ -1,0 +1,34 @@
+{
+  "title": "Topología",
+  "subtitle": "Un mapa de libre movimiento de tu parque de servidores: arrastrá para acomodar, hacé scroll para acercar.",
+  "loading": "Cargando la topología…",
+  "empty": {
+    "title": "Todavía no hay servidores mapeados",
+    "description": "Cuando agregues hosts, VMs, contenedores y sus relaciones, tu parque aparecerá acá como un diagrama arrastrable."
+  },
+  "error": {
+    "title": "No se pudo cargar la topología",
+    "description": "El mapa de infraestructura no se pudo cargar. Probá de nuevo en un momento."
+  },
+  "facts": {
+    "kind": "Tipo",
+    "status": "Estado",
+    "ip": "IP",
+    "noIp": "—"
+  },
+  "kind": {
+    "PHYSICAL_HOST": "Host físico",
+    "VM": "Máquina virtual",
+    "CONTAINER": "Contenedor",
+    "CLUSTER": "Clúster",
+    "NETWORK_DEVICE": "Dispositivo de red",
+    "STORAGE": "Almacenamiento",
+    "APPLIANCE": "Appliance",
+    "OTHER": "Otro"
+  },
+  "status": {
+    "ONLINE": "En línea",
+    "OFFLINE": "Fuera de línea",
+    "UNKNOWN": "Desconocido"
+  }
+}

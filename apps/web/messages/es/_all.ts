@@ -11,6 +11,7 @@ import consumables from "./consumables.json";
 import dashboard from "./dashboard.json";
 import help from "./help.json";
 import imports from "./imports.json";
+import infra from "./infra.json";
 import reports from "./reports.json";
 import kb from "./kb.json";
 import locations from "./locations.json";
@@ -45,6 +46,7 @@ const messages = {
   notifications,
   secrets,
   imports,
+  infra,
 };
 
 export default messages;
