@@ -176,7 +176,8 @@
       "articles": "Articles",
       "users": "Users",
       "locations": "Locations",
-      "applications": "Applications"
+      "applications": "Applications",
+      "infra": "Infrastructure"
     }
   },
   "field": {

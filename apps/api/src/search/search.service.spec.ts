@@ -107,12 +107,13 @@ describe('SearchService', () => {
       });
     });
 
-    it('search with no entities returns empty blocks for all five indexes', async () => {
+    it('search with no entities returns empty blocks for every index', async () => {
       const result = await service.search({ q: '', limit: 20 });
       expect(Object.keys(result).sort()).toEqual([
         'applications',
         'articles',
         'assets',
+        'infra',
         'locations',
         'users',
       ]);
@@ -196,7 +197,7 @@ describe('SearchService', () => {
       expect(logger.error).toHaveBeenCalledTimes(1);
     });
 
-    it('has NO process-wide write suppression — every write reaches the client (ADR-0069 §10)', async () => {
+    it('has NO process-wide write suppression — every write reaches the client (ADR-0069 §10)', () => {
       // The migrator bulk commit used to flip a global suppressDepth, silently dropping EVERY
       // concurrent non-import write. That global is retired: suppression is now scoped to the
       // import's own asset writes via AssetsService.create({ suppressSearch }). So a concurrent
@@ -293,7 +294,10 @@ describe('SearchService', () => {
         q: 'runbook',
         entities: ['articles'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'u1', role: 'VIEWER' },
+        } as never,
       });
 
       // Only the public-folder article survives; the restricted one NEVER surfaces.
@@ -319,7 +323,10 @@ describe('SearchService', () => {
         q: 'x',
         entities: ['articles', 'assets'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'u1', role: 'VIEWER' },
+        } as never,
       });
 
       const [params] = client.multiSearch.mock.calls[0] as [
@@ -343,7 +350,10 @@ describe('SearchService', () => {
         q: 'x',
         entities: ['articles'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'admin', role: 'ADMIN' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'admin', role: 'ADMIN' },
+        } as never,
       });
 
       const [params] = client.multiSearch.mock.calls[0] as [
@@ -361,7 +371,10 @@ describe('SearchService', () => {
         q: 'x',
         entities: ['articles'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'u1', role: 'VIEWER' },
+        } as never,
       });
 
       const [params] = client.multiSearch.mock.calls[0] as [
@@ -405,7 +418,10 @@ describe('SearchService', () => {
         q: 'runbook',
         entities: ['articles'],
         limit: 2,
-        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'u1', role: 'VIEWER' },
+        } as never,
       });
 
       // The readable article is returned (it would have been dropped by the old post-filter-only path).
@@ -424,7 +440,12 @@ describe('SearchService', () => {
           {
             indexUid: 'articles',
             hits: [
-              { id: 'sec1', slug: 'secret', title: 'Secret', categoryId: 'secret-folder' },
+              {
+                id: 'sec1',
+                slug: 'secret',
+                title: 'Secret',
+                categoryId: 'secret-folder',
+              },
             ],
             estimatedTotalHits: 1,
           },
@@ -435,7 +456,10 @@ describe('SearchService', () => {
         q: 'secret',
         entities: ['articles'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'admin', role: 'ADMIN' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'admin', role: 'ADMIN' },
+        } as never,
       });
 
       expect(result.articles?.hits).toEqual([
@@ -462,7 +486,10 @@ describe('SearchService', () => {
         q: 'stale',
         entities: ['articles'],
         limit: 10,
-        principal: { kind: 'human', user: { id: 'u1', role: 'VIEWER' } } as never,
+        principal: {
+          kind: 'human',
+          user: { id: 'u1', role: 'VIEWER' },
+        } as never,
       });
 
       expect(result.articles?.hits).toEqual([]);
@@ -516,7 +543,7 @@ describe('SearchService', () => {
       ]);
     });
 
-    it('search defaults to all five indexes when entities is omitted', async () => {
+    it('search defaults to every index when entities is omitted', async () => {
       client.multiSearch.mockResolvedValue({ results: [] });
 
       await service.search({ q: 'x', limit: 20 });
@@ -530,6 +557,7 @@ describe('SearchService', () => {
         'users',
         'locations',
         'applications',
+        'infra',
       ]);
     });
 
@@ -600,7 +628,7 @@ describe('SearchService', () => {
       expect(result.degraded).toBeUndefined();
     });
 
-    it('search fail-soft defaults to empty (degraded) blocks for all five indexes when entities omitted', async () => {
+    it('search fail-soft defaults to empty (degraded) blocks for every index when entities omitted', async () => {
       client.multiSearch.mockRejectedValueOnce(new Error('meili down'));
 
       const result = await service.search({ q: 'x', limit: 20 });
@@ -611,6 +639,7 @@ describe('SearchService', () => {
         'articles',
         'assets',
         'degraded',
+        'infra',
         'locations',
         'users',
       ]);
@@ -625,6 +654,7 @@ describe('SearchService', () => {
             assets: { numberOfDocuments: 12 },
             articles: { numberOfDocuments: 0 }, // empty -> needs rebuild
             users: { numberOfDocuments: 3 },
+            infra: { numberOfDocuments: 4 },
             // locations + applications absent from the map -> never created -> need rebuild
           },
         });
@@ -642,6 +672,7 @@ describe('SearchService', () => {
             users: { numberOfDocuments: 1 },
             locations: { numberOfDocuments: 1 },
             applications: { numberOfDocuments: 1 },
+            infra: { numberOfDocuments: 1 },
           },
         });
 

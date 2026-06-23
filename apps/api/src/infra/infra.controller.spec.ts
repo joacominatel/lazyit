@@ -26,6 +26,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
   it('gates every READ route on infra:read', () => {
     expect(permsOf('listNodes')).toEqual(['infra:read']);
     expect(permsOf('getNode')).toEqual(['infra:read']);
+    expect(permsOf('getImpact')).toEqual(['infra:read']);
     expect(permsOf('listEdges')).toEqual(['infra:read']);
   });
 

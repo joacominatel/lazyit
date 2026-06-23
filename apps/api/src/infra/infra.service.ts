@@ -10,6 +10,8 @@ import {
   type CreateInfraEdge,
   type CreateInfraNode,
   type InfraEdgeKind,
+  type InfraImpactNode,
+  type InfraImpactResponse,
   type InfraNodeKind,
   type InfraNodeState,
   type InfraNodeStatus,
@@ -22,8 +24,21 @@ import { ActorService } from '../common/actor.service';
 import { AssetsService } from '../assets/assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { ArticlesService } from '../articles/articles.service';
+import { SearchService } from '../search/search.service';
+import { projectInfraNode } from '../search/search.documents';
 import { parsePageQuery } from '../common/parse-page-query';
 import type { Principal } from '../auth/principal';
+
+/** The node columns + linked Asset name `projectInfraNode` needs (the search projection shape). */
+const SEARCH_NODE_SELECT = {
+  id: true,
+  label: true,
+  kind: true,
+  status: true,
+  state: true,
+  ipAddress: true,
+  asset: { select: { name: true } },
+} as const;
 
 /** Optional filters for listing nodes (ADR-0070). All AND-combine; soft-deleted nodes never surface. */
 export interface InfraNodeFilters {
@@ -51,7 +66,23 @@ export class InfraService {
     private readonly assets: AssetsService,
     private readonly assignments: AssetAssignmentsService,
     private readonly articles: ArticlesService,
+    private readonly search: SearchService,
   ) {}
+
+  /**
+   * Fire-and-forget search sync for a node (ADR-0035 / ADR-0070 v1): re-read the node WITH its linked
+   * Asset's name, project it, and upsert into the `infra` index. Un-awaited, never throws, no-op when
+   * Meili is disabled — a search outage can never fail a domain write. Mirrors AssetsService exactly.
+   * The re-read is what lets the projection carry the (joined) `assetName`; if the row vanished between
+   * the write and this read (a racing soft-delete), there is simply nothing to index.
+   */
+  private async syncNodeToSearch(id: string): Promise<void> {
+    const row = await this.prisma.infraNode.findFirst({
+      where: { id },
+      select: SEARCH_NODE_SELECT,
+    });
+    if (row) this.search.upsert('infra', projectInfraNode(row));
+  }
 
   // ── Nodes ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -96,7 +127,7 @@ export class InfraService {
     }
 
     const { specs, shortcuts, ...rest } = data;
-    return this.prisma.infraNode.create({
+    const node = await this.prisma.infraNode.create({
       data: {
         ...rest,
         // `rest` carries the input `assetId` (possibly undefined); override with the resolved one
@@ -108,6 +139,10 @@ export class InfraService {
         ...(shortcuts !== undefined ? { shortcuts } : {}),
       },
     });
+    // Fire-and-forget search sync after the write (ADR-0035): un-awaited, never throws, no-op when
+    // Meili is disabled. The helper re-reads with the linked Asset name for the projection.
+    void this.syncNodeToSearch(node.id);
+    return node;
   }
 
   /** A single page-less list of nodes, newest first, filtered; soft-deleted excluded by the extension. */
@@ -224,7 +259,7 @@ export class InfraService {
     }
 
     const { specs, shortcuts, ...rest } = data;
-    return this.prisma.infraNode.update({
+    const updated = await this.prisma.infraNode.update({
       where: { id },
       data: {
         ...rest,
@@ -246,6 +281,10 @@ export class InfraService {
           : {}),
       },
     });
+    // Fire-and-forget search re-sync: label/kind/status/ipAddress (and the asset link, on detach) may
+    // have changed (ADR-0035). Un-awaited, never throws, no-op when Meili is disabled.
+    void this.syncNodeToSearch(updated.id);
+    return updated;
   }
 
   /**
@@ -274,10 +313,14 @@ export class InfraService {
   /** Soft-delete a node (off the map, history kept). 404 if missing or already soft-deleted. */
   async removeNode(id: string) {
     await this.getNode(id);
-    return this.prisma.infraNode.update({
+    const removed = await this.prisma.infraNode.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
+    // Drop from the search index (a soft-deleted node is off the map). Fire-and-forget, never throws,
+    // no-op when Meili is disabled (ADR-0035). Mirrors AssetsService.remove.
+    this.search.remove('infra', id);
+    return removed;
   }
 
   /** Restore a soft-deleted node. 404 if it never existed; idempotent if already live. */
@@ -290,10 +333,13 @@ export class InfraService {
       throw new NotFoundException(`Infra node ${id} not found`);
     }
     if (node.deletedAt === null) return node; // already live — no-op.
-    return this.prisma.infraNode.update({
+    const restored = await this.prisma.infraNode.update({
       where: { id },
       data: { deletedAt: null },
     });
+    // Back on the map → re-index it. Fire-and-forget, never throws, no-op when disabled (ADR-0035).
+    void this.syncNodeToSearch(restored.id);
+    return restored;
   }
 
   // ── Edges ───────────────────────────────────────────────────────────────────────────────────────
@@ -437,7 +483,100 @@ export class InfraService {
       orderBy: { startedAt: 'desc' },
     });
   }
+
+  // ── Impact / blast-radius (ADR-0070 §7) ───────────────────────────────────────────────────────────
+
+  /**
+   * Blast radius: "if this node goes down, what is affected?" The downstream set is every node that
+   * RUNS_ON or DEPENDS_ON the root, transitively — i.e. we walk the INVERSE of those edges (start at
+   * the root, follow edges whose TARGET is a frontier node back to their SOURCE), over ACTIVE edges
+   * only (`endedAt IS NULL`), skipping soft-deleted nodes. Returns each affected node once, at its
+   * MINIMUM hop count from the root (ADR-0070 §7 / InfraImpactResponse).
+   *
+   * ponytail: the graph traversal is ONE recursive CTE in Postgres (`$queryRaw`) — never an N+1 of
+   * per-level Prisma queries in app code. The CTE is:
+   *   - CYCLE-SAFE — it threads a `path` array of visited ids and only recurses into a neighbour NOT
+   *     already on that path, so a cycle (A→B→A) terminates instead of looping forever.
+   *   - DEPTH-BOUNDED — a hard ceiling of {@link IMPACT_MAX_DEPTH} hops is a belt-and-suspenders cap on
+   *     top of the path guard (a malformed/huge estate can never spin an unbounded recursion).
+   * The outer query then collapses to the MIN depth per affected node and joins back for display facts.
+   */
+  async getImpact(id: string): Promise<InfraImpactResponse> {
+    await this.getNode(id); // 404 if the root is missing or soft-deleted.
+
+    // The downstream/inverse traversal kinds (ADR-0070 §7). Bound as a SQL array literal cast to the
+    // enum type so the IN-list is parameterized, not concatenated.
+    const kinds: InfraEdgeKind[] = ['RUNS_ON', 'DEPENDS_ON'];
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        label: string;
+        kind: InfraNodeKind;
+        status: InfraNodeStatus;
+        depth: number;
+      }>
+    >(Prisma.sql`
+      WITH RECURSIVE impact AS (
+        -- Seed: the root at depth 0 (it is the cycle-path origin; excluded from the result below).
+        SELECT
+          n."id",
+          0 AS depth,
+          ARRAY[n."id"] AS path
+        FROM "infra_nodes" n
+        WHERE n."id" = ${id} AND n."deletedAt" IS NULL
+
+        UNION ALL
+
+        -- Step: a node SOURCE that RUNS_ON / DEPENDS_ON a frontier node (edge TARGET = frontier), over
+        -- ACTIVE edges only, where the source is live and NOT already on the path (cycle guard) and we
+        -- are under the depth ceiling.
+        SELECT
+          e."sourceId",
+          impact.depth + 1,
+          impact.path || e."sourceId"
+        FROM impact
+        JOIN "infra_edges" e
+          ON e."targetId" = impact."id"
+         AND e."endedAt" IS NULL
+         AND e."kind" = ANY(${kinds}::"InfraEdgeKind"[])
+        JOIN "infra_nodes" src
+          ON src."id" = e."sourceId"
+         AND src."deletedAt" IS NULL
+        WHERE impact.depth < ${IMPACT_MAX_DEPTH}
+          AND NOT (e."sourceId" = ANY(impact.path))
+      )
+      SELECT
+        n."id",
+        n."label",
+        n."kind",
+        n."status",
+        MIN(impact.depth)::int AS depth
+      FROM impact
+      JOIN "infra_nodes" n ON n."id" = impact."id"
+      WHERE impact.depth > 0          -- drop the root itself; only the affected set ships.
+      GROUP BY n."id", n."label", n."kind", n."status"
+      ORDER BY depth ASC, n."label" ASC
+    `);
+
+    const affected: InfraImpactNode[] = rows.map((r) => ({
+      id: r.id,
+      label: r.label,
+      kind: r.kind,
+      status: r.status,
+      depth: r.depth,
+    }));
+    return { rootId: id, affected };
+  }
 }
+
+/**
+ * Hard recursion ceiling for the impact CTE (ADR-0070 §7). The `path` cycle-guard already terminates
+ * any cycle; this is a defence-in-depth cap so even a pathologically deep (or malformed) estate can
+ * never spin an unbounded recursion. 64 hops dwarfs any realistic host→VM→container→… chain in a
+ * 5–20-person estate — ponytail: a generous constant, not a tunable knob nobody will turn.
+ */
+const IMPACT_MAX_DEPTH = 64;
 
 /** The lean owner-user shape AssetAssignmentsService inlines when `includeUser: true`. */
 interface AssignmentUser {

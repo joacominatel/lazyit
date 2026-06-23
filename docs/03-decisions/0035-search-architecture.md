@@ -43,10 +43,14 @@ logged (CRITICAL) and swallowed. If Meili is down, writes still succeed and sear
   it internal-only). _Originally hand-off to DevOps for `infra/docker-compose.prod.yml`; that file was
   since consolidated into `compose.yaml` — see [[auth-zitadel-sot]] §9._ Config via `MEILI_HOST` / `MEILI_MASTER_KEY`
   ([[0028-secrets-and-config]]). If `MEILI_HOST` is unset the search wiring no-ops (search disabled).
-- **Indexed entities**: `assets`, `articles`, `users`, `locations`, `applications` (one Meili index
-  each; primary key `id`). The `articles` document includes the markdown **`content`** since
+- **Indexed entities**: `assets`, `articles`, `users`, `locations`, `applications`, `infra` (one Meili
+  index each; primary key `id`). The `articles` document includes the markdown **`content`** since
   [[0042-article-versioning-and-linking]] (runbook bodies are findable); only PUBLISHED articles are
-  ever indexed, so a DRAFT's content can't leak. Re-run `reindex:all` after deploy to backfill it.
+  ever indexed, so a DRAFT's content can't leak. The `infra` index ([[0070-infra-topology-graph]] v1)
+  carries each topology node's `label`, `kind`, `status`, `state`, `ipAddress` and the linked Asset's
+  `assetName`; `kind`/`status`/`state` are **filterable** (the canvas/Servers-list filters). It NEVER
+  indexes secret values (a node holds none — zero-knowledge, [[0061-secret-manager-zero-knowledge]]).
+  Soft-deleted nodes are off the map and excluded. Re-run `reindex:all` after deploy to backfill it.
 - **Sync**: `SearchService.upsert(index, doc)` / `delete(index, id)`, called **fire-and-forget** from
   each service's create / update / soft-delete. Soft-deleting removes the document, so soft-deleted
   rows never appear in results. A failed sync is logged, never thrown.
