@@ -42,6 +42,20 @@ y **asigna** al nuevo.
 > Un responsable que dejó la empresa sigue figurando como responsable activo hasta que liberes
 > explícitamente la asignación — lazyit nunca descarta registros de pertenencia en silencio.
 
+## Acciones rápidas desde la lista de activos
+
+No hace falta abrir un activo para gestionar su responsable. Cada fila de la lista de **Activos** trae
+una acción rápida con color:
+
+- **Asignar** (azul) en una fila sin responsable — abre el mismo selector que la página de detalle.
+- **Desasignar** (ámbar) en una fila que ya tiene uno — te pide confirmación y luego libera al
+  responsable actual hacia el historial de pertenencia.
+
+Cada fila tiene además un menú **…** con el resto: abrir el activo en una pestaña nueva, editarlo o
+clonarlo, asignar o quitar su asignación, **cambiar estado** (un submenú rápido) y eliminarlo. Cambiar
+el estado desde aquí es instantáneo y reversible — sin confirmación, igual que la acción masiva. Estos
+atajos respetan tus permisos: solo ves las acciones que tienes permitido ejecutar.
+
 ## Actividad e historial de pertenencia
 
 Cada activo lleva un **registro de actividad de solo adición** — una línea de tiempo de eventos
