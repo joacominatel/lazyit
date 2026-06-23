@@ -1,29 +1,30 @@
-"use client";
-
-import { useTranslations } from "next-intl";
-import { Breadcrumb } from "@/components/breadcrumb";
-import { PageHeader } from "@/components/page-header";
-import { AdminGate } from "../_components/admin-gate";
-import { ServiceAccountsManager } from "./_components/service-accounts-manager";
+import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { auth } from "@/auth";
+import { getServiceAccounts } from "@/lib/api/endpoints/service-accounts";
+import { serviceAccountKeys } from "@/lib/api/hooks/use-service-accounts";
+import { getServerQueryClient } from "@/lib/api/server-query-client";
+import { ServiceAccountsView } from "./_components/service-accounts-view";
 
 /**
- * Settings → Service accounts (ADR-0048). The ADMIN-only surface to create, view, rotate, revoke and
- * restore service accounts — non-human API credentials authorized by direct permission grants. Wrapped
- * in AdminGate (the same client gate as the rest of Settings; the API's `settings:manage` guard is the
- * real boundary), and the manager re-checks `can('settings:manage')` for the write affordances.
+ * Settings → Service accounts (ADR-0048; ADR-0067 server-prefetch route). A thin Server Component
+ * that prefetches the live (non-revoked) service-account list so the {@link ServiceAccountsManager}'s
+ * `useServiceAccounts(false)` hydrates without a skeleton → fetch waterfall. The prefetched key
+ * matches the hook exactly: `serviceAccountKeys.list(false)`. The client `AdminGate` stays inside the
+ * wrapped view (the API's `settings:manage` guard is the real boundary; the #600 401 handler stays on
+ * the client provider). See the applications page for the full mold.
  */
-export default function ServiceAccountsPage() {
-  const t = useTranslations("settings");
+export default async function ServiceAccountsPage() {
+  const session = await auth();
+  const queryClient = getServerQueryClient();
+
+  await queryClient.prefetchQuery({
+    queryKey: serviceAccountKeys.list(false),
+    queryFn: () => getServiceAccounts(false, session?.accessToken),
+  });
+
   return (
-    <AdminGate>
-      <div className="space-y-6">
-        <PageHeader
-          title={t("serviceAccounts.title")}
-          subtitle={t("serviceAccounts.subtitle")}
-          breadcrumb={<Breadcrumb />}
-        />
-        <ServiceAccountsManager />
-      </div>
-    </AdminGate>
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <ServiceAccountsView />
+    </HydrationBoundary>
   );
 }

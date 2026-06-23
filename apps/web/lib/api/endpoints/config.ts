@@ -21,9 +21,14 @@ const BASE = "/config";
  * First-run status (`GET /config/status`). Drives the wizard's self-lock (isConfigured), the IdP
  * choice (integrationMode), the topbar dev-mode banner (devMode) and carries the CSRF token the
  * setup POST must echo.
+ *
+ * `token` is the optional SSR Bearer override (ADR-0067): the Settings → Instance Server Component
+ * passes `session.accessToken` from `await auth()` to prefetch this read. The endpoint is public (no
+ * Bearer required), so a missing token is harmless; client callers omit it and `apiFetch` falls back
+ * to the browser-only session-token store, unchanged.
  */
-export function getConfigStatus(): Promise<ConfigStatus> {
-  return apiFetch<ConfigStatus>(`${BASE}/status`);
+export function getConfigStatus(token?: string): Promise<ConfigStatus> {
+  return apiFetch<ConfigStatus>(`${BASE}/status`, { token });
 }
 
 /**
@@ -51,9 +56,13 @@ export function setupConfig(
 /**
  * Read the full role→permission matrix (`GET /config/permissions`). ADMIN-only (`settings:manage`).
  * ADMIN is reported as the COMPLETE catalog (immutable/full); MEMBER/VIEWER are their stored rows.
+ *
+ * `token` is the optional SSR Bearer override (ADR-0067): the Settings → Roles → Permissions Server
+ * Component passes `session.accessToken` from `await auth()` to prefetch the matrix; client callers
+ * omit it and `apiFetch` falls back to the browser-only session-token store, unchanged.
  */
-export function getPermissionMatrix(): Promise<RolePermissionMatrix> {
-  return apiFetch<RolePermissionMatrix>(`${BASE}/permissions`);
+export function getPermissionMatrix(token?: string): Promise<RolePermissionMatrix> {
+  return apiFetch<RolePermissionMatrix>(`${BASE}/permissions`, { token });
 }
 
 /**

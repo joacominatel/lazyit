@@ -3,6 +3,7 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { ArticleForm } from "../_components/article-form";
 
+// ponytail: no data read — empty create form; nothing to SSR-prefetch (#662).
 export default async function NewArticlePage() {
   const t = await getTranslations("kb");
   return (

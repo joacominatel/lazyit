@@ -1,67 +1,34 @@
-"use client";
-
-import { useTranslations } from "next-intl";
-import { useParams } from "next/navigation";
-import { Breadcrumb } from "@/components/breadcrumb";
-import { DetailSkeleton } from "@/components/detail-panel";
-import { PageHeader } from "@/components/page-header";
-import { ErrorState } from "@/components/resource-table";
-import { useApplication } from "@/lib/api/hooks/use-applications";
-import { ApplicationForm } from "../../_components/application-form";
+import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { auth } from "@/auth";
+import { getApplication } from "@/lib/api/endpoints/applications";
+import { applicationKeys } from "@/lib/api/hooks/use-applications";
+import { getServerQueryClient } from "@/lib/api/server-query-client";
+import { ApplicationCloneView } from "./_components/application-clone-view";
 
 /**
- * Clone an Application: mirrors `/[id]/edit` but renders the create form pre-filled from the source
- * record (issue #125). It fetches the source by id and hands it to {@link ApplicationForm} as
- * `cloneSource`, so the form stays in CREATE mode (CreateApplicationSchema + create mutation) with a
- * " (copy)" name; there's no unique business field. The carried `url` is re-validated (SEC-008) and
- * the deep-copied `metadata` rides along into the create body.
+ * Clone application — ADR-0067 server-prefetch rollout (#662). This thin Server Component prefetches
+ * the source application's detail (`applicationKeys.detail(id)` via `getApplication(id, token)`) —
+ * the same read the clone form pre-fills from — into a per-request `QueryClient`, dehydrates it, and
+ * hydrates the client `ApplicationCloneView` so its `useApplication(id)` finds the entry already
+ * cached on first paint. The #600 401 handler stays on the client provider.
  */
-export default function CloneApplicationPage() {
-  const t = useTranslations("applications");
-  const params = useParams<{ id: string }>();
-  const { data: application, isLoading, isError, error, refetch } =
-    useApplication(params.id);
+export default async function CloneApplicationPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const session = await auth();
+  const queryClient = getServerQueryClient();
 
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-3xl">
-        <DetailSkeleton panels={1} />
-      </div>
-    );
-  }
-
-  if (isError || !application) {
-    return (
-      <div className="mx-auto max-w-3xl">
-        <ErrorState
-          title={t("detail.notFoundTitle")}
-          description={t("detail.notFoundDescription")}
-          onRetry={() => refetch()}
-          error={error}
-        />
-      </div>
-    );
-  }
+  await queryClient.prefetchQuery({
+    queryKey: applicationKeys.detail(id),
+    queryFn: () => getApplication(id, session?.accessToken),
+  });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: t("list.title"), href: "/applications" },
-              {
-                label: application.name,
-                href: `/applications/${application.id}`,
-              },
-              { label: t("form.breadcrumbClone") },
-            ]}
-          />
-        }
-        title={t("form.cloneTitle")}
-        subtitle={t("form.cloneSubtitle")}
-      />
-      <ApplicationForm cloneSource={application} />
-    </div>
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <ApplicationCloneView id={id} />
+    </HydrationBoundary>
   );
 }

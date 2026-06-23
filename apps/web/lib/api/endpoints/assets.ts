@@ -93,9 +93,16 @@ export function getAssets(
   return apiFetch<AssetListPage>(qs ? `${BASE}?${qs}` : BASE, { signal, token });
 }
 
-/** A single expanded asset by id. */
-export function getAsset(id: string): Promise<AssetWithRelations> {
-  return apiFetch<AssetWithRelations>(`${BASE}/${id}`);
+/**
+ * A single expanded asset by id. `token` is the optional SSR Bearer override (ADR-0067): a Server
+ * Component prefetch passes `session.accessToken` from `await auth()`; client callers omit it and
+ * `apiFetch` falls back to the browser-only session-token store (unchanged).
+ */
+export function getAsset(
+  id: string,
+  token?: string,
+): Promise<AssetWithRelations> {
+  return apiFetch<AssetWithRelations>(`${BASE}/${id}`, { token });
 }
 
 /**

@@ -66,6 +66,8 @@ const SECTIONS: SettingsSection[] = [
   { href: "/settings/instance", key: "instance", icon: ServerStackIcon },
 ];
 
+// ponytail: skipped from the ADR-0067 server-prefetch rollout — a pure link hub with no list/record
+// read to prefetch (the only read is the client `useMyPermissions` per-card gate).
 export default function SettingsPage() {
   const t = useTranslations("settings");
   // Per-card gate (RBAC v2): hide a card the caller can't use even past AdminGate (e.g. Bulk import →

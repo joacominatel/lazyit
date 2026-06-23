@@ -22,7 +22,11 @@ import { apiFetch } from "./client";
 export function createCrudEndpoints<TEntity, TCreate, TUpdate>(base: string) {
   return {
     list: (): Promise<TEntity[]> => apiFetch<TEntity[]>(base),
-    get: (id: string): Promise<TEntity> => apiFetch<TEntity>(`${base}/${id}`),
+    // `token` is the optional SSR Bearer override (ADR-0067): a Server Component prefetch passes
+    // `session.accessToken` from `await auth()`, since the client token store is browser-only. Client
+    // callers omit it and `apiFetch` falls back to the session-token store — behaviour unchanged.
+    get: (id: string, token?: string): Promise<TEntity> =>
+      apiFetch<TEntity>(`${base}/${id}`, { token }),
     create: (data: TCreate): Promise<TEntity> =>
       apiFetch<TEntity>(base, { method: "POST", body: data }),
     update: (id: string, data: TUpdate): Promise<TEntity> =>
