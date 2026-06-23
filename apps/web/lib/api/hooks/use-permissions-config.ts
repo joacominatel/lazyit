@@ -29,7 +29,9 @@ export const permissionConfigKeys = {
 export function usePermissionMatrix() {
   return useQuery({
     queryKey: permissionConfigKeys.matrix(),
-    queryFn: getPermissionMatrix,
+    // Wrapped (not passed bare) so TanStack's QueryFunctionContext is never forwarded as the
+    // getter's optional SSR `token` arg (ADR-0067); client callers always send no token.
+    queryFn: () => getPermissionMatrix(),
     staleTime: 30 * 1000,
   });
 }

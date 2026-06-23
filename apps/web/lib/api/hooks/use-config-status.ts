@@ -25,7 +25,9 @@ export const configKeys = {
 export function useConfigStatus() {
   return useQuery({
     queryKey: configKeys.status(),
-    queryFn: getConfigStatus,
+    // Wrapped (not passed bare) so TanStack's QueryFunctionContext is never forwarded as the
+    // getter's optional SSR `token` arg (ADR-0067); client callers always send no token.
+    queryFn: () => getConfigStatus(),
     staleTime: 30 * 1000,
   });
 }
