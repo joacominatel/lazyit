@@ -93,6 +93,15 @@ aplicas aparece también como una etiqueta que puedes quitar debajo de la barra,
 en la dirección de la página, así que una vista filtrada es fácil de deshacer, compartir o guardar
 en marcadores.
 
+### Elegir qué columnas mostrar
+
+El botón **Columnas** (junto a *Filtros*) abre una lista de las columnas de la tabla — etiqueta,
+modelo, categoría, ubicación, estado, responsables y actualizado. Desmarca las que no te interesan
+para reducir la tabla a lo que te importa. La columna **Nombre** y las acciones de fila siempre se
+mantienen. Tu elección se recuerda en este navegador, así que la tabla conserva la misma forma la
+próxima vez que entres. (Esto rige la tabla de escritorio; la vista de tarjetas en móvil siempre
+muestra el conjunto completo.)
+
 ## Editar, clonar y desactivar
 
 - **Editar** actualiza el activo en su lugar; cada cambio relevante (estado, ubicación, modelo, campos
