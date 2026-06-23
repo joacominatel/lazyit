@@ -119,6 +119,13 @@ si lo hay) puede recuperarse más tarde. lazyit nunca borra de forma definitiva 
 Al hacer clic en un nodo se abre un panel a la derecha — la razón por la que esto supera a un dibujo
 estático. Reúne, en un solo lugar:
 
+> **Editar desde el panel.** Con el permiso de gestión, la sección **Detalles** del panel (cerca de
+> arriba) se edita ahí mismo — sin una página aparte. Hacé clic en el **título** para renombrar el
+> nodo; cambiá su **tipo** o su **dirección IP** directamente; y el **estado** y los **accesos
+> directos** también son editables (ver abajo). Los cambios se guardan a medida que los hacés y la
+> tarjeta del nodo en el lienzo se actualiza al instante. Quien solo puede ver lo encuentra como
+> texto plano, sin controles de edición.
+
 - **Responsable(s)** — quién es responsable, tomado de las asignaciones del activo vinculado. Un
   responsable que dejó la empresa pero cuya asignación nunca se liberó sigue mostrándose, marcado
   como tal.
@@ -130,7 +137,9 @@ estático. Reúne, en un solo lugar:
   valor en esta superficie. (Todavía no existe un vínculo activo-a-secreto, así que esta lista está
   vacía por ahora; el panel está listo para ello.)
 - **Accesos directos** — enlaces rápidos (SSH, interfaz web, consola) que se abren en una pestaña
-  nueva.
+  nueva. Con el permiso de gestión los editás ahí mismo: cada acceso directo es un par etiqueta + URL
+  que podés cambiar, agregar o quitar, y luego **Guardás** la lista (lazyit verifica que cada URL sea
+  válida antes de guardar).
 - **Dirección IP** y fecha de **agregado**.
 - **Hijos** — los nodos alojados en este (sus relaciones *corre sobre* activas).
 - **Conexiones** — las relaciones activas de este nodo (que se pueden cerrar) y su historial cerrado
