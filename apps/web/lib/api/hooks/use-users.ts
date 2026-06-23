@@ -5,6 +5,7 @@ import {
   getUser,
   getUserAssignments,
   getUserGrants,
+  getUserRoleCounts,
   getUsers,
   type UserListParams,
 } from "../endpoints/users";
@@ -23,6 +24,8 @@ export const userKeys = {
   ...baseUserKeys,
   /** The authenticated caller (`GET /users/me`) — distinct from any `detail(id)`. */
   me: () => [...baseUserKeys.all, "me"] as const,
+  /** Per-role LIVE counts (`GET /users/role-counts`, #693) for the Settings → Roles cards. */
+  roleCounts: () => [...baseUserKeys.all, "role-counts"] as const,
   /** A parameterized (search/sort/paged) list page — distinct from the bare directory `lists()`. */
   list: (params: UserListParams) => [...baseUserKeys.all, "list", params] as const,
   assignments: (id: string, activeOnly: boolean) =>
@@ -60,6 +63,19 @@ export function useUserList(params: UserListParams = {}) {
     queryKey: userKeys.list(params),
     queryFn: ({ signal }) => getUsers(params, signal),
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Per-role LIVE user counts (`GET /users/role-counts`, #693) — the authoritative `{ ADMIN, MEMBER,
+ * VIEWER }` the Settings → Roles cards render. One cheap server-side `groupBy`, so the counts are
+ * correct at any team size; the cards link into the Users list (`/users?role=…`) for the membership
+ * itself. Mutations invalidate `users.all`, which refetches this.
+ */
+export function useUserRoleCounts() {
+  return useQuery({
+    queryKey: userKeys.roleCounts(),
+    queryFn: ({ signal }) => getUserRoleCounts(signal),
   });
 }
 
