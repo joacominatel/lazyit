@@ -423,6 +423,7 @@
       "location:read": { "label": "View locations" },
       "location:write": { "label": "Add & edit locations" },
       "location:delete": { "label": "Delete locations" },
+      "import:run": { "label": "Run imports" },
       "application:read": { "label": "View applications" },
       "application:write": { "label": "Add & edit applications" },
       "application:delete": { "label": "Delete applications" },
