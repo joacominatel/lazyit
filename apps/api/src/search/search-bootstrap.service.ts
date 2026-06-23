@@ -8,6 +8,7 @@ import {
   projectApplication,
   projectArticle,
   projectAsset,
+  projectInfraNode,
   projectLocation,
   projectUser,
   type SearchDocument,
@@ -161,6 +162,23 @@ export class SearchBootstrapService implements OnApplicationBootstrap {
           where: { deletedAt: null },
         });
         return rows.map(projectApplication);
+      }
+      case 'infra': {
+        // Soft-deleted nodes are off the map (ADR-0070) — excluded, like every other index. Join the
+        // linked Asset's `name` for the searchable `assetName` (null when graph-only).
+        const rows = await this.prisma.infraNode.findMany({
+          where: { deletedAt: null },
+          select: {
+            id: true,
+            label: true,
+            kind: true,
+            status: true,
+            state: true,
+            ipAddress: true,
+            asset: { select: { name: true } },
+          },
+        });
+        return rows.map(projectInfraNode);
       }
     }
   }
