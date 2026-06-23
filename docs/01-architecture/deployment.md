@@ -3,7 +3,7 @@ title: Deployment
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-08
+updated: 2026-06-23
 ---
 
 # Deployment
@@ -29,13 +29,15 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
                           │    │ /api/*       ─▶ api :3001 (NestJS, Node)  [prefix stripped]
                           │    │ /api/docs*   ─▶ NOT proxied in prod (SEC-009; internal/dev only)
                           │   api ──▶ db :5432 (Postgres 18)               │
+                          │   api ──▶ meilisearch :7700 (search, no published port)
                           │   api ──▶ valkey :6379 (BullMQ broker, AOF)    │
                           │   migrate (one-shot: prisma migrate deploy + seed)
                           │   internal network — only Caddy publishes ports │
                           └────────────────────────────┘
 ```
 
-- **Components:** Postgres, a one-shot **migrate** job, the **API**, the **web** app, **Caddy**, and
+- **Components:** Postgres, a one-shot **migrate** job, the **API**, the **web** app, **Caddy**,
+  **Meilisearch** (the full-text search engine — [[stack]], [[0035-search-architecture]]), and
   **Valkey** (the BullMQ broker for the async `.docx` import + the Applications Workflow Engine —
   [[stack]]). With the bundled IdP, a **Zitadel** server + DB + one-shot bootstrap sidecar also run
   ([[auth-zitadel-sot]]).
@@ -55,14 +57,23 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   survive a restart, a `valkey-cli ping` **healthcheck**, and a memory/CPU ceiling; the API gains
   **`depends_on: valkey { condition: service_healthy }`**. Like the DBs it stays **internal-network
   only and never publishes its port in prod** (the dev override binds `127.0.0.1:6379`).
+- **Search (Meilisearch):** a **Meilisearch** container (`getmeili/meilisearch:v1.12.3`) serves
+  full-text search for articles and assets ([[stack]], [[0035-search-architecture]]). Like the DBs it
+  stays **internal-network only and never publishes a port in prod** (the dev override binds
+  `127.0.0.1:7700`). The integration is **fail-soft**: the API **no-ops** when Meili is down, so an
+  outage degrades search but never takes down the app. Its index is a **rebuildable projection** of
+  Postgres, so the `meili_data` **volume need not be backed up** — it is reconstructed with
+  `reindex:all` ([[backups]], [[0035-search-architecture]]). A **one-off `reindex:all` is required
+  after the first deploy** (and after any volume rebuild) or search returns no hits.
 - **Secrets/config:** one `.env` per scope with a committed `.env.example`; the prod
   `infra/env/.env.prod` is gitignored, with `CHANGE_ME` placeholders and host-side protection. No
   Docker secrets block or external manager (YAGNI). New scoped env: **`REDIS_URL`** (the Valkey URL,
   e.g. `redis://valkey:6379`) and **`WORKFLOW_SECRET_KEY`** (the AES-256-GCM key for the workflow
   secret store — 32 bytes / 64 hex via `openssl rand -hex 32`, fail-loud at boot if missing).
   → [[0028-secrets-and-config]].
-- **Exposure:** only Caddy publishes ports; Postgres, Valkey, the API and web stay on the internal
-  network. The dev DB and Valkey bind loopback only. → [[0028-secrets-and-config]], SEC-005.
+- **Exposure:** only Caddy publishes ports; Postgres, Meilisearch, Valkey, the API and web stay on the
+  internal network. The dev DB, Meilisearch and Valkey bind loopback only.
+  → [[0028-secrets-and-config]], SEC-005.
 - **Backups:** manual `pg_dump`/`pg_restore` now, automation deferred. **`WORKFLOW_SECRET_KEY` is a
   third unrotatable DR linchpin** (alongside `POSTGRES_PASSWORD` and `ZITADEL_MASTERKEY`): losing it
   makes every stored connector credential undecryptable, so back it up off-host with the *matching*
@@ -124,5 +135,6 @@ path. See [[authorization]], [[0046-roles-permissions-v2]], [[0048-service-accou
 Related: [[stack]] · [[monorepo]] · [[setup]] · [[authorization]] · [[auth-zitadel-sot]] ·
 [[backups]] · [[05-runbooks/_MOC|Runbooks]] · [[0025-containerization-strategy]] ·
 [[0026-reverse-proxy-tls]] · [[0027-ci-pipeline]] · [[0028-secrets-and-config]] ·
-[[0043-zitadel-source-of-truth]] · [[0047-guided-first-deploy-bootstrap]] ·
-[[0053-async-workers-bullmq-valkey]] · [[0054-applications-workflow-engine]]
+[[0035-search-architecture]] · [[0043-zitadel-source-of-truth]] ·
+[[0047-guided-first-deploy-bootstrap]] · [[0053-async-workers-bullmq-valkey]] ·
+[[0054-applications-workflow-engine]]

@@ -3,7 +3,7 @@ title: Monorepo Layout
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-23
 ---
 
 # Monorepo Layout
@@ -18,7 +18,10 @@ lazyit/
 ├── packages/
 │   └── shared/      # @lazyit/shared — types & zod schemas shared front↔back
 ├── docs/            # this vault
-├── docker-compose.yml
+├── compose.yaml             # dev backing services (Postgres, Meilisearch, Zitadel)
+├── compose.override.yaml    # dev-only overrides (loopback port bindings), auto-loaded
+├── infra/
+│   └── docker-compose.prod.yaml  # the `prod` profile (Caddy, full containerized stack)
 ├── .env.example
 ├── turbo.json
 └── package.json     # workspace root: workspaces = ["apps/*", "packages/*"]
@@ -28,10 +31,16 @@ lazyit/
 
 - **`@lazyit/web`** — Next.js app. Depends on `@lazyit/shared` via `workspace:*`.
 - **`@lazyit/api`** — NestJS app + Prisma. Depends on `@lazyit/shared` via `workspace:*`.
-- **`@lazyit/shared`** — framework-agnostic TypeScript. Built to `dist/` (CommonJS + `.d.ts`)
-  via `tsc`; `main`/`types`/`exports` → `dist/` (the base `tsconfig.json` stays no-emit). Exports
-  `APP_NAME` and the `User` schemas/types so far. Why a build → [[0014-shared-package-build]].
-  **What may live here is governed by a contract → [[shared-package]].**
+- **`@lazyit/shared`** — framework-agnostic TypeScript. Built with `bun run scripts/build.ts`,
+  which runs **two `tsc` emits**: a CommonJS build to `dist/` (the main `.` barrel, consumed by
+  apps/api's CommonJS Jest and the Node-compiled API) plus a separate **ESM** emit to `dist/esm/crypto/`
+  for the `@lazyit/shared/crypto` subpath (the `@noble/*` primitives are ESM-only). `main`/`types`/
+  `exports` → `dist/` (the base `tsconfig.json` stays no-emit). It now exports the **full domain zod
+  schemas/types** (assets, users, applications, access grants, consumables, articles, locations, …),
+  the **`Page` / `PageQuery`** pagination envelope, the **authZ Permission catalog**, the **workflow**
+  engine contract, and the **Secret Manager** wire shapes — plus the crypto primitives behind the
+  separate **`@lazyit/shared/crypto`** subpath. Why a build → [[0014-shared-package-build]].
+  **Full inventory and what may live here is governed by a contract → [[shared-package]].**
 
 ## Orchestration
 
