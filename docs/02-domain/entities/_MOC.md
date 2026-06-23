@@ -30,6 +30,17 @@ updated: 2026-06-23
 - 🟢 [[asset-history]] — append-only log of asset state changes.
 - 🟢 [[asset-tag-scheme]] — singleton instance-config: opt-in auto-tag scheme (monotonic counter, gaps accepted). [[0063-configurable-asset-tag-scheme]] · [[0068-asset-tag-existing-estate-awareness]]
 
+## Infra topology (visual CMDB)
+
+The generic visual CMDB ([[0070-infra-topology-graph]]): a free-move canvas of typed, timestamped
+relationships over the server estate. A node is **Asset-backed by default** (it reuses the
+[[asset]]/[[asset-assignment]]/KB/secret machinery via the link) and can be detached to a graph-only
+node for ephemerals. Servers-only and platform-agnostic. v1 shipped (MVP + impact/blast-radius +
+Servers list + Meili search); the reporting agent is a future major. See [[0070-infra-topology-graph]].
+
+- 🟢 [[infra-node]] — a thing on the map (host/VM/container/cluster/…); generic kinds, Asset-backed by default, soft-delete = off the map. [[0070-infra-topology-graph]]
+- 🟢 [[infra-edge]] — a typed, timestamped relationship between two nodes (RUNS_ON / MEMBER_OF / DEPENDS_ON / BACKS_UP_TO / CONNECTS_TO); the [[asset-assignment]] lifecycle-join pattern. [[0070-infra-topology-graph]] · [[0019-asset-assignment-integrity]]
+
 ## People
 
 - 🟢 [[user]] — central to access, peripheral to assets (role + DB-first permissions).
