@@ -177,22 +177,22 @@ describe("resolveSort — per-resource allowlist", () => {
   });
 
   test("an allowed key maps to its Prisma field with the direction", () => {
-    expect(resolveSort({ sort: "name", dir: "asc" }, allow)).toEqual({
+    expect(resolveSort<Record<string, string>>({ sort: "name", dir: "asc" }, allow)).toEqual({
       name: "asc",
     });
-    expect(resolveSort({ sort: "updated", dir: "desc" }, allow)).toEqual({
+    expect(resolveSort<Record<string, string>>({ sort: "updated", dir: "desc" }, allow)).toEqual({
       updatedAt: "desc",
     });
   });
 
   test("a wire key may differ from its Prisma column", () => {
-    expect(resolveSort({ sort: "updated", dir: "asc" }, allow)).toEqual({
+    expect(resolveSort<Record<string, string>>({ sort: "updated", dir: "asc" }, allow)).toEqual({
       updatedAt: "asc",
     });
   });
 
   test("defaults dir to asc when omitted", () => {
-    expect(resolveSort({ sort: "name", dir: undefined }, allow)).toEqual({
+    expect(resolveSort<Record<string, string>>({ sort: "name", dir: undefined }, allow)).toEqual({
       name: "asc",
     });
   });
@@ -212,7 +212,7 @@ describe("resolveSort — per-resource allowlist", () => {
 
 describe("offsetOf", () => {
   test("maps the normalized window to Prisma take/skip", () => {
-    expect(offsetOf({ limit: 25, offset: 50 })).toEqual({
+    expect(offsetOf({ limit: 25, offset: 50, deleted: "active" })).toEqual({
       take: 25,
       skip: 50,
     });
@@ -222,12 +222,12 @@ describe("offsetOf", () => {
 describe("pageOf", () => {
   test("builds the envelope, echoing limit/offset from the query", () => {
     const items = [{ id: "a" }, { id: "b" }];
-    const page = pageOf(items, 7, { limit: 2, offset: 4 });
+    const page = pageOf(items, 7, { limit: 2, offset: 4, deleted: "active" });
     expect(page).toEqual({ items, total: 7, limit: 2, offset: 4 });
   });
 
   test("an empty slice still carries the total and window", () => {
-    expect(pageOf([], 0, { limit: 50, offset: 0 })).toEqual({
+    expect(pageOf([], 0, { limit: 50, offset: 0, deleted: "active" })).toEqual({
       items: [],
       total: 0,
       limit: 50,
