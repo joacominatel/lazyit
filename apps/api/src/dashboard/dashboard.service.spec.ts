@@ -547,4 +547,60 @@ describe('DashboardService', () => {
       ]);
     });
   });
+
+  describe('getActivityFilterOptions (distinct actor/action menus, issue #718)', () => {
+    beforeEach(() => {
+      // $queryRaw is called twice (actors, then actions); $transaction resolves both handles.
+      prisma.$queryRaw
+        .mockReturnValueOnce('ACTORS_QUERY')
+        .mockReturnValueOnce('ACTIONS_QUERY');
+    });
+
+    it('maps the distinct actors (id + name) and actions present in the feed', async () => {
+      prisma.$transaction.mockResolvedValue([
+        [
+          { id: '11111111-1111-4111-8111-111111111111', name: 'Admin User' },
+          { id: '22222222-2222-4222-8222-222222222222', name: 'Jane Doe' },
+        ],
+        [{ action: 'assigned' }, { action: 'granted' }],
+      ]);
+      const options = await service.getActivityFilterOptions();
+      expect(options.actors).toEqual([
+        { id: '11111111-1111-4111-8111-111111111111', name: 'Admin User' },
+        { id: '22222222-2222-4222-8222-222222222222', name: 'Jane Doe' },
+      ]);
+      expect(options.actions).toEqual(['assigned', 'granted']);
+    });
+
+    it('drops any action verb outside the shared allowlist (typed-response guard)', async () => {
+      prisma.$transaction.mockResolvedValue([
+        [],
+        [{ action: 'assigned' }, { action: 'exploded' }],
+      ]);
+      const options = await service.getActivityFilterOptions();
+      expect(options.actions).toEqual(['assigned']);
+    });
+
+    it('uses an inner JOIN on users so a null actor never reaches the actor menu', async () => {
+      prisma.$transaction.mockResolvedValue([[], []]);
+      await service.getActivityFilterOptions();
+      const actorsText = (
+        prisma.$queryRaw.mock.calls[0][0] as { text: string }
+      ).text;
+      // INNER JOIN (not LEFT JOIN) — a row with a null actorId has nothing to filter by, so it's out.
+      expect(actorsText).toContain('JOIN "users"');
+      expect(actorsText).not.toContain('LEFT JOIN');
+      expect(actorsText).toContain('DISTINCT');
+    });
+
+    it('batches the actor + action reads in a single $transaction', async () => {
+      prisma.$transaction.mockResolvedValue([[], []]);
+      await service.getActivityFilterOptions();
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledWith([
+        'ACTORS_QUERY',
+        'ACTIONS_QUERY',
+      ]);
+    });
+  });
 });
