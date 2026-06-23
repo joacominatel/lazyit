@@ -92,6 +92,12 @@
     "statusInColumnNote": "Map each status value in this column to a lazyit status. Common synonyms are filled in for you.",
     "statusNoValues": "No status values were found in the sampled rows.",
     "statusUnmapped": "— leave as-is —",
+    "fixedValue": {
+      "modeExisting": "Existing",
+      "modeConstant": "Constant",
+      "toggleAria": "Pick an existing value or type a constant",
+      "helper": "Pick an existing value to link every row to it, or switch to a constant to type a new one."
+    },
     "modelConfig": {
       "title": "Model brand and category",
       "description": "Map a column to Manufacturer or Category above to set them per row, or pin a value here to apply it to every model the import creates.",
@@ -99,6 +105,9 @@
       "manufacturerPlaceholder": "e.g. Apple",
       "categoryLabel": "Category for all models",
       "categoryPlaceholder": "e.g. Laptop",
+      "categoryPickPlaceholder": "Pick a category…",
+      "categoryPickSearch": "Search categories…",
+      "categoryPickEmpty": "No categories found.",
       "fromColumn": "Taken from the column “{column}”."
     },
     "missingRequired": "Map a column to: {fields}.",
