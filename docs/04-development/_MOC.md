@@ -22,6 +22,9 @@ Everything a developer needs to work on lazyit.
 - [[secret-manager-crypto-design]] — **build-time crypto primitives for the Secret Manager**
   (Argon2id KDF, X25519 envelope, AES-256-GCM, recovery key). Pins libraries/parameters before
   any code. Decision of record: [[0061-secret-manager-zero-knowledge]].
+- [[ssr-prefetch-recipe]] — **how to server-prefetch a route's first paint** (the thin Server
+  Component + `prefetchQuery` + `dehydrate` + `<HydrationBoundary>` mold). The operating manual for
+  copying the pattern onto a new route. Decision: [[0067-server-prefetch-ssr-strategy]].
 
 Domain/data conventions live separately in [[conventions]] (under
 [[02-domain/_MOC|Domain]]).

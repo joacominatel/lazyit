@@ -209,6 +209,28 @@ endpoints, no `?cloneFrom=` transport**. The mold:
   Every entry point is gated on `useCanWrite()` (a clone is a create; fails closed while loading) and
   is **never shown in the archived `deleted=only` view** (where Edit is already hidden).
 
+### Server-prefetch extension to the three-layer path (2026-06-23)
+
+The "Deferred" fork below — moving reads onto the server once auth landed — has now been **partially
+taken**, without disturbing the three layers. Auth landed ([[0039-authjs-v5-frontend-oidc]]), so
+[[0067-server-prefetch-ssr-strategy]] added a **fourth, optional layer on top** of the existing
+three: a thin `async` Server Component `page.tsx` that `prefetchQuery`s the route's **primary** read
+into a per-request `QueryClient`, `dehydrate()`s it, and wraps the interactive client view in
+`<HydrationBoundary>`. The endpoints layer is **reused unchanged** (a getter gains only an optional
+trailing `token?: string` for the server's Bearer, since the client token store is browser-only); the
+hooks are **untouched** (the child `useQuery` finds the dehydrated entry on first paint instead of
+fetching). The key the page prefetches is built from the **same key factory** the hook uses, so they
+can't drift. The pilot (#537) converted the six high-traffic list routes; the full rollout (#662)
+extended the mold to detail/edit/clone, KB, reports and the settings pages with a clear single
+primary read.
+
+What stays client-fetched, deliberately: secondary/related reads (prefetch only the primary to keep
+the change uniform); filtered/paged/searched first paints (only the unfiltered default is
+prefetched — a filtered URL degrades to a client fetch); and the **Secret Manager** entirely (it is
+`ssr: false` by design for INV-10 / zero-knowledge — [[0061-secret-manager-zero-knowledge]] — and its
+safe metadata reads are inseparable from the ciphertext/wrapped-key reads that feed client-side
+decryption). The operating manual for applying this to a new route is [[ssr-prefetch-recipe]].
+
 ## Consequences
 
 - **Positive:** a consistent, testable, copy-pasteable mold; contracts centralized in
@@ -216,13 +238,15 @@ endpoints, no `?cloneFrom=` transport**. The mold:
   of fetching concerns.
 - **Trade-offs:** boilerplate per entity (an endpoints file + two hook files); query-key
   discipline is enforced by convention, not tooling.
-- **Deferred — not a minor trade-off:** this commits the app to **client-side** data fetching
-  (TanStack Query) instead of React Server Components + Server Actions. It is the right call
-  *now* — auth/IdP isn't wired ([[0016-auth-strategy-deferred]]) and the screens are
-  interaction-heavy (dialogs, optimistic updates) — but it is a real architectural fork that
-  **will be revisited** once auth lands and reads can run on the server with a session.
-  Migrating later means moving reads into Server Components while keeping the `endpoints/`
-  layer; the hooks would shrink to mutation/optimistic concerns.
+- **Deferred — not a minor trade-off (now partially resolved):** this committed the app to
+  **client-side** data fetching (TanStack Query) instead of React Server Components + Server
+  Actions. It was the right call when written — auth/IdP wasn't wired
+  ([[0016-auth-strategy-deferred]]) and the screens are interaction-heavy (dialogs, optimistic
+  updates). Once auth landed, the fork was taken the **minimal** way (not a full RSC migration):
+  reads now run on the server via server-prefetch + hydration, the `endpoints/` layer is reused and
+  the hooks are unchanged. See the *Server-prefetch extension* section above and
+  [[0067-server-prefetch-ssr-strategy]].
 
 Related: [[0010-nextjs-frontend]] · [[0011-tailwind-styling]] · [[shared-package]] ·
-[[location]] · [[0018-api-documentation-swagger]] · [[0016-auth-strategy-deferred]]
+[[location]] · [[0018-api-documentation-swagger]] · [[0016-auth-strategy-deferred]] ·
+[[0067-server-prefetch-ssr-strategy]] · [[ssr-prefetch-recipe]]
