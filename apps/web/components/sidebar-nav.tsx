@@ -117,19 +117,13 @@ const NAV: NavSection[] = [
     pillar: "inventory",
     items: [
       { labelKey: "assets", href: "/assets", icon: ServerStackIcon },
-      // Assets › Servers — the filtered LIST view of infra nodes (ADR-0070 §6, #743). Same `infra:read`
-      // gate as Diagram (the API guards `/infra/*`); listed just before Diagram so the two topology
-      // surfaces sit together. The most-specific-active-highlight below distinguishes /assets,
-      // /assets/servers and /assets/diagram by longest-prefix match.
-      {
-        labelKey: "servers",
-        href: "/assets/servers",
-        icon: ServerStackIcon,
-        permission: "infra:read",
-      },
-      // Assets › Diagram — the infra topology canvas (ADR-0070 §6, #741). Gated behind `infra:read`
-      // (DEFAULT-OPEN — the map is team-wide operational), so the API's guard is the real gate and
-      // this just hides the link from a caller who can't view it.
+      // Assets › Topology — the infra topology surface (ADR-0070 §6, #741). One destination, two views:
+      // a Map (the React Flow canvas) and a Table (the filterable node list), switched in-page via a
+      // `?view=map|table` toggle (#760) — so the LIST is no longer a separate nav entry. `/assets/servers`
+      // survives only as a redirect into the Table view (deep-links + the Manual). Gated behind
+      // `infra:read` (DEFAULT-OPEN — the map is team-wide operational), so the API's guard is the real
+      // gate and this just hides the link from a caller who can't view it. The most-specific-active
+      // highlight below distinguishes /assets and /assets/diagram by longest-prefix match.
       {
         labelKey: "diagram",
         href: "/assets/diagram",
