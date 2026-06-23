@@ -107,12 +107,13 @@ describe('SearchService', () => {
       });
     });
 
-    it('search with no entities returns empty blocks for all five indexes', async () => {
+    it('search with no entities returns empty blocks for every index', async () => {
       const result = await service.search({ q: '', limit: 20 });
       expect(Object.keys(result).sort()).toEqual([
         'applications',
         'articles',
         'assets',
+        'infra',
         'locations',
         'users',
       ]);
@@ -516,7 +517,7 @@ describe('SearchService', () => {
       ]);
     });
 
-    it('search defaults to all five indexes when entities is omitted', async () => {
+    it('search defaults to every index when entities is omitted', async () => {
       client.multiSearch.mockResolvedValue({ results: [] });
 
       await service.search({ q: 'x', limit: 20 });
@@ -530,6 +531,7 @@ describe('SearchService', () => {
         'users',
         'locations',
         'applications',
+        'infra',
       ]);
     });
 
@@ -600,7 +602,7 @@ describe('SearchService', () => {
       expect(result.degraded).toBeUndefined();
     });
 
-    it('search fail-soft defaults to empty (degraded) blocks for all five indexes when entities omitted', async () => {
+    it('search fail-soft defaults to empty (degraded) blocks for every index when entities omitted', async () => {
       client.multiSearch.mockRejectedValueOnce(new Error('meili down'));
 
       const result = await service.search({ q: 'x', limit: 20 });
@@ -611,6 +613,7 @@ describe('SearchService', () => {
         'articles',
         'assets',
         'degraded',
+        'infra',
         'locations',
         'users',
       ]);
@@ -625,6 +628,7 @@ describe('SearchService', () => {
             assets: { numberOfDocuments: 12 },
             articles: { numberOfDocuments: 0 }, // empty -> needs rebuild
             users: { numberOfDocuments: 3 },
+            infra: { numberOfDocuments: 4 },
             // locations + applications absent from the map -> never created -> need rebuild
           },
         });
@@ -642,6 +646,7 @@ describe('SearchService', () => {
             users: { numberOfDocuments: 1 },
             locations: { numberOfDocuments: 1 },
             applications: { numberOfDocuments: 1 },
+            infra: { numberOfDocuments: 1 },
           },
         });
 
