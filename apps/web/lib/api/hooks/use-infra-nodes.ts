@@ -4,6 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useMemo } from "react";
 import type {
   CreateInfraEdge,
   InfraEdge,
@@ -57,6 +58,47 @@ export function useInfraNodes(filters: InfraNodeFilters = {}) {
     queryKey: infraKeys.nodes(filters),
     queryFn: ({ signal }) => getInfraNodes(filters, signal),
   });
+}
+
+/**
+ * Resolve the topology node backing an asset, for the Assets screen's "On topology" badge + "View in
+ * topology" deep-link (issue #765). ponytail: rather than a bespoke `?assetId=` endpoint, reuse the
+ * already-cached node list (`useInfraNodes`) and find the match client-side — the estate is small by
+ * design (ADR-0070), so the whole list is cheap to hold and scan. `enabled` gates the fetch on
+ * `infra:read` so a viewer without topology access never fires a 403 (the badge simply won't show).
+ *
+ * Returns the matched node id (or null when the asset doesn't back one), so callers build the link
+ * from a bare id without re-deriving the lookup.
+ */
+export function useAssetInfraNodeId(
+  assetId: string,
+  enabled: boolean,
+): string | null {
+  const { data } = useQuery({
+    queryKey: infraKeys.nodes({}),
+    queryFn: ({ signal }) => getInfraNodes({}, signal),
+    enabled,
+  });
+  return data?.find((node) => node.assetId === assetId)?.id ?? null;
+}
+
+/**
+ * The set of asset ids that back a topology node — for the Assets LIST glyph (issue #765). Shares the
+ * exact same cached node list as {@link useAssetInfraNodeId} (one `["infra","nodes",{}]` query), so a
+ * list → detail navigation reuses the fetch. `enabled` gates it on `infra:read`. Returns an empty Set
+ * while loading / when gated off, so the caller's `has()` check is a safe no-op.
+ */
+export function useAssetsOnTopology(enabled: boolean): ReadonlySet<string> {
+  const { data } = useQuery({
+    queryKey: infraKeys.nodes({}),
+    queryFn: ({ signal }) => getInfraNodes({}, signal),
+    enabled,
+  });
+  return useMemo(() => {
+    const ids = new Set<string>();
+    for (const node of data ?? []) if (node.assetId) ids.add(node.assetId);
+    return ids;
+  }, [data]);
 }
 
 /**
