@@ -40,6 +40,20 @@ the new one.
 > An owner who has left the company still appears as an active owner until you explicitly release the
 > assignment — lazyit never silently drops ownership records.
 
+## Quick actions from the assets list
+
+You don't have to open an asset to manage its owner. Each row on the **Assets** list carries one
+colored quick action:
+
+- **Assign** (blue) on a row with no owner — opens the same picker as the detail page.
+- **Unassign** (amber) on a row that already has one — asks you to confirm, then releases the current
+  owner into the ownership history.
+
+Each row also has a **…** menu with the rest: open the asset in a new tab, edit or clone it, assign or
+remove its assignment, **change status** (a quick submenu), and delete. Changing status from here is
+instant and reversible — no confirmation, just like the bulk action. These shortcuts respect your
+permissions: you only see the actions you're allowed to run.
+
 ## Activity and ownership history
 
 Every asset carries an **append-only activity log** — a timeline of discrete events, newest first.

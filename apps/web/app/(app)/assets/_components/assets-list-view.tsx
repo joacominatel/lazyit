@@ -1,13 +1,17 @@
 "use client";
 
 import {
+  ArrowPathIcon,
   ArrowUturnLeftIcon,
   FunnelIcon,
   PlusIcon,
   ServerStackIcon,
   TrashIcon,
+  UserMinusIcon,
+  UserPlusIcon,
 } from "@heroicons/react/24/outline";
 import {
+  type AssetListItem,
   type AssetStatus,
   AssetStatusSchema,
   type BatchResult,
@@ -32,7 +36,6 @@ import {
   type ResourceColumn,
   ResourceTable,
   RestoreRowAction,
-  RowActions,
   rowActionsReveal,
   SelectCell,
   SortableHeader,
@@ -40,6 +43,15 @@ import {
 import { RowsPerPageSelect } from "@/components/rows-per-page-select";
 import { SearchInput } from "@/components/search-input";
 import { UserCombobox } from "@/components/user-combobox";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,7 +77,9 @@ import {
   useBatchSetAssetStatus,
   useDeleteAsset,
   useRestoreAsset,
+  useUpdateAsset,
 } from "@/lib/api/hooks/use-asset-mutations";
+import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { useLocations } from "@/lib/api/hooks/use-locations";
 import {
   type BatchVerb,
@@ -77,11 +91,12 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
-import { cn } from "@/lib/utils";
+import { AssetRowActions } from "./asset-row-actions";
 import {
   AssetStatusBadge,
   useAssetStatusLabel,
 } from "./asset-status-badge";
+import { AssignUserDialog } from "./assign-user-dialog";
 import { StackedOwnerAvatars } from "./stacked-owner-avatars";
 
 type OwnershipFilter = "ALL" | "HAS" | "NONE";
@@ -171,6 +186,8 @@ export function AssetsListView() {
   const { data: locations } = useLocations();
   const deleteAsset = useDeleteAsset();
   const restoreAsset = useRestoreAsset();
+  const updateAsset = useUpdateAsset();
+  const releaseAssignment = useReleaseAssignment();
   const batchDelete = useBatchDeleteAssets();
   const batchRestore = useBatchRestoreAssets();
   const batchStatus = useBatchSetAssetStatus();
@@ -178,6 +195,12 @@ export function AssetsListView() {
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(
     null,
   );
+  // The asset the Assign dialog targets (null = closed). Its current owners are excluded from the
+  // picker. Reuses the same dialog as the detail page — verbatim.
+  const [assigning, setAssigning] = useState<AssetListItem | null>(null);
+  // The asset whose single active owner is being unassigned, pending confirm (null = closed). The
+  // list row already carries `activeAssignments[0].id`, so releasing needs no extra fetch.
+  const [unassigning, setUnassigning] = useState<AssetListItem | null>(null);
 
   const rows = useMemo(() => {
     const items = page?.items ?? [];
@@ -214,6 +237,94 @@ export function AssetsListView() {
       onSuccess: () => toast.success(t("restoredToast", { name })),
       onError: (err) => notifyError(err, t("restoreError")),
     });
+  }
+
+  /** Change one asset's status from the row kebab (reversible — no confirm, matching the batch flow). */
+  function handleChangeStatus(asset: AssetListItem, status: AssetStatus) {
+    if (status === asset.status) return;
+    updateAsset.mutate(
+      { id: asset.id, data: { status } },
+      {
+        onSuccess: () =>
+          toast.success(
+            t("statusChangedToast", { status: statusLabel(status) }),
+          ),
+        onError: (err) => notifyError(err, t("statusChangeError")),
+      },
+    );
+  }
+
+  /** Release the asset's single active owner (the row carries its assignment id — no extra fetch). */
+  function handleConfirmUnassign() {
+    const assignmentId = unassigning?.activeAssignments[0]?.id;
+    if (!assignmentId) return;
+    releaseAssignment.mutate(
+      { id: assignmentId },
+      {
+        onSuccess: () => {
+          toast.success(t("unassignedToast"));
+          setUnassigning(null);
+        },
+        onError: (err) => notifyError(err, t("unassignError")),
+      },
+    );
+  }
+
+  /**
+   * The one color-coded quick action per row (active view, `asset:write` only): a blue tonal
+   * **Assign** when the asset has no live owner, an amber tonal **Unassign** when it does. Assign
+   * reuses the detail page's {@link AssignUserDialog}; Unassign goes through a confirm. Returns null
+   * when the operator can't write, so the column stays empty for them.
+   */
+  function rowQuickAction(asset: AssetListItem) {
+    if (!canWrite) return null;
+    const owned = asset.activeAssignments.length > 0;
+    return owned ? (
+      <Button
+        variant="warning"
+        size="sm"
+        onClick={() => setUnassigning(asset)}
+      >
+        <UserMinusIcon />
+        {t("unassign")}
+      </Button>
+    ) : (
+      <Button variant="info" size="sm" onClick={() => setAssigning(asset)}>
+        <UserPlusIcon />
+        {t("assign")}
+      </Button>
+    );
+  }
+
+  /** The Assets-local row kebab for the active view, wired to this row's permissions + state. */
+  function rowKebab(asset: AssetListItem) {
+    if (!canWrite && !canDelete) return null;
+    const owned = asset.activeAssignments.length > 0;
+    return (
+      <AssetRowActions
+        assetId={asset.id}
+        currentStatus={asset.status}
+        hasOwner={owned}
+        onEdit={
+          canWrite ? () => router.push(`/assets/${asset.id}/edit`) : undefined
+        }
+        onClone={
+          canWrite ? () => router.push(`/assets/${asset.id}/clone`) : undefined
+        }
+        onAssign={canWrite ? () => setAssigning(asset) : undefined}
+        onUnassign={canWrite ? () => setUnassigning(asset) : undefined}
+        onChangeStatus={
+          canWrite
+            ? (status) => handleChangeStatus(asset, status)
+            : undefined
+        }
+        onDelete={
+          canDelete
+            ? () => setDeleting({ id: asset.id, name: asset.name })
+            : undefined
+        }
+      />
+    );
   }
 
   const columns = useMemo<ResourceColumn[]>(
@@ -646,23 +757,10 @@ export function AssetsListView() {
                       />
                     ) : undefined
                   ) : canWrite || canDelete ? (
-                    <RowActions
-                      onEdit={
-                        canWrite
-                          ? () => router.push(`/assets/${asset.id}/edit`)
-                          : undefined
-                      }
-                      onClone={
-                        canWrite
-                          ? () => router.push(`/assets/${asset.id}/clone`)
-                          : undefined
-                      }
-                      onDelete={
-                        canDelete
-                          ? () => setDeleting({ id: asset.id, name: asset.name })
-                          : undefined
-                      }
-                    />
+                    <>
+                      {rowQuickAction(asset)}
+                      {rowKebab(asset)}
+                    </>
                   ) : undefined
                 }
               />
@@ -730,24 +828,11 @@ export function AssetsListView() {
                       </div>
                     ) : null
                   ) : canWrite || canDelete ? (
-                    <div className={cn("flex justify-end", rowActionsReveal)}>
-                      <RowActions
-                        onEdit={
-                          canWrite
-                            ? () => router.push(`/assets/${asset.id}/edit`)
-                            : undefined
-                        }
-                        onClone={
-                          canWrite
-                            ? () => router.push(`/assets/${asset.id}/clone`)
-                            : undefined
-                        }
-                        onDelete={
-                          canDelete
-                            ? () => setDeleting({ id: asset.id, name: asset.name })
-                            : undefined
-                        }
-                      />
+                    <div className="flex items-center justify-end gap-1">
+                      {/* The colored quick action stays visible (a primary affordance); only the
+                          kebab fades in on row hover/focus to keep dense lists calm. */}
+                      {rowQuickAction(asset)}
+                      <span className={rowActionsReveal}>{rowKebab(asset)}</span>
                     </div>
                   ) : null}
                 </TableCell>
@@ -841,6 +926,56 @@ export function AssetsListView() {
           name={deleting.name}
           onConfirm={() => deleteAsset.mutateAsync(deleting.id)}
         />
+      ) : null}
+
+      {/* Assign — the same dialog the detail page uses, verbatim. Excludes current owners so a
+          person can't be double-assigned to the same asset. */}
+      {assigning ? (
+        <AssignUserDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setAssigning(null);
+          }}
+          assetId={assigning.id}
+          excludeUserIds={assigning.activeAssignments.map((a) => a.userId)}
+        />
+      ) : null}
+
+      {/* Unassign — a confirm before releasing the active owner (prevents accidental un-assignments).
+          The row already carries the assignment id, so no extra fetch is needed. */}
+      {unassigning ? (
+        <AlertDialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !releaseAssignment.isPending) setUnassigning(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("unassignConfirmTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("unassignConfirmDescription", { name: unassigning.name })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={releaseAssignment.isPending}>
+                {tc("cancel")}
+              </AlertDialogCancel>
+              {/* Plain warning button (not AlertDialogAction) so we own the spinner and only close
+                  on success — matching the DeleteConfirmDialog pattern. */}
+              <Button
+                variant="warning"
+                onClick={handleConfirmUnassign}
+                disabled={releaseAssignment.isPending}
+              >
+                {releaseAssignment.isPending && (
+                  <ArrowPathIcon className="animate-spin" />
+                )}
+                {t("unassign")}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       ) : null}
     </div>
   );

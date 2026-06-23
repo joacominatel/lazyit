@@ -18,6 +18,14 @@
     "batchDeleteError": "Couldn't delete the selected assets",
     "setStatusPlaceholder": "Set status…",
     "restore": "Restore",
+    "assign": "Assign",
+    "unassign": "Unassign",
+    "statusChangedToast": "Status set to {status}",
+    "statusChangeError": "Couldn't change the status",
+    "unassignedToast": "Owner unassigned",
+    "unassignError": "Couldn't unassign the owner",
+    "unassignConfirmTitle": "Unassign owner?",
+    "unassignConfirmDescription": "This releases the current owner of {name} and moves the assignment into its ownership history. You can reassign it at any time.",
     "columns": {
       "name": "Name",
       "assetTag": "Asset tag",
@@ -173,6 +181,12 @@
         "restored": "Asset restored"
       }
     }
+  },
+  "rowActions": {
+    "openInNewTab": "Open in new tab",
+    "assign": "Assign to…",
+    "removeAssignment": "Remove assignment",
+    "changeStatus": "Change status"
   },
   "assign": {
     "title": "Assign user",
