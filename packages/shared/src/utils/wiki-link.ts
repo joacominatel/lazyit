@@ -33,7 +33,8 @@ const WIKI_LINK_TOKEN = /\[\[([^\][]+?)\]\]/g;
  */
 function targetSlugOf(body: string): string | null {
   // Strip a `|display` alias and a `#heading` anchor — both are non-target presentation.
-  const target = body.split("|")[0].split("#")[0];
+  // `.split()` always returns at least one element, so [0] is never undefined.
+  const target = body.split("|")[0]!.split("#")[0]!;
   const slug = slugify(target);
   return slug === "" ? null : slug;
 }
@@ -53,7 +54,7 @@ export function parseWikiLinks(content: string): string[] {
   const seen = new Set<string>();
   const slugs: string[] = [];
   for (const match of content.matchAll(WIKI_LINK_TOKEN)) {
-    const slug = targetSlugOf(match[1]);
+    const slug = targetSlugOf(match[1]!);
     if (slug !== null && !seen.has(slug)) {
       seen.add(slug);
       slugs.push(slug);
