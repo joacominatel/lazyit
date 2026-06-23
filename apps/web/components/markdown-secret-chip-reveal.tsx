@@ -246,9 +246,10 @@ export function SecretChipReveal({
  */
 function UnlockSuccess({ onClose }: { onClose: () => void }) {
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   useEffect(() => {
+    onCloseRef.current = onClose;
     onCloseRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-shot: fires exactly once on mount; ref is updated first so the call uses the current closure (SECW-01 / SM-FE-005)
   }, []);
   return (
     <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">

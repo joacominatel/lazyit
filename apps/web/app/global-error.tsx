@@ -55,7 +55,7 @@ export default function GlobalError({
   }, [error]);
 
   // Resolve once on mount — the cookie can't change while this boundary is shown.
-  const locale = useMemo(readLocaleFromCookie, []);
+  const locale = useMemo(() => readLocaleFromCookie(), []);
   const messages = useMemo(() => ({ shared: SHARED_BY_LOCALE[locale] }), [
     locale,
   ]);
