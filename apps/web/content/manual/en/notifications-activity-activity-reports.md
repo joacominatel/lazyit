@@ -22,7 +22,7 @@ role-permission settings — see [Permissions](/help/permissions).
 
 ## What it shows
 
-The feed merges events from across the product into one timeline:
+The feed merges events from across the product into one chronological stream:
 
 - **Assets** — history and assignments (assigned / released).
 - **Access** — application access granted and revoked.
@@ -50,15 +50,17 @@ URL, so a filtered view is shareable and survives Back navigation.
 
 A row of active-filter chips shows what is applied; clear them individually or all at once.
 
-## Views and export
+## Table and export
 
-- **Timeline** — a comfortable, day-grouped view; use **Load more** to page through.
-- **Table** — a dense table with true previous/next paging.
+The feed is a single dense **table** — when, action, entity, actor and a one-line summary, one row per
+event. Paging is real previous/next over the filtered result (pick how many rows per page), so each page
+is one true slice of the server's count, never a partial window.
+
 - **Export visible** — download the rows currently shown as a CSV.
 - **Print** — print the current view.
 
-Both export actions act on exactly what is currently visible (the active filters and view), so narrow
-the feed first to export just the slice you need.
+Both export actions act on exactly what is currently visible (the active filters and the current page), so
+narrow the feed first to export just the slice you need.
 
 ## Reports vs the notification bell
 

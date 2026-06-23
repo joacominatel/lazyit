@@ -53,15 +53,18 @@ navegación hacia atrás.
 
 Una fila de fichas de filtros activos muestra lo que está aplicado; quítalas una a una o todas a la vez.
 
-## Vistas y exportación
+## Tabla y exportación
 
-- **Cronología** — una vista cómoda, agrupada por día; usa **Cargar más** para avanzar.
-- **Tabla** — una tabla densa con paginación real de anterior/siguiente.
+El feed es una única **tabla** densa — cuándo, acción, entidad, responsable y un resumen de una línea, una
+fila por evento. La paginación es real de anterior/siguiente sobre el resultado filtrado (eliges cuántas
+filas por página), así que cada página es una porción real del recuento del servidor, nunca una ventana
+parcial.
+
 - **Exportar eventos visibles** — descarga las filas mostradas actualmente como CSV.
 - **Imprimir** — imprime la vista actual.
 
-Ambas acciones de exportación operan exactamente sobre lo que está visible en ese momento (los filtros y
-la vista activos), así que acota el feed primero para exportar solo la porción que necesitas.
+Ambas acciones de exportación operan exactamente sobre lo que está visible en ese momento (los filtros y la
+página actual), así que acota el feed primero para exportar solo la porción que necesitas.
 
 ## Informes frente a la campana de notificaciones
 
