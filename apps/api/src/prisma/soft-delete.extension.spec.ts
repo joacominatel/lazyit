@@ -97,7 +97,7 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     });
   });
 
-  it('SOFT_DELETABLE_MODELS lists exactly the 14 mutable domain entities', () => {
+  it('SOFT_DELETABLE_MODELS lists exactly the 15 mutable domain entities', () => {
     expect(SOFT_DELETABLE_MODELS.has('User')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('Asset')).toBe(true);
     // ServiceAccount is soft-deletable (revoke = soft delete; ADR-0048).
@@ -119,7 +119,11 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     // DELIBERATELY excluded from the soft-delete set (ADR-0061 §4/§10).
     expect(SOFT_DELETABLE_MODELS.has('VaultMembership')).toBe(false);
     expect(SOFT_DELETABLE_MODELS.has('SecretAuditLog')).toBe(false);
-    expect(SOFT_DELETABLE_MODELS.size).toBe(14);
+    // Infra topology (ADR-0070): InfraNode soft-deletes (off the map, history kept); InfraEdge does
+    // not (no deletedAt — a closed edge sets endedAt, an ADR-0019 lifecycle marker, and cascades).
+    expect(SOFT_DELETABLE_MODELS.has('InfraNode')).toBe(true);
+    expect(SOFT_DELETABLE_MODELS.has('InfraEdge')).toBe(false);
+    expect(SOFT_DELETABLE_MODELS.size).toBe(15);
   });
 
   it('auto-scopes ConsumableCategory reads to live rows (#321)', () => {

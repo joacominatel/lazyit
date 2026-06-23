@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { requireAtLeastOneKey } from "./primitives";
+import { ArticleListItemSchema } from "./article-list";
 
 /**
  * Infra topology graph — InfraNode (the things) + InfraEdge (typed, timestamped relationships).
@@ -164,6 +165,72 @@ export const CreateInfraEdgeSchema = z
     path: ["targetId"],
   });
 
+// ── Node drill-in detail (ADR-0070 §6) — the asset-backed payoff panel ────────────────────────────
+
+/**
+ * The active owner of an asset-backed node, surfaced through the node's linked Asset's active
+ * `AssetAssignment` (asset-centric ownership — ADR-0004/0019; ownership is a join, never a column).
+ * A lean summary (NOT the full User row): just enough to render an avatar + name. An asset may have
+ * 0..n active owners (multi-owner), so the drill-in carries an array. `userId` is the User uuid.
+ */
+export const InfraNodeOwnerSchema = z.object({
+  assignmentId: z.cuid(),
+  userId: z.uuid(),
+  firstName: z.string(),
+  lastName: z.string(),
+  email: z.email(),
+  /** Non-null when the owner left the company but the assignment was never released (history kept). */
+  deletedAt: z.iso.datetime().nullable(),
+});
+
+/**
+ * A child node — one hosted on this node via an ACTIVE inverse `RUNS_ON` edge (ADR-0070 §6: "the
+ * children list derived from RUNS_ON edges"). A lean summary so the panel can list + link to each
+ * child without a second round-trip.
+ */
+export const InfraNodeChildSchema = z.object({
+  id: z.cuid(),
+  label: z.string(),
+  kind: InfraNodeKindSchema,
+  status: InfraNodeStatusSchema,
+});
+
+/**
+ * A secret reference surfaced on the drill-in — HANDLES ONLY, NEVER a decrypted value (INV-10,
+ * [[0061-secret-manager-zero-knowledge]]). The handle is the `{{ lazyit_secret.HANDLE }}` chip token;
+ * `label` is the human title. Deliberately carries NO ciphertext/iv/authTag — the server is
+ * structurally incapable of decryption and this surface must never approach the value side.
+ *
+ * ponytail: v1 has NO asset→secret linkage in the data model (no FK/join exists — verified against the
+ * Secret Manager schema). So the API returns an EMPTY array here today; the shape is fixed now so the
+ * frontend panel and a future linkage (ADR-0070 §6) agree without a contract change.
+ */
+export const InfraSecretRefSchema = z.object({
+  handle: z.string(),
+  label: z.string(),
+  vaultId: z.cuid(),
+});
+
+/**
+ * `GET /infra/nodes/:id` — the enriched drill-in (ADR-0070 §6). The whole reason to build this over a
+ * Draw.io diagram: the node PLUS its asset-backed payoff (owner, KB links, secret handles, shortcuts,
+ * IP) and its children (active inverse RUNS_ON). `label` is the canvas display name and always wins;
+ * `assetName` is the secondary "inventory name" from the linked Asset (null when graph-only). The KB
+ * links reuse the lean `ArticleListItem` shape (PUBLISHED only, folder-scoped to the caller).
+ */
+export const InfraNodeDetailSchema = InfraNodeSchema.extend({
+  /** The linked Asset's `name` (the secondary "inventory name"); null when the node is graph-only. */
+  assetName: z.string().nullable(),
+  /** Active owners via the linked Asset's `AssetAssignment`s; `[]` when graph-only or unowned. */
+  owners: z.array(InfraNodeOwnerSchema),
+  /** PUBLISHED KB articles linked to the node's Asset (folder-scoped); `[]` when graph-only. */
+  articleLinks: z.array(ArticleListItemSchema),
+  /** Secret HANDLES only (never values, INV-10); `[]` in v1 — no asset→secret linkage exists yet. */
+  secretRefs: z.array(InfraSecretRefSchema),
+  /** Nodes hosted on this one via an ACTIVE inverse RUNS_ON edge. */
+  children: z.array(InfraNodeChildSchema),
+});
+
 // ── Plausibility table (ADR-0070 §3) — data the API WARNS on, NOT a hard constraint ───────────────
 
 export type InfraNodeKind = z.infer<typeof InfraNodeKindSchema>;
@@ -247,3 +314,7 @@ export type InfraEdge = z.infer<typeof InfraEdgeSchema>;
 export type CreateInfraEdge = z.infer<typeof CreateInfraEdgeSchema>;
 export type InfraImpactNode = z.infer<typeof InfraImpactNodeSchema>;
 export type InfraImpactResponse = z.infer<typeof InfraImpactResponseSchema>;
+export type InfraNodeOwner = z.infer<typeof InfraNodeOwnerSchema>;
+export type InfraNodeChild = z.infer<typeof InfraNodeChildSchema>;
+export type InfraSecretRef = z.infer<typeof InfraSecretRefSchema>;
+export type InfraNodeDetail = z.infer<typeof InfraNodeDetailSchema>;
