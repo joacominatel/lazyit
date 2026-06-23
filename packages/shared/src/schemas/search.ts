@@ -11,13 +11,14 @@ import { z } from "zod";
  * typing, not runtime parsing).
  */
 
-/** The five searchable entities — one Meili index each. Mirrors `SEARCH_INDEXES` in the API. */
+/** The searchable entities — one Meili index each. Mirrors `SEARCH_INDEXES` in the API. */
 export const SEARCH_ENTITIES = [
   "assets",
   "articles",
   "users",
   "locations",
   "applications",
+  "infra", // topology nodes (ADR-0070 v1 — kind/status/state filterable, label/ip/asset name searchable)
 ] as const;
 
 export const SearchEntitySchema = z.enum(SEARCH_ENTITIES);
@@ -64,11 +65,26 @@ export const ApplicationHitSchema = z.object({
   description: z.string().nullable(),
 });
 
+// An infra topology node hit (ADR-0070 v1). `label` is the canvas display name; `assetName` is the
+// linked Asset's inventory name (null when graph-only). `kind`/`status`/`state` are kept as plain
+// strings (what the index stores; they double as FILTERABLE attributes — see the API). NEVER carries
+// secret values (none exist on a node — zero-knowledge, ADR-0061).
+export const InfraNodeHitSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  kind: z.string(),
+  status: z.string(),
+  state: z.string(),
+  ipAddress: z.string().nullable(),
+  assetName: z.string().nullable(),
+});
+
 export type AssetHit = z.infer<typeof AssetHitSchema>;
 export type ArticleHit = z.infer<typeof ArticleHitSchema>;
 export type UserHit = z.infer<typeof UserHitSchema>;
 export type LocationHit = z.infer<typeof LocationHitSchema>;
 export type ApplicationHit = z.infer<typeof ApplicationHitSchema>;
+export type InfraNodeHit = z.infer<typeof InfraNodeHitSchema>;
 
 /** One result block per entity: the hits for that index plus Meili's total estimate. */
 function entityResult<Hit extends z.ZodType>(hit: Hit) {
@@ -96,6 +112,7 @@ export const SearchResultsSchema = z
     users: entityResult(UserHitSchema),
     locations: entityResult(LocationHitSchema),
     applications: entityResult(ApplicationHitSchema),
+    infra: entityResult(InfraNodeHitSchema),
   })
   .partial()
   .extend({
