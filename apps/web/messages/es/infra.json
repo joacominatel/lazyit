@@ -35,6 +35,10 @@
     "CONFIRMED": "Confirmado",
     "PENDING": "Pendiente"
   },
+  "view": {
+    "map": "Mapa",
+    "table": "Tabla"
+  },
   "servers": {
     "title": "Servidores",
     "subtitle": "Todos los nodos de tu topología: filtrá, buscá y abrí uno para ver su responsable, secretos y conexiones.",

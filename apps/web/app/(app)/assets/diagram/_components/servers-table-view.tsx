@@ -15,7 +15,6 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { EmptyState } from "@/components/empty-state";
-import { PageHeader } from "@/components/page-header";
 import {
   ErrorState,
   LinkableRow,
@@ -41,13 +40,23 @@ import { useListParams } from "@/lib/hooks/use-list-params";
 import { statusTone } from "@/lib/infra/canvas";
 
 /**
- * Assets › Servers (ADR-0070 §6, issue #743) — the filtered LIST view of infra topology nodes, the
- * scannable sibling of the Diagram canvas. Built on the same shared list infrastructure every other
+ * Topology › Table (ADR-0070 §6, issues #743 + #760) — the filtered LIST view of infra topology
+ * nodes, the scannable sibling of the Map (the React Flow canvas). It is one of the two views the
+ * Topology screen toggles between (`?view=map|table`, see {@link DiagramView}); it used to be its own
+ * `/assets/servers` route, now folded in. Built on the same shared list infrastructure every other
  * entity list uses (`ResourceTable` / `LinkableRow` / `useListParams` / `SearchInput`), so it reads
  * and behaves like Assets / Locations / Applications.
  *
+ * It renders ONLY the body — the filter bar + table — with NO `PageHeader` of its own: the Topology
+ * page owns the single shared header (title + the Map/Table toggle), so the table view slots straight
+ * under it without a duplicate heading (#760). The `?view` toggle lives one level up; this view never
+ * reads or writes it.
+ *
  * Data: reuses `useInfraNodes({ kind, status, state })` (#741). kind/status/state are SERVER-side
- * filters (the API supports them); `q` is a CLIENT-side text filter over label + IP.
+ * filters (the API supports them); `q` is a CLIENT-side text filter over label + IP. All of these
+ * live in the URL via `useListParams`, so they SURVIVE a Map↔Table switch (the switch only flips
+ * `?view`, leaving the filter params untouched) — and a row click deep-links `?node=<id>` which the
+ * Map view honours when you flip back (#760).
  *
  * ponytail — search & paging are client-side, not server-driven:
  *  - The infra node list is UNPAGED by design (ADR-0070: the estate is small) — `getInfraNodes`
@@ -62,7 +71,7 @@ import { statusTone } from "@/lib/infra/canvas";
  */
 const FILTER_DEFAULTS = { kind: "ALL", status: "ALL", state: "ALL" } as const;
 
-export function ServersListView() {
+export function ServersTableView() {
   const t = useTranslations("infra");
   const tServers = useTranslations("infra.servers");
 
@@ -176,167 +185,163 @@ export function ServersListView() {
       : []),
   ];
 
+  if (isLoading) {
+    return <ResourceTable columns={columns} isLoading mobileChildren={<></>} />;
+  }
+  if (isError) {
+    return (
+      <ErrorState
+        title={tServers("loadError")}
+        onRetry={() => refetch()}
+        error={error}
+      />
+    );
+  }
+  if (isEmpty && !filtersActive) {
+    return (
+      <EmptyState
+        icon={ServerStackIcon}
+        pillar="inventory"
+        title={t("empty.title")}
+        description={t("empty.description")}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={tServers("title")}
-        pillar="inventory"
-        icon={ServerStackIcon}
-        subtitle={tServers("subtitle")}
-      />
-
-      {isLoading ? (
-        <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
-      ) : isError ? (
-        <ErrorState
-          title={tServers("loadError")}
-          onRetry={() => refetch()}
-          error={error}
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <SearchInput
+          value={q}
+          debounceMs={300}
+          onDebouncedChange={setQ}
+          label={tServers("searchLabel")}
+          placeholder={tServers("searchPlaceholder")}
+          className="sm:max-w-xs sm:flex-1"
         />
-      ) : isEmpty && !filtersActive ? (
-        <EmptyState
-          icon={ServerStackIcon}
-          pillar="inventory"
-          title={t("empty.title")}
-          description={t("empty.description")}
-        />
-      ) : (
-        <>
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <SearchInput
-              value={q}
-              debounceMs={300}
-              onDebouncedChange={setQ}
-              label={tServers("searchLabel")}
-              placeholder={tServers("searchPlaceholder")}
-              className="sm:max-w-xs sm:flex-1"
-            />
-            <Select
-              value={kindFilter}
-              onValueChange={(value) => setFilter("kind", value)}
-            >
-              <SelectTrigger className="sm:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{tServers("allKinds")}</SelectItem>
-                {InfraNodeKindSchema.options.map((kind) => (
-                  <SelectItem key={kind} value={kind}>
-                    {t(`kind.${kind}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={statusFilter}
-              onValueChange={(value) => setFilter("status", value)}
-            >
-              <SelectTrigger className="sm:w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{tServers("allStatuses")}</SelectItem>
-                {InfraNodeStatusSchema.options.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {t(`status.${status}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={stateFilter}
-              onValueChange={(value) => setFilter("state", value)}
-            >
-              <SelectTrigger className="sm:w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{tServers("allStates")}</SelectItem>
-                {InfraNodeStateSchema.options.map((state) => (
-                  <SelectItem key={state} value={state}>
-                    {t(`state.${state}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <ActiveFilters chips={chips} onClearAll={clearFilters} />
-
-          <ResourceTable
-            columns={columns}
-            isFilteredEmpty={rows.length === 0}
-            filteredEmptyMessage={tServers("filteredEmpty")}
-            filteredEmptyAction={<ClearFiltersLink onClick={clearFilters} />}
-            mobileChildren={rows.map((node) => (
-              <ResourceCard
-                key={node.id}
-                href={diagramHref(node.id)}
-                title={node.label}
-                badge={
-                  <StatusBadge tone={statusTone(node.status)}>
-                    {t(`status.${node.status}`)}
-                  </StatusBadge>
-                }
-                meta={
-                  <>
-                    <ResourceCardMeta label={t("facts.kind")}>
-                      <Badge variant="outline">{t(`kind.${node.kind}`)}</Badge>
-                    </ResourceCardMeta>
-                    <ResourceCardMeta label={tServers("meta.asset")}>
-                      <AssetCell assetId={node.assetId} />
-                    </ResourceCardMeta>
-                    <ResourceCardMeta
-                      label={tServers("meta.ip")}
-                      className="col-span-2"
-                    >
-                      {node.ipAddress ?? "—"}
-                    </ResourceCardMeta>
-                  </>
-                }
-              />
+        <Select
+          value={kindFilter}
+          onValueChange={(value) => setFilter("kind", value)}
+        >
+          <SelectTrigger className="sm:w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">{tServers("allKinds")}</SelectItem>
+            {InfraNodeKindSchema.options.map((kind) => (
+              <SelectItem key={kind} value={kind}>
+                {t(`kind.${kind}`)}
+              </SelectItem>
             ))}
-          >
-            {rows.map((node) => (
-              <LinkableRow key={node.id} href={diagramHref(node.id)}>
-                <TableCell className="font-medium">
-                  <Link
-                    href={diagramHref(node.id)}
-                    className="hover:underline"
-                  >
-                    {node.label}
-                  </Link>
-                </TableCell>
-                <TableCell>
+          </SelectContent>
+        </Select>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) => setFilter("status", value)}
+        >
+          <SelectTrigger className="sm:w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">{tServers("allStatuses")}</SelectItem>
+            {InfraNodeStatusSchema.options.map((status) => (
+              <SelectItem key={status} value={status}>
+                {t(`status.${status}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={stateFilter}
+          onValueChange={(value) => setFilter("state", value)}
+        >
+          <SelectTrigger className="sm:w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">{tServers("allStates")}</SelectItem>
+            {InfraNodeStateSchema.options.map((state) => (
+              <SelectItem key={state} value={state}>
+                {t(`state.${state}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <ActiveFilters chips={chips} onClearAll={clearFilters} />
+
+      <ResourceTable
+        columns={columns}
+        isFilteredEmpty={rows.length === 0}
+        filteredEmptyMessage={tServers("filteredEmpty")}
+        filteredEmptyAction={<ClearFiltersLink onClick={clearFilters} />}
+        mobileChildren={rows.map((node) => (
+          <ResourceCard
+            key={node.id}
+            href={diagramHref(node.id)}
+            title={node.label}
+            badge={
+              <StatusBadge tone={statusTone(node.status)}>
+                {t(`status.${node.status}`)}
+              </StatusBadge>
+            }
+            meta={
+              <>
+                <ResourceCardMeta label={t("facts.kind")}>
                   <Badge variant="outline">{t(`kind.${node.kind}`)}</Badge>
-                </TableCell>
-                <TableCell>
-                  <StatusBadge tone={statusTone(node.status)}>
-                    {t(`status.${node.status}`)}
-                  </StatusBadge>
-                </TableCell>
-                <TableCell>
+                </ResourceCardMeta>
+                <ResourceCardMeta label={tServers("meta.asset")}>
                   <AssetCell assetId={node.assetId} />
-                </TableCell>
-                <TableCell className="text-muted-foreground tabular-nums">
+                </ResourceCardMeta>
+                <ResourceCardMeta
+                  label={tServers("meta.ip")}
+                  className="col-span-2"
+                >
                   {node.ipAddress ?? "—"}
-                </TableCell>
-              </LinkableRow>
-            ))}
-          </ResourceTable>
-        </>
-      )}
+                </ResourceCardMeta>
+              </>
+            }
+          />
+        ))}
+      >
+        {rows.map((node) => (
+          <LinkableRow key={node.id} href={diagramHref(node.id)}>
+            <TableCell className="font-medium">
+              <Link href={diagramHref(node.id)} className="hover:underline">
+                {node.label}
+              </Link>
+            </TableCell>
+            <TableCell>
+              <Badge variant="outline">{t(`kind.${node.kind}`)}</Badge>
+            </TableCell>
+            <TableCell>
+              <StatusBadge tone={statusTone(node.status)}>
+                {t(`status.${node.status}`)}
+              </StatusBadge>
+            </TableCell>
+            <TableCell>
+              <AssetCell assetId={node.assetId} />
+            </TableCell>
+            <TableCell className="text-muted-foreground tabular-nums">
+              {node.ipAddress ?? "—"}
+            </TableCell>
+          </LinkableRow>
+        ))}
+      </ResourceTable>
     </div>
   );
 }
 
 /**
- * Row-open (ADR-0070 §6): deep-link into the Diagram, seeding its drill-in panel with this node via
- * `?node=<id>` (honoured by `DiagramView`). ponytail: reuses the existing panel — the whole
- * asset-backed payoff (owner, KB, secrets, connections) — instead of building a parallel detail route.
+ * Row-open (ADR-0070 §6): deep-link into the Map view, seeding its drill-in panel with this node via
+ * `?node=<id>` (honoured by `DiagramView`) while flipping `?view` to `map`. ponytail: reuses the
+ * existing panel — the whole asset-backed payoff (owner, KB, secrets, connections) — instead of
+ * building a parallel detail route. Carrying `view=map` makes a Table row click land on the canvas
+ * with that node selected (the state-preserving deep-link, #760).
  */
 function diagramHref(nodeId: string): string {
-  return `/assets/diagram?node=${nodeId}`;
+  return `/assets/diagram?view=map&node=${nodeId}`;
 }
 
 /**

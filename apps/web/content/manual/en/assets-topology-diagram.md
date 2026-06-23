@@ -12,8 +12,9 @@ clusters, network devices, storage and more — drawn as draggable cards joined 
 relationships. It is a generic visual inventory of *how your things relate*: which machine runs on
 which host, what belongs to a cluster, what backs up to where, what depends on what.
 
-You reach it from the sidebar under **Assets › Diagram**. Its scannable sibling, a plain table of
-the same things, is **Assets › Servers** — see [Servers list](/help/assets-topology-servers).
+You reach it from the sidebar under **Assets › Topology**. The same screen has a **Map ⇄ Table**
+toggle in the top-right: the **Map** is this free-move board, and the **Table** is a plain,
+filterable list of the same nodes — see [Servers list](/help/assets-topology-servers).
 
 > Anyone who can view the topology sees the map and the read-only detail of each node. Adding
 > nodes, drawing connections, changing a status or taking a node off the map needs the manage

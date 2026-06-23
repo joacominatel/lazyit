@@ -13,8 +13,9 @@ tarjetas arrastrables unidas por relaciones tipadas. Es un inventario visual gen
 relacionan tus cosas*: qué máquina corre sobre qué host, qué pertenece a un clúster, qué respalda a
 dónde, qué depende de qué.
 
-Lo abres desde la barra lateral en **Activos › Diagrama**. Su equivalente escaneable, una tabla
-plana de las mismas cosas, es **Activos › Servidores** — ver
+Lo abres desde la barra lateral en **Activos › Topología**. La misma pantalla tiene un interruptor
+**Mapa ⇄ Tabla** arriba a la derecha: el **Mapa** es este tablero de movimiento libre, y la **Tabla**
+es una lista plana y filtrable de los mismos nodos — ver
 [Lista de servidores](/help/assets-topology-servers).
 
 > Cualquiera que pueda ver la topología ve el mapa y el detalle de solo lectura de cada nodo.
