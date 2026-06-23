@@ -24,12 +24,17 @@ const BASE = "/service-accounts";
  * List service accounts. `GET /service-accounts` returns a FLAT array (not a `Page<T>` envelope —
  * the management list is small and unpaginated). Live accounts only by default; pass
  * `includeRevoked: true` to also list revoked (soft-deleted) accounts for the archived/restore view.
+ *
+ * `token` is the optional SSR Bearer override (ADR-0067): the Settings → Service accounts Server
+ * Component passes `session.accessToken` from `await auth()` to prefetch the live list; client
+ * callers omit it and `apiFetch` falls back to the browser-only session-token store, unchanged.
  */
 export function getServiceAccounts(
   includeRevoked = false,
+  token?: string,
 ): Promise<ServiceAccount[]> {
   const path = includeRevoked ? `${BASE}?includeRevoked=true` : BASE;
-  return apiFetch<ServiceAccount[]>(path);
+  return apiFetch<ServiceAccount[]>(path, { token });
 }
 
 /** Fetch one service account by id (`GET /service-accounts/:id`). Never carries the secret. */
