@@ -182,6 +182,29 @@ describe('reindexIndex (authoritative rebuild)', () => {
     expect(filterableIdx).toBeLessThan(swapIdx);
   });
 
+  it('declares kind/status/state filterable on the INFRA temp index before the swap (ADR-0070 v1)', async () => {
+    const { client, ops } = fakeClient();
+    const INFRA_TEMP = `infra__reindex_tmp_${RUN}`;
+
+    await reindexIndex(client, 'infra', docs('n1'), RUN);
+
+    const filterableOp = ops.find(
+      (op) => op.kind === 'updateFilterableAttributes',
+    );
+    expect(filterableOp).toEqual({
+      kind: 'updateFilterableAttributes',
+      uid: INFRA_TEMP,
+      attributes: ['kind', 'status', 'state'],
+    });
+    const filterableIdx = ops.findIndex(
+      (op) => op.kind === 'updateFilterableAttributes',
+    );
+    const addIdx = ops.findIndex((op) => op.kind === 'addDocuments');
+    const swapIdx = ops.findIndex((op) => op.kind === 'swap');
+    expect(filterableIdx).toBeLessThan(addIdx);
+    expect(filterableIdx).toBeLessThan(swapIdx);
+  });
+
   it('does NOT set filterable attributes on an index that declares none (users)', async () => {
     const { client, ops } = fakeClient();
     await reindexIndex(client, 'users', docs('u1'));
