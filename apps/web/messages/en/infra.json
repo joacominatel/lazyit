@@ -1,0 +1,34 @@
+{
+  "title": "Topology",
+  "subtitle": "A free-move map of your server estate — drag to arrange, scroll to zoom.",
+  "loading": "Loading the topology…",
+  "empty": {
+    "title": "No servers mapped yet",
+    "description": "Once you add hosts, VMs, containers and their relationships, your estate will appear here as a draggable diagram."
+  },
+  "error": {
+    "title": "Couldn't load the topology",
+    "description": "The infra map failed to load. Try again in a moment."
+  },
+  "facts": {
+    "kind": "Kind",
+    "status": "Status",
+    "ip": "IP",
+    "noIp": "—"
+  },
+  "kind": {
+    "PHYSICAL_HOST": "Physical host",
+    "VM": "Virtual machine",
+    "CONTAINER": "Container",
+    "CLUSTER": "Cluster",
+    "NETWORK_DEVICE": "Network device",
+    "STORAGE": "Storage",
+    "APPLIANCE": "Appliance",
+    "OTHER": "Other"
+  },
+  "status": {
+    "ONLINE": "Online",
+    "OFFLINE": "Offline",
+    "UNKNOWN": "Unknown"
+  }
+}
