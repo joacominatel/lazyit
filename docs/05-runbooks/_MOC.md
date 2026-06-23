@@ -3,7 +3,7 @@ title: Runbooks — MOC
 tags: [moc, runbook]
 status: draft
 created: 2026-05-25
-updated: 2026-06-03
+updated: 2026-06-23
 ---
 
 # Runbooks — Map of Content
@@ -29,6 +29,9 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
 - **[[deploy-self-hosted]]** — install on a single host on a real domain: the guided `infra/start.sh`
   bootstrap ([[0047-guided-first-deploy-bootstrap]]), env/secrets, Let's Encrypt, bring-up, updates, the
   bundled-Zitadel vs BYOI fork.
+- **[[auth-bootstrap]]** — bring up the bundled Zitadel IdP for the prod stack: the zero-touch
+  bootstrap sidecar (project / OIDC app / roles / service account, no console access), the BYOI
+  path, and the manual console fallback. [[0037-idp-choice-zitadel-byoi]] · [[0043-zitadel-source-of-truth]].
 - **[[managing-service-accounts]]** — create / rotate / revoke a [[service-account]] (the lazyit-native
   non-human API credential): the token is shown **once**, scoping by direct permission grants, rotation
   and revocation. [[0048-service-accounts]].
