@@ -3,7 +3,7 @@ title: Problem Space
 tags: [overview]
 status: draft
 created: 2026-05-25
-updated: 2026-06-08
+updated: 2026-06-23
 ---
 
 # Problem Space
@@ -43,6 +43,13 @@ A focused, IT-native, asset-centric system (see [[asset-centric]]) that unifies 
 access, consumables and knowledge — with auditability built in — is more valuable
 to a small IT team than any of the generic or narrow alternatives, and far cheaper to run
 than the enterprise suites.
+
+The "spreadsheets and chat" sprawl above includes **secrets** — the shared root passwords,
+API keys and service credentials a small IT team passes around. So lazyit also holds those
+beside the inventory and access, in a **zero-knowledge credentials vault**: the server stores
+secrets encrypted and can never decrypt a stored value, so the credential store stops being
+one more tool (and one more leak surface) outside the system of record
+([[0061-secret-manager-zero-knowledge]]).
 
 And where the ad-hoc grant/revoke pain above bites hardest, an opt-in
 [[workflow-engine/_MOC|Workflow Engine]] now automates provisioning and deprovisioning into the
