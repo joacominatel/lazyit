@@ -1,11 +1,16 @@
 import { Test } from '@nestjs/testing';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InfraService } from './infra.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { AssetsService } from '../assets/assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { ArticlesService } from '../articles/articles.service';
+import { SearchService } from '../search/search.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` for types (erased) AND at runtime for `Prisma.PrismaClientKnownRequestError` (the P2002
@@ -15,6 +20,13 @@ jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {
     DbNull: { __dbNull: true },
+    // `Prisma.sql` tags the recursive-CTE template (getImpact). The real helper builds a parameterized
+    // query object; the test only asserts the call happened + returns mocked rows, so a passthrough
+    // that captures the raw fragments + values is enough (no DB, no SQL execution).
+    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      strings,
+      values,
+    }),
     PrismaClientKnownRequestError: class extends Error {
       constructor(
         public code: string,
@@ -64,6 +76,7 @@ interface PrismaMock {
   };
   asset: { findFirst: Mock };
   $transaction: Mock;
+  $queryRaw: Mock;
 }
 
 const HUMAN = { kind: 'human', user: { id: 'u-1' } } as never;
@@ -74,6 +87,8 @@ describe('InfraService', () => {
   let assets: { create: Mock; remove: Mock; assertExists: Mock };
   let assignments: { findAll: Mock };
   let articles: { findArticlesForAsset: Mock };
+  // The fire-and-forget search sync (ADR-0035): upsert on write, remove on soft-delete.
+  let search: { upsert: Mock; remove: Mock };
   // The tx client the $transaction callback receives (RUNS_ON migration writes through it).
   let txEdge: { create: Mock; updateMany: Mock };
 
@@ -102,6 +117,7 @@ describe('InfraService', () => {
         (cb: (tx: { infraEdge: typeof txEdge }) => unknown) =>
           cb({ infraEdge: txEdge }),
       ),
+      $queryRaw: jest.fn().mockResolvedValue([]),
     };
     assets = {
       create: jest.fn(),
@@ -112,6 +128,7 @@ describe('InfraService', () => {
     articles = {
       findArticlesForAsset: jest.fn().mockResolvedValue({ items: [] }),
     };
+    search = { upsert: jest.fn(), remove: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -121,6 +138,7 @@ describe('InfraService', () => {
         { provide: AssetsService, useValue: assets },
         { provide: AssetAssignmentsService, useValue: assignments },
         { provide: ArticlesService, useValue: articles },
+        { provide: SearchService, useValue: search },
       ],
     }).compile();
     service = moduleRef.get(InfraService);
@@ -504,6 +522,224 @@ describe('InfraService', () => {
       await expect(service.closeEdge('e-1')).rejects.toBeInstanceOf(
         ConflictException,
       );
+    });
+  });
+
+  // ── Fire-and-forget search sync (ADR-0035 / ADR-0070 v1, #740) ──────────────
+
+  describe('search sync', () => {
+    it('upserts the node (with linked asset name) into the infra index on create', async () => {
+      prisma.infraNode.create.mockResolvedValue({ id: 'node-1' });
+      // The post-write re-read the sync helper does (node + joined asset name).
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        kind: 'VM',
+        status: 'ONLINE',
+        state: 'CONFIRMED',
+        ipAddress: '10.0.0.5',
+        asset: { name: 'srv-prod-01' },
+      });
+
+      await service.createNode({ kind: 'VM', label: 'web-01' }, false);
+      // The sync is fire-and-forget (un-awaited inside the service); let the microtask drain.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(search.upsert).toHaveBeenCalledWith('infra', {
+        id: 'node-1',
+        label: 'web-01',
+        kind: 'VM',
+        status: 'ONLINE',
+        state: 'CONFIRMED',
+        ipAddress: '10.0.0.5',
+        assetName: 'srv-prod-01', // the linked asset name is joined in (NEVER a secret value)
+      });
+    });
+
+    it('removes the node from the infra index on soft-delete', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-1' });
+      prisma.infraNode.update.mockResolvedValue({ id: 'node-1' });
+
+      await service.removeNode('node-1');
+
+      expect(search.remove).toHaveBeenCalledWith('infra', 'node-1');
+      expect(search.upsert).not.toHaveBeenCalled();
+    });
+
+    it('re-indexes the node on restore', async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce({ id: 'node-1', deletedAt: new Date() }) // restore lookup
+        .mockResolvedValueOnce({
+          id: 'node-1',
+          label: 'redis',
+          kind: 'CONTAINER',
+          status: 'UNKNOWN',
+          state: 'CONFIRMED',
+          ipAddress: null,
+          asset: null, // graph-only — assetName is null, not a leaked value
+        });
+      prisma.infraNode.update.mockResolvedValue({ id: 'node-1' });
+
+      await service.restoreNode('node-1');
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(search.upsert).toHaveBeenCalledWith('infra', {
+        id: 'node-1',
+        label: 'redis',
+        kind: 'CONTAINER',
+        status: 'UNKNOWN',
+        state: 'CONFIRMED',
+        ipAddress: null,
+        assetName: null,
+      });
+    });
+  });
+
+  // ── Impact / blast-radius (ADR-0070 §7, #739) ───────────────────────────────
+  //
+  // The traversal itself is ONE Postgres recursive CTE (no per-level Prisma calls); a Jest run has no
+  // DB, so we drive `$queryRaw` with an in-memory simulation of the EXACT semantics the CTE must
+  // satisfy — walk the INVERSE of ACTIVE RUNS_ON/DEPENDS_ON edges from the root, skip soft-deleted
+  // nodes, dedup to the MIN depth per node, and TERMINATE on a cycle (path guard). This locks the
+  // contract: feed the service the rows the CTE would produce for a fixture graph and assert the
+  // mapped { rootId, affected } downstream set — and that a cycle does not hang the simulation.
+
+  describe('getImpact', () => {
+    // Fixture: host(0) ← VM(1) ← container(2) RUNS_ON chain, a DEPENDS_ON branch app(1) → host, and a
+    // CYCLE container↔VM (a second RUNS_ON the other way). Edges: source RUNS_ON/DEPENDS_ON target.
+    interface FixtureNode {
+      id: string;
+      label: string;
+      kind: string;
+      status: string;
+      deleted?: boolean;
+    }
+    interface FixtureEdge {
+      sourceId: string;
+      targetId: string;
+      kind: string;
+      active: boolean;
+    }
+
+    /** In-memory analogue of the recursive CTE: inverse traversal, cycle-safe, MIN depth per node. */
+    function simulateImpact(
+      rootId: string,
+      nodes: FixtureNode[],
+      edges: FixtureEdge[],
+    ): Array<{
+      id: string;
+      label: string;
+      kind: string;
+      status: string;
+      depth: number;
+    }> {
+      const liveById = new Map(
+        nodes.filter((n) => !n.deleted).map((n) => [n.id, n]),
+      );
+      const minDepth = new Map<string, number>();
+      // BFS frontier with the visited-path guard (the CTE's `path || sourceId` + NOT ANY(path)).
+      const queue: Array<{ id: string; depth: number; path: Set<string> }> = [
+        { id: rootId, depth: 0, path: new Set([rootId]) },
+      ];
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        if (cur.depth >= 64) continue; // mirrors IMPACT_MAX_DEPTH
+        for (const e of edges) {
+          if (!e.active) continue;
+          if (e.kind !== 'RUNS_ON' && e.kind !== 'DEPENDS_ON') continue;
+          if (e.targetId !== cur.id) continue; // INVERSE: source depends-on/runs-on the frontier
+          const src = e.sourceId;
+          if (!liveById.has(src)) continue; // skip soft-deleted
+          if (cur.path.has(src)) continue; // CYCLE GUARD — already on the path, do not recurse
+          const depth = cur.depth + 1;
+          const prev = minDepth.get(src);
+          if (prev === undefined || depth < prev) minDepth.set(src, depth);
+          queue.push({ id: src, depth, path: new Set(cur.path).add(src) });
+        }
+      }
+      return [...minDepth.entries()]
+        .map(([id, depth]) => {
+          const n = liveById.get(id)!;
+          return { id, label: n.label, kind: n.kind, status: n.status, depth };
+        })
+        .sort((a, b) => a.depth - b.depth || a.label.localeCompare(b.label));
+    }
+
+    const NODES: FixtureNode[] = [
+      { id: 'host', label: 'host', kind: 'PHYSICAL_HOST', status: 'ONLINE' },
+      { id: 'vm', label: 'vm', kind: 'VM', status: 'ONLINE' },
+      {
+        id: 'container',
+        label: 'container',
+        kind: 'CONTAINER',
+        status: 'ONLINE',
+      },
+      { id: 'app', label: 'app', kind: 'OTHER', status: 'ONLINE' },
+      {
+        id: 'ghost',
+        label: 'ghost',
+        kind: 'VM',
+        status: 'OFFLINE',
+        deleted: true,
+      },
+    ];
+    const EDGES: FixtureEdge[] = [
+      { sourceId: 'vm', targetId: 'host', kind: 'RUNS_ON', active: true }, // vm RUNS_ON host
+      { sourceId: 'container', targetId: 'vm', kind: 'RUNS_ON', active: true }, // container RUNS_ON vm
+      { sourceId: 'app', targetId: 'host', kind: 'DEPENDS_ON', active: true }, // app DEPENDS_ON host
+      { sourceId: 'vm', targetId: 'container', kind: 'RUNS_ON', active: true }, // CYCLE: vm↔container
+      { sourceId: 'ghost', targetId: 'host', kind: 'RUNS_ON', active: true }, // soft-deleted → excluded
+      { sourceId: 'vm', targetId: 'host', kind: 'CONNECTS_TO', active: true }, // wrong kind → ignored
+    ];
+
+    function wireQueryRaw(rootId: string): void {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: rootId }); // getNode (root exists, live)
+      prisma.$queryRaw.mockResolvedValue(simulateImpact(rootId, NODES, EDGES));
+    }
+
+    it('returns the transitive downstream set with MIN depth per node (chain + DEPENDS_ON branch)', async () => {
+      wireQueryRaw('host');
+
+      const result = await service.getImpact('host');
+
+      expect(result.rootId).toBe('host');
+      // host goes down → vm (RUNS_ON, depth 1), app (DEPENDS_ON, depth 1), container (via vm, depth 2).
+      expect(result.affected).toEqual([
+        { id: 'app', label: 'app', kind: 'OTHER', status: 'ONLINE', depth: 1 },
+        { id: 'vm', label: 'vm', kind: 'VM', status: 'ONLINE', depth: 1 },
+        {
+          id: 'container',
+          label: 'container',
+          kind: 'CONTAINER',
+          status: 'ONLINE',
+          depth: 2,
+        },
+      ]);
+      // The root itself is never in the affected set; the soft-deleted 'ghost' is excluded.
+      const ids = result.affected.map((a) => a.id);
+      expect(ids).not.toContain('host');
+      expect(ids).not.toContain('ghost');
+    });
+
+    it('is cycle-safe: the vm↔container cycle terminates and each node appears once', async () => {
+      wireQueryRaw('host');
+
+      const result = await service.getImpact('host');
+
+      // Despite vm→container→vm being a cycle, every node appears exactly once (path guard + MIN depth).
+      const ids = result.affected.map((a) => a.id).sort();
+      expect(ids).toEqual(['app', 'container', 'vm']);
+      expect(new Set(ids).size).toBe(ids.length); // no duplicates — the cycle did not re-emit nodes
+    });
+
+    it('404s when the root node is missing or soft-deleted (getNode guard)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      await expect(service.getImpact('nope')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
   });
 });
