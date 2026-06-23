@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-06-23
 ---
 
 # Code Conventions
@@ -145,6 +145,10 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
   warm `--bone` canvas is a committed ADR-0011 decision, not an "AI cream default"; and no
   hollow hero-metric template, gradient text, glassmorphism, per-section eyebrows, or nested
   cards.
+- **Rendering: SSR-prefetch for list/high-traffic pages** → [[0067-server-prefetch-ssr-strategy]]
+  (implemented #537). List and other high-traffic routes prefetch their data on the server and
+  hydrate it into TanStack Query (no first-paint spinner / waterfall); follow this pattern for
+  new list pages rather than client-only fetching.
 
 ## The Bun-first boundary
 

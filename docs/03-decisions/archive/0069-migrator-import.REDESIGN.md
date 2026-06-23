@@ -1,13 +1,19 @@
 ---
 title: "ADR-0069 REDESIGN: Bulk import — directory people, assisted column mapping, specs passthrough, real models"
 tags: [adr, migrator, import, asset, user, directory, backend, frontend, shared, design]
-status: proposed
+status: superseded
+superseded-by: "[[0069-migrator-import]]"
 created: 2026-06-18
-updated: 2026-06-18
+updated: 2026-06-23
 deciders: [Joaquín Minatel]
 amends: [ADR-0069 (§11/§12 deferrals), ADR-0038 (JIT linking)]
 source: multi-agent design workflow (11 agents, 3 adversarial critique lenses)
 ---
+
+> **Archived design document.** The directory-persons / specs-passthrough / real-models redesign
+> shipped and was folded into the accepted ADR — see [[0069-migrator-import]] "Amendment — Etapa 2"
+> (§A.1–A.6), which is the decision-of-record. This document (including its §0 CEO decisions) is
+> **superseded by** that ADR and retained for auditability only.
 
 # lazyit — Rediseño del Import Masivo · Documento de Diseño Maestro (FINAL)
 

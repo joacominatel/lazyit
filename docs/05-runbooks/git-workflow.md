@@ -3,7 +3,7 @@ title: Git / GitHub Workflow
 tags: [runbook, git, workflow, development]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-23
 ---
 
 # Git / GitHub Workflow
@@ -47,6 +47,7 @@ gh pr create --base dev --title "<prefix>: <summary>" --body "Closes #<n> ..."
 | --- | --- | --- |
 | `master` | **Production.** Only ever receives merges from `dev`. **Protected on GitHub.** | User only (merges `dev` → `master`) |
 | `dev` | **Integration.** Every feature/fix/chore/docs change merges here first via PR. | User merges PRs here; agents never merge |
+| `stage` | **Permanent staging / CI environment branch** — an intentional, long-lived env branch in the `dev` → … → `master` flow. CI gates it exactly like `master` and `dev` (push + PR). | User only |
 | `<prefix>/issue-<n>-<slug>` | **One branch per concrete piece of work**, always cut from `dev`. | The agent doing that work |
 
 - All issue branches are cut **from `dev`**, never from `master`.
@@ -182,19 +183,10 @@ fully enforced:
 
 1. **Protect `master` on GitHub** — require PRs, block direct pushes and force-pushes. The user
    configures this in repo Settings → Branches. *(Manual; not scripted here.)*
-2. **Extend CI to run on `dev`.** `.github/workflows/ci.yml` currently triggers on `push` to
-   `master` and on every `pull_request`. It must also gate `dev`:
-
-   ```yaml
-   on:
-     push:
-       branches: [master, dev]
-     pull_request:
-       branches: [master, dev]
-   ```
-
-   Editing the workflow YAML is the **DevOps lane** (and touches [[0027-ci-pipeline]]) — the
-   user does it or delegates it to the DevOps agent. Documented here as a pending action only.
+2. **CI gates `dev` — ✅ DONE.** `.github/workflows/ci.yml` triggers on `push` **and**
+   `pull_request` for `[master, dev, stage]`, so the integration (`dev`), staging (`stage`) and
+   production (`master`) branches and every PR targeting them are all gated. No further action
+   needed (the workflow YAML is the DevOps lane — [[0027-ci-pipeline]]).
 3. **Create the labels** listed above (once, by the user).
 
 > [!note] `dev` already exists

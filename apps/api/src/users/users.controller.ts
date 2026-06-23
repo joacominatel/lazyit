@@ -126,7 +126,7 @@ export class UsersController {
     required: false,
     type: Boolean,
     description:
-      'Directory-person filter (ADR-0069 REDESIGN §0 #2). true = only directory persons (no login); false = only login-backed accounts; absent = all (default).',
+      'Directory-person filter (ADR-0069 §0 #2). true = only directory persons (no login); false = only login-backed accounts; absent = all (default).',
   })
   @ApiQuery({
     name: 'role',
@@ -463,14 +463,14 @@ export class UsersController {
     return this.users.restore(id, this.actor.resolveActor(principal));
   }
 
-  // The manual "Crear cuenta OIDC" promotion (ADR-0069 REDESIGN §0 #3): take an existing DIRECTORY
+  // The manual "Crear cuenta OIDC" promotion (ADR-0069 §0 #3): take an existing DIRECTORY
   // person (no login) and provision its IdP account NOW — the explicit counterpart to the auto-claim by
   // verified-email login (ADR-0038). ADMIN-only (same `user:manage` gate as every other user mutation).
   @Post(':id/provision-account')
   @RequirePermission('user:manage')
   @ApiOperation({
     summary:
-      'Provision an OIDC account for a directory person — ADMIN only (ADR-0069 REDESIGN)',
+      'Provision an OIDC account for a directory person — ADMIN only (ADR-0069)',
     description:
       'Promotes a directory-only person (created by the bulk import, no login) into a real account: ' +
       'creates the user in the bundled identity provider (Zitadel), sets externalId and flips ' +

@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-06-06
+updated: 2026-06-20
 ---
 
 # Security summary
@@ -48,6 +48,15 @@ Snapshot of the security review. Updated each sweep. Method:
    (closed) did not regress — **except SEC-051 re-opens the SEC-008 class** via a new bypass vector.
    SEC-011, SEC-020, SEC-031, SEC-061 subsequently fixed and moved to `closed/`.
 
+7. **2026-06-20 — KB access hardening + directory-person invariants + #555 SA-ungrantable fast-follow.**
+   Reviewing the KB access path + the import's directory-person model added the
+   [[INVARIANTS]] INV-DIR-1/2 directory-person invariants and filed
+   [[SEC-072-asset-specs-schema-global-bound-and-deep-equal-guard\|SEC-072]] (the global structural
+   bound on `AssetSpecsSchema` + the `jsonDeepEqual` depth guard, extending SEC-032 and now
+   import-reachable). The #555 fast-follow made `secret:*` / `import:run` **SA-ungrantable**
+   (added to `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS`), **reserved the engine service-account
+   name**, and **generalised the parity test** so the ungrantable set stays enforced.
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 
 ## Counts by severity (open)
@@ -56,10 +65,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 2 |
+| Medium | 3 |
 | Low | 12 |
 | Info | 0 |
-| **Total open** | **14** |
+| **Total open** | **15** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -70,6 +79,7 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | --- | --- | --- | --- |
 | [[SEC-021-last-admin-lockout-via-isactive\|SEC-021]] | 🟠 Medium | users | Last-admin lockout via `PATCH {isActive:false}` (skips `assertNotLastAdmin`) |
 | [[SEC-051-application-url-scheme-guard-port-carveout-bypass\|SEC-051]] | 🟠 Medium | applications | URL `host:port` carve-out accepts `javascript:1/…` → re-opens the SEC-008 XSS class |
+| [[SEC-072-asset-specs-schema-global-bound-and-deep-equal-guard\|SEC-072]] | 🟠 Medium | assets/import | `AssetSpecsSchema` has no global structural bound + `jsonDeepEqual` has no depth guard — extends SEC-032, now import-reachable |
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
 | [[SEC-012-oidc-audience-not-validated\|SEC-012]] | 🟡 Low | auth | OIDC token audience unvalidated when `OIDC_CLIENT_ID` unset (audience confusion under BYOI) |
