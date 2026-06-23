@@ -3,6 +3,7 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { UserCreateForm } from "../_components/user-create-form";
 
+// ponytail: no data read — empty create form; nothing to SSR-prefetch (ADR-0067 rollout #662).
 export default async function NewUserPage() {
   const t = await getTranslations("users");
   return (
