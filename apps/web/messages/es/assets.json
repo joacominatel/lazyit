@@ -30,9 +30,13 @@
       "actions": "Acciones"
     },
     "filters": {
+      "moreFilters": "Filtros",
       "allStatuses": "Todos los estados",
       "allCategories": "Todas las categorías",
       "allLocations": "Todas las ubicaciones",
+      "ownerLabel": "Responsable",
+      "ownerPlaceholder": "Cualquier responsable",
+      "ownershipLabel": "Responsabilidad",
       "anyOwnership": "Cualquier responsable",
       "hasOwners": "Con responsables",
       "noOwners": "Sin responsables"
@@ -47,6 +51,7 @@
       "status": "Estado: {value}",
       "category": "Categoría: {value}",
       "location": "Ubicación: {value}",
+      "owner": "Responsable: {value}",
       "owners": "Responsables: {value}"
     }
   },

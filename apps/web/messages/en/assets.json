@@ -30,9 +30,13 @@
       "actions": "Actions"
     },
     "filters": {
+      "moreFilters": "Filters",
       "allStatuses": "All statuses",
       "allCategories": "All categories",
       "allLocations": "All locations",
+      "ownerLabel": "Owner",
+      "ownerPlaceholder": "Any owner",
+      "ownershipLabel": "Ownership",
       "anyOwnership": "Any ownership",
       "hasOwners": "Has owners",
       "noOwners": "No owners"
@@ -47,6 +51,7 @@
       "status": "Status: {value}",
       "category": "Category: {value}",
       "location": "Location: {value}",
+      "owner": "Owner: {value}",
       "owners": "Owners: {value}"
     }
   },
