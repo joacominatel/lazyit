@@ -118,6 +118,12 @@ definirlos de dos maneras:
   marca), fija un único **Fabricante** y/o **Categoría** en el recuadro *Marca y categoría del modelo*;
   se aplica a todos los modelos que cree la importación. Una columna mapeada siempre gana sobre un
   valor fijado.
+  - Para **Categoría**, el recuadro viene en modo **Existente**: elige una categoría que ya exista para
+    que todos los modelos se vinculen a ella — sin errores de tipeo ni categorías nuevas por accidente.
+    Cambia el interruptor a **Constante** para escribir un valor libre (igual se busca-o-crea por nombre
+    al importar).
+  - El **Fabricante** es texto libre (no hay una lista de fabricantes para elegir), así que siempre es
+    una constante.
 
 ### Asignar activos a personas
 
