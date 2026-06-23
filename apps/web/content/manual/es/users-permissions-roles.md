@@ -30,6 +30,16 @@ pueden ajustar. El rol es lo que un usuario *tiene*; los permisos son lo que un 
   nada. Además, algunas vistas sensibles (el directorio de usuarios y el registro de concesiones de
   acceso) quedan ocultas para el Lector por defecto.
 
+## La vista general de Roles
+
+**Configuración → Roles** muestra una tarjeta por rol con, para cada uno: un **conteo de miembros en
+vivo** (cuántos usuarios activos lo tienen), un recordatorio breve de lo que el rol puede hacer y un
+enlace **Ver N miembros**. Ese enlace abre la [lista de Usuarios](/help/users-permissions-user-lifecycle)
+filtrada por ese rol — la lista de Usuarios es donde realmente navegas y gestionas quién lo tiene, con
+búsqueda, orden y paginado. Las tarjetas solo muestran conteos; ya no listan a los miembros en línea.
+Desde las mismas tarjetas puedes abrir **Editar permisos** para Miembro y Lector (Admin tiene acceso
+completo y está bloqueado).
+
 ## Cómo se asigna un rol
 
 - **El primer usuario siempre es Administrador.** La primera persona que se provisiona en una
