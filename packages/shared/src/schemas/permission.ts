@@ -44,6 +44,7 @@ export const PERMISSION_DOMAINS = [
   "notification", // the in-app notification bell (ADR-0056) — operational nudges; read is ADMIN-only
   "secret", // the human Secret Manager (ADR-0061) — zero-knowledge vaults; ALL ADMIN-only by default
   "import", // the guided bulk Migrator (ADR-0069) — a single coarse `:run` verb; ADMIN-only by default
+  "infra", // the infra topology graph (ADR-0070) — the generic visual CMDB of the server estate
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
 
@@ -161,6 +162,14 @@ export const PERMISSIONS = [
   // from the role matrix but MUST NOT be auto-granted to service accounts (import is human-only —
   // enforced at the controller by the human-only guard, independent of this permission).
   "import:run",
+  // infra (the infra topology graph, ADR-0070 §8) — the generic visual CMDB of the server estate.
+  // `infra:read` is DEFAULT-OPEN (NOT in ADMIN_ONLY_READS): the server map is a team-wide operational
+  // surface, seeded to all three roles like `asset:read` (the map is "where do our servers live", not a
+  // sensitive ledger). `infra:manage` is the coarse mutation verb (create/edit/delete nodes, open/close
+  // edges, drag positions); ADMIN-only by construction of the seed (neither `:read` nor `:write`). An
+  // asset-backed node create ALSO requires `asset:write`, AND-checked at the controller (ADR-0070 §8).
+  "infra:read",
+  "infra:manage",
 ] as const;
 
 /**
