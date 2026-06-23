@@ -7,7 +7,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -16,7 +16,7 @@ import { buildNextUrl } from "@/lib/hooks/list-params-url";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 import { CreateNodeDialog } from "./create-node-dialog";
-import { InfraCanvas } from "./infra-canvas";
+import { InfraCanvas, type InfraCanvasApi } from "./infra-canvas";
 import { InfraNodePanel } from "./infra-node-panel";
 import { ServersTableView } from "./servers-table-view";
 
@@ -48,6 +48,11 @@ import { ServersTableView } from "./servers-table-view";
  * user owns the selection. The panel works from a bare nodeId alone (it fetches its own detail), so
  * no canvas pan is needed for the payoff to show.
  *
+ * `?focus=1` (issue #765) additionally asks the canvas to *fly to* the seeded node — used by the
+ * future Assets "View in topology" button. The canvas exposes a `focusNode(id)` primitive via
+ * `onApiReady`; we call it once, the first time the API is ready, if the deep-link asked for it
+ * (`?node=&focus=1`). A bare `?node=` (no focus) just opens the panel, no camera move.
+ *
  * Impact / blast-radius (ADR-0070 §7, issue #755) lives HERE because the canvas and the panel both
  * read it: `impactOn` is the toggle the panel flips; the impact query runs once for the selected
  * node and feeds the panel its count/list AND the canvas its highlight set. Selecting another node
@@ -63,6 +68,19 @@ export function DiagramView() {
   const [selectedId, setSelectedId] = useState<string | null>(initialNodeId);
   const [impactOn, setImpactOn] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+
+  // One-shot deep-link focus (issue #765): if the URL is `?node=&focus=1`, fly to that node the
+  // first time the canvas API is ready. Read once on mount (the URL drives the FIRST landing, then
+  // the user owns the camera); the ref is nulled after firing so a later API re-ready never re-fires.
+  const pendingFocusRef = useRef<string | null>(
+    initialNodeId && searchParams.get("focus") === "1" ? initialNodeId : null,
+  );
+  const onCanvasReady = useCallback((api: InfraCanvasApi) => {
+    const target = pendingFocusRef.current;
+    if (!target) return;
+    pendingFocusRef.current = null;
+    api.focusNode(target);
+  }, []);
 
   // Selecting (or clearing) a node always exits impact mode — the radius is per-node, so it would be
   // wrong to carry the previous node's highlight onto a new selection.
@@ -119,6 +137,7 @@ export function DiagramView() {
               onSelectNode={selectNode}
               impactRootId={impactRootId}
               affectedIds={affectedIds}
+              onApiReady={onCanvasReady}
             />
           </div>
 
