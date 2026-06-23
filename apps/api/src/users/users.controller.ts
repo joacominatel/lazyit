@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -25,10 +26,13 @@ import {
   CloneUserResultSchema,
   CloneUserSchema,
   CreateUserSchema,
+  RoleCountsSchema,
+  RoleSchema,
   UpdateUserSchema,
   UserListPageSchema,
   UserSchema,
 } from '@lazyit/shared';
+import type { Role } from '@lazyit/shared';
 import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
@@ -50,6 +54,7 @@ import { VaultSetupNudgeService } from '../notifications/vault-setup-nudge.servi
 // OpenAPI schema, all from one definition. See docs/03-decisions/0018-api-documentation-swagger.md.
 class UserDto extends createZodDto(UserSchema) {}
 class UserListPageDto extends createZodDto(UserListPageSchema) {}
+class RoleCountsDto extends createZodDto(RoleCountsSchema) {}
 class CreateUserDto extends createZodDto(CreateUserSchema) {}
 class UpdateUserDto extends createZodDto(UpdateUserSchema) {}
 class CloneUserDto extends createZodDto(CloneUserSchema) {}
@@ -123,6 +128,13 @@ export class UsersController {
     description:
       'Directory-person filter (ADR-0069 REDESIGN §0 #2). true = only directory persons (no login); false = only login-backed accounts; absent = all (default).',
   })
+  @ApiQuery({
+    name: 'role',
+    required: false,
+    enum: RoleSchema.options,
+    description:
+      'RBAC role filter (issue #693). Scope the list to one role (ADMIN | MEMBER | VIEWER). Unknown value → 400. Absent = all roles (default). Backs the Settings → Roles "View N members" deep-link.',
+  })
   @ApiOkResponse({ type: UserListPageDto })
   findAll(
     @Query('q') q?: string,
@@ -133,6 +145,7 @@ export class UsersController {
     @Query('dir') dir?: string,
     @Query('deleted') deleted?: string,
     @Query('directoryOnly') directoryOnly?: string,
+    @Query('role') role?: string,
     @CurrentUser() user?: User,
   ) {
     const pageQuery = parsePageQuery({
@@ -151,7 +164,43 @@ export class UsersController {
       directoryOnly !== undefined
         ? parseBooleanQuery(directoryOnly, true)
         : undefined;
-    return this.users.findPage({ q, directoryOnly: directoryOnlyFilter }, pageQuery);
+    // role is optional (issue #693): absent → no filter; present → validated by RoleSchema (the global
+    // ZodValidationPipe only validates @Body, so a raw @Query is otherwise unchecked → 400 on a bad value).
+    const roleFilter =
+      role !== undefined ? this.parseRoleQuery(role) : undefined;
+    return this.users.findPage(
+      { q, directoryOnly: directoryOnlyFilter, role: roleFilter },
+      pageQuery,
+    );
+  }
+
+  /** Validate a raw `?role=` query value against the RBAC allowlist; an unknown value is a clean 400. */
+  private parseRoleQuery(raw: string): Role {
+    const result = RoleSchema.safeParse(raw);
+    if (!result.success) {
+      throw new BadRequestException(
+        `Invalid role filter: must be one of ${RoleSchema.options.join(', ')}`,
+      );
+    }
+    return result.data;
+  }
+
+  // The Settings → Roles cards' real per-role counts (issue #693): one lightweight server-side
+  // `groupBy` over the live directory, returned as `{ ADMIN, MEMBER, VIEWER }`. Gated on `user:read`
+  // (the same directory-read gate as the list); a VIEWER 403s, consistent with ADR-0046 P3.
+  @Get('role-counts')
+  @RequirePermission('user:read')
+  @ApiOperation({
+    summary:
+      'Per-role LIVE user counts { ADMIN, MEMBER, VIEWER } — the Settings → Roles card counts (issue #693)',
+    description:
+      'A single server-side groupBy over the active (not soft-deleted) directory. Correct at any team ' +
+      'size (the old client-side count truncated past the list window). The cards deep-link into the ' +
+      'Users list (/users?role=…) for the actual membership browser.',
+  })
+  @ApiOkResponse({ type: RoleCountsDto })
+  roleCounts() {
+    return this.users.roleCounts();
   }
 
   // INTENTIONALLY NOT gated with `user:read` (ADR-0046 P3): a VIEWER must read its OWN record + role
