@@ -1,72 +1,35 @@
-"use client";
+import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { auth } from "@/auth";
+import { getArticleBySlug } from "@/lib/api/endpoints/articles";
+import { articleKeys } from "@/lib/api/hooks/use-articles";
+import { getServerQueryClient } from "@/lib/api/server-query-client";
+import { ArticleEditView } from "./_components/article-edit-view";
 
-import { useTranslations } from "next-intl";
-import { useSession } from "next-auth/react";
-import { useParams } from "next/navigation";
-import { Breadcrumb } from "@/components/breadcrumb";
-import { DetailSkeleton } from "@/components/detail-panel";
-import { PageHeader } from "@/components/page-header";
-import { EmptyState, ErrorState } from "@/components/resource-table";
-import { LockClosedIcon } from "@heroicons/react/24/outline";
-import { useArticleBySlug } from "@/lib/api/hooks/use-articles";
-import { ArticleForm } from "../../_components/article-form";
+/**
+ * Article edit — an ADR-0067 server-prefetch route. Like the detail route, the form's primary read
+ * is `useArticleBySlug(slug)`, so this thin Server Component prefetches `articleKeys.bySlug(slug)`
+ * into a per-request `QueryClient`, dehydrates it, and hydrates the client `ArticleEditView`. The
+ * key must be byte-identical to the child's, or the dehydrated entry misses and the client refetches
+ * (double-fetch). See the assets page for the full rationale; the #600 401 handler stays on the
+ * client provider.
+ */
+export default async function EditArticlePage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  const session = await auth();
+  const queryClient = getServerQueryClient();
 
-export default function EditArticlePage() {
-  const t = useTranslations("kb");
-  const params = useParams<{ slug: string }>();
-  const { data: article, isLoading, isError, error, refetch } =
-    useArticleBySlug(params.slug);
-  const { data: session } = useSession();
-
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-4xl">
-        <DetailSkeleton panels={1} />
-      </div>
-    );
-  }
-
-  if (isError || !article) {
-    return (
-      <div className="mx-auto max-w-4xl">
-        <ErrorState
-          title={t("detail.notFoundTitle")}
-          description={t("detail.notFoundDescription")}
-          onRetry={() => refetch()}
-          error={error}
-        />
-      </div>
-    );
-  }
-
-  if (!session) {
-    return (
-      <div className="mx-auto max-w-4xl">
-        <EmptyState
-          icon={LockClosedIcon}
-          title={t("form.notSignedInTitle")}
-          description={t("form.notSignedInDescription")}
-        />
-      </div>
-    );
-  }
+  await queryClient.prefetchQuery({
+    queryKey: articleKeys.bySlug(slug),
+    queryFn: () => getArticleBySlug(slug, session?.accessToken),
+  });
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: t("breadcrumb"), href: "/kb" },
-              { label: article.title, href: `/kb/${article.slug}` },
-              { label: t("form.editCrumb") },
-            ]}
-          />
-        }
-        title={t("form.editTitle")}
-        subtitle={t("form.editSubtitle")}
-      />
-      <ArticleForm article={article} />
-    </div>
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <ArticleEditView slug={slug} />
+    </HydrationBoundary>
   );
 }
