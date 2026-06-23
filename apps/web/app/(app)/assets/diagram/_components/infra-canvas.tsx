@@ -19,6 +19,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { InfraEdge, InfraNode } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
+import { useTheme } from "next-themes";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ErrorState } from "@/components/resource-table";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -114,6 +115,12 @@ function CanvasBoard({
   const t = useTranslations("infra");
   const canManage = useCan("infra:manage");
   const persist = useUpdateInfraNodePosition();
+  // Pin React Flow's color mode to the resolved app theme (next-themes class), NOT the OS — so
+  // RF's own `.dark` toggles in lockstep with our `.dark` class and the themed `--xy-*` chrome
+  // vars (globals.css) resolve to the matching light/dark tokens. `system` would follow the OS and
+  // diverge from an explicit in-app theme choice (issue #763).
+  const { resolvedTheme } = useTheme();
+  const colorMode = resolvedTheme === "dark" ? "dark" : "light";
 
   // Resolve i18n labels once per kind/status so the (i18n-free) node card just renders strings.
   const kindLabel = (kind: InfraNode["kind"]) => t(`kind.${kind}`);
@@ -249,11 +256,22 @@ function CanvasBoard({
         minZoom={0.2}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
-        colorMode="system"
+        colorMode={colorMode}
       >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={20}
+          size={1}
+          color="var(--border)"
+        />
         <Controls showInteractive={false} />
-        <MiniMap pannable zoomable className="!hidden md:!block" />
+        <MiniMap
+          pannable
+          zoomable
+          className="!hidden md:!block"
+          maskColor="color-mix(in oklab, var(--background) 60%, transparent)"
+          nodeColor="var(--muted-foreground)"
+        />
 
         {/* Hover quick-facts (ADR-0070 §6). NodeToolbar auto-positions above the hovered node; a
             lightweight card, no extra dep. The rich drill-in (owner/KB/secrets) is issue #742. */}
