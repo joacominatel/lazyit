@@ -4,25 +4,47 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { InfraEdge, InfraNode } from "@lazyit/shared";
+import type {
+  CreateInfraEdge,
+  InfraEdge,
+  InfraNode,
+  InfraNodeDetail,
+  UpdateInfraNode,
+} from "@lazyit/shared";
 import {
+  closeInfraEdge,
+  createInfraEdge,
+  createInfraNode,
+  type CreateInfraNodeInput,
+  deleteInfraNode,
+  getInfraNodeDetail,
   getInfraNodeEdges,
+  getInfraNodeEdgesHistory,
   getInfraNodes,
   type InfraNodeFilters,
+  restoreInfraNode,
+  updateInfraNode,
   updateInfraNodePosition,
 } from "../endpoints/infra";
 
 /**
- * Query keys + read/write hooks for the infra topology canvas (ADR-0070, issue #741).
+ * Query keys + read/write hooks for the infra topology canvas + drill-in panel (ADR-0070, issues
+ * #741 + #742).
  *
- * Hand-written (not `createQueryKeys`) for the canvas's two bespoke shapes: a filtered node list and
- * a PER-NODE edge list (the API has no global edges endpoint). Mutations invalidate `infraKeys.all`.
+ * Hand-written (not `createQueryKeys`) for the canvas's bespoke shapes: a filtered node list, a
+ * PER-NODE edge list (the API has no global edges endpoint), the enriched per-node `detail`, and a
+ * per-node edge `history` (active + closed). Every mutation invalidates `infraKeys.all`, which
+ * prefix-matches all `["infra", …]` keys — so a create/edit/delete/edge write refreshes the canvas
+ * node list, the open panel's detail, and its edge lists in one call (TanStack Query v5 prefix match).
  */
 export const infraKeys = {
   all: ["infra"] as const,
   nodes: (filters: InfraNodeFilters) =>
     [...infraKeys.all, "nodes", filters] as const,
   edges: (nodeId: string) => [...infraKeys.all, "edges", nodeId] as const,
+  detail: (nodeId: string) => [...infraKeys.all, "detail", nodeId] as const,
+  edgeHistory: (nodeId: string) =>
+    [...infraKeys.all, "edgeHistory", nodeId] as const,
 };
 
 /** List topology nodes, optionally filtered. The canvas keeps the fetch client-side (React Flow is
@@ -90,3 +112,111 @@ export function useUpdateInfraNodePosition() {
     },
   });
 }
+
+// ── Drill-in detail + edge history (ADR-0070 §6, issue #742) ───────────────────────────────────────
+
+/**
+ * The enriched drill-in for the selected node (`GET /infra/nodes/:id`) — owners, KB links, secret
+ * HANDLES (never values, INV-10), shortcuts, IP, and the children list (active inverse RUNS_ON). The
+ * panel passes the selected id; `enabled` gates the fetch so nothing fires until a node is selected.
+ */
+export function useInfraNodeDetail(nodeId: string | null) {
+  return useQuery({
+    queryKey: infraKeys.detail(nodeId ?? ""),
+    queryFn: ({ signal }) => getInfraNodeDetail(nodeId as string, signal),
+    enabled: Boolean(nodeId),
+  });
+}
+
+/**
+ * A node's full edge history (active + closed) for the panel's edge manager (`?active=false`). The
+ * canvas's `useInfraEdges` reads active-only to draw the live graph; this read shows migrations (a
+ * closed RUNS_ON) so an operator understands the host history. `enabled` gates it on a selected node.
+ */
+export function useInfraNodeEdgesHistory(nodeId: string | null) {
+  return useQuery({
+    queryKey: infraKeys.edgeHistory(nodeId ?? ""),
+    queryFn: ({ signal }) => getInfraNodeEdgesHistory(nodeId as string, signal),
+    enabled: Boolean(nodeId),
+  });
+}
+
+// ── Write mutations (ADR-0070 §5/§3 lifecycle, issue #742) ─────────────────────────────────────────
+//
+// All write mutations share one shape: invalidate `infraKeys.all` on success so the canvas list, the
+// open panel's detail and every per-node edge list refresh together (prefix match). They expose
+// `mutate`/`mutateAsync` so callers own their own toast + close on success / `notifyError` on failure
+// (the app-wide dialog/form convention) — including the friendly RUNS_ON / duplicate-pair 409 the
+// edge API returns as a plain message.
+
+/** Create a node (`POST /infra/nodes`); asset-backed by default via the `trackAsAsset` flag (§5). */
+export function useCreateInfraNode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateInfraNodeInput) => createInfraNode(input),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
+ * Patch a node (`PATCH /infra/nodes/:id`) — the lifecycle status toggle, label/kind/ip/shortcut
+ * edits, and `assetId: null` detach (§5). One hook for every node edit; the caller passes the patch.
+ */
+export function useUpdateInfraNode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateInfraNode }) =>
+      updateInfraNode(id, patch),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/** Soft-delete a node (`DELETE /infra/nodes/:id`) — off the map, history kept (§5). */
+export function useDeleteInfraNode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteInfraNode(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/** Restore a soft-deleted node (`POST /infra/nodes/:id/restore`) — back onto the map. */
+export function useRestoreInfraNode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => restoreInfraNode(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
+ * Open an edge (`POST /infra/edges`). The API canonicalizes CONNECTS_TO, migrates RUNS_ON, and may
+ * 409 on the one-active-host / duplicate-pair invariant — the caller toasts that message verbatim via
+ * `notifyError`. Invalidates `infraKeys.all` so both endpoints' edge lists + the canvas refresh.
+ */
+export function useCreateInfraEdge() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateInfraEdge) => createInfraEdge(input),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/** Close an edge (`POST /infra/edges/:id/close`) — the ADR-0019 migration/lifecycle marker. */
+export function useCloseInfraEdge() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => closeInfraEdge(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+// Re-export the detail/edge wire types so panel components can import them from the hook module
+// (the single place the next Servers-list agent reuses) without reaching into endpoints.
+export type { InfraNodeDetail, InfraEdge };
