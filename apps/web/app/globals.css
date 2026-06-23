@@ -377,6 +377,45 @@
     }
   }
 
+  /* Infra topology — the DEPENDS_ON dash flow (ADR-0070 UX, issue #767). The ONE animated edge
+     kind: a slow, subtle march of the dash pattern along the path, reading as the direction of
+     "need". Applied via `.infra-edge-flow` on the edge's <path>; the dash pattern itself comes from
+     `edgeStyle('DEPENDS_ON').dashArray` ("6 4" → period 10), so the offset cycles exactly one
+     period. It is a continuous ambient loop (not a ≤220ms UI transition) — a low-salience cue, not
+     chrome — and the consolidated reduced-motion block below freezes it to a static dashed line
+     (animation-duration → ~0), so it never moves for motion-sensitive readers. */
+  @keyframes infra-dash-flow {
+    to {
+      stroke-dashoffset: -10;
+    }
+  }
+
+  /* Infra topology — the one-shot focus pulse (ADR-0070 UX, issue #765). When `focusNode(id)` lands
+     on a node (a deep-link, a fresh create, or the future "View in topology" button), the node's
+     card breathes ONCE — a gentle 1 → 1.06 → 1 scale — to say "here". Driven by a `data.focusPulse`
+     flag the canvas sets then auto-clears (~600ms timeout), so the class is present for a single
+     play. ≤600ms, one iteration, off the success-check spring (uses the workhorse ease). Reduced
+     motion freezes it to no movement via the block below (the fitView itself runs instant there). */
+  @keyframes infra-focus-pulse {
+    0% {
+      transform: scale(1);
+    }
+    45% {
+      transform: scale(1.06);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  .infra-edge-flow {
+    animation: infra-dash-flow 0.9s linear infinite;
+  }
+
+  .infra-focus-pulse {
+    animation: infra-focus-pulse 600ms var(--ease-out-quad) 1;
+  }
+
   .animate-rise-in {
     animation: rise-in var(--dur-slow) var(--ease-out-quad) both;
   }
