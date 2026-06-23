@@ -119,6 +119,13 @@
     "statusDescription": "Set the node's live state. The reporting agent will drive this automatically later.",
     "statusUpdatedToast": "Status updated.",
     "statusError": "Couldn't update the status.",
+    "impactTitle": "Impact / blast radius",
+    "impactShow": "Show blast radius",
+    "impactHide": "Hide blast radius",
+    "impactDescription": "If this node goes down, what stops with it? Highlights the downstream nodes on the map.",
+    "impactSafe": "Nothing depends on this node — safe to take down.",
+    "impactCount": "{count, plural, one {# node affected if this goes down} other {# nodes affected if this goes down}}",
+    "impactDepth": "{depth, plural, one {# hop} other {# hops}}",
     "deleteAction": "Remove from map",
     "loading": "Loading node…"
   },

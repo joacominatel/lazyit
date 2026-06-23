@@ -119,6 +119,13 @@
     "statusDescription": "Definí el estado actual del nodo. Más adelante el agente de reporte lo actualizará automáticamente.",
     "statusUpdatedToast": "Estado actualizado.",
     "statusError": "No se pudo actualizar el estado.",
+    "impactTitle": "Impacto / radio de afectación",
+    "impactShow": "Mostrar radio de afectación",
+    "impactHide": "Ocultar radio de afectación",
+    "impactDescription": "Si este nodo se cae, ¿qué se detiene con él? Resalta los nodos dependientes en el mapa.",
+    "impactSafe": "Nada depende de este nodo: se puede dar de baja sin riesgo.",
+    "impactCount": "{count, plural, one {# nodo afectado si este se cae} other {# nodos afectados si este se cae}}",
+    "impactDepth": "{depth, plural, one {# salto} other {# saltos}}",
     "deleteAction": "Quitar del mapa",
     "loading": "Cargando nodo…"
   },
