@@ -65,6 +65,14 @@ handover note and print a **return act** (with company name and signature lines)
 hand-off. Offboarding is valid even when the person holds nothing — it still stands as a record of
 their departure.
 
+## Find users by role
+
+The Users list has a **role filter** alongside the status and directory filters: pick **Admin**,
+**Member** or **Viewer** to show only people who hold that role. It is server-side, so it stays
+accurate at any team size, and the choice lives in the page address — a filtered list is shareable and
+bookmarkable. The [Roles](/help/users-permissions-roles) screen's **View N members** links land here
+pre-filtered, so the Users list is the one place you browse and manage role membership.
+
 ## Directory people
 
 A **directory** person is a User without a login — created by the [bulk import](/help/assets-bulk-import)

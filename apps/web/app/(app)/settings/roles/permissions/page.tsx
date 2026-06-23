@@ -12,7 +12,6 @@ import {
   type Permission,
   PRESET_BY_ID,
   type PresetId,
-  type Role,
   type RolePermissionMatrix,
   UpdateRolePermissionsSchema,
 } from "@lazyit/shared";
@@ -31,7 +30,7 @@ import {
   useUpdatePermissionMatrix,
 } from "@/lib/api/hooks/use-permissions-config";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
-import { useUsersByRole } from "@/lib/hooks/use-users-by-role";
+import { useRoleCounts } from "@/lib/hooks/use-role-counts";
 import { AdminGate } from "../../_components/admin-gate";
 import { CapabilityGroup } from "./_components/capability-group";
 import { ConsequentialConfirmDialog } from "./_components/consequential-confirm-dialog";
@@ -78,7 +77,7 @@ function PermissionsEditor() {
   const editingRole = roleFromParam(searchParams.get("role"));
 
   const matrixQuery = usePermissionMatrix();
-  const { byRole } = useUsersByRole();
+  const { counts: holderCounts } = useRoleCounts();
   const updateMutation = useUpdatePermissionMatrix();
 
   // The staged sets for BOTH editable roles (held together so editing one never clobbers the other —
@@ -97,15 +96,6 @@ function PermissionsEditor() {
     setSeededFrom(serverMatrix);
     setStaged(stagedFromMatrix(serverMatrix));
   }
-
-  const holderCounts: Record<Role, number> | undefined = useMemo(() => {
-    if (!byRole) return undefined;
-    return {
-      ADMIN: byRole.ADMIN.length,
-      MEMBER: byRole.MEMBER.length,
-      VIEWER: byRole.VIEWER.length,
-    };
-  }, [byRole]);
 
   // Per-role dirtiness (staged vs. server), and whole-form dirtiness.
   const isRoleDirty = useCallback(

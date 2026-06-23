@@ -149,7 +149,7 @@
     "title": "Roles",
     "subtitle": "Who holds which access level, and what each role can do. Change a role from the Users section.",
     "manageUsers": "Manage users",
-    "emptyMembers": "No users with this role.",
+    "viewMembers": "View {count, plural, =0 {no members} one {# member} other {# members}}",
     "fullAccessLocked": "Full access — not editable.",
     "editPermissions": "Edit permissions",
     "meta": {

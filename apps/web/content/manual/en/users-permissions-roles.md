@@ -28,6 +28,15 @@ can be tuned. The role is the thing a user *has*; permissions are what a role *g
   sensitive views (the user directory and the access-grant ledger) are also hidden from Viewer by
   default.
 
+## The Roles overview
+
+**Settings → Roles** shows one card per role with, for each: a **live holder count** (how many active
+users currently hold it), a short reminder of what the role can do, and a **View N members** link. That
+link opens the [Users list](/help/users-permissions-user-lifecycle) filtered to that role — the Users
+list is where you actually browse and manage who holds it, with search, sort and paging. The cards show
+counts only; they no longer list members inline. From the same cards you can open **Edit permissions**
+for Member and Viewer (Admin is full access and locked).
+
 ## How a role is assigned
 
 - **The first user is always Admin.** The very first person provisioned on a fresh install — whether
