@@ -2,6 +2,7 @@
 
 import {
   BookOpenIcon,
+  CpuChipIcon,
   KeyIcon,
   MagnifyingGlassIcon,
   MapPinIcon,
@@ -41,6 +42,7 @@ const ENTITY_ICON: Record<SearchEntity, typeof ServerStackIcon> = {
   users: UsersIcon,
   locations: MapPinIcon,
   applications: KeyIcon,
+  infra: CpuChipIcon,
 };
 
 /**
@@ -225,6 +227,18 @@ export function GlobalSearch() {
                     render={(hit) => ({
                       primary: hit.name,
                       secondary: hit.vendor ?? undefined,
+                    })}
+                  />
+                  <ResultGroup
+                    entity="infra"
+                    block={data?.infra}
+                    // ponytail: no infra detail/canvas route exists on this branch yet (the topology
+                    // Diagram UI lands separately — ADR-0070 v1). Degrade gracefully by closing the
+                    // palette instead of pushing to a 404; wire the Diagram deep-link when it ships.
+                    onSelect={() => handleOpenChange(false)}
+                    render={(hit) => ({
+                      primary: hit.label,
+                      secondary: hit.assetName ?? hit.ipAddress ?? undefined,
                     })}
                   />
                   {totalHits === 0 &&
