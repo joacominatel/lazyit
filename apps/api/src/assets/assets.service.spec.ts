@@ -722,6 +722,33 @@ describe('AssetsService', () => {
     });
   });
 
+  it('findPage filters by assignedToUserId: only assets with a LIVE assignment to that user', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { assignedToUserId: 'u-uuid-1' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    // Owner = a live assignment (releasedAt null) to the user; released owners are excluded.
+    expect(findManyArgs.where).toEqual({
+      assignments: { some: { userId: 'u-uuid-1', releasedAt: null } },
+      deletedAt: null,
+    });
+    // The count query must filter on the SAME where so total matches the page.
+    const countArgs = (
+      asset.count.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(countArgs.where).toEqual({
+      assignments: { some: { userId: 'u-uuid-1', releasedAt: null } },
+      deletedAt: null,
+    });
+  });
+
   it('findPage filters by q (case-insensitive OR over name/serial/assetTag)', async () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
