@@ -82,10 +82,7 @@ function chunk<T>(docs: T[], size: number): T[][] {
  * a task that *fails* (rather than the call rejecting) when the index already exists, so we await
  * the task and swallow only that benign already-exists outcome — any other failure propagates.
  */
-async function ensureIndex(
-  client: ReindexClient,
-  uid: string,
-): Promise<void> {
+async function ensureIndex(client: ReindexClient, uid: string): Promise<void> {
   try {
     await client.createIndex(uid, { primaryKey: 'id' }).waitTask();
   } catch (err) {
@@ -100,7 +97,11 @@ function isIndexAlreadyExists(err: unknown): boolean {
   // Match either, plus the message, so a minor client-shape change doesn't make ensureIndex brittle.
   const code = extractCode(err);
   if (code === 'index_already_exists') return true;
-  const message = err instanceof Error ? err.message : String(err ?? '');
+  // Fall back to the message text. Only an Error or a raw string carries one; any other shape
+  // (object/number/null) has no message to match, so it can't be the already-exists outcome. (A
+  // bare object would stringify to `[object Object]` and never contain the token anyway.)
+  const message =
+    err instanceof Error ? err.message : typeof err === 'string' ? err : '';
   return message.includes('index_already_exists');
 }
 
@@ -153,7 +154,10 @@ export async function reindexIndex(
     // filterable for folder-access scoping).
     const filterable = FILTERABLE_ATTRIBUTES[index];
     if (filterable !== undefined) {
-      await client.index(tempUid).updateFilterableAttributes(filterable).waitTask();
+      await client
+        .index(tempUid)
+        .updateFilterableAttributes(filterable)
+        .waitTask();
     }
 
     for (const batch of chunk(docs, REINDEX_BATCH_SIZE)) {
@@ -165,9 +169,7 @@ export async function reindexIndex(
 
     // Atomic swap: queries against `index` see the old, complete data right up to the swap, then the
     // freshly-built data — never an empty or half-built index.
-    await client
-      .swapIndexes([{ indexes: [index, tempUid] }])
-      .waitTask();
+    await client.swapIndexes([{ indexes: [index, tempUid] }]).waitTask();
   } finally {
     // Dispose THIS run's own temp index (the per-run uid), never another concurrent rebuild's
     // (#464). After a successful swap it holds the *stale* docs; after a failure it holds a partial
