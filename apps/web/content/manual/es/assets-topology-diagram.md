@@ -82,7 +82,10 @@ preexistente, queda intacto y simplemente se desvincula.
 
 La **etiqueta del nodo siempre manda para mostrarse** en el lienzo; el nombre del activo vinculado
 aparece en el panel de detalle como un *nombre de inventario* secundario, así que ambos nunca se
-desfasan en silencio.
+desfasan en silencio. Ese nombre de inventario es un **enlace de vuelta al activo** —hacé clic para
+abrir su registro completo—. La propia página de detalle del activo cierra el círculo en sentido
+contrario: muestra una insignia **En la topología** y un botón **Ver en la topología** que vuela el
+mapa hasta este nodo (ver [Conceptos básicos de activos](/help/assets-asset-basics)).
 
 ## Relaciones (conexiones)
 
