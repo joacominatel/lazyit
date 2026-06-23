@@ -34,6 +34,8 @@ const ROLE_TONE: Record<Role, StatusTone> = {
  * the per-role permissions screen: the MEMBER/VIEWER cards link to it; ADMIN is immutable/full and
  * shown locked. Counts reflect the active (not soft-deleted) directory.
  */
+// ponytail: skipped from the ADR-0067 server-prefetch rollout — a low-traffic role-counts overview;
+// not worth a prefetch to keep this rollout's scope tight.
 export default function RolesPage() {
   const t = useTranslations("settings");
   const { counts, isLoading } = useRoleCounts();

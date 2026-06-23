@@ -13,6 +13,8 @@ import { ImportWizard } from "./_components/import-wizard";
  * `import:run`, and the wizard for those who hold it. The API enforces the same gate (plus human-only
  * + owner-scope) server-side, so this is a UI affordance, not the boundary (fails closed).
  */
+// ponytail: skipped from the ADR-0067 server-prefetch rollout — the Migrator wizard has no
+// first-paint read (a session id only exists after the upload step), so there is nothing to prefetch.
 export default function ImportsPage() {
   const t = useTranslations("imports");
   return (

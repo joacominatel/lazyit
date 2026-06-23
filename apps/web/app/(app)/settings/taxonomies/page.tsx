@@ -26,6 +26,9 @@ type TabKey = (typeof TAB_KEYS)[number];
  * models, each backed by its own CRUD manager. Lean local tabs (no shadcn Tabs in the kit yet) keep
  * this consistent with the rest of the app's chrome.
  */
+// ponytail: skipped from the ADR-0067 server-prefetch rollout — a tab-state shell whose primary read
+// is a tab-dependent child (CategoryManager kind varies / AssetModelManager); no single stable
+// first-paint query to prefetch.
 export default function TaxonomiesPage() {
   const t = useTranslations("settings");
   const [tab, setTab] = useState<TabKey>("asset");
