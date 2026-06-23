@@ -232,7 +232,10 @@ export class AssetsService {
   async create(
     data: CreateAsset,
     principal?: Principal,
-    options?: { createdPayload?: Prisma.InputJsonValue; suppressSearch?: boolean },
+    options?: {
+      createdPayload?: Prisma.InputJsonValue;
+      suppressSearch?: boolean;
+    },
   ) {
     const actor = this.actor.resolveActor(principal);
     const { specs, assetTag, ...rest } = data;
