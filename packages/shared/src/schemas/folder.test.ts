@@ -15,7 +15,7 @@ import {
 describe("FolderAccessRuleSchema — the closed rule vocabulary (ADR-0060 §3)", () => {
   test("accepts a users rule (explicit user set)", () => {
     const rule = {
-      kind: "users",
+      kind: "users" as const,
       userIds: ["11111111-1111-4111-8111-111111111111"],
     };
     expect(FolderAccessRuleSchema.parse(rule)).toEqual(rule);
@@ -34,7 +34,7 @@ describe("FolderAccessRuleSchema — the closed rule vocabulary (ADR-0060 §3)",
   });
 
   test("accepts a role rule", () => {
-    const rule = { kind: "role", role: "MEMBER" };
+    const rule = { kind: "role" as const, role: "MEMBER" as const };
     expect(FolderAccessRuleSchema.parse(rule)).toEqual(rule);
   });
 
@@ -46,7 +46,7 @@ describe("FolderAccessRuleSchema — the closed rule vocabulary (ADR-0060 §3)",
 
   test("accepts an appGrant rule (holders of an active grant to an application)", () => {
     const rule = {
-      kind: "appGrant",
+      kind: "appGrant" as const,
       applicationId: "clappapplication000000000",
     };
     expect(FolderAccessRuleSchema.parse(rule)).toEqual(rule);
@@ -54,7 +54,7 @@ describe("FolderAccessRuleSchema — the closed rule vocabulary (ADR-0060 §3)",
 
   test("accepts an assetAssignment rule (current assignees of an asset)", () => {
     const rule = {
-      kind: "assetAssignment",
+      kind: "assetAssignment" as const,
       assetId: "classetasset0000000000000",
     };
     expect(FolderAccessRuleSchema.parse(rule)).toEqual(rule);
@@ -80,8 +80,8 @@ describe("FolderAccessRuleSchema — the closed rule vocabulary (ADR-0060 §3)",
 describe("FolderAccessRulesSchema — the OR-combined rule list", () => {
   test("accepts a multi-rule OR list", () => {
     const rules = [
-      { kind: "role", role: "MEMBER" },
-      { kind: "appGrant", applicationId: "clappapplication000000000" },
+      { kind: "role" as const, role: "MEMBER" as const },
+      { kind: "appGrant" as const, applicationId: "clappapplication000000000" },
     ];
     expect(FolderAccessRulesSchema.parse(rules)).toEqual(rules);
   });
@@ -119,7 +119,7 @@ describe("isPublicAccessRules — the PUBLIC fast-path predicate (ADR-0060 §2)"
 
 describe("UpdateFolderAccessRulesSchema — the PUT body (set/clear a folder's rules)", () => {
   test("accepts a rule list", () => {
-    const body = { accessRules: [{ kind: "role", role: "ADMIN" }] };
+    const body = { accessRules: [{ kind: "role" as const, role: "ADMIN" as const }] };
     expect(UpdateFolderAccessRulesSchema.parse(body)).toEqual(body);
   });
 
