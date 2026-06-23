@@ -37,7 +37,7 @@ export function isSafeApplicationUrl(value: string): boolean {
     .replace(/^[^a-zA-Z0-9]+/, "");
   const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(normalized);
   if (!match) return true; // scheme-less host/path, e.g. vpn.corp.local
-  const scheme = match[1].toLowerCase();
+  const scheme = match[1]!.toLowerCase();
   if (scheme === "http" || scheme === "https") return true;
   // A scheme-less host with a port (vpn.corp.local:8080) is read as scheme=host by the regex above;
   // allow it when what follows the first colon is only a port (+ optional path).
