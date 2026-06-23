@@ -92,7 +92,6 @@ export function RelatedArticlesPanel(
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <SearchInput
           value={q}
-          onChange={setQ}
           debounceMs={300}
           onDebouncedChange={(next) => {
             setQ(next);

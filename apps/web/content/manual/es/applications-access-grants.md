@@ -64,5 +64,17 @@ planificada, no el comportamiento actual.)
 - Una persona con concesión que luego fue desactivada queda señalada en sus concesiones, para que
   encuentres rápido el acceso que debería limpiarse.
 
+## Buscar una concesión
+
+El panel de **Acceso activo** agrupa las concesiones por usuario — cuando alguien tiene más de
+una, todas sus concesiones aparecen juntas bajo su nombre con un distintivo de cantidad. Puedes
+**buscar por nombre** usando el cuadro de filtro encima del listado para encontrar rápidamente
+las concesiones de una persona. Si la lista es larga, se **pagina automáticamente** (25 por
+página) para que siga siendo legible sin importar cuántas concesiones acumule una aplicación.
+
+Cada concesión individual sigue siendo completamente visible dentro del grupo con sus propios
+controles de **Editar** y **Revocar** — el agrupamiento es solo visual y nunca oculta ni fusiona
+concesiones.
+
 > Ver el mapa de acceso — quién tiene acceso a qué — está disponible para administradores y
 > miembros. Los visualizadores no ven el registro de acceso de forma predeterminada.

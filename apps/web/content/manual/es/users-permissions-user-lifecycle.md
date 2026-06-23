@@ -68,6 +68,15 @@ de entrega e imprimir un **acta de baja** (con el nombre de la empresa y líneas
 papel en la entrega. Dar de baja es válido incluso cuando la persona no tiene nada — sigue valiendo como
 constancia de su salida.
 
+## Encontrar usuarios por rol
+
+La lista de Usuarios tiene un **filtro de rol** junto a los filtros de estado y de directorio: elige
+**Admin**, **Miembro** o **Lector** para mostrar solo a quienes tienen ese rol. Es del lado del
+servidor, así que se mantiene exacto con cualquier tamaño de equipo, y la elección vive en la dirección
+de la página — una lista filtrada se puede compartir y guardar en marcadores. Los enlaces **Ver N
+miembros** de la pantalla de [Roles](/help/users-permissions-roles) llegan aquí ya filtrados, así que la
+lista de Usuarios es el único lugar donde navegas y gestionas la membresía de roles.
+
 ## Personas de directorio
 
 Una persona de **directorio** es un usuario sin acceso — creada por la

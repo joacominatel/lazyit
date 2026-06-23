@@ -4,7 +4,7 @@ import { Bars3Icon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,11 +28,12 @@ export function MobileNav() {
   const t = useTranslations("shared");
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-
-  // Close the sheet after a navigation so the next page isn't hidden behind it.
-  useEffect(() => {
+  // Close the sheet when the route changes — derived during render (no effect needed).
+  const [lastPathname, setLastPathname] = useState(pathname);
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
     setOpen(false);
-  }, [pathname]);
+  }
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>

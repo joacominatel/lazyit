@@ -3,7 +3,7 @@ title: "ADR-0069: Migrator — guided bulk import (phase 1: Asset slice, JSON + 
 tags: [adr, migrator, import, asset, backend, frontend, shared, settings]
 status: accepted
 created: 2026-06-17
-updated: 2026-06-20
+updated: 2026-06-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -12,9 +12,9 @@ deciders: [Joaquín Minatel]
 ## Status
 
 **accepted** — 2026-06-17 (CEO delegated the architecture call to the CTO and confirmed; *"si crees que es la mejor forma de importar cosas de forma masiva, podemos adaptarlo"*). Issue #620. Backed by the strict pre-ADR analysis
-(`docs/03-decisions/0069-migrator-import.ANALYSIS.md`, ~20-agent review grounded in verified code).
+([[0069-migrator-import.ANALYSIS]] — archived in `docs/03-decisions/archive/`, ~20-agent review grounded in verified code).
 Builds on [[0005-id-strategy]], [[0006-soft-delete-and-auditing]], [[0007-flexible-asset-specs-jsonb]],
-[[0041-soft-delete-reuse-and-restore]], [[0046-rbac-v2]], [[0053-async-workers-bullmq-valkey]],
+[[0041-soft-delete-reuse-and-restore]], [[0046-roles-permissions-v2]], [[0053-async-workers-bullmq-valkey]],
 [[0054-applications-workflow-engine]] (transactional-outbox), [[0063-configurable-asset-tag-scheme]],
 [[0068-asset-tag-existing-estate-awareness]].
 
@@ -169,7 +169,7 @@ import** — the per-asset Meili upsert is skipped and a **single search reconci
 
 ### 11. Security
 
-- **New `import:run` permission, ADMIN-only by default** (RBAC catalog addition, [[0046-rbac-v2]]) **AND** a
+- **New `import:run` permission, ADMIN-only by default** (RBAC catalog addition, [[0046-roles-permissions-v2]]) **AND** a
   **runtime per-target check at commit** (`asset:write`, plus `category:write` / `assetModel:write` /
   `location:write` for each create-new conflict action) via a `PermissionResolver` call inside the commit
   service — `@RequirePermission` can't express the AND because the target isn't known until after analyze.
@@ -310,7 +310,7 @@ with the catalog change in `@lazyit/shared`. All consistent with §1/§11:
 
 **Related:** #620 · the pre-ADR analysis doc · [[0063-configurable-asset-tag-scheme]] ·
 [[0068-asset-tag-existing-estate-awareness]] · [[0007-flexible-asset-specs-jsonb]] ·
-[[0006-soft-delete-and-auditing]] · [[0053-async-workers-bullmq-valkey]] · [[0046-rbac-v2]]
+[[0006-soft-delete-and-auditing]] · [[0053-async-workers-bullmq-valkey]] · [[0046-roles-permissions-v2]]
 
 ---
 

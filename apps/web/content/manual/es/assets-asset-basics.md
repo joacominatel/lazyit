@@ -76,6 +76,32 @@ modelo con valores por defecto, esos valores se copian como punto de partida —
 esta unidad concreta antes de guardar. Los campos personalizados se muestran como una lista ordenada
 de etiqueta/valor en la página de detalle.
 
+## Encontrar activos en la lista
+
+La lista de **Activos** tiene un buscador y un desplegable de **Estado** en la barra de
+herramientas, y además un botón **Filtros** que abre un panel con el resto:
+
+- **Categoría** y **Ubicación** — acota a una categoría de modelo o a un lugar.
+- **Responsable** — muestra solo los activos asignados actualmente a una persona concreta. Empieza a
+  escribir un nombre para elegirla; la lista mostrará únicamente las asignaciones vigentes de esa
+  persona.
+- **Responsabilidad** — filtra según si el activo tiene algún responsable actual (*Con responsables*
+  / *Sin responsables*), sin importar quién.
+
+El botón **Filtros** muestra un pequeño contador de cuántos de estos están activos. Cada filtro que
+aplicas aparece también como una etiqueta que puedes quitar debajo de la barra, y los filtros viven
+en la dirección de la página, así que una vista filtrada es fácil de deshacer, compartir o guardar
+en marcadores.
+
+### Elegir qué columnas mostrar
+
+El botón **Columnas** (junto a *Filtros*) abre una lista de las columnas de la tabla — etiqueta,
+modelo, categoría, ubicación, estado, responsables y actualizado. Desmarca las que no te interesan
+para reducir la tabla a lo que te importa. La columna **Nombre** y las acciones de fila siempre se
+mantienen. Tu elección se recuerda en este navegador, así que la tabla conserva la misma forma la
+próxima vez que entres. (Esto rige la tabla de escritorio; la vista de tarjetas en móvil siempre
+muestra el conjunto completo.)
+
 ## Editar, clonar y desactivar
 
 - **Editar** actualiza el activo en su lugar; cada cambio relevante (estado, ubicación, modelo, campos

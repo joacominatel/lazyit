@@ -2,11 +2,8 @@
 
 import {
   ArrowDownTrayIcon,
-  ArrowPathIcon,
-  Bars3BottomLeftIcon,
   ClockIcon,
   PrinterIcon,
-  TableCellsIcon,
   UserIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -19,15 +16,12 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import {
-  ActivityRow,
-  ActorAvatar,
-  ENTITY_META,
-} from "@/components/activity-row";
+import { ActorAvatar, ENTITY_META } from "@/components/activity-row";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { RowsPerPageSelect } from "@/components/rows-per-page-select";
 import {
   ErrorState,
   LinkableRow,
@@ -50,18 +44,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { TableCell } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { groupByDay } from "@/lib/activity-grouping";
 import { actionLabel, actionTone } from "@/lib/activity-tones";
 import type { DashboardActivityFilters } from "@/lib/api/endpoints/dashboard";
-import {
-  REPORTS_ACTIVITY_PAGE_SIZE,
-  useDashboardActivity,
-  useReportsActivityPage,
-} from "@/lib/api/hooks/use-dashboard";
+import { useReportsActivityPage } from "@/lib/api/hooks/use-dashboard";
 import { useUsers } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
-import { cn } from "@/lib/utils";
 import { downloadCsv } from "./reports-csv";
 
 /**
@@ -74,9 +62,8 @@ import { downloadCsv } from "./reports-csv";
  * the returned values map straight onto the request — there is no more client-side `.filter()` over a
  * partial window, so the `total` and the table pagination are the server's real filtered figures.
  *
- * Two views share the filtered feed: a Timeline (the reused activity row, day-grouped, "Load more"
- * over the infinite query) and a Table (`ResourceTable` with true server-side prev/next paging). CSV
- * + Print export exactly the rows currently visible.
+ * The feed is rendered as a dense Table (`ResourceTable` with true server-side prev/next paging);
+ * the earlier Timeline view was dropped (#696). CSV + Print export exactly the rows currently visible.
  */
 
 /**
@@ -130,7 +117,6 @@ const FILTER_DEFAULTS = {
   // `from` / `to` are date-only (`YYYY-MM-DD`) URL filters; empty means that bound is open.
   from: "",
   to: "",
-  view: "timeline",
 } as const;
 
 /** Local `YYYY-MM-DD` for an epoch ms (the value an `<input type="date">` round-trips). */
@@ -184,7 +170,7 @@ function toDateToIso(date: string): string | undefined {
 export function ReportsScreen() {
   const t = useTranslations("reports");
   const tAction = useTranslations("shared.activity.action");
-  // Snapshot "now" once so the relative-range presets + day-grouping stay pure across renders.
+  // Snapshot "now" once so the relative-range presets stay pure across renders.
   const [now] = useState(() => Date.now());
   const {
     q,
@@ -194,6 +180,7 @@ export function ReportsScreen() {
     setQ,
     setFilter,
     setFilters,
+    setLimit,
     setOffset,
     clearFilters,
     filtersActive,
@@ -208,7 +195,6 @@ export function ReportsScreen() {
   const actorFilter = filters.actor;
   const fromDate = filters.from;
   const toDate = filters.to;
-  const view = filters.view === "table" ? "table" : "timeline";
 
   const tabMeta = useMemo(() => TABS.find((t) => t.value === tab) ?? TABS[0], [tab]);
   const isMyHistory = tab === "me";
@@ -242,40 +228,17 @@ export function ReportsScreen() {
     return out;
   }, [tabMeta.entityType, isMyHistory, actorFilter, actionFilter, fromDate, toDate, q]);
 
-  // Timeline: the infinite "Load more" feed, keyed (and filtered) by the server filters.
-  const {
-    data: timelineData,
-    isLoading: timelineLoading,
-    isError: timelineError,
-    error: timelineErr,
-    refetch: timelineRefetch,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-  } = useDashboardActivity(REPORTS_ACTIVITY_PAGE_SIZE, serverFilters);
-
-  // Table: a single server-side page (true prev/next) over the same filtered feed.
+  // A single server-side page (true prev/next) over the filtered feed.
   const {
     data: pageData,
-    isLoading: pageLoading,
-    isError: pageError,
-    error: pageErr,
-    refetch: pageRefetch,
+    isLoading,
+    isError,
+    error,
+    refetch,
   } = useReportsActivityPage(limit, offset, serverFilters);
 
-  const timelineItems = useMemo(
-    () => (timelineData?.pages ?? []).flatMap((page) => page.items),
-    [timelineData],
-  );
-
-  // The active view's rows, loading/error, and the server's filtered total.
-  const isTable = view === "table";
-  const items = isTable ? (pageData?.items ?? []) : timelineItems;
-  const total = isTable ? (pageData?.total ?? 0) : (timelineData?.pages[0]?.total ?? 0);
-  const isLoading = isTable ? pageLoading : timelineLoading;
-  const isError = isTable ? pageError : timelineError;
-  const error = isTable ? pageErr : timelineErr;
-  const refetch = isTable ? pageRefetch : timelineRefetch;
+  const items = pageData?.items ?? [];
+  const total = pageData?.total ?? 0;
 
   const chips = [
     ...(q
@@ -432,7 +395,6 @@ export function ReportsScreen() {
       >
         <SearchInput
           value={q}
-          onChange={setQ}
           debounceMs={250}
           onDebouncedChange={setQ}
           label={t("filters.searchLabel")}
@@ -541,23 +503,11 @@ export function ReportsScreen() {
           />
         </div>
 
-        {/* View toggle: Timeline (comfortable) ↔ Table (dense). */}
-        <div className="ml-auto inline-flex items-center gap-1 rounded-lg border p-0.5">
-          <ViewToggleButton
-            active={view === "timeline"}
-            onClick={() => setFilter("view", "timeline")}
-            icon={Bars3BottomLeftIcon}
-            label={t("view.timeline")}
-            title={t("view.viewTitle", { label: t("view.timeline") })}
-          />
-          <ViewToggleButton
-            active={view === "table"}
-            onClick={() => setFilter("view", "table")}
-            icon={TableCellsIcon}
-            label={t("view.table")}
-            title={t("view.viewTitle", { label: t("view.table") })}
-          />
-        </div>
+        <RowsPerPageSelect
+          value={limit}
+          onChange={setLimit}
+          className="lg:ml-auto lg:w-44"
+        />
       </div>
 
       <div data-print-hide>
@@ -565,7 +515,7 @@ export function ReportsScreen() {
       </div>
 
       {isLoading ? (
-        <TimelineSkeleton />
+        <TableSkeleton />
       ) : items.length === 0 ? (
         <EmptyState
           icon={ClockIcon}
@@ -581,14 +531,6 @@ export function ReportsScreen() {
             <ClearFiltersLink onClick={clearFilters} />
           ) : null}
         </EmptyState>
-      ) : view === "timeline" ? (
-        <TimelineView
-          items={items}
-          now={now}
-          hasNextPage={!!hasNextPage}
-          isFetchingNextPage={isFetchingNextPage}
-          onLoadMore={() => fetchNextPage()}
-        />
       ) : (
         <TableView
           items={items}
@@ -599,130 +541,6 @@ export function ReportsScreen() {
           onClearFilters={clearFilters}
         />
       )}
-    </div>
-  );
-}
-
-/** A single segmented view-toggle button (Timeline / Table). */
-function ViewToggleButton({
-  active,
-  onClick,
-  icon: Icon,
-  label,
-  title,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: typeof ClockIcon;
-  label: string;
-  title: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      title={title}
-      className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        active
-          ? "bg-muted text-foreground"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      <Icon className="size-4" />
-      <span className="hidden sm:inline">{label}</span>
-    </button>
-  );
-}
-
-/** The day-grouped timeline, reusing the shared {@link ActivityRow}, with an action badge per row. */
-function TimelineView({
-  items,
-  now,
-  hasNextPage,
-  isFetchingNextPage,
-  onLoadMore,
-}: {
-  items: RecentActivityItem[];
-  now: number;
-  hasNextPage: boolean;
-  isFetchingNextPage: boolean;
-  onLoadMore: () => void;
-}) {
-  const t = useTranslations("reports");
-  const tShared = useTranslations("shared");
-  const groups = useMemo(() => groupByDay(items, now), [items, now]);
-  return (
-    <div className="space-y-5">
-      {groups.map((group) => (
-        <div key={group.key}>
-          <p className="mb-2 text-xs font-medium text-muted-foreground">
-            {tShared(`activity.dateGroup.${group.key}`)}
-          </p>
-          {/*
-            Comfortable inter-row spacing for the Reports timeline only (issue #369). We add bottom
-            PADDING to each connected row's <li> rather than margin: the shared ActivityRow's connector
-            (activity-row.tsx, the absolute span sized `h-[calc(100%-1.25rem)]`) is bound to the <li>
-            box, so padding grows the box AND the connector together, keeping the line continuous
-            between rows — margin (e.g. `space-y-*`) would push the next row away from the box and
-            leave a floating connector. Each ActivityRowWithBadge wraps the <li> in a direct-child
-            <div>, so we target every non-last wrapper's <li> (mirroring the row's own `!isLast`
-            connector gate) and leave the last, connector-less row's tight `last:pb-0` intact. The
-            dashboard rail uses ActivityRow directly without this wrapper, so its dense rhythm is
-            untouched.
-          */}
-          <ol className="[&>div:not(:last-child)_li]:pb-7">
-            {group.items.map(({ item, index }, rowInGroup) => (
-              <ActivityRowWithBadge
-                key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}-${index}`}
-                item={item}
-                isLast={rowInGroup === group.items.length - 1}
-                index={index}
-              />
-            ))}
-          </ol>
-        </div>
-      ))}
-      {hasNextPage ? (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onLoadMore}
-          disabled={isFetchingNextPage}
-          data-print-hide
-        >
-          {isFetchingNextPage ? <ArrowPathIcon className="animate-spin" /> : null}
-          {t("timeline.loadMore")}
-        </Button>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * The shared {@link ActivityRow} with a trailing action StatusBadge. The badge sits in a flex row so
- * the row keeps its single-line summary while the action verb gets a solid, AA-safe tone chip
- * (`actionTone`). The base row is unchanged on the dashboard (where no badge is rendered).
- */
-function ActivityRowWithBadge({
-  item,
-  isLast,
-  index,
-}: {
-  item: RecentActivityItem;
-  isLast: boolean;
-  index: number;
-}) {
-  const tAction = useTranslations("shared.activity.action");
-  return (
-    <div className="flex items-start gap-2">
-      <div className="min-w-0 flex-1">
-        <ActivityRow item={item} isLast={isLast} index={index} />
-      </div>
-      <StatusBadge tone={actionTone(item.action)} className="mt-0.5 shrink-0">
-        {actionLabel(item.action, tAction)}
-      </StatusBadge>
     </div>
   );
 }
@@ -882,8 +700,8 @@ function TableView({
 
 const SKELETON_KEYS = ["a", "b", "c", "d", "e"] as const;
 
-/** Loading placeholder mirroring the timeline rows. */
-function TimelineSkeleton() {
+/** Loading placeholder shown while the first activity page resolves. */
+function TableSkeleton() {
   return (
     <ul className="space-y-5">
       {SKELETON_KEYS.map((key) => (

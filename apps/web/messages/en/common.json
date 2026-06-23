@@ -43,6 +43,7 @@
   "download": "Download",
   "upload": "Upload",
   "settings": "Settings",
+  "rowsPerPage": "Rows per page",
   "combobox": {
     "placeholder": "Select…",
     "searchPlaceholder": "Search…",

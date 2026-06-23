@@ -3,7 +3,7 @@ title: ArticleVersion
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-06-23
 ---
 
 # ArticleVersion
@@ -15,7 +15,7 @@ updated: 2026-06-01
 > its `content` in place. [[0042-article-versioning-and-linking]] adds this **append-only** table —
 > a non-destructive addition (a new table + FK, no reshaping of `Article`), restoring auditability
 > ([[0006-soft-delete-and-auditing]]). Earlier docs wrongly implied this table already existed; it
-> did not until [[0042]].
+> did not until [[0042-article-versioning-and-linking]].
 
 ## Purpose
 

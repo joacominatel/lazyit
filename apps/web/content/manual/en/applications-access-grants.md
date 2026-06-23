@@ -62,5 +62,16 @@ passes its expiry — an expired-but-not-revoked grant is still active access. l
 - A grantee who has since been deactivated is flagged on their grants, so you can quickly find
   access that should be cleaned up.
 
+## Finding a grant
+
+The **Active access** panel groups grants by user — when someone holds more than one, all their
+grants appear together under their name with a count badge. You can **search by name** using the
+filter box above the list to find a specific person's grants quickly. If the list is long, it
+**paginates automatically** (25 per page) so it stays readable no matter how many grants an
+application accumulates.
+
+Each individual grant remains fully visible inside the group with its own **Edit** and **Revoke**
+controls — grouping is display-only and never hides or merges grants.
+
 > Seeing the access map — who has access to what — is available to administrators and members.
 > Viewers do not see the access ledger by default.

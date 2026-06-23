@@ -43,6 +43,7 @@
   "download": "Descargar",
   "upload": "Subir",
   "settings": "Configuración",
+  "rowsPerPage": "Filas por página",
   "combobox": {
     "placeholder": "Seleccionar…",
     "searchPlaceholder": "Buscar…",

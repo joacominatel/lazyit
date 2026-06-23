@@ -311,7 +311,6 @@ export function LocationsListView() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <SearchInput
               value={q}
-              onChange={setQ}
               debounceMs={300}
               onDebouncedChange={setQ}
               label={t("list.searchLabel")}

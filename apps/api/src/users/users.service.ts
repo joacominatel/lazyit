@@ -93,6 +93,12 @@ export interface UserFilters {
    * absent/undefined → all users (default; no filter).
    */
   directoryOnly?: boolean;
+  /**
+   * RBAC role filter (issue #693). When set, scope the list to users holding exactly this role —
+   * the deep-link target of the Settings → Roles "View N members" link (`/users?role=VIEWER`).
+   * absent/undefined → all roles (default; no filter). Validated by `RoleSchema` at the controller.
+   */
+  role?: Role;
 }
 
 /**
@@ -238,7 +244,7 @@ export class UsersService {
   }
 
   /** The shared `where` for the user list — used identically by findPage and its count. */
-  private buildWhere({ q, directoryOnly }: UserFilters): Prisma.UserWhereInput {
+  private buildWhere({ q, directoryOnly, role }: UserFilters): Prisma.UserWhereInput {
     return {
       ...(q
         ? {
@@ -251,7 +257,29 @@ export class UsersService {
         : {}),
       // directoryOnly filter (ADR-0069 REDESIGN §0 #2): absent → no filter (show all).
       ...(directoryOnly !== undefined ? { directoryOnly } : {}),
+      // role filter (issue #693): absent → no filter; backs the Roles "View N members" deep-link.
+      ...(role ? { role } : {}),
     };
+  }
+
+  /**
+   * Per-role LIVE user counts (issue #693): `{ ADMIN, MEMBER, VIEWER }` over the active (not
+   * soft-deleted) directory. ONE Prisma `groupBy` on `role` (not three list calls) — the lazy,
+   * cheap, exact source for the Settings → Roles cards, correct at any team size. A role with no
+   * holders is absent from the groupBy result and defaults to `0`, so every key is always present.
+   */
+  async roleCounts(): Promise<Record<Role, number>> {
+    const groups = await this.prisma.user.groupBy({
+      by: ['role'],
+      where: { deletedAt: null },
+      _count: { _all: true },
+    });
+    const byRole = new Map(groups.map((g) => [g.role, g._count._all]));
+    // Seed every role to 0 so the response is exhaustive (a role with no holders is never omitted).
+    const counts = Object.fromEntries(
+      Object.values(Role).map((role) => [role, byRole.get(role) ?? 0]),
+    ) as Record<Role, number>;
+    return counts;
   }
 
   // --- manager read-descriptor resolution (ADR-0058) ----------------------

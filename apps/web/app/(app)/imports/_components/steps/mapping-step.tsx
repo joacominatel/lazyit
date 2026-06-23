@@ -18,6 +18,7 @@ import {
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
+import { CategoryCombobox } from "@/components/category-combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,11 +33,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import {
   useRunImportDryRun,
   useSetImportMapping,
 } from "@/lib/api/hooks/use-imports";
 import type { ImportDryRunReport } from "@lazyit/shared";
+import { FixedValueField } from "../fixed-value-field";
 import { useImportError } from "../use-import-error";
 
 /**
@@ -203,6 +206,15 @@ export function MappingStep({
     (h) => choices[h]?.target === token("model", "manufacturer"),
   );
   const modelCategoryHeader = headers.find((h) => choices[h]?.target === token("model", "category"));
+
+  // Category fixed-value picker (#640): default = pick an EXISTING AssetCategory so a typo can't create a
+  // ghost category. The picker is controlled by id, but what we persist is the category's NATURAL KEY (its
+  // `name`) — the dry-run/commit resolver matches `assetCategory.name`, so writing the id would resolve to
+  // "create-new" (a silent bug). Manufacturer has NO entity (plain string on AssetModel) → text only, no
+  // picker. `categoryPickMode` true = pick existing (default), false = free constant.
+  const { data: assetCategories } = useAssetCategories();
+  const [categoryPickMode, setCategoryPickMode] = useState(true);
+  const [categoryPickId, setCategoryPickId] = useState("");
 
   // --- validation: a column must be mapped to `name` AND to `status` (ADR-0069 REDESIGN §6.2) ---
   const hasName = headers.some((h) => choices[h]?.target === token("asset", "name"));
@@ -589,38 +601,59 @@ export function MappingStep({
           <p className="text-xs text-muted-foreground">{t("mapping.modelConfig.description")}</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-1.5">
-            <Label htmlFor="model-manufacturer-const">
-              {t("mapping.modelConfig.manufacturerLabel")}
-            </Label>
-            <Input
-              id="model-manufacturer-const"
-              value={modelManufacturerHeader ? "" : manufacturerConst}
-              placeholder={t("mapping.modelConfig.manufacturerPlaceholder")}
-              disabled={Boolean(modelManufacturerHeader)}
-              onChange={(e) => setManufacturerConst(e.target.value)}
-            />
-            {modelManufacturerHeader && (
-              <p className="text-xs text-muted-foreground">
-                {t("mapping.modelConfig.fromColumn", { column: modelManufacturerHeader })}
-              </p>
-            )}
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="model-category-const">{t("mapping.modelConfig.categoryLabel")}</Label>
-            <Input
-              id="model-category-const"
-              value={modelCategoryHeader ? "" : categoryConst}
-              placeholder={t("mapping.modelConfig.categoryPlaceholder")}
-              disabled={Boolean(modelCategoryHeader)}
-              onChange={(e) => setCategoryConst(e.target.value)}
-            />
-            {modelCategoryHeader && (
-              <p className="text-xs text-muted-foreground">
-                {t("mapping.modelConfig.fromColumn", { column: modelCategoryHeader })}
-              </p>
-            )}
-          </div>
+          {/* Manufacturer is a plain string on AssetModel (no Manufacturer entity) → constant only. */}
+          <FixedValueField
+            id="model-manufacturer-const"
+            label={t("mapping.modelConfig.manufacturerLabel")}
+            value={modelManufacturerHeader ? "" : manufacturerConst}
+            constantPlaceholder={t("mapping.modelConfig.manufacturerPlaceholder")}
+            mode={false}
+            onModeChange={() => {}}
+            onConstantChange={setManufacturerConst}
+            disabled={Boolean(modelManufacturerHeader)}
+            fromColumn={
+              modelManufacturerHeader ? (
+                <p className="text-xs text-muted-foreground">
+                  {t("mapping.modelConfig.fromColumn", { column: modelManufacturerHeader })}
+                </p>
+              ) : undefined
+            }
+          />
+          {/* Category IS an entity — default to picking an existing one; we write its NAME (natural key). */}
+          <FixedValueField
+            id="model-category-const"
+            label={t("mapping.modelConfig.categoryLabel")}
+            value={modelCategoryHeader ? "" : categoryConst}
+            constantPlaceholder={t("mapping.modelConfig.categoryPlaceholder")}
+            mode={categoryPickMode}
+            onModeChange={setCategoryPickMode}
+            onConstantChange={setCategoryConst}
+            disabled={Boolean(modelCategoryHeader)}
+            picker={
+              <CategoryCombobox
+                id="model-category-const"
+                value={categoryPickId}
+                categories={assetCategories ?? []}
+                disabled={Boolean(modelCategoryHeader)}
+                placeholder={t("mapping.modelConfig.categoryPickPlaceholder")}
+                searchPlaceholder={t("mapping.modelConfig.categoryPickSearch")}
+                emptyText={t("mapping.modelConfig.categoryPickEmpty")}
+                onValueChange={(id) => {
+                  setCategoryPickId(id);
+                  // Persist the NATURAL KEY (name), never the id — the resolver matches on name.
+                  const picked = (assetCategories ?? []).find((c) => c.id === id);
+                  setCategoryConst(picked?.name ?? "");
+                }}
+              />
+            }
+            fromColumn={
+              modelCategoryHeader ? (
+                <p className="text-xs text-muted-foreground">
+                  {t("mapping.modelConfig.fromColumn", { column: modelCategoryHeader })}
+                </p>
+              ) : undefined
+            }
+          />
         </div>
       </div>
 

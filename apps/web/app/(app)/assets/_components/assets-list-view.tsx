@@ -1,12 +1,18 @@
 "use client";
 
 import {
+  ArrowPathIcon,
   ArrowUturnLeftIcon,
+  FunnelIcon,
   PlusIcon,
   ServerStackIcon,
   TrashIcon,
+  UserMinusIcon,
+  UserPlusIcon,
+  ViewColumnsIcon,
 } from "@heroicons/react/24/outline";
 import {
+  type AssetListItem,
   type AssetStatus,
   AssetStatusSchema,
   type BatchResult,
@@ -14,7 +20,7 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
@@ -31,14 +37,37 @@ import {
   type ResourceColumn,
   ResourceTable,
   RestoreRowAction,
-  RowActions,
   rowActionsReveal,
   SelectCell,
   SortableHeader,
 } from "@/components/resource-table";
+import { RowsPerPageSelect } from "@/components/rows-per-page-select";
 import { SearchInput } from "@/components/search-input";
+import { UserCombobox } from "@/components/user-combobox";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -50,13 +79,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useAssets } from "@/lib/api/hooks/use-assets";
+import { useUser } from "@/lib/api/hooks/use-users";
 import {
   useBatchDeleteAssets,
   useBatchRestoreAssets,
   useBatchSetAssetStatus,
   useDeleteAsset,
   useRestoreAsset,
+  useUpdateAsset,
 } from "@/lib/api/hooks/use-asset-mutations";
+import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { useLocations } from "@/lib/api/hooks/use-locations";
 import {
   type BatchVerb,
@@ -67,25 +99,29 @@ import type { EntityKey } from "@/lib/entity-key";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
+import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
-import { cn } from "@/lib/utils";
+import { AssetRowActions } from "./asset-row-actions";
 import {
   AssetStatusBadge,
   useAssetStatusLabel,
 } from "./asset-status-badge";
+import { AssignUserDialog } from "./assign-user-dialog";
 import { StackedOwnerAvatars } from "./stacked-owner-avatars";
 
 type OwnershipFilter = "ALL" | "HAS" | "NONE";
 
 /**
  * Filter param defaults for the URL list-state. `status`/`category`/`location` map to the server's
- * `status`/`categoryId`/`locationId` params; `ownership` is filtered client-side over the page.
- * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
+ * `status`/`categoryId`/`locationId` params; `owner` maps to the server's `assignedToUserId` (a
+ * User uuid, "" = unset); `ownership` (Has/None) is filtered client-side over the page. `archived`
+ * ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
  */
 const FILTER_DEFAULTS = {
   status: "ALL",
   category: "ALL",
   location: "ALL",
+  owner: "",
   ownership: "ALL",
   archived: "ALL",
 } as const;
@@ -96,6 +132,46 @@ const OWNERSHIP_LABEL_KEY: Record<OwnershipFilter, "any" | "has" | "none"> = {
   HAS: "has",
   NONE: "none",
 };
+
+/**
+ * The Assets-table columns an operator can show/hide via the column picker (#695). The `name` identity
+ * column (the row's canonical link) and the row `actions` column are always rendered and intentionally
+ * absent here. Keys match the `ResourceColumn` keys and the per-key body-cell map below, so the header
+ * and body never drift, and the ARRAY ORDER is the canonical left-to-right table order (persistence
+ * re-emits selections in this order). Ported from the Users picker and scoped to this page by CTO
+ * decision (the shared `ResourceTable` stays untouched).
+ */
+const HIDEABLE_COLUMNS = [
+  "assetTag",
+  "model",
+  "category",
+  "location",
+  "status",
+  "owners",
+  "updated",
+] as const;
+type HideableColumn = (typeof HIDEABLE_COLUMNS)[number];
+
+/**
+ * Column-picker grouping — purely presentational structure for the dropdown so the list reads as
+ * labelled sections. The flattened union of `keys` MUST equal `HIDEABLE_COLUMNS` (every hideable
+ * column appears in exactly one group); it drives only the menu, never visibility.
+ */
+const COLUMN_GROUPS: { id: string; keys: readonly HideableColumn[] }[] = [
+  { id: "details", keys: ["assetTag", "model", "category", "location"] },
+  { id: "status", keys: ["status", "owners"] },
+  { id: "activity", keys: ["updated"] },
+];
+
+/** localStorage key persisting the visible hideable-column set (per browser). */
+const COLUMNS_STORAGE_KEY = "lazyit:assets:columns";
+
+/**
+ * The columns shown by default — the picker subtracts from (and adds back to) this set. Every hideable
+ * column is on out of the box, so the table is unchanged for operators who never open the picker; the
+ * picker just lets them turn columns off.
+ */
+const DEFAULT_VISIBLE_COLUMNS: HideableColumn[] = [...HIDEABLE_COLUMNS];
 
 export function AssetsListView() {
   const router = useRouter();
@@ -121,6 +197,7 @@ export function AssetsListView() {
     setQ,
     toggleSort,
     setFilter,
+    setLimit,
     setOffset,
     clearFilters,
     filtersActive,
@@ -133,7 +210,10 @@ export function AssetsListView() {
   const statusFilter = filters.status as AssetStatus | "ALL";
   const categoryFilter = filters.category;
   const locationFilter = filters.location;
+  const ownerFilter = filters.owner; // "" = unset; otherwise a User uuid (server-side filter)
   const ownershipFilter = filters.ownership as OwnershipFilter;
+  // Resolve the owner-filter user's name for its chip, even when not on the current search page.
+  const { data: ownerUser } = useUser(ownerFilter || undefined);
   // The archived view is ADMIN-only; a non-admin can never set it (toggle hidden) and we never send
   // the param for them, so the API stays on the active-only list.
   const archived = isAdmin && filters.archived === "only";
@@ -145,6 +225,7 @@ export function AssetsListView() {
       status: statusFilter === "ALL" ? undefined : statusFilter,
       categoryId: categoryFilter === "ALL" ? undefined : categoryFilter,
       locationId: locationFilter === "ALL" ? undefined : locationFilter,
+      assignedToUserId: ownerFilter || undefined,
       sort,
       dir: sort ? dir : undefined,
       limit,
@@ -155,6 +236,8 @@ export function AssetsListView() {
   const { data: locations } = useLocations();
   const deleteAsset = useDeleteAsset();
   const restoreAsset = useRestoreAsset();
+  const updateAsset = useUpdateAsset();
+  const releaseAssignment = useReleaseAssignment();
   const batchDelete = useBatchDeleteAssets();
   const batchRestore = useBatchRestoreAssets();
   const batchStatus = useBatchSetAssetStatus();
@@ -162,6 +245,42 @@ export function AssetsListView() {
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(
     null,
   );
+  // The asset the Assign dialog targets (null = closed). Its current owners are excluded from the
+  // picker. Reuses the same dialog as the detail page — verbatim.
+  const [assigning, setAssigning] = useState<AssetListItem | null>(null);
+  // The asset whose single active owner is being unassigned, pending confirm (null = closed). The
+  // list row already carries `activeAssignments[0].id`, so releasing needs no extra fetch.
+  const [unassigning, setUnassigning] = useState<AssetListItem | null>(null);
+
+  // Per-browser column-picker state (#695, ported from Users). `mounted` gates the persisted set so
+  // SSR/first paint always renders the full `DEFAULT_VISIBLE_COLUMNS` (the server snapshot) — no
+  // hydration flash.
+  const [storedColumns, setStoredColumns, columnsMounted] = useLocalStorage<
+    HideableColumn[]
+  >(COLUMNS_STORAGE_KEY, DEFAULT_VISIBLE_COLUMNS);
+  // Defend against stale/garbage storage (renamed/removed keys, or a non-array shape from an older
+  // build): only keep known hideable keys.
+  const visibleColumns = useMemo(() => {
+    if (!columnsMounted || !Array.isArray(storedColumns)) {
+      return new Set<HideableColumn>(DEFAULT_VISIBLE_COLUMNS);
+    }
+    return new Set(storedColumns.filter((key) => HIDEABLE_COLUMNS.includes(key)));
+  }, [columnsMounted, storedColumns]);
+  const isColumnVisible = (key: HideableColumn) => visibleColumns.has(key);
+
+  function toggleColumn(key: HideableColumn, visible: boolean) {
+    setStoredColumns((prev) => {
+      const kept = (Array.isArray(prev) ? prev : DEFAULT_VISIBLE_COLUMNS).filter(
+        (k) => HIDEABLE_COLUMNS.includes(k),
+      );
+      if (visible) {
+        if (kept.includes(key)) return kept;
+        // Re-emit in canonical column order so persistence stays stable regardless of toggle order.
+        return HIDEABLE_COLUMNS.filter((k) => k === key || kept.includes(k));
+      }
+      return kept.filter((k) => k !== key);
+    });
+  }
 
   const rows = useMemo(() => {
     const items = page?.items ?? [];
@@ -200,8 +319,98 @@ export function AssetsListView() {
     });
   }
 
-  const columns = useMemo<ResourceColumn[]>(
-    () => [
+  /** Change one asset's status from the row kebab (reversible — no confirm, matching the batch flow). */
+  function handleChangeStatus(asset: AssetListItem, status: AssetStatus) {
+    if (status === asset.status) return;
+    updateAsset.mutate(
+      { id: asset.id, data: { status } },
+      {
+        onSuccess: () =>
+          toast.success(
+            t("statusChangedToast", { status: statusLabel(status) }),
+          ),
+        onError: (err) => notifyError(err, t("statusChangeError")),
+      },
+    );
+  }
+
+  /** Release the asset's single active owner (the row carries its assignment id — no extra fetch). */
+  function handleConfirmUnassign() {
+    const assignmentId = unassigning?.activeAssignments[0]?.id;
+    if (!assignmentId) return;
+    releaseAssignment.mutate(
+      { id: assignmentId },
+      {
+        onSuccess: () => {
+          toast.success(t("unassignedToast"));
+          setUnassigning(null);
+        },
+        onError: (err) => notifyError(err, t("unassignError")),
+      },
+    );
+  }
+
+  /**
+   * The one color-coded quick action per row (active view, `asset:write` only): a blue tonal
+   * **Assign** when the asset has no live owner, an amber tonal **Unassign** when it does. Assign
+   * reuses the detail page's {@link AssignUserDialog}; Unassign goes through a confirm. Returns null
+   * when the operator can't write, so the column stays empty for them.
+   */
+  function rowQuickAction(asset: AssetListItem) {
+    if (!canWrite) return null;
+    const owned = asset.activeAssignments.length > 0;
+    return owned ? (
+      <Button
+        variant="warning"
+        size="sm"
+        onClick={() => setUnassigning(asset)}
+      >
+        <UserMinusIcon />
+        {t("unassign")}
+      </Button>
+    ) : (
+      <Button variant="info" size="sm" onClick={() => setAssigning(asset)}>
+        <UserPlusIcon />
+        {t("assign")}
+      </Button>
+    );
+  }
+
+  /** The Assets-local row kebab for the active view, wired to this row's permissions + state. */
+  function rowKebab(asset: AssetListItem) {
+    if (!canWrite && !canDelete) return null;
+    const owned = asset.activeAssignments.length > 0;
+    return (
+      <AssetRowActions
+        assetId={asset.id}
+        currentStatus={asset.status}
+        hasOwner={owned}
+        onEdit={
+          canWrite ? () => router.push(`/assets/${asset.id}/edit`) : undefined
+        }
+        onClone={
+          canWrite ? () => router.push(`/assets/${asset.id}/clone`) : undefined
+        }
+        onAssign={canWrite ? () => setAssigning(asset) : undefined}
+        onUnassign={canWrite ? () => setUnassigning(asset) : undefined}
+        onChangeStatus={
+          canWrite
+            ? (status) => handleChangeStatus(asset, status)
+            : undefined
+        }
+        onDelete={
+          canDelete
+            ? () => setDeleting({ id: asset.id, name: asset.name })
+            : undefined
+        }
+      />
+    );
+  }
+
+  const columns = useMemo<ResourceColumn[]>(() => {
+    // Entries are `ResourceColumn | false`; a hideable column collapses to `false` when toggled off
+    // and is dropped below, so the rendered set always matches the persisted visible-column set.
+    const defs: (ResourceColumn | false)[] = [
       {
         key: "name",
         header: (
@@ -214,7 +423,7 @@ export function AssetsListView() {
         ),
         skeleton: <Skeleton className="h-4 w-32" />,
       },
-      {
+      isColumnVisible("assetTag") && {
         key: "assetTag",
         header: (
           <SortableHeader
@@ -226,22 +435,22 @@ export function AssetsListView() {
         ),
         skeleton: <Skeleton className="h-4 w-20" />,
       },
-      {
+      isColumnVisible("model") && {
         key: "model",
         header: t("columns.model"),
         skeleton: <Skeleton className="h-4 w-28" />,
       },
-      {
+      isColumnVisible("category") && {
         key: "category",
         header: t("columns.category"),
         skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
       },
-      {
+      isColumnVisible("location") && {
         key: "location",
         header: t("columns.location"),
         skeleton: <Skeleton className="h-4 w-24" />,
       },
-      {
+      isColumnVisible("status") && {
         key: "status",
         header: (
           <SortableHeader
@@ -253,12 +462,12 @@ export function AssetsListView() {
         ),
         skeleton: <Skeleton className="h-5 w-20 rounded-full" />,
       },
-      {
+      isColumnVisible("owners") && {
         key: "owners",
         header: t("columns.owners"),
         skeleton: <Skeleton className="size-6 rounded-full" />,
       },
-      {
+      isColumnVisible("updated") && {
         key: "updated",
         header: (
           <SortableHeader
@@ -277,12 +486,23 @@ export function AssetsListView() {
         headClassName: "w-12 text-right",
         skeleton: <Skeleton className="ml-auto size-7" />,
       },
-    ],
-    [sort, dir, toggleSort, t],
-  );
+    ];
+    return defs.filter((column): column is ResourceColumn => column !== false);
+    // `visibleColumns` is the source of truth for which hideable columns appear; `isColumnVisible`
+    // reads it, so depend on the set itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sort, dir, toggleSort, t, visibleColumns]);
 
   const total = page?.total ?? 0;
   const isEmpty = total === 0;
+
+  // Count of the filters living INSIDE the Filters popover (search + status stay inline), for its
+  // trigger badge. The active-filter chip row below remains the full recovery path.
+  const popoverFilterCount =
+    (categoryFilter !== "ALL" ? 1 : 0) +
+    (locationFilter !== "ALL" ? 1 : 0) +
+    (ownerFilter ? 1 : 0) +
+    (ownershipFilter !== "ALL" ? 1 : 0);
 
   const chips = [
     ...(q
@@ -324,6 +544,19 @@ export function AssetsListView() {
                 locations?.find((l) => l.id === locationFilter)?.name ?? "—",
             }),
             onClear: () => setFilter("location", FILTER_DEFAULTS.location),
+          },
+        ]
+      : []),
+    ...(ownerFilter
+      ? [
+          {
+            key: "owner",
+            label: t("chips.owner", {
+              value: ownerUser
+                ? `${ownerUser.firstName} ${ownerUser.lastName}`
+                : "…",
+            }),
+            onClear: () => setFilter("owner", FILTER_DEFAULTS.owner),
           },
         ]
       : []),
@@ -395,7 +628,6 @@ export function AssetsListView() {
           <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
             <SearchInput
               value={q}
-              onChange={setQ}
               debounceMs={300}
               onDebouncedChange={setQ}
               label={t("searchLabel")}
@@ -418,51 +650,159 @@ export function AssetsListView() {
                 ))}
               </SelectContent>
             </Select>
-            <Select
-              value={categoryFilter}
-              onValueChange={(value) => setFilter("category", value)}
-            >
-              <SelectTrigger className="lg:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{t("filters.allCategories")}</SelectItem>
-                {(categories ?? []).map((category) => (
-                  <SelectItem key={category.id} value={category.id}>
-                    {category.name}
-                  </SelectItem>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="justify-start lg:w-auto">
+                  <FunnelIcon />
+                  {t("filters.moreFilters")}
+                  {popoverFilterCount > 0 ? (
+                    <Badge
+                      variant="secondary"
+                      className="ml-1 size-5 justify-center rounded-full p-0 tabular-nums"
+                    >
+                      {popoverFilterCount}
+                    </Badge>
+                  ) : null}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-72 space-y-4">
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="assets-filter-category"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {t("columns.category")}
+                  </label>
+                  <Select
+                    value={categoryFilter}
+                    onValueChange={(value) => setFilter("category", value)}
+                  >
+                    <SelectTrigger id="assets-filter-category" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">
+                        {t("filters.allCategories")}
+                      </SelectItem>
+                      {(categories ?? []).map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="assets-filter-location"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {t("columns.location")}
+                  </label>
+                  <Select
+                    value={locationFilter}
+                    onValueChange={(value) => setFilter("location", value)}
+                  >
+                    <SelectTrigger id="assets-filter-location" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">
+                        {t("filters.allLocations")}
+                      </SelectItem>
+                      {(locations ?? []).map((location) => (
+                        <SelectItem key={location.id} value={location.id}>
+                          {location.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="assets-filter-owner"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {t("filters.ownerLabel")}
+                  </label>
+                  <UserCombobox
+                    id="assets-filter-owner"
+                    value={ownerFilter || undefined}
+                    onValueChange={(value) => setFilter("owner", value)}
+                    placeholder={t("filters.ownerPlaceholder")}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="assets-filter-ownership"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {t("filters.ownershipLabel")}
+                  </label>
+                  <Select
+                    value={ownershipFilter}
+                    onValueChange={(value) => setFilter("ownership", value)}
+                  >
+                    <SelectTrigger
+                      id="assets-filter-ownership"
+                      className="w-full"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">
+                        {t("filters.anyOwnership")}
+                      </SelectItem>
+                      <SelectItem value="HAS">
+                        {t("filters.hasOwners")}
+                      </SelectItem>
+                      <SelectItem value="NONE">
+                        {t("filters.noOwners")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </PopoverContent>
+            </Popover>
+            <RowsPerPageSelect
+              value={limit}
+              onChange={setLimit}
+              className="lg:ml-auto lg:w-44"
+            />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label={t("columnPicker.label")}
+                  title={t("columnPicker.label")}
+                >
+                  <ViewColumnsIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-48">
+                <DropdownMenuLabel>{t("columnPicker.label")}</DropdownMenuLabel>
+                {COLUMN_GROUPS.map((group) => (
+                  <div key={group.id}>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">
+                      {t(`columnPicker.groups.${group.id}`)}
+                    </DropdownMenuLabel>
+                    {group.keys.map((key) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={isColumnVisible(key)}
+                        // Keep the menu open so several columns can be toggled in one pass.
+                        onSelect={(event) => event.preventDefault()}
+                        onCheckedChange={(checked) => toggleColumn(key, checked)}
+                      >
+                        {t(`columnPicker.columns.${key}`)}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </div>
                 ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={locationFilter}
-              onValueChange={(value) => setFilter("location", value)}
-            >
-              <SelectTrigger className="lg:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{t("filters.allLocations")}</SelectItem>
-                {(locations ?? []).map((location) => (
-                  <SelectItem key={location.id} value={location.id}>
-                    {location.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={ownershipFilter}
-              onValueChange={(value) => setFilter("ownership", value)}
-            >
-              <SelectTrigger className="lg:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{t("filters.anyOwnership")}</SelectItem>
-                <SelectItem value="HAS">{t("filters.hasOwners")}</SelectItem>
-                <SelectItem value="NONE">{t("filters.noOwners")}</SelectItem>
-              </SelectContent>
-            </Select>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           <ActiveFilters chips={chips} onClearAll={clearFilters} />
@@ -536,113 +876,129 @@ export function AssetsListView() {
                       />
                     ) : undefined
                   ) : canWrite || canDelete ? (
-                    <RowActions
-                      onEdit={
-                        canWrite
-                          ? () => router.push(`/assets/${asset.id}/edit`)
-                          : undefined
-                      }
-                      onClone={
-                        canWrite
-                          ? () => router.push(`/assets/${asset.id}/clone`)
-                          : undefined
-                      }
-                      onDelete={
-                        canDelete
-                          ? () => setDeleting({ id: asset.id, name: asset.name })
-                          : undefined
-                      }
-                    />
+                    <>
+                      {rowQuickAction(asset)}
+                      {rowKebab(asset)}
+                    </>
                   ) : undefined
                 }
               />
             ))}
           >
-            {rows.map((asset) => (
-              <LinkableRow
-                key={asset.id}
-                href={`/assets/${asset.id}`}
-                data-state={
-                  selectable && selection.isSelected(asset.id)
-                    ? "selected"
-                    : undefined
-                }
-              >
-                {selectable ? (
-                  <SelectCell
-                    checked={selection.isSelected(asset.id)}
-                    onCheckedChange={(on) =>
-                      selection.setSelected(asset.id, on)
-                    }
-                    label={t("selectRowLabel", { name: asset.name })}
-                  />
-                ) : null}
-                <TableCell className="font-medium">
-                  <Link href={`/assets/${asset.id}`} className="hover:underline">
-                    {asset.name}
-                  </Link>
-                </TableCell>
-                <TableCell className="font-mono text-muted-foreground">
-                  {asset.assetTag ?? "—"}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {asset.model?.name ?? "—"}
-                </TableCell>
-                <TableCell>
-                  {asset.model?.category ? (
-                    <Badge variant="outline">{asset.model.category.name}</Badge>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {asset.location?.name ?? "—"}
-                </TableCell>
-                <TableCell>
-                  <AssetStatusBadge status={asset.status} />
-                </TableCell>
-                <TableCell>
-                  <StackedOwnerAvatars assignments={asset.activeAssignments} />
-                </TableCell>
-                <TableCell className="text-muted-foreground tabular-nums">
-                  {date(asset.updatedAt)}
-                </TableCell>
-                <TableCell className="text-right">
-                  {archived ? (
-                    canDelete ? (
-                      <div className="flex justify-end">
-                        <RestoreRowAction
-                          onRestore={() =>
-                            handleRestoreRow(asset.id, asset.name)
-                          }
-                          disabled={restoreAsset.isPending}
-                        />
+            {rows.map((asset) => {
+              // Per-key body cells, keyed to the same column keys as the `columns` memo above. We
+              // render by iterating `columns`, so a hidden column drops from the header AND the body
+              // in lockstep — they can never drift. Structural keys (name/actions) are always present
+              // here; the hideable ones simply won't be looked up when their column is off.
+              const cells: Record<string, ReactNode> = {
+                name: (
+                  <TableCell key="name" className="font-medium">
+                    <Link
+                      href={`/assets/${asset.id}`}
+                      className="hover:underline"
+                    >
+                      {asset.name}
+                    </Link>
+                  </TableCell>
+                ),
+                assetTag: (
+                  <TableCell
+                    key="assetTag"
+                    className="font-mono text-muted-foreground"
+                  >
+                    {asset.assetTag ?? "—"}
+                  </TableCell>
+                ),
+                model: (
+                  <TableCell key="model" className="text-muted-foreground">
+                    {asset.model?.name ?? "—"}
+                  </TableCell>
+                ),
+                category: (
+                  <TableCell key="category">
+                    {asset.model?.category ? (
+                      <Badge variant="outline">
+                        {asset.model.category.name}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                ),
+                location: (
+                  <TableCell key="location" className="text-muted-foreground">
+                    {asset.location?.name ?? "—"}
+                  </TableCell>
+                ),
+                status: (
+                  <TableCell key="status">
+                    <AssetStatusBadge status={asset.status} />
+                  </TableCell>
+                ),
+                owners: (
+                  <TableCell key="owners">
+                    <StackedOwnerAvatars
+                      assignments={asset.activeAssignments}
+                    />
+                  </TableCell>
+                ),
+                updated: (
+                  <TableCell
+                    key="updated"
+                    className="text-muted-foreground tabular-nums"
+                  >
+                    {date(asset.updatedAt)}
+                  </TableCell>
+                ),
+                actions: (
+                  <TableCell key="actions" className="text-right">
+                    {archived ? (
+                      canDelete ? (
+                        <div className="flex justify-end">
+                          <RestoreRowAction
+                            onRestore={() =>
+                              handleRestoreRow(asset.id, asset.name)
+                            }
+                            disabled={restoreAsset.isPending}
+                          />
+                        </div>
+                      ) : null
+                    ) : canWrite || canDelete ? (
+                      <div className="flex items-center justify-end gap-1">
+                        {/* The colored quick action stays visible (a primary affordance); only the
+                            kebab fades in on row hover/focus to keep dense lists calm. */}
+                        {rowQuickAction(asset)}
+                        <span className={rowActionsReveal}>
+                          {rowKebab(asset)}
+                        </span>
                       </div>
-                    ) : null
-                  ) : canWrite || canDelete ? (
-                    <div className={cn("flex justify-end", rowActionsReveal)}>
-                      <RowActions
-                        onEdit={
-                          canWrite
-                            ? () => router.push(`/assets/${asset.id}/edit`)
-                            : undefined
-                        }
-                        onClone={
-                          canWrite
-                            ? () => router.push(`/assets/${asset.id}/clone`)
-                            : undefined
-                        }
-                        onDelete={
-                          canDelete
-                            ? () => setDeleting({ id: asset.id, name: asset.name })
-                            : undefined
-                        }
-                      />
-                    </div>
+                    ) : null}
+                  </TableCell>
+                ),
+              };
+              return (
+                <LinkableRow
+                  key={asset.id}
+                  href={`/assets/${asset.id}`}
+                  data-state={
+                    selectable && selection.isSelected(asset.id)
+                      ? "selected"
+                      : undefined
+                  }
+                >
+                  {selectable ? (
+                    <SelectCell
+                      checked={selection.isSelected(asset.id)}
+                      onCheckedChange={(on) =>
+                        selection.setSelected(asset.id, on)
+                      }
+                      label={t("selectRowLabel", { name: asset.name })}
+                    />
                   ) : null}
-                </TableCell>
-              </LinkableRow>
-            ))}
+                  {columns.map((column) => cells[column.key])}
+                </LinkableRow>
+              );
+            })}
           </ResourceTable>
 
           <BatchActionBar
@@ -731,6 +1087,56 @@ export function AssetsListView() {
           name={deleting.name}
           onConfirm={() => deleteAsset.mutateAsync(deleting.id)}
         />
+      ) : null}
+
+      {/* Assign — the same dialog the detail page uses, verbatim. Excludes current owners so a
+          person can't be double-assigned to the same asset. */}
+      {assigning ? (
+        <AssignUserDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setAssigning(null);
+          }}
+          assetId={assigning.id}
+          excludeUserIds={assigning.activeAssignments.map((a) => a.userId)}
+        />
+      ) : null}
+
+      {/* Unassign — a confirm before releasing the active owner (prevents accidental un-assignments).
+          The row already carries the assignment id, so no extra fetch is needed. */}
+      {unassigning ? (
+        <AlertDialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !releaseAssignment.isPending) setUnassigning(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("unassignConfirmTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("unassignConfirmDescription", { name: unassigning.name })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={releaseAssignment.isPending}>
+                {tc("cancel")}
+              </AlertDialogCancel>
+              {/* Plain warning button (not AlertDialogAction) so we own the spinner and only close
+                  on success — matching the DeleteConfirmDialog pattern. */}
+              <Button
+                variant="warning"
+                onClick={handleConfirmUnassign}
+                disabled={releaseAssignment.isPending}
+              >
+                {releaseAssignment.isPending && (
+                  <ArrowPathIcon className="animate-spin" />
+                )}
+                {t("unassign")}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       ) : null}
     </div>
   );

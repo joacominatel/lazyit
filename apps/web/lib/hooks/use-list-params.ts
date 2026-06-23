@@ -121,6 +121,11 @@ export interface ListParams {
    * yields `[]`.
    */
   getFilterValues: (name: string) => string[];
+  /**
+   * Set the page size (`limit`). Clamps to `[1, MAX_PAGE_LIMIT]` (the API's hard cap, ADR-0030) and
+   * resets `offset`/`page` to the first page, since a new page size yields a different first window.
+   */
+  setLimit: (limit: number) => void;
   /** Set the row offset (paging; does not reset). */
   setOffset: (offset: number) => void;
   /** Set the 1-based page (paging; does not reset). */
@@ -280,6 +285,16 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
     [filters, filterDefaults],
   );
 
+  const setLimit = useCallback(
+    (next: number) => {
+      // Clamp to the API's accepted range; a new page size is a new first window → reset paging.
+      const clamped = Math.min(Math.max(1, Math.floor(next)), MAX_PAGE_LIMIT);
+      // Omit the param when it equals the default, keeping URLs clean (mirrors how setQ drops "").
+      commit({ limit: clamped === defaultLimit ? undefined : clamped, offset: undefined });
+    },
+    [commit, defaultLimit],
+  );
+
   const setOffset = useCallback(
     (next: number) => {
       commit({ offset: next > 0 ? next : undefined });
@@ -336,6 +351,7 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
     setFilterValues,
     setFilters,
     getFilterValues,
+    setLimit,
     setOffset,
     setPage,
     clearFilters,

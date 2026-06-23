@@ -70,6 +70,29 @@ Add, edit or remove rows in the **Custom fields** section of the form. When you 
 default specs, those values are copied in as a starting point — you can change them for this
 individual unit before saving. Custom fields are shown as a tidy label/value list on the detail page.
 
+## Finding assets in the list
+
+The **Assets** list has a search box and a **Status** dropdown right in the toolbar, plus a
+**Filters** button that opens a small panel for the rest:
+
+- **Category** and **Location** — narrow to one model category or one place.
+- **Owner** — show only the assets currently assigned to a specific person. Start typing a name to
+  pick them; the list then shows just that person's live assignments.
+- **Ownership** — filter by whether an asset has any current owner at all (*Has owners* /
+  *No owners*), regardless of who.
+
+The **Filters** button shows a small count of how many of these are active. Every filter you set
+also appears as a removable chip below the toolbar, and the filters live in the page address, so a
+filtered view is easy to undo, share or bookmark.
+
+### Choosing which columns to show
+
+The **Columns** button (next to *Filters*) opens a checklist of the table's columns — asset tag,
+model, category, location, status, owners and updated. Untick the ones you don't care about to slim
+the table down to what matters for you. The **Name** column and the row actions always stay. Your
+choice is remembered in this browser, so the table keeps the same shape next time you visit. (This
+governs the desktop table; the mobile card view always shows the full set.)
+
 ## Editing, cloning and deactivating
 
 - **Edit** updates the asset in place; each meaningful change (status, location, model, custom

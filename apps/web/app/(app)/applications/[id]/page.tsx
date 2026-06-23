@@ -4,7 +4,6 @@ import {
   ArrowTopRightOnSquareIcon,
   Cog6ToothIcon,
   DocumentDuplicateIcon,
-  PencilIcon,
   PencilSquareIcon,
   TrashIcon,
   UserPlusIcon,
@@ -21,8 +20,6 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { RelatedArticlesPanel } from "@/components/related-articles-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/ui/status-badge";
-import { UserAvatar } from "@/components/user-avatar";
 import { ErrorState } from "@/components/resource-table";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useApplicationCategories } from "@/lib/api/hooks/use-application-categories";
@@ -37,7 +34,7 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { EditGrantDialog } from "../_components/edit-grant-dialog";
 import { GrantAccessDialog } from "../_components/grant-access-dialog";
 import { RevokeGrantDialog } from "../_components/revoke-grant-dialog";
-import { GrantRunChip } from "./workflows/_components/grant-run-chip";
+import { GroupedAccessList } from "./_components/grouped-access-list";
 
 /** isSafeApplicationUrl guarantees scheme-less or http(s); make scheme-less hosts absolute so the
  *  browser treats them as external links, not relative paths (SEC-008 defense in depth). */
@@ -243,113 +240,17 @@ export default function ApplicationDetailPage() {
           ) : undefined
         }
       >
-        {active.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {t("detail.noActiveGrants")}
-          </p>
-        ) : (
-          <ul className="divide-y">
-            {active.map((grant) => {
-              const user = userById.get(grant.userId);
-              const gone = user?.deletedAt != null;
-              const expired =
-                grant.expiresAt != null &&
-                new Date(grant.expiresAt).getTime() < now;
-              return (
-                <li
-                  key={grant.id}
-                  className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    {user ? (
-                      <UserAvatar
-                        firstName={user.firstName}
-                        lastName={user.lastName}
-                        email={user.email}
-                        className={gone ? "opacity-50 grayscale" : undefined}
-                      />
-                    ) : null}
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {user ? (
-                          <Link
-                            href={`/users/${user.id}`}
-                            className="truncate font-medium hover:underline"
-                          >
-                            {userName(grant.userId)}
-                          </Link>
-                        ) : (
-                          <span className="truncate font-medium">
-                            {userName(grant.userId)}
-                          </span>
-                        )}
-                        {grant.accessLevel && (
-                          <Badge variant="secondary">{grant.accessLevel}</Badge>
-                        )}
-                        {gone && (
-                          <Badge
-                            variant="outline"
-                            className="text-muted-foreground"
-                          >
-                            {t("detail.deactivatedBadge")}
-                          </Badge>
-                        )}
-                        {expired && (
-                          <StatusBadge tone="warning">
-                            {t("detail.expiredBadge")}
-                          </StatusBadge>
-                        )}
-                        {canReadWorkflows && (
-                          <GrantRunChip
-                            applicationId={application.id}
-                            accessGrantId={grant.id}
-                          />
-                        )}
-                      </div>
-                      <p className="truncate text-sm text-muted-foreground">
-                        {t("detail.grantedLine", {
-                          date: date(grant.grantedAt),
-                        })}
-                        {grant.grantedById
-                          ? t("detail.grantedByPart", {
-                              name: userName(grant.grantedById),
-                            })
-                          : ""}
-                        {grant.expiresAt
-                          ? t("detail.expiresPart", {
-                              date: date(grant.expiresAt),
-                            })
-                          : ""}
-                        {grant.notes
-                          ? t("detail.notesPart", { notes: grant.notes })
-                          : ""}
-                      </p>
-                    </div>
-                  </div>
-                  {canGrant && (
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={t("detail.editGrantAriaLabel")}
-                        onClick={() => setEditing(grant)}
-                      >
-                        <PencilIcon />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setRevoking(grant)}
-                      >
-                        {t("detail.revoke")}
-                      </Button>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <GroupedAccessList
+          activeGrants={active}
+          userById={userById}
+          now={now}
+          applicationId={application.id}
+          canGrant={canGrant}
+          canReadWorkflows={canReadWorkflows}
+          onEdit={setEditing}
+          onRevoke={setRevoking}
+          userName={userName}
+        />
       </DetailPanel>
 
       <RelatedArticlesPanel applicationId={application.id} />

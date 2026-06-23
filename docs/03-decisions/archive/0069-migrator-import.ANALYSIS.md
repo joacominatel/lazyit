@@ -1,6 +1,16 @@
-All key claims confirmed: per-row IdP write-back with compensate-on-failure 503 (user.service.ts:474–533), BYOI password 400, last-admin guard, article import gated on `article:write` (same verb as single create), no `import` permission in the catalog, `getStatus(jobId)` has no ownership check. I have what I need.
+---
+title: "ADR-0069 ANALYSIS: Pre-ADR analysis — Migrator (bulk import wizard)"
+tags: [adr, migrator, import, analysis, archived]
+status: superseded
+superseded-by: "[[0069-migrator-import]]"
+created: 2026-06-17
+updated: 2026-06-23
+deciders: [Joaquín Minatel]
+---
 
-Now writing the synthesis.
+> **Archived working draft.** This is the pre-ADR analysis that fed [[0069-migrator-import]];
+> it is **superseded by** that accepted ADR (the canonical decision-of-record). Retained for
+> auditability only — do not treat its open questions or recommendations as current.
 
 # Pre-ADR Analysis — Migrator Agent (Bulk Import Wizard) → ADR-0069
 

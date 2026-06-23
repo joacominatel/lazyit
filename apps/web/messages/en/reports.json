@@ -40,11 +40,6 @@
       "rangeCustom": "Range: {from} → {to}"
     }
   },
-  "view": {
-    "timeline": "Timeline",
-    "table": "Table",
-    "viewTitle": "{label} view"
-  },
   "table": {
     "columns": {
       "when": "When",
@@ -67,9 +62,6 @@
     "exportTitle": "Export the events currently visible (the filtered page)",
     "print": "Print",
     "printTitle": "Print the report"
-  },
-  "timeline": {
-    "loadMore": "Load more"
   },
   "empty": {
     "errorTitle": "Couldn't load the activity history",

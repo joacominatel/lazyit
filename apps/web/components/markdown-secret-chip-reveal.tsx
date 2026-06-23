@@ -105,6 +105,7 @@ export function SecretChipReveal({
   // (no DEK yet), open the unlock gate instead of decrypting.
   const onMaskedRef = useRef(onMasked);
   onMaskedRef.current = onMasked;
+  /* eslint-disable react-hooks/set-state-in-effect -- mount-only trigger for crypto op; cleanup also clears state on unmount; not derivable during render */
   useEffect(() => {
     const dek = ensureDek();
     if (dek) {
@@ -121,6 +122,7 @@ export function SecretChipReveal({
     // Mount-only: ensureDek/decrypt are stable enough for a one-shot; re-running would re-decrypt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   async function handleCopy() {
     if (!plaintext) return;
@@ -244,9 +246,10 @@ export function SecretChipReveal({
  */
 function UnlockSuccess({ onClose }: { onClose: () => void }) {
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   useEffect(() => {
+    onCloseRef.current = onClose;
     onCloseRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-shot: fires exactly once on mount; ref is updated first so the call uses the current closure (SECW-01 / SM-FE-005)
   }, []);
   return (
     <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">

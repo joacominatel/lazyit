@@ -41,6 +41,8 @@ type PrismaUserMock = {
   update: jest.Mock;
   delete: jest.Mock;
   count: jest.Mock;
+  // roleCounts() (issue #693) aggregates the live directory by `role` with one groupBy.
+  groupBy: jest.Mock;
 };
 
 // A mock IdentityProvider (ADR-0043 write-back). Defaults to a supports-management provider whose
@@ -112,6 +114,9 @@ describe('UsersService', () => {
       // Default: there is at least one OTHER admin, so the last-admin guard is a no-op unless a test
       // overrides this to 0 to simulate the final administrator.
       count: jest.fn().mockResolvedValue(1),
+      // Backs roleCounts() (issue #693). Default empty → every role defaults to 0; the role-counts
+      // tests override this with per-role groups.
+      groupBy: jest.fn().mockResolvedValue([]),
     };
     tx = {
       // A real jest.Mock so offboard assertions (`tx.user.update.mockResolvedValue`, `.toHaveBeenCalled`)
@@ -1209,6 +1214,70 @@ describe('UsersService', () => {
         user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
       )[0][0];
       expect(call.where).not.toHaveProperty('directoryOnly');
+    });
+
+    // issue #693 — the RBAC role filter (backs the Roles "View N members" deep-link).
+    it('role scopes both the findMany and the paired count where to { role }', async () => {
+      user.findMany.mockResolvedValue([{ id: 'v1' }]);
+      user.count.mockResolvedValue(1);
+
+      await service.findPage(
+        { role: 'VIEWER' },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+
+      const findCall = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      const countCall = (
+        user.count.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      // The same where (role + live slice) drives the page and its total, so the count is authoritative.
+      expect(findCall.where).toMatchObject({ role: 'VIEWER', deletedAt: null });
+      expect(countCall.where).toMatchObject({ role: 'VIEWER', deletedAt: null });
+    });
+
+    it('absent role adds no role clause (shows all roles)', async () => {
+      user.findMany.mockResolvedValue([{ id: 'any-1' }]);
+      user.count.mockResolvedValue(1);
+
+      await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      expect(call.where).not.toHaveProperty('role');
+    });
+  });
+
+  // issue #693 — per-role LIVE counts for the Settings → Roles cards. ONE groupBy over the live
+  // directory, exhaustive over the role enum (a role with no holders is 0, never absent).
+  describe('roleCounts (#693)', () => {
+    it('returns one groupBy result per role, scoped to live users, defaulting missing roles to 0', async () => {
+      // VIEWER has no holders → absent from the groupBy result → must default to 0 below.
+      user.groupBy.mockResolvedValue([
+        { role: 'ADMIN', _count: { _all: 2 } },
+        { role: 'MEMBER', _count: { _all: 5 } },
+      ]);
+
+      const counts = await service.roleCounts();
+
+      expect(counts).toEqual({ ADMIN: 2, MEMBER: 5, VIEWER: 0 });
+      // ONE query (never one-per-role), grouped by role over the ACTIVE (not soft-deleted) directory.
+      expect(user.groupBy).toHaveBeenCalledTimes(1);
+      expect(user.groupBy).toHaveBeenCalledWith({
+        by: ['role'],
+        where: { deletedAt: null },
+        _count: { _all: true },
+      });
+    });
+
+    it('returns all-zero when the directory is empty (every role key still present)', async () => {
+      user.groupBy.mockResolvedValue([]);
+
+      const counts = await service.roleCounts();
+
+      expect(counts).toEqual({ ADMIN: 0, MEMBER: 0, VIEWER: 0 });
     });
   });
 

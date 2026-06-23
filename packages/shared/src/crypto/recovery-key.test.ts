@@ -81,7 +81,7 @@ describe("encode ↔ decode (byte-exact, deterministic)", () => {
     expect(symbols.length).toBe(RECOVERY_KEY_SYMBOLS);
     // Decoding recovers the CANONICAL form (top 3 bits of byte 0 zeroed).
     const canon = raw.slice();
-    canon[0] = canon[0] & 0x1f;
+    canon[0] = canon[0]! & 0x1f;
     expect([...decodeRecoveryKeyBytes(symbols)]).toEqual([...canon]);
   });
 

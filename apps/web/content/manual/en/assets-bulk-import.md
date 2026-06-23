@@ -110,6 +110,10 @@ these two ways:
 - **For every model** — if your file has no such column (or all your assets are the same brand), pin a
   single **Manufacturer** and/or **Category** in the *Model brand and category* box; it applies to
   every model the import creates. A mapped column always wins over a pinned value.
+  - For **Category**, the box defaults to **Existing**: pick a category that already exists so every
+    model links to it — no typo, no accidental new category. Flip the toggle to **Constant** to type a
+    free value instead (it's still found-or-created by name on import).
+  - **Manufacturer** is free text (there's no manufacturer list to pick from), so it's always a constant.
 
 ### Assign assets to people
 

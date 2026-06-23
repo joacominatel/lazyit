@@ -3,7 +3,7 @@ title: Decisions (ADRs) — MOC
 tags: [moc, adr]
 status: draft
 created: 2026-05-25
-updated: 2026-06-20
+updated: 2026-06-23
 ---
 
 <!-- updated 2026-06-01: ADR-0043 (Zitadel source-of-truth) accepted + validated live end-to-end
@@ -34,7 +34,7 @@ updated: 2026-06-20
 <!-- updated 2026-06-16: ADR-0067 (server-prefetch + hydration rendering strategy — targeted pilot on
      the 6 highest-traffic routes; eliminates skeleton→hydrate→fetch waterfall; keeps TanStack Query
      as client cache; adds loading.tsx + error.tsx coverage; must sequence after #498; resolves
-     ADR-0020 deferred debt; #500) — **accepted** (CEO 2026-06-16; implementation deferred to #537). -->
+     ADR-0020 deferred debt; #500) — **accepted** (CEO 2026-06-16); pilot implemented 2026-06-20 (#537). -->
 <!-- updated 2026-06-14: ADR batch (docs/adr-batch-jun14). Three new ADRs + two amendments capturing CEO
      decisions already made. ADR-0062 (in-app Help/Manual surface — shipped product docs as repo markdown
      rendered by MarkdownView, **public** (marketing route group, no auth gate) + secret-free, en/es;
@@ -107,6 +107,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0038-jit-user-provisioning]] | JIT user provisioning on first OIDC login | accepted (extended by [[0043-zitadel-source-of-truth]]; amended 2026-06-20: directory-person promotion on JIT claim + manual `provision-account` path) |
 | [[0039-authjs-v5-frontend-oidc]] | Auth.js v5 for frontend OIDC login | accepted |
 | [[0040-rbac-roles]] | Minimal RBAC — ADMIN/MEMBER/VIEWER role on User | accepted (default-role + bootstrap extended by [[0043-zitadel-source-of-truth]]; authZ MECHANISM superseded by [[0046-roles-permissions-v2]] — the 3 roles stay fixed) |
+| [[0041-soft-delete-reuse-and-restore]] | Soft-delete reuse — partial unique indexes, restore, citext email | accepted |
 | [[0042-article-versioning-and-linking]] | KB depth — append-only ArticleVersion + article↔asset/application linking + content search | accepted |
 | [[0043-zitadel-source-of-truth]] | Zitadel as the identity & authorization source of truth (Option B) | accepted |
 | [[0044-recent-activity-view]] | Dashboard recent-activity feed backed by a unified `recent_activity` DB view | accepted |
@@ -132,7 +133,7 @@ Use [[0000-adr-template]] as the starting point for new records.
 | [[0064-admin-user-provisioning-credentials]] | Admin user provisioning — full-page asset-style create flow (opt-in assign-asset/app); a **bounded SECOND carve-out** from [[0043-zitadel-source-of-truth]]: **temporary password only** (`changeRequired:true`), email auto-verify always-on, **BYOI hides the controls**, reuses `user:manage` ([[0046-roles-permissions-v2]], no new permission); #411 | **accepted** (2026-06-14) |
 | [[0065-secret-manager-regenerate-recovery-key]] | Secret Manager — regenerate the recovery key for an EXISTING keypair (#452, the deferred "regenerate" half): unlock the private key **with the passphrase** client-side → mint a NEW recovery key → re-wrap **only** the recovery-wrapped blob (`privateKeyEncByRecovery`/`recoverySalt`/`recoveryIv`); public key, per-vault DEKs, and all [[vault-membership]] UNCHANGED (no DEK re-wrap, no membership churn — the non-destructive alternative to peer-reset). New self-only `POST /secret-manager/keypair/recovery`; shown-once (reuses #452/PR #457 ordering); **INV-10 preserved** (server stays ciphertext custodian, can't validate the blob). "Lost BOTH passphrase + recovery key" on a single-member vault = still permanent loss (by design). Extends [[0061-secret-manager-zero-knowledge]] | **superseded by [[0066-secret-manager-password-vs-recovery-root]]** (2026-06-15) |
 | [[0066-secret-manager-password-vs-recovery-root]] | Secret Manager — password is the daily entry credential, recovery key is the root that resets it (ADR-0066): renames the "passphrase" to **vault password** (mutable, user-changeable); elevates the **recovery key** as the root-only reset credential (shown once, used only when password is lost); clarifies that `POST /secret-manager/keypair/recovery` changes the password, not the recovery key; supersedes the locked-in terminology of [[0065-secret-manager-regenerate-recovery-key]] | **accepted** (2026-06-15) — built in #526/#527 + frontend #528 |
-| [[0067-server-prefetch-ssr-strategy]] | Server-prefetch + hydration rendering strategy — targeted pilot on the 6 highest-traffic routes (`/dashboard` + 5 entity list pages): thin async Server Component pages using `prefetchQuery` + `dehydrate` + `<HydrationBoundary>` (TanStack Query v5); eliminates the skeleton→hydrate→fetch waterfall; keeps TanStack Query as the client cache; adds group-level `loading.tsx` + per-group `error.tsx`; must sequence after #498 (session-seeding fix); builds on [[0039-authjs-v5-frontend-oidc]] §6a; resolves the deferred debt noted in [[0020-frontend-data-layer]]; #500 | **accepted** (2026-06-16, CEO ratification; implementation deferred to #537) |
+| [[0067-server-prefetch-ssr-strategy]] | Server-prefetch + hydration rendering strategy — targeted pilot on the 6 highest-traffic routes (`/dashboard` + 5 entity list pages): thin async Server Component pages using `prefetchQuery` + `dehydrate` + `<HydrationBoundary>` (TanStack Query v5); eliminates the skeleton→hydrate→fetch waterfall; keeps TanStack Query as the client cache; adds group-level `loading.tsx` + per-group `error.tsx`; must sequence after #498 (session-seeding fix); builds on [[0039-authjs-v5-frontend-oidc]] §6a; resolves the deferred debt noted in [[0020-frontend-data-layer]]; #500 | **accepted** (2026-06-16); pilot implemented 2026-06-20 (#537) |
 | [[0068-asset-tag-existing-estate-awareness]] | Asset Tag Scheme — existing-estate awareness (extends [[0063-configurable-asset-tag-scheme]]): a **skip-existing allocation invariant** (an auto-tag is NEVER a tag that already exists on a live asset — the counter always advances to the next free rendered tag, by construction + the `assets_assetTag_active_key` index for races; no false 409 under dense occupancy), a **seed suggestion** (`startNumber = max(existing matching)+1`), and an explicit **backfill** (`settings:manage`) with a **read-only paginated preview** (AssetModel filter + per-row deselect) + two modes — default `untagged-only`, opt-in `normalize-non-conforming` behind a warning — forward-only & audited via `AssetHistory` ([[0006-soft-delete-and-auditing]]); #547 | **accepted** (2026-06-16) |
 | [[0069-migrator-import]] | Guided bulk import — phase 1 (Asset slice, JSON + CSV) with Etapa-2 amendment: directory persons (`directoryOnly` User mode) + AssetAssignment + specs passthrough | **accepted** (2026-06-17); amended 2026-06-20 (Etapa 2: §A.1–A.5) |
 

@@ -4,6 +4,8 @@ import type {
   CloneUser,
   CloneUserResult,
   CreateUser,
+  Role,
+  RoleCounts,
   UpdateUser,
   User,
   UserListPage,
@@ -44,6 +46,12 @@ export interface UserListParams {
    * list mixes them, badged "Directory"), so this is the optional slice that lets an operator focus on one.
    */
   directoryOnly?: boolean;
+  /**
+   * RBAC role filter (#693). Scope the list to one role (ADMIN | MEMBER | VIEWER); omitted → all roles.
+   * The Settings → Roles "View N members" link deep-links here as `/users?role=VIEWER`, so the list IS
+   * the role-membership browser (server-side search/sort/paging) — no separate per-role view.
+   */
+  role?: Role;
 }
 
 /**
@@ -71,12 +79,23 @@ export function getUsers(
   if (params.deleted) qs.set("deleted", params.deleted);
   if (params.directoryOnly !== undefined)
     qs.set("directoryOnly", String(params.directoryOnly));
+  if (params.role) qs.set("role", params.role);
   const search = qs.toString();
   return apiFetch<UserListPage>(search ? `${BASE}?${search}` : BASE, {
     signal,
     token,
   });
 }
+/**
+ * Per-role LIVE user counts (`GET /users/role-counts`, #693). One server-side `groupBy` over the
+ * active directory → `{ ADMIN, MEMBER, VIEWER }`. Backs the Settings → Roles card counts so they stay
+ * correct at any team size (the old client-side count truncated past the list window). Every role key
+ * is always present (`0` when the role has no holders).
+ */
+export function getUserRoleCounts(signal?: AbortSignal): Promise<RoleCounts> {
+  return apiFetch<RoleCounts>(`${BASE}/role-counts`, { signal });
+}
+
 export const getUser = users.get;
 export const createUser = users.create;
 export const updateUser = users.update;

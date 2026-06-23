@@ -18,6 +18,14 @@
     "batchDeleteError": "No se pudieron eliminar los activos seleccionados",
     "setStatusPlaceholder": "Definir estado…",
     "restore": "Restaurar",
+    "assign": "Asignar",
+    "unassign": "Desasignar",
+    "statusChangedToast": "Estado cambiado a {status}",
+    "statusChangeError": "No se pudo cambiar el estado",
+    "unassignedToast": "Responsable desasignado",
+    "unassignError": "No se pudo desasignar al responsable",
+    "unassignConfirmTitle": "¿Desasignar responsable?",
+    "unassignConfirmDescription": "Esto libera al responsable actual de {name} y mueve la asignación a su historial de responsables. Puedes reasignarlo cuando quieras.",
     "columns": {
       "name": "Nombre",
       "assetTag": "Etiqueta",
@@ -29,10 +37,31 @@
       "updated": "Actualizado",
       "actions": "Acciones"
     },
+    "columnPicker": {
+      "label": "Columnas",
+      "groups": {
+        "details": "Detalles",
+        "status": "Estado",
+        "activity": "Actividad"
+      },
+      "columns": {
+        "assetTag": "Etiqueta",
+        "model": "Modelo",
+        "category": "Categoría",
+        "location": "Ubicación",
+        "status": "Estado",
+        "owners": "Responsables",
+        "updated": "Actualizado"
+      }
+    },
     "filters": {
+      "moreFilters": "Filtros",
       "allStatuses": "Todos los estados",
       "allCategories": "Todas las categorías",
       "allLocations": "Todas las ubicaciones",
+      "ownerLabel": "Responsable",
+      "ownerPlaceholder": "Cualquier responsable",
+      "ownershipLabel": "Responsabilidad",
       "anyOwnership": "Cualquier responsable",
       "hasOwners": "Con responsables",
       "noOwners": "Sin responsables"
@@ -47,6 +76,7 @@
       "status": "Estado: {value}",
       "category": "Categoría: {value}",
       "location": "Ubicación: {value}",
+      "owner": "Responsable: {value}",
       "owners": "Responsables: {value}"
     }
   },
@@ -168,6 +198,12 @@
         "restored": "Activo restaurado"
       }
     }
+  },
+  "rowActions": {
+    "openInNewTab": "Abrir en pestaña nueva",
+    "assign": "Asignar a…",
+    "removeAssignment": "Quitar asignación",
+    "changeStatus": "Cambiar estado"
   },
   "assign": {
     "title": "Asignar usuario",

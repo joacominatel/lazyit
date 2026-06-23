@@ -2,7 +2,7 @@
 
 import { MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
@@ -12,10 +12,22 @@ interface SearchInputProps
     React.ComponentProps<"input">,
     "value" | "onChange" | "type" | "aria-label"
   > {
-  /** Current input text (controlled). */
+  /**
+   * Seed/sync value for the visible text. The input keeps its OWN local buffer
+   * (so spaces and fast typing never get clobbered); `value` only seeds the
+   * buffer initially and re-syncs it when it changes externally and differs from
+   * the buffer (a cleared chip, a deep-linked `?q=`, a programmatic reset).
+   * ponytail: the URL stays the source of truth for the *committed* query — we
+   * just buffer the keystrokes locally and let only the debounced settle write it.
+   */
   value: string;
-  /** Fires on every keystroke with the raw text — wire to your state. */
-  onChange: (value: string) => void;
+  /**
+   * Optional. Fires on every keystroke with the raw (untrimmed) text. Wire this
+   * only when you need the immediate value (e.g. a purely-local `useState`
+   * filter). URL-backed lists should leave it unset and use `onDebouncedChange`
+   * so keystrokes don't trigger a `router.replace` per character.
+   */
+  onChange?: (value: string) => void;
   /**
    * Optional self-debounce. When set, `onDebouncedChange` fires only after the
    * value has been still for this many ms. Use this OR debounce upstream with
@@ -42,8 +54,9 @@ interface SearchInputProps
  *
  * Debouncing is opt-in via `debounceMs` + `onDebouncedChange`; otherwise the
  * caller debounces upstream (the established list-page pattern with
- * `useDebouncedValue`). The visible value is always the immediate one so typing
- * stays responsive.
+ * `useDebouncedValue`). The visible value is a LOCAL buffer, so typing stays
+ * responsive and trimming/URL round-trips never snap a half-typed term back
+ * (issue #692: a trailing space "wouldn't type", fast typing dropped chars).
  */
 export function SearchInput({
   value,
@@ -64,9 +77,28 @@ export function SearchInput({
   const inputId = id ?? generatedId;
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // The visible text lives in a LOCAL buffer (issue #692). It updates instantly
+  // on every keystroke — spaces persist, fast typing never lags — while the
+  // committed query is what the debounced settle writes to the URL. The `value`
+  // prop only SEEDS this buffer and re-syncs it when it changes externally (a
+  // cleared chip, a deep-linked `?q=`, a programmatic reset), never on the
+  // user's own keystroke. ponytail: keep the URL as the source of truth for the
+  // *committed* query; buffer the in-flight keystrokes here.
+  //
+  // We adjust the buffer DURING render (React's documented "store info from
+  // previous render" pattern) keyed off the last seen `value`, rather than in an
+  // effect — that re-syncs synchronously (no extra paint of the stale buffer)
+  // and avoids the set-state-in-effect cascade.
+  const [buffer, setBuffer] = useState(value);
+  const [lastValue, setLastValue] = useState(value);
+  if (value !== lastValue) {
+    setLastValue(value);
+    setBuffer(value);
+  }
+
   // Self-debounce only when asked. The hook always runs (rules of hooks); when
   // debounceMs is undefined the effect below simply never fires.
-  const debounced = useDebouncedValue(value, debounceMs ?? 0);
+  const debounced = useDebouncedValue(buffer, debounceMs ?? 0);
   // Avoid emitting the initial value as a "change" before the user types.
   const firstRun = useRef(true);
   useEffect(() => {
@@ -78,10 +110,17 @@ export function SearchInput({
     onDebouncedChange(debounced);
   }, [debounced, debounceMs, onDebouncedChange]);
 
-  const hasValue = value.length > 0;
+  const hasValue = buffer.length > 0;
+
+  function handleChange(next: string) {
+    setBuffer(next);
+    onChange?.(next);
+  }
 
   function handleClear() {
-    onChange("");
+    setBuffer("");
+    onChange?.("");
+    onDebouncedChange?.("");
     // Return focus to the field so keyboard users keep their place.
     inputRef.current?.focus();
   }
@@ -96,8 +135,8 @@ export function SearchInput({
         ref={inputRef}
         id={inputId}
         type="search"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
+        value={buffer}
+        onChange={(event) => handleChange(event.target.value)}
         placeholder={placeholderText}
         // pl-8 clears the leading icon; pr-8 clears the trailing clear button.
         className={cn("pl-8", hasValue && "pr-8")}

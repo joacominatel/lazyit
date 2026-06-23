@@ -3,7 +3,7 @@ title: Competitors & Landscape
 tags: [overview]
 status: draft
 created: 2026-05-25
-updated: 2026-06-08
+updated: 2026-06-23
 ---
 
 # Competitors & Landscape
@@ -14,7 +14,7 @@ How lazyit relates to the tools a small IT team might otherwise reach for.
 | --- | --- | --- | --- |
 | **ServiceNow** | ITSM suite | Complete, enterprise-grade | Expensive, heavy, legacy UX; over-scoped for 5–20 people |
 | **Jira / Linear** | Issue tracking | Great workflows & UX | Generic; no native concept of assets, access, consumables |
-| **Snipe-IT** | Asset inventory | Solid, open-source inventory | Inventory only; no access management, knowledge base, or provisioning automation |
+| **Snipe-IT** | Asset inventory | Solid, open-source inventory | Inventory only; no access management, knowledge base, provisioning automation, or secret/credential vault |
 | **GLPI** | ITSM (open source) | Broad, free | Dated UX; configuration-heavy; steep to operate well |
 | **Freshservice** | ITSM SaaS | Modern, approachable | SaaS-only; pricing scales with agents; not self-hosted |
 | **Spreadsheets / Notion** | Ad hoc | Zero cost, flexible | No model, no automation, no audit trail; breaks at scale |
@@ -23,7 +23,7 @@ How lazyit relates to the tools a small IT team might otherwise reach for.
 
 lazyit intentionally occupies the gap between **narrow** (Snipe-IT) and **heavy/generic**
 (ServiceNow, Jira): one opinionated, IT-native, self-hosted app that unifies inventory +
-access + consumables + knowledge, with auditability by default.
+access + consumables + knowledge + credentials, with auditability by default.
 
 One capability usually reserved for the heavy suites it now also has, on its own honest terms:
 **provisioning automation** — an opt-in, per-application [[workflow-engine/_MOC|Workflow Engine]]
@@ -31,6 +31,13 @@ that drives access provisioning/deprovisioning into external systems (Jira, Redm
 webhook target) when access is granted or revoked in lazyit. It is new and deliberately scoped
 (public-HTTPS REST/webhook/manual steps, event triggers) — not a general-purpose no-code automation
 canvas, and apps without a workflow keep behaving exactly as before.
+
+And none of the tools above ships a **credential vault** at all: a team using ServiceNow, Jira,
+Snipe-IT, GLPI or a spreadsheet still reaches for a *separate* password manager for shared
+secrets. lazyit folds that in as a **zero-knowledge Secret Manager** — credentials vaults living
+beside the KB where the server stores secrets encrypted and can never decrypt a stored value
+([[0061-secret-manager-zero-knowledge]]) — so the credential store is part of the system of record,
+not one more tool outside it.
 
 ```mermaid
 quadrantChart

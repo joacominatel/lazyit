@@ -92,6 +92,12 @@
     "statusInColumnNote": "Asocia cada valor de estado de esta columna a un estado de lazyit. Los sinónimos comunes se completan por ti.",
     "statusNoValues": "No se encontraron valores de estado en las filas de muestra.",
     "statusUnmapped": "— dejar tal cual —",
+    "fixedValue": {
+      "modeExisting": "Existente",
+      "modeConstant": "Constante",
+      "toggleAria": "Elegir un valor existente o escribir una constante",
+      "helper": "Elige un valor existente para vincular cada fila a él, o cambia a constante para escribir uno nuevo."
+    },
     "modelConfig": {
       "title": "Marca y categoría del modelo",
       "description": "Mapea una columna a Fabricante o Categoría arriba para definirlos por fila, o fija un valor aquí para aplicarlo a todos los modelos que cree la importación.",
@@ -99,6 +105,9 @@
       "manufacturerPlaceholder": "p. ej. Apple",
       "categoryLabel": "Categoría para todos los modelos",
       "categoryPlaceholder": "p. ej. Laptop",
+      "categoryPickPlaceholder": "Elegir una categoría…",
+      "categoryPickSearch": "Buscar categorías…",
+      "categoryPickEmpty": "No se encontraron categorías.",
       "fromColumn": "Se toma de la columna «{column}»."
     },
     "missingRequired": "Mapea una columna a: {fields}.",

@@ -398,6 +398,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
 
   // SECW-04 (lens1): when the session locks (isUnlocked → false), immediately cancel the pending auto-mask
   // timer and re-mask any revealed value. An explicit Lock must re-hide every revealed item at once.
+  /* eslint-disable react-hooks/set-state-in-effect -- reacting to external session-lock event; clearTimeout side-effect requires an effect */
   useEffect(() => {
     if (!isUnlocked) {
       clearTimeout(maskTimerRef.current);
@@ -405,6 +406,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
       setCopyFailed(false);
     }
   }, [isUnlocked]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleReveal = useCallback(() => {
     if (plaintext !== undefined) {
@@ -897,18 +899,19 @@ function EditItemDialog({
   const [newValue, setNewValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [keyError, setKeyError] = useState(false);
-
-  const preparingKey = membershipState === "loading";
-  // Only the value path needs the DEK; label/handle-only edits work without it.
-  const needsKey = newValue.length > 0;
-
-  // Sync fields when the item prop changes (re-open for different item).
-  useEffect(() => {
+  // Sync fields when item identity changes (re-open for different item) — derived during render.
+  const [lastItemId, setLastItemId] = useState(item.id);
+  if (item.id !== lastItemId) {
+    setLastItemId(item.id);
     setLabel(item.label);
     setHandle(item.handle);
     setNewValue("");
     setKeyError(false);
-  }, [item.id, item.label, item.handle]);
+  }
+
+  const preparingKey = membershipState === "loading";
+  // Only the value path needs the DEK; label/handle-only edits work without it.
+  const needsKey = newValue.length > 0;
 
   function handleOpenChange(next: boolean) {
     if (!next) {

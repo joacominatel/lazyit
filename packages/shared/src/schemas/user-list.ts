@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { UserSchema } from "./user";
+import { RoleSchema, UserSchema } from "./user";
 import { pageSchema } from "./pagination";
 
 /**
@@ -34,3 +34,18 @@ export type UserListItem = z.infer<typeof UserListItemSchema>;
 export const UserListPageSchema = pageSchema(UserListItemSchema);
 
 export type UserListPage = z.infer<typeof UserListPageSchema>;
+
+/**
+ * Per-role LIVE user counts (`GET /users/role-counts`, issue #693). One count per RBAC {@link
+ * RoleSchema} role over the active (not soft-deleted) directory — the authoritative numbers the
+ * Settings → Roles cards show, computed server-side by a single Prisma `groupBy` so they stay
+ * correct at any team size (the old client-side count truncated past the list window). A role with
+ * no holders is `0`, never absent — the keys are exhaustive. The cards deep-link into the Users list
+ * (`/users?role=…`) for the actual membership browser; this endpoint only supplies the headline count.
+ */
+export const RoleCountsSchema = z.object(
+  Object.fromEntries(
+    RoleSchema.options.map((role) => [role, z.number().int().nonnegative()]),
+  ) as Record<(typeof RoleSchema.options)[number], z.ZodNumber>,
+);
+export type RoleCounts = z.infer<typeof RoleCountsSchema>;

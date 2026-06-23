@@ -18,6 +18,14 @@
     "batchDeleteError": "Couldn't delete the selected assets",
     "setStatusPlaceholder": "Set status…",
     "restore": "Restore",
+    "assign": "Assign",
+    "unassign": "Unassign",
+    "statusChangedToast": "Status set to {status}",
+    "statusChangeError": "Couldn't change the status",
+    "unassignedToast": "Owner unassigned",
+    "unassignError": "Couldn't unassign the owner",
+    "unassignConfirmTitle": "Unassign owner?",
+    "unassignConfirmDescription": "This releases the current owner of {name} and moves the assignment into its ownership history. You can reassign it at any time.",
     "columns": {
       "name": "Name",
       "assetTag": "Asset tag",
@@ -29,10 +37,31 @@
       "updated": "Updated",
       "actions": "Actions"
     },
+    "columnPicker": {
+      "label": "Columns",
+      "groups": {
+        "details": "Details",
+        "status": "Status",
+        "activity": "Activity"
+      },
+      "columns": {
+        "assetTag": "Asset tag",
+        "model": "Model",
+        "category": "Category",
+        "location": "Location",
+        "status": "Status",
+        "owners": "Owners",
+        "updated": "Updated"
+      }
+    },
     "filters": {
+      "moreFilters": "Filters",
       "allStatuses": "All statuses",
       "allCategories": "All categories",
       "allLocations": "All locations",
+      "ownerLabel": "Owner",
+      "ownerPlaceholder": "Any owner",
+      "ownershipLabel": "Ownership",
       "anyOwnership": "Any ownership",
       "hasOwners": "Has owners",
       "noOwners": "No owners"
@@ -47,6 +76,7 @@
       "status": "Status: {value}",
       "category": "Category: {value}",
       "location": "Location: {value}",
+      "owner": "Owner: {value}",
       "owners": "Owners: {value}"
     }
   },
@@ -168,6 +198,12 @@
         "restored": "Asset restored"
       }
     }
+  },
+  "rowActions": {
+    "openInNewTab": "Open in new tab",
+    "assign": "Assign to…",
+    "removeAssignment": "Remove assignment",
+    "changeStatus": "Change status"
   },
   "assign": {
     "title": "Assign user",

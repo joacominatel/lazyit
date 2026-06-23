@@ -7,7 +7,7 @@ import {
   UsersIcon,
   ViewColumnsIcon,
 } from "@heroicons/react/24/outline";
-import type { BatchResult, User } from "@lazyit/shared";
+import { type BatchResult, type Role, RoleSchema, type User } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
@@ -31,6 +31,7 @@ import {
   SelectCell,
   SortableHeader,
 } from "@/components/resource-table";
+import { RowsPerPageSelect } from "@/components/rows-per-page-select";
 import { SearchInput } from "@/components/search-input";
 import { Button } from "@/components/ui/button";
 import {
@@ -82,14 +83,23 @@ type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
 type DirectoryFilter = "ALL" | "directory" | "accounts";
 
 /**
+ * RBAC role filter (#693). `ALL` → every role (default, omitted from the query); a specific role
+ * scopes the list server-side via `?role=`. This is also the deep-link target of the Settings → Roles
+ * "View N members" link (`/users?role=VIEWER`) — because the value lives in the URL, the link just works.
+ */
+type RoleFilter = "ALL" | Role;
+
+/**
  * Filter param defaults. `status` (active/inactive) is filtered client-side over the page.
  * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL. `directory`
- * ("ALL" | "directory" | "accounts") drives the server-side `directoryOnly` slice.
+ * ("ALL" | "directory" | "accounts") drives the server-side `directoryOnly` slice. `role` ("ALL" |
+ * ADMIN | MEMBER | VIEWER) drives the server-side `?role=` slice (#693).
  */
 const FILTER_DEFAULTS = {
   status: "ALL",
   archived: "ALL",
   directory: "ALL",
+  role: "ALL",
 } as const;
 
 /**
@@ -179,6 +189,7 @@ export function UsersListView() {
     setQ,
     toggleSort,
     setFilter,
+    setLimit,
     setOffset,
     clearFilters,
     filtersActive,
@@ -199,6 +210,10 @@ export function UsersListView() {
       : directoryFilter === "accounts"
         ? false
         : undefined;
+  const roleFilter = filters.role as RoleFilter;
+  // Map the role filter to the server's optional `?role=` slice (omit for "ALL"). The Roles deep-link
+  // (`/users?role=VIEWER`) lands here via the URL, so no extra handling is needed for it (#693).
+  const role = roleFilter === "ALL" ? undefined : roleFilter;
 
   // Forward only the server-supported params; `status` is filtered client-side over the page below.
   const { data: page, isLoading, isFetching, isError, error, refetch } =
@@ -210,6 +225,7 @@ export function UsersListView() {
       offset,
       deleted: archived ? "only" : undefined,
       directoryOnly,
+      role,
     });
   const restoreUserMutation = useRestoreUser();
 
@@ -440,6 +456,17 @@ export function UsersListView() {
           },
         ]
       : []),
+    ...(roleFilter !== "ALL"
+      ? [
+          {
+            key: "role",
+            label: t("list.chips.role", {
+              role: t(`list.roleFilter.${roleFilter}`),
+            }),
+            onClear: () => setFilter("role", FILTER_DEFAULTS.role),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -499,7 +526,6 @@ export function UsersListView() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <SearchInput
               value={q}
-              onChange={setQ}
               debounceMs={300}
               onDebouncedChange={setQ}
               label={t("list.searchLabel")}
@@ -543,12 +569,35 @@ export function UsersListView() {
                 </SelectItem>
               </SelectContent>
             </Select>
+            <Select
+              value={roleFilter}
+              onValueChange={(value) => setFilter("role", value)}
+            >
+              <SelectTrigger
+                className="sm:w-44"
+                aria-label={t("list.roleFilter.label")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">{t("list.roleFilter.ALL")}</SelectItem>
+                {RoleSchema.options.map((roleOption) => (
+                  <SelectItem key={roleOption} value={roleOption}>
+                    {t(`list.roleFilter.${roleOption}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <RowsPerPageSelect
+              value={limit}
+              onChange={setLimit}
+              className="sm:ml-auto sm:w-44"
+            />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="outline"
                   size="icon"
-                  className="sm:ml-auto"
                   aria-label={t("list.columnPicker.label")}
                   title={t("list.columnPicker.label")}
                 >

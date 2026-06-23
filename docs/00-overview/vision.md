@@ -3,7 +3,7 @@ title: Vision
 tags: [overview]
 status: draft
 created: 2026-05-25
-updated: 2026-06-16
+updated: 2026-06-23
 ---
 
 # Vision
@@ -11,7 +11,9 @@ updated: 2026-06-16
 **lazyit** is an internal web application for IT / Systems teams — helpdesk, support,
 infrastructure. It is the single place where a small IT team manages everything technical
 in a company: asset inventory, application access, datacenter, backups, switches and Cisco
-gear, laptops, licenses, requests, and internal documentation.
+gear, laptops, licenses, requests, internal documentation, and
+**zero-knowledge credentials vaults** (the server never decrypts a stored secret —
+[[0061-secret-manager-zero-knowledge]]).
 
 ## Who it is for
 
@@ -35,11 +37,13 @@ Inspired by ServiceNow, but deliberately different:
 lazyit is headed toward a **self-hosted product for IT teams** — one instance per organization,
 run inside the customer. The immediate step is **internal validation** (own / former company)
 before any external distribution. Self-hosting is the right default for this segment: the data
-(inventory, access, credentials-adjacent records) is sensitive, AD/LDAP integration is expected,
-and compliance often forbids keeping it off-premises — with clear market precedents (Snipe-IT,
-GLPI, Zammad, Authentik). **Multi-tenant SaaS is deferred** — not designed for now, revisitable
-later. Full rationale: [[0015-deployment-model]]; authentication direction:
-[[0016-auth-strategy-deferred]].
+(inventory, access, and the zero-knowledge credentials vaults of the
+[[0061-secret-manager-zero-knowledge|Secret Manager]]) is sensitive, AD/LDAP integration is
+expected, and compliance often forbids keeping it off-premises — with clear market precedents
+(Snipe-IT, GLPI, Zammad, Authentik). **Multi-tenant SaaS is deferred** — not designed for now,
+revisitable later. Full rationale: [[0015-deployment-model]]; authentication is OIDC via a
+bundled-but-replaceable Zitadel (BYOI) — [[0037-idp-choice-zitadel-byoi]],
+[[0038-jit-user-provisioning]], [[0039-authjs-v5-frontend-oidc]].
 
 ## Principles
 

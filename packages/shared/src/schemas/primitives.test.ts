@@ -38,7 +38,7 @@ describe("int4()", () => {
   test("emits int4 bounds (not safe-integer bounds) in the generated JSON Schema", () => {
     const json = z.toJSONSchema(z.object({ n: int4() }), {
       unrepresentable: "any",
-    }) as { properties: { n: { maximum: number; minimum: number } } };
+    }) as unknown as { properties: { n: { maximum: number; minimum: number } } };
     expect(json.properties.n.maximum).toBe(INT4_MAX);
     expect(json.properties.n.minimum).toBe(INT4_MIN);
   });
@@ -46,7 +46,7 @@ describe("int4()", () => {
   test("carries the example into the JSON Schema (overrides Swagger autofill)", () => {
     const json = z.toJSONSchema(z.object({ n: int4({ example: 5 }) }), {
       unrepresentable: "any",
-    }) as { properties: { n: { example?: number } } };
+    }) as unknown as { properties: { n: { example?: number } } };
     expect(json.properties.n.example).toBe(5);
   });
 });
