@@ -31,6 +31,42 @@
     "OFFLINE": "Offline",
     "UNKNOWN": "Unknown"
   },
+  "state": {
+    "CONFIRMED": "Confirmed",
+    "PENDING": "Pending"
+  },
+  "servers": {
+    "title": "Servers",
+    "subtitle": "Every node in your topology — filter, search and open one to see its owner, secrets and connections.",
+    "searchLabel": "Search servers",
+    "searchPlaceholder": "Search by name or IP…",
+    "openLabel": "Open on the map",
+    "allKinds": "All kinds",
+    "allStatuses": "All statuses",
+    "allStates": "All states",
+    "loadError": "Couldn't load the servers.",
+    "filteredEmpty": "No servers match these filters.",
+    "chipSearch": "Search: {query}",
+    "chipKind": "Kind: {kind}",
+    "chipStatus": "Status: {status}",
+    "chipState": "State: {state}",
+    "columns": {
+      "label": "Name",
+      "kind": "Kind",
+      "status": "Status",
+      "asset": "Asset",
+      "ip": "IP address",
+      "actions": "Actions"
+    },
+    "asset": {
+      "tracked": "Tracked asset",
+      "graphOnly": "Graph-only"
+    },
+    "meta": {
+      "asset": "Asset",
+      "ip": "IP address"
+    }
+  },
   "edgeKind": {
     "RUNS_ON": "Runs on",
     "MEMBER_OF": "Member of",

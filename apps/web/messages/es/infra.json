@@ -31,6 +31,42 @@
     "OFFLINE": "Fuera de línea",
     "UNKNOWN": "Desconocido"
   },
+  "state": {
+    "CONFIRMED": "Confirmado",
+    "PENDING": "Pendiente"
+  },
+  "servers": {
+    "title": "Servidores",
+    "subtitle": "Todos los nodos de tu topología: filtrá, buscá y abrí uno para ver su responsable, secretos y conexiones.",
+    "searchLabel": "Buscar servidores",
+    "searchPlaceholder": "Buscar por nombre o IP…",
+    "openLabel": "Abrir en el mapa",
+    "allKinds": "Todos los tipos",
+    "allStatuses": "Todos los estados",
+    "allStates": "Todos los ciclos",
+    "loadError": "No se pudieron cargar los servidores.",
+    "filteredEmpty": "Ningún servidor coincide con estos filtros.",
+    "chipSearch": "Búsqueda: {query}",
+    "chipKind": "Tipo: {kind}",
+    "chipStatus": "Estado: {status}",
+    "chipState": "Ciclo: {state}",
+    "columns": {
+      "label": "Nombre",
+      "kind": "Tipo",
+      "status": "Estado",
+      "asset": "Activo",
+      "ip": "Dirección IP",
+      "actions": "Acciones"
+    },
+    "asset": {
+      "tracked": "Activo registrado",
+      "graphOnly": "Solo en el grafo"
+    },
+    "meta": {
+      "asset": "Activo",
+      "ip": "Dirección IP"
+    }
+  },
   "edgeKind": {
     "RUNS_ON": "Se ejecuta en",
     "MEMBER_OF": "Miembro de",
