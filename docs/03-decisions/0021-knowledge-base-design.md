@@ -98,7 +98,9 @@ can be added later without a destructive migration**.
   click-handlers/HTML labels, each diagram error-bounded so a malformed one degrades to a copyable
   inline error, never a crash — issue #310). This is **render-only** — authoring stays a raw-Markdown
   textarea + live preview (no TipTap/WYSIWYG), with a quiet split/write/preview layout toggle to gain
-  room (#310), so the "simple wiki" decision holds. Both the highlighter and the mermaid renderer are
+  room (#310) and a `?` reserved-syntax cheat sheet in the toolbar (a Popover of copyable `[[slug]]` /
+  `{{ lazyit_secret.HANDLE }}` / link examples — issue #720, no in-textarea highlighting: the live
+  preview already shows how a token resolves), so the "simple wiki" decision holds. Both the highlighter and the mermaid renderer are
   React `components.code` overrides that run **after**
   [[0029-untrusted-content-sanitization|rehype-sanitize]], so the sanitize allow-list is untouched,
   `rehype-raw` stays off, and the SEC-003 guarantee is preserved by construction (mermaid's own

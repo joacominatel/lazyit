@@ -14,6 +14,7 @@ import {
 } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownView } from "@/components/markdown-view";
+import { MarkdownSyntaxHelp } from "@/components/markdown-syntax-help";
 import {
   type WikiLinkAutocomplete,
   WikiLinkSuggestions,
@@ -263,33 +264,39 @@ export function MarkdownEditor({
 
   return (
     <div className="space-y-3">
-      {/* Quiet segmented control — ghost buttons on a muted track, the active one gets the
-          card surface + ring. Restraint-consistent: no colour, glyph + label only. */}
-      <div
-        role="group"
-        aria-label={t("editor.viewToggleLabel")}
-        className="inline-flex items-center gap-0.5 rounded-lg border bg-muted/40 p-0.5"
-      >
-        {MODES.map(({ mode: m, icon: Icon, labelKey }) => {
-          const active = mode === m;
-          return (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              aria-pressed={active}
-              className={cn(
-                "inline-flex h-7 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] font-medium transition-all outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                active
-                  ? "bg-card text-foreground shadow-e1 ring-1 ring-foreground/10"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="size-3.5" aria-hidden />
-              {t(labelKey)}
-            </button>
-          );
-        })}
+      {/* Toolbar row: the layout toggle on the left, the reserved-syntax `?` helper (issue #720)
+          on the right. Lives here so both the `/kb/new` and edit routes get it via the one editor. */}
+      <div className="flex items-center justify-between gap-2">
+        {/* Quiet segmented control — ghost buttons on a muted track, the active one gets the
+            card surface + ring. Restraint-consistent: no colour, glyph + label only. */}
+        <div
+          role="group"
+          aria-label={t("editor.viewToggleLabel")}
+          className="inline-flex items-center gap-0.5 rounded-lg border bg-muted/40 p-0.5"
+        >
+          {MODES.map(({ mode: m, icon: Icon, labelKey }) => {
+            const active = mode === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                aria-pressed={active}
+                className={cn(
+                  "inline-flex h-7 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] font-medium transition-all outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                  active
+                    ? "bg-card text-foreground shadow-e1 ring-1 ring-foreground/10"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="size-3.5" aria-hidden />
+                {t(labelKey)}
+              </button>
+            );
+          })}
+        </div>
+
+        <MarkdownSyntaxHelp />
       </div>
 
       <div
