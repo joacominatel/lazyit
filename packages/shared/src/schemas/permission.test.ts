@@ -99,7 +99,7 @@ describe("Workflow permissions (Applications Workflow Engine, epic #248)", () =>
   });
 
   test("workflow:read is an admin-only read (treated like logs:read)", () => {
-    expect(ADMIN_ONLY_READS).toContain("workflow:read" as Permission);
+    expect(ADMIN_ONLY_READS).toContain("workflow:read");
   });
 
   test("SAFE DEFAULT: every workflow verb is ADMIN-only — MEMBER/VIEWER hold none", () => {
@@ -121,7 +121,7 @@ describe("Notification permission (in-app notification bell, ADR-0056)", () => {
   });
 
   test("notification:read is an admin-only read (treated like logs:read / workflow:read)", () => {
-    expect(ADMIN_ONLY_READS).toContain("notification:read" as Permission);
+    expect(ADMIN_ONLY_READS).toContain("notification:read");
   });
 
   test("SAFE DEFAULT: notification:read is ADMIN-only — MEMBER/VIEWER hold none", () => {
@@ -159,7 +159,7 @@ describe("Secret permissions (human Secret Manager, ADR-0061)", () => {
   });
 
   test("secret:read is an admin-only read (same posture as logs:read / workflow:read)", () => {
-    expect(ADMIN_ONLY_READS).toContain("secret:read" as Permission);
+    expect(ADMIN_ONLY_READS).toContain("secret:read");
   });
 
   test("SAFE DEFAULT: every secret verb is ADMIN-only — MEMBER/VIEWER hold none", () => {
@@ -266,7 +266,7 @@ describe("DEFAULT_ROLE_PERMISSIONS (the seed source of truth)", () => {
 
   test("the pre-tightening is EXACTLY accessGrant:read + user:read", () => {
     expect([...VIEWER_DENIED_READS].sort()).toEqual(
-      ["accessGrant:read", "user:read"].sort(),
+      (["accessGrant:read", "user:read"] as (typeof VIEWER_DENIED_READS)[number][]).sort(),
     );
     // VIEWER specifically lacks these two…
     expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain("accessGrant:read" as Permission);
