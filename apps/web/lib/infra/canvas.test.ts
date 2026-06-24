@@ -1,10 +1,13 @@
+import { Position } from "@xyflow/react";
 import { describe, expect, mock, test } from "bun:test";
 import {
   debounce,
   edgeStroke,
   edgeStyle,
+  getFloatingEdgeParams,
   gridPosition,
   layoutNodes,
+  type NodeRect,
   NODE_HEIGHT,
   NODE_WIDTH,
   placementOffset,
@@ -82,6 +85,86 @@ describe("edgeStyle", () => {
     for (const kind of ["RUNS_ON", "MEMBER_OF", "DEPENDS_ON", "BACKS_UP_TO"] as const) {
       expect(edgeStyle(kind).marker).toBeDefined();
     }
+  });
+});
+
+describe("getFloatingEdgeParams", () => {
+  // A 100×100 source box centred at (50,50); targets are placed unambiguously on one side.
+  const source: NodeRect = { x: 0, y: 0, width: 100, height: 100 };
+  const place = (x: number, y: number): NodeRect => ({ x, y, width: 100, height: 100 });
+
+  test("a target to the RIGHT leaves the source's right side and enters the target's left", () => {
+    const p = getFloatingEdgeParams(source, place(300, 0));
+    expect(p.sourcePos).toBe(Position.Right);
+    expect(p.targetPos).toBe(Position.Left);
+    // The source anchor sits on the right face (x == source.width), at the vertical centre.
+    expect(p.sx).toBeCloseTo(100);
+    expect(p.sy).toBeCloseTo(50);
+  });
+
+  test("a target to the LEFT leaves the source's left side and enters the target's right", () => {
+    const p = getFloatingEdgeParams(source, place(-300, 0));
+    expect(p.sourcePos).toBe(Position.Left);
+    expect(p.targetPos).toBe(Position.Right);
+    expect(p.sx).toBeCloseTo(0);
+    expect(p.sy).toBeCloseTo(50);
+  });
+
+  test("a target ABOVE leaves the source's top side and enters the target's bottom", () => {
+    const p = getFloatingEdgeParams(source, place(0, -300));
+    expect(p.sourcePos).toBe(Position.Top);
+    expect(p.targetPos).toBe(Position.Bottom);
+    expect(p.sx).toBeCloseTo(50);
+    expect(p.sy).toBeCloseTo(0);
+  });
+
+  test("a target BELOW leaves the source's bottom side and enters the target's top", () => {
+    const p = getFloatingEdgeParams(source, place(0, 300));
+    expect(p.sourcePos).toBe(Position.Bottom);
+    expect(p.targetPos).toBe(Position.Top);
+    expect(p.sx).toBeCloseTo(50);
+    expect(p.sy).toBeCloseTo(100);
+  });
+
+  test("the anchor points always sit ON each node's perimeter (never inside, never beyond)", () => {
+    // A diagonal target (down-right) exits a corner-ish point — still on the source border.
+    const p = getFloatingEdgeParams(source, place(400, 400));
+    const onPerimeter = (
+      x: number,
+      y: number,
+      r: NodeRect,
+    ): boolean => {
+      const onVertical =
+        (Math.abs(x - r.x) < 1e-6 || Math.abs(x - (r.x + r.width)) < 1e-6) &&
+        y >= r.y - 1e-6 &&
+        y <= r.y + r.height + 1e-6;
+      const onHorizontal =
+        (Math.abs(y - r.y) < 1e-6 || Math.abs(y - (r.y + r.height)) < 1e-6) &&
+        x >= r.x - 1e-6 &&
+        x <= r.x + r.width + 1e-6;
+      return onVertical || onHorizontal;
+    };
+    expect(onPerimeter(p.sx, p.sy, source)).toBe(true);
+    expect(onPerimeter(p.tx, p.ty, place(400, 400))).toBe(true);
+  });
+
+  test("is symmetric: swapping source/target mirrors the sides and swaps the anchors", () => {
+    const target = place(300, 0);
+    const a = getFloatingEdgeParams(source, target);
+    const b = getFloatingEdgeParams(target, source);
+    expect(b.sourcePos).toBe(a.targetPos);
+    expect(b.targetPos).toBe(a.sourcePos);
+    expect(b.sx).toBeCloseTo(a.tx);
+    expect(b.sy).toBeCloseTo(a.ty);
+  });
+
+  test("concentric centres (one box inside another) don't NaN — anchors at the centre", () => {
+    const inner: NodeRect = { x: 40, y: 40, width: 20, height: 20 }; // same centre (50,50)
+    const p = getFloatingEdgeParams(source, inner);
+    expect(Number.isFinite(p.sx)).toBe(true);
+    expect(Number.isFinite(p.sy)).toBe(true);
+    expect(p.sx).toBeCloseTo(50);
+    expect(p.sy).toBeCloseTo(50);
   });
 });
 
