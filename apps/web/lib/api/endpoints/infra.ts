@@ -5,6 +5,7 @@ import type {
   InfraImpactResponse,
   InfraNode,
   InfraNodeDetail,
+  InfraNodeListItem,
   UpdateInfraNode,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
@@ -23,8 +24,8 @@ const BASE = "/infra";
 
 /**
  * Server-side filters for the node list. `kind`/`status`/`state` scope the result set; omit for all
- * confirmed nodes. The API excludes soft-deleted rows and returns a plain `InfraNode[]` (no page
- * envelope — the estate is small by design, ADR-0070).
+ * confirmed nodes. The API excludes soft-deleted rows and returns a plain `InfraNodeListItem[]` (no
+ * page envelope — the estate is small by design, ADR-0070).
  */
 export interface InfraNodeFilters {
   kind?: InfraNode["kind"];
@@ -32,19 +33,25 @@ export interface InfraNodeFilters {
   state?: InfraNode["state"];
 }
 
-/** List topology nodes (`GET /infra/nodes`), optionally filtered. Newest first. */
+/**
+ * List topology nodes (`GET /infra/nodes`), optionally filtered. Newest first. Each row is an
+ * `InfraNodeListItem` — the lean node PLUS the linked Asset's inventory `assetName` and active
+ * `owners` (joined server-side in one query, ADR-0070 §6 / issue #750) so the Servers list can show
+ * and search them inline. Hooks that only read `assetId` keep working (the list shape is a superset).
+ */
 export function getInfraNodes(
   filters: InfraNodeFilters = {},
   signal?: AbortSignal,
-): Promise<InfraNode[]> {
+): Promise<InfraNodeListItem[]> {
   const params = new URLSearchParams();
   if (filters.kind) params.set("kind", filters.kind);
   if (filters.status) params.set("status", filters.status);
   if (filters.state) params.set("state", filters.state);
   const qs = params.toString();
-  return apiFetch<InfraNode[]>(qs ? `${BASE}/nodes?${qs}` : `${BASE}/nodes`, {
-    signal,
-  });
+  return apiFetch<InfraNodeListItem[]>(
+    qs ? `${BASE}/nodes?${qs}` : `${BASE}/nodes`,
+    { signal },
+  );
 }
 
 /**

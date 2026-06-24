@@ -493,6 +493,94 @@ describe('InfraService', () => {
     });
   });
 
+  // ── listNodes — the Servers-list enrichment (ADR-0070 §6, #750) ─────────────
+
+  describe('listNodes — asset name + owners enrichment', () => {
+    it('flattens assetName + owners from ONE include (no N+1), via the active assignments + user', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-1',
+          label: 'web-01',
+          assetId: 'asset-1',
+          asset: {
+            name: 'srv-prod-01',
+            deletedAt: null,
+            assignments: [
+              {
+                id: 'as-1',
+                user: {
+                  id: 'u-9',
+                  firstName: 'Ada',
+                  lastName: 'Lovelace',
+                  email: 'ada@example.com',
+                  deletedAt: null,
+                },
+              },
+            ],
+          },
+        },
+      ]);
+
+      const rows = await service.listNodes();
+
+      // The enrichment came from ONE query — a relation include, NOT a per-row detail fetch.
+      expect(assignments.findAll).not.toHaveBeenCalled();
+      expect(prisma.infraNode.findMany).toHaveBeenCalledTimes(1);
+      const arg = firstArg<{ include?: { asset?: { select?: unknown } } }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.include?.asset?.select).toBeDefined();
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].assetName).toBe('srv-prod-01');
+      expect(rows[0].owners).toEqual([
+        {
+          assignmentId: 'as-1',
+          userId: 'u-9',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          email: 'ada@example.com',
+          deletedAt: null,
+        },
+      ]);
+      // The flattened row must NOT carry the raw relation object.
+      expect((rows[0] as unknown as { asset?: unknown }).asset).toBeUndefined();
+    });
+
+    it('does NOT leak a soft-deleted asset name (deletedAt set → assetName null), keeping the node', async () => {
+      // The soft-delete extension only filters the TOP-LEVEL findMany, not the nested asset include —
+      // a soft-deleted asset still arrives through the relation, so the name MUST be gated in app code.
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-1',
+          label: 'web-01',
+          assetId: 'asset-archived',
+          asset: {
+            name: 'should-not-leak',
+            deletedAt: new Date('2026-01-01T00:00:00.000Z'),
+            assignments: [],
+          },
+        },
+      ]);
+
+      const rows = await service.listNodes();
+
+      expect(rows).toHaveLength(1); // the NODE still surfaces…
+      expect(rows[0].assetName).toBeNull(); // …but the archived asset's name is withheld.
+    });
+
+    it('returns null assetName + empty owners for a graph-only node (no linked asset)', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-1', label: 'redis', assetId: null, asset: null },
+      ]);
+
+      const rows = await service.listNodes();
+
+      expect(rows[0].assetName).toBeNull();
+      expect(rows[0].owners).toEqual([]);
+    });
+  });
+
   // ── Edge close (ADR-0019 lifecycle marker) ──────────────────────────────────
 
   describe('closeEdge', () => {

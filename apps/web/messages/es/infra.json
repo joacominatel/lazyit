@@ -65,6 +65,7 @@
       "kind": "Tipo",
       "status": "Estado",
       "asset": "Activo",
+      "owner": "Responsable",
       "ip": "Dirección IP",
       "actions": "Acciones"
     },
@@ -72,8 +73,13 @@
       "tracked": "Activo registrado",
       "graphOnly": "Solo en el grafo"
     },
+    "owner": {
+      "more": "+{count} más",
+      "departed": "{name} (dejó la empresa)"
+    },
     "meta": {
       "asset": "Activo",
+      "owner": "Responsable",
       "ip": "Dirección IP"
     }
   },

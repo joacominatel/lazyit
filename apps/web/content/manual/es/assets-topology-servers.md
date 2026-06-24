@@ -34,14 +34,17 @@ Cada fila es un nodo:
 - **Nombre** — el nombre del nodo; haz clic para abrir su detalle en el Mapa.
 - **Tipo** — host, VM, contenedor, clúster, etc.
 - **Estado** — En línea, Fuera de línea o Desconocido, como insignia de color.
-- **Activo** — si el nodo está **Rastreado** (respaldado por un activo) o es **Solo de grafo**. Esta
-  columna muestra el *vínculo*, no el nombre del activo: el nombre completo del activo vinculado y sus
-  responsables están a un clic en el panel de detalle.
+- **Activo** — el nombre del activo de inventario vinculado cuando el nodo está respaldado por un
+  activo, o **Solo de grafo** cuando no lo está. (El nombre se oculta si el activo vinculado se archivó.)
+- **Responsable** — el o los responsables actuales del activo. Si hay más de uno, se muestra el
+  primero más una pista "+N más"; la lista completa está en el panel de detalle. Quien dejó la empresa
+  aparece tachado.
 - **IP** — la dirección IP principal del nodo, cuando está definida.
 
 ## Buscar y filtrar
 
-- La **búsqueda** coincide con el **nombre** y la **IP** a medida que escribes.
+- La **búsqueda** coincide con el **nombre**, la **IP**, el **nombre del activo** vinculado y el
+  **responsable** a medida que escribes.
 - Los desplegables **Tipo**, **Estado** y **Estado de ciclo** acotan la lista. *Estado de ciclo*
   distingue los nodos confirmados de los pendientes (los pendientes son parte de una futura función
   de detección automática; hoy todo está confirmado).

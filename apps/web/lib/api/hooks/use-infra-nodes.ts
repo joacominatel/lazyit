@@ -11,6 +11,7 @@ import type {
   InfraImpactResponse,
   InfraNode,
   InfraNodeDetail,
+  InfraNodeListItem,
   UpdateInfraNode,
 } from "@lazyit/shared";
 import {
@@ -148,8 +149,9 @@ export function useUpdateInfraNodePosition() {
       updateInfraNodePosition(id, x, y),
     onSuccess: (node: InfraNode) => {
       // Patch every cached node-list page that holds this node, so a later remount reads the saved
-      // position without a round-trip. Cheap: the lists are small.
-      queryClient.setQueriesData<InfraNode[]>(
+      // position without a round-trip. The list cache holds enriched `InfraNodeListItem`s (assetName
+      // + owners); the spread preserves them — only x/y change. Cheap: the lists are small.
+      queryClient.setQueriesData<InfraNodeListItem[]>(
         { queryKey: [...infraKeys.all, "nodes"] },
         (prev) =>
           prev?.map((n) => (n.id === node.id ? { ...n, x: node.x, y: node.y } : n)),
