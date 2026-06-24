@@ -6,6 +6,7 @@ import {
   FunnelIcon,
   PlusIcon,
   ServerStackIcon,
+  ShareIcon,
   TrashIcon,
   UserMinusIcon,
   UserPlusIcon,
@@ -79,6 +80,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useAssets } from "@/lib/api/hooks/use-assets";
+import { useAssetsOnTopology } from "@/lib/api/hooks/use-infra-nodes";
 import { useUser } from "@/lib/api/hooks/use-users";
 import {
   useBatchDeleteAssets,
@@ -187,6 +189,9 @@ export function AssetsListView() {
   const { isAdmin } = usePermissions();
   const canWrite = useCan("asset:write");
   const canDelete = useCan("asset:delete");
+  // Which assets back a topology node — drives the small "On topology" glyph per row (issue #765).
+  // Gated on infra:read so a viewer without topology access never fires the node-list fetch.
+  const onTopology = useAssetsOnTopology(useCan("infra:read"));
   const {
     q,
     sort,
@@ -829,7 +834,17 @@ export function AssetsListView() {
               <ResourceCard
                 key={asset.id}
                 href={`/assets/${asset.id}`}
-                title={asset.name}
+                title={
+                  <span className="inline-flex items-center gap-1.5">
+                    {asset.name}
+                    {onTopology.has(asset.id) ? (
+                      <ShareIcon
+                        className="size-3.5 shrink-0 text-muted-foreground"
+                        aria-label={t("onTopology")}
+                      />
+                    ) : null}
+                  </span>
+                }
                 badge={<AssetStatusBadge status={asset.status} />}
                 selectable={selectable}
                 selected={selection.isSelected(asset.id)}
@@ -893,12 +908,20 @@ export function AssetsListView() {
               const cells: Record<string, ReactNode> = {
                 name: (
                   <TableCell key="name" className="font-medium">
-                    <Link
-                      href={`/assets/${asset.id}`}
-                      className="hover:underline"
-                    >
-                      {asset.name}
-                    </Link>
+                    <span className="inline-flex items-center gap-1.5">
+                      <Link
+                        href={`/assets/${asset.id}`}
+                        className="hover:underline"
+                      >
+                        {asset.name}
+                      </Link>
+                      {onTopology.has(asset.id) ? (
+                        <ShareIcon
+                          className="size-3.5 shrink-0 text-muted-foreground"
+                          aria-label={t("onTopology")}
+                        />
+                      ) : null}
+                    </span>
                   </TableCell>
                 ),
                 assetTag: (

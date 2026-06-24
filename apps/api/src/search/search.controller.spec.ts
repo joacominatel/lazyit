@@ -132,12 +132,13 @@ describe('SearchController', () => {
   it('drops the users index from "search all" when the caller lacks user:read', async () => {
     canReadUsers = false;
     await request(app.getHttpServer()).get('/search');
-    // "all" minus users — materialized to the explicit four-index list (users removed).
+    // "all" minus users — materialized to the explicit index list (users removed).
     expect(lastArg().entities).toEqual([
       'assets',
       'articles',
       'locations',
       'applications',
+      'infra',
     ]);
   });
 

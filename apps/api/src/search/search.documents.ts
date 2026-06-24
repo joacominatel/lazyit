@@ -57,6 +57,23 @@ export interface ApplicationRow {
   description: string | null;
 }
 
+/**
+ * An infra topology node row + its (optionally-included) linked Asset (ADR-0070 v1). The projector
+ * needs only the node's display/filter columns plus the linked Asset's `name` (the inventory name,
+ * joined for searchability). Fetch the node WITH `asset: { select: { name: true } }` so this is a
+ * structural subset of that shape. NEVER carries secret values — a node has none (zero-knowledge,
+ * ADR-0061); we deliberately project no `specs`/`shortcuts` blobs either.
+ */
+export interface InfraNodeRow {
+  id: string;
+  label: string;
+  kind: string;
+  status: string;
+  state: string;
+  ipAddress: string | null;
+  asset: { name: string } | null;
+}
+
 /** A projected search document — always carries the `id` primary key plus its searchable fields. */
 export type SearchDocument = { id: string } & Record<string, unknown>;
 
@@ -111,5 +128,24 @@ export function projectApplication(row: ApplicationRow): SearchDocument {
     name: row.name,
     vendor: row.vendor,
     description: row.description,
+  };
+}
+
+/**
+ * Project an infra topology node (ADR-0070 v1). Searchable: label, ipAddress and the linked asset's
+ * name (`assetName`, null when graph-only). `kind`/`status`/`state` are projected as the FILTERABLE
+ * attributes (declared in reindex.ts). No `specs`/`shortcuts` blobs and NO secret values are ever
+ * indexed — a node holds no secrets (zero-knowledge, ADR-0061), and the loose blobs are not search
+ * surface. Nulls pass through as `null`, like every other projector.
+ */
+export function projectInfraNode(row: InfraNodeRow): SearchDocument {
+  return {
+    id: row.id,
+    label: row.label,
+    kind: row.kind,
+    status: row.status,
+    state: row.state,
+    ipAddress: row.ipAddress,
+    assetName: row.asset?.name ?? null,
   };
 }

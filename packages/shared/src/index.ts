@@ -42,6 +42,7 @@ export * from "./schemas/consumable-movement";
 export * from "./schemas/dashboard";
 export * from "./schemas/folder";
 export * from "./schemas/import";
+export * from "./schemas/infra";
 export * from "./schemas/location";
 export * from "./schemas/location-list";
 export * from "./schemas/notification";

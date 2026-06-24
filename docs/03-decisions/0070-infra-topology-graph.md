@@ -1,7 +1,7 @@
 ---
 title: "ADR-0070: Infra topology graph — a generic visual CMDB of the server estate (InfraNode + InfraEdge)"
 tags: [adr, infra, topology, graph, cmdb, asset, agent, backend, frontend, shared]
-status: proposed
+status: accepted
 created: 2026-06-23
 updated: 2026-06-23
 deciders: [Joaquín Minatel]
@@ -11,17 +11,42 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — 2026-06-23. Pre-build design. Reviewed before a line of code by a senior
-infrastructure architect (ServiceNow/Device42/NetBox background); this revision folds in that review.
-Builds on [[asset-centric]], [[0005-id-strategy]], [[0006-soft-delete-and-auditing]],
-[[0007-flexible-asset-specs-jsonb]], [[0019-asset-assignment-integrity]] (the timestamped-join pattern
-the edges reuse), [[0041-soft-delete-reuse-and-restore]], [[0046-roles-permissions-v2]],
+**accepted** — 2026-06-23. Originally **proposed** 2026-06-23 (pre-build design, reviewed before a
+line of code by a senior infrastructure architect — ServiceNow/Device42/NetBox background — whose
+review this revision folds in), now **accepted**: the **MVP + v1** are built and merged on
+`feat/topology` (epic #723). Builds on [[asset-centric]], [[0005-id-strategy]],
+[[0006-soft-delete-and-auditing]], [[0007-flexible-asset-specs-jsonb]],
+[[0019-asset-assignment-integrity]] (the timestamped-join pattern the edges reuse),
+[[0041-soft-delete-reuse-and-restore]], [[0046-roles-permissions-v2]],
 [[0048-service-accounts]] (the auth pattern the v2 reporting agent extends),
 [[0053-async-workers-bullmq-valkey]] (the substrate the agent feeds),
 [[0061-secret-manager-zero-knowledge]] (secrets attachable to asset-backed nodes).
 
 This is a **new major** for lazyit. The ADR fixes the **data model and the phasing
 (MVP → v1 → v2 agent → future)** so the model is never re-migrated, while scoping what each phase ships.
+
+> [!success] Shipped vs deferred (as of 2026-06-23 — merged on `feat/topology`)
+> **SHIPPED (MVP + v1):** the `InfraNode` + `InfraEdge` model & migration (incl. the raw-SQL partial
+> unique indexes — one-active-host for `RUNS_ON`, canonical-pair for `CONNECTS_TO`); the API —
+> `infra:read`/`infra:manage` gated CRUD, default-asset linkage + the "track as asset" toggle and
+> detach semantics (§5), **all five edge kinds** with `RUNS_ON` migration (close one / open next),
+> the impact/blast-radius query **and its UI** (§7), and the Meilisearch `infra` index; the frontend —
+> the React Flow **Diagram** canvas (drag/persist, status/kind styling, hover quick-facts), the
+> **drill-in panel** (owner / KB links / secret HANDLES / shortcuts / IP / children — the §6 payoff),
+> the **Servers** list (kind/status/state filters + client-side label/IP search), and the
+> impact highlight on the canvas. Nav: **Assets › Servers** + **Assets › Diagram**.
+>
+> **DEFERRED:** the **v2 reporting agent** (its provenance/lifecycle columns — `source`, `state`,
+> `reportingSource`, `externalId`, `lastReportedAt` — exist nullable now, but no agent code, no review
+> tray, no `(reportingSource, externalId)` composite unique index yet). **Future:** network depth
+> (VLAN/ports/subnets/IPAM), metrics/telemetry & alerting, per-kind `specs` schema validation (the
+> existing `TODO(specs)` debt), multi-board layouts, a `SERVICE` kind linked to [[application]], a
+> dedicated `InfraNodeHistory`. **v1 follow-ups:** **#750** — enrich `GET /infra/nodes` with the
+> linked asset's name/owner so the Servers list shows it inline and search can match asset name (today
+> the list row carries only `assetId`, surfaced as a Tracked/Graph-only indicator; the full name +
+> owners are one click away in the drill-in panel); and **asset→secret linkage** so the panel's
+> `secretRefs` populates (the shape is honoured — INV-10 handles only — but the array is empty in v1
+> because no asset↔secret join exists in the data model yet).
 
 ## Context
 
@@ -244,6 +269,19 @@ children list derived from `RUNS_ON` edges. This panel is the entire reason to b
 diagram, so it ships in the MVP, not v1. **React Flow** is adopted as the one new frontend dependency,
 scoped to this screen (confirm version via Context7 before install). Nav: **Assets › Servers** (filtered
 list) and **Assets › Diagram** (the canvas). A static HTML tree is rejected (can't do free-move/pan/edges).
+
+> **UX round (issues #760–#767).** Post-MVP the canvas got a UX pass (design brief pinned on #723).
+> Edges became a *system*, not just colour: each kind reads by **colour + line-style + marker +
+> (DEPENDS_ON only) animated flow**, with an on-edge kind label on hover/select and a collapsible
+> legend — encoded as a pure `edgeStyle(kind)` descriptor + a custom React Flow edge type. A **Tidy /
+> auto-arrange** button runs a layered top-down layout (host→guest hierarchy) via **`@dagrejs/dagre`**
+> — a second, deliberately scoped frontend dependency (small, sync, ships its own types; elkjs
+> rejected as overkill), behind the pure `layoutNodes()` helper. Fresh creates land at the viewport
+> centre with a spiral offset so they don't stack (#761), and a reusable `focusNode(id)` primitive
+> (fit-view + one-shot pulse) backs the `?node=&focus=1` deep-link (#765). All motion honours
+> ADR-0049's budget and `prefers-reduced-motion` (the cinematic deep-link fit-view at ~400ms is the
+> one allowed exception). The pure helpers (`edgeStyle`/`layoutNodes`/`placementOffset`) are
+> unit-tested in `apps/web/lib/infra/canvas.test.ts`.
 
 ### 7. Impact / blast-radius — the query that justifies a graph
 

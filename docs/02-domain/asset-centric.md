@@ -36,6 +36,11 @@ system — not the User.
 
 - **[[user]]** is central to *access* and peripheral to *assets*: a user is an owner of N
   assets (via [[asset-assignment]]) and holds N [[access-grant]]s.
+- **[[infra-node]]** (the topology graph) is **Asset-backed by default**: a node on the map links to
+  an [[asset]] so it inherits owner/KB/secrets/warranty/shortcuts through the asset surface, rather
+  than re-modelling any of it. "Who owns this server?" is answered through the asset's
+  [[asset-assignment]], never a graph edge to a person ([[0070-infra-topology-graph]]).
+
 ## Consequence
 
 Designing around the asset means the schema, the UI, and the audit story all orient around

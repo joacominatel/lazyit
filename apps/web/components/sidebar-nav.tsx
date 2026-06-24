@@ -9,6 +9,7 @@ import {
   KeyIcon,
   LockClosedIcon,
   ServerStackIcon,
+  ShareIcon,
   Squares2X2Icon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -116,6 +117,19 @@ const NAV: NavSection[] = [
     pillar: "inventory",
     items: [
       { labelKey: "assets", href: "/assets", icon: ServerStackIcon },
+      // Assets › Topology — the infra topology surface (ADR-0070 §6, #741). One destination, two views:
+      // a Map (the React Flow canvas) and a Table (the filterable node list), switched in-page via a
+      // `?view=map|table` toggle (#760) — so the LIST is no longer a separate nav entry. `/assets/servers`
+      // survives only as a redirect into the Table view (deep-links + the Manual). Gated behind
+      // `infra:read` (DEFAULT-OPEN — the map is team-wide operational), so the API's guard is the real
+      // gate and this just hides the link from a caller who can't view it. The most-specific-active
+      // highlight below distinguishes /assets and /assets/diagram by longest-prefix match.
+      {
+        labelKey: "diagram",
+        href: "/assets/diagram",
+        icon: ShareIcon,
+        permission: "infra:read",
+      },
       { labelKey: "consumables", href: "/consumables", icon: CubeIcon },
       // The guided bulk Migrator (ADR-0069) is NOT in the primary nav: it is an occasional ADMIN action,
       // so it is surfaced from Settings (a "Bulk import" card, same `import:run` gate) — issue #639.
@@ -195,6 +209,19 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
         if (items.length === 0) return null;
         // The active item's icon wears this section's pillar hue (Dashboard → brand fallback).
         const activeIconClass = ACTIVE_ICON_BY_PILLAR[section.pillar ?? "default"];
+        // Pick the SINGLE best (most-specific) matching href in this section so a parent and its
+        // sub-route sibling don't both light up: `/assets` and `/assets/diagram` are now siblings
+        // here, and visiting the latter must highlight only Topology, not also Assets (#741). The
+        // longest prefix-matching href wins; exact match always qualifies.
+        const activeHref = items
+          .map((it) => it.href)
+          .filter(
+            (h) => pathname === h || pathname.startsWith(`${h}/`),
+          )
+          .reduce<string | null>(
+            (best, h) => (best === null || h.length > best.length ? h : best),
+            null,
+          );
         return (
         <div key={section.headingKey ?? `section-${index}`} className="space-y-0.5">
           {/* section heading - hidden when collapsed, a divider line takes its place */}
@@ -207,8 +234,10 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
           ) : null}
           {items.map((item) => {
             const { labelKey, href, icon: Icon } = item;
-            // Active for the exact route and any nested route (e.g. /assets/:id).
-            const active = pathname === href || pathname.startsWith(`${href}/`);
+            // Active when this item is the section's most-specific match (computed above), so a
+            // nested route (e.g. /assets/:id) still highlights its list item, but a sub-route with
+            // its own nav entry (/assets/diagram) highlights only itself.
+            const active = href === activeHref;
             // The Access → Applications item becomes an expandable group on the expanded rail
             // (issue #287). The icon-only rail keeps the plain link (no room for a sub-tree).
             if (item.expandable && !collapsed) {

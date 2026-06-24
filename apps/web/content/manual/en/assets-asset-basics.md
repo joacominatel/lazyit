@@ -93,6 +93,17 @@ the table down to what matters for you. The **Name** column and the row actions 
 choice is remembered in this browser, so the table keeps the same shape next time you visit. (This
 governs the desktop table; the mobile card view always shows the full set.)
 
+## Assets on the topology map
+
+If an asset backs a node on the [Infrastructure diagram](/help/assets-topology-diagram) — for
+example a host, a NAS or a switch you've placed on the map — its detail page shows an **On topology**
+badge next to the status, and the same marker appears as a small share glyph beside the asset's name
+in the list. A **View in topology** button on the detail page jumps straight to the map, flying to
+that node and giving it a brief highlight so you can spot which one it is at a glance. (You only see
+these when you have permission to view the topology.) The reverse link exists too: a node's details
+panel links its *inventory name* back to this asset, so you can move between an asset and its node in
+either direction.
+
 ## Editing, cloning and deactivating
 
 - **Edit** updates the asset in place; each meaningful change (status, location, model, custom

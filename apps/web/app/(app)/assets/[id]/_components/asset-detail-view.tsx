@@ -4,6 +4,7 @@ import {
   ArrowPathIcon,
   DocumentDuplicateIcon,
   PencilSquareIcon,
+  ShareIcon,
   TrashIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
@@ -26,6 +27,7 @@ import { ErrorState } from "@/components/resource-table";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useAsset, useAssetAssignments } from "@/lib/api/hooks/use-assets";
+import { useAssetInfraNodeId } from "@/lib/api/hooks/use-infra-nodes";
 import { useDeleteAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { notifyError } from "@/lib/api/notify-error";
@@ -47,6 +49,10 @@ export function AssetDetailView({ id }: { id: string }) {
   // Edit/Clone + asset-assignment create/release are asset:write; deletion is asset:delete.
   const canWrite = useCan("asset:write");
   const canDelete = useCan("asset:delete");
+  // Resolve whether this asset backs a topology node (issue #765). Gated on infra:read so a viewer
+  // without topology access never fires the node-list fetch — the badge + deep-link stay hidden.
+  const canReadInfra = useCan("infra:read");
+  const topologyNodeId = useAssetInfraNodeId(id, canReadInfra);
 
   const { data: asset, isLoading, isError, error, refetch } = useAsset(id);
   // All assignments (active + released), each with its user, for owners + history.
@@ -124,10 +130,30 @@ export function AssetDetailView({ id }: { id: string }) {
             </span>
           ) : undefined
         }
-        badge={<AssetStatusBadge status={asset.status} />}
+        badge={
+          <span className="inline-flex items-center gap-2">
+            <AssetStatusBadge status={asset.status} />
+            {topologyNodeId ? (
+              <Badge variant="secondary" className="gap-1">
+                <ShareIcon className="size-3.5" aria-hidden />
+                {t("onTopology")}
+              </Badge>
+            ) : null}
+          </span>
+        }
         actions={
-          canWrite || canDelete ? (
+          canWrite || canDelete || topologyNodeId ? (
             <>
+              {topologyNodeId ? (
+                <Button variant="outline" size="sm" asChild>
+                  <Link
+                    href={`/assets/diagram?node=${topologyNodeId}&focus=1`}
+                  >
+                    <ShareIcon />
+                    {t("viewInTopology")}
+                  </Link>
+                </Button>
+              ) : null}
               {canWrite ? (
                 <>
                   <Button variant="outline" size="sm" asChild>

@@ -31,6 +31,7 @@ import { ServiceAccountsModule } from './service-accounts/service-accounts.modul
 import { WorkflowEngineModule } from './workflow-engine/workflow-engine.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SecretManagerModule } from './secret-manager/secret-manager.module';
+import { InfraModule } from './infra/infra.module';
 import { SearchModule } from './search/search.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
@@ -95,6 +96,9 @@ import { buildLoggerParams } from './logging/logging.config';
     // `import-parse` queue + sandboxed parse worker (SEC-002) and the owner-scoped ImportSession
     // service. No HTTP surface / `import:run` permission yet — those land in wave 4.
     ImportModule,
+    // The infra topology graph (ADR-0070) — the generic visual CMDB of the server estate. Nodes +
+    // typed timestamped edges; asset-backed by default (reuses Assets/AssetAssignments/Articles).
+    InfraModule,
   ],
   controllers: [AppController],
   providers: [

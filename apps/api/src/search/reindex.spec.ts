@@ -1,4 +1,8 @@
-import { reindexIndex, REINDEX_BATCH_SIZE, type ReindexClient } from './reindex';
+import {
+  reindexIndex,
+  REINDEX_BATCH_SIZE,
+  type ReindexClient,
+} from './reindex';
 import type { SearchDocument } from './search.documents';
 
 // A fake Meilisearch client recording the operations reindexIndex performs, so we can assert the
@@ -9,7 +13,11 @@ type Op =
   | { kind: 'createIndex'; uid: string }
   | { kind: 'addDocuments'; uid: string; ids: string[] }
   | { kind: 'updateFilterableAttributes'; uid: string; attributes: string[] }
-  | { kind: 'swap'; indexes: [string, string]; params: { indexes: [string, string] } }
+  | {
+      kind: 'swap';
+      indexes: [string, string];
+      params: { indexes: [string, string] };
+    }
   | { kind: 'deleteIndexIfExists'; uid: string };
 
 interface FakeOptions {
@@ -25,24 +33,29 @@ function fakeClient(opts: FakeOptions = {}): {
 } {
   const ops: Op[] = [];
   const task = (run?: () => void): { waitTask: () => Promise<unknown> } => ({
-    waitTask: async () => {
+    // Resolve immediately; `run` may throw to simulate a failed Meili task (the production code awaits
+    // waitTask(), so a rejection surfaces there). No `await` needed — return a resolved promise.
+    waitTask: () => {
       if (run) run();
-      return { status: 'succeeded' };
+      return Promise.resolve({ status: 'succeeded' });
     },
   });
 
   const client: ReindexClient = {
-    createIndex: (uid, _options) =>
+    createIndex: (uid) =>
       task(() => {
         ops.push({ kind: 'createIndex', uid });
         // The temp uid now carries a per-run suffix (`..._${runId}`, #464), so match on
         // substring rather than `endsWith` to single out the live index.
         if (opts.liveAlreadyExists && !uid.includes('__reindex_tmp')) {
-          throw { code: 'index_already_exists' };
+          // Mirror the real already-exists failure: an Error whose `code` extractCode() reads.
+          throw Object.assign(new Error('index_already_exists'), {
+            code: 'index_already_exists',
+          });
         }
       }),
     index: (uid) => ({
-      addDocuments: (documents: SearchDocument[], _options) =>
+      addDocuments: (documents: SearchDocument[]) =>
         task(() => {
           ops.push({
             kind: 'addDocuments',
@@ -66,9 +79,9 @@ function fakeClient(opts: FakeOptions = {}): {
           params: params[0],
         });
       }),
-    deleteIndexIfExists: async (uid) => {
+    deleteIndexIfExists: (uid) => {
       ops.push({ kind: 'deleteIndexIfExists', uid });
-      return true;
+      return Promise.resolve(true);
     },
   };
   return { client, ops };
@@ -182,6 +195,29 @@ describe('reindexIndex (authoritative rebuild)', () => {
     expect(filterableIdx).toBeLessThan(swapIdx);
   });
 
+  it('declares kind/status/state filterable on the INFRA temp index before the swap (ADR-0070 v1)', async () => {
+    const { client, ops } = fakeClient();
+    const INFRA_TEMP = `infra__reindex_tmp_${RUN}`;
+
+    await reindexIndex(client, 'infra', docs('n1'), RUN);
+
+    const filterableOp = ops.find(
+      (op) => op.kind === 'updateFilterableAttributes',
+    );
+    expect(filterableOp).toEqual({
+      kind: 'updateFilterableAttributes',
+      uid: INFRA_TEMP,
+      attributes: ['kind', 'status', 'state'],
+    });
+    const filterableIdx = ops.findIndex(
+      (op) => op.kind === 'updateFilterableAttributes',
+    );
+    const addIdx = ops.findIndex((op) => op.kind === 'addDocuments');
+    const swapIdx = ops.findIndex((op) => op.kind === 'swap');
+    expect(filterableIdx).toBeLessThan(addIdx);
+    expect(filterableIdx).toBeLessThan(swapIdx);
+  });
+
   it('does NOT set filterable attributes on an index that declares none (users)', async () => {
     const { client, ops } = fakeClient();
     await reindexIndex(client, 'users', docs('u1'));
@@ -200,9 +236,9 @@ describe('reindexIndex (authoritative rebuild)', () => {
     expect(adds.every((op) => op.uid === TEMP)).toBe(true);
     // The only thing that touches the live index is the swap — so stale docs there are replaced
     // wholesale by the live set, evicting any ghost (soft-deleted / unpublished) document.
-    expect(ops.some((op) => op.kind === 'swap' && op.indexes[0] === 'users')).toBe(
-      true,
-    );
+    expect(
+      ops.some((op) => op.kind === 'swap' && op.indexes[0] === 'users'),
+    ).toBe(true);
   });
 
   it('treats an empty live set as authoritative — swaps in an empty index (no add)', async () => {
@@ -218,7 +254,9 @@ describe('reindexIndex (authoritative rebuild)', () => {
   it('tolerates the live index already existing (idempotent ensure) and still rebuilds', async () => {
     const { client, ops } = fakeClient({ liveAlreadyExists: true });
 
-    await expect(reindexIndex(client, 'users', docs('u1'))).resolves.toBeUndefined();
+    await expect(
+      reindexIndex(client, 'users', docs('u1')),
+    ).resolves.toBeUndefined();
 
     expect(ops.some((op) => op.kind === 'swap')).toBe(true);
     expect(ops.some((op) => op.kind === 'addDocuments')).toBe(true);

@@ -1,0 +1,196 @@
+{
+  "title": "Topology",
+  "subtitle": "A free-move map of your server estate — drag to arrange, scroll to zoom.",
+  "loading": "Loading the topology…",
+  "empty": {
+    "title": "No servers mapped yet",
+    "description": "Once you add hosts, VMs, containers and their relationships, your estate will appear here as a draggable diagram."
+  },
+  "error": {
+    "title": "Couldn't load the topology",
+    "description": "The infra map failed to load. Try again in a moment."
+  },
+  "facts": {
+    "kind": "Kind",
+    "status": "Status",
+    "ip": "IP",
+    "noIp": "—"
+  },
+  "kind": {
+    "PHYSICAL_HOST": "Physical host",
+    "VM": "Virtual machine",
+    "CONTAINER": "Container",
+    "CLUSTER": "Cluster",
+    "NETWORK_DEVICE": "Network device",
+    "STORAGE": "Storage",
+    "APPLIANCE": "Appliance",
+    "OTHER": "Other"
+  },
+  "status": {
+    "ONLINE": "Online",
+    "OFFLINE": "Offline",
+    "UNKNOWN": "Unknown"
+  },
+  "state": {
+    "CONFIRMED": "Confirmed",
+    "PENDING": "Pending"
+  },
+  "view": {
+    "map": "Map",
+    "table": "Table"
+  },
+  "tidy": {
+    "action": "Tidy"
+  },
+  "legend": {
+    "title": "Edge legend"
+  },
+  "servers": {
+    "title": "Servers",
+    "subtitle": "Every node in your topology — filter, search and open one to see its owner, secrets and connections.",
+    "searchLabel": "Search servers",
+    "searchPlaceholder": "Search by name or IP…",
+    "openLabel": "Open on the map",
+    "allKinds": "All kinds",
+    "allStatuses": "All statuses",
+    "allStates": "All states",
+    "loadError": "Couldn't load the servers.",
+    "filteredEmpty": "No servers match these filters.",
+    "chipSearch": "Search: {query}",
+    "chipKind": "Kind: {kind}",
+    "chipStatus": "Status: {status}",
+    "chipState": "State: {state}",
+    "columns": {
+      "label": "Name",
+      "kind": "Kind",
+      "status": "Status",
+      "asset": "Asset",
+      "ip": "IP address",
+      "actions": "Actions"
+    },
+    "asset": {
+      "tracked": "Tracked asset",
+      "graphOnly": "Graph-only"
+    },
+    "meta": {
+      "asset": "Asset",
+      "ip": "IP address"
+    }
+  },
+  "edgeKind": {
+    "RUNS_ON": "Runs on",
+    "MEMBER_OF": "Member of",
+    "DEPENDS_ON": "Depends on",
+    "BACKS_UP_TO": "Backs up to",
+    "CONNECTS_TO": "Connects to"
+  },
+  "create": {
+    "action": "Add node",
+    "title": "Add a node to the map",
+    "description": "Map a host, VM, container or any other part of your estate.",
+    "labelLabel": "Name",
+    "labelPlaceholder": "e.g. pve1, web-01, core-switch",
+    "kindLabel": "Kind",
+    "kindPlaceholder": "Pick a kind",
+    "trackAsAssetLabel": "Track as an inventory asset",
+    "trackAsAssetDescription": "On by default — the node gets a backing asset so it can carry an owner, KB links and secrets. Turn off for ephemeral nodes like containers.",
+    "linkAssetLabel": "Link an existing asset (optional)",
+    "linkAssetPlaceholder": "Search assets…",
+    "linkAssetSearch": "Search by name, tag or serial…",
+    "linkAssetEmpty": "No matching assets.",
+    "linkAssetDescription": "Leave empty to create a minimal asset named after the node.",
+    "submit": "Add node",
+    "createdToast": "Node added to the map.",
+    "error": "Couldn't add the node.",
+    "labelRequired": "A name is required.",
+    "kindRequired": "Pick a kind."
+  },
+  "panel": {
+    "inventoryName": "Inventory name",
+    "noInventoryName": "Not tracked as an asset",
+    "ipLabel": "IP address",
+    "createdLabel": "Added",
+    "ownersTitle": "Owners",
+    "noOwners": "No owner — this node isn't tracked as an asset, or no one is assigned.",
+    "ownerLeft": "Left the company",
+    "articlesTitle": "Knowledge base",
+    "noArticles": "No linked articles.",
+    "viewArticle": "Open",
+    "secretsTitle": "Secrets",
+    "noSecrets": "No secret references. Values are never shown here — only handles.",
+    "secretHandleNote": "Reference only — the value is never revealed here.",
+    "shortcutsTitle": "Shortcuts",
+    "noShortcuts": "No shortcuts.",
+    "openShortcut": "Open",
+    "childrenTitle": "Runs here",
+    "noChildren": "Nothing runs on this node yet.",
+    "loadError": "Couldn't load this node.",
+    "statusTitle": "Status",
+    "statusDescription": "Set the node's live state. The reporting agent will drive this automatically later.",
+    "statusUpdatedToast": "Status updated.",
+    "statusError": "Couldn't update the status.",
+    "detailsTitle": "Details",
+    "labelLabel": "Name",
+    "labelEditHint": "Click the title to rename",
+    "labelEmpty": "A name is required.",
+    "kindLabel": "Kind",
+    "ipEditLabel": "IP address",
+    "ipPlaceholder": "e.g. 10.0.0.12",
+    "ipClear": "Clear",
+    "editSave": "Save",
+    "editCancel": "Cancel",
+    "editedToast": "Node updated.",
+    "editError": "Couldn't save the change.",
+    "shortcutLabelPlaceholder": "Label (e.g. SSH)",
+    "shortcutUrlPlaceholder": "https://…",
+    "shortcutAdd": "Add shortcut",
+    "shortcutRemove": "Remove shortcut",
+    "shortcutInvalid": "Each shortcut needs a label and a valid URL.",
+    "shortcutsSavedToast": "Shortcuts updated.",
+    "impactTitle": "Impact / blast radius",
+    "impactShow": "Show blast radius",
+    "impactHide": "Hide blast radius",
+    "impactDescription": "If this node goes down, what stops with it? Highlights the downstream nodes on the map.",
+    "impactSafe": "Nothing depends on this node — safe to take down.",
+    "impactCount": "{count, plural, one {# node affected if this goes down} other {# nodes affected if this goes down}}",
+    "impactDepth": "{depth, plural, one {# hop} other {# hops}}",
+    "deleteAction": "Remove from map",
+    "loading": "Loading node…"
+  },
+  "delete": {
+    "title": "Remove this node from the map?",
+    "descriptionPrefix": "This takes ",
+    "descriptionSuffix": " off the map. Its history is kept and it can be restored later.",
+    "submit": "Remove from map",
+    "removedToast": "Node removed from the map.",
+    "error": "Couldn't remove the node."
+  },
+  "edges": {
+    "title": "Connections",
+    "description": "How this node relates to the rest of your estate.",
+    "addAction": "Add connection",
+    "addTitle": "Connect this node",
+    "addDescription": "Pick the relationship and the other node.",
+    "kindLabel": "Relationship",
+    "kindPlaceholder": "Pick a relationship",
+    "targetLabel": "Other node",
+    "targetPlaceholder": "Pick a node",
+    "targetSearch": "Search nodes…",
+    "targetEmpty": "No other nodes.",
+    "directionNote": "This node is the source; the relationship points to the other node.",
+    "submit": "Connect",
+    "createdToast": "Connection added.",
+    "error": "Couldn't add the connection.",
+    "active": "Active",
+    "closed": "History",
+    "noActive": "No active connections.",
+    "noHistory": "No past connections.",
+    "closeAction": "Close",
+    "closedToast": "Connection closed.",
+    "closeError": "Couldn't close the connection.",
+    "loadError": "Couldn't load connections.",
+    "selfNode": "this node",
+    "since": "since {date}",
+    "ended": "ended {date}"
+  }
+}

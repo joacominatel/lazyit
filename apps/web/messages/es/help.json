@@ -54,6 +54,7 @@
       "locations": "Ubicaciones",
       "assignments-history": "Asignaciones e historial",
       "asset-tags": "Etiquetas de activos",
+      "topology": "Topología y servidores",
       "bulk-import": "Importación masiva"
     },
     "users-permissions": {
