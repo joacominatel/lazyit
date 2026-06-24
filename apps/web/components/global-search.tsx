@@ -232,10 +232,7 @@ export function GlobalSearch() {
                   <ResultGroup
                     entity="infra"
                     block={data?.infra}
-                    // ponytail: no infra detail/canvas route exists on this branch yet (the topology
-                    // Diagram UI lands separately — ADR-0070 v1). Degrade gracefully by closing the
-                    // palette instead of pushing to a 404; wire the Diagram deep-link when it ships.
-                    onSelect={() => handleOpenChange(false)}
+                    onSelect={(hit) => go(`/assets/diagram?node=${hit.id}&focus=1`)}
                     render={(hit) => ({
                       primary: hit.label,
                       secondary: hit.assetName ?? hit.ipAddress ?? undefined,
