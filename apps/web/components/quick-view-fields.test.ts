@@ -8,7 +8,9 @@ import type {
 } from "@lazyit/shared";
 import {
   detailHref,
+  formatOwners,
   type QuickViewData,
+  type QuickViewLabels,
   selectFields,
   titleFor,
 } from "./quick-view-fields";
@@ -16,10 +18,35 @@ import {
 /**
  * Unit tests for the PURE Quick View presenter (ADR-0072). The component rendering is not e2e'd
  * (frontend e2e is deferred, ADR-0012); this locks the load-bearing field selection: per-entity
- * order, empty-value dropping, the SEC-008 url gate, and the no-detail-route entities.
+ * order, empty-value dropping, the SEC-008 url gate, the no-detail-route entities, and the asset
+ * owner formatting (the CEO's headline disambiguator).
  */
 
 const NOW = "2026-06-24T00:00:00.000Z";
+
+/** Stand-in for the localized `common.quickView.*` strings the asset owner field needs. */
+const LABELS: QuickViewLabels = {
+  noOwner: "Unassigned",
+  moreOwners: (count) => `+${count} more`,
+};
+
+/** Build an `AssetListItem.activeAssignments` entry for `firstName lastName`. */
+function makeAssignment(
+  firstName: string,
+  lastName: string,
+): AssetListItem["activeAssignments"][number] {
+  return {
+    id: `assign_${firstName}`,
+    userId: "11111111-1111-1111-1111-111111111111",
+    user: {
+      id: "11111111-1111-1111-1111-111111111111",
+      firstName,
+      lastName,
+      email: `${firstName}@example.com`.toLowerCase(),
+      deletedAt: null,
+    },
+  };
+}
 
 function makeAsset(overrides: Partial<AssetListItem> = {}): AssetListItem {
   return {
@@ -97,14 +124,15 @@ describe("titleFor", () => {
 });
 
 describe("selectFields — asset", () => {
-  it("emits serial, assetTag, model, category, location in order", () => {
-    const fields = selectFields({ entity: "asset", data: makeAsset() });
+  it("emits serial, assetTag, model, category, location, owner in order", () => {
+    const fields = selectFields({ entity: "asset", data: makeAsset() }, LABELS);
     expect(fields.map((f) => f.labelKey)).toEqual([
       "serial",
       "assetTag",
       "model",
       "category",
       "location",
+      "owner",
     ]);
     expect(fields[0]).toMatchObject({ value: "C02XYZ", mono: true });
     expect(fields.find((f) => f.labelKey === "model")?.value).toBe(
@@ -113,11 +141,70 @@ describe("selectFields — asset", () => {
   });
 
   it("drops fields whose value is missing (no model ⇒ no model/category)", () => {
-    const fields = selectFields({
-      entity: "asset",
-      data: makeAsset({ serial: null, model: null, location: null }),
-    });
-    expect(fields.map((f) => f.labelKey)).toEqual(["assetTag"]);
+    const fields = selectFields(
+      { entity: "asset", data: makeAsset({ serial: null, model: null, location: null }) },
+      LABELS,
+    );
+    // owner is still present (it's the localized "Unassigned" when there are no owners).
+    expect(fields.map((f) => f.labelKey)).toEqual(["assetTag", "owner"]);
+  });
+
+  it("omits the owner field entirely when no labels are supplied", () => {
+    const fields = selectFields({ entity: "asset", data: makeAsset() });
+    expect(fields.find((f) => f.labelKey === "owner")).toBeUndefined();
+  });
+});
+
+describe("asset owner (CEO headline disambiguator)", () => {
+  it("shows the single active owner's name", () => {
+    const fields = selectFields(
+      {
+        entity: "asset",
+        data: makeAsset({ activeAssignments: [makeAssignment("Ana", "Pérez")] }),
+      },
+      LABELS,
+    );
+    expect(fields.find((f) => f.labelKey === "owner")?.value).toBe("Ana Pérez");
+  });
+
+  it("shows the first owner + a localized '+N more' when several", () => {
+    const fields = selectFields(
+      {
+        entity: "asset",
+        data: makeAsset({
+          activeAssignments: [
+            makeAssignment("Ana", "Pérez"),
+            makeAssignment("Juan", "Díaz"),
+            makeAssignment("Lia", "Gómez"),
+          ],
+        }),
+      },
+      LABELS,
+    );
+    expect(fields.find((f) => f.labelKey === "owner")?.value).toBe(
+      "Ana Pérez +2 more",
+    );
+  });
+
+  it("shows the localized 'Unassigned' when there are no active owners", () => {
+    const fields = selectFields(
+      { entity: "asset", data: makeAsset({ activeAssignments: [] }) },
+      LABELS,
+    );
+    expect(fields.find((f) => f.labelKey === "owner")?.value).toBe("Unassigned");
+  });
+
+  it("formatOwners is a pure function over the loaded assignments", () => {
+    expect(formatOwners([], LABELS)).toBe("Unassigned");
+    expect(formatOwners([makeAssignment("Ana", "Pérez")], LABELS)).toBe(
+      "Ana Pérez",
+    );
+    expect(
+      formatOwners(
+        [makeAssignment("Ana", "Pérez"), makeAssignment("Juan", "Díaz")],
+        LABELS,
+      ),
+    ).toBe("Ana Pérez +1 more");
   });
 });
 
