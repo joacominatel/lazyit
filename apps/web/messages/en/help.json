@@ -99,7 +99,8 @@
     "notifications-activity": {
       "notification-bell": "Notification bell",
       "activity-reports": "Activity & reports",
-      "global-search": "Global search"
+      "global-search": "Global search",
+      "quick-view": "Quick view"
     },
     "configuration": {
       "instance-settings": "Instance settings",

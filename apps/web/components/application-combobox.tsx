@@ -55,6 +55,14 @@ export function ApplicationCombobox({
     [data],
   );
 
+  // Quick View (ADR-0072): the eye reads the ALREADY-LOADED list row — zero extra fetch. The row is
+  // the full Application (vendor/url/description); the url is gated by isSafeApplicationUrl in the
+  // presenter (SEC-008) and rendered as plain text.
+  const byId = useMemo(
+    () => new Map((data?.items ?? []).map((application) => [application.id, application])),
+    [data],
+  );
+
   return (
     <Combobox
       id={id}
@@ -71,6 +79,10 @@ export function ApplicationCombobox({
       emptyText={emptyText}
       loadingText={tc("searching")}
       typeToSearchText={tc("typeToSearch")}
+      quickView={(rowId) => {
+        const application = byId.get(rowId);
+        return application ? { entity: "application", data: application } : null;
+      }}
     />
   );
 }

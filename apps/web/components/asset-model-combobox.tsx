@@ -58,6 +58,13 @@ export function AssetModelCombobox({
     [data],
   );
 
+  // Quick View (ADR-0072): the eye reads the ALREADY-LOADED list row — zero extra fetch. The model
+  // row is the full AssetModel (manufacturer/name/sku/description). No detail route → no footer link.
+  const byId = useMemo(
+    () => new Map((data?.items ?? []).map((model) => [model.id, model])),
+    [data],
+  );
+
   return (
     <Combobox
       id={id}
@@ -80,6 +87,10 @@ export function AssetModelCombobox({
       emptyText={emptyText}
       loadingText={tc("searching")}
       typeToSearchText={tc("typeToSearch")}
+      quickView={(rowId) => {
+        const model = byId.get(rowId);
+        return model ? { entity: "assetModel", data: model } : null;
+      }}
     />
   );
 }

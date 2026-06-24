@@ -51,6 +51,13 @@ export function AssetCombobox({
     [data],
   );
 
+  // Quick View (ADR-0072): the eye reads the ALREADY-LOADED list row — zero extra fetch. The row
+  // carries the full graph the preview needs (serial/assetTag/status + trimmed model/category/location).
+  const byId = useMemo(
+    () => new Map((data?.items ?? []).map((asset) => [asset.id, asset])),
+    [data],
+  );
+
   return (
     <Combobox
       id={id}
@@ -67,6 +74,10 @@ export function AssetCombobox({
       emptyText={emptyText}
       loadingText={tc("searching")}
       typeToSearchText={tc("typeToSearch")}
+      quickView={(rowId) => {
+        const asset = byId.get(rowId);
+        return asset ? { entity: "asset", data: asset } : null;
+      }}
     />
   );
 }
