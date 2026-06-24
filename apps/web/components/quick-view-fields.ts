@@ -198,6 +198,12 @@ export function selectFields(
       push("email", u.email);
       push("username", u.username);
       push("legajo", u.legajo);
+      // Directory attributes (ADR-0069 REDESIGN §3): department / job title live in the unvalidated
+      // `directoryAttrs` jsonb (the importer routes them under exactly these keys). They are the
+      // "may-or-may-not-exist" identity context the CEO wants — read defensively (the jsonb is per-field
+      // unvalidated) and dropped by `push` when absent or not a non-empty string.
+      push("department", directoryAttr(u.directoryAttrs, "department"));
+      push("jobTitle", directoryAttr(u.directoryAttrs, "jobTitle"));
       push(
         "manager",
         u.manager
@@ -282,6 +288,21 @@ export function formatOwners(
   const name = `${first.firstName} ${first.lastName}`.trim();
   const extra = assignments.length - 1;
   return extra > 0 ? `${name} ${labels.moreOwners(extra)}` : name;
+}
+
+/**
+ * Read one directory attribute (ADR-0069 REDESIGN §3) from the unvalidated `directoryAttrs` jsonb.
+ * The bag is `Record<string, unknown> | null | undefined` (per-field unvalidated, like Asset.specs),
+ * so it is read defensively: only a non-empty string value is returned — anything else (missing key,
+ * null, a non-string) yields `null`, which {@link selectFields}'s `push` then drops. Exported for the
+ * unit test.
+ */
+export function directoryAttr(
+  attrs: UserListItem["directoryAttrs"],
+  key: string,
+): string | null {
+  const value = attrs?.[key];
+  return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
 /** The set of field keys whose value is long enough to span the full grid width. */

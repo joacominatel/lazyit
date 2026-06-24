@@ -70,6 +70,8 @@
       "role": "Rol",
       "username": "Usuario",
       "legajo": "Legajo",
+      "department": "Departamento",
+      "jobTitle": "Puesto",
       "manager": "Responsable jerárquico",
       "assets": "Activos",
       "apps": "Accesos a apps",
