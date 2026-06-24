@@ -33,14 +33,15 @@ Each row is one node:
 - **Name** — the node's display name; click it to open its details on the Map.
 - **Kind** — host, VM, container, cluster, and so on.
 - **Status** — Online, Offline or Unknown, as a colored badge.
-- **Asset** — whether the node is **Tracked** (asset-backed) or **Graph-only**. This column shows
-  the *link*, not the asset's name: the linked asset's full name and owners live one click away in
-  the details panel.
+- **Asset** — the linked inventory asset's name when the node is asset-backed, or **Graph-only**
+  when it isn't. (A name is hidden if the linked asset was archived.)
+- **Owner** — the asset's current owner(s). With more than one, the first is shown plus a "+N more"
+  hint; the full list is in the details panel. Someone who has left the company shows struck-through.
 - **IP** — the node's primary IP address, when set.
 
 ## Searching and filtering
 
-- **Search** matches the **name** and **IP** as you type.
+- **Search** matches the **name**, **IP**, the linked **asset name** and the **owner** as you type.
 - **Kind**, **Status** and **State** dropdowns narrow the list. *State* distinguishes confirmed
   nodes from any pending ones (pending nodes are part of a future auto-discovery feature; today
   everything is confirmed).
