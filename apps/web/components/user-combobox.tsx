@@ -57,6 +57,13 @@ export function UserCombobox({
       }));
   }, [data, excludeUserIds]);
 
+  // Quick View (ADR-0072): the eye reads the ALREADY-LOADED list row — zero extra fetch. The
+  // UserListItem carries email/role/status/legajo/username/manager + the optional asset/app counts.
+  const byId = useMemo(
+    () => new Map((data?.items ?? []).map((user) => [user.id, user])),
+    [data],
+  );
+
   return (
     <Combobox
       id={id}
@@ -75,6 +82,10 @@ export function UserCombobox({
       emptyText={emptyText}
       loadingText={tc("searching")}
       typeToSearchText={tc("typeToSearch")}
+      quickView={(rowId) => {
+        const user = byId.get(rowId);
+        return user ? { entity: "user", data: user } : null;
+      }}
     />
   );
 }
