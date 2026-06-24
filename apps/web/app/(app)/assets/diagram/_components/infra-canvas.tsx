@@ -3,6 +3,7 @@
 import {
   Background,
   BackgroundVariant,
+  ConnectionMode,
   Controls,
   type Edge,
   MiniMap,
@@ -266,9 +267,23 @@ function CanvasBoard({
       id === impactRootId || Boolean(affectedIds?.has(id));
     const inSpotlight = (id: string) =>
       spotlightNeighbourhood === null || spotlightNeighbourhood.has(id);
+    // Parallel-edge fan-out (issue #773): group edges by their UNORDERED node pair so the floating
+    // edge can offset each one along the line's normal — two edges between the same nodes (either
+    // direction, any kind) don't draw on top of each other. `pairKey` sorts the two ids so A→B and
+    // B→A share a group; `slot`/`size` give each edge its index within the group.
+    const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+    const pairCount = new Map<string, number>();
+    for (const edge of infraEdges) {
+      const key = pairKey(edge.sourceId, edge.targetId);
+      pairCount.set(key, (pairCount.get(key) ?? 0) + 1);
+    }
+    const pairSlot = new Map<string, number>();
     setRfEdges(
       infraEdges.map((edge) => {
         const style = edgeStyle(edge.kind);
+        const key = pairKey(edge.sourceId, edge.targetId);
+        const slot = pairSlot.get(key) ?? 0;
+        pairSlot.set(key, slot + 1);
         const impactDimmed =
           inImpactMode && !(inRadius(edge.sourceId) && inRadius(edge.targetId));
         // An edge is in the spotlight when EITHER endpoint is the hovered node or its neighbour.
@@ -299,6 +314,8 @@ function CanvasBoard({
             kindLabel: edgeKindLabel(edge.kind),
             dimmed: impactDimmed || spotlightDimmed,
             showLabel,
+            parallelIndex: slot,
+            parallelCount: pairCount.get(key) ?? 1,
           },
         };
       }),
@@ -510,6 +527,11 @@ function CanvasBoard({
           onSelectNode?.(null);
         }}
         nodesConnectable={false}
+        // Floating edges (issue #773) anchor to whichever node side faces the neighbour, so an edge
+        // may attach to a handle of either polarity. Loose mode lets a connection touch any handle
+        // regardless of type — the RF "floating edges" pattern (handles stay purely visual anchors;
+        // the path is computed from node geometry in the custom edge).
+        connectionMode={ConnectionMode.Loose}
         fitView
         fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
         minZoom={0.2}
