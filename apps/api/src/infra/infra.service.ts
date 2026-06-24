@@ -145,16 +145,72 @@ export class InfraService {
     return node;
   }
 
-  /** A single page-less list of nodes, newest first, filtered; soft-deleted excluded by the extension. */
-  listNodes(filters: InfraNodeFilters = {}) {
-    return this.prisma.infraNode.findMany({
+  /**
+   * A page-less list of nodes, newest first, filtered; soft-deleted nodes excluded by the extension.
+   * Each row carries the Servers-list payoff (ADR-0070 §6, issue #750): the linked Asset's inventory
+   * `assetName` and its active `owners` — joined in ONE query (a single relation `include`, NOT an
+   * N+1 per-row detail fetch), then flattened to the lean `InfraNodeListItem` wire shape. Mirrors the
+   * `getNodeDetail` resolution: `label` always wins for display, `assetName` is the secondary name.
+   *
+   * CRITICAL — the soft-delete extension only filters the TOP-LEVEL operation (`infraNode.findMany`),
+   * NOT nested relation reads (verified against the Prisma query-extension docs). And a `where` filter
+   * is NOT allowed on a to-ONE relation include (`asset` is to-one) — Prisma only filters to-MANY
+   * relation lists inside `include`/`select`. So we select the asset's `deletedAt` alongside `name`
+   * and gate the name in app code: a soft-deleted (detached/archived) Asset never leaks its name
+   * (`assetName: null`), exactly as `getNodeDetail`'s soft-delete-filtered `findFirst` already honours.
+   * Owners mirror `resolveOwners` exactly: ACTIVE assignments only (`releasedAt: null`), newest first,
+   * with the owner user inlined — a departed (soft-deleted) USER still surfaces with its `deletedAt`
+   * set, so the UI renders the same "left the company" affordance (history kept, ADR-0019).
+   */
+  async listNodes(filters: InfraNodeFilters = {}) {
+    const rows = await this.prisma.infraNode.findMany({
       where: {
         ...(filters.kind ? { kind: filters.kind } : {}),
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.state ? { state: filters.state } : {}),
       },
       orderBy: { createdAt: 'desc' },
+      include: {
+        asset: {
+          // `deletedAt` is selected (not filterable on a to-one include) so the flatten can gate the
+          // name — a soft-deleted asset must NOT leak its name through the list.
+          select: {
+            name: true,
+            deletedAt: true,
+            assignments: {
+              where: { releasedAt: null },
+              orderBy: { assignedAt: 'desc' },
+              select: {
+                id: true,
+                user: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                    deletedAt: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
+
+    return rows.map(({ asset, ...node }) => ({
+      ...node,
+      // Gate the name on the asset being live (the to-one include can't be where-filtered).
+      assetName: asset && asset.deletedAt === null ? asset.name : null,
+      owners: (asset?.assignments ?? []).map((a) => ({
+        assignmentId: a.id,
+        userId: a.user.id,
+        firstName: a.user.firstName,
+        lastName: a.user.lastName,
+        email: a.user.email,
+        deletedAt: a.user.deletedAt,
+      })),
+    }));
   }
 
   /** A single live node by id (the lean row); 404 if missing or soft-deleted. */
