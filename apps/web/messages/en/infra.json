@@ -65,6 +65,7 @@
       "kind": "Kind",
       "status": "Status",
       "asset": "Asset",
+      "owner": "Owner",
       "ip": "IP address",
       "actions": "Actions"
     },
@@ -72,8 +73,13 @@
       "tracked": "Tracked asset",
       "graphOnly": "Graph-only"
     },
+    "owner": {
+      "more": "+{count} more",
+      "departed": "{name} (left the company)"
+    },
     "meta": {
       "asset": "Asset",
+      "owner": "Owner",
       "ip": "IP address"
     }
   },
