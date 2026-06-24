@@ -347,6 +347,83 @@ describe("selectFields — location", () => {
   });
 });
 
+// An infra node (wave 3, #791) — the new entity variant. The basics (kind/status/IP/linked asset)
+// come straight from the lean search hit (zero fetch); status is the identity badge, so the <dl>
+// fields are kind, linkedAsset, ip. `kind` is localized via the threaded `infraKind` label (the raw
+// enum is the translator-free fallback the test asserts), and the deep-link is the canvas focus URL.
+describe("selectFields — infra", () => {
+  const node: QuickViewData = {
+    entity: "infra",
+    data: {
+      id: "node_1",
+      label: "db-prod-01",
+      kind: "VM",
+      status: "ONLINE",
+      ipAddress: "10.0.0.5",
+      assetName: "Dell R740 #3",
+    },
+  };
+
+  it("emits kind, linkedAsset, ip in order (status is the identity badge, not a field)", () => {
+    const fields = selectFields(node);
+    expect(fields.map((f) => f.labelKey)).toEqual([
+      "kind",
+      "linkedAsset",
+      "ip",
+    ]);
+    // No `status` field — it renders as the identity badge.
+    expect(fields.find((f) => f.labelKey === "status")).toBeUndefined();
+    // IP is monospaced.
+    expect(fields.find((f) => f.labelKey === "ip")).toMatchObject({
+      value: "10.0.0.5",
+      mono: true,
+    });
+  });
+
+  it("renders the raw kind enum when no infraKind label is supplied", () => {
+    const fields = selectFields(node);
+    expect(fields.find((f) => f.labelKey === "kind")?.value).toBe("VM");
+  });
+
+  it("localizes the kind via the threaded infraKind label", () => {
+    const fields = selectFields(node, {
+      ...LABELS,
+      infraKind: (kind) => `kind:${kind}`,
+    });
+    expect(fields.find((f) => f.labelKey === "kind")?.value).toBe("kind:VM");
+  });
+
+  it("drops linkedAsset + ip when the node is graph-only / has no IP", () => {
+    const fields = selectFields({
+      entity: "infra",
+      data: {
+        id: "node_2",
+        label: "graph-only",
+        kind: "OTHER",
+        status: "UNKNOWN",
+        ipAddress: null,
+        assetName: null,
+      },
+    });
+    expect(fields.map((f) => f.labelKey)).toEqual(["kind"]);
+  });
+});
+
+describe("titleFor / detailHref — infra", () => {
+  const node: QuickViewData = {
+    entity: "infra",
+    data: { id: "node_1", label: "db-prod-01", kind: "VM", status: "ONLINE" },
+  };
+
+  it("uses the node label as the title", () => {
+    expect(titleFor(node)).toBe("db-prod-01");
+  });
+
+  it("deep-links to the canvas with the focus flag", () => {
+    expect(detailHref(node)).toBe("/assets/diagram?node=node_1&focus=1");
+  });
+});
+
 // Satisfy the unused-import lint when only some constructors are referenced above.
 const _typecheck: QuickViewData = { entity: "asset", data: makeAsset() };
 void _typecheck;
