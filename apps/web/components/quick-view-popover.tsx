@@ -101,7 +101,11 @@ export function QuickViewPopover({
   const t = useTranslations("common.quickView");
   const tf = useTranslations("common.quickView.fields");
   const title = titleFor(view);
-  const fields = selectFields(view);
+  // The asset OWNER field needs localized strings the pure presenter can't produce itself.
+  const fields = selectFields(view, {
+    noOwner: t("noOwner"),
+    moreOwners: (count) => t("moreOwners", { count }),
+  });
   const href = detailHref(view);
   const Glyph = ENTITY_GLYPH[view.entity];
   // A stable id for aria-labelledby on the pinned (dialog) panel.
