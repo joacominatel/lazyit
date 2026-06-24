@@ -33,6 +33,10 @@ import {
   applySecretChipSuggestion,
 } from "@/components/markdown-secret-chip-autocomplete";
 import { cn } from "@/lib/utils";
+import {
+  type PopupPosition,
+  caretPopupPosition,
+} from "@/lib/utils/textarea-caret";
 
 interface MarkdownEditorProps {
   value: string;
@@ -116,6 +120,11 @@ export function MarkdownEditor({
   // Only one popup is active at a time (wikiOpen takes priority; chipOpen is checked second).
   const anyOpen = wikiOpen || chipOpen;
 
+  // Caret-aware popup placement (issue #797): the `{ top, left }` for whichever picker is open, so it
+  // sits just below the caret's line instead of the old fixed top-left that covered the typed text.
+  // Re-measured from the caret on every query sync; `null` falls the popups back to a static anchor.
+  const [popupPos, setPopupPos] = useState<PopupPosition | null>(null);
+
   const showSource = mode !== "preview";
   const showPreview = mode !== "write";
 
@@ -123,18 +132,41 @@ export function MarkdownEditor({
   const syncQuery = useCallback(
     (text: string, caret: number) => {
       // Wiki-link query.
+      let open = false;
+      // The popup's CSS box caps so the clamp keeps it on-screen before it renders (see the
+      // `w-72`/`w-80` + `max-h-64` classes on the two pickers).
+      let popupWidth = 0;
       if (wikiLink) {
         const next = activeWikiLinkQuery(text, caret);
         setWikiQuery(next);
         setWikiActiveIndex(0);
-        if (next !== null) wikiOnQueryChange?.(next);
+        if (next !== null) {
+          wikiOnQueryChange?.(next);
+          open = true;
+          popupWidth = 288; // w-72
+        }
       }
-      // Secret chip query.
+      // Secret chip query (only anchors the popup if a wiki token didn't already claim it).
       if (secretChip) {
         const next = activeSecretChipQuery(text, caret);
         setChipQuery(next);
         setChipActiveIndex(0);
-        if (next !== null) chipOnQueryChange?.(next);
+        if (next !== null) {
+          chipOnQueryChange?.(next);
+          if (!open) {
+            open = true;
+            popupWidth = 320; // w-80
+          }
+        }
+      }
+      // Anchor the open picker just below the caret line; keep the last position while none is open.
+      if (open && textareaRef.current) {
+        setPopupPos(
+          caretPopupPosition(textareaRef.current, caret, {
+            width: popupWidth,
+            height: 256, // max-h-64
+          }),
+        );
       }
     },
     [wikiLink, wikiOnQueryChange, secretChip, chipOnQueryChange],
@@ -279,6 +311,7 @@ export function MarkdownEditor({
           activeIndex={wikiActiveIndex}
           onHover={setWikiActiveIndex}
           onSelect={(slug) => insertWikiSuggestion(slug)}
+          style={popupPos ?? undefined}
         />
       ) : chipOpen ? (
         <SecretChipSuggestions
@@ -286,6 +319,7 @@ export function MarkdownEditor({
           activeIndex={chipActiveIndex}
           onHover={setChipActiveIndex}
           onSelect={(handle) => insertChipSuggestion(handle)}
+          style={popupPos ?? undefined}
         />
       ) : null}
     </div>
