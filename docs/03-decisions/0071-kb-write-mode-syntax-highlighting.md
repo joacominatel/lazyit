@@ -85,8 +85,26 @@ its scroll offset and shares an identical typographic box so the colour sits on 
 - **−** Two surfaces must keep identical typography; a future change to padding/leading on one must
   change both. The shared `MARKDOWN_SOURCE_BOX` constant is the guardrail (a desync shows as colour
   drifting off the glyphs).
+- **−** **Metric parity — the overlay theme must be colour-only** (issue #796). Because the transparent
+  textarea on top is always the editor's regular weight/style/size, any token style that changes a
+  glyph's advance width — `font-weight`, `font-style: italic`, `font-size`, `letter-spacing` — makes
+  that run wider/narrower in the coloured `<pre>` than in the textarea, so the layers drift and the
+  **caret separates from the visible text** (it showed on `## heading` lines, bold via `**…**`, and the
+  italicised `_secret` in `{{ lazyit_secret.… }}`). `restraintMarkdownSourceTheme` is therefore
+  restricted to `color` (plus the base `hljs` `display`/`background`): headings + bold + italic
+  differentiate by the brand accent **hue**, blockquotes by the dim tone — never by weight or slant.
+  This is also an a11y win: emphasis is conveyed by both the source colour *and* the live preview, not
+  by a font style that some users can't perceive in a monospace editor.
 - **−** The source highlighter is hljs's markdown grammar, not a markdown-it-faithful tokenizer — it is
   a *legibility* aid, not a parser. The preview remains the source of truth for how markdown renders.
-- Files: `apps/web/components/markdown-editor.tsx` (overlay wiring),
+- **+** **Caret-aware autocomplete popups** (issue #797). The `[[` / `{{` suggestion popups were pinned
+  to the editor's top-left, covering the lines being typed. They now anchor just *below the caret's
+  line* (flipping above when near the bottom), measured with a self-cleaning hidden-mirror-`<div>`
+  helper (`apps/web/lib/utils/textarea-caret.ts`). Keyboard nav, selection, and the token detection /
+  insertion helpers are unchanged. The pure clamp/flip layout is unit-tested (`textarea-caret.test.ts`).
+- Files: `apps/web/components/markdown-editor.tsx` (overlay wiring + caret-aware popup placement),
   `apps/web/components/markdown-source-highlight.tsx` (the layer + shared box),
-  `apps/web/components/markdown-source-theme.ts` (the token palette). Manual: KB authoring page (en+es).
+  `apps/web/components/markdown-source-theme.ts` (the colour-only token palette),
+  `apps/web/components/markdown-{wiki-link,secret-chip}-autocomplete.tsx` (popup accepts a caret `style`),
+  `apps/web/lib/utils/textarea-caret.ts` (+ `.test.ts`, the caret-rect / placement helper).
+  Manual: KB authoring page (en+es).
