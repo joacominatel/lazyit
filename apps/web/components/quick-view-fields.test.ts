@@ -8,6 +8,7 @@ import type {
 } from "@lazyit/shared";
 import {
   detailHref,
+  directoryAttr,
   formatOwners,
   type QuickViewData,
   type QuickViewLabels,
@@ -246,6 +247,83 @@ describe("selectFields — user", () => {
     const fields = selectFields({ entity: "user", data: makeUser() });
     expect(fields.find((f) => f.labelKey === "assets")).toBeUndefined();
     expect(fields.find((f) => f.labelKey === "apps")).toBeUndefined();
+  });
+
+  // The optional identity fields (#798): username + legajo render when present and are dropped when
+  // empty (the CEO's test user had them unset). Order: email → username → legajo.
+  it("emits username + legajo after email, in order", () => {
+    const fields = selectFields({ entity: "user", data: makeUser() });
+    expect(fields.map((f) => f.labelKey)).toEqual([
+      "email",
+      "username",
+      "legajo",
+    ]);
+    const byKey = Object.fromEntries(fields.map((f) => [f.labelKey, f.value]));
+    expect(byKey.username).toBe("ada");
+    expect(byKey.legajo).toBe("12345");
+  });
+
+  it("drops username + legajo when the user has neither", () => {
+    const fields = selectFields({
+      entity: "user",
+      data: makeUser({ username: null, legajo: null }),
+    });
+    expect(fields.find((f) => f.labelKey === "username")).toBeUndefined();
+    expect(fields.find((f) => f.labelKey === "legajo")).toBeUndefined();
+    expect(fields.map((f) => f.labelKey)).toEqual(["email"]);
+  });
+
+  // Directory attributes (#798): department + jobTitle live in the unvalidated `directoryAttrs` jsonb
+  // (ADR-0069 REDESIGN §3, populated by the bulk import). Surfaced when present, after legajo.
+  it("surfaces department + jobTitle from directoryAttrs when present", () => {
+    const fields = selectFields({
+      entity: "user",
+      data: makeUser({
+        directoryAttrs: { department: "Engineering", jobTitle: "SRE" },
+      }),
+    });
+    expect(fields.map((f) => f.labelKey)).toEqual([
+      "email",
+      "username",
+      "legajo",
+      "department",
+      "jobTitle",
+    ]);
+    const byKey = Object.fromEntries(fields.map((f) => [f.labelKey, f.value]));
+    expect(byKey.department).toBe("Engineering");
+    expect(byKey.jobTitle).toBe("SRE");
+  });
+
+  it("drops directory attrs that are absent, null, blank, or non-string", () => {
+    // No directoryAttrs at all.
+    expect(
+      selectFields({ entity: "user", data: makeUser() }).find(
+        (f) => f.labelKey === "department",
+      ),
+    ).toBeUndefined();
+    // A bag missing the keys / holding empty or non-string values.
+    const fields = selectFields({
+      entity: "user",
+      data: makeUser({
+        directoryAttrs: { department: "  ", jobTitle: 42 as unknown as string },
+      }),
+    });
+    expect(fields.find((f) => f.labelKey === "department")).toBeUndefined();
+    expect(fields.find((f) => f.labelKey === "jobTitle")).toBeUndefined();
+  });
+});
+
+describe("directoryAttr", () => {
+  it("returns a non-empty string value", () => {
+    expect(directoryAttr({ department: "Sales" }, "department")).toBe("Sales");
+  });
+
+  it("returns null for missing / null / blank / non-string values", () => {
+    expect(directoryAttr(null, "department")).toBeNull();
+    expect(directoryAttr(undefined, "department")).toBeNull();
+    expect(directoryAttr({}, "department")).toBeNull();
+    expect(directoryAttr({ department: "   " }, "department")).toBeNull();
+    expect(directoryAttr({ department: 7 }, "department")).toBeNull();
   });
 });
 
