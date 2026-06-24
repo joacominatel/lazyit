@@ -80,7 +80,10 @@
       "address": "Address",
       "floor": "Floor",
       "vendor": "Vendor",
-      "url": "URL"
+      "url": "URL",
+      "kind": "Kind",
+      "linkedAsset": "Linked asset",
+      "ip": "IP address"
     }
   }
 }

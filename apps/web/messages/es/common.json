@@ -80,7 +80,10 @@
       "address": "Dirección",
       "floor": "Piso",
       "vendor": "Proveedor",
-      "url": "URL"
+      "url": "URL",
+      "kind": "Tipo",
+      "linkedAsset": "Activo vinculado",
+      "ip": "Dirección IP"
     }
   }
 }
