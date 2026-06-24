@@ -33,6 +33,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { UserAvatar } from "@/components/user-avatar";
+import { ErrorState } from "@/components/resource-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,7 +102,13 @@ export function InfraNodePanel({
 }) {
   const t = useTranslations("infra");
   const canManage = useCan("infra:manage");
-  const { data: node, isLoading, isError } = useInfraNodeDetail(nodeId);
+  const {
+    data: node,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useInfraNodeDetail(nodeId);
 
   return (
     <Sheet open={nodeId !== null} onOpenChange={(open) => !open && onClose()}>
@@ -119,13 +126,22 @@ export function InfraNodePanel({
             <PanelSkeleton label={t("panel.loading")} />
           </>
         ) : isError || !node ? (
-          <div className="p-6">
-            <SheetHeader className="p-0">
+          // A failed detail fetch is recoverable — mirror the canvas's ErrorState (with onRetry)
+          // a few files over (issue #776), reusing the shared retry affordance. The SheetTitle stays
+          // sr-only so Radix gets its required title for screen readers (the #762 a11y fix).
+          <div className="flex h-full flex-col p-6">
+            <SheetHeader className="sr-only">
               <SheetTitle>{t("panel.loadError")}</SheetTitle>
-              <SheetDescription className="sr-only">
-                {t("panel.loadError")}
-              </SheetDescription>
+              <SheetDescription>{t("panel.loadError")}</SheetDescription>
             </SheetHeader>
+            <div className="flex flex-1 items-center justify-center">
+              <ErrorState
+                title={t("panel.loadError")}
+                description={t("error.description")}
+                onRetry={() => refetch()}
+                error={error}
+              />
+            </div>
           </div>
         ) : (
           <PanelBody
