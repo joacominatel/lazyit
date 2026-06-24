@@ -333,15 +333,20 @@ export function Combobox({
 const QUICK_VIEW_HOVER_MS = 120;
 
 /**
- * The per-row eye affordance (ADR-0072). A REAL focusable `<button>` (not a hover-only glyph): it is
- * `opacity-0` and revealed by `group-hover/row` OR `group-data-[selected=true]/row` — so cmdk's
- * arrow-key roving selection reveals it for keyboard users, not just mouse hover. It is its own button
+ * The per-row eye affordance (ADR-0072). A real `<button>` (not a hover-only glyph): it is `opacity-0`
+ * and revealed by `group-hover/row` OR `group-data-[selected=true]/row` — so it is keyboard-VISIBLE on
+ * the cmdk-selected row (arrow-key roving selection), not just on mouse hover. It is its own button
  * that `stopPropagation`/`preventDefault`s so activating it NEVER selects the row.
  *
- * Hover (after a ~120ms intent delay) opens a transient PREVIEW; click or Enter/Space PINS it (footer +
- * dialog semantics). It is the radix `PopoverAnchor`, so Escape closes the panel and returns focus here
- * for free (radix default). One open at a time is enforced by the lifted `openQuickViewId` in the
- * Combobox — this component only reports intent up.
+ * Hover (after a ~120ms intent delay) opens a transient PREVIEW; click PINS it (footer + dialog
+ * semantics). It is the radix `PopoverAnchor`, so Escape closes the panel and returns focus here for
+ * free (radix default). One open at a time is enforced by the lifted `openQuickViewId` in the Combobox.
+ *
+ * KEYBOARD-OPEN is a documented v1 LIMITATION (#793): cmdk keeps DOM focus on the CommandInput and routes
+ * Enter to the highlighted row's `onSelect`, so the eye — though visible on the selected row — can't be
+ * opened by keyboard without fighting that roving-focus model. The eye keeps an `onKeyDown` for the
+ * mouse-then-keyboard case (a focused eye), but a pure-keyboard user can't yet open the preview. The
+ * clean fix (Tab-reachable selected-row eye, or a non-conflicting Command-root chord) is the follow-up.
  */
 function QuickViewEye({
   view,
@@ -384,8 +389,9 @@ function QuickViewEye({
         <button
           type="button"
           aria-label={t("trigger", { name: titleFor(view) })}
-          // cmdk owns roving focus over the list; keep the eye out of the Tab order so it doesn't fight
-          // that model. It's reached via mouse, or via its row being cmdk-selected then Enter/Space.
+          // cmdk owns roving focus (DOM focus stays on the CommandInput); keep the eye out of the Tab
+          // order so it doesn't fight that model. It's reached by mouse today; a keyboard-open path is
+          // the documented v1 limitation / follow-up (#793).
           tabIndex={-1}
           className={cn(
             "flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 group-hover/row:opacity-100 group-data-[selected=true]/row:opacity-100",
