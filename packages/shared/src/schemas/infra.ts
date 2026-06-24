@@ -231,6 +231,22 @@ export const InfraNodeDetailSchema = InfraNodeSchema.extend({
   children: z.array(InfraNodeChildSchema),
 });
 
+/**
+ * `GET /infra/nodes` list row (ADR-0070 §6, issue #750). The lean `InfraNodeSchema` plus the two
+ * facts the Servers list shows inline — the linked Asset's inventory `name` and its active owners —
+ * so the list can render + search them WITHOUT an N+1 detail fetch per row. A SIBLING of
+ * `InfraNodeSchema` (NOT a mutation of it) because other callers depend on the lean node shape.
+ * Owners reuse the same lean `InfraNodeOwnerSchema` as the drill-in, so the "departed owner"
+ * (deletedAt set) affordance renders identically. `assetName` is null when the node is graph-only
+ * or its linked asset is soft-deleted (the API never leaks a detached/archived asset's name).
+ */
+export const InfraNodeListItemSchema = InfraNodeSchema.extend({
+  /** The linked Asset's `name` (inventory name); null when graph-only or the asset is soft-deleted. */
+  assetName: z.string().nullable(),
+  /** Active owners via the linked Asset's `AssetAssignment`s; `[]` when graph-only or unowned. */
+  owners: z.array(InfraNodeOwnerSchema),
+});
+
 // ── Plausibility table (ADR-0070 §3) — data the API WARNS on, NOT a hard constraint ───────────────
 
 export type InfraNodeKind = z.infer<typeof InfraNodeKindSchema>;
@@ -308,6 +324,7 @@ export type InfraNodeSource = z.infer<typeof InfraNodeSourceSchema>;
 export type InfraNodeState = z.infer<typeof InfraNodeStateSchema>;
 export type InfraShortcut = z.infer<typeof InfraShortcutSchema>;
 export type InfraNode = z.infer<typeof InfraNodeSchema>;
+export type InfraNodeListItem = z.infer<typeof InfraNodeListItemSchema>;
 export type CreateInfraNode = z.infer<typeof CreateInfraNodeSchema>;
 export type UpdateInfraNode = z.infer<typeof UpdateInfraNodeSchema>;
 export type InfraEdge = z.infer<typeof InfraEdgeSchema>;
