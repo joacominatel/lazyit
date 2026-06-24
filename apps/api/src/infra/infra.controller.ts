@@ -24,6 +24,7 @@ import {
   InfraImpactResponseSchema,
   InfraNodeDetailSchema,
   InfraNodeKindSchema,
+  InfraNodeListItemSchema,
   InfraNodeSchema,
   InfraNodeStateSchema,
   InfraNodeStatusSchema,
@@ -37,6 +38,7 @@ import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
 
 class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
+class InfraNodeListItemDto extends createZodDto(InfraNodeListItemSchema) {}
 class InfraNodeDetailDto extends createZodDto(InfraNodeDetailSchema) {}
 class InfraImpactResponseDto extends createZodDto(InfraImpactResponseSchema) {}
 class UpdateInfraNodeDto extends createZodDto(UpdateInfraNodeSchema) {}
@@ -87,7 +89,7 @@ export class InfraController {
     required: false,
     enum: [...InfraNodeStateSchema.options],
   })
-  @ApiOkResponse({ type: [InfraNodeDto] })
+  @ApiOkResponse({ type: [InfraNodeListItemDto] })
   listNodes(
     @Query('kind') kind?: string,
     @Query('status') status?: string,
