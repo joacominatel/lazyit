@@ -16,6 +16,18 @@
 
 ---
 
+## Demo
+
+<p align="center">
+  <video src="https://github.com/joacominatel/lazyit/raw/master/brand/video.mp4" controls width="820"></video>
+</p>
+
+<p align="center">
+  <em>▶ <a href="brand/video.mp4">Watch the demo</a> — a quick tour of lazyit (inventory, access, knowledge base and the secret manager).</em>
+</p>
+
+---
+
 ## What is lazyit?
 
 If you're 5–20 people who own *all* of a company's technology — the laptops, the
