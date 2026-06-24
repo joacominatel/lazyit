@@ -22,19 +22,19 @@ Hover the mouse over a row and the **eye** appears at its right edge. There are 
 
 - **Hover** the eye for a moment and a **preview** opens beside the row. Move away and it closes on
   its own. This is the quick "let me just check" glance.
-- **Click** the eye (or press **Enter** / **Space** while the eye is focused) to **pin** the preview
-  open. A pinned preview stays put until you dismiss it, and it adds an **"Open full record"** link.
+- **Click** the eye to **pin** the preview open. A pinned preview stays put until you dismiss it, and
+  it adds an **"Open full record"** link.
 
 Only one preview is open at a time — opening another row's eye closes the previous one.
 
 ## Using the keyboard
 
-Quick view is fully keyboard-operable:
+- Move through the list with the **↑ / ↓** arrows. The **eye is shown on the highlighted row**, so you
+  can see at a glance which rows have a preview.
+- Press **Esc** to close an open preview without leaving the picker.
 
-- Move through the list with the **↑ / ↓** arrows. The eye is revealed on the highlighted row.
-- Press **Enter** or **Space** on the eye to open and pin the preview.
-- Press **Esc** to close the preview; focus returns to the eye you opened it from, so you can keep
-  navigating without losing your place.
+Opening a preview from the keyboard alone is not available in this version — use the mouse to open it.
+A fully keyboard-operable eye is planned.
 
 ## What a preview shows
 

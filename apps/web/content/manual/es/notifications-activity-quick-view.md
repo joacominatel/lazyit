@@ -23,20 +23,19 @@ Pasá el mouse por una fila y el **ojo** aparece en su borde derecho. Hay dos ma
 
 - **Pasá el mouse** sobre el ojo un instante y se abre una **vista previa** al lado de la fila.
   Alejate y se cierra sola. Es el vistazo rápido de "déjame chequear".
-- **Hacé clic** en el ojo (o presioná **Enter** / **Espacio** con el ojo enfocado) para **fijar** la
-  vista previa abierta. Una vista previa fijada se queda hasta que la cerrás y agrega un enlace
-  **«Abrir ficha completa»**.
+- **Hacé clic** en el ojo para **fijar** la vista previa abierta. Una vista previa fijada se queda
+  hasta que la cerrás y agrega un enlace **«Abrir ficha completa»**.
 
 Solo hay una vista previa abierta a la vez: abrir el ojo de otra fila cierra la anterior.
 
 ## Usar el teclado
 
-La vista rápida funciona por completo con el teclado:
+- Movete por la lista con las flechas **↑ / ↓**. El **ojo se muestra en la fila resaltada**, así ves
+  de un vistazo qué filas tienen vista previa.
+- Presioná **Esc** para cerrar una vista previa abierta sin salir del selector.
 
-- Movete por la lista con las flechas **↑ / ↓**. El ojo se muestra en la fila resaltada.
-- Presioná **Enter** o **Espacio** sobre el ojo para abrir y fijar la vista previa.
-- Presioná **Esc** para cerrar la vista previa; el foco vuelve al ojo desde el que la abriste, así
-  seguís navegando sin perder tu lugar.
+Abrir una vista previa solo con el teclado no está disponible en esta versión — usá el mouse para
+abrirla. Un ojo totalmente operable por teclado está planificado.
 
 ## Qué muestra una vista previa
 
