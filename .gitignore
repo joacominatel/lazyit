@@ -36,3 +36,5 @@ coverage.out
 # Test coverage output
 apps/*/coverage/
 packages/*/coverage/
+
+video/
