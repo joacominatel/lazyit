@@ -39,6 +39,15 @@ export function ApplicationMultiSelect({
     [applications],
   );
 
+  // Quick View (ADR-0072): the eye reads the ALREADY-LOADED list row — zero extra fetch. The row is
+  // the full Application (vendor/url/description); the url is gated by isSafeApplicationUrl in the
+  // presenter (SEC-008) and rendered as plain text.
+  const byId = useMemo(
+    () =>
+      new Map((applications ?? []).map((application) => [application.id, application])),
+    [applications],
+  );
+
   return (
     <EntityMultiSelect
       label={t("filters.applicationLabelName")}
@@ -48,6 +57,10 @@ export function ApplicationMultiSelect({
       searchPlaceholder={t("filters.searchApplication")}
       emptyText={t("filters.noApplications")}
       className={className}
+      quickView={(rowId) => {
+        const application = byId.get(rowId);
+        return application ? { entity: "application", data: application } : null;
+      }}
     />
   );
 }

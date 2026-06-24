@@ -29,6 +29,7 @@ function prismaMock() {
     user: { findMany: jest.fn().mockResolvedValue([]) },
     location: { findMany: jest.fn().mockResolvedValue([]) },
     application: { findMany: jest.fn().mockResolvedValue([]) },
+    infraNode: { findMany: jest.fn().mockResolvedValue([]) },
   };
 }
 
@@ -135,16 +136,17 @@ describe('SearchBootstrapService', () => {
     it('rebuilds EVERY index (not just empty/missing) — for the drift-reconcile sweeper, issue #383', async () => {
       const rebuilt = await build(search, prisma).reconcileAll();
 
-      // All five indexes, regardless of current doc counts — emptyOrMissingIndexes is NOT consulted.
+      // Every index, regardless of current doc counts — emptyOrMissingIndexes is NOT consulted.
       expect(rebuilt).toEqual([
         'assets',
         'articles',
         'users',
         'locations',
         'applications',
+        'infra',
       ]);
       expect(search.emptyOrMissingIndexes).not.toHaveBeenCalled();
-      expect(search.rebuildIndex).toHaveBeenCalledTimes(5);
+      expect(search.rebuildIndex).toHaveBeenCalledTimes(6);
       expect(search.rebuildIndex).toHaveBeenCalledWith('assets', [
         { id: 'a1' },
       ]);
@@ -157,15 +159,16 @@ describe('SearchBootstrapService', () => {
 
       const rebuilt = await build(search, prisma).reconcileAll();
 
-      // assets failed but the pass still attempted (and reported) all five indexes.
+      // assets failed but the pass still attempted (and reported) every index.
       expect(rebuilt).toEqual([
         'assets',
         'articles',
         'users',
         'locations',
         'applications',
+        'infra',
       ]);
-      expect(search.rebuildIndex).toHaveBeenCalledTimes(5);
+      expect(search.rebuildIndex).toHaveBeenCalledTimes(6);
     });
   });
 

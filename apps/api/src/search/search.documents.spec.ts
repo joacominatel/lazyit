@@ -2,9 +2,11 @@ import {
   projectApplication,
   projectArticle,
   projectAsset,
+  projectInfraNode,
   projectLocation,
   projectUser,
   type AssetRow,
+  type InfraNodeRow,
 } from './search.documents';
 
 // Pure projectors: assert each maps a row to exactly the documented search fields (id + searchable
@@ -124,6 +126,60 @@ describe('search document projectors', () => {
       name: 'Jira',
       vendor: 'Atlassian',
       description: 'tracker',
+    });
+  });
+
+  it('projectInfraNode keeps id/label/kind/status/state/ipAddress + joined assetName (ADR-0070 v1), dropping blobs/secrets', () => {
+    // A wider row (the loose `specs`/`shortcuts` blobs the full node carries) assigned to InfraNodeRow,
+    // to prove the projector copies only the searchable/filterable subset and NEVER a secret/blob.
+    const row: InfraNodeRow & Record<string, unknown> = {
+      id: 'n1',
+      label: 'web-01',
+      kind: 'VM',
+      status: 'ONLINE',
+      state: 'CONFIRMED',
+      ipAddress: '10.0.0.5',
+      asset: { name: 'srv-prod-01' },
+      // Fields that must NOT leak into the index:
+      specs: { ['{{ lazyit_secret.DB_PASS }}']: 'never-index-this' },
+      shortcuts: [{ label: 'ssh', url: 'ssh://x' }],
+      deletedAt: null,
+    };
+    const doc = projectInfraNode(row);
+    expect(doc).toEqual({
+      id: 'n1',
+      label: 'web-01',
+      kind: 'VM',
+      status: 'ONLINE',
+      state: 'CONFIRMED',
+      ipAddress: '10.0.0.5',
+      assetName: 'srv-prod-01', // the linked asset NAME is joined in (a label, never a secret)
+    });
+    // Explicit: no specs/shortcuts/secret material crossed into the search document.
+    expect(doc).not.toHaveProperty('specs');
+    expect(doc).not.toHaveProperty('shortcuts');
+    expect(JSON.stringify(doc)).not.toContain('lazyit_secret');
+  });
+
+  it('projectInfraNode passes a graph-only node (no asset) through with assetName null', () => {
+    expect(
+      projectInfraNode({
+        id: 'n2',
+        label: 'redis',
+        kind: 'CONTAINER',
+        status: 'UNKNOWN',
+        state: 'CONFIRMED',
+        ipAddress: null,
+        asset: null,
+      }),
+    ).toEqual({
+      id: 'n2',
+      label: 'redis',
+      kind: 'CONTAINER',
+      status: 'UNKNOWN',
+      state: 'CONFIRMED',
+      ipAddress: null,
+      assetName: null,
     });
   });
 });

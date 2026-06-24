@@ -469,6 +469,9 @@ model Asset {
   history      AssetHistory[]
   // KB links (ADR-0042): knowledge-base articles linked to this asset ("the runbook for THIS server").
   articleLinks ArticleLink[]
+  // Infra topology (ADR-0070): nodes on the CMDB canvas backed by this asset (owner/KB/secrets/warranty
+  // flow through here). SetNull on the node's assetId — deleting an asset detaches, never deletes, a node.
+  infraNodes   InfraNode[]
 
   @@index([modelId])
   @@index([locationId])
@@ -1957,4 +1960,129 @@ enum ImportRowStatus {
   COMMITTED
   FAILED
   SKIPPED
+}
+
+// ─── Infra topology graph (ADR-0070) ─────────────────────────────────────────────────────────────
+// A generic visual CMDB of the server estate: InfraNode (the things) + InfraEdge (typed, timestamped
+// relationships). The full enum sets ship from day 1 so MVP/v1 never re-migrate; the model is generic
+// on purpose (no platform-specific kinds). Enums mirror @lazyit/shared `schemas/infra.ts`.
+// See docs/03-decisions/0070-infra-topology-graph.md.
+
+/// What a node IS (ADR-0070 §2). Generic + extensible — a new kind is a one-line enum migration,
+/// never a re-model. No platform-specific kinds (a k8s pod is a CONTAINER, a namespace a CLUSTER/OTHER).
+enum InfraNodeKind {
+  PHYSICAL_HOST
+  VM
+  CONTAINER
+  CLUSTER // any logical grouping of hosts/nodes
+  NETWORK_DEVICE
+  STORAGE
+  APPLIANCE
+  OTHER
+}
+
+/// Live state of a node. The v2 agent's `lastReportedAt` liveness drives this (stale => OFFLINE);
+/// manual until then.
+enum InfraNodeStatus {
+  ONLINE
+  OFFLINE
+  UNKNOWN
+}
+
+/// Provenance (ADR-0070 §4): hand-entered vs auto-discovered by the v2 reporting agent.
+enum InfraNodeSource {
+  MANUAL
+  AGENT
+}
+
+/// Lifecycle (ADR-0070 §4): PENDING = in the v2 review tray, CONFIRMED = on the live map.
+enum InfraNodeState {
+  CONFIRMED
+  PENDING
+}
+
+/// Typed relationship between two nodes (ADR-0070 §3). Direction/cardinality live in
+/// @lazyit/shared (PLAUSIBLE_EDGE_TARGETS) and the partial unique indexes below.
+enum InfraEdgeKind {
+  RUNS_ON // source is hosted/executed by target — one active host per source (partial unique below)
+  MEMBER_OF // source belongs to a logical group
+  DEPENDS_ON // source needs target to function
+  BACKS_UP_TO // source's data is backed up to target
+  CONNECTS_TO // network adjacency — symmetric; API stores lower id as source (canonical-pair unique below)
+}
+
+/// A node: anything that appears on the map. Asset-backed by default (ADR-0070 §5 — inherits
+/// owner/KB/secrets/warranty/shortcuts via the linked Asset). Mutable domain entity: createdAt +
+/// updatedAt + deletedAt (soft delete = off the map, history kept; ADR-0006).
+model InfraNode {
+  id              String          @id @default(cuid())
+
+  kind            InfraNodeKind
+  label           String // canvas display name — always wins for display (ADR-0070 §5)
+  status          InfraNodeStatus @default(UNKNOWN)
+
+  // Asset linkage — DEFAULT-ON. SetNull: deleting the asset detaches, never deletes the node
+  // (audit > strict integrity). The default-asset create flow is API logic (ADR-0070 §5).
+  assetId         String?
+  asset           Asset?          @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  // Access surface (NOT a network model — ADR-0070 scope cuts).
+  ipAddress       String? // primary IP, label-only (no validation/IPAM)
+  shortcuts       Json? // [{ label, url }] — SSH/web UI/console links (validated by zod in @lazyit/shared)
+  specs           Json? // loose per-kind attrs (ADR-0007 posture)
+
+  // Canvas layout (free-move). v1: one board, x/y on the node. Multi-board => join later.
+  x               Float?
+  y               Float?
+
+  // Provenance + lifecycle (columns exist now; the agent that exercises them is v2 — ADR-0070 §4).
+  source          InfraNodeSource @default(MANUAL)
+  state           InfraNodeState  @default(CONFIRMED)
+  reportingSource String? // which agent/host reported it (dedup scope)
+  externalId      String? // platform id (vmid/container-id) for reconciliation
+  lastReportedAt  DateTime? // agent liveness; stale => OFFLINE
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  deletedAt       DateTime? // soft delete = off the map, history kept
+
+  edgesFrom       InfraEdge[]     @relation("EdgeSource")
+  edgesTo         InfraEdge[]     @relation("EdgeTarget")
+
+  @@index([assetId])
+  @@index([kind])
+  @@index([state]) // the PENDING review-tray query
+  // v2: partial UNIQUE (reportingSource, externalId) WHERE both NOT NULL — added with the agent
+  // migration (the columns exist now, so it is a forward-only add, NOT a re-model). See ADR-0070 §4.
+  // DO NOT add it in this foundation migration.
+  @@map("infra_nodes")
+}
+
+/// An edge: a typed, timestamped relationship. Same DNA as AssetAssignment (ADR-0019) — append-style
+/// lifecycle with startedAt/endedAt (a migration closes one edge, opens the next). Cascade on node
+/// delete: an edge is meaningless without both endpoints and is NOT an audited domain entity (the
+/// node and its Asset carry durable history). No deletedAt — it is not soft-deleted.
+model InfraEdge {
+  id        String        @id @default(cuid())
+  sourceId  String
+  source    InfraNode     @relation("EdgeSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetId  String
+  target    InfraNode     @relation("EdgeTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  kind      InfraEdgeKind
+  startedAt DateTime      @default(now())
+  endedAt   DateTime? // null = active; migration = close one, open next
+
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  // Two raw-SQL PARTIAL UNIQUE indexes Prisma can't express live in the migration (ADR-0070 §3,
+  // docs/05-runbooks/prisma-migrations.md §3):
+  //   1. (sourceId) WHERE endedAt IS NULL AND kind = 'RUNS_ON' — one active host per source. ONLY
+  //      RUNS_ON is constrained; MEMBER_OF/DEPENDS_ON/BACKS_UP_TO/CONNECTS_TO are legitimately many.
+  //   2. (sourceId, targetId) WHERE kind = 'CONNECTS_TO' AND endedAt IS NULL — canonical-pair
+  //      uniqueness for the symmetric CONNECTS_TO (the API canonicalizes lower id as source).
+  @@index([sourceId])
+  @@index([targetId])
+  @@index([kind])
+  @@map("infra_edges")
 }

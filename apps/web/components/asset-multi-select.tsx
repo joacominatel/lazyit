@@ -44,6 +44,13 @@ export function AssetMultiSelect({
     [data],
   );
 
+  // Quick View (ADR-0072): the eye reads the ALREADY-LOADED list row — zero extra fetch. The row
+  // carries the full graph the preview needs (serial/assetTag/status + trimmed model/category/location).
+  const byId = useMemo(
+    () => new Map((data?.items ?? []).map((asset) => [asset.id, asset])),
+    [data],
+  );
+
   return (
     <EntityMultiSelect
       label={t("filters.assetLabelName")}
@@ -55,6 +62,10 @@ export function AssetMultiSelect({
       searchPlaceholder={t("filters.searchAsset")}
       emptyText={t("filters.noAssets")}
       className={className}
+      quickView={(rowId) => {
+        const asset = byId.get(rowId);
+        return asset ? { entity: "asset", data: asset } : null;
+      }}
     />
   );
 }

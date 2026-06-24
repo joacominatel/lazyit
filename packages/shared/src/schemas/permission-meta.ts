@@ -150,6 +150,20 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
     pillar: "inventory",
     tier: "coarse",
   },
+  "infra:read": {
+    // The infra topology graph (ADR-0070) — the server-estate map. Bucketed under Inventory (servers
+    // are assets); a default-open `view` read, like `asset:read`.
+    label: "View the server map",
+    pillar: "inventory",
+    tier: "view",
+  },
+  "infra:manage": {
+    // Coarse: create/edit/delete topology nodes, open/close edges, drag node positions. ADMIN-only by
+    // seed default; an asset-backed node create ALSO requires `asset:write` (AND-checked, ADR-0070 §8).
+    label: "Manage the server map",
+    pillar: "inventory",
+    tier: "coarse",
+  },
   // ── Access ─────────────────────────────────────────────────────────────────
   "application:read": { label: "View applications", pillar: "access", tier: "view" },
   "application:write": {
@@ -301,6 +315,8 @@ export const CAPABILITY_IDS = [
   "inventory.edit",
   "inventory.delete",
   "inventory.import",
+  "infra.view",
+  "infra.manage",
   // Access
   "application.view",
   "application.edit",
@@ -406,6 +422,24 @@ export const CAPABILITIES: readonly Capability[] = [
       "Use the guided Migrator to bulk-import assets from a CSV/JSON file. Also requires the relevant write permissions (assets, models, categories, locations), checked per row at commit.",
     pillar: "inventory",
     permissions: ["import:run"],
+  },
+  // The infra topology graph (ADR-0070) — `view` and `manage` as separate toggles. `manage` is
+  // above-default tier (coarse, ⚠ admin-level); an asset-backed node create also needs `asset:write`.
+  {
+    id: "infra.view",
+    label: "View the server map",
+    description:
+      "See the infra topology canvas — nodes, edges and the per-node drill-in (owner, KB, IP, shortcuts).",
+    pillar: "inventory",
+    permissions: ["infra:read"],
+  },
+  {
+    id: "infra.manage",
+    label: "Manage the server map",
+    description:
+      "Create, edit and delete topology nodes, open and close edges, and persist node positions on the canvas. Asset-backed node creation also requires the asset edit permission.",
+    pillar: "inventory",
+    permissions: ["infra:manage"],
   },
   // ── Access ─────────────────────────────────────────────────────────────────
   {

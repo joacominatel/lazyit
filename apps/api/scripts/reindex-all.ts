@@ -24,6 +24,7 @@ import {
   projectApplication,
   projectArticle,
   projectAsset,
+  projectInfraNode,
   projectLocation,
   projectUser,
 } from '../src/search/search.documents';
@@ -44,16 +45,31 @@ const prisma = new PrismaClient({
 const meili = new Meilisearch({ host, apiKey: process.env.MEILI_MASTER_KEY });
 
 async function reindex(): Promise<void> {
-  const [assets, articles, users, locations, applications] = await Promise.all([
-    prisma.asset.findMany({ where: { deletedAt: null } }),
-    // Draft privacy (ADR-0022): only PUBLISHED articles are searchable.
-    prisma.article.findMany({
-      where: { deletedAt: null, status: 'PUBLISHED' },
-    }),
-    prisma.user.findMany({ where: { deletedAt: null } }),
-    prisma.location.findMany({ where: { deletedAt: null } }),
-    prisma.application.findMany({ where: { deletedAt: null } }),
-  ]);
+  const [assets, articles, users, locations, applications, infra] =
+    await Promise.all([
+      prisma.asset.findMany({ where: { deletedAt: null } }),
+      // Draft privacy (ADR-0022): only PUBLISHED articles are searchable.
+      prisma.article.findMany({
+        where: { deletedAt: null, status: 'PUBLISHED' },
+      }),
+      prisma.user.findMany({ where: { deletedAt: null } }),
+      prisma.location.findMany({ where: { deletedAt: null } }),
+      prisma.application.findMany({ where: { deletedAt: null } }),
+      // Infra topology nodes (ADR-0070 v1): soft-deleted nodes are off the map. Join the linked
+      // Asset's `name` for the searchable `assetName` (null when graph-only).
+      prisma.infraNode.findMany({
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          label: true,
+          kind: true,
+          status: true,
+          state: true,
+          ipAddress: true,
+          asset: { select: { name: true } },
+        },
+      }),
+    ]);
 
   // `Meilisearch` structurally satisfies the small ReindexClient surface reindexIndex depends on.
   const client = meili as unknown as ReindexClient;
@@ -69,6 +85,7 @@ async function reindex(): Promise<void> {
     'applications',
     applications.map(projectApplication),
   );
+  await reindexIndex(client, 'infra', infra.map(projectInfraNode));
 
   console.log('Reindex complete (full rebuild — stale documents evicted):');
   console.log(`  assets:       ${assets.length}`);
@@ -76,6 +93,7 @@ async function reindex(): Promise<void> {
   console.log(`  users:        ${users.length}`);
   console.log(`  locations:    ${locations.length}`);
   console.log(`  applications: ${applications.length}`);
+  console.log(`  infra:        ${infra.length}`);
 }
 
 reindex()

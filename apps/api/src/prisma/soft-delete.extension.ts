@@ -40,6 +40,11 @@ export const SOFT_DELETABLE_MODELS: ReadonlySet<string> = new Set([
   'SecretVault',
   'SecretItem',
   'UserKeypair',
+  // Infra topology graph (ADR-0070). InfraNode is a mutable domain entity with a `deletedAt` (soft
+  // delete = off the map, history kept), so reads must auto-exclude soft-deleted nodes — registered
+  // here like Asset. InfraEdge is DELIBERATELY EXCLUDED: it has no `deletedAt` (a closed edge sets
+  // `endedAt`, an ADR-0019 lifecycle marker, not a soft delete) and cascades on node delete.
+  'InfraNode',
 ]);
 
 // Read operations whose results must hide soft-deleted rows. `findUnique`/`findUniqueOrThrow` are

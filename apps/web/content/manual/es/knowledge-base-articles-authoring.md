@@ -27,9 +27,14 @@ Abre la Base de conocimiento y elige **Nuevo artículo**. El formulario es breve
 - **Contenido** — el cuerpo, en Markdown.
 
 El editor es un editor de Markdown plano con vista previa en vivo: por diseño no hay un modo de texto
-enriquecido/WYSIWYG. Los bloques de código se resaltan con sintaxis en la página publicada, cada uno
-con un botón de copia, y un bloque ` ```mermaid ` se renderiza como un diagrama. Tú escribes Markdown
-en bruto; el formato aparece cuando se ve el artículo.
+enriquecido/WYSIWYG. Mientras escribes, el **panel de redacción colorea la fuente sobre la marcha**:
+los encabezados se ven en negrita y con color, los marcadores de negrita/cursiva, las listas, el
+código en línea, las citas y los enlaces se tiñen, y los tokens reservados `[[` y `{{` destacan, de
+modo que el Markdown en bruto se mantiene legible sin cambiar a la vista previa. Sigue siendo texto
+plano editable, no renderizado: el formato completo aparece igualmente en la vista previa en vivo y
+en la página publicada. Los bloques de código se resaltan con sintaxis en la página publicada, cada
+uno con un botón de copia, y un bloque ` ```mermaid ` se renderiza como un diagrama. Tú escribes
+Markdown en bruto; el formato aparece cuando se ve el artículo.
 
 Mientras escribes, dos ayudas ofrecen autocompletado:
 

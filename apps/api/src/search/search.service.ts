@@ -3,7 +3,7 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Meilisearch } from 'meilisearch';
 import type { MultiSearchParams } from 'meilisearch';
 import type { SearchDocument } from './search.documents';
-import { reindexIndex, type ReindexClient } from './reindex';
+import { reindexIndex } from './reindex';
 import {
   FolderAccessService,
   folderVisible,
@@ -11,13 +11,14 @@ import {
 } from '../article-categories/folder-access.service';
 import type { Principal } from '../auth/principal';
 
-/** The five Meili indexes (one per searchable entity). Primary key on every index is `id`. */
+/** The Meili indexes (one per searchable entity). Primary key on every index is `id`. */
 export const SEARCH_INDEXES = [
   'assets',
   'articles',
   'users',
   'locations',
   'applications',
+  'infra', // topology nodes (ADR-0070 v1) — kind/status/state filterable (see reindex.ts)
 ] as const;
 
 export type SearchIndex = (typeof SEARCH_INDEXES)[number];
@@ -38,6 +39,10 @@ const RETRIEVE: Record<SearchIndex, string[]> = {
   users: ['id', 'firstName', 'lastName', 'email'],
   locations: ['id', 'name', 'type', 'address', 'floor'],
   applications: ['id', 'name', 'vendor', 'description'],
+  // ADR-0070 v1: the infra-node hit fields. `kind`/`status`/`state` double as the FILTERABLE
+  // attributes (declared in reindex.ts) AND are returned so the canvas can badge a hit. No secret
+  // values, no `specs`/`shortcuts` blobs — a node holds no secrets (zero-knowledge, ADR-0061).
+  infra: ['id', 'label', 'kind', 'status', 'state', 'ipAddress', 'assetName'],
 };
 
 /** The internal-only article-hit field stripped before a hit ships (the post-filter's folder key). */
@@ -296,11 +301,14 @@ export class SearchService {
   /**
    * Authoritatively (re)build one index from its full live `docs` set (issue #370 self-heal), reusing
    * the zero-downtime temp-index-swap of {@link reindexIndex}. No-op in disabled mode. The Meili client
-   * structurally satisfies the small {@link ReindexClient} surface the rebuild needs.
+   * structurally satisfies the small `ReindexClient` surface the rebuild needs (no cast required).
    */
-  async rebuildIndex(index: SearchIndex, docs: SearchDocument[]): Promise<void> {
+  async rebuildIndex(
+    index: SearchIndex,
+    docs: SearchDocument[],
+  ): Promise<void> {
     if (!this.client) return;
-    await reindexIndex(this.client as unknown as ReindexClient, index, docs);
+    await reindexIndex(this.client, index, docs);
   }
 
   /**

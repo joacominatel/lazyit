@@ -263,6 +263,40 @@
   --code-accent: oklch(0.74 0.15 275);
 }
 
+/* ---------------------------------------------------------------------------
+   React Flow chrome → app tokens (ADR-0070, issue #763). The infra topology
+   canvas (`apps/web/app/(app)/assets/diagram`) imports `@xyflow/react/dist/style.css`,
+   which ships its OWN `--xy-*` palette — light/dark defaults that DON'T track our
+   next-themes class, so the board's chrome (Controls + MiniMap + grid backing) read
+   dark in both themes. This ADDITIVE block maps RF's public chrome vars to OUR design
+   tokens for both `:root` (light) and `.dark`, so the whole surface follows the app
+   theme. It defines NO new tokens and leaves per-node/edge colours to RF defaults —
+   the node cards (`infra-node-card.tsx`) and edge strokes (`lib/infra/canvas.ts`) are
+   already token-driven in code, and the `<Background>` dots / `<MiniMap>` mask+nodes are
+   set from tokens at the call site. RF consumes each var as
+   `var(--xy-NAME, var(--xy-NAME-default))`, so setting `--xy-NAME` wins over RF's
+   built-in default regardless of RF's internal `.react-flow.dark`. The canvas also pins
+   `colorMode` to the resolved app theme so RF's own `.dark` toggles in lockstep. */
+.react-flow {
+  /* Board backing — the canvas wrapper already paints `bg-muted/20`, so this only
+     governs RF's internal background fill; keep it on the same muted surface. */
+  --xy-background-color: var(--muted);
+  /* Controls toolbar (zoom/fit buttons): a card surface with our border + foreground
+     icon, accent on hover — identical chrome to every other floating control. */
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--accent);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-button-color: var(--foreground);
+  --xy-controls-button-color-hover: var(--accent-foreground);
+  --xy-controls-box-shadow: var(--elevation-2);
+  /* MiniMap: backing on the board surface, a low-alpha background mask over the
+     off-viewport region, and node blips in muted-foreground (also set at the call
+     site via maskColor/nodeColor for parity). */
+  --xy-minimap-background-color: var(--card);
+  --xy-minimap-mask-background-color: color-mix(in oklab, var(--background) 60%, transparent);
+  --xy-minimap-node-background-color: var(--muted-foreground);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -341,6 +375,45 @@
     to {
       stroke-dashoffset: 0;
     }
+  }
+
+  /* Infra topology — the DEPENDS_ON dash flow (ADR-0070 UX, issue #767). The ONE animated edge
+     kind: a slow, subtle march of the dash pattern along the path, reading as the direction of
+     "need". Applied via `.infra-edge-flow` on the edge's <path>; the dash pattern itself comes from
+     `edgeStyle('DEPENDS_ON').dashArray` ("6 4" → period 10), so the offset cycles exactly one
+     period. It is a continuous ambient loop (not a ≤220ms UI transition) — a low-salience cue, not
+     chrome — and the consolidated reduced-motion block below freezes it to a static dashed line
+     (animation-duration → ~0), so it never moves for motion-sensitive readers. */
+  @keyframes infra-dash-flow {
+    to {
+      stroke-dashoffset: -10;
+    }
+  }
+
+  /* Infra topology — the one-shot focus pulse (ADR-0070 UX, issue #765). When `focusNode(id)` lands
+     on a node (a deep-link, a fresh create, or the future "View in topology" button), the node's
+     card breathes ONCE — a gentle 1 → 1.06 → 1 scale — to say "here". Driven by a `data.focusPulse`
+     flag the canvas sets then auto-clears (~600ms timeout), so the class is present for a single
+     play. ≤600ms, one iteration, off the success-check spring (uses the workhorse ease). Reduced
+     motion freezes it to no movement via the block below (the fitView itself runs instant there). */
+  @keyframes infra-focus-pulse {
+    0% {
+      transform: scale(1);
+    }
+    45% {
+      transform: scale(1.06);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  .infra-edge-flow {
+    animation: infra-dash-flow 0.9s linear infinite;
+  }
+
+  .infra-focus-pulse {
+    animation: infra-focus-pulse 600ms var(--ease-out-quad) 1;
   }
 
   .animate-rise-in {

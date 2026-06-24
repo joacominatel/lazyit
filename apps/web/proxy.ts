@@ -37,6 +37,11 @@ const API_URL =
 /** Public paths the gate must never trap (the sign-in/first-run/OIDC surfaces themselves). */
 function isPublicPath(pathname: string): boolean {
   return (
+    // Static media served from /public (the landing demo video, OG images, fonts…) is public by
+    // nature and must never be auth-gated — without this a `/landing/demo.mp4` sub-resource on a
+    // public route falls through to the guard below and gets 302'd to /login (these /public files
+    // are served at the root, so they don't hit the matcher's `_next/static` exclusion).
+    /\.(?:mp4|webm|ogg|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf|mp3)$/i.test(pathname) ||
     pathname.startsWith("/api/auth") ||
     pathname === "/login" ||
     pathname === "/setup" ||

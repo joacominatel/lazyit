@@ -2,6 +2,7 @@
   "dashboard": "Dashboard",
   "inventory": "Inventory",
   "assets": "Assets",
+  "diagram": "Topology",
   "consumables": "Consumables",
   "imports": "Importer",
   "access": "Access",

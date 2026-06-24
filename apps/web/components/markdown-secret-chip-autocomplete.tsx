@@ -1,6 +1,7 @@
 "use client";
 
 import { KeyIcon } from "@heroicons/react/24/outline";
+import type { CSSProperties } from "react";
 import type { HandleSuggestion } from "@lazyit/shared";
 import { cn } from "@/lib/utils";
 
@@ -70,23 +71,34 @@ export function applySecretChipSuggestion(
  * `WikiLinkSuggestions`). Keyboard nav (↑/↓/Enter/Tab/Esc) is owned by the textarea's key
  * handler in `MarkdownEditor`; this renders the list and forwards hover/click.
  * `onMouseDown`-prevent keeps the textarea focused through a click.
+ *
+ * `style` carries the caret-aware `{ top, left }` `MarkdownEditor` computes so the popup sits just
+ * below the line being typed (issue #797) instead of the old fixed top-left that covered it. When
+ * unset (caret not yet measured), it falls back to a static top-left anchor.
  */
 export function SecretChipSuggestions({
   suggestions,
   activeIndex,
   onHover,
   onSelect,
+  style,
 }: {
   suggestions: HandleSuggestion[];
   activeIndex: number;
   onHover: (index: number) => void;
   onSelect: (handle: string) => void;
+  style?: CSSProperties;
 }) {
   return (
     <ul
       role="listbox"
       aria-label="Secret handle suggestions"
-      className="absolute left-2 top-2 z-20 max-h-64 w-80 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-e3 ring-1 ring-foreground/10"
+      style={style}
+      className={cn(
+        "absolute z-20 max-h-64 w-80 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-e3 ring-1 ring-foreground/10",
+        // Static fallback anchor used until the caret position is measured.
+        style ? undefined : "left-2 top-2",
+      )}
     >
       {suggestions.map((suggestion, index) => {
         const active = index === activeIndex;

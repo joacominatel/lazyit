@@ -176,7 +176,8 @@
       "articles": "Articles",
       "users": "Users",
       "locations": "Locations",
-      "applications": "Applications"
+      "applications": "Applications",
+      "infra": "Infrastructure"
     }
   },
   "field": {
@@ -205,7 +206,7 @@
       },
       "secret": {
         "title": "Reference a secret",
-        "note": "Shows a masked chip — only a vault member can reveal the value. Type {{ for a picker; you pick a handle, never a value."
+        "note": "Shows a masked chip — only a vault member can reveal the value. Type '{{' for a picker; you pick a handle, never a value."
       },
       "links": {
         "title": "External link",

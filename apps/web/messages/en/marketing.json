@@ -16,6 +16,10 @@
     "ctaDashboard": "Go to dashboard",
     "ctaSignIn": "Sign in"
   },
+  "demo": {
+    "title": "See it in action",
+    "subtitle": "A quick tour of lazyit — inventory, access, the knowledge base and the zero-knowledge secret manager."
+  },
   "thesis": {
     "title": "Assets persist. People rotate.",
     "body": "Most tools hang ownership off a user. lazyit inverts it: the asset is the first-class citizen, and ownership is a timestamped record — who holds it, since when, and everything that changed. Someone leaves; the history stays intact.",
