@@ -202,10 +202,13 @@ export function GlobalSearch() {
                       secondary: hit.excerpt ?? undefined,
                     })}
                   />
+                  {/* CEO decision (#779): user/location hits land on the pre-filtered list
+                      (search-then-browse) — carry the typed query as `?q=` so the list arrives
+                      filtered and the search input hydrates from the URL on mount. */}
                   <ResultGroup
                     entity="users"
                     block={data?.users}
-                    onSelect={() => go("/users")}
+                    onSelect={() => go(`/users?q=${encodeURIComponent(query)}`)}
                     render={(hit) => ({
                       primary: `${hit.firstName} ${hit.lastName}`.trim(),
                       secondary: hit.email,
@@ -214,7 +217,7 @@ export function GlobalSearch() {
                   <ResultGroup
                     entity="locations"
                     block={data?.locations}
-                    onSelect={() => go("/locations")}
+                    onSelect={() => go(`/locations?q=${encodeURIComponent(query)}`)}
                     render={(hit) => ({
                       primary: hit.name,
                       secondary: hit.address ?? hit.type,
