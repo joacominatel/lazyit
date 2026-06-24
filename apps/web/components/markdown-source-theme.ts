@@ -6,11 +6,19 @@ import type { CSSProperties } from "react";
  *
  * This is a sibling of `restraintCodeTheme` (which styles *fenced code* in the rendered preview),
  * but tuned for the markdown grammar's own token set (`section`, `strong`, `emphasis`, `link`,
- * `bullet`, `code`, `quote`, `string`, `symbol`). It follows ADR-0049 «Activated Restraint»:
+ * `bullet`, `code`, `quote`, `string`, `symbol`). It follows ADR-0049 «Activated Restraint».
  *
- *  - **Headings** (`## Title` → `hljs-section`) get the single brand accent + bold, the one piece of
- *    real colour — this is the legibility win the issue asks for ("# ADR-0011" reads blue + bold).
- *  - **Bold / italic** markers express themselves as weight/style, not hue — the source stays calm.
+ * METRIC PARITY (issue #796): this is a **colour-only** theme — it sets *only* `color`. The overlay
+ * is a coloured `<pre>` painted *under* a transparent `<textarea>` whose own glyphs are always the
+ * editor's regular weight/style/size. Any token property that changes a glyph's advance width
+ * (`font-weight`, `font-style: italic`, `font-size`, `letter-spacing`) would make a bold/italic run
+ * in the `<pre>` wider or narrower than the same run in the textarea, so the two layers drift and the
+ * caret separates from the visible text. We therefore differentiate purely by hue/tone:
+ *
+ *  - **Headings** (`## Title` → `hljs-section`) get the single brand accent — the legibility win the
+ *    original issue asked for ("# ADR-0011" reads blue), now colour-only (no bold).
+ *  - **Bold / italic** (`hljs-strong` / `hljs-emphasis`) read as the accent too: "emphasised text =
+ *    coloured", never weight or slant — so the calm source still flags what will stand out rendered.
  *  - **Links, code spans, lists, blockquotes** sit on the dim tone so structure is visible without
  *    turning the editor into a rainbow.
  *
@@ -19,7 +27,7 @@ import type { CSSProperties } from "react";
  *
  * The base `hljs` colour is left at `--foreground` so any *unhighlighted* run of source text (plain
  * paragraphs, the bulk of an article) renders in the normal editor colour — only the markers and
- * headings pick up styling.
+ * headings pick up colour.
  */
 const accent: CSSProperties = { color: "var(--code-accent)" };
 const dim: CSSProperties = { color: "var(--muted-foreground)" };
@@ -31,16 +39,17 @@ export const restraintMarkdownSourceTheme: Record<string, CSSProperties> = {
     color: "var(--foreground)",
   },
 
-  // Headings — the accent + weight. `## Status` should read instantly as a heading.
-  "hljs-section": { ...accent, fontWeight: 700 },
+  // Headings — the accent. `## Status` reads instantly as a heading on hue alone (no weight change,
+  // which would widen the glyphs and drift the overlay off the caret — see METRIC PARITY above).
+  "hljs-section": accent,
 
-  // Emphasis markers — style, never colour (matches the rendered look: bold is bold, italic italic).
-  "hljs-strong": { fontWeight: 700 },
-  "hljs-emphasis": { fontStyle: "italic" },
+  // Emphasis — the accent, expressed as colour (never weight/italic, which alter glyph advance).
+  "hljs-strong": accent,
+  "hljs-emphasis": accent,
 
   // Structure tokens — visible but quiet, on the dim tone.
   "hljs-bullet": dim, // list markers (-, *, 1.)
-  "hljs-quote": { ...dim, fontStyle: "italic" }, // > blockquotes
+  "hljs-quote": dim, // > blockquotes (dim only — no italic, which would change glyph metrics)
   "hljs-code": dim, // `inline code` and ``` fences
   "hljs-link": dim, // [text](url) and bare links
   "hljs-symbol": dim, // link reference symbols
