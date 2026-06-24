@@ -83,9 +83,10 @@ preview. **No new fetch, no new endpoint, no widened list payload, no N+1.**
 
 This is sound because the list rows are already a **rich superset** of what the preview needs (verified
 against the shared list schemas): `AssetListItem` carries serial/assetTag/status + trimmed
-model/category/location; `UserListItem` is the full `UserSchema` + the optional asset/app counts;
-the application/model/location rows are the full entity. Minor gaps (e.g. an owner's display name on
-an asset row, a category name where a row only carries an id) are **resolved from the loaded data or
+model/category/location **and the active-assignment owners** (`activeAssignments[].user`, the asset
+OWNER — the CEO's headline disambiguator, "which laptop? Ana's"); `UserListItem` is the full
+`UserSchema` + the optional asset/app counts; the application/model/location rows are the full entity.
+Minor gaps (e.g. a category name where a row only carries an id) are **resolved from the loaded data or
 omitted** — never backfilled with a per-row fetch.
 
 The **global command palette** (wave 3) is the one exception: its search hits are lean (id + a couple
@@ -107,20 +108,27 @@ honest choice is no eye there.
 
 ### 3. Affordance + interaction (a11y)
 
-- **The eye is a real focusable `<button>`**, not a hover-only glyph. It is `opacity-0` and revealed by
-  `group-hover/row` **and** `group-data-[selected=true]/row` — so cmdk's arrow-key roving selection
-  reveals it for **keyboard** users, not just mouse hover. It carries `aria-label="Quick view: {name}"`
-  and a visible `focus-visible` ring.
+- **The eye is a real `<button>`**, not a hover-only glyph. It is `opacity-0` and revealed by
+  `group-hover/row` **and** `group-data-[selected=true]/row` — so it is **keyboard-VISIBLE** on the
+  cmdk-selected row (arrow-key roving selection), not just on mouse hover. It carries
+  `aria-label="Quick view: {name}"` and a visible `focus-visible` ring.
 - The eye `stopPropagation`/`preventDefault`s on click **and** on its own Enter/Space `keydown`, so
   activating it **never selects the row** (the row's primary action stays "pick this").
 - **Hover** (after a ~120ms intent delay, so skimming doesn't flicker previews) opens a **transient
-  preview**; **click / Enter / Space pins** it (shows the footer + takes dialog semantics). Clicking a
-  pinned eye toggles it closed.
+  preview**; **click pins** it (shows the footer + takes dialog semantics). Clicking a pinned eye
+  toggles it closed.
 - **Single open at a time** — `openQuickViewId` is lifted into the `Combobox`, so opening one row's
   preview closes any other.
 - **Escape closes and returns focus to the eye** — radix Popover's default focus-return to the anchor
   (the eye is the `PopoverAnchor`) gives this for free; closing the picker also dismisses any open
   preview (its anchor is about to unmount).
+- **Keyboard-OPEN is a documented v1 limitation (#793).** cmdk keeps DOM focus on the `CommandInput`
+  and routes Enter to the highlighted row's `onSelect`, so the eye — though *visible* on the selected
+  row — cannot be opened by a pure-keyboard user without fighting that roving-focus model. We chose
+  **not to force a brittle workaround** (a value-reverse-mapped undiscoverable chord, or a Tab-reachable
+  item that fights cmdk's focus): the eye keeps an `onKeyDown` for the mouse-then-keyboard case, and the
+  clean fix (a Tab-reachable selected-row eye, or a non-conflicting Command-root chord) is the wave-1
+  follow-up #793. Quick view is therefore **mouse/hover-primary in wave 1**.
 - **Dialog semantics only when pinned** — a pinned panel gets `role="dialog"` + `aria-labelledby` on
   the identity title; a transient hover preview stays role-less (a passive surface) and does not steal
   focus (`onOpenAutoFocus` prevented), so it never fights cmdk's roving focus.
