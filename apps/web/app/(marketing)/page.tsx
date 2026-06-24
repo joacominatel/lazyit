@@ -137,6 +137,30 @@ export default async function LandingPage() {
         </div>
       </section>
 
+      {/* ── Demo video ──────────────────────────────────────────────────── */}
+      <section className="border-t border-border bg-muted/30">
+        <div className="lz-reveal mx-auto w-full max-w-5xl px-6 py-20 sm:py-24">
+          <h2 className="max-w-2xl text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+            {t("demo.title")}
+          </h2>
+          <p className="mt-4 max-w-2xl text-base text-pretty text-muted-foreground sm:text-lg">
+            {t("demo.subtitle")}
+          </p>
+          <div className="mt-10 overflow-hidden rounded-xl border border-border shadow-e2">
+            {/* Native controls, no autoplay; `preload=metadata` avoids fetching the 10 MB file until
+                play. Served from /public (allowed through the auth proxy — see proxy.ts isPublicPath). */}
+            <video
+              controls
+              preload="metadata"
+              playsInline
+              className="aspect-video w-full bg-black"
+            >
+              <source src="/landing/demo.mp4" type="video/mp4" />
+            </video>
+          </div>
+        </div>
+      </section>
+
       {/* ── Thesis: asset-centric ───────────────────────────────────────── */}
       <section className="border-t border-border">
         <div className="lz-reveal mx-auto w-full max-w-3xl px-6 py-20 sm:py-24">
