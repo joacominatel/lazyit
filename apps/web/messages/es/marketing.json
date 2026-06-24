@@ -16,6 +16,10 @@
     "ctaDashboard": "Ir al panel",
     "ctaSignIn": "Iniciar sesión"
   },
+  "demo": {
+    "title": "Velo en acción",
+    "subtitle": "Un recorrido rápido por lazyit — inventario, accesos, la base de conocimiento y el secret manager zero-knowledge."
+  },
   "thesis": {
     "title": "Los activos perduran. Las personas rotan.",
     "body": "La mayoría de las herramientas cuelgan la propiedad del usuario. lazyit lo invierte: el activo es el ciudadano de primera clase, y la propiedad es un registro con fecha — quién lo tiene, desde cuándo y todo lo que cambió. Alguien se va; el historial queda intacto.",
