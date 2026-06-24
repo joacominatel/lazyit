@@ -109,13 +109,31 @@ export function detailHref(view: QuickViewData): string | null {
 }
 
 /**
+ * Localized strings the pure presenter can't produce itself (it has no translator). Threaded in by the
+ * component from `common.quickView.*`; the asset OWNER field needs them so the presenter stays pure and
+ * unit-testable (the test passes plain functions). Optional: omit them and the owner field is dropped
+ * rather than rendered untranslated.
+ */
+export interface QuickViewLabels {
+  /** "Unassigned" — shown as the asset owner value when the asset has no active owner. */
+  noOwner: string;
+  /** "+{n} more" — suffix appended after the first owner when an asset has multiple active owners. */
+  moreOwners: (count: number) => string;
+}
+
+/**
  * PURE field selector (ADR-0072, unit-tested). Maps an entity row to the ordered `<dl>` body — only
  * the plain label/value fields; the identity title + status/role badge are rendered separately by the
  * component. Returns ONLY fields with a present value, in the per-entity order from the design brief.
  * Never emits a secret value (INV-10). An Application `url` is gated by {@link isSafeApplicationUrl}
- * (SEC-008) and rendered as plain text by the component (never a link href).
+ * (SEC-008) and rendered as plain text by the component (never a link href). The optional
+ * {@link QuickViewLabels} supply the localized strings the asset OWNER field needs (so the function
+ * stays translator-free and testable).
  */
-export function selectFields(view: QuickViewData): QuickViewField[] {
+export function selectFields(
+  view: QuickViewData,
+  labels?: QuickViewLabels,
+): QuickViewField[] {
   const fields: QuickViewField[] = [];
   const push = (
     labelKey: string,
@@ -138,6 +156,13 @@ export function selectFields(view: QuickViewData): QuickViewField[] {
       );
       push("category", a.model?.category?.name ?? null);
       push("location", a.location?.name ?? null);
+      // Owner — the CEO's headline disambiguator ("which laptop? Ana's"). Already on the loaded row
+      // as activeAssignments[].user (zero extra fetch). First owner "First Last" + "+N more" when
+      // several; the localized "Unassigned" when none. Needs the translated labels, so it is skipped
+      // when they aren't supplied (e.g. a non-localized caller / a bare test of the other fields).
+      if (labels) {
+        push("owner", formatOwners(a.activeAssignments, labels));
+      }
       break;
     }
     case "user": {
@@ -202,6 +227,23 @@ export function selectFields(view: QuickViewData): QuickViewField[] {
     }
   }
   return fields;
+}
+
+/**
+ * The asset OWNER value from its active assignments (ADR-0019: ownership is the active-assignment join,
+ * never a column). The first owner's "First Last", plus a localized "+N more" suffix when several;
+ * the localized "Unassigned" when there are none. Reads only the already-loaded
+ * `AssetListItem.activeAssignments` (zero extra fetch). Exported for the unit test.
+ */
+export function formatOwners(
+  assignments: AssetListItem["activeAssignments"],
+  labels: QuickViewLabels,
+): string {
+  if (assignments.length === 0) return labels.noOwner;
+  const first = assignments[0]!.user;
+  const name = `${first.firstName} ${first.lastName}`.trim();
+  const extra = assignments.length - 1;
+  return extra > 0 ? `${name} ${labels.moreOwners(extra)}` : name;
 }
 
 /** The set of field keys whose value is long enough to span the full grid width. */
