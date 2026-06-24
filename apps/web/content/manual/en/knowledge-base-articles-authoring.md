@@ -27,9 +27,13 @@ Open the Knowledge Base and choose **New article**. The form is short:
 - **Content** — the body, in Markdown.
 
 The editor is a plain Markdown editor with a live preview — there is no rich-text/WYSIWYG mode by
-design. Fenced code blocks are syntax-highlighted on the published page, each with a copy button,
-and a ` ```mermaid ` block renders as a diagram. You write raw Markdown; the formatting appears when
-the article is viewed.
+design. As you type, the **write pane colourises the source in place** — headings read bold and
+coloured, bold/italic markers, lists, code spans, blockquotes and links are tinted, and the `[[` and
+`{{` reserved tokens stand out — so the raw Markdown stays legible without switching to preview. It
+remains plain editable text, not rendered: the full formatting still appears in the live preview and
+on the published page. Fenced code blocks are syntax-highlighted on the published page, each with a
+copy button, and a ` ```mermaid ` block renders as a diagram. You write raw Markdown; the formatting
+appears when the article is viewed.
 
 While typing, two helpers offer autocomplete:
 
