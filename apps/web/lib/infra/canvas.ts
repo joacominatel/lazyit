@@ -1,4 +1,4 @@
-import { MarkerType } from "@xyflow/react";
+import { MarkerType, Position } from "@xyflow/react";
 import { Graph, layout } from "@dagrejs/dagre";
 import type { InfraEdgeKind, InfraNodeStatus } from "@lazyit/shared";
 import type { StatusTone } from "@/components/ui/status-badge";
@@ -98,6 +98,106 @@ export function edgeStyle(kind: InfraEdgeKind): EdgeStyle {
       // CONNECTS_TO — symmetric, cosmetic adjacency: the calmest thin line, no arrowhead.
       return { stroke, dashArray: undefined, marker: undefined, width: 1, animated: false };
   }
+}
+
+/**
+ * The geometry a floating edge needs from a node: its absolute top-left (`x`/`y`) plus its measured
+ * `width`/`height`. A plain rectangle — NOT React Flow's `InternalNode` — so the intersection math
+ * stays pure and unit-testable (`canvas.test.ts`) without mounting a flow. The edge component reads
+ * `useInternalNode(id)` and feeds `{ x: internals.positionAbsolute.x, y: …, width: measured.width,
+ * height: measured.height }` in (issue #773).
+ */
+export interface NodeRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** The resolved anchors for a floating edge: a point + the side it leaves on, per endpoint. */
+export interface FloatingEdgeParams {
+  sx: number;
+  sy: number;
+  sourcePos: Position;
+  tx: number;
+  ty: number;
+  targetPos: Position;
+}
+
+/**
+ * Where the centre-to-centre line between two node rectangles crosses `rect`'s perimeter — the
+ * canonical React Flow "floating edges" intersection (issue #773). Returns the point on `rect`'s
+ * border that faces `other`, so an edge always leaves the side pointing at its neighbour instead of
+ * a fixed handle (no U-turns, no curl-back loops, no cross-map sweeps).
+ *
+ * The math (RF's `getNodeIntersection`): treat `rect` as a box of half-width `w`, half-height `h`
+ * centred at `(cx, cy)`; the unit-square parametrisation of the line to `other`'s centre gives the
+ * scalar at which it exits the box. Degenerate (concentric centres) falls back to the centre.
+ */
+function nodeIntersection(rect: NodeRect, other: NodeRect): { x: number; y: number } {
+  const w = rect.width / 2;
+  const h = rect.height / 2;
+  const cx = rect.x + w; // rect centre
+  const cy = rect.y + h;
+  const ox = other.x + other.width / 2; // other centre
+  const oy = other.y + other.height / 2;
+
+  const dx = ox - cx;
+  const dy = oy - cy;
+  // Concentric / coincident centres: no meaningful direction — anchor at the centre.
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+
+  // Project the direction onto the box: the scalar that first hits a face is the smaller of the two
+  // axis scalars. A zero component means that axis never limits the line, so its scalar is Infinity
+  // (NOT `w/Infinity = 0`, which would wrongly clamp to the centre for a straight-up/down neighbour).
+  const scaleX = dx === 0 ? Infinity : w / Math.abs(dx);
+  const scaleY = dy === 0 ? Infinity : h / Math.abs(dy);
+  const scale = Math.min(scaleX, scaleY);
+  return { x: cx + dx * scale, y: cy + dy * scale };
+}
+
+/**
+ * Which side of `rect` the intersection `point` sits on (RF's `getEdgePosition`) — used to derive the
+ * `Position` fed into `getBezierPath` so the curve's control handle leaves perpendicular to the right
+ * face. Compares the point against the rect's faces with a 1px tolerance; defaults to Top.
+ */
+function edgePosition(rect: NodeRect, point: { x: number; y: number }): Position {
+  const px = Math.round(point.x);
+  const py = Math.round(point.y);
+  const left = Math.round(rect.x);
+  const right = Math.round(rect.x + rect.width);
+  const top = Math.round(rect.y);
+  const bottom = Math.round(rect.y + rect.height);
+
+  if (px <= left + 1) return Position.Left;
+  if (px >= right - 1) return Position.Right;
+  if (py <= top + 1) return Position.Top;
+  if (py >= bottom - 1) return Position.Bottom;
+  return Position.Top;
+}
+
+/**
+ * The floating-edge anchors for a source/target pair (issue #773) — the pure core of the custom edge.
+ * Computes each node's perimeter point facing the other (via {@link nodeIntersection}) and the side
+ * it leaves on (via {@link edgePosition}). The custom edge feeds `sx/sy/sourcePos` + `tx/ty/targetPos`
+ * straight into `getBezierPath`, so every line exits and enters the convenient side — short, direct,
+ * U-turn-free — regardless of which handle React Flow would otherwise pick. Pure: rectangles in,
+ * numbers + `Position`s out, unit-tested like {@link layoutNodes}.
+ */
+export function getFloatingEdgeParams(
+  source: NodeRect,
+  target: NodeRect,
+): FloatingEdgeParams {
+  const sourcePoint = nodeIntersection(source, target);
+  const targetPoint = nodeIntersection(target, source);
+  return {
+    sx: sourcePoint.x,
+    sy: sourcePoint.y,
+    sourcePos: edgePosition(source, sourcePoint),
+    tx: targetPoint.x,
+    ty: targetPoint.y,
+    targetPos: edgePosition(target, targetPoint),
+  };
 }
 
 /** Horizontal/vertical step + columns for the auto-layout grid. */
