@@ -3,6 +3,8 @@
 import { CheckIcon, ChevronDownIcon } from "@heroicons/react/16/solid";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { type QuickViewData } from "@/components/quick-view-fields";
+import { QuickViewEye } from "@/components/quick-view-eye";
 import {
   Command,
   CommandEmpty,
@@ -83,6 +85,16 @@ export interface EntityMultiSelectProps {
   debounceMs?: number;
   /** Popover alignment. Default `start`. */
   align?: "start" | "center" | "end";
+  /**
+   * Quick View opt-in (epic #788, wave 2 — ADR-0072). Mirrors {@link Combobox}'s `quickView`: when
+   * supplied, each row gains a focusable eye button (before the selection check) that opens a
+   * {@link QuickViewPopover} preview of that entity. The callback maps a row's `value` (entity id) to
+   * the {@link QuickViewData} the wrapper ALREADY loaded (zero extra fetch) — return `null` to skip the
+   * eye for a row with no previewable data. OMIT this prop entirely (the default) and no eye renders —
+   * zero behavior change for non-entity multi-selects. The picker owns the open/pinned/single-open +
+   * focus-return interaction; the wrapper only supplies the data.
+   */
+  quickView?: (value: string) => QuickViewData | null;
 }
 
 export function EntityMultiSelect({
@@ -98,11 +110,24 @@ export function EntityMultiSelect({
   loading = false,
   debounceMs = 250,
   align = "start",
+  quickView,
 }: EntityMultiSelectProps) {
   const t = useTranslations("shared");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const listId = useId();
+
+  // Quick View (ADR-0072): lifted here so only ONE preview is open at a time across all rows, and so
+  // a pinned preview survives the cmdk selection moving. `pinned` distinguishes a transient hover
+  // preview (auto-closes on leave) from a click/Enter/Space-pinned one (stays + shows the footer).
+  const [openQuickViewId, setOpenQuickViewId] = useState<string | null>(null);
+  const [quickViewPinned, setQuickViewPinned] = useState(false);
+
+  // Closing the picker also dismisses any open preview (it's anchored to a row that's about to unmount).
+  function closeQuickView() {
+    setOpenQuickViewId(null);
+    setQuickViewPinned(false);
+  }
 
   const isServerSearch = onSearchChange !== undefined;
   const selectedSet = useMemo(() => new Set(selected), [selected]);
@@ -130,7 +155,11 @@ export function EntityMultiSelect({
   function handleOpenChange(next: boolean) {
     setOpen(next);
     // Reset the query on close so reopening starts clean (server-search reopens on its first page).
-    if (!next) setQuery("");
+    if (!next) {
+      setQuery("");
+      // A preview is anchored to a row that's about to unmount — dismiss it with the picker.
+      closeQuickView();
+    }
   }
 
   return (
@@ -185,33 +214,59 @@ export function EntityMultiSelect({
                   {emptyText ?? t("multiSelect.empty")}
                 </CommandEmpty>
                 <CommandGroup>
-                  {items.map((item) => (
-                    <CommandItem
-                      key={item.value}
-                      // cmdk matches on `value`; in client-filter mode we want the LABEL searchable
-                      // while still toggling by KEY, so pass label+key (+keywords) for matching and
-                      // resolve the chosen key via the closure — never the value text.
-                      value={
-                        isServerSearch
-                          ? item.value
-                          : `${item.label} ${item.value}`
-                      }
-                      keywords={item.keywords}
-                      disabled={item.disabled}
-                      // Keep the menu open while toggling several entities (#198 pattern).
-                      onSelect={() => toggle(item.value)}
-                    >
-                      <span className="line-clamp-1">{item.label}</span>
-                      <CheckIcon
-                        className={cn(
-                          "ml-auto size-4 shrink-0",
-                          selectedSet.has(item.value)
-                            ? "opacity-100"
-                            : "opacity-0",
-                        )}
-                      />
-                    </CommandItem>
-                  ))}
+                  {items.map((item) => {
+                    const view = quickView?.(item.value) ?? null;
+                    return (
+                      <CommandItem
+                        key={item.value}
+                        // cmdk matches on `value`; in client-filter mode we want the LABEL searchable
+                        // while still toggling by KEY, so pass label+key (+keywords) for matching and
+                        // resolve the chosen key via the closure — never the value text.
+                        value={
+                          isServerSearch
+                            ? item.value
+                            : `${item.label} ${item.value}`
+                        }
+                        keywords={item.keywords}
+                        disabled={item.disabled}
+                        // Keep the menu open while toggling several entities (#198 pattern).
+                        onSelect={() => toggle(item.value)}
+                        // `group/row` so the eye can reveal on hover OR on the cmdk-selected row.
+                        className="group/row"
+                      >
+                        <span className="line-clamp-1">{item.label}</span>
+                        <span className="ml-auto flex shrink-0 items-center gap-1">
+                          {/* Eye before the check so the selection glyph stays the row's last element. */}
+                          {view ? (
+                            <QuickViewEye
+                              view={view}
+                              open={openQuickViewId === item.value}
+                              pinned={
+                                openQuickViewId === item.value && quickViewPinned
+                              }
+                              onPreview={() => {
+                                setOpenQuickViewId(item.value);
+                                setQuickViewPinned(false);
+                              }}
+                              onPin={() => {
+                                setOpenQuickViewId(item.value);
+                                setQuickViewPinned(true);
+                              }}
+                              onClose={closeQuickView}
+                            />
+                          ) : null}
+                          <CheckIcon
+                            className={cn(
+                              "size-4",
+                              selectedSet.has(item.value)
+                                ? "opacity-100"
+                                : "opacity-0",
+                            )}
+                          />
+                        </span>
+                      </CommandItem>
+                    );
+                  })}
                 </CommandGroup>
               </>
             )}

@@ -9,8 +9,10 @@ subcategory: quick-view
 
 Quick view is a small **eye** that appears on each row of the entity pickers — the dropdowns you use
 to choose an asset, a person, a model, an application or a location while assigning, granting access
-or linking a record. It opens a generous preview of that row **without leaving what you are doing**,
-so you can tell two similar-looking entries apart before you pick one.
+or linking a record. The same eye also appears in the **multi-select filters** — for example when you
+filter the knowledge base by the specific assets or applications an article relates to. It opens a
+generous preview of that row **without leaving what you are doing**, so you can tell two
+similar-looking entries apart before you pick one.
 
 It exists because a picker row is necessarily terse: an asset shows as a name, a person as "Juan D.",
 a model as "Dell Latitude". When two rows look alike — two laptops with the same model, two people

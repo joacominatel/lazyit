@@ -9,8 +9,11 @@ subcategory: quick-view
 
 La vista rápida es un pequeño **ojo** que aparece en cada fila de los selectores de entidades — los
 desplegables que usás para elegir un activo, una persona, un modelo, una aplicación o una ubicación
-al asignar, otorgar acceso o vincular un registro. Abre una vista previa generosa de esa fila **sin
-salir de lo que estás haciendo**, para que puedas distinguir entradas parecidas antes de elegir una.
+al asignar, otorgar acceso o vincular un registro. El mismo ojo aparece también en los **filtros de
+selección múltiple** — por ejemplo cuando filtrás la base de conocimiento por los activos o las
+aplicaciones específicas con las que se relaciona un artículo. Abre una vista previa generosa de esa
+fila **sin salir de lo que estás haciendo**, para que puedas distinguir entradas parecidas antes de
+elegir una.
 
 Existe porque una fila de un selector es necesariamente escueta: un activo se muestra por su nombre,
 una persona como "Juan D.", un modelo como "Dell Latitude". Cuando dos filas se parecen — dos
