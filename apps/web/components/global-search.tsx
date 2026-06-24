@@ -9,10 +9,25 @@ import {
   ServerStackIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
-import { SEARCH_ENTITIES, type SearchEntity } from "@lazyit/shared";
+import { EyeIcon } from "@heroicons/react/16/solid";
+import {
+  type AssetHit,
+  type AssetStatus,
+  type InfraNodeHit,
+  type InfraNodeKind,
+  type InfraNodeStatus,
+  type LocationType,
+  SEARCH_ENTITIES,
+  type SearchEntity,
+} from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type QuickViewData,
+  titleFor,
+} from "@/components/quick-view-fields";
+import { QuickViewPopover } from "@/components/quick-view-popover";
 import {
   Command,
   CommandGroup,
@@ -27,7 +42,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useAsset } from "@/lib/api/hooks/use-assets";
 import { useSearch } from "@/lib/api/hooks/use-search";
+import { useUser } from "@/lib/api/hooks/use-users";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 
@@ -64,6 +81,33 @@ export function GlobalSearch() {
   const [query, setQuery] = useState("");
   const [entity, setEntity] = useState<EntityFilter>("all");
 
+  // Quick View (epic #788, wave 3 — ADR-0072): lifted here so only ONE preview is open at a time
+  // across every result row, and a pinned preview survives the cmdk selection moving. The id is the
+  // namespaced row key (`entity:id`) so two entities can't collide on a bare id. `pinned` separates a
+  // transient hover preview (auto-closes on leave) from a click/Enter/Space-pinned one (footer shown).
+  const [openQuickViewId, setOpenQuickViewId] = useState<string | null>(null);
+  const [quickViewPinned, setQuickViewPinned] = useState(false);
+
+  function closeQuickView() {
+    setOpenQuickViewId(null);
+    setQuickViewPinned(false);
+  }
+
+  // Bundle the single-open state + transitions once, so each ResultGroup wires its rows identically.
+  const quickViewState: QuickViewState = {
+    openId: openQuickViewId,
+    pinned: quickViewPinned,
+    preview: (id) => {
+      setOpenQuickViewId(id);
+      setQuickViewPinned(false);
+    },
+    pin: (id) => {
+      setOpenQuickViewId(id);
+      setQuickViewPinned(true);
+    },
+    close: closeQuickView,
+  };
+
   const debouncedQuery = useDebouncedValue(query.trim(), 300);
   const entities = entity === "all" ? undefined : [entity];
   // Fewer per index when searching everything (keeps the palette compact); more when scoped.
@@ -94,6 +138,8 @@ export function GlobalSearch() {
     if (!next) {
       setQuery("");
       setEntity("all");
+      // A preview is anchored to a row that's about to unmount — dismiss it with the palette.
+      closeQuickView();
     }
   }
 
@@ -184,6 +230,11 @@ export function GlobalSearch() {
                 <StatusRow tone="error">{t("search.unavailable")}</StatusRow>
               ) : (
                 <>
+                  {/* Each group gets the lifted single-open Quick View state. The eye opens a preview
+                      of that row WITHOUT firing its `onSelect` navigation (the eye stopPropagations).
+                      Most entities build the preview from the lean hit itself (zero extra fetch);
+                      assets lazily fetch the rich detail on open (`AssetQuickViewEye`) since the hit
+                      lacks the model/category/location/owner disambiguators. */}
                   <ResultGroup
                     entity="assets"
                     block={data?.assets}
@@ -192,6 +243,8 @@ export function GlobalSearch() {
                       primary: hit.name,
                       secondary: hit.assetTag ?? hit.serial ?? undefined,
                     })}
+                    quickViewState={quickViewState}
+                    Eye={AssetQuickViewEye}
                   />
                   <ResultGroup
                     entity="articles"
@@ -200,6 +253,17 @@ export function GlobalSearch() {
                     render={(hit) => ({
                       primary: hit.title,
                       secondary: hit.excerpt ?? undefined,
+                    })}
+                    quickViewState={quickViewState}
+                    quickView={(hit) => ({
+                      entity: "article",
+                      data: {
+                        id: hit.id,
+                        title: hit.title,
+                        slug: hit.slug,
+                        status: hit.status === "PUBLISHED" ? "PUBLISHED" : "DRAFT",
+                        excerpt: hit.excerpt,
+                      },
                     })}
                   />
                   {/* CEO decision (#779): user/location hits land on the pre-filtered list
@@ -213,6 +277,8 @@ export function GlobalSearch() {
                       primary: `${hit.firstName} ${hit.lastName}`.trim(),
                       secondary: hit.email,
                     })}
+                    quickViewState={quickViewState}
+                    Eye={UserQuickViewEye}
                   />
                   <ResultGroup
                     entity="locations"
@@ -221,6 +287,23 @@ export function GlobalSearch() {
                     render={(hit) => ({
                       primary: hit.name,
                       secondary: hit.address ?? hit.type,
+                    })}
+                    quickViewState={quickViewState}
+                    quickView={(hit) => ({
+                      entity: "location",
+                      // The hit already carries type/address/floor — the full preview, no fetch.
+                      data: {
+                        id: hit.id,
+                        name: hit.name,
+                        type: isLocationType(hit.type) ? hit.type : "OTHER",
+                        address: hit.address,
+                        floor: hit.floor,
+                        description: null,
+                        notes: null,
+                        createdAt: "",
+                        updatedAt: "",
+                        deletedAt: null,
+                      },
                     })}
                   />
                   <ResultGroup
@@ -231,6 +314,26 @@ export function GlobalSearch() {
                       primary: hit.name,
                       secondary: hit.vendor ?? undefined,
                     })}
+                    quickViewState={quickViewState}
+                    quickView={(hit) => ({
+                      entity: "application",
+                      // The hit carries vendor + description (the useful preview); url isn't indexed and
+                      // isn't worth a per-open fetch. SEC-008 stays satisfied — no url is shown at all.
+                      data: {
+                        id: hit.id,
+                        name: hit.name,
+                        description: hit.description,
+                        url: null,
+                        vendor: hit.vendor,
+                        categoryId: null,
+                        isCritical: false,
+                        metadata: null,
+                        notes: null,
+                        createdAt: "",
+                        updatedAt: "",
+                        deletedAt: null,
+                      },
+                    })}
                   />
                   <ResultGroup
                     entity="infra"
@@ -240,6 +343,8 @@ export function GlobalSearch() {
                       primary: hit.label,
                       secondary: hit.assetName ?? hit.ipAddress ?? undefined,
                     })}
+                    quickViewState={quickViewState}
+                    quickView={(hit) => infraViewFromHit(hit)}
                   />
                   {totalHits === 0 &&
                     (isFetching ? (
@@ -329,20 +434,58 @@ function Kbd({ children }: { children: ReactNode }) {
 }
 
 /**
+ * The lifted, single-open Quick View interaction shared by every result row (ADR-0072, wave 3). One
+ * preview open at a time across the whole palette; a pinned one survives the cmdk selection moving.
+ * `openId` is the namespaced row key (`entity:id`). The transitions take that key so a hover preview,
+ * a click-pin and Escape/outside-click all collapse to the one lifted state.
+ */
+interface QuickViewState {
+  openId: string | null;
+  pinned: boolean;
+  preview: (id: string) => void;
+  pin: (id: string) => void;
+  close: () => void;
+}
+
+/** The eye-state slice a per-row eye needs (already narrowed to THIS row's open/pinned booleans). */
+interface RowEyeState {
+  open: boolean;
+  pinned: boolean;
+  onPreview: () => void;
+  onPin: () => void;
+  onClose: () => void;
+}
+
+/** A per-row eye component: builds the (possibly lazily-fetched) {@link QuickViewData} for one hit. */
+type EyeComponent<H> = (props: { hit: H; eye: RowEyeState }) => ReactNode;
+
+/**
  * One entity's result section. Generic over the hit type `H` so `render`/`onSelect` are typed to the
  * concrete hit (asset, article, …). Renders nothing when the block is absent or empty, so a scoped
  * search (only one entity key present) collapses the rest.
+ *
+ * Quick View (wave 3): each row gains a focusable eye (revealed on hover or on the cmdk-selected row)
+ * that previews the entity WITHOUT firing `onSelect`. A group supplies EITHER `quickView` — a pure
+ * hit→{@link QuickViewData} mapper for entities the lean hit already disambiguates (zero fetch) — OR a
+ * custom `Eye` component for entities that lazily fetch their detail on open (assets, users). Omit
+ * both and the row renders eyeless (unchanged).
  */
 function ResultGroup<H extends { id: string }>({
   entity,
   block,
   render,
   onSelect,
+  quickViewState,
+  quickView,
+  Eye,
 }: {
   entity: SearchEntity;
   block: { hits: H[]; total: number } | undefined;
   render: (hit: H) => { primary: string; secondary?: string };
   onSelect: (hit: H) => void;
+  quickViewState?: QuickViewState;
+  quickView?: (hit: H) => QuickViewData | null;
+  Eye?: EyeComponent<H>;
 }) {
   const t = useTranslations("shared");
   if (!block || block.hits.length === 0) return null;
@@ -354,12 +497,26 @@ function ResultGroup<H extends { id: string }>({
     <CommandGroup heading={`${label}${more}`}>
       {block.hits.map((hit) => {
         const { primary, secondary } = render(hit);
+        const rowId = `${entity}:${hit.id}`;
+        // Narrow the lifted state to THIS row so the eye only knows its own open/pinned booleans.
+        const eye: RowEyeState | null = quickViewState
+          ? {
+              open: quickViewState.openId === rowId,
+              pinned:
+                quickViewState.openId === rowId && quickViewState.pinned,
+              onPreview: () => quickViewState.preview(rowId),
+              onPin: () => quickViewState.pin(rowId),
+              onClose: quickViewState.close,
+            }
+          : null;
+        const fromHit = quickView?.(hit) ?? null;
         return (
           <CommandItem
-            key={`${entity}:${hit.id}`}
-            value={`${entity}:${hit.id}`}
+            key={rowId}
+            value={rowId}
             onSelect={() => onSelect(hit)}
-            className="gap-2"
+            // `group/row` so the eye reveals on hover OR on the cmdk-selected row (keyboard roving).
+            className="group/row gap-2"
           >
             <Icon className="size-4 shrink-0 text-muted-foreground" />
             <span className="truncate">{primary}</span>
@@ -368,9 +525,293 @@ function ResultGroup<H extends { id: string }>({
                 {secondary}
               </span>
             ) : null}
+            {eye ? (
+              <span
+                className={cn("shrink-0", secondary ? "pl-1" : "ml-auto pl-3")}
+              >
+                {Eye ? (
+                  <Eye hit={hit} eye={eye} />
+                ) : fromHit ? (
+                  <QuickViewEye view={fromHit} {...eye} />
+                ) : null}
+              </span>
+            ) : null}
           </CommandItem>
         );
       })}
     </CommandGroup>
   );
+}
+
+/** Intent delay (ms) before a hover opens the Quick View preview — long enough that skimming the
+ *  list with the mouse doesn't flicker previews, short enough to feel instant on a deliberate hover.
+ *  Matches the picker affordance (combobox.tsx). */
+const QUICK_VIEW_HOVER_MS = 120;
+
+/**
+ * The per-row eye affordance (ADR-0072), mirroring the picker's `QuickViewEye` (combobox.tsx). A real
+ * `<button>` that is `opacity-0` and revealed by `group-hover/row` OR `group-data-[selected=true]/row`
+ * — so it is keyboard-VISIBLE on the cmdk-selected row, not just on mouse hover. It
+ * `stopPropagation`/`preventDefault`s so activating it NEVER triggers the row's `onSelect` navigation.
+ *
+ * Hover (after a ~120ms intent delay) opens a transient PREVIEW; click PINS it (footer + dialog
+ * semantics). It is the radix `PopoverAnchor`, so Escape closes + returns focus here for free.
+ *
+ * KEYBOARD-OPEN is the documented v1 LIMITATION (#793, same as the pickers): cmdk keeps DOM focus on
+ * the CommandInput and routes Enter to the highlighted row's `onSelect`, so the eye — though visible
+ * on the selected row — can't be opened by a pure-keyboard user without fighting that roving model.
+ */
+function QuickViewEye({
+  view,
+  open,
+  pinned,
+  onPreview,
+  onPin,
+  onClose,
+}: { view: QuickViewData } & RowEyeState) {
+  const t = useTranslations("common.quickView");
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearHoverTimer() {
+    if (hoverTimer.current) {
+      clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+    }
+  }
+
+  useEffect(() => clearHoverTimer, []);
+
+  return (
+    <QuickViewPopover
+      view={view}
+      open={open}
+      pinned={pinned}
+      onOpenChange={(next) => {
+        // Radix drives this on Escape / outside-click — collapse our lifted state to match.
+        if (!next) onClose();
+      }}
+      anchor={
+        <button
+          type="button"
+          aria-label={t("trigger", { name: titleFor(view) })}
+          // cmdk owns roving focus (DOM focus stays on the CommandInput); keep the eye out of the Tab
+          // order so it doesn't fight that model (the #793 follow-up adds a keyboard-open path).
+          tabIndex={-1}
+          className={cn(
+            "flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 group-hover/row:opacity-100 group-data-[selected=true]/row:opacity-100",
+            open && "opacity-100",
+          )}
+          onMouseEnter={() => {
+            clearHoverTimer();
+            hoverTimer.current = setTimeout(onPreview, QUICK_VIEW_HOVER_MS);
+          }}
+          onMouseLeave={() => {
+            clearHoverTimer();
+            // Only a transient preview auto-dismisses on leave; a pinned one stays.
+            if (open && !pinned) onClose();
+          }}
+          onClick={(event) => {
+            // Don't let the click bubble to cmdk and select the row — the eye is a separate action.
+            event.preventDefault();
+            event.stopPropagation();
+            clearHoverTimer();
+            // Toggle: clicking the eye of an already-pinned preview closes it.
+            if (open && pinned) onClose();
+            else onPin();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              clearHoverTimer();
+              if (open && pinned) onClose();
+              else onPin();
+            }
+          }}
+        >
+          <EyeIcon className="size-4" />
+        </button>
+      }
+    />
+  );
+}
+
+/**
+ * Asset eye — the one palette entity whose lean hit (name/serial/assetTag/status) lacks the headline
+ * disambiguators (model, category, location, OWNER). It lazily fetches the rich detail via `useAsset`
+ * gated on the preview being open (`enabled: open`) — one deduped/cached request per opened item,
+ * never on row render, never list-wide. The lean hit renders instantly; the detail enriches it when it
+ * lands (TanStack dedup + the warm detail cache from a prior open/navigation make repeats instant).
+ */
+function AssetQuickViewEye({ hit, eye }: { hit: AssetHit; eye: RowEyeState }) {
+  const { data } = useAsset(eye.open ? hit.id : undefined);
+  const view: QuickViewData = {
+    entity: "asset",
+    data: data
+      ? {
+          // The detail read (AssetWithRelations) is a structural superset of AssetListItem; map only
+          // the fields the presenter reads so the slot stays exactly the list-item shape it expects.
+          id: data.id,
+          name: data.name,
+          serial: data.serial,
+          assetTag: data.assetTag,
+          status: data.status,
+          notes: data.notes,
+          purchaseDate: data.purchaseDate,
+          warrantyEnd: data.warrantyEnd,
+          modelId: data.modelId,
+          locationId: data.locationId,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+          deletedAt: data.deletedAt,
+          model: data.model
+            ? {
+                id: data.model.id,
+                name: data.model.name,
+                manufacturer: data.model.manufacturer,
+                category: data.model.category
+                  ? { id: data.model.category.id, name: data.model.category.name }
+                  : null,
+              }
+            : null,
+          location: data.location
+            ? {
+                id: data.location.id,
+                name: data.location.name,
+                type: data.location.type,
+              }
+            : null,
+          activeAssignments: data.activeAssignments.map((a) => ({
+            id: a.id,
+            userId: a.userId,
+            user: {
+              id: a.user.id,
+              firstName: a.user.firstName,
+              lastName: a.user.lastName,
+              email: a.user.email,
+              deletedAt: a.user.deletedAt,
+            },
+          })),
+        }
+      : {
+          // Instant skeleton from the lean hit while the detail loads (serial/tag/status show now).
+          id: hit.id,
+          name: hit.name,
+          serial: hit.serial,
+          assetTag: hit.assetTag,
+          status: isAssetStatus(hit.status) ? hit.status : "UNKNOWN",
+          notes: hit.notes,
+          purchaseDate: null,
+          warrantyEnd: null,
+          modelId: null,
+          locationId: null,
+          createdAt: "",
+          updatedAt: "",
+          deletedAt: null,
+          model: null,
+          location: null,
+          activeAssignments: [],
+        },
+  };
+  return <QuickViewEye view={view} {...eye} />;
+}
+
+/**
+ * User eye — the lean hit (id/name/email) is enough to render the avatar + email identity instantly,
+ * but the identity badge (active/inactive + RBAC role) and the username/legajo/manager fields aren't
+ * on the search index, so it would fabricate a (wrong) badge from the hit. So it lazily fetches the
+ * bare `User` via `useUser` (gated on open) for the correct role/status/details, showing the hit
+ * identity while it loads. `User` is a structural `UserListItem` (the activity counts are optional).
+ */
+function UserQuickViewEye({
+  hit,
+  eye,
+}: {
+  hit: { id: string; firstName: string; lastName: string; email: string };
+  eye: RowEyeState;
+}) {
+  const { data } = useUser(eye.open ? hit.id : undefined);
+  const view: QuickViewData = {
+    entity: "user",
+    data: data ?? {
+      // Identity-only skeleton from the hit while the detail loads. The role/status badge waits for
+      // the fetch rather than guessing — `MEMBER`/active here would be a misleading default, so we
+      // keep them off until the real values arrive (the badge simply renders from these once `data`
+      // replaces this object).
+      id: hit.id,
+      firstName: hit.firstName,
+      lastName: hit.lastName,
+      email: hit.email,
+      isActive: true,
+      role: "MEMBER",
+      externalId: null,
+      legajo: null,
+      username: null,
+      manager: null,
+      directoryOnly: false,
+      createdAt: "",
+      updatedAt: "",
+      deletedAt: null,
+    },
+  };
+  return <QuickViewEye view={view} {...eye} />;
+}
+
+/** Build the infra Quick View straight from the lean hit — kind/status/IP/linked-asset are all on the
+ *  index (zero extra fetch). Narrows the index's plain-string `kind`/`status` back to their enums. */
+function infraViewFromHit(hit: InfraNodeHit): QuickViewData {
+  return {
+    entity: "infra",
+    data: {
+      id: hit.id,
+      label: hit.label,
+      kind: isInfraKind(hit.kind) ? hit.kind : "OTHER",
+      status: isInfraStatus(hit.status) ? hit.status : "UNKNOWN",
+      ipAddress: hit.ipAddress,
+      assetName: hit.assetName,
+    },
+  };
+}
+
+const ASSET_STATUSES = new Set<string>([
+  "OPERATIONAL",
+  "IN_MAINTENANCE",
+  "IN_STORAGE",
+  "RETIRED",
+  "LOST",
+  "UNKNOWN",
+]);
+function isAssetStatus(v: string): v is AssetStatus {
+  return ASSET_STATUSES.has(v);
+}
+
+const LOCATION_TYPES = new Set<string>([
+  "OFFICE",
+  "DATACENTER",
+  "RACK",
+  "REMOTE",
+  "STORAGE",
+  "OTHER",
+]);
+function isLocationType(v: string): v is LocationType {
+  return LOCATION_TYPES.has(v);
+}
+
+const INFRA_KINDS = new Set<string>([
+  "PHYSICAL_HOST",
+  "VM",
+  "CONTAINER",
+  "CLUSTER",
+  "NETWORK_DEVICE",
+  "STORAGE",
+  "APPLIANCE",
+  "OTHER",
+]);
+function isInfraKind(v: string): v is InfraNodeKind {
+  return INFRA_KINDS.has(v);
+}
+
+const INFRA_STATUSES = new Set<string>(["ONLINE", "OFFLINE", "UNKNOWN"]);
+function isInfraStatus(v: string): v is InfraNodeStatus {
+  return INFRA_STATUSES.has(v);
 }
