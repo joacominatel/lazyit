@@ -50,6 +50,13 @@ export function LocationCombobox({
     [data],
   );
 
+  // Quick View (ADR-0072): the eye reads the ALREADY-LOADED list row — zero extra fetch. The row is
+  // the full Location (type badge + address/floor/description).
+  const byId = useMemo(
+    () => new Map((data?.items ?? []).map((location) => [location.id, location])),
+    [data],
+  );
+
   return (
     <Combobox
       id={id}
@@ -66,6 +73,10 @@ export function LocationCombobox({
       emptyText={emptyText}
       loadingText={tc("searching")}
       typeToSearchText={tc("typeToSearch")}
+      quickView={(rowId) => {
+        const location = byId.get(rowId);
+        return location ? { entity: "location", data: location } : null;
+      }}
     />
   );
 }
