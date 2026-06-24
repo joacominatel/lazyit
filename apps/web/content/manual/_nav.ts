@@ -105,7 +105,12 @@ export const MANUAL_NAV: readonly ManualNavCategory[] = [
   },
   {
     category: "notifications-activity",
-    subcategories: ["notification-bell", "activity-reports", "global-search"],
+    subcategories: [
+      "notification-bell",
+      "activity-reports",
+      "global-search",
+      "quick-view",
+    ],
   },
   {
     category: "configuration",
