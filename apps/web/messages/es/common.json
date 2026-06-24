@@ -50,5 +50,37 @@
     "empty": "Sin resultados.",
     "typeToSearch": "Escribe para buscar…",
     "loading": "Buscando…"
+  },
+  "quickView": {
+    "trigger": "Vista rápida: {name}",
+    "openRecord": "Abrir ficha completa",
+    "none": "—",
+    "noOwner": "Sin asignar",
+    "moreOwners": "+{count} más",
+    "fields": {
+      "serial": "Número de serie",
+      "assetTag": "Etiqueta",
+      "model": "Modelo",
+      "category": "Categoría",
+      "location": "Ubicación",
+      "owner": "Responsable",
+      "owners": "Responsables",
+      "status": "Estado",
+      "email": "Email",
+      "role": "Rol",
+      "username": "Usuario",
+      "legajo": "Legajo",
+      "manager": "Responsable jerárquico",
+      "assets": "Activos",
+      "apps": "Accesos a apps",
+      "sku": "SKU",
+      "manufacturer": "Fabricante",
+      "description": "Descripción",
+      "type": "Tipo",
+      "address": "Dirección",
+      "floor": "Piso",
+      "vendor": "Proveedor",
+      "url": "URL"
+    }
   }
 }

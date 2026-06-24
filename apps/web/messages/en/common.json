@@ -50,5 +50,37 @@
     "empty": "No results.",
     "typeToSearch": "Type to search…",
     "loading": "Searching…"
+  },
+  "quickView": {
+    "trigger": "Quick view: {name}",
+    "openRecord": "Open full record",
+    "none": "—",
+    "noOwner": "Unassigned",
+    "moreOwners": "+{count} more",
+    "fields": {
+      "serial": "Serial",
+      "assetTag": "Asset tag",
+      "model": "Model",
+      "category": "Category",
+      "location": "Location",
+      "owner": "Owner",
+      "owners": "Owners",
+      "status": "Status",
+      "email": "Email",
+      "role": "Role",
+      "username": "Username",
+      "legajo": "File number",
+      "manager": "Manager",
+      "assets": "Assets",
+      "apps": "App access",
+      "sku": "SKU",
+      "manufacturer": "Manufacturer",
+      "description": "Description",
+      "type": "Type",
+      "address": "Address",
+      "floor": "Floor",
+      "vendor": "Vendor",
+      "url": "URL"
+    }
   }
 }
