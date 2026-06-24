@@ -8,8 +8,8 @@ subcategory: global-search
 # Global search
 
 Global search is the command palette that spans the whole product: one box that searches across
-assets, articles, users, locations and applications at once. It is typo-tolerant and ranked, so a
-near-miss or a partial word still finds the record.
+assets, articles, users, locations, applications and topology nodes at once. It is typo-tolerant and
+ranked, so a near-miss or a partial word still finds the record.
 
 ## Opening it
 
@@ -21,7 +21,7 @@ Start typing and results appear, grouped by kind. Move through them with the **�
 
 ## What it searches
 
-Five kinds of records are indexed:
+Six kinds of records are indexed:
 
 - **Assets** — by name, asset tag or serial.
 - **Articles** — Knowledge Base articles, including their body text, so a procedure inside an article
@@ -29,9 +29,22 @@ Five kinds of records are indexed:
 - **Users** — by name and email.
 - **Locations** — by name and address.
 - **Applications** — by name and vendor.
+- **Topology nodes** — servers, VMs, containers and the rest of the infrastructure map, by label, IP
+  address or linked asset name.
 
 Use the **filter chips** above the results to scope the search to a single kind, or leave it on
 **All** to search everything. Selecting a result navigates straight to that record.
+
+## Quick View — preview a result without leaving search
+
+Each result row carries a small **eye** that appears when you hover the row (or when the keyboard
+selection lands on it). Hover the eye to peek at a generous **preview** of that record, or click it to
+**pin** the preview open. Pinned previews show an **"Open full record"** link that opens the entity in
+a new tab, so you can confirm you have the right "Juan D." or the right `LZ-0042` before you navigate.
+
+Only one preview is open at a time, and **Esc** closes it. Most previews render instantly from the
+search result itself; an asset's or user's richer details (owner, location, role) load on demand the
+moment you open the preview, so opening it never slows the search down.
 
 ## What you see depends on your permissions
 

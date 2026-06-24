@@ -8,8 +8,9 @@ subcategory: global-search
 # Búsqueda global
 
 La búsqueda global es la paleta de comandos que abarca todo el producto: una sola caja que busca a la
-vez en activos, artículos, usuarios, ubicaciones y aplicaciones. Tolera errores de tipeo y ordena los
-resultados por relevancia, así que una palabra parcial o casi acertada igual encuentra el registro.
+vez en activos, artículos, usuarios, ubicaciones, aplicaciones y nodos de topología. Tolera errores de
+tipeo y ordena los resultados por relevancia, así que una palabra parcial o casi acertada igual
+encuentra el registro.
 
 ## Cómo abrirla
 
@@ -21,7 +22,7 @@ pulsa **Enter** para abrir el resultado resaltado y **Esc** para cerrar.
 
 ## Qué busca
 
-Se indexan cinco tipos de registros:
+Se indexan seis tipos de registros:
 
 - **Activos** — por nombre, etiqueta de activo o número de serie.
 - **Artículos** — artículos de la Base de Conocimiento, incluido su cuerpo de texto, así que un
@@ -30,9 +31,24 @@ Se indexan cinco tipos de registros:
 - **Usuarios** — por nombre y correo.
 - **Ubicaciones** — por nombre y dirección.
 - **Aplicaciones** — por nombre y proveedor.
+- **Nodos de topología** — servidores, máquinas virtuales, contenedores y el resto del mapa de
+  infraestructura, por etiqueta, dirección IP o nombre del activo vinculado.
 
 Usa las **fichas de filtro** encima de los resultados para acotar la búsqueda a un solo tipo, o déjala en
 **Todos** para buscar en todo. Al seleccionar un resultado se navega directamente a ese registro.
+
+## Vista rápida — previsualiza un resultado sin salir de la búsqueda
+
+Cada fila de resultado lleva un pequeño **ojo** que aparece al pasar el cursor por la fila (o cuando la
+selección del teclado cae sobre ella). Pasa el cursor por el ojo para asomarte a una **vista previa**
+generosa de ese registro, o haz clic para **fijarla** abierta. Las vistas previas fijadas muestran un
+enlace **"Abrir ficha completa"** que abre la entidad en una pestaña nueva, así puedes confirmar que
+tienes al "Juan D." correcto o el `LZ-0042` correcto antes de navegar.
+
+Solo hay una vista previa abierta a la vez, y **Esc** la cierra. La mayoría de las vistas previas se
+renderizan al instante a partir del propio resultado de búsqueda; los detalles más ricos de un activo o
+un usuario (responsable, ubicación, rol) se cargan a pedido en el momento en que abres la vista previa,
+así que abrirla nunca ralentiza la búsqueda.
 
 ## Lo que ves depende de tus permisos
 

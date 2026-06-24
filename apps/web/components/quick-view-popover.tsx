@@ -33,7 +33,9 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { UserAvatar } from "@/components/user-avatar";
+import { statusTone } from "@/lib/infra/canvas";
 import { cn } from "@/lib/utils";
 
 export type {
@@ -76,6 +78,7 @@ const ENTITY_GLYPH = {
   article: BookOpenIcon,
   consumable: CubeIcon,
   category: TagIcon,
+  infra: CpuChipIcon,
 } as const;
 
 export interface QuickViewPopoverProps {
@@ -100,11 +103,15 @@ export function QuickViewPopover({
 }: QuickViewPopoverProps) {
   const t = useTranslations("common.quickView");
   const tf = useTranslations("common.quickView.fields");
+  // The infra `kind` field is localized from the `infra` namespace (shared with the topology panel).
+  const ti = useTranslations("infra");
   const title = titleFor(view);
-  // The asset OWNER field needs localized strings the pure presenter can't produce itself.
+  // The asset OWNER field needs localized strings the pure presenter can't produce itself; the infra
+  // KIND field likewise needs the `infra.kind.*` translator threaded in (presenter stays translator-free).
   const fields = selectFields(view, {
     noOwner: t("noOwner"),
     moreOwners: (count) => t("moreOwners", { count }),
+    infraKind: (kind) => ti(`kind.${kind}`),
   });
   const href = detailHref(view);
   const Glyph = ENTITY_GLYPH[view.entity];
@@ -206,6 +213,8 @@ export function QuickViewPopover({
 /** The status/role badge in the identity row, per entity. Returns nothing for entities with no badge
  *  (asset model, category, consumable) so the row collapses cleanly. */
 function IdentityBadge({ view }: { view: QuickViewData }) {
+  // Called unconditionally (hook rules); only the infra case reads it.
+  const ti = useTranslations("infra");
   switch (view.entity) {
     case "asset":
       return <AssetStatusBadge status={view.data.status} />;
@@ -220,6 +229,14 @@ function IdentityBadge({ view }: { view: QuickViewData }) {
       return <LocationTypeBadge type={view.data.type} />;
     case "article":
       return <ArticleStatusBadge status={view.data.status} />;
+    case "infra":
+      // Mirror the topology panel: a toned status dot-badge (online/offline/unknown), localized from
+      // the same `infra.status.*` keys.
+      return (
+        <StatusBadge tone={statusTone(view.data.status)} dot>
+          {ti(`status.${view.data.status}`)}
+        </StatusBadge>
+      );
     default:
       return null;
   }

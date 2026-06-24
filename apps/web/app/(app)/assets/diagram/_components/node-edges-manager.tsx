@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Combobox } from "@/components/combobox";
+import type { QuickViewData } from "@/components/quick-view-fields";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -242,6 +243,30 @@ function AddEdgeDialog({
     [nodes, sourceId],
   );
 
+  // Quick View (epic #788): the already-loaded `nodes` are a rich-enough preview source — no fetch.
+  // So the target picker's eye previews kind/status/IP straight from the row before you connect it.
+  const nodeById = useMemo(
+    () => new Map(nodes.map((node) => [node.id, node])),
+    [nodes],
+  );
+  const targetQuickView = (value: string): QuickViewData | null => {
+    const node = nodeById.get(value);
+    return node
+      ? {
+          entity: "infra",
+          data: {
+            id: node.id,
+            label: node.label,
+            kind: node.kind,
+            status: node.status,
+            ipAddress: node.ipAddress,
+            // `InfraNode` (the canvas node) carries no joined asset name — left undefined (the
+            // drill-in detail is where the linked asset surfaces).
+          },
+        }
+      : null;
+  };
+
   const onSubmit = form.handleSubmit((values) => {
     if (!values.kind || !values.targetId) return;
     create.mutate(
@@ -320,6 +345,7 @@ function AddEdgeDialog({
                     placeholder={t("edges.targetPlaceholder")}
                     searchPlaceholder={t("edges.targetSearch")}
                     emptyText={t("edges.targetEmpty")}
+                    quickView={targetQuickView}
                   />
                   <FieldDescription>
                     {t("edges.directionNote")}{" "}

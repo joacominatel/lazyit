@@ -2,6 +2,8 @@ import type {
   Application,
   AssetListItem,
   AssetModel,
+  InfraNodeKind,
+  InfraNodeStatus,
   Location,
   UserListItem,
 } from "@lazyit/shared";
@@ -24,7 +26,8 @@ export type QuickViewEntity =
   | "location"
   | "article"
   | "consumable"
-  | "category";
+  | "category"
+  | "infra";
 
 /** A plain `<dl>` field: a localized label key (under `common.quickView.fields`) and its value. A
  *  `null`/empty value is dropped by {@link selectFields} so the grid never shows a dangling label. */
@@ -72,6 +75,22 @@ export type QuickViewData =
   | {
       entity: "category";
       data: { id: string; name: string; description?: string | null };
+    }
+  | {
+      // An infra topology node (ADR-0070). Used by the global command palette (#791): the basics
+      // (kind/status/linked asset/IP) come straight from the lean `InfraNodeHit` OR the already-loaded
+      // `InfraNodeListItem` — zero extra fetch — with the drill-in (`useInfraNodeDetail`) only enriching
+      // `assetName` when a palette hit lacks it. NEVER carries a secret value (INV-10): v1 has no
+      // asset→secret linkage so there is no secrets field here at all.
+      entity: "infra";
+      data: {
+        id: string;
+        label: string;
+        kind: InfraNodeKind;
+        status: InfraNodeStatus;
+        ipAddress?: string | null;
+        assetName?: string | null;
+      };
     };
 
 /** The identity title shown in the header row (and announced via `aria-labelledby`). */
@@ -83,6 +102,8 @@ export function titleFor(view: QuickViewData): string {
       return `${view.data.manufacturer} ${view.data.name}`.trim();
     case "article":
       return view.data.title;
+    case "infra":
+      return view.data.label;
     default:
       return view.data.name;
   }
@@ -102,6 +123,9 @@ export function detailHref(view: QuickViewData): string | null {
       return `/locations/${view.data.id}`;
     case "article":
       return `/kb/${view.data.slug}`;
+    case "infra":
+      // No standalone detail page — the proven canvas deep-link selects + focuses the node (issue #765).
+      return `/assets/diagram?node=${view.data.id}&focus=1`;
     default:
       // assetModel / consumable / category have no own detail route.
       return null;
@@ -119,6 +143,10 @@ export interface QuickViewLabels {
   noOwner: string;
   /** "+{n} more" — suffix appended after the first owner when an asset has multiple active owners. */
   moreOwners: (count: number) => string;
+  /** Localizes an infra node's `kind` enum (e.g. `PHYSICAL_HOST` → "Physical host", from the `infra`
+   *  namespace). Optional: omit it and the infra `kind` field renders the raw enum value rather than a
+   *  localized one (keeps the presenter translator-free + unit-testable). */
+  infraKind?: (kind: InfraNodeKind) => string;
 }
 
 /**
@@ -223,6 +251,16 @@ export function selectFields(
     }
     case "category": {
       push("description", view.data.description ?? null);
+      break;
+    }
+    case "infra": {
+      const n = view.data;
+      // status is the identity badge (like asset/location/article), so it isn't a <dl> field here.
+      // kind is localized via the threaded `infraKind` label; the raw enum is the translator-free
+      // fallback (the unit test relies on it). linked asset + IP are the other quick disambiguators.
+      push("kind", labels?.infraKind ? labels.infraKind(n.kind) : n.kind);
+      push("linkedAsset", n.assetName ?? null);
+      push("ip", n.ipAddress ?? null, true);
       break;
     }
   }
