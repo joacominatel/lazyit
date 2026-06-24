@@ -189,10 +189,14 @@ function CanvasBoard({
   // The node currently playing a one-shot focus pulse (issue #765); cleared by a timeout.
   const [focusPulseId, setFocusPulseId] = useState<string | null>(null);
 
-  // Impact mode is on when a root is set (ADR-0070 §7, issue #755). The blast radius is derived
-  // state: each node carries three flags so the (i18n-free) card just toggles classes — the root is
-  // the origin, members of `affectedIds` highlight, and everything else dims. Off ⇒ all flags false.
-  const inImpactMode = impactRootId !== null;
+  // Impact mode is on when a root is set AND its radius has resolved (ADR-0070 §7, issue #755). The
+  // blast radius is derived state: each node carries three flags so the (i18n-free) card just toggles
+  // classes — the root is the origin, members of `affectedIds` highlight, and everything else dims.
+  // Off ⇒ all flags false. ponytail (#775): gate on `affectedIds !== undefined`, not just the root —
+  // `impactRootId` flips on the instant the toggle does, but `affectedIds` stays undefined until the
+  // query resolves (an *empty* set still counts as resolved). Dimming on the root alone flashes the
+  // whole map to the reassuring "nothing depends on this" state before the real radius lights up.
+  const inImpactMode = impactRootId !== null && affectedIds !== undefined;
 
   // The hover spotlight neighbourhood (issue #767): the hovered node + every node one hop away on
   // any active edge. Deferred to impact mode (its dim is the more urgent cue) and to no-hover. The
@@ -647,9 +651,11 @@ function EdgeLegend() {
         className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium"
       >
         {open ? (
-          <ChevronDownIcon className="size-3.5 text-muted-foreground" aria-hidden />
-        ) : (
+          // Content (the <ul>) renders BELOW this toggle, so the chevron follows the standard
+          // disclosure direction: expanded points up (collapse), collapsed points down (#775).
           <ChevronUpIcon className="size-3.5 text-muted-foreground" aria-hidden />
+        ) : (
+          <ChevronDownIcon className="size-3.5 text-muted-foreground" aria-hidden />
         )}
         {t("legend.title")}
       </button>
