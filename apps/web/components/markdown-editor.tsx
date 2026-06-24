@@ -8,7 +8,6 @@ import {
 import { useTranslations } from "next-intl";
 import {
   type KeyboardEvent,
-  type UIEvent,
   useCallback,
   useRef,
   useState,
@@ -16,10 +15,6 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownView } from "@/components/markdown-view";
 import { MarkdownSyntaxHelp } from "@/components/markdown-syntax-help";
-import {
-  MARKDOWN_SOURCE_BOX,
-  MarkdownSourceHighlight,
-} from "@/components/markdown-source-highlight";
 import {
   type WikiLinkAutocomplete,
   WikiLinkSuggestions,
@@ -99,9 +94,6 @@ export function MarkdownEditor({
   const t = useTranslations("shared");
   const [mode, setMode] = useState<ViewMode>("split");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  // The highlighted source layer painted behind the transparent textarea (issue #736). Its scroll
-  // offset is slaved to the textarea so the colour stays glued to the glyphs as the author scrolls.
-  const highlightRef = useRef<HTMLDivElement | null>(null);
 
   // Wiki-link autocomplete state: the open `[[` token's query and the highlighted suggestion index.
   const [wikiQuery, setWikiQuery] = useState<string | null>(null);
@@ -178,14 +170,6 @@ export function MarkdownEditor({
     syncQuery(text, event.target.selectionStart ?? text.length);
   };
 
-  /** Slave the highlight layer's scroll to the textarea's so colour tracks the visible glyphs. */
-  const handleScroll = (event: UIEvent<HTMLTextAreaElement>) => {
-    const layer = highlightRef.current;
-    if (!layer) return;
-    layer.scrollTop = event.currentTarget.scrollTop;
-    layer.scrollLeft = event.currentTarget.scrollLeft;
-  };
-
   /** Insert the chosen wiki-link slug as `[[slug]]`, replacing the open token. */
   const insertWikiSuggestion = (slug: string) => {
     const textarea = textareaRef.current;
@@ -258,25 +242,11 @@ export function MarkdownEditor({
 
   const textarea = (
     <div className="relative">
-      {/* Live write-mode syntax colouring (issue #736): the highlighted source sits in an absolutely
-          positioned layer that fills the textarea's content box, *behind* a transparent-text
-          textarea. The textarea on top keeps every native behaviour (caret, selection, scroll, IME,
-          undo) and both `[[`/`{{` autocompletes — ADR-0021's lightweight-textarea editor is intact;
-          we only paint colour underneath. `inset-px` insets the layer by the textarea's 1px border
-          so the two boxes line up; `overflow-hidden` lets `handleScroll` slave its scroll. */}
-      <div
-        ref={highlightRef}
-        aria-hidden
-        className="pointer-events-none absolute inset-px overflow-hidden rounded-lg"
-      >
-        <MarkdownSourceHighlight value={value} />
-      </div>
       <Textarea
         ref={textareaRef}
         id={id}
         value={value}
         onChange={handleChange}
-        onScroll={handleScroll}
         onKeyDown={handleKeyDown}
         // Keep the open-token queries in sync when the caret moves without an edit (arrow/click).
         onKeyUp={(e) =>
@@ -294,16 +264,7 @@ export function MarkdownEditor({
         aria-expanded={anyOpen || undefined}
         aria-autocomplete={wikiLink || secretChip ? "list" : undefined}
         spellCheck
-        // `text-transparent` hides the textarea's own glyphs so only the highlighted layer shows;
-        // `caret-foreground` keeps the caret visible. The typography (font/size/leading/padding)
-        // matches `MARKDOWN_SOURCE_BOX` exactly so the transparent glyphs sit atop the coloured ones.
-        // `relative z-10` lifts it above the colour layer to receive all interaction.
-        // `field-sizing-fixed` overrides the shadcn `Textarea`'s content-sizing so its scroll height
-        // (not the layer's) drives a normal scrollbar that `handleScroll` mirrors.
-        className={cn(
-          "relative z-10 min-h-[420px] resize-y bg-transparent text-transparent caret-foreground field-sizing-fixed",
-          MARKDOWN_SOURCE_BOX,
-        )}
+        className="min-h-[420px] resize-y font-mono text-sm"
       />
       {wikiOpen ? (
         <WikiLinkSuggestions
