@@ -32,14 +32,29 @@ interface RotateDialogProps {
  * Body is keyed on the account id so reopening for a different row resets the confirm/secret state.
  */
 export function RotateDialog({ open, onOpenChange, account }: RotateDialogProps) {
+  // The new token is shown once; while it is unacknowledged the reveal locks the dialog against
+  // accidental dismissal (Escape / overlay-click / close button) so it cannot be lost (issue #813).
+  const [locked, setLocked] = useState(false);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (locked && !next) return;
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent
+        className="sm:max-w-lg"
+        showCloseButton={!locked}
+        onEscapeKeyDown={locked ? (e) => e.preventDefault() : undefined}
+        onInteractOutside={locked ? (e) => e.preventDefault() : undefined}
+      >
         {open ? (
           <RotateBody
             key={account.id}
             account={account}
             onClose={() => onOpenChange(false)}
+            onLockChange={setLocked}
           />
         ) : null}
       </DialogContent>
@@ -50,9 +65,11 @@ export function RotateDialog({ open, onOpenChange, account }: RotateDialogProps)
 function RotateBody({
   account,
   onClose,
+  onLockChange,
 }: {
   account: ServiceAccount;
   onClose: () => void;
+  onLockChange: (locked: boolean) => void;
 }) {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
@@ -84,6 +101,7 @@ function RotateBody({
           action="rotated"
           onAcknowledge={onClose}
           permissions={account.permissions}
+          onLockedChange={onLockChange}
         />
       </>
     );

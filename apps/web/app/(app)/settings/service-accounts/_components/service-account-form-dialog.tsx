@@ -116,14 +116,29 @@ export function ServiceAccountFormDialog({
   account,
 }: ServiceAccountFormDialogProps) {
   const recordKey = account ? `edit-${account.id}` : "new";
+  // While a fresh once-only token is shown and unacknowledged, the reveal locks the dialog so it can't
+  // be dismissed by Escape / overlay-click / the close button (issue #813) — losing it is irrecoverable.
+  const [locked, setLocked] = useState(false);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (locked && !next) return;
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent
+        className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"
+        showCloseButton={!locked}
+        onEscapeKeyDown={locked ? (e) => e.preventDefault() : undefined}
+        onInteractOutside={locked ? (e) => e.preventDefault() : undefined}
+      >
         {open ? (
           <ServiceAccountForm
             key={recordKey}
             account={account}
             onClose={() => onOpenChange(false)}
+            onLockChange={setLocked}
           />
         ) : null}
       </DialogContent>
@@ -134,9 +149,11 @@ export function ServiceAccountFormDialog({
 function ServiceAccountForm({
   account,
   onClose,
+  onLockChange,
 }: {
   account?: ServiceAccount;
   onClose: () => void;
+  onLockChange: (locked: boolean) => void;
 }) {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
@@ -266,6 +283,7 @@ function ServiceAccountForm({
           action="created"
           onAcknowledge={onClose}
           permissions={secret.permissions}
+          onLockedChange={onLockChange}
         />
       </>
     );
