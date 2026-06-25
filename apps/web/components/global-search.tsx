@@ -22,7 +22,15 @@ import {
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import {
   type QuickViewData,
   titleFor,
@@ -62,6 +70,29 @@ const ENTITY_ICON: Record<SearchEntity, typeof ServerStackIcon> = {
   infra: CpuChipIcon,
 };
 
+/** The lifted single-open Quick View state: which row's preview is open and whether it's pinned.
+ *  Grouped into a reducer so the palette stays under the prefer-useReducer budget (open/query/entity
+ *  remain their own state). The transitions mirror the original setOpenQuickViewId/setQuickViewPinned
+ *  pairs exactly. */
+type QuickViewLocalState = { openId: string | null; pinned: boolean };
+type QuickViewLocalAction =
+  | { type: "preview"; id: string }
+  | { type: "pin"; id: string }
+  | { type: "close" };
+function quickViewReducer(
+  state: QuickViewLocalState,
+  action: QuickViewLocalAction,
+): QuickViewLocalState {
+  switch (action.type) {
+    case "preview":
+      return { openId: action.id, pinned: false };
+    case "pin":
+      return { openId: action.id, pinned: true };
+    case "close":
+      return { openId: null, pinned: false };
+  }
+}
+
 /**
  * Global search palette (ADR-0035). A topbar trigger (and ⌘K / Ctrl+K) opens a command dialog that
  * queries `GET /search`; results are grouped by entity and each navigates to that entity.
@@ -85,26 +116,21 @@ export function GlobalSearch() {
   // across every result row, and a pinned preview survives the cmdk selection moving. The id is the
   // namespaced row key (`entity:id`) so two entities can't collide on a bare id. `pinned` separates a
   // transient hover preview (auto-closes on leave) from a click/Enter/Space-pinned one (footer shown).
-  const [openQuickViewId, setOpenQuickViewId] = useState<string | null>(null);
-  const [quickViewPinned, setQuickViewPinned] = useState(false);
+  const [quickView, dispatchQuickView] = useReducer(quickViewReducer, {
+    openId: null,
+    pinned: false,
+  });
 
   function closeQuickView() {
-    setOpenQuickViewId(null);
-    setQuickViewPinned(false);
+    dispatchQuickView({ type: "close" });
   }
 
   // Bundle the single-open state + transitions once, so each ResultGroup wires its rows identically.
   const quickViewState: QuickViewState = {
-    openId: openQuickViewId,
-    pinned: quickViewPinned,
-    preview: (id) => {
-      setOpenQuickViewId(id);
-      setQuickViewPinned(false);
-    },
-    pin: (id) => {
-      setOpenQuickViewId(id);
-      setQuickViewPinned(true);
-    },
+    openId: quickView.openId,
+    pinned: quickView.pinned,
+    preview: (id) => dispatchQuickView({ type: "preview", id }),
+    pin: (id) => dispatchQuickView({ type: "pin", id }),
     close: closeQuickView,
   };
 
@@ -572,14 +598,61 @@ function QuickViewEye({
   const t = useTranslations("common.quickView");
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function clearHoverTimer() {
+  const clearHoverTimer = useCallback(() => {
     if (hoverTimer.current) {
       clearTimeout(hoverTimer.current);
       hoverTimer.current = null;
     }
-  }
+  }, []);
 
-  useEffect(() => clearHoverTimer, []);
+  useEffect(() => clearHoverTimer, [clearHoverTimer]);
+
+  // Stable element for QuickViewPopover's `anchor` slot (jsx-no-jsx-as-prop).
+  const anchor = useMemo(
+    () => (
+      <button
+        type="button"
+        aria-label={t("trigger", { name: titleFor(view) })}
+        // cmdk owns roving focus (DOM focus stays on the CommandInput); keep the eye out of the Tab
+        // order so it doesn't fight that model (the #793 follow-up adds a keyboard-open path).
+        tabIndex={-1}
+        className={cn(
+          "flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 group-hover/row:opacity-100 group-data-[selected=true]/row:opacity-100",
+          open && "opacity-100",
+        )}
+        onMouseEnter={() => {
+          clearHoverTimer();
+          hoverTimer.current = setTimeout(onPreview, QUICK_VIEW_HOVER_MS);
+        }}
+        onMouseLeave={() => {
+          clearHoverTimer();
+          // Only a transient preview auto-dismisses on leave; a pinned one stays.
+          if (open && !pinned) onClose();
+        }}
+        onClick={(event) => {
+          // Don't let the click bubble to cmdk and select the row — the eye is a separate action.
+          event.preventDefault();
+          event.stopPropagation();
+          clearHoverTimer();
+          // Toggle: clicking the eye of an already-pinned preview closes it.
+          if (open && pinned) onClose();
+          else onPin();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            event.stopPropagation();
+            clearHoverTimer();
+            if (open && pinned) onClose();
+            else onPin();
+          }
+        }}
+      >
+        <EyeIcon className="size-4" />
+      </button>
+    ),
+    [t, view, open, pinned, onPreview, onPin, onClose, clearHoverTimer],
+  );
 
   return (
     <QuickViewPopover
@@ -590,48 +663,7 @@ function QuickViewEye({
         // Radix drives this on Escape / outside-click — collapse our lifted state to match.
         if (!next) onClose();
       }}
-      anchor={
-        <button
-          type="button"
-          aria-label={t("trigger", { name: titleFor(view) })}
-          // cmdk owns roving focus (DOM focus stays on the CommandInput); keep the eye out of the Tab
-          // order so it doesn't fight that model (the #793 follow-up adds a keyboard-open path).
-          tabIndex={-1}
-          className={cn(
-            "flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 group-hover/row:opacity-100 group-data-[selected=true]/row:opacity-100",
-            open && "opacity-100",
-          )}
-          onMouseEnter={() => {
-            clearHoverTimer();
-            hoverTimer.current = setTimeout(onPreview, QUICK_VIEW_HOVER_MS);
-          }}
-          onMouseLeave={() => {
-            clearHoverTimer();
-            // Only a transient preview auto-dismisses on leave; a pinned one stays.
-            if (open && !pinned) onClose();
-          }}
-          onClick={(event) => {
-            // Don't let the click bubble to cmdk and select the row — the eye is a separate action.
-            event.preventDefault();
-            event.stopPropagation();
-            clearHoverTimer();
-            // Toggle: clicking the eye of an already-pinned preview closes it.
-            if (open && pinned) onClose();
-            else onPin();
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              event.stopPropagation();
-              clearHoverTimer();
-              if (open && pinned) onClose();
-              else onPin();
-            }
-          }}
-        >
-          <EyeIcon className="size-4" />
-        </button>
-      }
+      anchor={anchor}
     />
   );
 }

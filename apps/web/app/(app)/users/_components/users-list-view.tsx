@@ -10,7 +10,7 @@ import {
 import { type BatchResult, type Role, RoleSchema, type User } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useReducer, useState } from "react";
 import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
@@ -170,6 +170,43 @@ function CountCell({ value }: { value?: number }) {
   );
 }
 
+/** Stable empty element for the ResourceTable loading state's `mobileChildren` (jsx-no-jsx-as-prop). */
+const EMPTY_MOBILE_CHILDREN = <></>;
+
+/** The create/edit form + clone wizard + offboarding sheet, each carrying its target user. Grouped into
+ *  one machine so the view stays under the prefer-useReducer budget (the independent `bulkRestoring`
+ *  progress flag stays its own state). Fields are set independently — the transitions mirror the
+ *  original setState calls exactly. */
+type DialogsState = {
+  formOpen: boolean;
+  editing: User | undefined;
+  cloning: User | undefined;
+  deleting: User | undefined;
+};
+type DialogsAction =
+  | { type: "openEdit"; user: User }
+  | { type: "setFormOpen"; open: boolean }
+  | { type: "openClone"; user: User }
+  | { type: "closeClone" }
+  | { type: "openDelete"; user: User }
+  | { type: "closeDelete" };
+function dialogsReducer(state: DialogsState, action: DialogsAction): DialogsState {
+  switch (action.type) {
+    case "openEdit":
+      return { ...state, editing: action.user, formOpen: true };
+    case "setFormOpen":
+      return { ...state, formOpen: action.open };
+    case "openClone":
+      return { ...state, cloning: action.user };
+    case "closeClone":
+      return { ...state, cloning: undefined };
+    case "openDelete":
+      return { ...state, deleting: action.user };
+    case "closeDelete":
+      return { ...state, deleting: undefined };
+  }
+}
+
 export function UsersListView() {
   const t = useTranslations("users");
   const { date } = useFormatters();
@@ -229,11 +266,14 @@ export function UsersListView() {
     });
   const restoreUserMutation = useRestoreUser();
 
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<User | undefined>(undefined);
-  // The server-orchestrated clone wizard (ADR-0058) — distinct from the create/edit form dialog.
-  const [cloning, setCloning] = useState<User | undefined>(undefined);
-  const [deleting, setDeleting] = useState<User | undefined>(undefined);
+  // The server-orchestrated clone wizard (ADR-0058) is `cloning` — distinct from the create/edit form.
+  const [dialogs, dispatchDialogs] = useReducer(dialogsReducer, {
+    formOpen: false,
+    editing: undefined,
+    cloning: undefined,
+    deleting: undefined,
+  });
+  const { formOpen, editing, cloning, deleting } = dialogs;
   const [bulkRestoring, setBulkRestoring] = useState(false);
 
   const rows = useMemo(() => {
@@ -415,13 +455,12 @@ export function UsersListView() {
   const isEmpty = total === 0;
 
   function openEdit(user: User) {
-    setEditing(user);
-    setFormOpen(true);
+    dispatchDialogs({ type: "openEdit", user });
   }
 
   /** Opens the clone wizard (its own dialog), not the create/edit form. */
   function openClone(user: User) {
-    setCloning(user);
+    dispatchDialogs({ type: "openClone", user });
   }
 
   const chips = [
@@ -502,7 +541,11 @@ export function UsersListView() {
       <ByoiBanner />
 
       {isLoading ? (
-        <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
+        <ResourceTable
+          columns={columns}
+          isLoading
+          mobileChildren={EMPTY_MOBILE_CHILDREN}
+        />
       ) : isError ? (
         <ErrorState
           title={t("list.loadErrorTitle")}
@@ -704,7 +747,7 @@ export function UsersListView() {
                     <RowActions
                       onEdit={() => openEdit(user)}
                       onClone={() => openClone(user)}
-                      onDelete={() => setDeleting(user)}
+                      onDelete={() => dispatchDialogs({ type: "openDelete", user })}
                       deleteLabel={t("list.offboardAction")}
                     />
                   ) : undefined
@@ -822,7 +865,7 @@ export function UsersListView() {
                         <RowActions
                           onEdit={() => openEdit(user)}
                           onClone={() => openClone(user)}
-                          onDelete={() => setDeleting(user)}
+                          onDelete={() => dispatchDialogs({ type: "openDelete", user })}
                           deleteLabel={t("list.offboardAction")}
                         />
                       </div>
@@ -888,7 +931,7 @@ export function UsersListView() {
       <UserFormDialog
         key={editing ? `edit-${editing.id}` : "create"}
         open={formOpen}
-        onOpenChange={setFormOpen}
+        onOpenChange={(open) => dispatchDialogs({ type: "setFormOpen", open })}
         user={editing}
       />
       {cloning ? (
@@ -896,7 +939,7 @@ export function UsersListView() {
           key={`clone-${cloning.id}`}
           open
           onOpenChange={(open) => {
-            if (!open) setCloning(undefined);
+            if (!open) dispatchDialogs({ type: "closeClone" });
           }}
           source={cloning}
         />
@@ -905,7 +948,7 @@ export function UsersListView() {
         <OffboardingSheet
           open
           onOpenChange={(open) => {
-            if (!open) setDeleting(undefined);
+            if (!open) dispatchDialogs({ type: "closeDelete" });
           }}
           user={deleting}
         />
