@@ -8,7 +8,7 @@ import {
 import type { WorkflowStep } from "@lazyit/shared";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useReducer } from "react";
 import { Combobox, type ComboboxItem } from "@/components/combobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,6 +81,61 @@ function compositeIds(pairs: Pair[]): Set<string> {
   return ids;
 }
 
+/** The whole editor's state grouped into one machine — see {@link DataMappingEditor}. */
+type MappingState = {
+  pairs: Pair[];
+  advanced: boolean;
+  /** Pair ids currently shown as a segment composer. */
+  composing: Set<string>;
+  /** The advanced editor's live JSON buffer (separate so an invalid edit doesn't drop the mapping). */
+  jsonDraft: string;
+  jsonError: string | undefined;
+};
+
+type MappingAction =
+  | { type: "pairsSet"; pairs: Pair[] }
+  | { type: "composeSet"; id: string; on: boolean }
+  | { type: "advancedEntered"; jsonDraft: string }
+  | { type: "advancedExited"; pairs?: Pair[] }
+  | { type: "jsonChanged"; text: string; error: string | undefined };
+
+function mappingReducer(
+  state: MappingState,
+  action: MappingAction,
+): MappingState {
+  switch (action.type) {
+    case "pairsSet":
+      return { ...state, pairs: action.pairs };
+    case "composeSet": {
+      const composing = new Set(state.composing);
+      if (action.on) composing.add(action.id);
+      else composing.delete(action.id);
+      return { ...state, composing };
+    }
+    case "advancedEntered":
+      // Seed the JSON buffer from the current mapping and flip advanced on.
+      return {
+        ...state,
+        advanced: true,
+        jsonDraft: action.jsonDraft,
+        jsonError: undefined,
+      };
+    case "advancedExited":
+      // Closing advanced: when the JSON parsed cleanly the handler passes re-derived pairs, so we
+      // also reset the composer set; otherwise keep the last good pairs untouched. Always flip off.
+      return action.pairs !== undefined
+        ? {
+            ...state,
+            advanced: false,
+            pairs: action.pairs,
+            composing: compositeIds(action.pairs),
+          }
+        : { ...state, advanced: false };
+    case "jsonChanged":
+      return { ...state, jsonDraft: action.text, jsonError: action.error };
+  }
+}
+
 /**
  * The per-step data-mapping editor (frontend.md §5, issue #300) — a repeatable target-field →
  * value-source editor over the shared `WorkflowDataMapping` (a flat `Record<string,string>`).
@@ -109,16 +164,19 @@ export function DataMappingEditor({
 }) {
   const t = useTranslations("workflow");
   const baseId = useId();
-  const [pairs, setPairs] = useState<Pair[]>(() => toPairs(value));
-  const [advanced, setAdvanced] = useState(false);
-  // Per-field "compose" mode: the set of pair ids currently shown as a segment composer. A composite
-  // value loads with its composer already open (so it isn't hidden behind a picker that can't show it).
-  const [composing, setComposing] = useState<Set<string>>(() =>
-    compositeIds(toPairs(value)),
-  );
-  // The advanced editor's live JSON buffer (kept separate so an invalid edit doesn't drop the mapping).
-  const [jsonDraft, setJsonDraft] = useState<string>(() => mappingToJson(value));
-  const [jsonError, setJsonError] = useState<string | undefined>(undefined);
+  // The pairs, the advanced toggle + its JSON buffer/error, and the per-field "compose" set are one
+  // machine — see `mappingReducer`. A composite value loads with its composer already open (so it
+  // isn't hidden behind a picker that can't show it).
+  const [state, dispatch] = useReducer(mappingReducer, value, (initial) => {
+    const pairs = toPairs(initial);
+    return {
+      pairs,
+      advanced: false,
+      composing: compositeIds(pairs),
+      jsonDraft: mappingToJson(initial),
+      jsonError: undefined,
+    };
+  });
 
   const tokenItems = useMemo<ComboboxItem[]>(
     () =>
@@ -134,63 +192,58 @@ export function DataMappingEditor({
   );
 
   function update(next: Pair[]) {
-    setPairs(next);
+    dispatch({ type: "pairsSet", pairs: next });
     onChange(toRecord(next));
   }
 
   function add() {
     update([
-      ...pairs,
-      { id: `${baseId}-${pairs.length}-${Date.now()}`, key: "", value: "" },
+      ...state.pairs,
+      {
+        id: `${baseId}-${state.pairs.length}-${Date.now()}`,
+        key: "",
+        value: "",
+      },
     ]);
   }
 
   function edit(id: string, patch: Partial<Pick<Pair, "key" | "value">>) {
-    update(pairs.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    update(state.pairs.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }
 
   function remove(id: string) {
-    update(pairs.filter((p) => p.id !== id));
+    update(state.pairs.filter((p) => p.id !== id));
     setCompose(id, false);
   }
 
   function setCompose(id: string, on: boolean) {
-    setComposing((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+    dispatch({ type: "composeSet", id, on });
   }
 
   // Switching to advanced seeds the JSON buffer from the current mapping; switching back re-derives the
   // pairs from whatever JSON last parsed cleanly (round-trip through the toggle).
   function toggleAdvanced(on: boolean) {
     if (on) {
-      setJsonDraft(mappingToJson(toRecord(pairs)));
-      setJsonError(undefined);
+      dispatch({
+        type: "advancedEntered",
+        jsonDraft: mappingToJson(toRecord(state.pairs)),
+      });
     } else {
-      const parsed = jsonToMapping(jsonDraft);
+      const parsed = jsonToMapping(state.jsonDraft);
       if (!parsed.error) {
-        const nextPairs = toPairs(parsed.mapping);
-        setPairs(nextPairs);
+        dispatch({ type: "advancedExited", pairs: toPairs(parsed.mapping) });
         onChange(parsed.mapping);
-        setComposing(compositeIds(nextPairs));
+      } else {
+        // If the JSON was invalid, keep the last good pairs (already in state) and just close advanced.
+        dispatch({ type: "advancedExited" });
       }
-      // If the JSON was invalid, keep the last good pairs (already in state) and just close advanced.
     }
-    setAdvanced(on);
   }
 
   function onJsonChange(text: string) {
-    setJsonDraft(text);
     const parsed = jsonToMapping(text);
-    if (parsed.error) {
-      setJsonError(parsed.error);
-      return;
-    }
-    setJsonError(undefined);
-    onChange(parsed.mapping);
+    dispatch({ type: "jsonChanged", text, error: parsed.error });
+    if (!parsed.error) onChange(parsed.mapping);
   }
 
   return (
@@ -201,7 +254,7 @@ export function DataMappingEditor({
         </span>
         <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
           <Switch
-            checked={advanced}
+            checked={state.advanced}
             onCheckedChange={toggleAdvanced}
             aria-label={t("mapping.advancedAria")}
           />
@@ -209,17 +262,17 @@ export function DataMappingEditor({
         </label>
       </div>
 
-      {advanced ? (
+      {state.advanced ? (
         <div className="space-y-2">
           <JsonTemplateEditor
-            value={jsonDraft}
+            value={state.jsonDraft}
             onChange={onJsonChange}
             priorSteps={priorSteps}
             ariaLabel={t("mapping.advancedAria")}
           />
-          {jsonError ? (
+          {state.jsonError ? (
             <p className="text-xs text-destructive" role="alert">
-              {t("mapping.jsonError", { error: jsonError })}
+              {t("mapping.jsonError", { error: state.jsonError })}
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">
@@ -227,14 +280,14 @@ export function DataMappingEditor({
             </p>
           )}
         </div>
-      ) : pairs.length === 0 ? (
+      ) : state.pairs.length === 0 ? (
         <p className="rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
           {t("mapping.empty")}
         </p>
       ) : (
         <ul className="space-y-2">
-          {pairs.map((pair) => {
-            const isComposing = composing.has(pair.id);
+          {state.pairs.map((pair) => {
+            const isComposing = state.composing.has(pair.id);
             return (
               <li key={pair.id} className="flex items-start gap-2">
                 <Input
@@ -296,7 +349,7 @@ export function DataMappingEditor({
         </ul>
       )}
 
-      {advanced ? null : (
+      {state.advanced ? null : (
         <Button type="button" size="sm" variant="outline" onClick={add}>
           <PlusIcon />
           {t("mapping.add")}
