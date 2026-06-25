@@ -14,7 +14,7 @@ import {
   isPublicAccessRules,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useReducer, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -379,6 +379,55 @@ type AddRuleRowProps = {
 
 type RuleKind = FolderAccessRule["kind"];
 
+/** The two-step add-rule picker's grouped state (chosen kind + each kind's subject selector). */
+type AddRuleState = {
+  kind: RuleKind | "";
+  selectedUserIds: string[];
+  selectedRole: string;
+  selectedAppId: string;
+  selectedAssetId: string;
+};
+
+type AddRuleAction =
+  | { type: "kindChanged"; kind: RuleKind | "" }
+  | { type: "userIdsChanged"; userIds: string[] }
+  | { type: "roleChanged"; role: string }
+  | { type: "appIdChanged"; appId: string }
+  | { type: "assetIdChanged"; assetId: string };
+
+const INITIAL_ADD_RULE: AddRuleState = {
+  kind: "",
+  selectedUserIds: [],
+  selectedRole: "",
+  selectedAppId: "",
+  selectedAssetId: "",
+};
+
+function addRuleReducer(
+  state: AddRuleState,
+  action: AddRuleAction,
+): AddRuleState {
+  switch (action.type) {
+    case "kindChanged":
+      // Changing (or clearing) the kind resets every subject selector.
+      return {
+        kind: action.kind,
+        selectedUserIds: [],
+        selectedRole: "",
+        selectedAppId: "",
+        selectedAssetId: "",
+      };
+    case "userIdsChanged":
+      return { ...state, selectedUserIds: action.userIds };
+    case "roleChanged":
+      return { ...state, selectedRole: action.role };
+    case "appIdChanged":
+      return { ...state, selectedAppId: action.appId };
+    case "assetIdChanged":
+      return { ...state, selectedAssetId: action.assetId };
+  }
+}
+
 function AddRuleRow({
   existingRules,
   users,
@@ -388,12 +437,8 @@ function AddRuleRow({
   disabled,
   t,
 }: AddRuleRowProps) {
-  const [kind, setKind] = useState<RuleKind | "">("");
-  // Subject selectors for each kind
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [selectedRole, setSelectedRole] = useState<string>("");
-  const [selectedAppId, setSelectedAppId] = useState<string>("");
-  const [selectedAssetId, setSelectedAssetId] = useState<string>("");
+  // The two-step picker (choose a kind, then its subject) is one machine — see `addRuleReducer`.
+  const [state, dispatch] = useReducer(addRuleReducer, INITIAL_ADD_RULE);
 
   // Already-picked roles and app/asset ids — used to disable already-added options.
   const existingRoles = useMemo(
@@ -422,67 +467,65 @@ function AddRuleRow({
     [existingRules],
   );
 
-  function resetSubject() {
-    setSelectedUserIds([]);
-    setSelectedRole("");
-    setSelectedAppId("");
-    setSelectedAssetId("");
-  }
-
   function handleKindChange(value: string) {
-    setKind(value as RuleKind | "");
-    resetSubject();
+    dispatch({ type: "kindChanged", kind: value as RuleKind | "" });
   }
 
   function handleAdd() {
-    if (!kind) return;
+    if (!state.kind) return;
 
     let rule: FolderAccessRule | null = null;
 
-    switch (kind) {
+    switch (state.kind) {
       case "users":
-        if (selectedUserIds.length === 0) return;
-        rule = { kind: "users", userIds: selectedUserIds };
+        if (state.selectedUserIds.length === 0) return;
+        rule = { kind: "users", userIds: state.selectedUserIds };
         break;
       case "role":
-        if (!selectedRole) return;
-        rule = { kind: "role", role: selectedRole as "ADMIN" | "MEMBER" | "VIEWER" };
+        if (!state.selectedRole) return;
+        rule = {
+          kind: "role",
+          role: state.selectedRole as "ADMIN" | "MEMBER" | "VIEWER",
+        };
         break;
       case "appGrant":
-        if (!selectedAppId) return;
-        rule = { kind: "appGrant", applicationId: selectedAppId };
+        if (!state.selectedAppId) return;
+        rule = { kind: "appGrant", applicationId: state.selectedAppId };
         break;
       case "assetAssignment":
-        if (!selectedAssetId) return;
-        rule = { kind: "assetAssignment", assetId: selectedAssetId };
+        if (!state.selectedAssetId) return;
+        rule = { kind: "assetAssignment", assetId: state.selectedAssetId };
         break;
     }
 
     if (!rule) return;
     onAdd(rule);
-    setKind("");
-    resetSubject();
+    dispatch({ type: "kindChanged", kind: "" });
   }
 
   const canAdd =
-    kind === "users"
-      ? selectedUserIds.length > 0
-      : kind === "role"
-        ? Boolean(selectedRole)
-        : kind === "appGrant"
-          ? Boolean(selectedAppId)
-          : kind === "assetAssignment"
-            ? Boolean(selectedAssetId)
+    state.kind === "users"
+      ? state.selectedUserIds.length > 0
+      : state.kind === "role"
+        ? Boolean(state.selectedRole)
+        : state.kind === "appGrant"
+          ? Boolean(state.selectedAppId)
+          : state.kind === "assetAssignment"
+            ? Boolean(state.selectedAssetId)
             : false;
 
   return (
     <div className="space-y-2">
       {/* Kind selector */}
       <div className="flex items-center gap-2">
-        <Select value={kind} onValueChange={handleKindChange} disabled={disabled}>
+        <Select
+          value={state.kind}
+          onValueChange={handleKindChange}
+          disabled={disabled}
+        >
           <SelectTrigger
             size="sm"
-            className={cn("flex-1", !kind && "text-muted-foreground")}
+            className={cn("flex-1", !state.kind && "text-muted-foreground")}
             aria-label={t("access.addRuleKindLabel")}
           >
             <SelectValue placeholder={t("access.addRulePlaceholder")} />
@@ -499,18 +542,18 @@ function AddRuleRow({
       </div>
 
       {/* Subject selector — rendered after a kind is chosen */}
-      {kind === "users" ? (
+      {state.kind === "users" ? (
         <UserMultiPick
           users={users}
-          selected={selectedUserIds}
-          onChange={setSelectedUserIds}
+          selected={state.selectedUserIds}
+          onChange={(userIds) => dispatch({ type: "userIdsChanged", userIds })}
           disabled={disabled}
           t={t}
         />
-      ) : kind === "role" ? (
+      ) : state.kind === "role" ? (
         <Select
-          value={selectedRole}
-          onValueChange={setSelectedRole}
+          value={state.selectedRole}
+          onValueChange={(role) => dispatch({ type: "roleChanged", role })}
           disabled={disabled}
         >
           <SelectTrigger size="sm" className="w-full">
@@ -528,10 +571,10 @@ function AddRuleRow({
             ))}
           </SelectContent>
         </Select>
-      ) : kind === "appGrant" ? (
+      ) : state.kind === "appGrant" ? (
         <Select
-          value={selectedAppId}
-          onValueChange={setSelectedAppId}
+          value={state.selectedAppId}
+          onValueChange={(appId) => dispatch({ type: "appIdChanged", appId })}
           disabled={disabled}
         >
           <SelectTrigger size="sm" className="w-full">
@@ -555,10 +598,10 @@ function AddRuleRow({
             )}
           </SelectContent>
         </Select>
-      ) : kind === "assetAssignment" ? (
+      ) : state.kind === "assetAssignment" ? (
         <Select
-          value={selectedAssetId}
-          onValueChange={setSelectedAssetId}
+          value={state.selectedAssetId}
+          onValueChange={(assetId) => dispatch({ type: "assetIdChanged", assetId })}
           disabled={disabled}
         >
           <SelectTrigger size="sm" className="w-full">
@@ -585,7 +628,7 @@ function AddRuleRow({
       ) : null}
 
       {/* Add button — only shown once a kind (and valid subject) is chosen */}
-      {kind ? (
+      {state.kind ? (
         <Button
           type="button"
           size="sm"
