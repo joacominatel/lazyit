@@ -69,6 +69,18 @@
       "saveError": "No se pudo guardar el artículo",
       "draftCreated": "Borrador creado",
       "createError": "No se pudo crear el artículo"
+    },
+    "draft": {
+      "restoreTitle": "Borrador sin guardar recuperado",
+      "restoreDescription": "Guardamos un borrador local del {time}. Restáuralo para seguir editando o descártalo.",
+      "restore": "Restaurar borrador",
+      "discard": "Descartar borrador"
+    },
+    "leaveConfirm": {
+      "title": "¿Descartar los cambios sin guardar?",
+      "description": "Tienes cambios sin guardar. Si sales ahora, no se guardarán.",
+      "stay": "Seguir editando",
+      "leave": "Descartar cambios"
     }
   },
   "detail": {

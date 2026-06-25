@@ -69,6 +69,18 @@
       "saveError": "Couldn't save the article",
       "draftCreated": "Draft created",
       "createError": "Couldn't create the article"
+    },
+    "draft": {
+      "restoreTitle": "Unsaved draft recovered",
+      "restoreDescription": "We saved a local draft from {time}. Restore it to keep editing, or discard it.",
+      "restore": "Restore draft",
+      "discard": "Discard draft"
+    },
+    "leaveConfirm": {
+      "title": "Discard unsaved changes?",
+      "description": "You have unsaved changes. If you leave now, they won't be saved.",
+      "stay": "Keep editing",
+      "leave": "Discard changes"
     }
   },
   "detail": {

@@ -1,16 +1,16 @@
 "use client";
 
-import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, ArrowUturnLeftIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   type Article,
   CreateArticleSchema,
   UpdateArticleSchema,
 } from "@lazyit/shared";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { CreatableField } from "@/components/creatable-field";
@@ -18,6 +18,15 @@ import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { useArticleSlugSuggestions } from "@/lib/api/hooks/use-article-slug-suggestions";
 import { useHandleSuggestions } from "@/lib/secret-manager/hooks/use-chip";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -40,7 +49,9 @@ import {
   useUpdateArticle,
 } from "@/lib/api/hooks/use-article-mutations";
 import { notifyError } from "@/lib/api/notify-error";
+import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
+import { useArticleDraft } from "../_lib/use-article-draft";
 
 const FORM_ID = "article-form";
 
@@ -97,12 +108,72 @@ export function ArticleForm({ article }: { article?: Article }) {
   const wikiLinkSuggestions = useArticleSlugSuggestions(wikiLinkQuery);
   const { data: chipSuggestions } = useHandleSuggestions(chipQuery);
 
+  const format = useFormatter();
+  const baseline = useMemo(() => toFormValues(article), [article]);
+
   const form = useForm<ArticleFormValues>({
     resolver: zodResolver(
       isEdit ? UpdateArticleSchema : CreateArticleSchema,
     ) as Resolver<ArticleFormValues>,
-    defaultValues: toFormValues(article),
+    defaultValues: baseline,
   });
+
+  // ── Unsaved-work protection (issue #816) ─────────────────────────────────────────────────────
+  // 1) Hard navigations (tab close / reload / address bar) get the native confirm while dirty.
+  // 2) The Cancel button intercepts in-app navigation with a confirm while dirty.
+  // 3) A local, slug-keyed draft is autosaved and offered for restore on the next mount, then
+  //    cleared on a successful save — so a crash/closed tab never silently discards a runbook.
+  const { isDirty } = form.formState;
+  useBeforeUnloadGuard(isDirty);
+
+  const draft = useArticleDraft(article?.slug, baseline);
+  const queueSave = draft.queueSave;
+  // Subscribe to value changes WITHOUT re-rendering (the hook throttles the localStorage write).
+  useEffect(() => {
+    const unsubscribe = form.subscribe({
+      formState: { values: true },
+      callback: ({ values }) =>
+        queueSave({
+          title: values.title ?? "",
+          categoryId: values.categoryId ?? "",
+          excerpt: values.excerpt,
+          content: values.content ?? "",
+        }),
+    });
+    return () => unsubscribe();
+  }, [form, queueSave]);
+
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const cancelHref = article ? `/kb/${article.slug}` : "/kb";
+
+  const handleRestoreDraft = () => {
+    const values = draft.restorable?.values;
+    if (!values) return;
+    // keepDefaultValues re-evaluates isDirty against the original server/empty baseline, so the
+    // restored draft stays guarded + autosaved rather than being treated as pristine.
+    form.reset(values, { keepDefaultValues: true });
+    draft.dismissRestore();
+  };
+
+  const handleDiscardDraft = () => {
+    draft.clearDraft();
+    draft.dismissRestore();
+  };
+
+  const handleCancel = () => {
+    if (isDirty) {
+      setLeaveConfirmOpen(true);
+      return;
+    }
+    router.push(cancelHref);
+  };
+
+  const confirmLeave = () => {
+    // Explicit discard: drop the local draft too so it never resurfaces as a stale restore prompt.
+    draft.clearDraft();
+    setLeaveConfirmOpen(false);
+    router.push(cancelHref);
+  };
 
   const onSubmit = form.handleSubmit((values) => {
     if (!isAuthenticated) {
@@ -122,6 +193,7 @@ export function ArticleForm({ article }: { article?: Article }) {
         },
         {
           onSuccess: (updated) => {
+            draft.clearDraft();
             toast.success(t("form.toast.saved"));
             router.push(`/kb/${updated.slug}`);
           },
@@ -140,6 +212,7 @@ export function ArticleForm({ article }: { article?: Article }) {
         },
         {
           onSuccess: (created) => {
+            draft.clearDraft();
             toast.success(t("form.toast.draftCreated"));
             router.push(`/kb/${created.slug}`);
           },
@@ -154,6 +227,43 @@ export function ArticleForm({ article }: { article?: Article }) {
 
   return (
     <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
+      {draft.restorable && (
+        <div
+          role="status"
+          className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-start gap-2">
+            <ArrowUturnLeftIcon className="mt-0.5 size-4 shrink-0 text-primary" />
+            <div>
+              <p className="font-medium text-foreground">
+                {t("form.draft.restoreTitle")}
+              </p>
+              <p className="text-muted-foreground">
+                {t("form.draft.restoreDescription", {
+                  time: format.dateTime(new Date(draft.restorable.savedAt), {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }),
+                })}
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleDiscardDraft}
+            >
+              {t("form.draft.discard")}
+            </Button>
+            <Button type="button" size="sm" onClick={handleRestoreDraft}>
+              {t("form.draft.restore")}
+            </Button>
+          </div>
+        </div>
+      )}
+
       <FieldGroup>
         <Controller
           control={form.control}
@@ -278,9 +388,7 @@ export function ArticleForm({ article }: { article?: Article }) {
           type="button"
           variant="outline"
           disabled={isPending}
-          onClick={() =>
-            router.push(article ? `/kb/${article.slug}` : "/kb")
-          }
+          onClick={handleCancel}
         >
           {tc("cancel")}
         </Button>
@@ -293,6 +401,25 @@ export function ArticleForm({ article }: { article?: Article }) {
           {isEdit ? t("form.saveChanges") : t("form.createDraft")}
         </Button>
       </div>
+
+      <AlertDialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("form.leaveConfirm.title")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("form.leaveConfirm.description")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("form.leaveConfirm.stay")}</AlertDialogCancel>
+            {/* Plain destructive button (not AlertDialogAction) so leaving is an explicit,
+                clearly-styled discard rather than the default confirm. */}
+            <Button variant="destructive" onClick={confirmLeave}>
+              {t("form.leaveConfirm.leave")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </form>
   );
 }
