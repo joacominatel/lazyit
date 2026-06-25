@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { DetailSkeleton } from "@/components/detail-panel";
@@ -18,6 +19,19 @@ export function AssetCloneView({ id }: { id: string }) {
   const t = useTranslations("assets.form");
   const tList = useTranslations("assets.list");
   const { data: asset, isLoading, isError, error, refetch } = useAsset(id);
+
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: tList("title"), href: "/assets" },
+          { label: asset?.name ?? "", href: `/assets/${asset?.id ?? ""}` },
+          { label: t("breadcrumbClone") },
+        ]}
+      />
+    ),
+    [t, tList, asset?.name, asset?.id],
+  );
 
   if (isLoading) {
     return (
@@ -43,15 +57,7 @@ export function AssetCloneView({ id }: { id: string }) {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: tList("title"), href: "/assets" },
-              { label: asset.name, href: `/assets/${asset.id}` },
-              { label: t("breadcrumbClone") },
-            ]}
-          />
-        }
+        breadcrumb={breadcrumb}
         title={t("cloneTitle")}
         subtitle={t("cloneSubtitle")}
       />
