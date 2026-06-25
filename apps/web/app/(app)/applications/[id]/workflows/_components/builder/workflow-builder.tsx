@@ -22,7 +22,7 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useReducer } from "react";
 import { toast } from "sonner";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { DetailField, DetailPanel } from "@/components/detail-panel";
@@ -80,6 +80,98 @@ function stepSummary(step: WorkflowStep): string {
   }
 }
 
+/** The editable workflow document (header fields + the ordered `steps` array). Grouped into one typed
+ *  reducer so the builder stays under the prefer-useReducer budget; every transition mirrors the
+ *  original setSteps/setName/… logic exactly (the `moveStep` splice and functional updates included). */
+type WorkflowDraft = {
+  workflowId: string | undefined;
+  name: string;
+  trigger: WorkflowTriggerV1;
+  enabled: boolean;
+  deprovisionPolicy: WorkflowDeprovisionPolicy;
+  steps: WorkflowStep[];
+};
+
+type WorkflowDraftAction =
+  | { type: "setWorkflowId"; workflowId: string }
+  | { type: "setName"; name: string }
+  | { type: "setTrigger"; trigger: WorkflowTriggerV1 }
+  | { type: "setEnabled"; enabled: boolean }
+  | { type: "setDeprovisionPolicy"; policy: WorkflowDeprovisionPolicy }
+  | { type: "appendStep"; step: WorkflowStep }
+  | { type: "replaceStep"; index: number; step: WorkflowStep }
+  | { type: "removeStep"; index: number }
+  | { type: "moveStep"; index: number; delta: number };
+
+function workflowDraftReducer(
+  state: WorkflowDraft,
+  action: WorkflowDraftAction,
+): WorkflowDraft {
+  switch (action.type) {
+    case "setWorkflowId":
+      return { ...state, workflowId: action.workflowId };
+    case "setName":
+      return { ...state, name: action.name };
+    case "setTrigger":
+      return { ...state, trigger: action.trigger };
+    case "setEnabled":
+      return { ...state, enabled: action.enabled };
+    case "setDeprovisionPolicy":
+      return { ...state, deprovisionPolicy: action.policy };
+    case "appendStep":
+      return { ...state, steps: [...state.steps, action.step] };
+    case "replaceStep":
+      return {
+        ...state,
+        steps: state.steps.map((s, i) => (i === action.index ? action.step : s)),
+      };
+    case "removeStep":
+      return { ...state, steps: state.steps.filter((_, i) => i !== action.index) };
+    case "moveStep": {
+      const target = action.index + action.delta;
+      if (target < 0 || target >= state.steps.length) return state;
+      const next = [...state.steps];
+      const [item] = next.splice(action.index, 1);
+      if (item) next.splice(target, 0, item);
+      return { ...state, steps: next };
+    }
+  }
+}
+
+/** Transient editor UI (which step is being edited, the flagged-invalid set, the save error and the
+ *  dry-run dialog). Kept separate from {@link WorkflowDraft} — view state, not the saved document. */
+type WorkflowEditorState = {
+  editingIndex: number | null;
+  invalidSteps: ReadonlySet<number>;
+  saveError: string | undefined;
+  dryRunOpen: boolean;
+};
+
+type WorkflowEditorAction =
+  | { type: "openEditor"; index: number }
+  | { type: "closeEditor" }
+  | { type: "setInvalidSteps"; steps: ReadonlySet<number> }
+  | { type: "setSaveError"; error: string | undefined }
+  | { type: "setDryRunOpen"; open: boolean };
+
+function workflowEditorReducer(
+  state: WorkflowEditorState,
+  action: WorkflowEditorAction,
+): WorkflowEditorState {
+  switch (action.type) {
+    case "openEditor":
+      return { ...state, editingIndex: action.index };
+    case "closeEditor":
+      return { ...state, editingIndex: null };
+    case "setInvalidSteps":
+      return { ...state, invalidSteps: action.steps };
+    case "setSaveError":
+      return { ...state, saveError: action.error };
+    case "setDryRunOpen":
+      return { ...state, dryRunOpen: action.open };
+  }
+}
+
 /**
  * The workflow builder (frontend.md §3) — the opinionated error-handling DAG editor. The header
  * (name/trigger/enabled/deprovision) + an ordered `steps` array (a degenerate sequence by default) are
@@ -114,30 +206,50 @@ export function WorkflowBuilder({
     updateWorkflow.isPending ||
     createVersion.isPending;
 
-  const [workflowId, setWorkflowId] = useState<string | undefined>(
-    workflow?.id,
+  const [draft, dispatchDraft] = useReducer(
+    workflowDraftReducer,
+    undefined,
+    (): WorkflowDraft => ({
+      workflowId: workflow?.id,
+      name: workflow?.name ?? "",
+      trigger: (workflow?.trigger as WorkflowTriggerV1) ?? "ACCESS_GRANTED",
+      enabled: workflow?.enabled ?? false,
+      deprovisionPolicy: workflow?.deprovisionPolicy ?? "LAST_ACTIVE_GRANT",
+      steps: workflow?.latestVersion?.steps ?? [],
+    }),
   );
-  const [name, setName] = useState(workflow?.name ?? "");
-  const [trigger, setTrigger] = useState<WorkflowTriggerV1>(
-    (workflow?.trigger as WorkflowTriggerV1) ?? "ACCESS_GRANTED",
-  );
-  const [enabled, setEnabled] = useState(workflow?.enabled ?? false);
-  const [deprovisionPolicy, setDeprovisionPolicy] =
-    useState<WorkflowDeprovisionPolicy>(
-      workflow?.deprovisionPolicy ?? "LAST_ACTIVE_GRANT",
-    );
-  const [steps, setSteps] = useState<WorkflowStep[]>(
-    workflow?.latestVersion?.steps ?? [],
-  );
+  const { workflowId, name, trigger, enabled, deprovisionPolicy, steps } = draft;
 
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [invalidSteps, setInvalidSteps] = useState<ReadonlySet<number>>(
-    new Set(),
-  );
-  const [saveError, setSaveError] = useState<string | undefined>(undefined);
-  const [dryRunOpen, setDryRunOpen] = useState(false);
+  const [editor, dispatchEditor] = useReducer(workflowEditorReducer, {
+    editingIndex: null,
+    invalidSteps: new Set<number>(),
+    saveError: undefined,
+    dryRunOpen: false,
+  });
+  const { editingIndex, invalidSteps, saveError, dryRunOpen } = editor;
 
   const isEdit = workflow != null;
+
+  // Stable element for the PageHeader `breadcrumb` slot (jsx-no-jsx-as-prop).
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: t("breadcrumb.applications"), href: "/applications" },
+          {
+            label: applicationName,
+            href: `/applications/${applicationId}`,
+          },
+          {
+            label: t("breadcrumb.workflows"),
+            href: `/applications/${applicationId}/workflows`,
+          },
+          { label: isEdit ? t("builder.editTitle") : t("builder.newTitle") },
+        ]}
+      />
+    ),
+    [t, applicationName, applicationId, isEdit],
+  );
 
   function addStep(kind: StepKind) {
     if (kind !== "MANUAL" && !connection) {
@@ -145,41 +257,37 @@ export function WorkflowBuilder({
       return;
     }
     const key = nextStepKey(steps);
-    setSteps((prev) => [...prev, createStep(kind, key, connection?.id ?? "")]);
+    dispatchDraft({
+      type: "appendStep",
+      step: createStep(kind, key, connection?.id ?? ""),
+    });
   }
 
   function saveStep(index: number, next: WorkflowStep) {
-    setSteps((prev) => prev.map((s, i) => (i === index ? next : s)));
-    setEditingIndex(null);
+    dispatchDraft({ type: "replaceStep", index, step: next });
+    dispatchEditor({ type: "closeEditor" });
   }
 
   function removeStep(index: number) {
-    setSteps((prev) => prev.filter((_, i) => i !== index));
+    dispatchDraft({ type: "removeStep", index });
   }
 
   function move(index: number, delta: number) {
-    setSteps((prev) => {
-      const target = index + delta;
-      if (target < 0 || target >= prev.length) return prev;
-      const next = [...prev];
-      const [item] = next.splice(index, 1);
-      if (item) next.splice(target, 0, item);
-      return next;
-    });
+    dispatchDraft({ type: "moveStep", index, delta });
   }
 
   async function save() {
     if (name.trim().length === 0) {
-      setSaveError(t("builder.nameRequired"));
+      dispatchEditor({ type: "setSaveError", error: t("builder.nameRequired") });
       return;
     }
     const parsed = WorkflowStepsSchema.safeParse(steps);
     if (!parsed.success) {
-      setSaveError(t("builder.invalidSteps"));
+      dispatchEditor({ type: "setSaveError", error: t("builder.invalidSteps") });
       return;
     }
-    setSaveError(undefined);
-    setInvalidSteps(new Set());
+    dispatchEditor({ type: "setSaveError", error: undefined });
+    dispatchEditor({ type: "setInvalidSteps", steps: new Set() });
 
     try {
       let id = workflowId;
@@ -192,7 +300,7 @@ export function WorkflowBuilder({
           deprovisionPolicy,
         });
         id = created.id;
-        setWorkflowId(id);
+        dispatchDraft({ type: "setWorkflowId", workflowId: id });
       } else {
         await updateWorkflow.mutateAsync({
           id,
@@ -208,8 +316,8 @@ export function WorkflowBuilder({
           const flagged = new Set<number>();
           for (const s of graphError.unreachableSteps ?? []) flagged.add(s.index);
           if (graphError.stepIndex !== undefined) flagged.add(graphError.stepIndex);
-          setInvalidSteps(flagged);
-          setSaveError(graphError.message);
+          dispatchEditor({ type: "setInvalidSteps", steps: flagged });
+          dispatchEditor({ type: "setSaveError", error: graphError.message });
           // The header now exists — keep editing this workflow so a re-save is an update.
           router.replace(`/applications/${applicationId}/workflows/${id}/edit`);
           return;
@@ -229,22 +337,7 @@ export function WorkflowBuilder({
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: t("breadcrumb.applications"), href: "/applications" },
-              {
-                label: applicationName,
-                href: `/applications/${applicationId}`,
-              },
-              {
-                label: t("breadcrumb.workflows"),
-                href: `/applications/${applicationId}/workflows`,
-              },
-              { label: isEdit ? t("builder.editTitle") : t("builder.newTitle") },
-            ]}
-          />
-        }
+        breadcrumb={breadcrumb}
         title={isEdit ? name || t("builder.editTitle") : t("builder.newTitle")}
         subtitle={t("builder.subtitle")}
         actions={
@@ -252,7 +345,9 @@ export function WorkflowBuilder({
             <label className="flex items-center gap-2 text-sm">
               <Switch
                 checked={enabled}
-                onCheckedChange={setEnabled}
+                onCheckedChange={(checked) =>
+                  dispatchDraft({ type: "setEnabled", enabled: checked })
+                }
                 disabled={!canManage}
                 aria-label={t("builder.enabledAria")}
               />
@@ -262,7 +357,7 @@ export function WorkflowBuilder({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setDryRunOpen(true)}
+                onClick={() => dispatchEditor({ type: "setDryRunOpen", open: true })}
               >
                 <BeakerIcon />
                 {t("dryRun.button")}
@@ -288,7 +383,9 @@ export function WorkflowBuilder({
             <Input
               id="wf-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) =>
+                dispatchDraft({ type: "setName", name: e.target.value })
+              }
               placeholder={t("builder.namePlaceholder")}
               maxLength={120}
               disabled={!canManage}
@@ -304,7 +401,7 @@ export function WorkflowBuilder({
                   key={value}
                   type="button"
                   disabled={isEdit || !canManage}
-                  onClick={() => setTrigger(value)}
+                  onClick={() => dispatchDraft({ type: "setTrigger", trigger: value })}
                   className={cn(
                     "rounded-lg border px-3 py-2 text-sm transition-colors disabled:opacity-60",
                     trigger === value
@@ -329,7 +426,10 @@ export function WorkflowBuilder({
               <Select
                 value={deprovisionPolicy}
                 onValueChange={(v) =>
-                  setDeprovisionPolicy(v as WorkflowDeprovisionPolicy)
+                  dispatchDraft({
+                    type: "setDeprovisionPolicy",
+                    policy: v as WorkflowDeprovisionPolicy,
+                  })
                 }
                 disabled={!canManage}
               >
@@ -399,7 +499,7 @@ export function WorkflowBuilder({
                   canManage={canManage}
                   failureLabel={failureLabel}
                   successLabel={successLabel}
-                  onOpen={() => setEditingIndex(index)}
+                  onOpen={() => dispatchEditor({ type: "openEditor", index })}
                   onMoveUp={() => move(index, -1)}
                   onMoveDown={() => move(index, 1)}
                   onRemove={() => removeStep(index)}
@@ -423,14 +523,14 @@ export function WorkflowBuilder({
           otherSteps={steps.filter((_, i) => i !== editingIndex)}
           priorSteps={steps.slice(0, editingIndex ?? 0)}
           onSave={(next) => saveStep(editingIndex as number, next)}
-          onClose={() => setEditingIndex(null)}
+          onClose={() => dispatchEditor({ type: "closeEditor" })}
         />
       ) : null}
 
       {canManage && workflowId ? (
         <DryRunDialog
           open={dryRunOpen}
-          onOpenChange={setDryRunOpen}
+          onOpenChange={(open) => dispatchEditor({ type: "setDryRunOpen", open })}
           workflowId={workflowId}
           applicationId={applicationId}
           trigger={trigger}
