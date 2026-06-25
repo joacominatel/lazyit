@@ -12,7 +12,7 @@ import type { AssetAssignmentWithUser } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "@/components/copy-button";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
@@ -57,6 +57,18 @@ export function AssetDetailView({ id }: { id: string }) {
   const { data: asset, isLoading, isError, error, refetch } = useAsset(id);
   // All assignments (active + released), each with its user, for owners + history.
   const { data: assignments } = useAssetAssignments(id, false);
+
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: tList("title"), href: "/assets" },
+          { label: asset?.name ?? "" },
+        ]}
+      />
+    ),
+    [tList, asset?.name],
+  );
   const release = useReleaseAssignment();
   const deleteAsset = useDeleteAsset();
 
@@ -109,14 +121,7 @@ export function AssetDetailView({ id }: { id: string }) {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: tList("title"), href: "/assets" },
-              { label: asset.name },
-            ]}
-          />
-        }
+        breadcrumb={breadcrumb}
         title={asset.name}
         subtitle={
           asset.assetTag ? (

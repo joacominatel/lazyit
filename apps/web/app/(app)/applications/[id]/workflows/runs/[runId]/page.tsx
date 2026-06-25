@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
@@ -29,6 +30,26 @@ export default function WorkflowRunDetailPage() {
   const { data: run, isLoading, isError, error, refetch } =
     useWorkflowRun(runId);
 
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: t("breadcrumb.applications"), href: "/applications" },
+          {
+            label: application?.name ?? applicationId,
+            href: `/applications/${applicationId}`,
+          },
+          {
+            label: t("breadcrumb.workflows"),
+            href: `/applications/${applicationId}/workflows`,
+          },
+          { label: t("runDetail.title") },
+        ]}
+      />
+    ),
+    [t, application?.name, applicationId, runId],
+  );
+
   return (
     <div className="mx-auto max-w-3xl">
       <PermissionGate
@@ -38,22 +59,7 @@ export default function WorkflowRunDetailPage() {
       >
         <div className="space-y-6">
           <PageHeader
-            breadcrumb={
-              <Breadcrumb
-                items={[
-                  { label: t("breadcrumb.applications"), href: "/applications" },
-                  {
-                    label: application?.name ?? applicationId,
-                    href: `/applications/${applicationId}`,
-                  },
-                  {
-                    label: t("breadcrumb.workflows"),
-                    href: `/applications/${applicationId}/workflows`,
-                  },
-                  { label: t("runDetail.title") },
-                ]}
-              />
-            }
+            breadcrumb={breadcrumb}
             title={t("runDetail.title")}
             subtitle={t("runDetail.subtitle")}
           />

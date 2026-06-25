@@ -53,6 +53,10 @@ type CriticalityFilter = "ALL" | "CRITICAL" | "NORMAL";
  */
 const FILTER_DEFAULTS = { category: "ALL", criticality: "ALL" } as const;
 
+/** Stable empty placeholder for the loading skeleton's mobile children slot. */
+const LOADING_MOBILE_CHILDREN = <></>;
+
+
 export function ApplicationsListView() {
   const t = useTranslations("applications");
   const { date } = useFormatters();
@@ -293,7 +297,7 @@ export function ApplicationsListView() {
       />
 
       {isLoading ? (
-        <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
+        <ResourceTable columns={columns} isLoading mobileChildren={LOADING_MOBILE_CHILDREN} />
       ) : isError ? (
         <ErrorState
           title={t("list.errorTitle")}

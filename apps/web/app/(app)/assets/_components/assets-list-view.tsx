@@ -168,6 +168,10 @@ const COLUMN_GROUPS: { id: string; keys: readonly HideableColumn[] }[] = [
 /** localStorage key persisting the visible hideable-column set (per browser). */
 const COLUMNS_STORAGE_KEY = "lazyit:assets:columns";
 
+/** Stable empty placeholder for the loading skeleton's mobile children slot. */
+const LOADING_MOBILE_CHILDREN = <></>;
+
+
 /**
  * The columns shown by default — the picker subtracts from (and adds back to) this set. Every hideable
  * column is on out of the box, so the table is unchanged for operators who never open the picker; the
@@ -609,7 +613,7 @@ export function AssetsListView() {
       />
 
       {isLoading ? (
-        <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
+        <ResourceTable columns={columns} isLoading mobileChildren={LOADING_MOBILE_CHILDREN} />
       ) : isError ? (
         <ErrorState
           title={t("errorTitle")}

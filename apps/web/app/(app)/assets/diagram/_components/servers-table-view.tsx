@@ -72,6 +72,10 @@ import { statusTone } from "@/lib/infra/canvas";
  */
 const FILTER_DEFAULTS = { kind: "ALL", status: "ALL", state: "ALL" } as const;
 
+/** Stable empty placeholder for the loading skeleton's mobile children slot. */
+const LOADING_MOBILE_CHILDREN = <></>;
+
+
 export function ServersTableView() {
   const t = useTranslations("infra");
   const tServers = useTranslations("infra.servers");
@@ -199,7 +203,7 @@ export function ServersTableView() {
   ];
 
   if (isLoading) {
-    return <ResourceTable columns={columns} isLoading mobileChildren={<></>} />;
+    return <ResourceTable columns={columns} isLoading mobileChildren={LOADING_MOBILE_CHILDREN} />;
   }
   if (isError) {
     return (
