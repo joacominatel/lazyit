@@ -3,7 +3,7 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { type AssetModel, cloneAssetModelDefaults } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useReducer, useState } from "react";
 import { toast } from "sonner";
 import { CategoryCombobox } from "@/components/category-combobox";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,31 @@ type BuildResult =
   | { ok: true; payload: Record<string, unknown> }
   | { ok: false; error: string };
 
+/** The default-specs editor's grouped state — see {@link AssetModelForm}. */
+type SpecsState = {
+  rows: SpecsFieldRow[];
+  preserved: Record<string, unknown>;
+  errors: Record<string, SpecsFieldError>;
+};
+
+type SpecsAction =
+  | { type: "rowsChanged"; rows: SpecsFieldRow[] }
+  | { type: "errorsSet"; errors: Record<string, SpecsFieldError> };
+
+function specsReducer(state: SpecsState, action: SpecsAction): SpecsState {
+  switch (action.type) {
+    case "rowsChanged":
+      // Editing rows clears any pending errors — only when there were some, to keep the reference.
+      return {
+        ...state,
+        rows: action.rows,
+        errors: Object.keys(state.errors).length > 0 ? {} : state.errors,
+      };
+    case "errorsSet":
+      return { ...state, errors: action.errors };
+  }
+}
+
 interface AssetModelFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -147,16 +172,16 @@ function AssetModelForm({
   const specsSource =
     model?.specs ??
     (cloneSource && !model ? cloneAssetModelDefaults(cloneSource).specs : undefined);
-  const [{ rows: initialSpecRows, preserved: initialPreservedSpecs }] =
-    useState(() => specsToRows(specsSource));
-  const [specRows, setSpecRows] =
-    useState<SpecsFieldRow[]>(initialSpecRows);
-  const [preservedSpecs] = useState<Record<string, unknown>>(
-    initialPreservedSpecs,
+  // The specs editor (rows + preserved non-scalar entries + per-row errors) is one machine — see
+  // `specsReducer`. Lazily split the source specs once.
+  const [specState, dispatchSpec] = useReducer(
+    specsReducer,
+    specsSource,
+    (src) => {
+      const { rows, preserved } = specsToRows(src);
+      return { rows, preserved, errors: {} };
+    },
   );
-  const [specErrors, setSpecErrors] = useState<
-    Record<string, SpecsFieldError>
-  >({});
   const [error, setError] = useState<string | undefined>(undefined);
   const hadSpecs = model?.specs != null && Object.keys(model.specs).length > 0;
   const specLabels = {
@@ -212,11 +237,11 @@ function AssetModelForm({
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const { errors, ok } = validateRows(specRows);
-    setSpecErrors(errors);
+    const { errors, ok } = validateRows(specState.rows);
+    dispatchSpec({ type: "errorsSet", errors });
     if (!ok) return;
 
-    let specs = rowsToSpecs(specRows, preservedSpecs);
+    let specs = rowsToSpecs(specState.rows, specState.preserved);
     if (isEdit && specs === undefined && hadSpecs) specs = {};
 
     const built = buildPayload(specs);
@@ -340,13 +365,10 @@ function AssetModelForm({
           </Field>
 
           <SpecsFieldsEditor
-            rows={specRows}
-            errors={specErrors}
+            rows={specState.rows}
+            errors={specState.errors}
             labels={specLabels}
-            onChange={(rows) => {
-              setSpecRows(rows);
-              if (Object.keys(specErrors).length > 0) setSpecErrors({});
-            }}
+            onChange={(rows) => dispatchSpec({ type: "rowsChanged", rows })}
           />
         </FieldGroup>
       </form>

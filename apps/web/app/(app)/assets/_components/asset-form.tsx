@@ -15,7 +15,7 @@ import {
 } from "@lazyit/shared";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useReducer } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { LocationFormDialog } from "@/app/(app)/locations/_components/location-form-dialog";
@@ -114,6 +114,55 @@ function toFormValues(asset?: Asset, cloneSource?: Asset): AssetFormValues {
   return { name: "", status: "OPERATIONAL" };
 }
 
+/** The specs editor's grouped state — see {@link AssetForm}. */
+type SpecsState = {
+  rows: CustomFieldRow[];
+  preserved: Record<string, unknown>;
+  errors: Record<string, CustomFieldError>;
+  /** "Manufacturer Model" when the rows were seeded from a model's default specs, else undefined. */
+  modelSource: string | undefined;
+};
+
+type SpecsAction =
+  | { type: "rowsChanged"; rows: CustomFieldRow[] }
+  | { type: "errorsSet"; errors: Record<string, CustomFieldError> }
+  | { type: "modelApplied"; model: AssetModel }
+  | { type: "modelCleared" };
+
+function specsReducer(state: SpecsState, action: SpecsAction): SpecsState {
+  switch (action.type) {
+    case "rowsChanged":
+      // Editing rows clears any pending errors — only when there were some, to keep the reference.
+      return {
+        ...state,
+        rows: action.rows,
+        errors: Object.keys(state.errors).length > 0 ? {} : state.errors,
+      };
+    case "errorsSet":
+      return { ...state, errors: action.errors };
+    case "modelApplied": {
+      // Merge the model's default specs into the current rows, then re-split into rows + preserved.
+      const currentSpecs = rowsToSpecs(state.rows, state.preserved);
+      const merged = applyAssetModelSpecsDefaults(
+        action.model.specs,
+        currentSpecs,
+      );
+      const { rows, preserved } = specsToRows(merged);
+      return {
+        rows,
+        preserved,
+        errors: {},
+        modelSource:
+          action.model.specs && Object.keys(action.model.specs).length > 0
+            ? `${action.model.manufacturer} ${action.model.name}`
+            : undefined,
+      };
+    }
+    case "modelCleared":
+      return { ...state, modelSource: undefined };
+  }
+}
+
 /**
  * Create/edit/clone form for an Asset. Per-mode validation (CreateAssetSchema vs the
  * partial UpdateAssetSchema — ADR-0020). Clone (`cloneSource`, no `asset`) stays in CREATE mode but
@@ -153,18 +202,15 @@ export function AssetForm({
 
   // Specs source: the edited asset's specs, or the clone source's (deep-copied by the sanitizer).
   const specsSource = asset?.specs ?? cloneSource?.specs;
-  // Split existing specs into editable scalar rows + preserved non-scalar entries.
-  const [{ rows: initialRows, preserved: initialPreserved }] = useState(() =>
-    specsToRows(specsSource),
-  );
-  const [specRows, setSpecRows] = useState<CustomFieldRow[]>(initialRows);
-  const [preservedSpecs, setPreservedSpecs] =
-    useState<Record<string, unknown>>(initialPreserved);
-  const [specErrors, setSpecErrors] = useState<
-    Record<string, CustomFieldError>
-  >({});
-  const [modelSpecsSource, setModelSpecsSource] = useState<string | undefined>(
-    undefined,
+  // The specs editor is one machine (rows + preserved non-scalar entries + per-row errors + the
+  // model the defaults were copied from) — see `specsReducer`. Lazily split the source specs once.
+  const [specState, dispatchSpec] = useReducer(
+    specsReducer,
+    specsSource,
+    (src) => {
+      const { rows, preserved } = specsToRows(src);
+      return { rows, preserved, errors: {}, modelSource: undefined };
+    },
   );
   // Did the asset arrive with any specs? Used to clear them on edit (see onSubmit).
   const hadSpecs = asset?.specs != null && Object.keys(asset.specs).length > 0;
@@ -178,17 +224,7 @@ export function AssetForm({
 
   function applyModelSpecs(model: AssetModel) {
     if (isEdit) return;
-    const currentSpecs = rowsToSpecs(specRows, preservedSpecs);
-    const merged = applyAssetModelSpecsDefaults(model.specs, currentSpecs);
-    const { rows, preserved } = specsToRows(merged);
-    setSpecRows(rows);
-    setPreservedSpecs(preserved);
-    setSpecErrors({});
-    setModelSpecsSource(
-      model.specs && Object.keys(model.specs).length > 0
-        ? `${model.manufacturer} ${model.name}`
-        : undefined,
-    );
+    dispatchSpec({ type: "modelApplied", model });
   }
 
   const specLabels = {
@@ -212,8 +248,8 @@ export function AssetForm({
   const onSubmit = form.handleSubmit(
     (values) => {
       // Validate the custom-field rows (non-empty + unique names); abort on any error.
-      const { errors, ok } = validateRows(specRows);
-      setSpecErrors(errors);
+      const { errors, ok } = validateRows(specState.rows);
+      dispatchSpec({ type: "errorsSet", errors });
       if (!ok) {
         // The custom-field rows live outside RHF, so a row error never reaches RHF's `onInvalid`.
         // The spec rows set `aria-invalid` too, so the shared helper (which defers a frame for the
@@ -223,7 +259,7 @@ export function AssetForm({
       }
 
       // Serialize rows into the specs object, merging preserved non-scalar entries.
-      let specs = rowsToSpecs(specRows, preservedSpecs);
+      let specs = rowsToSpecs(specState.rows, specState.preserved);
       // On edit, if the user cleared every field but the asset previously had specs,
       // send `{}` to actually clear them (an omitted key is a no-op in a PATCH).
       if (isEdit && specs === undefined && hadSpecs) specs = {};
@@ -336,7 +372,7 @@ export function AssetForm({
                     onValueChange={(value) => {
                       const next = value === "" ? undefined : value;
                       field.onChange(next);
-                      setModelSpecsSource(undefined);
+                      dispatchSpec({ type: "modelCleared" });
                     }}
                     onModelSelect={applyModelSpecs}
                     placeholder={t("modelPlaceholder")}
@@ -501,20 +537,17 @@ export function AssetForm({
         />
 
         <CustomFieldsEditor
-          rows={specRows}
-          errors={specErrors}
+          rows={specState.rows}
+          errors={specState.errors}
           labels={specLabels}
           note={
-            modelSpecsSource
+            specState.modelSource
               ? t("customFields.copiedFromModel", {
-                  model: modelSpecsSource,
+                  model: specState.modelSource,
                 })
               : undefined
           }
-          onChange={(rows) => {
-            setSpecRows(rows);
-            if (Object.keys(specErrors).length > 0) setSpecErrors({});
-          }}
+          onChange={(rows) => dispatchSpec({ type: "rowsChanged", rows })}
         />
       </FieldGroup>
 

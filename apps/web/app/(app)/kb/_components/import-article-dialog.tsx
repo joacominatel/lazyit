@@ -6,7 +6,7 @@ import { ArticleStatusSchema, type ArticleStatus, type ZipImportResult, type Zip
 import { useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,6 +50,41 @@ const COLLAPSED_LIMIT = 5;
 interface ImportArticleDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+/** The upload form's grouped inputs (the async job state lives in its own `useState`). */
+type ImportFormState = {
+  file: File | null;
+  categoryId: string;
+  status: ArticleStatus;
+};
+
+type ImportFormAction =
+  | { type: "fileChanged"; file: File | null }
+  | { type: "categoryChanged"; categoryId: string }
+  | { type: "statusChanged"; status: ArticleStatus }
+  | { type: "reset" };
+
+const INITIAL_IMPORT_FORM: ImportFormState = {
+  file: null,
+  categoryId: "",
+  status: "DRAFT",
+};
+
+function importFormReducer(
+  state: ImportFormState,
+  action: ImportFormAction,
+): ImportFormState {
+  switch (action.type) {
+    case "fileChanged":
+      return { ...state, file: action.file };
+    case "categoryChanged":
+      return { ...state, categoryId: action.categoryId };
+    case "statusChanged":
+      return { ...state, status: action.status };
+    case "reset":
+      return INITIAL_IMPORT_FORM;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -222,9 +257,8 @@ export function ImportArticleDialog({
   const canWrite = useCan("article:write");
   const importArticle = useImportArticle();
 
-  const [file, setFile] = useState<File | null>(null);
-  const [categoryId, setCategoryId] = useState("");
-  const [status, setStatus] = useState<ArticleStatus>("DRAFT");
+  // The upload form inputs are grouped into one reducer; the async job state below stays separate.
+  const [form, dispatchForm] = useReducer(importFormReducer, INITIAL_IMPORT_FORM);
 
   // jobId (the only stored async state) drives the poll; everything else is derived from it.
   const [jobId, setJobId] = useState<string | null>(null);
@@ -258,9 +292,7 @@ export function ImportArticleDialog({
   // Reset everything (in an event handler, never an effect) so a reopened dialog starts clean
   // and any in-flight poll stops being acted on.
   function reset() {
-    setFile(null);
-    setCategoryId("");
-    setStatus("DRAFT");
+    dispatchForm({ type: "reset" });
     setJobId(null);
     setBatchResult(null);
     failedJobRef.current = null;
@@ -311,6 +343,7 @@ export function ImportArticleDialog({
   }, [completedBatch, jobId, queryClient, t]);
 
   function handleImport() {
+    const { file, categoryId, status } = form;
     if (!session) {
       toast.error(t("import.toast.signInRequired"));
       return;
@@ -365,7 +398,12 @@ export function ImportArticleDialog({
                   type="file"
                   accept={ACCEPT}
                   disabled={isImporting}
-                  onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                  onChange={(event) =>
+                    dispatchForm({
+                      type: "fileChanged",
+                      file: event.target.files?.[0] ?? null,
+                    })
+                  }
                 />
                 <FieldDescription>{t("import.fileHint")}</FieldDescription>
               </Field>
@@ -375,8 +413,10 @@ export function ImportArticleDialog({
                   {t("import.categoryLabel")}
                 </FieldLabel>
                 <Select
-                  value={categoryId}
-                  onValueChange={setCategoryId}
+                  value={form.categoryId}
+                  onValueChange={(value) =>
+                    dispatchForm({ type: "categoryChanged", categoryId: value })
+                  }
                   disabled={isImporting}
                 >
                   <SelectTrigger id="import-category" className="w-full">
@@ -403,8 +443,13 @@ export function ImportArticleDialog({
                   {t("import.statusLabel")}
                 </FieldLabel>
                 <Select
-                  value={status}
-                  onValueChange={(value) => setStatus(value as ArticleStatus)}
+                  value={form.status}
+                  onValueChange={(value) =>
+                    dispatchForm({
+                      type: "statusChanged",
+                      status: value as ArticleStatus,
+                    })
+                  }
                   disabled={isImporting}
                 >
                   <SelectTrigger id="import-status" className="w-full">

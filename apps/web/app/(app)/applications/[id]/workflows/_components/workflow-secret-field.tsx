@@ -7,7 +7,7 @@ import {
   type WorkflowSecret,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useReducer } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
@@ -32,6 +32,58 @@ import {
   type BindableAuthScheme,
   deriveSchemePatch,
 } from "@/lib/workflow/credential-scheme";
+
+/** The credential-entry form's grouped state — see {@link WorkflowSecretField}. */
+type SecretFormState = {
+  editing: boolean;
+  /** The cleartext credential — lives only in this component's local state, never the query cache. */
+  value: string;
+  label: string;
+  /** The auth scheme the operator picks while binding (REST connections only). */
+  scheme: BindableAuthScheme;
+  headerName: string;
+};
+
+type SecretFormAction =
+  | { type: "editStarted" }
+  | { type: "valueChanged"; value: string }
+  | { type: "labelChanged"; label: string }
+  | { type: "schemeChanged"; scheme: BindableAuthScheme }
+  | { type: "headerNameChanged"; headerName: string }
+  | {
+      type: "reset";
+      label: string;
+      scheme: BindableAuthScheme;
+      headerName: string;
+    };
+
+function secretFormReducer(
+  state: SecretFormState,
+  action: SecretFormAction,
+): SecretFormState {
+  switch (action.type) {
+    case "editStarted":
+      return { ...state, editing: true };
+    case "valueChanged":
+      return { ...state, value: action.value };
+    case "labelChanged":
+      return { ...state, label: action.label };
+    case "schemeChanged":
+      return { ...state, scheme: action.scheme };
+    case "headerNameChanged":
+      return { ...state, headerName: action.headerName };
+    case "reset":
+      // Leave edit mode and drop the cleartext; label/scheme/headerName fall back to the
+      // connection-derived defaults the caller recomputes at dispatch time (props may have changed).
+      return {
+        editing: false,
+        value: "",
+        label: action.label,
+        scheme: action.scheme,
+        headerName: action.headerName,
+      };
+  }
+}
 
 /**
  * The WRITE-ONLY credential field for a connection (frontend.md §4b) — the inverse of the
@@ -83,16 +135,15 @@ export function WorkflowSecretField({
   // A REST connection needs a scheme chosen as part of binding when none is set yet (`NONE`).
   const needsSchemeChoice = isRest && currentScheme === "NONE";
 
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState("");
-  const [label, setLabel] = useState(defaultLabel);
-  // The scheme the operator picks while binding (only used for a REST connection).
-  const [scheme, setScheme] = useState<BindableAuthScheme>(
-    currentScheme && currentScheme !== "NONE" ? currentScheme : "BEARER",
-  );
-  const [headerName, setHeaderName] = useState(
-    config.kind === "REST" ? (config.authHeaderName ?? "") : "",
-  );
+  // The entry form (edit toggle + cleartext value + label + the REST scheme/header chosen while
+  // binding) is one machine — see `secretFormReducer`.
+  const [form, dispatch] = useReducer(secretFormReducer, undefined, () => ({
+    editing: false,
+    value: "",
+    label: defaultLabel,
+    scheme: currentScheme && currentScheme !== "NONE" ? currentScheme : "BEARER",
+    headerName: config.kind === "REST" ? (config.authHeaderName ?? "") : "",
+  }));
 
   const isPending =
     createSecret.isPending ||
@@ -101,23 +152,22 @@ export function WorkflowSecretField({
     updateConnection.isPending;
 
   function reset() {
-    setEditing(false);
-    setValue("");
-    setLabel(defaultLabel);
-    setScheme(
-      currentScheme && currentScheme !== "NONE" ? currentScheme : "BEARER",
-    );
-    setHeaderName(config.kind === "REST" ? (config.authHeaderName ?? "") : "");
+    dispatch({
+      type: "reset",
+      label: defaultLabel,
+      scheme: currentScheme && currentScheme !== "NONE" ? currentScheme : "BEARER",
+      headerName: config.kind === "REST" ? (config.authHeaderName ?? "") : "",
+    });
   }
 
   function persistSecret() {
-    const trimmed = value.trim();
+    const trimmed = form.value.trim();
     // Create + link: persist the credential, then point the connection at it.
     createSecret.mutate(
       {
         applicationId,
         connectionId,
-        label: label.trim() || defaultLabel,
+        label: form.label.trim() || defaultLabel,
         value: trimmed,
       },
       {
@@ -139,7 +189,7 @@ export function WorkflowSecretField({
   }
 
   function save() {
-    const trimmed = value.trim();
+    const trimmed = form.value.trim();
     if (trimmed.length === 0) return;
 
     if (secret) {
@@ -159,7 +209,11 @@ export function WorkflowSecretField({
 
     // Derive the auth-scheme config patch for the GUIDED bind (#342). Rotating an existing secret never
     // re-touches the scheme, so the derivation only runs when adding a NEW credential.
-    const derived = deriveSchemePatch({ config, scheme, headerName });
+    const derived = deriveSchemePatch({
+      config,
+      scheme: form.scheme,
+      headerName: form.headerName,
+    });
     if (!derived.ok) {
       // HEADER scheme picked without a header name — surface a clear, non-blocking error.
       notifyError(
@@ -197,7 +251,7 @@ export function WorkflowSecretField({
     });
   }
 
-  if (editing) {
+  if (form.editing) {
     // Show the auth-type chooser only when BINDING a new credential to a REST connection (not on
     // rotation, where the scheme is already set — change it in the connection form instead).
     const showSchemeChooser = isRest && !secret;
@@ -209,8 +263,10 @@ export function WorkflowSecretField({
               {t("secret.authTypeLabel")}
             </FieldLabel>
             <Select
-              value={scheme}
-              onValueChange={(v) => setScheme(v as BindableAuthScheme)}
+              value={form.scheme}
+              onValueChange={(v) =>
+                dispatch({ type: "schemeChanged", scheme: v as BindableAuthScheme })
+              }
             >
               <SelectTrigger id="wf-secret-scheme">
                 <SelectValue />
@@ -223,11 +279,13 @@ export function WorkflowSecretField({
                 ))}
               </SelectContent>
             </Select>
-            {scheme === "HEADER" ? (
+            {form.scheme === "HEADER" ? (
               <Input
                 id="wf-secret-header"
-                value={headerName}
-                onChange={(e) => setHeaderName(e.target.value)}
+                value={form.headerName}
+                onChange={(e) =>
+                  dispatch({ type: "headerNameChanged", headerName: e.target.value })
+                }
                 placeholder="X-Api-Key"
                 maxLength={100}
                 aria-label={t("secret.authHeaderLabel")}
@@ -242,8 +300,10 @@ export function WorkflowSecretField({
         {!secret ? (
           <Input
             id="wf-secret-label"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
+            value={form.label}
+            onChange={(e) =>
+              dispatch({ type: "labelChanged", label: e.target.value })
+            }
             placeholder={t("secret.labelPlaceholder")}
             maxLength={120}
             className="mb-2"
@@ -253,8 +313,10 @@ export function WorkflowSecretField({
         <Input
           id="wf-secret-value"
           type="password"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
+          value={form.value}
+          onChange={(e) =>
+            dispatch({ type: "valueChanged", value: e.target.value })
+          }
           placeholder={t("secret.valuePlaceholder")}
           maxLength={8192}
           autoComplete="off"
@@ -266,7 +328,7 @@ export function WorkflowSecretField({
             type="button"
             size="sm"
             onClick={save}
-            disabled={isPending || value.trim().length === 0}
+            disabled={isPending || form.value.trim().length === 0}
           >
             {isPending && <ArrowPathIcon className="animate-spin" />}
             {t("secret.save")}
@@ -300,7 +362,7 @@ export function WorkflowSecretField({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => setEditing(true)}
+                onClick={() => dispatch({ type: "editStarted" })}
                 disabled={isPending}
               >
                 {t("secret.replace")}
@@ -335,7 +397,7 @@ export function WorkflowSecretField({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => setEditing(true)}
+                onClick={() => dispatch({ type: "editStarted" })}
               >
                 {t("secret.add")}
               </Button>
