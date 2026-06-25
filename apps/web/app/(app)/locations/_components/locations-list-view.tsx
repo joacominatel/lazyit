@@ -72,6 +72,10 @@ import {
  */
 const FILTER_DEFAULTS = { type: "ALL", archived: "ALL" } as const;
 
+/** Stable empty fragment for ResourceTable mobileChildren when the table is in loading state. */
+const EMPTY_MOBILE = <></>;
+
+
 export function LocationsListView() {
   const t = useTranslations("locations");
   const tShared = useTranslations("shared");
@@ -287,7 +291,7 @@ export function LocationsListView() {
       />
 
       {isLoading ? (
-        <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
+        <ResourceTable columns={columns} isLoading mobileChildren={EMPTY_MOBILE} />
       ) : isError ? (
         <ErrorState
           title={t("list.loadError")}
