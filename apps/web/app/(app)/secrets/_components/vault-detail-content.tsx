@@ -1032,12 +1032,14 @@ function EditItemDialog({
   // user mid-edit with their typed new value silently dropped.
   const membershipState = classifyMembership(useMyMembership(vaultId));
   const updateItem = useUpdateItem();
-  const [form, dispatchForm] = useReducer(editItemFormReducer, undefined, () => ({
+  // Seeded from `item` on first mount; the render-time sync below re-seeds on item change. The object
+  // recomputed on later renders is discarded by React — same lifecycle as the original useState seeds.
+  const [form, dispatchForm] = useReducer(editItemFormReducer, {
     label: item.label,
     handle: item.handle,
     busy: false,
     keyError: false,
-  }));
+  });
   const { label, handle, busy, keyError } = form;
   // Zero-knowledge: the plaintext new value stays in its OWN dedicated state, never folded into the form
   // reducer. Cleared in the mutation's finally (below) and on close / item-change.
