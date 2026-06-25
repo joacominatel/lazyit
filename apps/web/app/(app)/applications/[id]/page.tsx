@@ -19,8 +19,7 @@ export default async function ApplicationDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { id } = await params;
-  const session = await auth();
+  const [{ id }, session] = await Promise.all([params, auth()]);
   const queryClient = getServerQueryClient();
 
   await queryClient.prefetchQuery({

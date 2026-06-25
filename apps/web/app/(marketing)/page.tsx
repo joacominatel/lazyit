@@ -39,8 +39,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslations("marketing");
-  const locale = await getLocale();
+  const [t, locale] = await Promise.all([getTranslations("marketing"), getLocale()]);
   const title = t("meta.title");
   const description = t("meta.description");
   return {
@@ -89,8 +88,7 @@ function Bullet({ children }: { children: ReactNode }) {
 }
 
 export default async function LandingPage() {
-  const t = await getTranslations("marketing");
-  const unconfigured = await instanceIsUnconfigured();
+  const [t, unconfigured] = await Promise.all([getTranslations("marketing"), instanceIsUnconfigured()]);
 
   const PrimaryCta = (
     <Button asChild size="lg">
