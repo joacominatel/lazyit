@@ -206,18 +206,16 @@ export function WorkflowBuilder({
     updateWorkflow.isPending ||
     createVersion.isPending;
 
-  const [draft, dispatchDraft] = useReducer(
-    workflowDraftReducer,
-    undefined,
-    (): WorkflowDraft => ({
-      workflowId: workflow?.id,
-      name: workflow?.name ?? "",
-      trigger: (workflow?.trigger as WorkflowTriggerV1) ?? "ACCESS_GRANTED",
-      enabled: workflow?.enabled ?? false,
-      deprovisionPolicy: workflow?.deprovisionPolicy ?? "LAST_ACTIVE_GRANT",
-      steps: workflow?.latestVersion?.steps ?? [],
-    }),
-  );
+  // Initial state is derived from `workflow` on first mount; React keeps the reducer's own state
+  // thereafter (the object recomputed on later renders is discarded), matching the original useState seeds.
+  const [draft, dispatchDraft] = useReducer(workflowDraftReducer, {
+    workflowId: workflow?.id,
+    name: workflow?.name ?? "",
+    trigger: (workflow?.trigger as WorkflowTriggerV1) ?? "ACCESS_GRANTED",
+    enabled: workflow?.enabled ?? false,
+    deprovisionPolicy: workflow?.deprovisionPolicy ?? "LAST_ACTIVE_GRANT",
+    steps: workflow?.latestVersion?.steps ?? [],
+  });
   const { workflowId, name, trigger, enabled, deprovisionPolicy, steps } = draft;
 
   const [editor, dispatchEditor] = useReducer(workflowEditorReducer, {
