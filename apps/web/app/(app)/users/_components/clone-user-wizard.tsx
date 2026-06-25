@@ -18,7 +18,7 @@ import { MAX_PAGE_LIMIT } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useReducer, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -101,6 +101,40 @@ interface CloneUserWizardProps {
   source: CloneSource;
 }
 
+/** The clone configuration beyond the profile: which assignments/grants to carry over + the engine toggle. */
+type CloneOptionsState = {
+  selectedAssignments: Set<string>;
+  selectedGrants: Set<string>;
+  fireWorkflows: boolean;
+};
+
+type CloneOptionsAction =
+  | { type: "assignmentToggled"; id: string; on: boolean }
+  | { type: "grantToggled"; id: string; on: boolean }
+  | { type: "fireWorkflowsChanged"; value: boolean };
+
+function cloneOptionsReducer(
+  state: CloneOptionsState,
+  action: CloneOptionsAction,
+): CloneOptionsState {
+  switch (action.type) {
+    case "assignmentToggled": {
+      const selectedAssignments = new Set(state.selectedAssignments);
+      if (action.on) selectedAssignments.add(action.id);
+      else selectedAssignments.delete(action.id);
+      return { ...state, selectedAssignments };
+    }
+    case "grantToggled": {
+      const selectedGrants = new Set(state.selectedGrants);
+      if (action.on) selectedGrants.add(action.id);
+      else selectedGrants.delete(action.id);
+      return { ...state, selectedGrants };
+    }
+    case "fireWorkflowsChanged":
+      return { ...state, fireWorkflows: action.value };
+  }
+}
+
 /**
  * The server-orchestrated clone wizard (ADR-0058 §4) — the heavier sibling of the in-form clone
  * pre-fill. It mints a NEW user from the operator-supplied `profile` AND opt-in mirrors the SOURCE's
@@ -127,14 +161,17 @@ export function CloneUserWizard({
   const [profile, setProfile] = useState<ProfileValues>(() =>
     blankProfile(source),
   );
-  // Selected assignment / grant ids (Sets keep selection unique by construction — ADR-0058).
-  const [selectedAssignments, setSelectedAssignments] = useState<Set<string>>(
-    () => new Set(),
+  // The clone options (which assignment/grant ids to carry over + the engine toggle) are one machine
+  // — see `cloneOptionsReducer`. Sets keep the selection unique by construction (ADR-0058).
+  const [options, dispatchOptions] = useReducer(
+    cloneOptionsReducer,
+    undefined,
+    () => ({
+      selectedAssignments: new Set<string>(),
+      selectedGrants: new Set<string>(),
+      fireWorkflows: false,
+    }),
   );
-  const [selectedGrants, setSelectedGrants] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [fireWorkflows, setFireWorkflows] = useState(false);
   const [result, setResult] = useState<CloneUserResult | null>(null);
   // Per-field validation errors keyed by the CloneUserSchema profile path (e.g. "email").
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -167,20 +204,10 @@ export function CloneUserWizard({
   const activeGrants = grants ?? [];
 
   function toggleAssignment(id: string, on: boolean) {
-    setSelectedAssignments((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+    dispatchOptions({ type: "assignmentToggled", id, on });
   }
   function toggleGrant(id: string, on: boolean) {
-    setSelectedGrants((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+    dispatchOptions({ type: "grantToggled", id, on });
   }
 
   function buildPayload(): CloneUser {
@@ -197,9 +224,9 @@ export function CloneUserWizard({
         ...(username !== "" ? { username } : {}),
         manager,
       },
-      cloneAssetAssignments: [...selectedAssignments],
-      cloneAccessGrants: [...selectedGrants],
-      fireWorkflowsOnClonedGrants: fireWorkflows,
+      cloneAssetAssignments: [...options.selectedAssignments],
+      cloneAccessGrants: [...options.selectedGrants],
+      fireWorkflowsOnClonedGrants: options.fireWorkflows,
     };
   }
 
@@ -234,7 +261,7 @@ export function CloneUserWizard({
     );
   }
 
-  const grantCount = selectedGrants.size;
+  const grantCount = options.selectedGrants.size;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -392,7 +419,7 @@ export function CloneUserWizard({
                     date: date(a.assignedAt),
                   }),
                 }))}
-                selected={selectedAssignments}
+                selected={options.selectedAssignments}
                 onToggle={toggleAssignment}
                 idPrefix="clone-assignment"
               />
@@ -412,7 +439,7 @@ export function CloneUserWizard({
                     t("access.applicationFallback"),
                   meta: g.accessLevel ?? undefined,
                 }))}
-                selected={selectedGrants}
+                selected={options.selectedGrants}
                 onToggle={toggleGrant}
                 idPrefix="clone-grant"
               />
@@ -427,12 +454,14 @@ export function CloneUserWizard({
                 </FieldContent>
                 <Switch
                   id="clone-fire"
-                  checked={fireWorkflows}
-                  onCheckedChange={setFireWorkflows}
+                  checked={options.fireWorkflows}
+                  onCheckedChange={(value) =>
+                    dispatchOptions({ type: "fireWorkflowsChanged", value })
+                  }
                 />
               </Field>
 
-              {fireWorkflows && grantCount > 0 && (
+              {options.fireWorkflows && grantCount > 0 && (
                 <div
                   role="alert"
                   className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-foreground"
