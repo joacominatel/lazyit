@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
@@ -13,6 +14,17 @@ import { TasksInbox } from "../_components/tasks-inbox";
  */
 export default function WorkflowTasksPage() {
   const t = useTranslations("workflow");
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: t("breadcrumb.settings"), href: "/settings" },
+          { label: t("inbox.title") },
+        ]}
+      />
+    ),
+    [t],
+  );
   return (
     <div className="space-y-6">
       <PermissionGate
@@ -21,14 +33,7 @@ export default function WorkflowTasksPage() {
         description={t("gate.description")}
       >
         <PageHeader
-          breadcrumb={
-            <Breadcrumb
-              items={[
-                { label: t("breadcrumb.settings"), href: "/settings" },
-                { label: t("inbox.title") },
-              ]}
-            />
-          }
+          breadcrumb={breadcrumb}
           title={t("inbox.title")}
           subtitle={t("inbox.subtitle")}
         />
