@@ -3,7 +3,7 @@
 import { ArrowPathIcon, KeyIcon } from "@heroicons/react/24/outline";
 import type { UserKeypair } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useReducer, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +23,60 @@ import {
   unlockWithPassphrase,
 } from "@/lib/secret-manager/crypto";
 import { useChangePassword } from "@/lib/secret-manager/hooks/use-keypair";
+
+type ChangePasswordState = {
+  currentPassword: string;
+  newPassword: string;
+  confirm: string;
+  busy: boolean;
+  /** Wrong CURRENT password — inline error, nothing posted. */
+  failed: boolean;
+  /** 404: the caller has no keypair (cannot happen from this surface, but handled defensively). */
+  noKeypair: boolean;
+};
+
+type ChangePasswordAction =
+  | { type: "currentChanged"; value: string }
+  | { type: "newChanged"; value: string }
+  | { type: "confirmChanged"; value: string }
+  | { type: "submitStart" }
+  | { type: "currentFailed" }
+  | { type: "submitError" }
+  | { type: "noKeypair" }
+  | { type: "reset" };
+
+const changePasswordInitialState: ChangePasswordState = {
+  currentPassword: "",
+  newPassword: "",
+  confirm: "",
+  busy: false,
+  failed: false,
+  noKeypair: false,
+};
+
+function changePasswordReducer(
+  state: ChangePasswordState,
+  action: ChangePasswordAction,
+): ChangePasswordState {
+  switch (action.type) {
+    case "currentChanged":
+      return { ...state, currentPassword: action.value, failed: false, noKeypair: false };
+    case "newChanged":
+      return { ...state, newPassword: action.value };
+    case "confirmChanged":
+      return { ...state, confirm: action.value };
+    case "submitStart":
+      return { ...state, busy: true, failed: false, noKeypair: false };
+    case "currentFailed":
+      return { ...state, failed: true, currentPassword: "", busy: false };
+    case "submitError":
+      return { ...state, busy: false };
+    case "noKeypair":
+      return { ...state, noKeypair: true, busy: false };
+    case "reset":
+      return changePasswordInitialState;
+  }
+}
 
 /**
  * ChangePasswordFlow — change the daily ENTRY password (Copy A) of an EXISTING keypair (ADR-0066, #452).
@@ -54,14 +108,8 @@ export function ChangePasswordFlow({
   const tc = useTranslations("common");
   const changePassword = useChangePassword();
   const [open, setOpen] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
-  // Wrong CURRENT password — inline error, nothing posted.
-  const [failed, setFailed] = useState(false);
-  // 404: the caller has no keypair (cannot happen from this surface, but handled defensively).
-  const [noKeypair, setNoKeypair] = useState(false);
+  const [state, dispatch] = useReducer(changePasswordReducer, changePasswordInitialState);
+  const { currentPassword, newPassword, confirm, busy, failed, noKeypair } = state;
 
   const mismatch = confirm.length > 0 && newPassword !== confirm;
   const tooShort = newPassword.length > 0 && newPassword.length < 8;
@@ -73,12 +121,7 @@ export function ChangePasswordFlow({
     newPassword.length >= 8;
 
   function reset() {
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirm("");
-    setBusy(false);
-    setFailed(false);
-    setNoKeypair(false);
+    dispatch({ type: "reset" });
   }
 
   function handleOpenChange(next: boolean) {
@@ -92,9 +135,7 @@ export function ChangePasswordFlow({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
-    setBusy(true);
-    setFailed(false);
-    setNoKeypair(false);
+    dispatch({ type: "submitStart" });
 
     // Step 1 — unlock the private key with the CURRENT password IN THE BROWSER (this verifies it). A wrong
     // password throws the generic, payload-free decrypt error BEFORE anything is posted; nothing changes.
@@ -102,9 +143,7 @@ export function ChangePasswordFlow({
     try {
       privateKey = await unlockWithPassphrase(keypair, currentPassword);
     } catch {
-      setFailed(true);
-      setCurrentPassword("");
-      setBusy(false);
+      dispatch({ type: "currentFailed" });
       return;
     }
 
@@ -114,7 +153,7 @@ export function ChangePasswordFlow({
       wire = await rewrapPasswordCopy(privateKey, newPassword);
     } catch (err) {
       notifyError(err, t("changePassword.error"));
-      setBusy(false);
+      dispatch({ type: "submitError" });
       return;
     }
 
@@ -124,11 +163,11 @@ export function ChangePasswordFlow({
       await changePassword.mutateAsync(wire);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
-        setNoKeypair(true);
+        dispatch({ type: "noKeypair" });
       } else {
         notifyError(err, t("changePassword.error"));
+        dispatch({ type: "submitError" });
       }
-      setBusy(false);
       return;
     }
 
@@ -173,11 +212,9 @@ export function ChangePasswordFlow({
                 type="password"
                 autoComplete="current-password"
                 value={currentPassword}
-                onChange={(e) => {
-                  setCurrentPassword(e.target.value);
-                  setFailed(false);
-                  setNoKeypair(false);
-                }}
+                onChange={(e) =>
+                  dispatch({ type: "currentChanged", value: e.target.value })
+                }
                 disabled={busy}
                 autoFocus
               />
@@ -202,7 +239,9 @@ export function ChangePasswordFlow({
                 type="password"
                 autoComplete="new-password"
                 value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
+                onChange={(e) =>
+                  dispatch({ type: "newChanged", value: e.target.value })
+                }
                 disabled={busy}
               />
               <FieldDescription className={tooShort ? "text-destructive" : undefined}>
@@ -221,7 +260,9 @@ export function ChangePasswordFlow({
                 type="password"
                 autoComplete="new-password"
                 value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
+                onChange={(e) =>
+                  dispatch({ type: "confirmChanged", value: e.target.value })
+                }
                 disabled={busy}
               />
               {mismatch ? (
