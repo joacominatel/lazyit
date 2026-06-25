@@ -96,7 +96,7 @@ type AutocompleteAction =
   | { type: "chipClosed" }
   | { type: "chipActiveIndexSet"; index: number }
   | { type: "chipActiveIndexMoved"; delta: number; length: number }
-  | { type: "popupPositioned"; pos: PopupPosition };
+  | { type: "popupPositioned"; pos: PopupPosition | null };
 
 const INITIAL_AUTOCOMPLETE: AutocompleteState = {
   wikiQuery: null,
