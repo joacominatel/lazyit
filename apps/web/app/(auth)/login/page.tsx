@@ -83,8 +83,7 @@ export default async function LoginPage({
     redirect(destination);
   }
 
-  const t = await getTranslations("auth");
-  const unconfigured = await instanceIsUnconfigured();
+  const [t, unconfigured] = await Promise.all([getTranslations("auth"), instanceIsUnconfigured()]);
   const errorKeyBase = error
     ? (ERROR_KEY_BASE[error] ?? ERROR_KEY_BASE.Default)
     : null;
