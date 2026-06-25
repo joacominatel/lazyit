@@ -66,6 +66,13 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  /* Tinted-text tokens (issue #812) — AA-safe text colours for the tinted (non-solid)
+     warning/info/destructive variants. Registered here exactly like --color-warning so
+     Tailwind emits full, scanner-safe utilities (text-warning-text / text-info-text /
+     text-destructive-text) — never bg-[var(--x)] interpolation the JIT scanner can't see. */
+  --color-warning-text: var(--warning-text);
+  --color-info-text: var(--info-text);
+  --color-destructive-text: var(--destructive-text);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -138,6 +145,16 @@
   --warning-foreground: oklch(0.27 0.03 75);
   --info: oklch(0.54 0.14 240);
   --info-foreground: oklch(0.985 0 0);
+  /* Tinted-text tokens (issue #812). The tinted button/badge/banner variants paint status
+     text on a `bg-*/10` tint of the SAME hue (amber-on-amber, etc.). Using the raw fill hue
+     as text fails AA badly on the bone canvas (warning ~1.6:1, the #496 regression), so each
+     of these is the fill hue darkened until it clears ≥4.5:1 as text on its own /10 tint AND
+     through the /20 hover. Precomputed OKLCH (no color-mix), in-gamut so it renders exactly.
+     On the bone /10 tint: warning 5.11:1 · info 5.43:1 · destructive 5.80:1 (hover /20 still
+     ≥4.7:1). Emitted as text-*-text utilities via @theme inline. */
+  --warning-text: oklch(0.52 0.11 75);
+  --info-text: oklch(0.48 0.12 245);
+  --destructive-text: oklch(0.48 0.19 27);
   --border: oklch(0.9 0.005 95);
   --input: oklch(0.9 0.005 95);
   --ring: var(--brand);
@@ -229,6 +246,14 @@
   --warning-foreground: oklch(0.2 0.02 80);
   --info: oklch(0.7 0.13 240);
   --info-foreground: oklch(0.18 0 0);
+  /* Tinted-text tokens, dark (issue #812): the fill hue brightened until it clears ≥4.5:1 as
+     text on its own tint over the near-black canvas — the raw fill hue fails here too
+     (warning 3.66:1 / info 3.15:1 / destructive 3.02:1 per the audit). On the /20 tint:
+     warning 8.38:1 · info 7.02:1 · destructive 6.84:1 (the /10 dev-banner tint reads higher,
+     the /30 hover still ≥5:1). In-gamut OKLCH; same hues as light. */
+  --warning-text: oklch(0.9 0.12 90);
+  --info-text: oklch(0.8 0.11 240);
+  --destructive-text: oklch(0.8 0.11 22);
   /* Warm-tinted hairlines: a touch of the bone hue in the translucent white so
      borders read warm against the dark warm-gray canvas. */
   --border: oklch(0.97 0.004 95 / 10%);
