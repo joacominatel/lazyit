@@ -6,7 +6,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { RequestIdNote } from "@/components/request-id-note";
 import { StatusBadge } from "@/components/ui/status-badge";
 import type {
@@ -106,24 +106,29 @@ function RunStepRow({
   if (step.errorClass) summaryParts.push(step.errorClass);
   summaryParts.push(t("runDetail.attempt", { attempt: step.attempt }));
 
+  const meta = useMemo(
+    () => (
+      <span className="flex items-center gap-2">
+        <StatusBadge tone={stepStatusTone(step.status)}>
+          {t(`stepStatus.${step.status}`)}
+        </StatusBadge>
+        {duration ? (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {duration}
+          </span>
+        ) : null}
+      </span>
+    ),
+    [t, step.status, duration],
+  );
+
   return (
     <>
       <WorkflowNode
         dotTone={stepStatusTone(step.status)}
         title={step.stepKey}
         summary={summaryParts.join(" · ")}
-        meta={
-          <span className="flex items-center gap-2">
-            <StatusBadge tone={stepStatusTone(step.status)}>
-              {t(`stepStatus.${step.status}`)}
-            </StatusBadge>
-            {duration ? (
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {duration}
-              </span>
-            ) : null}
-          </span>
-        }
+        meta={meta}
         isLast={isLast && transition == null}
       >
         {step.externalCorrelationId ? (
