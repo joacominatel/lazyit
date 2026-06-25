@@ -57,6 +57,23 @@ Copia un ejemplo, pégalo en el cuerpo y la vista previa en vivo muestra exactam
 el token. El mismo `?` y la vista previa están disponibles tanto en **Nuevo artículo** como en
 **Editar**.
 
+### Tu trabajo está protegido
+
+El editor evita perder el trabajo en curso:
+
+- **Autoguardado local** — mientras escribes, tu borrador se guarda en **este navegador** cada pocos
+  segundos. Es una red de seguridad privada en tu propio equipo, *no* un guardado en el servidor: el
+  artículo solo cambia cuando pulsas **Crear borrador** / **Guardar cambios**. Si la pestaña falla o
+  se cierra por accidente, no se pierde nada.
+- **Restaurar al volver** — vuelve a abrir **Nuevo artículo** o **Editar** y, si hay un borrador local
+  sin guardar, un aviso ofrece **Restaurarlo** (o **Descartarlo**). Un artículo guardado nunca se
+  sobrescribe sin tu permiso.
+- **Aviso al salir** — cerrar la pestaña, recargar o pulsar **Cancelar** con cambios sin guardar te
+  pide confirmación antes de descartarlos. Un guardado correcto borra el borrador local.
+
+El borrador local vive solo en el navegador donde lo escribiste; no se comparte con tu equipo ni se
+sincroniza entre dispositivos.
+
 ## Borradores y publicación
 
 Todo artículo nuevo nace como **Borrador**. Un borrador es **privado de su autor**: nadie más puede

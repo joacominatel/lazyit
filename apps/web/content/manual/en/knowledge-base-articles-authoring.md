@@ -54,6 +54,23 @@ lazyit's two **reserved tokens**, each with a copyable example:
 Copy an example, paste it into the body, and the live preview shows exactly how the token resolves.
 The same `?` and live preview are available on both the **New article** and **Edit** screens.
 
+### Your work is protected
+
+The editor guards against losing in-progress writing:
+
+- **Local autosave** — as you type, your draft is saved to **this browser** every few seconds. It is
+  a private safety net on your own machine, *not* a server save: the article only changes when you
+  press **Create draft** / **Save changes**. If the tab crashes or closes by accident, nothing is
+  lost.
+- **Restore on return** — reopen **New article** or **Edit** and, if an unsaved local draft is
+  waiting, a banner offers to **Restore** it (or **Discard** it). A saved article is never
+  overwritten without your say-so.
+- **Leave warning** — closing the tab, reloading, or pressing **Cancel** with unsaved edits asks you
+  to confirm before discarding them. A successful save clears the local draft.
+
+The local draft lives only in the browser you wrote it in; it is not shared with teammates or synced
+across devices.
+
 ## Drafts and publishing
 
 Every new article is born a **Draft**. A draft is **private to its author** — no one else can see
