@@ -54,6 +54,9 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { downloadCsv } from "./reports-csv";
 
+/** Stable empty breadcrumb for the reports PageHeader (no items — just the home crumb). */
+const BREADCRUMB = <Breadcrumb />;
+
 /**
  * The Reports screen body (rendered only once `logs:read` is confirmed — see `page.tsx`).
  *
@@ -318,7 +321,7 @@ export function ReportsScreen() {
   const header = (
     <PageHeader
       title={t("page.title")}
-      breadcrumb={<Breadcrumb />}
+      breadcrumb={BREADCRUMB}
       subtitle={t("page.subtitle")}
       actions={
         <div className="flex items-center gap-2" data-print-hide>

@@ -85,6 +85,18 @@ export function LocationDetailView({ id }: { id: string }) {
     [t],
   );
 
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: t("detail.breadcrumb"), href: "/locations" },
+          { label: location?.name ?? "" },
+        ]}
+      />
+    ),
+    [t, location?.name],
+  );
+
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -114,14 +126,7 @@ export function LocationDetailView({ id }: { id: string }) {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: t("detail.breadcrumb"), href: "/locations" },
-              { label: location.name },
-            ]}
-          />
-        }
+        breadcrumb={breadcrumb}
         title={location.name}
         badge={<LocationTypeBadge type={location.type} />}
         actions={

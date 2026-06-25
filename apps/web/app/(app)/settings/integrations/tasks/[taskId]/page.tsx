@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
@@ -20,6 +21,18 @@ export default function WorkflowTaskDetailPage() {
   const { data: task, isLoading, isError, error, refetch } = useWorkflowTask(
     params.taskId,
   );
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: t("breadcrumb.settings"), href: "/settings" },
+          { label: t("inbox.title"), href: "/settings/integrations/tasks" },
+          { label: t("taskAction.title") },
+        ]}
+      />
+    ),
+    [t],
+  );
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -29,18 +42,7 @@ export default function WorkflowTaskDetailPage() {
         description={t("gate.description")}
       >
         <PageHeader
-          breadcrumb={
-            <Breadcrumb
-              items={[
-                { label: t("breadcrumb.settings"), href: "/settings" },
-                {
-                  label: t("inbox.title"),
-                  href: "/settings/integrations/tasks",
-                },
-                { label: t("taskAction.title") },
-              ]}
-            />
-          }
+          breadcrumb={breadcrumb}
           title={t("taskAction.title")}
           subtitle={t("taskAction.subtitle")}
         />

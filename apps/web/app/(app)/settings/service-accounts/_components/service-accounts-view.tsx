@@ -6,6 +6,9 @@ import { PageHeader } from "@/components/page-header";
 import { AdminGate } from "../../_components/admin-gate";
 import { ServiceAccountsManager } from "./service-accounts-manager";
 
+/** Stable empty breadcrumb for the service accounts PageHeader. */
+const BREADCRUMB = <Breadcrumb />;
+
 /**
  * Settings → Service accounts body (client). Extracted from `page.tsx` for the ADR-0067
  * server-prefetch rollout: the page prefetches `serviceAccountKeys.list(false)` so the
@@ -22,7 +25,7 @@ export function ServiceAccountsView() {
         <PageHeader
           title={t("serviceAccounts.title")}
           subtitle={t("serviceAccounts.subtitle")}
-          breadcrumb={<Breadcrumb />}
+          breadcrumb={BREADCRUMB}
         />
         <ServiceAccountsManager />
       </div>

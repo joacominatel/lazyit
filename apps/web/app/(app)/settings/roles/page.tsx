@@ -17,6 +17,9 @@ import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { ROLE_ORDER, useRoleCounts } from "@/lib/hooks/use-role-counts";
 import { AdminGate } from "../_components/admin-gate";
 
+/** Stable empty breadcrumb for the roles page PageHeader. */
+const BREADCRUMB = <Breadcrumb />;
+
 /** Tone for each RBAC role (ADR-0040). ADMIN is emphasized with the `info` tone. The label/hint
  * display copy is translated at render via `settings.roles.meta.<role>`. */
 const ROLE_TONE: Record<Role, StatusTone> = {
@@ -46,7 +49,7 @@ export default function RolesPage() {
         <PageHeader
           title={t("roles.title")}
           subtitle={t("roles.subtitle")}
-          breadcrumb={<Breadcrumb />}
+          breadcrumb={BREADCRUMB}
           actions={
             <Link
               href="/users"

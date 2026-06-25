@@ -57,6 +57,9 @@ const PILLAR_ORDER = [
   "automation",
 ] as const;
 
+/** Stable empty breadcrumb for the permissions editor PageHeader. */
+const BREADCRUMB = <Breadcrumb />;
+
 /** Parse the `?role=` deep-link to an editable role, defaulting to MEMBER for an absent/bad value. */
 function roleFromParam(value: string | null): EditableRole {
   return value === "VIEWER" ? "VIEWER" : "MEMBER";
@@ -222,7 +225,7 @@ function PermissionsEditor() {
       <PageHeader
         title={t("roles.permissions.title")}
         subtitle={t("roles.permissions.subtitle")}
-        breadcrumb={<Breadcrumb />}
+        breadcrumb={BREADCRUMB}
       />
 
       <p className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">

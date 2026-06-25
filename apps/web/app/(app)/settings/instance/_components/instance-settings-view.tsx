@@ -16,6 +16,9 @@ import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { AdminGate } from "../../_components/admin-gate";
 import { AssetTagSchemeEditor } from "./asset-tag-scheme-editor";
 
+/** Stable empty breadcrumb for the instance settings PageHeader. */
+const BREADCRUMB = <Breadcrumb />;
+
 /** A label / value row inside a panel; value can be text or a badge. */
 function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -59,7 +62,7 @@ export function InstanceSettingsView() {
         <PageHeader
           title={t("instance.title")}
           subtitle={t("instance.subtitle")}
-          breadcrumb={<Breadcrumb />}
+          breadcrumb={BREADCRUMB}
           actions={
             <Button
               variant="outline"

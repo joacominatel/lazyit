@@ -66,6 +66,18 @@ export function UserDetailView({ id }: { id: string }) {
   // Snapshot "now" once (not during render) so the expiry comparison stays pure and stable.
   const [now] = useState(() => Date.now());
 
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: t("list.title"), href: "/users" },
+          { label: user ? `${user.firstName} ${user.lastName}` : "" },
+        ]}
+      />
+    ),
+    [t, user?.firstName, user?.lastName],
+  );
+
   const [editOpen, setEditOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
   const [offboardOpen, setOffboardOpen] = useState(false);
@@ -114,14 +126,7 @@ export function UserDetailView({ id }: { id: string }) {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: t("list.title"), href: "/users" },
-              { label: `${user.firstName} ${user.lastName}` },
-            ]}
-          />
-        }
+        breadcrumb={breadcrumb}
         title={
           <span className="flex items-center gap-3">
             <UserAvatar
