@@ -20,8 +20,7 @@ import { getManualCategories } from "@/lib/manual/loader";
 export const dynamic = "force-dynamic";
 
 export default async function HelpIndexPage() {
-  const t = await getTranslations("help");
-  const categories = await getManualCategories();
+  const [t, categories] = await Promise.all([getTranslations("help"), getManualCategories()]);
 
   return (
     <section className="flex w-full max-w-3xl flex-col gap-10">
