@@ -19,6 +19,9 @@ const TAB_KEYS = [
   "models",
 ] as const;
 
+/** Stable empty breadcrumb for the taxonomies page PageHeader. */
+const BREADCRUMB = <Breadcrumb />;
+
 type TabKey = (typeof TAB_KEYS)[number];
 
 /**
@@ -39,7 +42,7 @@ export default function TaxonomiesPage() {
         <PageHeader
           title={t("taxonomies.title")}
           subtitle={t("taxonomies.subtitle")}
-          breadcrumb={<Breadcrumb />}
+          breadcrumb={BREADCRUMB}
         />
 
         <div className="border-b">
