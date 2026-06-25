@@ -9,7 +9,7 @@ import {
 } from "@heroicons/react/24/outline";
 import type { CreateUserKeypair, UserKeypair } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useReducer, useState } from "react";
 import { Callout } from "@/components/callout";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
@@ -220,6 +220,59 @@ function UnlockFlow({ keypair, embedded = false }: { keypair: UserKeypair; embed
   );
 }
 
+type ResetPasswordState = {
+  recoveryKey: string;
+  newPassword: string;
+  confirm: string;
+  busy: boolean;
+  /** Wrong RECOVERY KEY — inline error, nothing posted. */
+  failed: boolean;
+  noKeypair: boolean;
+};
+
+type ResetPasswordAction =
+  | { type: "recoveryChanged"; value: string }
+  | { type: "newChanged"; value: string }
+  | { type: "confirmChanged"; value: string }
+  | { type: "submitStart" }
+  | { type: "recoveryFailed" }
+  | { type: "submitError" }
+  | { type: "noKeypair" }
+  | { type: "succeeded" };
+
+const resetPasswordInitialState: ResetPasswordState = {
+  recoveryKey: "",
+  newPassword: "",
+  confirm: "",
+  busy: false,
+  failed: false,
+  noKeypair: false,
+};
+
+function resetPasswordReducer(
+  state: ResetPasswordState,
+  action: ResetPasswordAction,
+): ResetPasswordState {
+  switch (action.type) {
+    case "recoveryChanged":
+      return { ...state, recoveryKey: action.value, failed: false, noKeypair: false };
+    case "newChanged":
+      return { ...state, newPassword: action.value };
+    case "confirmChanged":
+      return { ...state, confirm: action.value };
+    case "submitStart":
+      return { ...state, busy: true, failed: false, noKeypair: false };
+    case "recoveryFailed":
+      return { ...state, failed: true, recoveryKey: "", busy: false };
+    case "submitError":
+      return { ...state, busy: false };
+    case "noKeypair":
+      return { ...state, noKeypair: true, busy: false };
+    case "succeeded":
+      return { ...state, recoveryKey: "", newPassword: "", confirm: "", busy: false };
+  }
+}
+
 /**
  * RESET PASSWORD with the recovery key (ADR-0066 §2c). The "I forgot my password but I have my recovery key"
  * path — it REPLACES the old "unlock directly with the recovery key" entry. The recovery key is the ROOT: it
@@ -248,13 +301,8 @@ function ResetPasswordFlow({
   const tc = useTranslations("common");
   const { setPrivateKey } = useSecretSession();
   const changePassword = useChangePassword();
-  const [recoveryKey, setRecoveryKey] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
-  // Wrong RECOVERY KEY — inline error, nothing posted.
-  const [failed, setFailed] = useState(false);
-  const [noKeypair, setNoKeypair] = useState(false);
+  const [state, dispatch] = useReducer(resetPasswordReducer, resetPasswordInitialState);
+  const { recoveryKey, newPassword, confirm, busy, failed, noKeypair } = state;
 
   const mismatch = confirm.length > 0 && newPassword !== confirm;
   const tooShort = newPassword.length > 0 && newPassword.length < 8;
@@ -268,9 +316,7 @@ function ResetPasswordFlow({
   async function handleResetPassword(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
-    setBusy(true);
-    setFailed(false);
-    setNoKeypair(false);
+    dispatch({ type: "submitStart" });
 
     // Step 1 — unlock the private key with the RECOVERY KEY in the browser. A wrong key throws the generic,
     // payload-free decrypt error BEFORE anything is posted; nothing changes.
@@ -278,9 +324,7 @@ function ResetPasswordFlow({
     try {
       privateKey = await unlockWithRecoveryKey(keypair, recoveryKey);
     } catch {
-      setFailed(true);
-      setRecoveryKey("");
-      setBusy(false);
+      dispatch({ type: "recoveryFailed" });
       return;
     }
 
@@ -290,7 +334,7 @@ function ResetPasswordFlow({
       wire = await rewrapPasswordCopy(privateKey, newPassword);
     } catch (err) {
       notifyError(err, t("resetPassword.error"));
-      setBusy(false);
+      dispatch({ type: "submitError" });
       return;
     }
 
@@ -300,21 +344,18 @@ function ResetPasswordFlow({
       await changePassword.mutateAsync(wire);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
-        setNoKeypair(true);
+        dispatch({ type: "noKeypair" });
       } else {
         notifyError(err, t("resetPassword.error"));
+        dispatch({ type: "submitError" });
       }
-      setBusy(false);
       return;
     }
 
     // Step 4 — AUTO-UNLOCK: the new password is live and we already hold the private key the recovery key
     // unlocked, so set it into the session (no second prompt). Drop all secret state.
-    setRecoveryKey("");
-    setNewPassword("");
-    setConfirm("");
+    dispatch({ type: "succeeded" });
     setPrivateKey(privateKey);
-    setBusy(false);
   }
 
   return (
@@ -335,11 +376,9 @@ function ResetPasswordFlow({
             type="text"
             autoComplete="off"
             value={recoveryKey}
-            onChange={(e) => {
-              setRecoveryKey(e.target.value);
-              setFailed(false);
-              setNoKeypair(false);
-            }}
+            onChange={(e) =>
+              dispatch({ type: "recoveryChanged", value: e.target.value })
+            }
             disabled={busy}
             placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
             autoFocus
@@ -363,7 +402,9 @@ function ResetPasswordFlow({
             type="password"
             autoComplete="new-password"
             value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
+            onChange={(e) =>
+              dispatch({ type: "newChanged", value: e.target.value })
+            }
             disabled={busy}
           />
           <FieldDescription className={tooShort ? "text-destructive" : undefined}>
@@ -378,7 +419,9 @@ function ResetPasswordFlow({
             type="password"
             autoComplete="new-password"
             value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
+            onChange={(e) =>
+              dispatch({ type: "confirmChanged", value: e.target.value })
+            }
             disabled={busy}
           />
           {mismatch ? (
@@ -402,6 +445,52 @@ function ResetPasswordFlow({
   );
 }
 
+type BootstrapFormState = {
+  passphrase: string;
+  confirm: string;
+  busy: boolean;
+  /**
+   * SECW-04: if the post-acknowledge auto-unlock throws, we must NOT wipe the form back to blank —
+   * the IRREVERSIBLE keypair already exists. We keep it + the passphrase and surface a recovery view.
+   */
+  unlockFailed: boolean;
+};
+
+type BootstrapFormAction =
+  | { type: "passphraseChanged"; value: string }
+  | { type: "confirmChanged"; value: string }
+  | { type: "busy"; value: boolean }
+  | { type: "cleared" }
+  | { type: "unlockSucceeded" }
+  | { type: "unlockFailed" };
+
+const bootstrapFormInitialState: BootstrapFormState = {
+  passphrase: "",
+  confirm: "",
+  busy: false,
+  unlockFailed: false,
+};
+
+function bootstrapFormReducer(
+  state: BootstrapFormState,
+  action: BootstrapFormAction,
+): BootstrapFormState {
+  switch (action.type) {
+    case "passphraseChanged":
+      return { ...state, passphrase: action.value };
+    case "confirmChanged":
+      return { ...state, confirm: action.value };
+    case "busy":
+      return { ...state, busy: action.value };
+    case "cleared":
+      return { ...state, passphrase: "", confirm: "" };
+    case "unlockSucceeded":
+      return { ...state, passphrase: "", confirm: "", unlockFailed: false };
+    case "unlockFailed":
+      return { ...state, unlockFailed: true };
+  }
+}
+
 /**
  * BOOTSTRAP: a brand-new user picks a vault passphrase, the browser mints a keypair (`bootstrapKeypair`),
  * the recovery key is shown ONCE, and ONLY AFTER the user explicitly acknowledges having saved it does the
@@ -419,18 +508,14 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
   const t = useTranslations("secrets");
   const { setPrivateKey } = useSecretSession();
   const createKeypair = useCreateKeypair();
-  const [passphrase, setPassphrase] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [form, dispatch] = useReducer(bootstrapFormReducer, bootstrapFormInitialState);
+  const { passphrase, confirm, busy, unlockFailed } = form;
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
   // The browser-minted wire DTO, held in memory while the recovery-key modal is up. It is POSTed ONLY
   // from `handleAcknowledge` — nothing is persisted server-side before the modal is acknowledged (#452).
   const [pendingWire, setPendingWire] = useState<CreateUserKeypair | null>(null);
   // The keypair returned by the (post-acknowledge) POST, used to unlock into the session.
   const [createdKeypair, setCreatedKeypair] = useState<UserKeypair | null>(null);
-  // SECW-04: if the post-acknowledge auto-unlock throws, we must NOT wipe the form back to blank —
-  // the IRREVERSIBLE keypair already exists. We keep it + the passphrase and surface a recovery view.
-  const [unlockFailed, setUnlockFailed] = useState(false);
 
   const mismatch = confirm.length > 0 && passphrase !== confirm;
   const tooShort = passphrase.length > 0 && passphrase.length < 8;
@@ -438,7 +523,7 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
   async function handleBootstrap(e: React.FormEvent) {
     e.preventDefault();
     if (busy || !passphrase || passphrase !== confirm || passphrase.length < 8) return;
-    setBusy(true);
+    dispatch({ type: "busy", value: true });
     try {
       // Mint the keypair material in the browser ONLY — do NOT POST yet. The recovery key MUST be shown
       // and acknowledged before anything is persisted server-side (#452 recovery-key-before-persist).
@@ -448,7 +533,7 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
     } catch (err) {
       notifyError(err, t("bootstrap.error"));
     } finally {
-      setBusy(false);
+      dispatch({ type: "busy", value: false });
     }
   }
 
@@ -462,11 +547,10 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
     const shownRecoveryKey = recoveryKey; // captured before we close the modal, to re-show on POST failure
     setRecoveryKey(null);
     if (!wire) {
-      setPassphrase("");
-      setConfirm("");
+      dispatch({ type: "cleared" });
       return;
     }
-    setBusy(true);
+    dispatch({ type: "busy", value: true });
     let created: UserKeypair;
     try {
       created = await createKeypair.mutateAsync(wire);
@@ -477,7 +561,7 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
       // continues to hold on the retry.
       notifyError(err, t("bootstrap.error"));
       setRecoveryKey(shownRecoveryKey);
-      setBusy(false);
+      dispatch({ type: "busy", value: false });
       return;
     }
     setCreatedKeypair(created);
@@ -486,16 +570,14 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
       const privateKey = await unlockWithPassphrase(created, pass);
       setPrivateKey(privateKey);
       // Success — now it is safe to drop the local secret state.
-      setPassphrase("");
-      setConfirm("");
+      dispatch({ type: "unlockSucceeded" });
       setCreatedKeypair(null);
-      setUnlockFailed(false);
     } catch {
       // POST succeeded but the auto-unlock threw — keep the created keypair + passphrase; show the
       // "created — unlock with your passphrase" recovery view (SECW-04).
-      setUnlockFailed(true);
+      dispatch({ type: "unlockFailed" });
     } finally {
-      setBusy(false);
+      dispatch({ type: "busy", value: false });
     }
   }
 
@@ -504,19 +586,17 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
   async function handleRetryUnlock(e: React.FormEvent) {
     e.preventDefault();
     if (busy || !passphrase || !createdKeypair) return;
-    setBusy(true);
+    dispatch({ type: "busy", value: true });
     try {
       const privateKey = await unlockWithPassphrase(createdKeypair, passphrase);
       setPrivateKey(privateKey);
-      setPassphrase("");
-      setConfirm("");
+      dispatch({ type: "unlockSucceeded" });
       setCreatedKeypair(null);
-      setUnlockFailed(false);
     } catch {
       // Wrong passphrase — keep the recovery view up so they can try again.
-      setUnlockFailed(true);
+      dispatch({ type: "unlockFailed" });
     } finally {
-      setBusy(false);
+      dispatch({ type: "busy", value: false });
     }
   }
 
@@ -529,7 +609,7 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
         passphraseLabel={t("bootstrap.passphraseLabel")}
         failedMessage={t("bootstrap.unlockFailed")}
         passphrase={passphrase}
-        onPassphraseChange={setPassphrase}
+        onPassphraseChange={(value) => dispatch({ type: "passphraseChanged", value })}
         busy={busy}
         onSubmit={handleRetryUnlock}
       />
@@ -554,7 +634,9 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
             type="password"
             autoComplete="new-password"
             value={passphrase}
-            onChange={(e) => setPassphrase(e.target.value)}
+            onChange={(e) =>
+              dispatch({ type: "passphraseChanged", value: e.target.value })
+            }
             disabled={busy}
             autoFocus
           />
@@ -569,7 +651,9 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
             type="password"
             autoComplete="new-password"
             value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
+            onChange={(e) =>
+              dispatch({ type: "confirmChanged", value: e.target.value })
+            }
             disabled={busy}
           />
           {mismatch ? (
@@ -600,6 +684,52 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
   );
 }
 
+type PeerResetFormState = {
+  passphrase: string;
+  confirm: string;
+  busy: boolean;
+  /**
+   * SECW-04: same discipline as bootstrap — a post-reset auto-unlock failure must not wipe back to blank,
+   * because the IRREVERSIBLE reset already minted the new keypair.
+   */
+  unlockFailed: boolean;
+};
+
+type PeerResetFormAction =
+  | { type: "passphraseChanged"; value: string }
+  | { type: "confirmChanged"; value: string }
+  | { type: "busy"; value: boolean }
+  | { type: "cleared" }
+  | { type: "unlockSucceeded" }
+  | { type: "unlockFailed" };
+
+const peerResetFormInitialState: PeerResetFormState = {
+  passphrase: "",
+  confirm: "",
+  busy: false,
+  unlockFailed: false,
+};
+
+function peerResetFormReducer(
+  state: PeerResetFormState,
+  action: PeerResetFormAction,
+): PeerResetFormState {
+  switch (action.type) {
+    case "passphraseChanged":
+      return { ...state, passphrase: action.value };
+    case "confirmChanged":
+      return { ...state, confirm: action.value };
+    case "busy":
+      return { ...state, busy: action.value };
+    case "cleared":
+      return { ...state, passphrase: "", confirm: "" };
+    case "unlockSucceeded":
+      return { ...state, passphrase: "", confirm: "", unlockFailed: false };
+    case "unlockFailed":
+      return { ...state, unlockFailed: true };
+  }
+}
+
 /**
  * PEER-RESET (ADR-0061 §6): a member who lost BOTH passphrase and recovery key sets a NEW passphrase →
  * `useResetKeypair` re-mints the keypair (new public key) → a new recovery key is shown once. CRUCIAL: a
@@ -616,17 +746,13 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
   const tc = useTranslations("common");
   const { setPrivateKey } = useSecretSession();
   const resetKeypair = useResetKeypair();
-  const [passphrase, setPassphrase] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [form, dispatch] = useReducer(peerResetFormReducer, peerResetFormInitialState);
+  const { passphrase, confirm, busy, unlockFailed } = form;
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
   // The browser-minted wire DTO, held in memory while the recovery-key modal is up. POSTed (as a reset)
   // ONLY from `handleAcknowledge` — the server-side keypair is not replaced before acknowledge (#452).
   const [pendingWire, setPendingWire] = useState<CreateUserKeypair | null>(null);
   const [resetKeypairData, setResetKeypairData] = useState<UserKeypair | null>(null);
-  // SECW-04: same discipline as bootstrap — a post-reset auto-unlock failure must not wipe back to blank,
-  // because the IRREVERSIBLE reset already minted the new keypair.
-  const [unlockFailed, setUnlockFailed] = useState(false);
 
   const mismatch = confirm.length > 0 && passphrase !== confirm;
   const tooShort = passphrase.length > 0 && passphrase.length < 8;
@@ -634,7 +760,7 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
   async function handleReset(e: React.FormEvent) {
     e.preventDefault();
     if (busy || !passphrase || passphrase !== confirm || passphrase.length < 8) return;
-    setBusy(true);
+    dispatch({ type: "busy", value: true });
     try {
       // Mint the new keypair material in the browser ONLY — do NOT POST the reset yet. The new recovery
       // key MUST be shown and acknowledged before the server-side keypair is replaced (#452).
@@ -644,7 +770,7 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
     } catch (err) {
       notifyError(err, t("reset.error"));
     } finally {
-      setBusy(false);
+      dispatch({ type: "busy", value: false });
     }
   }
 
@@ -656,11 +782,10 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
     const shownRecoveryKey = recoveryKey; // captured before we close the modal, to re-show on POST failure
     setRecoveryKey(null);
     if (!wire) {
-      setPassphrase("");
-      setConfirm("");
+      dispatch({ type: "cleared" });
       return;
     }
-    setBusy(true);
+    dispatch({ type: "busy", value: true });
     let updated: UserKeypair;
     try {
       updated = await resetKeypair.mutateAsync(wire);
@@ -669,7 +794,7 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
       // re-show the SAME recovery key behind the acknowledge gate so a retry still honours the invariant.
       notifyError(err, t("reset.error"));
       setRecoveryKey(shownRecoveryKey);
-      setBusy(false);
+      dispatch({ type: "busy", value: false });
       return;
     }
     setResetKeypairData(updated);
@@ -678,34 +803,30 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
       const privateKey = await unlockWithPassphrase(updated, pass);
       setPrivateKey(privateKey);
       // Success — only now drop the local secret state.
-      setPassphrase("");
-      setConfirm("");
+      dispatch({ type: "unlockSucceeded" });
       setResetKeypairData(null);
-      setUnlockFailed(false);
     } catch {
       // Reset succeeded but the auto-unlock threw — keep the freshly-minted keypair + passphrase; show the
       // recovery view (SECW-04).
-      setUnlockFailed(true);
+      dispatch({ type: "unlockFailed" });
     } finally {
-      setBusy(false);
+      dispatch({ type: "busy", value: false });
     }
   }
 
   async function handleRetryUnlock(e: React.FormEvent) {
     e.preventDefault();
     if (busy || !passphrase || !resetKeypairData) return;
-    setBusy(true);
+    dispatch({ type: "busy", value: true });
     try {
       const privateKey = await unlockWithPassphrase(resetKeypairData, passphrase);
       setPrivateKey(privateKey);
-      setPassphrase("");
-      setConfirm("");
+      dispatch({ type: "unlockSucceeded" });
       setResetKeypairData(null);
-      setUnlockFailed(false);
     } catch {
-      setUnlockFailed(true);
+      dispatch({ type: "unlockFailed" });
     } finally {
-      setBusy(false);
+      dispatch({ type: "busy", value: false });
     }
   }
 
@@ -718,7 +839,7 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
         passphraseLabel={t("reset.passphraseLabel")}
         failedMessage={t("reset.unlockFailed")}
         passphrase={passphrase}
-        onPassphraseChange={setPassphrase}
+        onPassphraseChange={(value) => dispatch({ type: "passphraseChanged", value })}
         busy={busy}
         onSubmit={handleRetryUnlock}
       />
@@ -747,7 +868,9 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
             type="password"
             autoComplete="new-password"
             value={passphrase}
-            onChange={(e) => setPassphrase(e.target.value)}
+            onChange={(e) =>
+              dispatch({ type: "passphraseChanged", value: e.target.value })
+            }
             disabled={busy}
             autoFocus
           />
@@ -762,7 +885,9 @@ function PeerResetFlow({ onCancel, embedded = false }: { onCancel: () => void; e
             type="password"
             autoComplete="new-password"
             value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
+            onChange={(e) =>
+              dispatch({ type: "confirmChanged", value: e.target.value })
+            }
             disabled={busy}
           />
           {mismatch ? (
