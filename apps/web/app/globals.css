@@ -527,14 +527,27 @@
     display: none !important;
   }
 
-  /* Let the document use the full printable width and avoid awkward row splits. */
+  /* Let the document use the full printable width AND pin the ink/paper tokens to their LIGHT
+     values so the act prints black-on-white regardless of the active theme. Every line in the
+     act is drawn from --foreground — body text (`text-foreground`), the letterhead/footer rules
+     and signature lines (`border-foreground/*`), the row separators (`divide-foreground/*`) and
+     the drawn checkbox (`border-foreground/50`). In dark mode --foreground is near-white, so on
+     the forced-white sheet the whole document would vanish (issue #815). Re-declaring the tokens
+     on the printed subtree overrides the `.dark` cascade for paper only; these mirror the `:root`
+     light values, so light-mode printing is unchanged. */
   [data-print-document] {
     max-width: none !important;
     padding: 0 !important;
+    --foreground: oklch(0.21 0.006 75);
+    --card-foreground: oklch(0.21 0.006 75);
+    --popover-foreground: oklch(0.21 0.006 75);
+    --border: oklch(0.9 0.005 95);
   }
 
-  [data-print-document] li,
-  [data-print-document] section {
+  /* Keep a single checklist row whole, but let `section` break naturally: a long (25+ asset)
+     list must be allowed to flow onto the next sheet instead of becoming one un-breakable
+     block that overflows the page (issue #815). */
+  [data-print-document] li {
     break-inside: avoid;
   }
 
