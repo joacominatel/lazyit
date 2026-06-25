@@ -40,6 +40,10 @@ their access:
   see the handle and a padlock, and cannot reveal anything.
 - **A broken chip.** The handle does not match any current secret — for example, it was renamed or
   deleted. The chip is flagged so an author can fix the reference.
+- **A decryption error.** The reader is a vault member but the value could not be decrypted — the vault
+  key is wrong, or the stored value is corrupt or tampered with. The chip shows a clear error and a
+  **Retry**, never failing silently. If Retry keeps failing, the value may have been altered — rotate the
+  real credential and re-add the secret.
 
 ## The two-key rule
 
