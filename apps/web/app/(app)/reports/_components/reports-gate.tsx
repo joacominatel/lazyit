@@ -8,6 +8,9 @@ import { useMyPermissions } from "@/lib/hooks/use-permissions";
 import { ReportsAccessDenied } from "./reports-access-denied";
 import { ReportsScreen } from "./reports-screen";
 
+/** Stable empty breadcrumb shared by both PageHeader instances in this gate. */
+const BREADCRUMB = <Breadcrumb />;
+
 /**
  * Client `logs:read` gate for the Reports surface (extracted from `page.tsx` for the ADR-0067
  * server-prefetch rollout — see that page's doc). While the permission set is loading we show a
@@ -27,7 +30,7 @@ export function ReportsGate() {
         <>
           <PageHeader
             title={t("page.title")}
-            breadcrumb={<Breadcrumb />}
+            breadcrumb={BREADCRUMB}
             subtitle={t("page.subtitle")}
           />
           <div className="space-y-3" aria-hidden>
@@ -42,7 +45,7 @@ export function ReportsGate() {
         <>
           <PageHeader
             title={t("page.title")}
-            breadcrumb={<Breadcrumb />}
+            breadcrumb={BREADCRUMB}
             subtitle={t("page.subtitle")}
           />
           <ReportsAccessDenied />
