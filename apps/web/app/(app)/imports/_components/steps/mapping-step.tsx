@@ -17,7 +17,7 @@ import {
   type ModelConfig,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useMemo, useReducer, useState } from "react";
 import { CategoryCombobox } from "@/components/category-combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,6 +76,40 @@ function normalize(value: string): string {
 
 /** Per-column state: the chosen target token + (for `__custom__`) the operator-named specs key. */
 type ColumnChoice = { target: string; customName: string };
+
+/** Model-config cluster: the brand/category constant fallbacks plus the category picker's mode
+ *  (pick-existing vs free constant) and picked id. Grouped into one reducer to stay under the
+ *  prefer-useReducer budget — `choices` and `statusMap` remain their own (independent) state. */
+type ModelConfigState = {
+  manufacturerConst: string;
+  categoryConst: string;
+  categoryPickMode: boolean;
+  categoryPickId: string;
+};
+
+type ModelConfigAction =
+  | { type: "setManufacturerConst"; value: string }
+  | { type: "setCategoryConst"; value: string }
+  | { type: "setCategoryPickMode"; mode: boolean }
+  | { type: "pickCategory"; id: string; name: string };
+
+function modelConfigReducer(
+  state: ModelConfigState,
+  action: ModelConfigAction,
+): ModelConfigState {
+  switch (action.type) {
+    case "setManufacturerConst":
+      return { ...state, manufacturerConst: action.value };
+    case "setCategoryConst":
+      return { ...state, categoryConst: action.value };
+    case "setCategoryPickMode":
+      return { ...state, categoryPickMode: action.mode };
+    case "pickCategory":
+      // The picker is controlled by id, but we persist the category's NATURAL KEY (name) — both move
+      // together, exactly as the original setCategoryPickId + setCategoryConst pair did.
+      return { ...state, categoryPickId: action.id, categoryConst: action.name };
+  }
+}
 
 export function MappingStep({
   sessionId,
@@ -199,9 +233,16 @@ export function MappingStep({
   }, [distinctStatusValues, statusMap]);
 
   // --- model brand/category constant fallbacks ("all models are brand X / category Y") ---
-  // Only relevant once a model is in play (a column maps to it, or these constants pin it).
-  const [manufacturerConst, setManufacturerConst] = useState("");
-  const [categoryConst, setCategoryConst] = useState("");
+  // Only relevant once a model is in play (a column maps to it, or these constants pin it). Grouped with
+  // the category picker (mode + picked id) into one reducer — see `modelConfigReducer`.
+  const [modelConfig, dispatchModelConfig] = useReducer(modelConfigReducer, {
+    manufacturerConst: "",
+    categoryConst: "",
+    categoryPickMode: true,
+    categoryPickId: "",
+  });
+  const { manufacturerConst, categoryConst, categoryPickMode, categoryPickId } =
+    modelConfig;
   const modelManufacturerHeader = headers.find(
     (h) => choices[h]?.target === token("model", "manufacturer"),
   );
@@ -213,8 +254,6 @@ export function MappingStep({
   // "create-new" (a silent bug). Manufacturer has NO entity (plain string on AssetModel) → text only, no
   // picker. `categoryPickMode` true = pick existing (default), false = free constant.
   const { data: assetCategories } = useAssetCategories();
-  const [categoryPickMode, setCategoryPickMode] = useState(true);
-  const [categoryPickId, setCategoryPickId] = useState("");
 
   // --- validation: a column must be mapped to `name` AND to `status` (ADR-0069 REDESIGN §6.2) ---
   const hasName = headers.some((h) => choices[h]?.target === token("asset", "name"));
@@ -376,6 +415,47 @@ export function MappingStep({
       },
     );
   }
+
+  // Stable elements for FixedValueField's `fromColumn` / `picker` slots (jsx-no-jsx-as-prop).
+  const manufacturerFromColumn = useMemo(
+    () =>
+      modelManufacturerHeader ? (
+        <p className="text-xs text-muted-foreground">
+          {t("mapping.modelConfig.fromColumn", { column: modelManufacturerHeader })}
+        </p>
+      ) : undefined,
+    [t, modelManufacturerHeader],
+  );
+
+  const categoryFromColumn = useMemo(
+    () =>
+      modelCategoryHeader ? (
+        <p className="text-xs text-muted-foreground">
+          {t("mapping.modelConfig.fromColumn", { column: modelCategoryHeader })}
+        </p>
+      ) : undefined,
+    [t, modelCategoryHeader],
+  );
+
+  const categoryPicker = useMemo(
+    () => (
+      <CategoryCombobox
+        id="model-category-const"
+        value={categoryPickId}
+        categories={assetCategories ?? []}
+        disabled={Boolean(modelCategoryHeader)}
+        placeholder={t("mapping.modelConfig.categoryPickPlaceholder")}
+        searchPlaceholder={t("mapping.modelConfig.categoryPickSearch")}
+        emptyText={t("mapping.modelConfig.categoryPickEmpty")}
+        onValueChange={(id) => {
+          // Persist the NATURAL KEY (name), never the id — the resolver matches on name.
+          const picked = (assetCategories ?? []).find((c) => c.id === id);
+          dispatchModelConfig({ type: "pickCategory", id, name: picked?.name ?? "" });
+        }}
+      />
+    ),
+    [t, categoryPickId, assetCategories, modelCategoryHeader],
+  );
 
   return (
     <div className="space-y-6">
@@ -609,15 +689,11 @@ export function MappingStep({
             constantPlaceholder={t("mapping.modelConfig.manufacturerPlaceholder")}
             mode={false}
             onModeChange={() => {}}
-            onConstantChange={setManufacturerConst}
-            disabled={Boolean(modelManufacturerHeader)}
-            fromColumn={
-              modelManufacturerHeader ? (
-                <p className="text-xs text-muted-foreground">
-                  {t("mapping.modelConfig.fromColumn", { column: modelManufacturerHeader })}
-                </p>
-              ) : undefined
+            onConstantChange={(value) =>
+              dispatchModelConfig({ type: "setManufacturerConst", value })
             }
+            disabled={Boolean(modelManufacturerHeader)}
+            fromColumn={manufacturerFromColumn}
           />
           {/* Category IS an entity — default to picking an existing one; we write its NAME (natural key). */}
           <FixedValueField
@@ -626,33 +702,15 @@ export function MappingStep({
             value={modelCategoryHeader ? "" : categoryConst}
             constantPlaceholder={t("mapping.modelConfig.categoryPlaceholder")}
             mode={categoryPickMode}
-            onModeChange={setCategoryPickMode}
-            onConstantChange={setCategoryConst}
+            onModeChange={(mode) =>
+              dispatchModelConfig({ type: "setCategoryPickMode", mode })
+            }
+            onConstantChange={(value) =>
+              dispatchModelConfig({ type: "setCategoryConst", value })
+            }
             disabled={Boolean(modelCategoryHeader)}
-            picker={
-              <CategoryCombobox
-                id="model-category-const"
-                value={categoryPickId}
-                categories={assetCategories ?? []}
-                disabled={Boolean(modelCategoryHeader)}
-                placeholder={t("mapping.modelConfig.categoryPickPlaceholder")}
-                searchPlaceholder={t("mapping.modelConfig.categoryPickSearch")}
-                emptyText={t("mapping.modelConfig.categoryPickEmpty")}
-                onValueChange={(id) => {
-                  setCategoryPickId(id);
-                  // Persist the NATURAL KEY (name), never the id — the resolver matches on name.
-                  const picked = (assetCategories ?? []).find((c) => c.id === id);
-                  setCategoryConst(picked?.name ?? "");
-                }}
-              />
-            }
-            fromColumn={
-              modelCategoryHeader ? (
-                <p className="text-xs text-muted-foreground">
-                  {t("mapping.modelConfig.fromColumn", { column: modelCategoryHeader })}
-                </p>
-              ) : undefined
-            }
+            picker={categoryPicker}
+            fromColumn={categoryFromColumn}
           />
         </div>
       </div>
