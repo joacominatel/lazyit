@@ -39,6 +39,11 @@ export interface AssetFilters {
   q?: string;
   /** Restrict to assets with a LIVE assignment (releasedAt null) to this user (User.id is a uuid). */
   assignedToUserId?: string;
+  /**
+   * Ownership slice over LIVE assignments (releasedAt null). `HAS` = assets with at least one active
+   * owner; `NONE` = unassigned assets. Independent of `assignedToUserId` (which already implies HAS).
+   */
+  ownership?: 'HAS' | 'NONE';
 }
 
 /**
@@ -190,6 +195,7 @@ export class AssetsService {
     status,
     q,
     assignedToUserId,
+    ownership,
   }: AssetFilters): Prisma.AssetWhereInput {
     return {
       ...(locationId ? { locationId } : {}),
@@ -204,7 +210,13 @@ export class AssetsService {
               some: { userId: assignedToUserId, releasedAt: null },
             },
           }
-        : {}),
+        : // Ownership slice over LIVE assignments. Both filters write the `assignments` key, so apply
+          // ownership only when `assignedToUserId` is absent — a specific user already implies HAS.
+          ownership === 'HAS'
+          ? { assignments: { some: { releasedAt: null } } }
+          : ownership === 'NONE'
+            ? { assignments: { none: { releasedAt: null } } }
+            : {}),
       ...(q
         ? {
             OR: [
