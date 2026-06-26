@@ -326,7 +326,11 @@ export class ConsumablesService {
    */
   private async emitLowStock(
     consumableId: string,
-    before: { currentStock: number; minStock: number | null; name: string } | null,
+    before: {
+      currentStock: number;
+      minStock: number | null;
+      name: string;
+    } | null,
   ): Promise<void> {
     try {
       // No threshold set, or the row was missing pre-commit → nothing to cross.
