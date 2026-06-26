@@ -189,6 +189,28 @@ describe('ConsumablesService', () => {
     });
   });
 
+  it('findPage filters by categoryId when set', async () => {
+    consumable.findMany.mockResolvedValue([]);
+    consumable.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { categoryId: 'cat1' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const call = (
+      consumable.findMany.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.where).toEqual({ categoryId: 'cat1', deletedAt: null });
+    // The count query must filter on the SAME where so total matches the page.
+    const countCall = (
+      consumable.count.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(countCall.where).toEqual({ categoryId: 'cat1', deletedAt: null });
+  });
+
   it('findPage honors an allowlisted sort and rejects an unknown one (400)', async () => {
     consumable.findMany.mockResolvedValue([]);
     consumable.count.mockResolvedValue(0);
