@@ -58,9 +58,9 @@ import { QuickAdjustButtons } from "./quick-adjust-buttons";
 import { StockBadge } from "./stock-badge";
 
 /**
- * Filter param defaults. `lowStock` is a server filter ("true"); `category` is client-side over the
- * page (the API has no category param). `archived` ("ALL" | "only") drives the ADMIN-only
- * `deleted=only` view via the URL.
+ * Filter param defaults. `lowStock` is a server filter ("true"); `category` is the server-side
+ * category filter (#824 — a category cuid, "ALL" = unset). `archived` ("ALL" | "only") drives the
+ * ADMIN-only `deleted=only` view via the URL.
  */
 const FILTER_DEFAULTS = {
   lowStock: "",
@@ -106,14 +106,15 @@ export function ConsumablesListView() {
   // The archived view is ADMIN-only.
   const archived = isAdmin && filters.archived === "only";
 
-  // Forward only the server-supported params (`q`/`sort`/`dir`/`lowStock` + the window). `category`
-  // is filtered client-side over the page below.
+  // Forward the server-supported params; `category` is now a server filter too (#824), so it scopes
+  // the whole result set instead of just the current page.
   const { data: page, isLoading, isFetching, isError, error, refetch } =
     useConsumables({
       q: q || undefined,
       sort,
       dir: sort ? dir : undefined,
       lowStock: lowStockOnly,
+      category: categoryFilter !== "ALL" ? categoryFilter : undefined,
       limit,
       offset,
       deleted: archived ? "only" : undefined,
@@ -133,12 +134,9 @@ export function ConsumablesListView() {
     [categories],
   );
 
-  const rows = useMemo(() => {
-    const items = page?.items ?? [];
-    return categoryFilter === "ALL"
-      ? items
-      : items.filter((consumable) => consumable.categoryId === categoryFilter);
-  }, [page?.items, categoryFilter]);
+  // The page is already scoped server-side (lowStock + category/#824), so rows are the page items
+  // verbatim — no client-side post-filter over the window.
+  const rows = useMemo(() => page?.items ?? [], [page?.items]);
 
   // Selection only matters in the archived view (the one place with a bulk action: Restore).
   const visibleIds = useMemo(() => rows.map((c) => c.id), [rows]);

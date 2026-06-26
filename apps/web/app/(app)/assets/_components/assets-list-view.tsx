@@ -116,8 +116,8 @@ type OwnershipFilter = "ALL" | "HAS" | "NONE";
 /**
  * Filter param defaults for the URL list-state. `status`/`category`/`location` map to the server's
  * `status`/`categoryId`/`locationId` params; `owner` maps to the server's `assignedToUserId` (a
- * User uuid, "" = unset); `ownership` (Has/None) is filtered client-side over the page. `archived`
- * ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
+ * User uuid, "" = unset); `ownership` (Has/None) maps to the server's `ownership` param (#824).
+ * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
  */
 const FILTER_DEFAULTS = {
   status: "ALL",
@@ -227,7 +227,8 @@ export function AssetsListView() {
   // the param for them, so the API stays on the active-only list.
   const archived = isAdmin && filters.archived === "only";
 
-  // Forward server-supported params; `ownership` is filtered client-side over the page below.
+  // Forward server-supported params; `ownership` (Has/None) is now a server filter too (#824), so it
+  // scopes the whole result set instead of just the current page.
   const { data: page, isLoading, isFetching, isError, error, refetch } =
     useAssets({
       q: q || undefined,
@@ -235,6 +236,7 @@ export function AssetsListView() {
       categoryId: categoryFilter === "ALL" ? undefined : categoryFilter,
       locationId: locationFilter === "ALL" ? undefined : locationFilter,
       assignedToUserId: ownerFilter || undefined,
+      ownership: ownershipFilter === "ALL" ? undefined : ownershipFilter,
       sort,
       dir: sort ? dir : undefined,
       limit,
@@ -291,14 +293,9 @@ export function AssetsListView() {
     });
   }
 
-  const rows = useMemo(() => {
-    const items = page?.items ?? [];
-    return items.filter((asset) => {
-      if (ownershipFilter === "HAS") return asset.activeAssignments.length > 0;
-      if (ownershipFilter === "NONE") return asset.activeAssignments.length === 0;
-      return true;
-    });
-  }, [page?.items, ownershipFilter]);
+  // The page is already scoped server-side (status/category/location/owner/ownership/#824), so the
+  // rendered rows are the page items verbatim — no client-side post-filter over the window.
+  const rows = useMemo(() => page?.items ?? [], [page?.items]);
 
   // Multi-select over the currently visible rows — the API batch endpoints all require asset:delete
   // (bulk delete/restore/status are lifecycle ops), so gate the selection column on canDelete.
