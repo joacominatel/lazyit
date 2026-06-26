@@ -146,7 +146,7 @@
   --info: oklch(0.54 0.14 240);
   --info-foreground: oklch(0.985 0 0);
   /* Tinted-text tokens (issue #812). The tinted button/badge/banner variants paint status
-     text on a `bg-*/10` tint of the SAME hue (amber-on-amber, etc.). Using the raw fill hue
+     text on a `bg-<token>/10` tint of the SAME hue (amber-on-amber, etc.). Using the raw fill hue
      as text fails AA badly on the bone canvas (warning ~1.6:1, the #496 regression), so each
      of these is the fill hue darkened until it clears ≥4.5:1 as text on its own /10 tint AND
      through the /20 hover. Precomputed OKLCH (no color-mix), in-gamut so it renders exactly.
