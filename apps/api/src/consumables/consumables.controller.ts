@@ -32,6 +32,7 @@ import {
   CONSUMABLE_SORT_ALLOWLIST,
 } from './consumables.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -71,6 +72,12 @@ export class ConsumablesController {
     required: false,
     description:
       'Case-insensitive substring match on name, sku and description',
+  })
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    description:
+      'Restrict to consumables in this category (a ConsumableCategory cuid). Invalid cuid → 400.',
   })
   @ApiQuery({
     name: 'limit',
@@ -114,6 +121,7 @@ export class ConsumablesController {
   findAll(
     @Query('lowStock') lowStock?: string,
     @Query('q') q?: string,
+    @Query('category') category?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -134,7 +142,11 @@ export class ConsumablesController {
     // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
     assertCanListDeleted(pageQuery.deleted, user);
     return this.consumables.findPage(
-      { lowStock: parseBooleanQuery(lowStock), q },
+      {
+        lowStock: parseBooleanQuery(lowStock),
+        q,
+        categoryId: parseCuidQuery(category, 'category'),
+      },
       pageQuery,
     );
   }
