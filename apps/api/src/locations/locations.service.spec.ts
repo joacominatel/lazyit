@@ -223,6 +223,28 @@ describe('LocationsService', () => {
     });
   });
 
+  it('findPage filters by type when set', async () => {
+    location.findMany.mockResolvedValue([]);
+    location.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { type: 'DATACENTER' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const call = (
+      location.findMany.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >
+    )[0][0];
+    expect(call.where).toEqual({ type: 'DATACENTER', deletedAt: null });
+    // The count query must filter on the SAME where so total matches the page.
+    const countCall = (
+      location.count.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(countCall.where).toEqual({ type: 'DATACENTER', deletedAt: null });
+  });
+
   it('findPage honors an allowlisted sort and rejects an unknown one (400)', async () => {
     location.findMany.mockResolvedValue([]);
     location.count.mockResolvedValue(0);
