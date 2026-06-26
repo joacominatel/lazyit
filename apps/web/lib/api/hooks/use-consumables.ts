@@ -23,8 +23,8 @@ export const consumableKeys = {
 
 /**
  * The Consumables list page: a single page with server-side `q`/`sort`/`lowStock` and paging (returns
- * the `Page<Consumable>` envelope so the page can paginate + sort). Category is filtered client-side
- * over the page (no server param). `keepPreviousData` holds the current page while the next query
+ * the `Page<Consumable>` envelope so the page can paginate + sort). `category` is a server filter
+ * too (#824). `keepPreviousData` holds the current page while the next query
  * resolves, avoiding a skeleton flash on each search/filter/page change.
  */
 export function useConsumables(params: ConsumableListParams = {}) {
