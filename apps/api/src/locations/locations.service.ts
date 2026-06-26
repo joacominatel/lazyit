@@ -1,5 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { CreateLocation, PageQuery, UpdateLocation } from '@lazyit/shared';
+import type {
+  CreateLocation,
+  LocationType,
+  PageQuery,
+  UpdateLocation,
+} from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,6 +17,8 @@ import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 export interface LocationFilters {
   /** Case-insensitive substring over name / address / floor / description (OR). */
   q?: string;
+  /** Restrict to locations of this type (OFFICE/DATACENTER/RACK/REMOTE/STORAGE/OTHER). */
+  type?: LocationType;
 }
 
 /**
@@ -74,17 +81,20 @@ export class LocationsService {
   }
 
   /** The shared `where` for the location list — used identically by findPage and its count. */
-  private buildWhere({ q }: LocationFilters): Prisma.LocationWhereInput {
-    return q
-      ? {
-          OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { address: { contains: q, mode: 'insensitive' } },
-            { floor: { contains: q, mode: 'insensitive' } },
-            { description: { contains: q, mode: 'insensitive' } },
-          ],
-        }
-      : {};
+  private buildWhere({ q, type }: LocationFilters): Prisma.LocationWhereInput {
+    return {
+      ...(type ? { type } : {}),
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { address: { contains: q, mode: 'insensitive' } },
+              { floor: { contains: q, mode: 'insensitive' } },
+              { description: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
   }
 
   /** A single non-deleted location by id; throws 404 if missing or deleted. */

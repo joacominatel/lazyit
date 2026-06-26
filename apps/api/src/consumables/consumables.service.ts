@@ -31,6 +31,8 @@ export interface ConsumableFilters {
   lowStock?: boolean;
   /** Case-insensitive substring over name / sku / description (OR). */
   q?: string;
+  /** Restrict to consumables in this category (ConsumableCategory id, a cuid). */
+  categoryId?: string;
 }
 
 /**
@@ -109,8 +111,10 @@ export class ConsumablesService {
   private buildWhere({
     lowStock,
     q,
+    categoryId,
   }: ConsumableFilters): Prisma.ConsumableWhereInput {
     return {
+      ...(categoryId ? { categoryId } : {}),
       ...(lowStock
         ? {
             minStock: { not: null },
@@ -322,7 +326,11 @@ export class ConsumablesService {
    */
   private async emitLowStock(
     consumableId: string,
-    before: { currentStock: number; minStock: number | null; name: string } | null,
+    before: {
+      currentStock: number;
+      minStock: number | null;
+      name: string;
+    } | null,
   ): Promise<void> {
     try {
       // No threshold set, or the row was missing pre-commit → nothing to cross.

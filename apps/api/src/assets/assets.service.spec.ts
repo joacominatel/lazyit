@@ -749,6 +749,50 @@ describe('AssetsService', () => {
     });
   });
 
+  it('findPage ownership=HAS filters to assets with a LIVE assignment (some releasedAt null)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { ownership: 'HAS' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({
+      assignments: { some: { releasedAt: null } },
+      deletedAt: null,
+    });
+    // The count query must filter on the SAME where so total matches the page.
+    const countArgs = (
+      asset.count.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(countArgs.where).toEqual({
+      assignments: { some: { releasedAt: null } },
+      deletedAt: null,
+    });
+  });
+
+  it('findPage ownership=NONE filters to unassigned assets (none releasedAt null)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { ownership: 'NONE' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({
+      assignments: { none: { releasedAt: null } },
+      deletedAt: null,
+    });
+  });
+
   it('findPage filters by q (case-insensitive OR over name/serial/assetTag)', async () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -20,7 +21,9 @@ import {
   CreateLocationSchema,
   LocationListPageSchema,
   LocationSchema,
+  LocationTypeSchema,
   UpdateLocationSchema,
+  type LocationType,
 } from '@lazyit/shared';
 import { LocationsService, LOCATION_SORT_ALLOWLIST } from './locations.service';
 import { parsePageQuery } from '../common/parse-page-query';
@@ -51,6 +54,13 @@ export class LocationsController {
     required: false,
     description:
       'Case-insensitive substring match on name, address, floor and description',
+  })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    enum: [...LocationTypeSchema.options],
+    description:
+      'Restrict to locations of this type (OFFICE/DATACENTER/RACK/REMOTE/STORAGE/OTHER). Invalid value → 400.',
   })
   @ApiQuery({
     name: 'limit',
@@ -93,6 +103,7 @@ export class LocationsController {
   @ApiOkResponse({ type: LocationListPageDto })
   findAll(
     @Query('q') q?: string,
+    @Query('type') type?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -101,6 +112,16 @@ export class LocationsController {
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
   ) {
+    let parsedType: LocationType | undefined;
+    if (type !== undefined) {
+      const result = LocationTypeSchema.safeParse(type);
+      if (!result.success) {
+        throw new BadRequestException(
+          `Invalid type. Expected one of: ${LocationTypeSchema.options.join(', ')}`,
+        );
+      }
+      parsedType = result.data;
+    }
     const pageQuery = parsePageQuery({
       limit,
       offset,
@@ -112,7 +133,7 @@ export class LocationsController {
     // The list route carries no @Roles (any authenticated user may list ACTIVE rows), so gate the
     // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
     assertCanListDeleted(pageQuery.deleted, user);
-    return this.locations.findPage({ q }, pageQuery);
+    return this.locations.findPage({ q, type: parsedType }, pageQuery);
   }
 
   @Get(':id')
