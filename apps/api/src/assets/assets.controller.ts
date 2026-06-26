@@ -139,6 +139,13 @@ export class AssetsController {
     description: 'Sort direction (default asc when sort is set).',
   })
   @ApiQuery({
+    name: 'ownership',
+    required: false,
+    enum: ['HAS', 'NONE'],
+    description:
+      'Ownership slice over LIVE assignments. HAS = assets with an active owner; NONE = unassigned. Invalid value → 400.',
+  })
+  @ApiQuery({
     name: 'deleted',
     required: false,
     enum: ['active', 'only'],
@@ -152,6 +159,7 @@ export class AssetsController {
     @Query('status') status?: string,
     @Query('q') q?: string,
     @Query('assignedToUserId') assignedToUserId?: string,
+    @Query('ownership') ownership?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -169,6 +177,15 @@ export class AssetsController {
         );
       }
       parsedStatus = result.data;
+    }
+    let parsedOwnership: 'HAS' | 'NONE' | undefined;
+    if (ownership !== undefined) {
+      if (ownership !== 'HAS' && ownership !== 'NONE') {
+        throw new BadRequestException(
+          'Invalid ownership. Expected one of: HAS, NONE',
+        );
+      }
+      parsedOwnership = ownership;
     }
     const pageQuery = parsePageQuery({
       limit,
@@ -189,6 +206,7 @@ export class AssetsController {
         q,
         // User.id is a uuid (ADR-0005) — validate with parseUuidQuery (cf. categoryId/locationId cuid).
         assignedToUserId: parseUuidQuery(assignedToUserId, 'assignedToUserId'),
+        ownership: parsedOwnership,
       },
       pageQuery,
     );
