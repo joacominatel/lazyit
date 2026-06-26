@@ -17,9 +17,10 @@ import { Button } from "@/components/ui/button";
  *   - devMode (AUTH_MODE=shim or NODE_ENV!=production) → a "Dev Mode" banner in the `warning` tone.
  *   - otherwise → a "Production" banner in the `info` tone.
  *
- * Colors use the semantic `--warning`/`--info` design tokens (text-warning / bg-warning/10, etc.)
- * rather than raw amber/blue palette classes, so the posture tones stay consistent with the rest of
- * the design system and adapt to light/dark via the tokens themselves.
+ * Colors use the semantic `--warning`/`--info` design tokens (the `/10` tint + border) with the
+ * AA-safe `text-warning-text` / `text-info-text` tokens for the label (issue #812 — the raw
+ * `text-warning` on its own amber tint fails WCAG AA), rather than raw amber/blue palette classes,
+ * so the posture tones stay consistent with the design system and adapt to light/dark via the tokens.
  *
  * Dismissible per browser session (sessionStorage) so it reappears on a fresh session but does not
  * nag within one. Responsive: the label collapses to icon-only on narrow screens. Renders nothing
@@ -75,8 +76,8 @@ export function ModeBanner() {
       className={cn(
         "flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium",
         dev
-          ? "border-warning/30 bg-warning/10 text-warning"
-          : "border-info/30 bg-info/10 text-info",
+          ? "border-warning/30 bg-warning/10 text-warning-text"
+          : "border-info/30 bg-info/10 text-info-text",
       )}
     >
       <Icon className="size-3.5 shrink-0" />

@@ -136,6 +136,19 @@ black anchors. Two CEO-driven amendments have since refined this **at the token 
      functions, so a person reads the same color on every screen. (The third copy in the
      dashboard activity panel adopts it in a later wave.)
 
+4. **AA-safe tinted-text tokens** (2026-06, issue #812). Amendment 3 said tinted text can't
+   reach AA, so status *pills* fill solid — true for the **fill hue used as its own text**
+   (`text-warning` on `bg-warning/10` is ~1.6:1 on the bone canvas). But the `Button`/`Badge`
+   tinted variants and the dev/prod mode banner deliberately keep the calm *tinted* look (not
+   solid), so they need text that clears AA **on the tint**. The fix mirrors `--code-accent`:
+   a dedicated **`--warning-text` / `--info-text` / `--destructive-text`** family — the fill
+   hue darkened (light) / brightened (dark) until it clears **≥4.5:1** as text on its own
+   `/10`–`/20` tint in both themes, precomputed in-gamut OKLCH (no `color-mix`), registered
+   under `@theme inline` so Tailwind emits scanner-safe `text-*-text` utilities. Light on the
+   `/10` tint: warning 5.11:1 · info 5.43:1 · destructive 5.80:1; dark on the `/20` tint:
+   8.38 / 7.02 / 6.84:1. **Refined rule:** tinted text is allowed *only* via these `*-text`
+   tokens (never the raw fill hue as text); solid `StatusBadge` pills are unchanged.
+
 ## Consequences
 
 - **Positive:** fast, consistent UI; neutral design tokens centralize the look; Radix
