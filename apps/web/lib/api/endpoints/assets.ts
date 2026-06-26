@@ -37,8 +37,9 @@ export const deleteAsset = crud.remove;
  * Server-side filters for the asset list. `q` matches name / serial / assetTag;
  * `status`/`categoryId`/`locationId` scope the result set. `sort` is allowlisted to
  * `name|assetTag|serial|status|createdAt|updatedAt` (unknown → 400). `assignedToUserId` is a
- * server-side OWNER filter (assets with a live assignment to that user). The Has/None *ownership*
- * filter is separate and NOT a server param — the screen applies it client-side over the page.
+ * server-side OWNER filter (assets with a live assignment to that user). `ownership` is the
+ * server-side Has/None filter: `HAS` keeps only assets with a live assignment, `NONE` only those
+ * with none (#824 — moved server-side so it scopes the whole result set, not just the page).
  * `limit`/`offset` thread the
  * pagination window (ADR-0030); omit for the defaults (page size 50, offset 0).
  *
@@ -52,6 +53,8 @@ export interface AssetFilters {
   status?: AssetStatus;
   /** Restrict to assets currently assigned (live) to this user (a User uuid). Server-side filter. */
   assignedToUserId?: string;
+  /** Server-side ownership filter: `HAS` = has a live owner, `NONE` = unassigned (#824). */
+  ownership?: "HAS" | "NONE";
   sort?: string;
   dir?: "asc" | "desc";
   limit?: number;
@@ -81,6 +84,7 @@ export function getAssets(
   if (filters.status) params.set("status", filters.status);
   if (filters.assignedToUserId)
     params.set("assignedToUserId", filters.assignedToUserId);
+  if (filters.ownership) params.set("ownership", filters.ownership);
   if (filters.sort) {
     params.set("sort", filters.sort);
     if (filters.dir) params.set("dir", filters.dir);
