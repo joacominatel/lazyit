@@ -46,6 +46,10 @@ function isPublicPath(pathname: string): boolean {
     pathname === "/login" ||
     pathname === "/setup" ||
     pathname === "/" ||
+    // The reporting-agent installer (ADR-0074 §6) is a public `curl | sh` script served from
+    // /public — it carries NO secret (the operator passes the SA token as a flag). The extension
+    // allowlist above doesn't cover `.sh`, so allow it by exact path or it'd 302 to /login.
+    pathname === "/install.sh" ||
     // The Help / Manual surface is PUBLIC, login-free product documentation (ADR-0062 §3): it
     // lives in the `(marketing)` route group, but route groups add no URL segment, so `/help`
     // would otherwise fall through to route protection and redirect to /login. Allow `/help`
