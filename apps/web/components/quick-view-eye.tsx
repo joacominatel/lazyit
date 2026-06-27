@@ -2,7 +2,11 @@
 
 import { EyeIcon } from "@heroicons/react/16/solid";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useRef,
+} from "react";
 import { titleFor, type QuickViewData } from "@/components/quick-view-fields";
 import { QuickViewPopover } from "@/components/quick-view-popover";
 import { cn } from "@/lib/utils";
@@ -28,14 +32,15 @@ const QUICK_VIEW_HOVER_MS = 120;
  * that `stopPropagation`/`preventDefault`s so activating it NEVER selects the row.
  *
  * Hover (after a ~120ms intent delay) opens a transient PREVIEW; click PINS it (footer + dialog
- * semantics). It is the radix `PopoverAnchor`, so Escape closes the panel and returns focus here for
- * free (radix default). One open at a time is enforced by the lifted `openQuickViewId` in the host picker.
+ * semantics). It is the radix `PopoverAnchor`, so Escape closes the panel and returns focus to the cmdk
+ * input ({@link QuickViewPopover} restores it). One open at a time is enforced by the lifted
+ * `openQuickViewId` in the host picker.
  *
- * KEYBOARD-OPEN is a documented v1 LIMITATION (#793): cmdk keeps DOM focus on the CommandInput and routes
- * Enter to the highlighted row's `onSelect`, so the eye — though visible on the selected row — can't be
- * opened by keyboard without fighting that roving-focus model. The eye keeps an `onKeyDown` for the
- * mouse-then-keyboard case (a focused eye), but a pure-keyboard user can't yet open the preview. The
- * clean fix (Tab-reachable selected-row eye, or a non-conflicting Command-root chord) is the follow-up.
+ * KEYBOARD-OPEN (#793): the eye is `tabIndex={-1}` (cmdk owns roving focus — DOM focus stays on the
+ * CommandInput), so it is not a Tab stop. The keyboard path is the non-conflicting **Alt+Enter** chord
+ * wired on the `<Command>` root via {@link quickViewChordKeyDown}: it opens + pins the currently
+ * HIGHLIGHTED row's preview without fighting cmdk's roving focus. The eye also keeps an `onKeyDown` for
+ * the mouse-then-keyboard case (a focused eye); `aria-keyshortcuts` advertises the chord to AT.
  */
 export function QuickViewEye({
   view,
@@ -78,9 +83,11 @@ export function QuickViewEye({
         <button
           type="button"
           aria-label={t("trigger", { name: titleFor(view) })}
+          // The Alt+Enter chord (quickViewChordKeyDown, wired on the Command root) opens this row's
+          // preview by keyboard; advertise it to AT on the control it activates (#793).
+          aria-keyshortcuts="Alt+Enter"
           // cmdk owns roving focus (DOM focus stays on the CommandInput); keep the eye out of the Tab
-          // order so it doesn't fight that model. It's reached by mouse today; a keyboard-open path is
-          // the documented v1 limitation / follow-up (#793).
+          // order so it doesn't fight that model — the keyboard path is the chord, not a Tab stop.
           tabIndex={-1}
           className={cn(
             "flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 group-hover/row:opacity-100 group-data-[selected=true]/row:opacity-100",
@@ -118,5 +125,54 @@ export function QuickViewEye({
         </button>
       }
     />
+  );
+}
+
+/**
+ * The keyboard-open path for Quick View (#793): a non-conflicting **Alt+Enter** chord wired on the cmdk
+ * `<Command>` root's `onKeyDown`. It opens + pins the currently HIGHLIGHTED row's preview — the one
+ * thing cmdk's roving focus otherwise blocks (cmdk keeps DOM focus on the input and routes plain Enter
+ * to the highlighted row's `onSelect`).
+ *
+ * Safe against cmdk by construction: cmdk calls a passed `onKeyDown` BEFORE its own handler and skips
+ * that handler entirely when the event is `defaultPrevented`. Calling `preventDefault()` here on
+ * Alt+Enter suppresses cmdk's row-select for the chord ONLY — plain Enter, the arrows and type-to-filter
+ * never match this branch and pass straight through untouched.
+ *
+ * The highlighted row id is read from the live DOM — the `data-quick-view-id` on the selected
+ * `[cmdk-item]` — never by parsing cmdk's client-filter value string (which is `"label id"`). Each host
+ * stamps that attribute on rows that have a preview; a highlighted row without one is a no-op.
+ */
+export function quickViewChordKeyDown(
+  event: ReactKeyboardEvent<HTMLDivElement>,
+  pin: (id: string) => void,
+) {
+  if (event.key !== "Enter" || !event.altKey) return;
+  // Alt+Enter is the preview chord — never let it fall through to cmdk's row-select.
+  event.preventDefault();
+  const selected = event.currentTarget.querySelector<HTMLElement>(
+    '[cmdk-item][aria-selected="true"]',
+  );
+  const id = selected?.getAttribute("data-quick-view-id");
+  if (id) pin(id);
+}
+
+/**
+ * A small, muted footer hint advertising the {@link quickViewChordKeyDown} Alt+Enter chord inside the
+ * picker popovers (Combobox / EntityMultiSelect), for discoverability. Render it only when the picker
+ * actually has eyes (a `quickView` callback + visible rows); the command palette has its own footer hint.
+ */
+export function QuickViewHint() {
+  const t = useTranslations("common.quickView");
+  return (
+    <div className="flex items-center gap-1 border-t px-3 py-1.5 text-xs text-muted-foreground">
+      <kbd className="rounded border bg-muted px-1 font-mono text-[0.6875rem]">
+        Alt
+      </kbd>
+      <kbd className="rounded border bg-muted px-1 font-mono text-[0.6875rem]">
+        ↵
+      </kbd>
+      <span className="ml-0.5">{t("keyboardHint")}</span>
+    </div>
   );
 }
