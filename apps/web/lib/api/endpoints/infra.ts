@@ -1,5 +1,6 @@
 import type {
   AttachInfraSecret,
+  ConfirmInfraNode,
   CreateInfraEdge,
   CreateInfraNode,
   InfraEdge,
@@ -132,6 +133,23 @@ export function deleteInfraNode(nodeId: string): Promise<InfraNode> {
 export function restoreInfraNode(nodeId: string): Promise<InfraNode> {
   return apiFetch<InfraNode>(`${BASE}/nodes/${nodeId}/restore`, {
     method: "POST",
+  });
+}
+
+/**
+ * Confirm a PENDING agent-reported node from the review tray (`POST /infra/nodes/:id/confirm`,
+ * ADR-0074 §3). Flips `state` to CONFIRMED; `trackAsAsset` (default true server-side) mints the backing
+ * Asset carrying the agent's host facts, so the auto-discovered host becomes a first-class Asset only on
+ * human approval. Optional `kind`/`label` re-classify/rename at the confirm step. Returns the enriched
+ * `InfraNodeDetail`. To DISCARD a proposal instead, soft-delete it (`deleteInfraNode`).
+ */
+export function confirmInfraNode(
+  nodeId: string,
+  body: ConfirmInfraNode,
+): Promise<InfraNodeDetail> {
+  return apiFetch<InfraNodeDetail>(`${BASE}/nodes/${nodeId}/confirm`, {
+    method: "POST",
+    body,
   });
 }
 

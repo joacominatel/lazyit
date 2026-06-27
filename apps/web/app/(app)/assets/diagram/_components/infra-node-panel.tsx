@@ -67,6 +67,7 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { statusTone } from "@/lib/infra/canvas";
+import { AgentBadge, AgentFreshness } from "./agent-provenance";
 import { DeleteNodeDialog } from "./delete-node-dialog";
 import { NodeEdgesManager } from "./node-edges-manager";
 
@@ -220,7 +221,17 @@ function PanelBody({
           <StatusBadge tone={tone} dot>
             {t(`status.${node.status}`)}
           </StatusBadge>
+          {/* Provenance (ADR-0074 §3): mark machine-reported nodes so an operator knows the inventory
+              is auto-maintained — and how fresh the last report is (muted/"stale" when OFFLINE). */}
+          {node.source === "AGENT" ? <AgentBadge /> : null}
         </div>
+        {node.source === "AGENT" ? (
+          <AgentFreshness
+            reportingSource={node.reportingSource}
+            lastReportedAt={node.lastReportedAt}
+            status={node.status}
+          />
+        ) : null}
         {node.assetName ? (
           <p className="text-xs text-muted-foreground">
             {t("panel.inventoryName")}:{" "}

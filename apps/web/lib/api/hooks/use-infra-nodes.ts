@@ -7,6 +7,7 @@ import {
 import { useMemo } from "react";
 import type {
   AttachInfraSecret,
+  ConfirmInfraNode,
   CreateInfraEdge,
   InfraEdge,
   InfraImpactResponse,
@@ -18,6 +19,7 @@ import type {
 import {
   attachInfraNodeSecret,
   closeInfraEdge,
+  confirmInfraNode,
   createInfraEdge,
   createInfraNode,
   type CreateInfraNodeInput,
@@ -266,6 +268,22 @@ export function useRestoreInfraNode() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => restoreInfraNode(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
+ * Confirm a PENDING agent-reported node from the review tray (`POST /infra/nodes/:id/confirm`,
+ * ADR-0074 §3). `trackAsAsset` (default true) mints the backing Asset; optional `kind`/`label` override
+ * re-classify/rename at confirm. Invalidates `infraKeys.all` so the pending tray drops the node (now
+ * CONFIRMED) and the canvas/table refresh. The caller owns its own toast/close + `notifyError`.
+ */
+export function useConfirmInfraNode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: ConfirmInfraNode }) =>
+      confirmInfraNode(id, body),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: infraKeys.all }),
   });
