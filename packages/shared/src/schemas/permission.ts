@@ -170,6 +170,13 @@ export const PERMISSIONS = [
   // asset-backed node create ALSO requires `asset:write`, AND-checked at the controller (ADR-0070 §8).
   "infra:read",
   "infra:manage",
+  // infra:report (the server reporting agent, ADR-0074 §5) — the SINGLE permission a self-installing
+  // collector's Service Account holds. It gates ONLY `POST /infra/report` (inventory upsert into the
+  // PENDING review tray); it confers no read, no delete, no other infra power. A coarse verb (neither
+  // `:read` nor `:write`), so it is ADMIN-only by construction of the seed and never enters the
+  // MEMBER/VIEWER default sets — but in practice it is granted ONLY to the agent SA, never a human
+  // role. Worst case on a leaked token is PENDING spam a human discards (ADR-0074 §5/§8).
+  "infra:report",
 ] as const;
 
 /**

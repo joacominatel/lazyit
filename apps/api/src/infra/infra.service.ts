@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import {
   isPlausibleEdge,
+  type AgentReport,
+  type AgentReportAck,
   type AttachInfraSecret,
   type CreateInfraEdge,
   type CreateInfraNode,
@@ -146,6 +148,79 @@ export class InfraService {
     // Meili is disabled. The helper re-reads with the linked Asset name for the projection.
     void this.syncNodeToSearch(node.id);
     return node;
+  }
+
+  /**
+   * Ingest one server reporting-agent report (ADR-0074 §3) — the machine-facing upsert behind
+   * `POST /infra/report`. Reconciles on the dedup key `(reportingSource, externalId)` over NON-deleted
+   * nodes (the partial-unique index from migration 20260627130000):
+   *
+   *   - UNKNOWN key → CREATE a `source=AGENT`, `state=PENDING`, `status=ONLINE` node (a PROPOSAL in the
+   *     review tray). `kind` defaults to `PHYSICAL_HOST`, `label` = hostname, `specs` = the inventory
+   *     blob. NO backing Asset is created — the Asset is minted later, only on HUMAN confirmation.
+   *   - KNOWN key → UPDATE `specs`, refresh `status=ONLINE` + `lastReportedAt`. It NEVER overwrites a
+   *     human's curation (`state`, `label`, `x`/`y`, asset link, …): the agent owns inventory FACTS,
+   *     the human owns curation. A confirmed node keeps receiving fresh facts without losing its edits.
+   *
+   * Returns a minimal ack `{ nodeId, state, accepted: true }`. The post-write search sync reuses the
+   * existing fire-and-forget helper.
+   *
+   * ponytail: no new BullMQ queue for MVP — reports are light; reuse the existing fire-and-forget
+   * search sync, add a queue only if report volume ever makes the inline upsert slow.
+   *
+   * ponytail: `kind` inference is deferred — the v1 contract carries no reliable virtualization hint,
+   * so every agent host lands as `PHYSICAL_HOST`; the human re-kinds it (VM/CONTAINER/…) on confirm.
+   */
+  async ingestReport(report: AgentReport): Promise<AgentReportAck> {
+    // The inventory blob (ADR-0074 §2 / ADR-0007 jsonb posture): host facts + software under clear
+    // keys, plus the agent's own version/timestamp for provenance. Stored verbatim — validated already
+    // by `AgentReportSchema` at the controller. `software` is omitted when the agent couldn't list it.
+    const specs: Prisma.InputJsonValue = {
+      host: report.host,
+      ...(report.software !== undefined ? { software: report.software } : {}),
+      agentVersion: report.agentVersion,
+      reportedAt: report.reportedAt,
+    };
+    const now = new Date();
+
+    // Reconcile by the dedup key over non-deleted nodes (the soft-delete extension scopes findFirst).
+    const existing = await this.prisma.infraNode.findFirst({
+      where: {
+        reportingSource: report.reportingSource,
+        externalId: report.externalId,
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      // Known host: refresh inventory facts + liveness ONLY. Curation (state/label/x/y/asset) is the
+      // human's and is deliberately left untouched.
+      const updated = await this.prisma.infraNode.update({
+        where: { id: existing.id },
+        data: { specs, status: 'ONLINE', lastReportedAt: now },
+        select: { id: true, state: true },
+      });
+      void this.syncNodeToSearch(updated.id);
+      return { nodeId: updated.id, state: updated.state, accepted: true };
+    }
+
+    // New host: a PENDING proposal in the review tray. No backing Asset until a human confirms (§3).
+    const created = await this.prisma.infraNode.create({
+      data: {
+        kind: 'PHYSICAL_HOST',
+        label: report.host.hostname,
+        status: 'ONLINE',
+        source: 'AGENT',
+        state: 'PENDING',
+        reportingSource: report.reportingSource,
+        externalId: report.externalId,
+        lastReportedAt: now,
+        specs,
+      },
+      select: { id: true, state: true },
+    });
+    void this.syncNodeToSearch(created.id);
+    return { nodeId: created.id, state: created.state, accepted: true };
   }
 
   /**

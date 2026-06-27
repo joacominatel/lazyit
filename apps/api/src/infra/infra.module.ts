@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { InfraController } from './infra.controller';
 import { InfraService } from './infra.service';
+import { InfraAgentStalenessSweeper } from './infra-agent-staleness.sweeper';
 import { AssetsModule } from '../assets/assets.module';
 import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.module';
 import { ArticlesModule } from '../articles/articles.module';
@@ -21,7 +22,9 @@ import { SecretManagerModule } from '../secret-manager/secret-manager.module';
     SecretManagerModule,
   ],
   controllers: [InfraController],
-  providers: [InfraService],
+  // InfraAgentStalenessSweeper: the periodic OFFLINE flip for stale agent nodes (ADR-0074 §4) — same
+  // self-scheduled `setInterval` pattern as the other sweepers (no @nestjs/schedule dep).
+  providers: [InfraService, InfraAgentStalenessSweeper],
   exports: [InfraService],
 })
 export class InfraModule {}

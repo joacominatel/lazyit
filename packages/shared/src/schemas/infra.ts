@@ -263,6 +263,100 @@ export const AttachInfraSecretSchema = z.strictObject({
   vaultId: z.cuid(),
 });
 
+// ── Server reporting agent (ADR-0074 §2) — the wire contract ──────────────────────────────────────
+
+/**
+ * The report a self-installing Linux collector POSTs to `POST /infra/report` (ADR-0074). This single
+ * zod schema is the SOURCE OF TRUTH for the wire, imported by BOTH the agent binary and the API
+ * handler (the monorepo payoff — zero drift). Everything beyond the two dedup keys
+ * (`reportingSource` + `externalId`) and `host.hostname` is OPTIONAL: the agent degrades gracefully
+ * when it lacks privilege (`dmidecode` needs root) or a tool is missing, so a PARTIAL report is VALID
+ * — never a 400 (ADR-0074 §2/§3). `strictObject` rejects unknown top-level keys (the agent is
+ * version-locked to the instance — ADR-0074 §6 — so an unexpected key is a bug, not forward-compat).
+ */
+export const AgentReportSchema = z.strictObject({
+  /** The collector binary's own version (skew diagnostics). */
+  agentVersion: z.string().min(1).max(40),
+  /** Stable per install (e.g. `agent:<machine-id-prefix>`); the dedup scope. */
+  reportingSource: z.string().min(1).max(120),
+  /** `/etc/machine-id` — the stable per-OS-install dedup key. One host = one node, forever. */
+  externalId: z.string().min(1).max(200),
+  /** When the agent gathered this report (ISO-8601). */
+  reportedAt: z.iso.datetime(),
+  host: z.object({
+    /** The only REQUIRED host fact — used as the new node's label. */
+    hostname: z.string().min(1).max(255),
+    os: z
+      .object({
+        name: z.string().max(200),
+        version: z.string().max(200),
+        kernel: z.string().max(200),
+      })
+      .partial()
+      .optional(),
+    cpu: z
+      .object({
+        model: z.string().max(200),
+        cores: z.number().int().nonnegative(),
+      })
+      .partial()
+      .optional(),
+    memoryBytes: z.number().int().nonnegative().optional(),
+    disks: z
+      .array(
+        z.object({
+          device: z.string().min(1).max(255),
+          sizeBytes: z.number().int().nonnegative().optional(),
+          mountpoint: z.string().max(1024).optional(),
+        }),
+      )
+      .max(256)
+      .optional(),
+    nics: z
+      .array(
+        z.object({
+          name: z.string().min(1).max(120),
+          mac: z.string().max(64).optional(),
+          ipv4: z.array(z.string().max(64)).max(64).optional(),
+        }),
+      )
+      .max(64)
+      .optional(),
+    // dmidecode (root-only) — manufacturer/model/serial; absent on unprivileged installs.
+    hardware: z
+      .object({
+        manufacturer: z.string().max(200),
+        model: z.string().max(200),
+        serial: z.string().max(200),
+      })
+      .partial()
+      .optional(),
+  }),
+  /** Installed packages (dpkg/rpm/apk auto-detected). Capped — a sane upper bound, not a real limit. */
+  software: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(255),
+        version: z.string().max(120).optional(),
+      }),
+    )
+    .max(5000)
+    .optional(),
+});
+export type AgentReport = z.infer<typeof AgentReportSchema>;
+
+/**
+ * The minimal ack the report endpoint returns (ADR-0074 §3). Fire-and-forget by design: it confirms
+ * the node id, its lifecycle `state` (PENDING for a freshly-discovered host, CONFIRMED once a human
+ * has approved it) and that the report was accepted. Nothing more leaks back to the machine caller.
+ */
+export const AgentReportAckSchema = z.object({
+  nodeId: z.cuid(),
+  state: InfraNodeStateSchema,
+  accepted: z.literal(true),
+});
+export type AgentReportAck = z.infer<typeof AgentReportAckSchema>;
+
 // ── Plausibility table (ADR-0070 §3) — data the API WARNS on, NOT a hard constraint ───────────────
 
 export type InfraNodeKind = z.infer<typeof InfraNodeKindSchema>;
