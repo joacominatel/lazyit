@@ -270,6 +270,11 @@ diagram, so it ships in the MVP, not v1. **React Flow** is adopted as the one ne
 scoped to this screen (confirm version via Context7 before install). Nav: **Assets › Servers** (filtered
 list) and **Assets › Diagram** (the canvas). A static HTML tree is rejected (can't do free-move/pan/edges).
 
+> **Updated 2026-06-27 (#801): node→secret linkage now implemented — see ADR-0073.** The §5 asset-backed
+> secret surface / the `secretRefs` placeholder is no longer empty: a node carries soft secret
+> handle-refs (`InfraNodeSecretRef`), resolved at read to live secret METADATA only (INV-10), with
+> member-scoped attach. See [[0073-infra-node-secret-linkage]].
+
 > **UX round (issues #760–#767).** Post-MVP the canvas got a UX pass (design brief pinned on #723).
 > Edges became a *system*, not just colour: each kind reads by **colour + line-style + marker +
 > (DEPENDS_ON only) animated flow**, with an on-edge kind label on hover/select and a collapsible

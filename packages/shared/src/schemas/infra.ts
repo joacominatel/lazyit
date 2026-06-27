@@ -201,9 +201,9 @@ export const InfraNodeChildSchema = z.object({
  * `label` is the human title. Deliberately carries NO ciphertext/iv/authTag — the server is
  * structurally incapable of decryption and this surface must never approach the value side.
  *
- * ponytail: v1 has NO asset→secret linkage in the data model (no FK/join exists — verified against the
- * Secret Manager schema). So the API returns an EMPTY array here today; the shape is fixed now so the
- * frontend panel and a future linkage (ADR-0070 §6) agree without a contract change.
+ * Populated from a node's `InfraNodeSecretRef` soft links, resolved to LIVE SecretItem metadata at
+ * read (ADR-0073, issue #801). A ref whose secret was soft-deleted or renamed away (the handle is
+ * editable + only live-unique) is dropped on resolution — never a dangling chip.
  */
 export const InfraSecretRefSchema = z.object({
   handle: z.string(),
@@ -225,7 +225,7 @@ export const InfraNodeDetailSchema = InfraNodeSchema.extend({
   owners: z.array(InfraNodeOwnerSchema),
   /** PUBLISHED KB articles linked to the node's Asset (folder-scoped); `[]` when graph-only. */
   articleLinks: z.array(ArticleListItemSchema),
-  /** Secret HANDLES only (never values, INV-10); `[]` in v1 — no asset→secret linkage exists yet. */
+  /** Secret HANDLES only (never values, INV-10); resolved from the node's links (ADR-0073, #801). */
   secretRefs: z.array(InfraSecretRefSchema),
   /** Nodes hosted on this one via an ACTIVE inverse RUNS_ON edge. */
   children: z.array(InfraNodeChildSchema),
@@ -245,6 +245,22 @@ export const InfraNodeListItemSchema = InfraNodeSchema.extend({
   assetName: z.string().nullable(),
   /** Active owners via the linked Asset's `AssetAssignment`s; `[]` when graph-only or unowned. */
   owners: z.array(InfraNodeOwnerSchema),
+});
+
+// ── Node → secret linkage (ADR-0073, issue #801) ──────────────────────────────────────────────────
+
+/**
+ * Attach (or detach) a secret HANDLE reference to a node — the request body for
+ * `POST`/`DELETE /infra/nodes/:id/secrets`. A SOFT reference (handle + vaultId, NO FK), mirroring the
+ * KB chip + SecretAuditLog convention: the server stores metadata only, never a value (INV-10,
+ * [[0061-secret-manager-zero-knowledge]]). `handle` is the editable, live-unique secret identifier
+ * (max 80, matching SecretItem.handle); `vaultId` scopes it to the vault the caller must be a LIVE
+ * member of (the layer-2 authz the API enforces). The node id is the route param, the actor the
+ * X-User-Id principal — neither rides in the body (house style). Detach reuses this exact shape.
+ */
+export const AttachInfraSecretSchema = z.strictObject({
+  handle: z.string().trim().min(1).max(80),
+  vaultId: z.cuid(),
 });
 
 // ── Plausibility table (ADR-0070 §3) — data the API WARNS on, NOT a hard constraint ───────────────
@@ -334,4 +350,5 @@ export type InfraImpactResponse = z.infer<typeof InfraImpactResponseSchema>;
 export type InfraNodeOwner = z.infer<typeof InfraNodeOwnerSchema>;
 export type InfraNodeChild = z.infer<typeof InfraNodeChildSchema>;
 export type InfraSecretRef = z.infer<typeof InfraSecretRefSchema>;
+export type AttachInfraSecret = z.infer<typeof AttachInfraSecretSchema>;
 export type InfraNodeDetail = z.infer<typeof InfraNodeDetailSchema>;

@@ -33,6 +33,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { UserAvatar } from "@/components/user-avatar";
+import { Combobox, type ComboboxItem } from "@/components/combobox";
 import { ErrorState } from "@/components/resource-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,10 +56,13 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
+  useAttachInfraSecret,
   useDeleteInfraNode,
+  useDetachInfraSecret,
   useInfraNodeDetail,
   useUpdateInfraNode,
 } from "@/lib/api/hooks/use-infra-nodes";
+import { useHandleSuggestions } from "@/lib/secret-manager/hooks/use-chip";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
@@ -306,7 +310,15 @@ function PanelBody({
 
         <OwnersSection owners={node.owners} />
         <ArticlesSection articles={node.articleLinks} />
-        <SecretsSection secretRefs={node.secretRefs} />
+        {canManage ? (
+          <SecretsEditor
+            key={`${node.id}:${JSON.stringify(node.secretRefs ?? [])}`}
+            nodeId={node.id}
+            secretRefs={node.secretRefs}
+          />
+        ) : (
+          <SecretsSection secretRefs={node.secretRefs} />
+        )}
         {canManage ? (
           <ShortcutsEditor
             key={`${node.id}:${JSON.stringify(node.shortcuts ?? [])}`}
@@ -921,6 +933,132 @@ function SecretsSection({ secretRefs }: { secretRefs: InfraSecretRef[] }) {
           </li>
         </ul>
       )}
+    </Section>
+  );
+}
+
+/**
+ * Editable secret references (ADR-0073, issue #801, manager-only). The manager variant of
+ * {@link SecretsSection}: the same handle chips PLUS a remove (×) per ref and an "Attach secret"
+ * picker. INV-10 holds throughout — this surface only ever touches HANDLES + labels (metadata), never
+ * a value; there is no reveal here (revealing is the KB chip's job).
+ *
+ * The picker is the shared {@link Combobox} in server-search mode, fed by {@link useHandleSuggestions}
+ * — the same member-scoped, value-free handle source the KB editor uses (only the caller's vaults).
+ * A handle needs its `vaultId` to attach, so each suggestion is keyed by `${vaultId}:${handle}` and
+ * the chosen `{ handle, vaultId }` recovered from the suggestion on select. Already-attached handles
+ * are filtered out of the picker (the backend is idempotent anyway). Attach/detach act immediately
+ * (no draft) and the panel detail refreshes via the hooks' `infraKeys.all` invalidation. Errors —
+ * including the API's friendly 403 ("not a member of the vault that holds this secret") — surface via
+ * `notifyError`, exactly like the other panel mutations.
+ */
+function SecretsEditor({
+  nodeId,
+  secretRefs,
+}: {
+  nodeId: string;
+  secretRefs: InfraSecretRef[];
+}) {
+  const t = useTranslations("infra");
+  const attach = useAttachInfraSecret();
+  const detach = useDetachInfraSecret();
+  const [query, setQuery] = useState("");
+  const { data: suggestions, isLoading } = useHandleSuggestions(
+    query || undefined,
+  );
+
+  const pending = attach.isPending || detach.isPending;
+
+  // Hide handles already attached to this node (idempotent on the server, but no point offering them).
+  const attached = new Set(secretRefs.map((ref) => `${ref.vaultId}:${ref.handle}`));
+  const items: ComboboxItem[] = (suggestions ?? [])
+    .map((s) => ({
+      value: `${s.vaultId}:${s.handle}`,
+      label: s.label,
+      // The handle is searchable too (the label is the human title).
+      keywords: [s.handle],
+    }))
+    .filter((item) => !attached.has(item.value));
+
+  function handleAttach(value: string) {
+    if (!value) return;
+    const chosen = (suggestions ?? []).find(
+      (s) => `${s.vaultId}:${s.handle}` === value,
+    );
+    if (!chosen) return;
+    attach.mutate(
+      { id: nodeId, handle: chosen.handle, vaultId: chosen.vaultId },
+      {
+        onSuccess: () => {
+          toast.success(t("panel.secretAttachedToast"));
+          setQuery("");
+        },
+        onError: (error) => notifyError(error, t("panel.secretAttachError")),
+      },
+    );
+  }
+
+  function handleDetach(ref: InfraSecretRef) {
+    detach.mutate(
+      { id: nodeId, handle: ref.handle, vaultId: ref.vaultId },
+      {
+        onSuccess: () => toast.success(t("panel.secretDetachedToast")),
+        onError: (error) => notifyError(error, t("panel.secretDetachError")),
+      },
+    );
+  }
+
+  return (
+    <Section title={t("panel.secretsTitle")}>
+      {secretRefs.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("panel.noSecrets")}</p>
+      ) : (
+        <ul className="space-y-2">
+          {secretRefs.map((ref) => (
+            <li key={`${ref.vaultId}:${ref.handle}`} className="space-y-1">
+              <div className="flex items-center gap-2">
+                <KeyIcon
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-hidden
+                />
+                <span className="truncate text-sm font-medium">{ref.label}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="ml-auto size-7 shrink-0 text-muted-foreground hover:text-destructive"
+                  aria-label={t("panel.secretRemove")}
+                  disabled={pending}
+                  onClick={() => handleDetach(ref)}
+                >
+                  <XMarkIcon />
+                </Button>
+              </div>
+              {/* The handle is a reference token, never the secret material — render it verbatim. */}
+              <code className="block truncate rounded-md bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
+                {`{{ lazyit_secret.${ref.handle} }}`}
+              </code>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-2 space-y-1.5">
+        <Combobox
+          value=""
+          onValueChange={handleAttach}
+          items={items}
+          onSearchChange={setQuery}
+          loading={isLoading}
+          disabled={pending}
+          placeholder={t("panel.secretAttach")}
+          searchPlaceholder={t("panel.secretPickerSearch")}
+          emptyText={t("panel.secretPickerEmpty")}
+        />
+        <p className="text-xs text-muted-foreground">
+          {t("panel.secretHandleNote")}
+        </p>
+      </div>
     </Section>
   );
 }

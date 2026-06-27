@@ -45,4 +45,13 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       new Set<Permission>(['infra:manage', 'asset:write']),
     );
   });
+
+  it('requires BOTH infra:manage AND secret:read to attach a secret handle; detach needs only infra:manage (ADR-0073, #801)', () => {
+    // Attach references a secret → layer-1 needs infra:manage + secret:read (AND); the layer-2 live
+    // vault-membership check is enforced in the service. Detach is a plain topology edit (infra:manage).
+    expect(new Set(permsOf('attachSecret'))).toEqual(
+      new Set<Permission>(['infra:manage', 'secret:read']),
+    );
+    expect(permsOf('detachSecret')).toEqual(['infra:manage']);
+  });
 });

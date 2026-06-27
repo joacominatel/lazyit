@@ -143,8 +143,12 @@ one place:
 - **Knowledge-base articles** — published articles linked to the node's asset, each a click away.
 - **Secret references** — *handles only, never the secret values themselves.* A reference shows the
   `{{ lazyit_secret.… }}` handle and a label so you know which credential goes with this machine;
-  there is no reveal here and lazyit never exposes the value on this surface. (No asset-to-secret
-  link exists yet, so this list is empty for now; the panel is ready for it.)
+  there is no reveal here and lazyit never exposes the value on this surface. With the manage
+  permission you attach a reference from the **Attach a secret** picker — it lists only the secrets
+  **you can access** (the vaults you're a member of) and you choose one by its handle; the **×** next
+  to a reference detaches it. References are stored by handle and resolved live, so the label always
+  reflects the current secret — and if the secret is removed (or its handle changed) the reference
+  simply drops from the list.
 - **Shortcuts** — quick links (SSH, web UI, console) that open in a new tab. With the manage
   permission you edit them inline: each shortcut is a label + URL pair you can change, add or remove,
   then **Save** the list (lazyit checks each URL is valid before saving).

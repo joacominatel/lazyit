@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   isPlausibleEdge,
+  type AttachInfraSecret,
   type CreateInfraEdge,
   type CreateInfraNode,
   type InfraEdgeKind,
@@ -24,6 +25,7 @@ import { ActorService } from '../common/actor.service';
 import { AssetsService } from '../assets/assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { ArticlesService } from '../articles/articles.service';
+import { SecretManagerService } from '../secret-manager/secret-manager.service';
 import { SearchService } from '../search/search.service';
 import { projectInfraNode } from '../search/search.documents';
 import { parsePageQuery } from '../common/parse-page-query';
@@ -66,6 +68,7 @@ export class InfraService {
     private readonly assets: AssetsService,
     private readonly assignments: AssetAssignmentsService,
     private readonly articles: ArticlesService,
+    private readonly secrets: SecretManagerService,
     private readonly search: SearchService,
   ) {}
 
@@ -254,17 +257,88 @@ export class InfraService {
       articleLinks = await this.resolveArticleLinks(node.assetId, principal);
     }
 
+    // Node→secret linkage (ADR-0073, #801): resolve this node's soft handle-refs to LIVE secret
+    // METADATA only (handle/label/vaultId), never values (INV-10). Dangling refs (the secret was
+    // soft-deleted or its editable handle renamed away) are dropped during resolution.
+    const secretRefs = await this.resolveNodeSecretRefs(id);
+
     return {
       ...node,
       assetName,
       owners,
       articleLinks,
-      // ponytail: no asset→secret linkage exists in the data model (verified against the Secret Manager
-      // schema), so there is nothing to surface yet. The shape is fixed (handles only, INV-10) so a
-      // future linkage (ADR-0070 §6) needs no contract change. NEVER return ciphertext/iv/authTag.
-      secretRefs: [] as InfraSecretRef[],
+      secretRefs,
       children,
     };
+  }
+
+  /**
+   * Load a node's secret soft-links and resolve them to LIVE secret METADATA (ADR-0073, #801) — the
+   * `secretRefs` the drill-in + attach/detach return. METADATA ONLY (handle/label/vaultId), NEVER a
+   * value/envelope (INV-10); a ref whose secret is no longer live (soft-deleted / handle renamed away)
+   * is dropped by the resolver. Stable-sorted (label, then handle) by the resolver.
+   */
+  private async resolveNodeSecretRefs(
+    nodeId: string,
+  ): Promise<InfraSecretRef[]> {
+    const links = await this.prisma.infraNodeSecretRef.findMany({
+      where: { nodeId },
+      select: { handle: true, vaultId: true },
+    });
+    if (links.length === 0) return [];
+    return this.secrets.resolveHandlesMetadata(links);
+  }
+
+  /**
+   * Attach a secret HANDLE reference to a node (ADR-0073, #801). The node must be live (else 404). The
+   * caller must be a LIVE member of `dto.vaultId` AND `dto.handle` must resolve to a live secret in
+   * that vault — enforced by {@link SecretManagerService.assertHandleAttachable} (403 non-member, 404
+   * no live handle; membership FIRST so a non-member can't probe handle existence). The join is
+   * UPSERTED on the `(nodeId, vaultId, handle)` unique, so re-attaching is an idempotent no-op (NOT a
+   * 409). Returns the node's UPDATED resolved `secretRefs` (handles only — INV-10).
+   */
+  async attachSecret(
+    nodeId: string,
+    dto: AttachInfraSecret,
+    principal?: Principal,
+  ): Promise<InfraSecretRef[]> {
+    await this.getNode(nodeId);
+    // Layer-2 authz: live vault membership + a live handle in that vault (metadata-only; no envelope).
+    await this.secrets.assertHandleAttachable(
+      principal,
+      dto.vaultId,
+      dto.handle,
+    );
+    await this.prisma.infraNodeSecretRef.upsert({
+      where: {
+        nodeId_vaultId_handle: {
+          nodeId,
+          vaultId: dto.vaultId,
+          handle: dto.handle,
+        },
+      },
+      create: { nodeId, vaultId: dto.vaultId, handle: dto.handle },
+      update: {},
+    });
+    return this.resolveNodeSecretRefs(nodeId);
+  }
+
+  /**
+   * Detach a secret HANDLE reference from a node (ADR-0073, #801). The node must be live (else 404).
+   * This is a TOPOLOGY edit — the route permission (`infra:manage`) is the only gate; NO secret
+   * membership is required (no value is touched). HARD-deletes the matching join row and is idempotent
+   * (deleting a missing ref is a no-op via `deleteMany`, never P2025). Returns the UPDATED resolved
+   * `secretRefs` (handles only — INV-10).
+   */
+  async detachSecret(
+    nodeId: string,
+    dto: AttachInfraSecret,
+  ): Promise<InfraSecretRef[]> {
+    await this.getNode(nodeId);
+    await this.prisma.infraNodeSecretRef.deleteMany({
+      where: { nodeId, vaultId: dto.vaultId, handle: dto.handle },
+    });
+    return this.resolveNodeSecretRefs(nodeId);
   }
 
   /** Active owners of an asset (multi-owner), each a lean summary; via the active AssetAssignment join. */

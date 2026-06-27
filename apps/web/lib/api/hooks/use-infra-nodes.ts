@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type {
+  AttachInfraSecret,
   CreateInfraEdge,
   InfraEdge,
   InfraImpactResponse,
@@ -15,11 +16,13 @@ import type {
   UpdateInfraNode,
 } from "@lazyit/shared";
 import {
+  attachInfraNodeSecret,
   closeInfraEdge,
   createInfraEdge,
   createInfraNode,
   type CreateInfraNodeInput,
   deleteInfraNode,
+  detachInfraNodeSecret,
   getInfraNodeDetail,
   getInfraNodeEdges,
   getInfraNodeEdgesHistory,
@@ -274,6 +277,37 @@ export function useCloseInfraEdge() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => closeInfraEdge(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
+ * Attach a secret HANDLE reference to a node (`POST /infra/nodes/:id/secrets`, ADR-0073 / #801). The
+ * API gates on infra:manage + secret:read + live vault membership and may 403/404 — the caller toasts
+ * that friendly message verbatim via `notifyError`. Invalidates `infraKeys.all` so the open panel's
+ * detail refreshes with the returned `secretRefs`.
+ */
+export function useAttachInfraSecret() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, handle, vaultId }: { id: string } & AttachInfraSecret) =>
+      attachInfraNodeSecret(id, { handle, vaultId }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
+ * Detach a secret HANDLE reference from a node (`DELETE /infra/nodes/:id/secrets`, ADR-0073). A
+ * topology edit (infra:manage only); idempotent. Invalidates `infraKeys.all` so the open panel's
+ * detail refreshes with the returned `secretRefs`.
+ */
+export function useDetachInfraSecret() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, handle, vaultId }: { id: string } & AttachInfraSecret) =>
+      detachInfraNodeSecret(id, { handle, vaultId }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: infraKeys.all }),
   });
