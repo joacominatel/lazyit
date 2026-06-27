@@ -113,10 +113,16 @@ export function useAssetsOnTopology(enabled: boolean): ReadonlySet<string> {
  * ponytail: a per-node fan-out, not a bespoke batch endpoint — the estate is small by design
  * (ADR-0070), each query is individually cached/invalidated, and `useQueries` already shares the
  * one client. `enabled` gates each on its node id so nothing fires before the node list resolves.
+ *
+ * Surfaces `isError` (true if ANY per-node edge query failed) and an aggregate `refetch` so the
+ * canvas can flag — and retry — a partial fetch instead of silently dropping relationships: a failed
+ * edge fetch would otherwise render the touched nodes as "disconnected" with no cue (issue #778).
  */
 export function useInfraEdges(nodeIds: string[]): {
   edges: InfraEdge[];
   isLoading: boolean;
+  isError: boolean;
+  refetch: () => void;
 } {
   const results = useQueries({
     queries: nodeIds.map((nodeId) => ({
@@ -136,6 +142,13 @@ export function useInfraEdges(nodeIds: string[]): {
     edges: [...byId.values()],
     // Loading only matters before the first paint; once nodes exist we render edges as they arrive.
     isLoading: nodeIds.length > 0 && results.some((r) => r.isLoading),
+    // Any per-node failure means some relationships are missing from the graph above.
+    isError: results.some((r) => r.isError),
+    // Re-run every per-node edge query; a successful retry flips `isError` back to false (the canvas
+    // notice auto-clears). Fresh closure per render is fine — it's only called from the retry click.
+    refetch: () => {
+      for (const result of results) void result.refetch();
+    },
   };
 }
 

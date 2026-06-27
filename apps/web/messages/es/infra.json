@@ -203,6 +203,8 @@
     "closedToast": "Conexión cerrada.",
     "closeError": "No se pudo cerrar la conexión.",
     "loadError": "No se pudieron cargar las conexiones.",
+    "partialError": "No se pudieron cargar algunas relaciones.",
+    "retry": "Reintentar",
     "selfNode": "este nodo",
     "since": "desde {date}",
     "ended": "finalizó {date}"
