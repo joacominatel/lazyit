@@ -2049,6 +2049,10 @@ model InfraNode {
   edgesFrom       InfraEdge[]     @relation("EdgeSource")
   edgesTo         InfraEdge[]     @relation("EdgeTarget")
 
+  // Soft secret-handle references attached to this node (ADR-0073, #801). Metadata only (handle +
+  // vaultId), NO FK to the SecretItem — mirrors KB chips + SecretAuditLog. INV-10: never a value.
+  secretLinks     InfraNodeSecretRef[]
+
   @@index([assetId])
   @@index([kind])
   @@index([state]) // the PENDING review-tray query
@@ -2085,4 +2089,28 @@ model InfraEdge {
   @@index([targetId])
   @@index([kind])
   @@map("infra_edges")
+}
+
+/// A SOFT secret-handle reference attached to an InfraNode (ADR-0073, #801) — the node→secret linkage
+/// the drill-in `secretRefs` surfaces. Stores metadata only (the editable `handle` + its `vaultId`),
+/// NO FK to the zero-knowledge SecretItem, mirroring the KB chip + SecretAuditLog soft-ref convention.
+/// Because `handle` is editable and only LIVE-unique, a ref may drift on rename; it is RESOLVED at read
+/// against live secret_items and a dangling ref (soft-deleted/renamed away) is dropped. INV-10:
+/// `handle`/`vaultId` are metadata only — NEVER a value, envelope, or wrapped key. Cascade on node
+/// delete (the link is meaningless without its node); not soft-deletable (a topology edit, not audited
+/// domain data). See [[0073-infra-node-secret-linkage]].
+model InfraNodeSecretRef {
+  id        String    @id @default(cuid())
+  nodeId    String
+  node      InfraNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  // Soft refs to the zero-knowledge SecretItem (NO FK), mirroring KB chips + SecretAuditLog.
+  // handle is editable + only live-unique => may drift on rename; resolved at read, dangling dropped.
+  // INV-10: handle/vaultId are metadata only — never values.
+  vaultId   String
+  handle    String
+  createdAt DateTime  @default(now())
+
+  @@unique([nodeId, vaultId, handle])
+  @@index([nodeId])
+  @@map("infra_node_secret_refs")
 }
