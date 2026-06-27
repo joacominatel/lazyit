@@ -17,7 +17,7 @@ agent↔server contract is pinned. It is the **v2 reporting agent** deferred by
 [[0070-infra-topology-graph]] (whose provenance columns were reserved for exactly this), and builds on
 [[0048-service-accounts]] (the machine auth it uses), [[0053-async-workers-bullmq-valkey]] (the worker
 substrate it feeds), [[0007-flexible-asset-specs-jsonb]] (where inventory blobs live),
-[[0005-id-strategy]], [[0006-soft-delete-and-auditing]], [[0026-same-origin-deployment]] and
+[[0005-id-strategy]], [[0006-soft-delete-and-auditing]], [[0026-reverse-proxy-tls]] and
 [[0046-roles-permissions-v2]] (the frozen permission catalog it extends).
 
 > [!info] Phasing (tracked in #831)
@@ -141,7 +141,7 @@ which already drives the blast-radius UI from [[0070-infra-topology-graph]] §7.
 
 The `curl` one-liner targets the **operator's own instance** — never a central landing. Self-hosted,
 version-locked, air-gapped-safe. Caddy already fronts web + API on one origin
-([[0026-same-origin-deployment]]).
+([[0026-reverse-proxy-tls]]).
 
 | Artifact | Served by | Auth | Rationale |
 | --- | --- | --- | --- |
@@ -222,6 +222,6 @@ would be a separate ADR and arguably a separate product).
 - Deferred by / fills the reserved columns of: [[0070-infra-topology-graph]]
 - Auth: [[0048-service-accounts]] · Permissions: [[0046-roles-permissions-v2]]
 - Workers: [[0053-async-workers-bullmq-valkey]] · Specs: [[0007-flexible-asset-specs-jsonb]]
-- Deployment/origin: [[0026-same-origin-deployment]] · Auditing: [[0006-soft-delete-and-auditing]]
+- Deployment/origin: [[0026-reverse-proxy-tls]] · Auditing: [[0006-soft-delete-and-auditing]]
 - Ingestion precedent: [[0069-migrator-import]] · Zero-knowledge boundary: [[0061-secret-manager-zero-knowledge]]
 - Epic: #831
