@@ -375,6 +375,136 @@ describe('InfraService', () => {
     });
   });
 
+  // ── Reporting-agent confirmation (ADR-0074 §3) — the human review-tray gate ──
+
+  describe('confirmNode', () => {
+    /** Mock the node reads confirmNode does (the method returns the enriched detail after the flip). */
+    function mockDetailReadAfterConfirm(node: Record<string, unknown>): void {
+      // The FIRST findFirst (getNode at the top) must see the PENDING node so the flip runs; every
+      // later findFirst (the fire-and-forget search re-read + the getNodeDetail re-read) sees CONFIRMED.
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(node)
+        .mockResolvedValue({ ...node, state: 'CONFIRMED' });
+      prisma.infraEdge.findMany.mockResolvedValue([]); // getNodeDetail children lookup
+    }
+
+    it('confirms a PENDING node → state CONFIRMED + a backing Asset minted (trackAsAsset default), host facts carried over', async () => {
+      const PENDING = {
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: { host: { hostname: 'web-01' }, agentVersion: '1.0.0' },
+      };
+      mockDetailReadAfterConfirm(PENDING);
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+        assetId: 'asset-new',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      // The backing Asset is minted via the reused asset-create path, host facts carried over + marked.
+      expect(assets.create).toHaveBeenCalledWith(
+        {
+          name: 'web-01',
+          status: 'UNKNOWN',
+          specs: {
+            host: { hostname: 'web-01' },
+            agentVersion: '1.0.0',
+            _infraAutoCreated: true,
+          },
+        },
+        HUMAN,
+      );
+      // The node is flipped to CONFIRMED and wired to the freshly-created asset.
+      const arg = firstArg<{
+        data: { state: string; assetId?: string };
+      }>(prisma.infraNode.update);
+      expect(arg.data.state).toBe('CONFIRMED');
+      expect(arg.data.assetId).toBe('asset-new');
+    });
+
+    it('applies kind/label overrides and names the minted Asset with the override label', async () => {
+      const PENDING = {
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: { host: { hostname: 'web-01' } },
+      };
+      mockDetailReadAfterConfirm(PENDING);
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+      prisma.infraNode.update.mockResolvedValue({ id: 'node-1' });
+
+      await service.confirmNode(
+        'node-1',
+        { kind: 'VM', label: 'prod-web' },
+        HUMAN,
+      );
+
+      // The Asset takes the OVERRIDE label, not the agent's hostname.
+      const createArg = firstArg<{ name: string }>(assets.create);
+      expect(createArg.name).toBe('prod-web');
+      const arg = firstArg<{ data: { kind?: string; label?: string } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.kind).toBe('VM');
+      expect(arg.data.label).toBe('prod-web');
+    });
+
+    it('trackAsAsset:false → CONFIRMED but NO Asset (graph-only)', async () => {
+      const PENDING = {
+        id: 'node-1',
+        label: 'redis',
+        state: 'PENDING',
+        assetId: null,
+        specs: {},
+      };
+      mockDetailReadAfterConfirm(PENDING);
+      prisma.infraNode.update.mockResolvedValue({ id: 'node-1' });
+
+      await service.confirmNode('node-1', { trackAsAsset: false }, HUMAN);
+
+      expect(assets.create).not.toHaveBeenCalled();
+      const arg = firstArg<{ data: { state: string; assetId?: string } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.state).toBe('CONFIRMED');
+      // No asset minted → no assetId written.
+      expect(arg.data).not.toHaveProperty('assetId');
+    });
+
+    it('is an idempotent no-op on an already-CONFIRMED node (no Asset minted, no re-flip write)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-1',
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({ name: 'srv-prod-01' });
+
+      const detail = await service.confirmNode('node-1', {}, HUMAN);
+
+      // No mutation: neither the asset-create nor the node update is invoked.
+      expect(assets.create).not.toHaveBeenCalled();
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+      // It still returns the current enriched detail.
+      expect(detail.state).toBe('CONFIRMED');
+    });
+
+    it('404s when the node is missing or soft-deleted (getNode guard)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      await expect(
+        service.confirmNode('nope', {}, HUMAN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+  });
+
   // ── Detach semantics (ADR-0070 §5) — the orphan fix ─────────────────────────
 
   describe('updateNode — detach (assetId: null)', () => {
