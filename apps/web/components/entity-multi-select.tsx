@@ -4,7 +4,11 @@ import { CheckIcon, ChevronDownIcon } from "@heroicons/react/16/solid";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { type QuickViewData } from "@/components/quick-view-fields";
-import { QuickViewEye } from "@/components/quick-view-eye";
+import {
+  QuickViewEye,
+  QuickViewHint,
+  quickViewChordKeyDown,
+} from "@/components/quick-view-eye";
 import {
   Command,
   CommandEmpty,
@@ -129,6 +133,12 @@ export function EntityMultiSelect({
     setQuickViewPinned(false);
   }
 
+  // Alt+Enter chord (#793): open + pin the cmdk-HIGHLIGHTED row's preview (wired on the Command root).
+  function pinQuickView(id: string) {
+    setOpenQuickViewId(id);
+    setQuickViewPinned(true);
+  }
+
   const isServerSearch = onSearchChange !== undefined;
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const count = selectedSet.size;
@@ -191,7 +201,17 @@ export function EntityMultiSelect({
         align={align}
         className="w-(--radix-popover-trigger-width) min-w-56 p-0"
       >
-        <Command shouldFilter={!isServerSearch}>
+        <Command
+          shouldFilter={!isServerSearch}
+          // Keyboard-open path (#793): Alt+Enter pins the highlighted row's preview. Only wired when
+          // Quick View is on; cmdk runs this before its own handler and the chord preventDefaults, so
+          // arrow-nav / type-to-filter / plain Enter-to-toggle are untouched.
+          onKeyDown={
+            quickView
+              ? (event) => quickViewChordKeyDown(event, pinQuickView)
+              : undefined
+          }
+        >
           <CommandInput
             value={query}
             onValueChange={setQuery}
@@ -231,6 +251,9 @@ export function EntityMultiSelect({
                         disabled={item.disabled}
                         // Keep the menu open while toggling several entities (#198 pattern).
                         onSelect={() => toggle(item.value)}
+                        // Robust highlighted→id mapping for the Alt+Enter chord: stamp the entity id so
+                        // quickViewChordKeyDown reads it off the selected row (never parses `value`).
+                        data-quick-view-id={view ? item.value : undefined}
                         // `group/row` so the eye can reveal on hover OR on the cmdk-selected row.
                         className="group/row"
                       >
@@ -242,7 +265,8 @@ export function EntityMultiSelect({
                               view={view}
                               open={openQuickViewId === item.value}
                               pinned={
-                                openQuickViewId === item.value && quickViewPinned
+                                openQuickViewId === item.value &&
+                                quickViewPinned
                               }
                               onPreview={() => {
                                 setOpenQuickViewId(item.value);
@@ -271,6 +295,8 @@ export function EntityMultiSelect({
               </>
             )}
           </CommandList>
+          {/* Discoverability for the Alt+Enter keyboard-open chord (#793) — only when rows have eyes. */}
+          {quickView && !loading && items.length > 0 ? <QuickViewHint /> : null}
         </Command>
       </PopoverContent>
     </Popover>
