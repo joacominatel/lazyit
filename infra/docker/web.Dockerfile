@@ -21,6 +21,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
+# apps/agent isn't built into this image, but its manifest must be present so the frozen install
+# sees the full workspace graph in bun.lock (ADR-0074 added the workspace).
+COPY apps/agent/package.json apps/agent/
 COPY packages/shared/package.json packages/shared/
 RUN ok=0; for i in 1 2 3; do bun install --frozen-lockfile && ok=1 && break || { echo "bun install failed (attempt $i/3), retrying in 5s..."; sleep 5; }; done; [ "$ok" -eq 1 ]
 
