@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { InfraService } from './infra.service';
@@ -10,6 +11,7 @@ import { ActorService } from '../common/actor.service';
 import { AssetsService } from '../assets/assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { ArticlesService } from '../articles/articles.service';
+import { SecretManagerService } from '../secret-manager/secret-manager.service';
 import { SearchService } from '../search/search.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
@@ -74,6 +76,7 @@ interface PrismaMock {
     update: Mock;
     updateMany: Mock;
   };
+  infraNodeSecretRef: { findMany: Mock; upsert: Mock; deleteMany: Mock };
   asset: { findFirst: Mock };
   $transaction: Mock;
   $queryRaw: Mock;
@@ -87,6 +90,8 @@ describe('InfraService', () => {
   let assets: { create: Mock; remove: Mock; assertExists: Mock };
   let assignments: { findAll: Mock };
   let articles: { findArticlesForAsset: Mock };
+  // The node→secret linkage helpers (ADR-0073, #801): metadata-only resolve + attach authz.
+  let secrets: { resolveHandlesMetadata: Mock; assertHandleAttachable: Mock };
   // The fire-and-forget search sync (ADR-0035): upsert on write, remove on soft-delete.
   let search: { upsert: Mock; remove: Mock };
   // The tx client the $transaction callback receives (RUNS_ON migration writes through it).
@@ -112,6 +117,12 @@ describe('InfraService', () => {
         update: jest.fn(),
         updateMany: jest.fn(),
       },
+      // Default: a node has no secret links (the existing getNodeDetail tests stay graph-clean).
+      infraNodeSecretRef: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: jest.fn().mockResolvedValue(undefined),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
       asset: { findFirst: jest.fn() },
       $transaction: jest.fn(
         (cb: (tx: { infraEdge: typeof txEdge }) => unknown) =>
@@ -128,6 +139,11 @@ describe('InfraService', () => {
     articles = {
       findArticlesForAsset: jest.fn().mockResolvedValue({ items: [] }),
     };
+    secrets = {
+      // Default: nothing to resolve (no links) and attach authz passes — overridden per test.
+      resolveHandlesMetadata: jest.fn().mockResolvedValue([]),
+      assertHandleAttachable: jest.fn().mockResolvedValue(undefined),
+    };
     search = { upsert: jest.fn(), remove: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
@@ -138,6 +154,7 @@ describe('InfraService', () => {
         { provide: AssetsService, useValue: assets },
         { provide: AssetAssignmentsService, useValue: assignments },
         { provide: ArticlesService, useValue: articles },
+        { provide: SecretManagerService, useValue: secrets },
         { provide: SearchService, useValue: search },
       ],
     }).compile();
@@ -401,7 +418,7 @@ describe('InfraService', () => {
   // ── Drill-in (ADR-0070 §6) — secret handles only, never values (INV-10) ─────
 
   describe('getNodeDetail — the payoff panel', () => {
-    it('returns secretRefs as an empty array and NEVER any ciphertext/value fields (INV-10)', async () => {
+    it('resolves linked secret HANDLES to metadata, DROPS dangling refs, and NEVER leaks ciphertext (INV-10, ADR-0073)', async () => {
       prisma.infraNode.findFirst.mockResolvedValue({
         id: 'node-1',
         label: 'web-01',
@@ -409,13 +426,46 @@ describe('InfraService', () => {
       });
       prisma.infraEdge.findMany.mockResolvedValue([]); // no children
       prisma.asset.findFirst.mockResolvedValue({ name: 'Inventory name' });
+      // The node has TWO soft links, but one is dangling (its secret was soft-deleted / renamed away).
+      prisma.infraNodeSecretRef.findMany.mockResolvedValue([
+        { handle: 'db_root', vaultId: 'v-1' },
+        { handle: 'gone', vaultId: 'v-1' }, // no longer a live secret → dropped by the resolver
+      ]);
+      // The resolver returns ONLY the live one — metadata only (handle/label/vaultId), no value fields.
+      secrets.resolveHandlesMetadata.mockResolvedValue([
+        { handle: 'db_root', label: 'DB root', vaultId: 'v-1' },
+      ]);
 
       const detail = await service.getNodeDetail('node-1', HUMAN);
 
-      // Handles only, none today (no asset→secret linkage exists) — and crucially NO value/cipher leak.
-      expect(detail.secretRefs).toEqual([]);
+      // The links are handed to the metadata-only resolver…
+      expect(secrets.resolveHandlesMetadata).toHaveBeenCalledWith([
+        { handle: 'db_root', vaultId: 'v-1' },
+        { handle: 'gone', vaultId: 'v-1' },
+      ]);
+      // …and only the live ref surfaces (the dangling one is dropped).
+      expect(detail.secretRefs).toEqual([
+        { handle: 'db_root', label: 'DB root', vaultId: 'v-1' },
+      ]);
+      // Crucially, NO value/cipher leak anywhere in the payload.
       const serialized = JSON.stringify(detail);
       expect(serialized).not.toMatch(/ciphertext|authTag|"iv"|wrappedDek/i);
+    });
+
+    it('returns empty secretRefs without calling the resolver when the node has no links', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        assetId: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      // infraNodeSecretRef.findMany defaults to [] — no links.
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.secretRefs).toEqual([]);
+      // No links → the resolver is never invoked (ponytail: skip the round-trip).
+      expect(secrets.resolveHandlesMetadata).not.toHaveBeenCalled();
     });
 
     it('surfaces owners via the active AssetAssignment + the inventory name; label wins for display', async () => {
@@ -490,6 +540,109 @@ describe('InfraService', () => {
       expect(detail.owners).toEqual([]);
       expect(detail.articleLinks).toEqual([]);
       expect(assignments.findAll).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Node → secret linkage (ADR-0073, #801) ──────────────────────────────────
+
+  describe('attachSecret', () => {
+    const DTO = { handle: 'db_root', vaultId: 'v-1' };
+
+    it('404s when the node is missing or soft-deleted (getNode guard)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.attachSecret('nope', DTO, HUMAN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      // Never reaches authz or the write.
+      expect(secrets.assertHandleAttachable).not.toHaveBeenCalled();
+      expect(prisma.infraNodeSecretRef.upsert).not.toHaveBeenCalled();
+    });
+
+    it('is FORBIDDEN when the caller is NOT a live member of the vault (no write happens)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-1' });
+      secrets.assertHandleAttachable.mockRejectedValue(
+        new ForbiddenException('not a member'),
+      );
+
+      await expect(
+        service.attachSecret('node-1', DTO, HUMAN),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      // Authz is enforced via the Secret Manager BEFORE the join row is written.
+      expect(secrets.assertHandleAttachable).toHaveBeenCalledWith(
+        HUMAN,
+        'v-1',
+        'db_root',
+      );
+      expect(prisma.infraNodeSecretRef.upsert).not.toHaveBeenCalled();
+    });
+
+    it('upserts idempotently on the (node, vault, handle) unique and returns the resolved refs (never an envelope)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-1' });
+      prisma.infraNodeSecretRef.findMany.mockResolvedValue([
+        { handle: 'db_root', vaultId: 'v-1' },
+      ]);
+      secrets.resolveHandlesMetadata.mockResolvedValue([
+        { handle: 'db_root', label: 'DB root', vaultId: 'v-1' },
+      ]);
+
+      const refs = await service.attachSecret('node-1', DTO, HUMAN);
+
+      // Idempotent upsert: re-attaching is a no-op (update {}), NOT a 409.
+      expect(prisma.infraNodeSecretRef.upsert).toHaveBeenCalledWith({
+        where: {
+          nodeId_vaultId_handle: {
+            nodeId: 'node-1',
+            vaultId: 'v-1',
+            handle: 'db_root',
+          },
+        },
+        create: { nodeId: 'node-1', vaultId: 'v-1', handle: 'db_root' },
+        update: {},
+      });
+      // Returns the node's UPDATED resolved secretRefs — metadata only.
+      expect(refs).toEqual([
+        { handle: 'db_root', label: 'DB root', vaultId: 'v-1' },
+      ]);
+      expect(JSON.stringify(refs)).not.toMatch(
+        /ciphertext|authTag|"iv"|wrappedDek/i,
+      );
+    });
+  });
+
+  describe('detachSecret', () => {
+    const DTO = { handle: 'db_root', vaultId: 'v-1' };
+
+    it('404s when the node is missing or soft-deleted (getNode guard)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+
+      await expect(service.detachSecret('nope', DTO)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(prisma.infraNodeSecretRef.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('hard-deletes the matching ref (idempotent — no membership needed) and returns the updated refs', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-1' });
+      // After the delete, no links remain.
+      prisma.infraNodeSecretRef.findMany.mockResolvedValue([]);
+
+      const refs = await service.detachSecret('node-1', DTO);
+
+      expect(prisma.infraNodeSecretRef.deleteMany).toHaveBeenCalledWith({
+        where: { nodeId: 'node-1', vaultId: 'v-1', handle: 'db_root' },
+      });
+      // Detach is a topology edit — it never calls the Secret Manager authz.
+      expect(secrets.assertHandleAttachable).not.toHaveBeenCalled();
+      expect(refs).toEqual([]);
+    });
+
+    it('is idempotent: detaching a ref that does not exist is a no-op (deleteMany count 0)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-1' });
+      prisma.infraNodeSecretRef.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.infraNodeSecretRef.findMany.mockResolvedValue([]);
+
+      await expect(service.detachSecret('node-1', DTO)).resolves.toEqual([]);
     });
   });
 
