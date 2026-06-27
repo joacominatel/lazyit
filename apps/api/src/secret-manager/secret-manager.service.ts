@@ -753,6 +753,66 @@ export class SecretManagerService {
     }));
   }
 
+  // ── Soft-ref resolution for non-secret surfaces (ADR-0073, #801) ────────────────
+
+  /**
+   * Resolve a batch of `(handle, vaultId)` soft refs to LIVE SecretItem METADATA — handle, label,
+   * vaultId ONLY, NEVER a value, envelope, or wrapped key (INV-10). For surfaces that store soft
+   * handle-refs (the Infra topology node→secret linkage, mirroring KB chips): a ref whose secret is
+   * no longer live (soft-deleted, or its editable handle was renamed away) simply DOES NOT match and
+   * is DROPPED — never a dangling chip. MEMBER-BLIND on purpose: handle + label are metadata shown to
+   * any node viewer (the same posture as a KB chip), so this does NOT gate on the caller's vault
+   * membership — the value side stays unreachable regardless. Returns stable-sorted (label, then
+   * handle). The `findMany` honours the soft-delete read filter, so only live items match.
+   */
+  async resolveHandlesMetadata(
+    refs: { handle: string; vaultId: string }[],
+  ): Promise<{ handle: string; label: string; vaultId: string }[]> {
+    if (refs.length === 0) return [];
+    const rows = await this.prisma.secretItem.findMany({
+      where: {
+        OR: refs.map((r) => ({ vaultId: r.vaultId, handle: r.handle })),
+      },
+      // METADATA ONLY — never ciphertext/iv/authTag (INV-10). The custodian cannot decrypt anyway.
+      select: { handle: true, label: true, vaultId: true },
+    });
+    return rows
+      .map((r) => ({ handle: r.handle, label: r.label, vaultId: r.vaultId }))
+      .sort(
+        (a, b) =>
+          a.label.localeCompare(b.label) || a.handle.localeCompare(b.handle),
+      );
+  }
+
+  /**
+   * Authorize ATTACHING a handle to a non-secret surface (ADR-0073, #801): the caller must hold a
+   * LIVE membership of `vaultId` (else 403) AND a live SecretItem with that `handle` must exist IN
+   * that vault (else 404). Membership is checked FIRST so a non-member can never probe whether a
+   * handle exists in a vault they cannot see (no information leak). METADATA ONLY — confirms
+   * existence by selecting `id`; it NEVER reads or returns an envelope (INV-10). Throws; returns void.
+   */
+  async assertHandleAttachable(
+    principal: Principal | undefined,
+    vaultId: string,
+    handle: string,
+  ): Promise<void> {
+    const userId = this.requireHumanId(principal);
+    await this.assertLiveMembership(
+      userId,
+      vaultId,
+      'You are not a member of the vault that holds this secret',
+    );
+    const item = await this.prisma.secretItem.findFirst({
+      where: { vaultId, handle },
+      select: { id: true },
+    });
+    if (!item) {
+      throw new NotFoundException(
+        'No secret found for that handle in this vault',
+      );
+    }
+  }
+
   // ── helpers: authz ────────────────────────────────────────────────────────────
 
   /** The authenticated human's User.id, or a 403 if anonymous/non-human (the controller guard also blocks SAs). */
