@@ -119,8 +119,10 @@ describe("Above-default-tier markers", () => {
           "secret:manage",
           // import coarse verb (Migrator, ADR-0069 §11) — the run-only verb that gates the import wizard
           "import:run",
-          // infra coarse verb (topology graph, ADR-0070 §8) — the manage verb; `infra:read` is view
+          // infra coarse verbs (ADR-0070 §8 / ADR-0074 §5) — `manage` (human) + `report` (the agent SA's
+          // single machine grant); both coarse (neither `:read` nor `:write`). `infra:read` is view.
           "infra:manage",
+          "infra:report",
         ] as const satisfies Permission[]
       ).slice().sort(),
     );
