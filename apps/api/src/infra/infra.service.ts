@@ -635,8 +635,12 @@ export class InfraService {
     await this.getNode(id); // 404 if the root is missing or soft-deleted.
 
     // The downstream/inverse traversal kinds (ADR-0070 §7). Bound as a SQL array literal cast to the
-    // enum type so the IN-list is parameterized, not concatenated.
-    const kinds: InfraEdgeKind[] = ['RUNS_ON', 'DEPENDS_ON'];
+    // enum type so the IN-list is parameterized, not concatenated. MEMBER_OF is included (#802): a
+    // CLUSTER/group going down ⇒ its members are surfaced (member=sourceId, group=targetId, so a group
+    // root surfaces its members at depth 1) — an edge-derived heuristic, not a hand-verified guarantee.
+    // BACKS_UP_TO and CONNECTS_TO are deliberately excluded: a backup target failing doesn't take down
+    // the primary, and CONNECTS_TO is symmetric (no failure direction).
+    const kinds: InfraEdgeKind[] = ['RUNS_ON', 'DEPENDS_ON', 'MEMBER_OF'];
 
     const rows = await this.prisma.$queryRaw<
       Array<{

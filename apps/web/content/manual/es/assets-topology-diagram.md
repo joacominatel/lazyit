@@ -180,9 +180,15 @@ panel, así puedes saltar de la tabla a la imagen completa de una máquina con u
 
 La pregunta estrella que un mapa puede responder y un dibujo no: **"si este nodo se cae, ¿qué se ve
 afectado?"** En el panel de detalle, activa **Mostrar impacto** para resaltar el conjunto aguas
-abajo — cada nodo que corre sobre, o depende de, este (directa o transitivamente). El lienzo atenúa
-todo lo que queda fuera del radio para que la región afectada destaque, y el panel lista cada nodo
-afectado con a cuántos saltos de distancia está.
+abajo — cada nodo que corre sobre, depende de, o es miembro de este (directa o transitivamente). Por
+eso, dar de baja un clúster o grupo también muestra sus miembros. El lienzo atenúa todo lo que queda
+fuera del radio para que la región afectada destaque, y el panel lista cada nodo afectado con a
+cuántos saltos de distancia está.
+
+El impacto es una **estimación derivada de las aristas**, no una garantía verificada a mano — sigue
+las aristas que dibujaste, así que un miembro podría sobrevivir si el grupo pierde un solo nodo. Los
+enlaces de destino de respaldo y los puramente de red se ignoran a propósito: que falle un destino de
+respaldo no tumba al primario, y una conexión de red simple no tiene dirección de fallo.
 
 Un **resultado vacío es buena noticia** — significa que nada depende de este nodo, así que es seguro
 darlo de baja. lazyit lo muestra como tranquilidad, no como un error.

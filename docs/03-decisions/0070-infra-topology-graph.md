@@ -295,6 +295,12 @@ A graph beats a picture only if you can ask **"if this node goes down, what is a
 the downstream set, surfaced in the UI as a highlight on the canvas. This is named as a v1 feature, not
 an afterthought.
 
+> **Updated 2026-06-27 (#802):** the traversal now includes `MEMBER_OF` alongside `RUNS_ON` and
+> `DEPENDS_ON` — a CLUSTER/group going down surfaces its members. This is an edge-derived heuristic (a
+> member may survive a group losing quorum), not a hand-verified guarantee. `BACKS_UP_TO` and
+> `CONNECTS_TO` remain excluded: a backup target failing does not take down the primary, and
+> `CONNECTS_TO` is symmetric with no failure direction.
+
 ### 8. Permissions
 
 New `infra:read` / `infra:manage` in the [[0046-roles-permissions-v2]] catalog (asset-backed node

@@ -842,7 +842,7 @@ describe('InfraService', () => {
   //
   // The traversal itself is ONE Postgres recursive CTE (no per-level Prisma calls); a Jest run has no
   // DB, so we drive `$queryRaw` with an in-memory simulation of the EXACT semantics the CTE must
-  // satisfy — walk the INVERSE of ACTIVE RUNS_ON/DEPENDS_ON edges from the root, skip soft-deleted
+  // satisfy — walk the INVERSE of ACTIVE RUNS_ON/DEPENDS_ON/MEMBER_OF edges from the root, skip soft-deleted
   // nodes, dedup to the MIN depth per node, and TERMINATE on a cycle (path guard). This locks the
   // contract: feed the service the rows the CTE would produce for a fixture graph and assert the
   // mapped { rootId, affected } downstream set — and that a cycle does not hang the simulation.
@@ -889,7 +889,13 @@ describe('InfraService', () => {
         if (cur.depth >= 64) continue; // mirrors IMPACT_MAX_DEPTH
         for (const e of edges) {
           if (!e.active) continue;
-          if (e.kind !== 'RUNS_ON' && e.kind !== 'DEPENDS_ON') continue;
+          // Mirrors the service's traversal kinds (#802): MEMBER_OF included, BACKS_UP_TO/CONNECTS_TO not.
+          if (
+            e.kind !== 'RUNS_ON' &&
+            e.kind !== 'DEPENDS_ON' &&
+            e.kind !== 'MEMBER_OF'
+          )
+            continue;
           if (e.targetId !== cur.id) continue; // INVERSE: source depends-on/runs-on the frontier
           const src = e.sourceId;
           if (!liveById.has(src)) continue; // skip soft-deleted
@@ -925,6 +931,28 @@ describe('InfraService', () => {
         status: 'OFFLINE',
         deleted: true,
       },
+      // A separate cluster subgraph (#802): two members via MEMBER_OF, plus a BACKS_UP_TO/CONNECTS_TO
+      // neighbour that must NOT contribute. Disjoint from `host`, so the chain tests above are unaffected.
+      { id: 'cluster', label: 'cluster', kind: 'CLUSTER', status: 'ONLINE' },
+      {
+        id: 'member-a',
+        label: 'member-a',
+        kind: 'PHYSICAL_HOST',
+        status: 'ONLINE',
+      },
+      {
+        id: 'member-b',
+        label: 'member-b',
+        kind: 'PHYSICAL_HOST',
+        status: 'ONLINE',
+      },
+      {
+        id: 'primary',
+        label: 'primary',
+        kind: 'PHYSICAL_HOST',
+        status: 'ONLINE',
+      },
+      { id: 'peer', label: 'peer', kind: 'PHYSICAL_HOST', status: 'ONLINE' },
     ];
     const EDGES: FixtureEdge[] = [
       { sourceId: 'vm', targetId: 'host', kind: 'RUNS_ON', active: true }, // vm RUNS_ON host
@@ -933,6 +961,31 @@ describe('InfraService', () => {
       { sourceId: 'vm', targetId: 'container', kind: 'RUNS_ON', active: true }, // CYCLE: vm↔container
       { sourceId: 'ghost', targetId: 'host', kind: 'RUNS_ON', active: true }, // soft-deleted → excluded
       { sourceId: 'vm', targetId: 'host', kind: 'CONNECTS_TO', active: true }, // wrong kind → ignored
+      // Cluster subgraph (#802): members belong to the cluster (member=source, cluster=target).
+      {
+        sourceId: 'member-a',
+        targetId: 'cluster',
+        kind: 'MEMBER_OF',
+        active: true,
+      }, // surfaces (cluster down)
+      {
+        sourceId: 'member-b',
+        targetId: 'cluster',
+        kind: 'MEMBER_OF',
+        active: true,
+      }, // surfaces (cluster down)
+      {
+        sourceId: 'primary',
+        targetId: 'cluster',
+        kind: 'BACKS_UP_TO',
+        active: true,
+      }, // excluded: backup target
+      {
+        sourceId: 'peer',
+        targetId: 'cluster',
+        kind: 'CONNECTS_TO',
+        active: true,
+      }, // excluded: symmetric
     ];
 
     function wireQueryRaw(rootId: string): void {
@@ -973,6 +1026,20 @@ describe('InfraService', () => {
       const ids = result.affected.map((a) => a.id).sort();
       expect(ids).toEqual(['app', 'container', 'vm']);
       expect(new Set(ids).size).toBe(ids.length); // no duplicates — the cycle did not re-emit nodes
+    });
+
+    it('surfaces MEMBER_OF members when a cluster goes down, but not BACKS_UP_TO/CONNECTS_TO neighbours (#802)', async () => {
+      wireQueryRaw('cluster');
+
+      const result = await service.getImpact('cluster');
+
+      expect(result.rootId).toBe('cluster');
+      const ids = result.affected.map((a) => a.id).sort();
+      // The two members (MEMBER_OF) surface at depth 1; the backup primary and the network peer do not.
+      expect(ids).toEqual(['member-a', 'member-b']);
+      expect(ids).not.toContain('primary'); // BACKS_UP_TO: a backup target down doesn't take the primary down
+      expect(ids).not.toContain('peer'); // CONNECTS_TO: symmetric — no failure direction
+      for (const a of result.affected) expect(a.depth).toBe(1);
     });
 
     it('404s when the root node is missing or soft-deleted (getNode guard)', async () => {
