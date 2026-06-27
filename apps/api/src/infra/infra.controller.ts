@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
@@ -18,6 +19,7 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  AttachInfraSecretSchema,
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
   InfraEdgeSchema,
@@ -28,6 +30,7 @@ import {
   InfraNodeSchema,
   InfraNodeStateSchema,
   InfraNodeStatusSchema,
+  InfraSecretRefSchema,
   UpdateInfraNodeSchema,
 } from '@lazyit/shared';
 import { z } from 'zod';
@@ -36,6 +39,7 @@ import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
+import { HumanOnlyGuard } from '../secret-manager/human-only.guard';
 
 class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
 class InfraNodeListItemDto extends createZodDto(InfraNodeListItemSchema) {}
@@ -44,6 +48,8 @@ class InfraImpactResponseDto extends createZodDto(InfraImpactResponseSchema) {}
 class UpdateInfraNodeDto extends createZodDto(UpdateInfraNodeSchema) {}
 class InfraEdgeDto extends createZodDto(InfraEdgeSchema) {}
 class CreateInfraEdgeDto extends createZodDto(CreateInfraEdgeSchema) {}
+class InfraSecretRefDto extends createZodDto(InfraSecretRefSchema) {}
+class AttachInfraSecretDto extends createZodDto(AttachInfraSecretSchema) {}
 
 /**
  * The "track as asset" toggle on node create (ADR-0070 §5), DEFAULT-ON. It is API logic, not part of
@@ -178,6 +184,35 @@ export class InfraController {
   @ApiOkResponse({ type: InfraNodeDto })
   restoreNode(@Param('id') id: string) {
     return this.infra.restoreNode(id);
+  }
+
+  // ── Node → secret linkage (ADR-0073, #801) ──────────────────────────────────
+
+  @Post('nodes/:id/secrets')
+  @RequirePermission('infra:manage', 'secret:read')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Attach a secret HANDLE reference to a node (handle + vaultId in the body; never a value — INV-10). Requires infra:manage + secret:read AND live membership of the vault (enforced server-side). Idempotent on (node, vault, handle). Returns the node’s updated resolved secretRefs (ADR-0073).',
+  })
+  @ApiOkResponse({ type: [InfraSecretRefDto] })
+  attachSecret(
+    @Param('id') id: string,
+    @Body() dto: AttachInfraSecretDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.infra.attachSecret(id, dto, principal);
+  }
+
+  @Delete('nodes/:id/secrets')
+  @RequirePermission('infra:manage')
+  @ApiOperation({
+    summary:
+      'Detach a secret HANDLE reference from a node (handle + vaultId in the BODY — handles can contain dots). A topology edit: infra:manage only, no vault membership needed. Idempotent. Returns the node’s updated resolved secretRefs (ADR-0073).',
+  })
+  @ApiOkResponse({ type: [InfraSecretRefDto] })
+  detachSecret(@Param('id') id: string, @Body() dto: AttachInfraSecretDto) {
+    return this.infra.detachSecret(id, dto);
   }
 
   // ── Edges ──────────────────────────────────────────────────────────────────
