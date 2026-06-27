@@ -44,6 +44,11 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
 - **Images:** multi-stage, built with Bun, run on Node (`node:26-alpine`); the API runs
   `node dist/src/main`, the web runs the Next.js standalone server. The migrate job runs on Bun
   (the seed needs it). Details: [[0025-containerization-strategy]].
+- **Reporting-agent binaries:** the API image bakes the Bun-compiled Linux collector
+  (`apps/agent`, both `x64` + `arm64`) into `AGENT_BIN_DIR` (`/app/agent/bin`) via an extra build
+  stage, and serves the right one over the token-gated `GET /api/agent/download`; the public
+  `install.sh` (web `/public`) installs it as a systemd timer. Same-origin, version-locked,
+  air-gapped-safe — no GitHub Release. → [[0074-server-reporting-agent]] §6.
 - **Reverse proxy / TLS:** **Caddy** with automatic HTTPS — internal CA for local prod-like,
   Let's Encrypt for a real domain. **Same-origin routing**: the browser calls `/api/*` and Caddy
   forwards it to the API, so the web image is domain-portable (`NEXT_PUBLIC_API_URL=/api`, baked at
