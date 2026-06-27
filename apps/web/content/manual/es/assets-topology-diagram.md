@@ -158,8 +158,12 @@ estático. Reúne, en un solo lugar:
 - **Referencias de secretos** — *solo identificadores, nunca los valores de los secretos.* Una
   referencia muestra el identificador `{{ lazyit_secret.… }}` y una etiqueta para que sepas qué
   credencial corresponde a esta máquina; aquí no hay forma de revelarlo y lazyit nunca expone el
-  valor en esta superficie. (Todavía no existe un vínculo activo-a-secreto, así que esta lista está
-  vacía por ahora; el panel está listo para ello.)
+  valor en esta superficie. Con el permiso de gestión vinculás una referencia desde el selector
+  **Vincular un secreto** — lista solo los secretos **a los que tenés acceso** (las bóvedas de las
+  que sos miembro) y elegís uno por su identificador; la **×** junto a una referencia la quita. Las
+  referencias se guardan por identificador y se resuelven en vivo, así que la etiqueta siempre refleja
+  el secreto actual; y si el secreto se elimina (o su identificador cambia) la referencia simplemente
+  desaparece de la lista.
 - **Accesos directos** — enlaces rápidos (SSH, interfaz web, consola) que se abren en una pestaña
   nueva. Con el permiso de gestión los editás ahí mismo: cada acceso directo es un par etiqueta + URL
   que podés cambiar, agregar o quitar, y luego **Guardás** la lista (lazyit verifica que cada URL sea
