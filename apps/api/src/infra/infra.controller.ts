@@ -24,6 +24,7 @@ import {
   AgentReportAckSchema,
   AgentReportSchema,
   AttachInfraSecretSchema,
+  ConfirmInfraNodeSchema,
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
   InfraEdgeSchema,
@@ -56,6 +57,7 @@ class InfraSecretRefDto extends createZodDto(InfraSecretRefSchema) {}
 class AttachInfraSecretDto extends createZodDto(AttachInfraSecretSchema) {}
 class AgentReportDto extends createZodDto(AgentReportSchema) {}
 class AgentReportAckDto extends createZodDto(AgentReportAckSchema) {}
+class ConfirmInfraNodeDto extends createZodDto(ConfirmInfraNodeSchema) {}
 
 /**
  * The "track as asset" toggle on node create (ADR-0070 §5), DEFAULT-ON. It is API logic, not part of
@@ -204,6 +206,25 @@ export class InfraController {
   @ApiOkResponse({ type: InfraNodeDto })
   restoreNode(@Param('id') id: string) {
     return this.infra.restoreNode(id);
+  }
+
+  @Post('nodes/:id/confirm')
+  // Asset-backed by default (mirrors POST /nodes), so the same infra:manage + asset:write posture.
+  @RequirePermission('infra:manage', 'asset:write')
+  // HUMAN-ONLY: confirming is human curation — the whole point of PENDING is a human gate, so a
+  // machine (the reporting agent SA) must never self-confirm its own proposals (ADR-0074 §1/§8).
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Confirm a PENDING agent-reported node from the ADR-0074 review tray: flips state to CONFIRMED and (trackAsAsset, default true) mints the backing Asset with the agent host facts carried over — making the auto-discovered host a first-class Asset only on human approval. Optional kind/label overrides re-classify/rename. Idempotent on an already-confirmed node. To DISCARD a proposal instead, soft-delete it (DELETE /infra/nodes/:id).',
+  })
+  @ApiOkResponse({ type: InfraNodeDetailDto })
+  confirmNode(
+    @Param('id') id: string,
+    @Body() dto: ConfirmInfraNodeDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.infra.confirmNode(id, dto, principal);
   }
 
   // ── Node → secret linkage (ADR-0073, #801) ──────────────────────────────────
