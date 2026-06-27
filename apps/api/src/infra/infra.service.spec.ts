@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { AgentReportSchema } from '@lazyit/shared';
 import { InfraService } from './infra.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
@@ -224,6 +225,153 @@ describe('InfraService', () => {
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.infraNode.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Reporting-agent ingestion (ADR-0074 §3) ─────────────────────────────────
+
+  describe('ingestReport', () => {
+    /** A full report; tests pass it through AgentReportSchema first so they exercise the real wire shape. */
+    const FULL_REPORT = AgentReportSchema.parse({
+      agentVersion: '1.0.0',
+      reportingSource: 'agent:abc123',
+      externalId: 'machine-id-xyz',
+      reportedAt: '2026-06-27T12:00:00.000Z',
+      host: {
+        hostname: 'web-01',
+        os: { name: 'Ubuntu', version: '24.04', kernel: '6.8.0' },
+        cpu: { model: 'Xeon', cores: 8 },
+        memoryBytes: 34359738368,
+      },
+      software: [{ name: 'nginx', version: '1.27.0' }],
+    });
+
+    it('UNKNOWN key → creates a PENDING/AGENT/ONLINE node and creates NO Asset', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null); // no existing node for the dedup key
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-1',
+        state: 'PENDING',
+      });
+
+      const ack = await service.ingestReport(FULL_REPORT);
+
+      // Reconciled on the dedup key over non-deleted rows.
+      const findArg = firstArg<{
+        where: { reportingSource: string; externalId: string };
+      }>(prisma.infraNode.findFirst);
+      expect(findArg.where).toEqual({
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+      });
+
+      // The new node is a PENDING proposal: source=AGENT, state=PENDING, status=ONLINE, label=hostname.
+      const createArg = firstArg<{
+        data: {
+          kind: string;
+          label: string;
+          status: string;
+          source: string;
+          state: string;
+          reportingSource: string;
+          externalId: string;
+          lastReportedAt: Date;
+          specs: { host: { hostname: string }; software: unknown };
+        };
+      }>(prisma.infraNode.create);
+      expect(createArg.data.source).toBe('AGENT');
+      expect(createArg.data.state).toBe('PENDING');
+      expect(createArg.data.status).toBe('ONLINE');
+      expect(createArg.data.kind).toBe('PHYSICAL_HOST');
+      expect(createArg.data.label).toBe('web-01');
+      expect(createArg.data.reportingSource).toBe('agent:abc123');
+      expect(createArg.data.externalId).toBe('machine-id-xyz');
+      expect(createArg.data.lastReportedAt).toBeInstanceOf(Date);
+      // The inventory blob is carried into specs (host + software under clear keys).
+      expect(createArg.data.specs.host.hostname).toBe('web-01');
+      expect(createArg.data.specs.software).toEqual([
+        { name: 'nginx', version: '1.27.0' },
+      ]);
+
+      // A PENDING node is a PROPOSAL — NO backing Asset is created until a human confirms.
+      expect(assets.create).not.toHaveBeenCalled();
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+
+      expect(ack).toEqual({
+        nodeId: 'node-1',
+        state: 'PENDING',
+        accepted: true,
+      });
+    });
+
+    it('KNOWN key → updates specs + lastReportedAt + status, NEVER touching state/label (human curation)', async () => {
+      // A human has already CONFIRMED + renamed this node; the agent must not clobber that.
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-1' });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      const ack = await service.ingestReport(FULL_REPORT);
+
+      const updateArg = firstArg<{
+        where: { id: string };
+        data: Record<string, unknown>;
+      }>(prisma.infraNode.update);
+      expect(updateArg.where).toEqual({ id: 'node-1' });
+      // Only inventory facts + liveness are written…
+      expect(updateArg.data.status).toBe('ONLINE');
+      expect(updateArg.data.lastReportedAt).toBeInstanceOf(Date);
+      expect(updateArg.data.specs).toBeDefined();
+      // …NEVER the human's curation (state/label/position/asset link).
+      expect(updateArg.data).not.toHaveProperty('state');
+      expect(updateArg.data).not.toHaveProperty('label');
+      expect(updateArg.data).not.toHaveProperty('x');
+      expect(updateArg.data).not.toHaveProperty('y');
+      expect(updateArg.data).not.toHaveProperty('assetId');
+      expect(updateArg.data).not.toHaveProperty('source');
+
+      // No new node + no Asset on an update.
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      expect(assets.create).not.toHaveBeenCalled();
+
+      // The ack echoes the node's existing (human-owned) state untouched.
+      expect(ack).toEqual({
+        nodeId: 'node-1',
+        state: 'CONFIRMED',
+        accepted: true,
+      });
+    });
+
+    it('a PARTIAL report (only the dedup keys + hostname) validates and ingests', async () => {
+      // The agent degrades gracefully (no privilege / missing tools): everything but the keys + hostname
+      // is omitted. This MUST pass AgentReportSchema (never a 400) and still create a node (ADR-0074 §2).
+      const partial = AgentReportSchema.parse({
+        agentVersion: '1.0.0',
+        reportingSource: 'agent:minimal',
+        externalId: 'machine-min',
+        reportedAt: '2026-06-27T12:00:00.000Z',
+        host: { hostname: 'tiny-01' },
+      });
+
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
+      });
+
+      const ack = await service.ingestReport(partial);
+
+      const createArg = firstArg<{
+        data: { label: string; specs: { software?: unknown } };
+      }>(prisma.infraNode.create);
+      expect(createArg.data.label).toBe('tiny-01');
+      // `software` was omitted from the report → it is NOT written into specs (no empty key).
+      expect(createArg.data.specs.software).toBeUndefined();
+      expect(ack).toEqual({
+        nodeId: 'node-2',
+        state: 'PENDING',
+        accepted: true,
+      });
     });
   });
 
