@@ -13,7 +13,7 @@ import {
 import { ArrowUpRightIcon } from "@heroicons/react/16/solid";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { type ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import { AssetStatusBadge } from "@/app/(app)/assets/_components/asset-status-badge";
 import { ArticleStatusBadge } from "@/app/(app)/kb/_components/article-status-badge";
 import { LocationTypeBadge } from "@/app/(app)/locations/_components/location-type-badge";
@@ -118,6 +118,13 @@ export function QuickViewPopover({
   // A stable id for aria-labelledby on the pinned (dialog) panel.
   const titleId = `quick-view-title-${view.data.id}`;
 
+  // There is a PopoverAnchor (the eye) but no PopoverTrigger, so radix has nothing to restore focus to
+  // on close and would drop it to <body>. A pinned panel pulls focus IN (dialog semantics), so we
+  // capture whatever held focus just before opening — the cmdk search input for the Alt+Enter chord
+  // (#793), the eye for a click — and return focus there on close so keyboard nav continues. A transient
+  // hover preview never takes focus (`onOpenAutoFocus` prevented), so there is nothing to restore.
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverAnchor asChild>{anchor}</PopoverAnchor>
@@ -135,7 +142,26 @@ export function QuickViewPopover({
         // Don't yank focus into a transient hover preview (it would fight the cmdk roving focus);
         // a pinned panel is fine to focus.
         onOpenAutoFocus={(event) => {
-          if (!pinned) event.preventDefault();
+          if (!pinned) {
+            event.preventDefault();
+            returnFocusRef.current = null;
+          } else {
+            // Capture the roving-focus owner (the cmdk input for the Alt+Enter chord) BEFORE radix
+            // pulls focus into the pinned panel, so we can restore it on close.
+            const active = document.activeElement;
+            returnFocusRef.current =
+              active instanceof HTMLElement ? active : null;
+          }
+        }}
+        // Radix would focus a (nonexistent) trigger and otherwise drop focus to <body>; restore the
+        // captured owner ourselves so Escape on a keyboard-opened preview returns focus to the input.
+        onCloseAutoFocus={(event) => {
+          const target = returnFocusRef.current;
+          returnFocusRef.current = null;
+          if (target && target.isConnected) {
+            event.preventDefault();
+            target.focus();
+          }
         }}
       >
         {/* Zone 1 — identity row. */}
@@ -172,7 +198,9 @@ export function QuickViewPopover({
                 <DetailField
                   key={field.labelKey}
                   label={tf(field.labelKey)}
-                  className={cn(FULL_WIDTH_FIELDS.has(field.labelKey) && "col-span-2")}
+                  className={cn(
+                    FULL_WIDTH_FIELDS.has(field.labelKey) && "col-span-2",
+                  )}
                 >
                   <span
                     className={cn(

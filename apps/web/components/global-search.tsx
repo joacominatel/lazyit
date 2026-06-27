@@ -31,10 +31,8 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  type QuickViewData,
-  titleFor,
-} from "@/components/quick-view-fields";
+import { quickViewChordKeyDown } from "@/components/quick-view-eye";
+import { type QuickViewData, titleFor } from "@/components/quick-view-fields";
 import { QuickViewPopover } from "@/components/quick-view-popover";
 import {
   Command,
@@ -179,7 +177,10 @@ export function GlobalSearch() {
   // it as the error state ("search unavailable") instead of silently rendering "no results".
   const isDegraded = data?.degraded === true;
   const totalHits = data
-    ? SEARCH_ENTITIES.reduce((sum, key) => sum + (data[key]?.hits.length ?? 0), 0)
+    ? SEARCH_ENTITIES.reduce(
+        (sum, key) => sum + (data[key]?.hits.length ?? 0),
+        0,
+      )
     : 0;
 
   return (
@@ -217,6 +218,12 @@ export function GlobalSearch() {
           <Command
             shouldFilter={false}
             className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium"
+            // Keyboard-open path (#793): Alt+Enter pins the highlighted result's preview. cmdk runs this
+            // before its own handler and the chord preventDefaults, so ↑/↓ nav, typing and plain
+            // Enter-to-open stay untouched.
+            onKeyDown={(event) =>
+              quickViewChordKeyDown(event, quickViewState.pin)
+            }
           >
             <CommandInput
               value={query}
@@ -225,7 +232,10 @@ export function GlobalSearch() {
             />
 
             <div className="flex flex-wrap gap-1 border-b px-3 py-2">
-              <FilterChip active={entity === "all"} onSelect={() => setEntity("all")}>
+              <FilterChip
+                active={entity === "all"}
+                onSelect={() => setEntity("all")}
+              >
                 {t("search.all")}
               </FilterChip>
               {SEARCH_ENTITIES.map((key) => (
@@ -287,7 +297,8 @@ export function GlobalSearch() {
                         id: hit.id,
                         title: hit.title,
                         slug: hit.slug,
-                        status: hit.status === "PUBLISHED" ? "PUBLISHED" : "DRAFT",
+                        status:
+                          hit.status === "PUBLISHED" ? "PUBLISHED" : "DRAFT",
                         excerpt: hit.excerpt,
                       },
                     })}
@@ -309,7 +320,9 @@ export function GlobalSearch() {
                   <ResultGroup
                     entity="locations"
                     block={data?.locations}
-                    onSelect={() => go(`/locations?q=${encodeURIComponent(query)}`)}
+                    onSelect={() =>
+                      go(`/locations?q=${encodeURIComponent(query)}`)
+                    }
                     render={(hit) => ({
                       primary: hit.name,
                       secondary: hit.address ?? hit.type,
@@ -364,7 +377,9 @@ export function GlobalSearch() {
                   <ResultGroup
                     entity="infra"
                     block={data?.infra}
-                    onSelect={(hit) => go(`/assets/diagram?node=${hit.id}&focus=1`)}
+                    onSelect={(hit) =>
+                      go(`/assets/diagram?node=${hit.id}&focus=1`)
+                    }
                     render={(hit) => ({
                       primary: hit.label,
                       secondary: hit.assetName ?? hit.ipAddress ?? undefined,
@@ -391,6 +406,10 @@ export function GlobalSearch() {
               </span>
               <span>
                 <Kbd>↵</Kbd> {t("search.open")}
+              </span>
+              <span>
+                <Kbd>alt</Kbd>
+                <Kbd>↵</Kbd> {t("search.preview")}
               </span>
               <span>
                 <Kbd>esc</Kbd> {t("search.close")}
@@ -528,8 +547,7 @@ function ResultGroup<H extends { id: string }>({
         const eye: RowEyeState | null = quickViewState
           ? {
               open: quickViewState.openId === rowId,
-              pinned:
-                quickViewState.openId === rowId && quickViewState.pinned,
+              pinned: quickViewState.openId === rowId && quickViewState.pinned,
               onPreview: () => quickViewState.preview(rowId),
               onPin: () => quickViewState.pin(rowId),
               onClose: quickViewState.close,
@@ -540,6 +558,9 @@ function ResultGroup<H extends { id: string }>({
           <CommandItem
             key={rowId}
             value={rowId}
+            // Robust highlighted→id mapping for the Alt+Enter chord (#793): stamp the namespaced row id
+            // (only when the row has an openable eye) so quickViewChordKeyDown reads it off the DOM.
+            data-quick-view-id={Eye || fromHit ? rowId : undefined}
             onSelect={() => onSelect(hit)}
             // `group/row` so the eye reveals on hover OR on the cmdk-selected row (keyboard roving).
             className="group/row gap-2"
@@ -581,11 +602,13 @@ const QUICK_VIEW_HOVER_MS = 120;
  * `stopPropagation`/`preventDefault`s so activating it NEVER triggers the row's `onSelect` navigation.
  *
  * Hover (after a ~120ms intent delay) opens a transient PREVIEW; click PINS it (footer + dialog
- * semantics). It is the radix `PopoverAnchor`, so Escape closes + returns focus here for free.
+ * semantics). It is the radix `PopoverAnchor`, so Escape closes + returns focus to the cmdk input
+ * (QuickViewPopover restores it).
  *
- * KEYBOARD-OPEN is the documented v1 LIMITATION (#793, same as the pickers): cmdk keeps DOM focus on
- * the CommandInput and routes Enter to the highlighted row's `onSelect`, so the eye — though visible
- * on the selected row — can't be opened by a pure-keyboard user without fighting that roving model.
+ * KEYBOARD-OPEN (#793, same as the pickers): the eye is `tabIndex={-1}` (cmdk owns roving focus — DOM
+ * focus stays on the CommandInput). The keyboard path is the non-conflicting Alt+Enter chord wired on
+ * the palette's `<Command>` root (`quickViewChordKeyDown`), which opens + pins the HIGHLIGHTED row's
+ * preview without fighting that roving model; `aria-keyshortcuts` advertises it to AT.
  */
 function QuickViewEye({
   view,
@@ -613,8 +636,11 @@ function QuickViewEye({
       <button
         type="button"
         aria-label={t("trigger", { name: titleFor(view) })}
+        // The Alt+Enter chord (quickViewChordKeyDown on the Command root) opens this row's preview by
+        // keyboard; advertise it to AT on the control it activates (#793).
+        aria-keyshortcuts="Alt+Enter"
         // cmdk owns roving focus (DOM focus stays on the CommandInput); keep the eye out of the Tab
-        // order so it doesn't fight that model (the #793 follow-up adds a keyboard-open path).
+        // order so it doesn't fight that model — the keyboard path is the chord, not a Tab stop.
         tabIndex={-1}
         className={cn(
           "flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 group-hover/row:opacity-100 group-data-[selected=true]/row:opacity-100",
@@ -702,7 +728,10 @@ function AssetQuickViewEye({ hit, eye }: { hit: AssetHit; eye: RowEyeState }) {
                 name: data.model.name,
                 manufacturer: data.model.manufacturer,
                 category: data.model.category
-                  ? { id: data.model.category.id, name: data.model.category.name }
+                  ? {
+                      id: data.model.category.id,
+                      name: data.model.category.name,
+                    }
                   : null,
               }
             : null,

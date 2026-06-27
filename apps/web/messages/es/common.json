@@ -54,6 +54,7 @@
   "quickView": {
     "trigger": "Vista rápida: {name}",
     "openRecord": "Abrir ficha completa",
+    "keyboardHint": "Vista previa",
     "none": "—",
     "noOwner": "Sin asignar",
     "moreOwners": "+{count} más",

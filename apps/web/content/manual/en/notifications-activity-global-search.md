@@ -42,9 +42,12 @@ selection lands on it). Hover the eye to peek at a generous **preview** of that 
 **pin** the preview open. Pinned previews show an **"Open full record"** link that opens the entity in
 a new tab, so you can confirm you have the right "Juan D." or the right `LZ-0042` before you navigate.
 
-Only one preview is open at a time, and **Esc** closes it. Most previews render instantly from the
-search result itself; an asset's or user's richer details (owner, location, role) load on demand the
-moment you open the preview, so opening it never slows the search down.
+Only one preview is open at a time, and **Esc** closes it (returning focus to the search box). To open
+a preview **from the keyboard**, highlight a result with the **↑ / ↓** arrows and press **Alt +
+Enter** — it opens and pins that result's preview without navigating, and the footer lists it next to
+the other shortcuts. Most previews render instantly from the search result itself; an asset's or
+user's richer details (owner, location, role) load on demand the moment you open the preview, so
+opening it never slows the search down.
 
 ## What you see depends on your permissions
 

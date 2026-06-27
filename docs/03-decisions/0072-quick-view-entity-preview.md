@@ -3,7 +3,7 @@ title: "ADR-0072: Quick View — entity-preview popover in pickers & search"
 tags: [adr, frontend, ux, a11y, motion, pickers, search]
 status: accepted
 created: 2026-06-24
-updated: 2026-06-24
+updated: 2026-06-27
 deciders: [Joaquín Minatel]
 ---
 
@@ -15,7 +15,9 @@ deciders: [Joaquín Minatel]
 foundation primitive (`apps/web/components/quick-view-popover.tsx` + the pure presenter
 `apps/web/components/quick-view-fields.ts`) plus the single-select rollout (the shared
 `components/combobox.tsx` eye/pin seam and 5 of the 6 entity wrappers). Waves 2 (multi-select,
-#790) and 3 (global command palette, #791) build on the same primitive.
+#790) and 3 (global command palette, #791) build on the same primitive. **Keyboard-open (#793)** then
+added the `Alt+Enter` chord across all three surfaces (single-select, multi-select, palette), retiring
+the wave-1 "keyboard-open limitation".
 
 ## Context
 
@@ -119,16 +121,23 @@ honest choice is no eye there.
   toggles it closed.
 - **Single open at a time** — `openQuickViewId` is lifted into the `Combobox`, so opening one row's
   preview closes any other.
-- **Escape closes and returns focus to the eye** — radix Popover's default focus-return to the anchor
-  (the eye is the `PopoverAnchor`) gives this for free; closing the picker also dismisses any open
-  preview (its anchor is about to unmount).
-- **Keyboard-OPEN is a documented v1 limitation (#793).** cmdk keeps DOM focus on the `CommandInput`
-  and routes Enter to the highlighted row's `onSelect`, so the eye — though *visible* on the selected
-  row — cannot be opened by a pure-keyboard user without fighting that roving-focus model. We chose
-  **not to force a brittle workaround** (a value-reverse-mapped undiscoverable chord, or a Tab-reachable
-  item that fights cmdk's focus): the eye keeps an `onKeyDown` for the mouse-then-keyboard case, and the
-  clean fix (a Tab-reachable selected-row eye, or a non-conflicting Command-root chord) is the wave-1
-  follow-up #793. Quick view is therefore **mouse/hover-primary in wave 1**.
+- **Escape closes and returns focus to the cmdk input** — there is a `PopoverAnchor` (the eye) but no
+  `PopoverTrigger`, so radix has nothing to restore focus to and would drop it to `<body>`. A pinned
+  panel pulls focus IN (dialog semantics), so `QuickViewPopover` captures the roving-focus owner (the
+  cmdk `CommandInput`) in `onOpenAutoFocus` — *before* radix moves focus — and restores it in
+  `onCloseAutoFocus`, so Escape returns the user to the list ready to keep arrowing. Closing the picker
+  also dismisses any open preview (its anchor is about to unmount).
+- **Keyboard-OPEN is the non-conflicting `Alt+Enter` chord (#793).** cmdk keeps DOM focus on the
+  `CommandInput` and routes plain Enter to the highlighted row's `onSelect`, so the eye — though
+  *visible* on the selected row — is `tabIndex={-1}` and not a Tab stop. The keyboard path is instead a
+  chord wired on the `<Command>` root's `onKeyDown` (`quickViewChordKeyDown`): cmdk calls a passed
+  `onKeyDown` **before** its own handler and **skips that handler when the event is
+  `defaultPrevented`**, so calling `preventDefault()` on `Alt+Enter` opens + pins the highlighted row's
+  preview while plain Enter, the arrows and type-to-filter pass straight through untouched. The
+  highlighted row id is read from the live DOM — `data-quick-view-id` on the selected `[cmdk-item]` —
+  **never by parsing cmdk's client-filter value string** (which is `"label id"`). `aria-keyshortcuts`
+  advertises the chord, and a small footer hint surfaces it in the picker popovers + the palette. The
+  eye also keeps an `onKeyDown` for the mouse-then-keyboard case (a focused eye).
 - **Dialog semantics only when pinned** — a pinned panel gets `role="dialog"` + `aria-labelledby` on
   the identity title; a transient hover preview stays role-less (a passive surface) and does not steal
   focus (`onOpenAutoFocus` prevented), so it never fights cmdk's roving focus.
@@ -164,9 +173,10 @@ unsafe-scheme url is dropped, and it is never used as a link `href` in the previ
 - The preview reflects the **list row**, which is intentionally trimmed (ADR-0030) — a couple of
   detail-only fields (e.g. asset notes, full specs) are not shown. By design: the footer deep-link is
   the path to the full record.
-- The eye is `tabIndex={-1}` (cmdk owns roving focus over the list); it is reached by mouse or by its
-  row being cmdk-selected, not by a separate Tab stop. This matches cmdk's focus model rather than
-  fighting it.
+- The eye is `tabIndex={-1}` (cmdk owns roving focus over the list); it is reached by mouse, or by
+  keyboard via the `Alt+Enter` chord on the highlighted row (#793), not by a separate Tab stop. This
+  matches cmdk's focus model rather than fighting it. The chord is a non-standard binding, so it is
+  advertised via `aria-keyshortcuts` and a visible footer hint for discoverability.
 - The status badges live in feature `_components/` folders; importing them into a shared `components/`
   primitive widens those imports' reach. Acceptable — they are already imported cross-feature, and
   promoting them is out of scope for this wave.
