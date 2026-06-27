@@ -54,6 +54,7 @@
   "quickView": {
     "trigger": "Quick view: {name}",
     "openRecord": "Open full record",
+    "keyboardHint": "Preview",
     "none": "—",
     "noOwner": "Unassigned",
     "moreOwners": "+{count} more",
