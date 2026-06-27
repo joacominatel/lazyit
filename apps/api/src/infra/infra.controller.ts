@@ -4,6 +4,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -19,6 +21,8 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  AgentReportAckSchema,
+  AgentReportSchema,
   AttachInfraSecretSchema,
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
@@ -50,6 +54,8 @@ class InfraEdgeDto extends createZodDto(InfraEdgeSchema) {}
 class CreateInfraEdgeDto extends createZodDto(CreateInfraEdgeSchema) {}
 class InfraSecretRefDto extends createZodDto(InfraSecretRefSchema) {}
 class AttachInfraSecretDto extends createZodDto(AttachInfraSecretSchema) {}
+class AgentReportDto extends createZodDto(AgentReportSchema) {}
+class AgentReportAckDto extends createZodDto(AgentReportAckSchema) {}
 
 /**
  * The "track as asset" toggle on node create (ADR-0070 §5), DEFAULT-ON. It is API logic, not part of
@@ -71,6 +77,20 @@ class PatchPositionDto extends createZodDto(PatchPositionSchema) {}
 @Controller('infra')
 export class InfraController {
   constructor(private readonly infra: InfraService) {}
+
+  // ── Reporting agent (ADR-0074) ───────────────────────────────────────────────
+
+  @Post('report')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('infra:report')
+  @ApiOperation({
+    summary:
+      'Ingest a server reporting-agent inventory report (ADR-0074). MACHINE-intended: authenticated by the agent Service Account holding infra:report. Upserts on (reportingSource, externalId) — a new host lands in the PENDING review tray (no Asset yet); a known host refreshes its inventory + liveness without touching human curation. Returns a minimal ack.',
+  })
+  @ApiOkResponse({ type: AgentReportAckDto })
+  report(@Body() report: AgentReportDto) {
+    return this.infra.ingestReport(report);
+  }
 
   // ── Nodes ──────────────────────────────────────────────────────────────────
 
