@@ -781,9 +781,24 @@ describe('InfraService', () => {
       // A separate cluster subgraph (#802): two members via MEMBER_OF, plus a BACKS_UP_TO/CONNECTS_TO
       // neighbour that must NOT contribute. Disjoint from `host`, so the chain tests above are unaffected.
       { id: 'cluster', label: 'cluster', kind: 'CLUSTER', status: 'ONLINE' },
-      { id: 'member-a', label: 'member-a', kind: 'PHYSICAL_HOST', status: 'ONLINE' },
-      { id: 'member-b', label: 'member-b', kind: 'PHYSICAL_HOST', status: 'ONLINE' },
-      { id: 'primary', label: 'primary', kind: 'PHYSICAL_HOST', status: 'ONLINE' },
+      {
+        id: 'member-a',
+        label: 'member-a',
+        kind: 'PHYSICAL_HOST',
+        status: 'ONLINE',
+      },
+      {
+        id: 'member-b',
+        label: 'member-b',
+        kind: 'PHYSICAL_HOST',
+        status: 'ONLINE',
+      },
+      {
+        id: 'primary',
+        label: 'primary',
+        kind: 'PHYSICAL_HOST',
+        status: 'ONLINE',
+      },
       { id: 'peer', label: 'peer', kind: 'PHYSICAL_HOST', status: 'ONLINE' },
     ];
     const EDGES: FixtureEdge[] = [
@@ -794,10 +809,30 @@ describe('InfraService', () => {
       { sourceId: 'ghost', targetId: 'host', kind: 'RUNS_ON', active: true }, // soft-deleted → excluded
       { sourceId: 'vm', targetId: 'host', kind: 'CONNECTS_TO', active: true }, // wrong kind → ignored
       // Cluster subgraph (#802): members belong to the cluster (member=source, cluster=target).
-      { sourceId: 'member-a', targetId: 'cluster', kind: 'MEMBER_OF', active: true }, // surfaces (cluster down)
-      { sourceId: 'member-b', targetId: 'cluster', kind: 'MEMBER_OF', active: true }, // surfaces (cluster down)
-      { sourceId: 'primary', targetId: 'cluster', kind: 'BACKS_UP_TO', active: true }, // excluded: backup target
-      { sourceId: 'peer', targetId: 'cluster', kind: 'CONNECTS_TO', active: true }, // excluded: symmetric
+      {
+        sourceId: 'member-a',
+        targetId: 'cluster',
+        kind: 'MEMBER_OF',
+        active: true,
+      }, // surfaces (cluster down)
+      {
+        sourceId: 'member-b',
+        targetId: 'cluster',
+        kind: 'MEMBER_OF',
+        active: true,
+      }, // surfaces (cluster down)
+      {
+        sourceId: 'primary',
+        targetId: 'cluster',
+        kind: 'BACKS_UP_TO',
+        active: true,
+      }, // excluded: backup target
+      {
+        sourceId: 'peer',
+        targetId: 'cluster',
+        kind: 'CONNECTS_TO',
+        active: true,
+      }, // excluded: symmetric
     ];
 
     function wireQueryRaw(rootId: string): void {
