@@ -16,8 +16,9 @@ directly at `/assets/diagram?view=table`.
 It's handy when you want to *find* a machine rather than *see* how it connects: scan a column, filter
 to one kind, or search by name.
 
-> The list shows the same things to everyone who can view the topology. It is read-only here —
-> creating, editing and connecting nodes all happen on the [Map](/help/assets-topology-diagram).
+> The list shows the same things to everyone who can view the topology. Creating, editing and
+> connecting nodes all happen on the [Map](/help/assets-topology-diagram); the Servers view adds two
+> things of its own — the **Pending review** tray and the **Add a server** button (both below).
 
 ## Switching between Map and Table
 
@@ -42,11 +43,27 @@ Each row is one node:
 ## Searching and filtering
 
 - **Search** matches the **name**, **IP**, the linked **asset name** and the **owner** as you type.
-- **Kind**, **Status** and **State** dropdowns narrow the list. *State* distinguishes confirmed
-  nodes from any pending ones (pending nodes are part of a future auto-discovery feature; today
-  everything is confirmed).
+- **Kind**, **Status** and **State** dropdowns narrow the list. *State* distinguishes **confirmed**
+  nodes from **pending** ones — pending nodes are servers the
+  [reporting agent](/help/assets-topology-reporting-agent) discovered and that are awaiting your
+  approval (see *Pending review* below).
 
 Active filters appear as removable chips below the toolbar, and a **Clear** action resets them all.
+
+## Pending review
+
+When the [reporting agent](/help/assets-topology-reporting-agent) discovers a server, it doesn't go
+straight into your inventory — it lands in the **Pending review** tray at the top of this view (shown
+only to people who can manage the topology). Each pending server shows its hostname, kind, where the
+report came from and how fresh it is, with two actions: **Confirm** to add it to your live topology
+(optionally also creating a tracked asset), or **Discard** to drop the proposal. See
+[Reporting agent](/help/assets-topology-reporting-agent) for the full flow.
+
+## Add a server
+
+The **Add a server** button (top of this view, for people who can manage settings) generates the
+one-time install command for the reporting agent so a new Linux server can start reporting itself.
+See [Reporting agent](/help/assets-topology-reporting-agent).
 
 ## Opening a server
 
@@ -58,4 +75,5 @@ panel covers.
 ## What's next
 
 - [Infrastructure diagram](/help/assets-topology-diagram) — the same estate as a free-move map.
+- [Reporting agent](/help/assets-topology-reporting-agent) — auto-discover servers into the tray above.
 - [Asset basics](/help/assets-asset-basics) — the inventory record behind an asset-backed node.

@@ -118,8 +118,14 @@ Every node carries a status, shown as a colored pill on its card and badge in th
 - **Offline** — down.
 - **Unknown** — not established (the default for a new node).
 
-With the manage permission you set the status from the details panel. (Status is hand-set today;
-automatic liveness is a future addition.)
+With the manage permission you set the status from the details panel. Nodes reported by the
+[reporting agent](/help/assets-topology-reporting-agent) carry their status (and an *Agent-reported*
+badge with a "reported … ago" freshness) automatically; you can still set it by hand for nodes you
+manage yourself.
+
+> **Auto-discovered nodes.** Servers reported by the [reporting agent](/help/assets-topology-reporting-agent)
+> don't appear on the map straight away — they wait in the **Pending review** tray on the
+> [Servers list](/help/assets-topology-servers) until you confirm them.
 
 ## Taking a node off the map
 
@@ -179,5 +185,6 @@ down. lazyit shows that as reassurance, not as an error.
 ## What's next
 
 - [Servers list](/help/assets-topology-servers) — the same estate as a filterable table.
+- [Reporting agent](/help/assets-topology-reporting-agent) — auto-populate the map from your servers.
 - [Asset basics](/help/assets-asset-basics) — the inventory record behind an asset-backed node.
 - [Assignments & history](/help/assets-assignments-history) — how ownership (the panel's owner) works.

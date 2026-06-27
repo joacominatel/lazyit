@@ -129,8 +129,15 @@ panel:
 - **Fuera de línea** — caído.
 - **Desconocido** — no establecido (el valor por defecto de un nodo nuevo).
 
-Con el permiso de gestión defines el estado desde el panel de detalle. (El estado se fija a mano hoy;
-la detección automática de actividad es una incorporación futura.)
+Con el permiso de gestión defines el estado desde el panel de detalle. Los nodos reportados por el
+[agente de reporte](/help/assets-topology-reporting-agent) llevan su estado (y una insignia
+*Reportado por agente* con una frescura "reportado hace …") automáticamente; igual podés fijarlo a
+mano para los nodos que gestionás vos.
+
+> **Nodos descubiertos automáticamente.** Los servidores reportados por el
+> [agente de reporte](/help/assets-topology-reporting-agent) no aparecen en el mapa de inmediato:
+> esperan en la bandeja de **Revisión pendiente** en la
+> [lista de servidores](/help/assets-topology-servers) hasta que los confirmás.
 
 ## Quitar un nodo del mapa
 
@@ -196,5 +203,6 @@ darlo de baja. lazyit lo muestra como tranquilidad, no como un error.
 ## Qué sigue
 
 - [Lista de servidores](/help/assets-topology-servers) — el mismo parque como tabla filtrable.
+- [Agente de reporte](/help/assets-topology-reporting-agent) — completá el mapa desde tus servidores.
 - [Conceptos de activos](/help/assets-asset-basics) — el registro de inventario detrás de un nodo respaldado por un activo.
 - [Asignaciones e historial](/help/assets-assignments-history) — cómo funciona la propiedad (el responsable del panel).

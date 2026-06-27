@@ -17,8 +17,9 @@ de un mapa de movimiento libre. No es una entrada aparte en la barra lateral: la
 Es útil cuando quieres *encontrar* una máquina en vez de *ver* cómo se conecta: recorre una columna,
 filtra por un tipo o busca por nombre.
 
-> La lista muestra las mismas cosas a todos los que pueden ver la topología. Aquí es de solo
-> lectura: crear, editar y conectar nodos sucede en el [Mapa](/help/assets-topology-diagram).
+> La lista muestra las mismas cosas a todos los que pueden ver la topología. Crear, editar y conectar
+> nodos sucede en el [Mapa](/help/assets-topology-diagram); la vista de Servidores agrega dos cosas
+> propias — la bandeja de **Revisión pendiente** y el botón **Agregar un servidor** (ambos abajo).
 
 ## Cambiar entre Mapa y Tabla
 
@@ -46,11 +47,28 @@ Cada fila es un nodo:
 - La **búsqueda** coincide con el **nombre**, la **IP**, el **nombre del activo** vinculado y el
   **responsable** a medida que escribes.
 - Los desplegables **Tipo**, **Estado** y **Estado de ciclo** acotan la lista. *Estado de ciclo*
-  distingue los nodos confirmados de los pendientes (los pendientes son parte de una futura función
-  de detección automática; hoy todo está confirmado).
+  distingue los nodos **confirmados** de los **pendientes** — los pendientes son servidores que
+  descubrió el [agente de reporte](/help/assets-topology-reporting-agent) y que esperan tu aprobación
+  (ver *Revisión pendiente* abajo).
 
 Los filtros activos aparecen como chips removibles debajo de la barra de herramientas, y una acción
 **Limpiar** los restablece todos.
+
+## Revisión pendiente
+
+Cuando el [agente de reporte](/help/assets-topology-reporting-agent) descubre un servidor, no entra
+directo a tu inventario: aparece en la bandeja de **Revisión pendiente** arriba de esta vista (visible
+solo para quienes pueden gestionar la topología). Cada servidor pendiente muestra su nombre de host,
+tipo, de dónde vino el reporte y hace cuánto reportó, con dos acciones: **Confirmar** para sumarlo a
+tu topología activa (creando opcionalmente un activo registrado) o **Descartar** para soltar la
+propuesta. Ver [Agente de reporte](/help/assets-topology-reporting-agent) para el flujo completo.
+
+## Agregar un servidor
+
+El botón **Agregar un servidor** (arriba de esta vista, para quienes pueden gestionar la
+configuración) genera el comando de instalación de un solo uso del agente de reporte para que un
+servidor Linux nuevo empiece a reportarse. Ver
+[Agente de reporte](/help/assets-topology-reporting-agent).
 
 ## Abrir un servidor
 
@@ -62,4 +80,5 @@ identificadores), accesos directos, conexiones y el interruptor de impacto/radio
 ## Qué sigue
 
 - [Diagrama de infraestructura](/help/assets-topology-diagram) — el mismo parque como mapa de movimiento libre.
+- [Agente de reporte](/help/assets-topology-reporting-agent) — descubrí servidores en la bandeja de arriba.
 - [Conceptos de activos](/help/assets-asset-basics) — el registro de inventario detrás de un nodo respaldado por un activo.
