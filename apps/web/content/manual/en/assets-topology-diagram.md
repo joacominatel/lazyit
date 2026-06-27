@@ -160,9 +160,14 @@ you can jump from the table to a machine's full picture in one click.
 
 The headline question a map can answer that a drawing can't: **"if this node goes down, what is
 affected?"** In the details panel, toggle **Show impact** to highlight the downstream set — every
-node that runs on, or depends on, this one (directly or transitively). The canvas dims everything
-outside the radius so the affected region stands out, and the panel lists each affected node with
-how many hops away it is.
+node that runs on, depends on, or is a member of this one (directly or transitively). Taking down a
+cluster or group therefore surfaces its members. The canvas dims everything outside the radius so the
+affected region stands out, and the panel lists each affected node with how many hops away it is.
+
+Impact is an **edge-derived estimate**, not a hand-verified guarantee — it follows the edges you've
+drawn, so a member might survive a group losing one node. Backup-target and network-only links are
+deliberately ignored: a backup target failing doesn't take down the primary, and a plain network
+connection has no failure direction.
 
 An **empty result is good news** — it means nothing depends on this node, so it's safe to take
 down. lazyit shows that as reassurance, not as an error.
