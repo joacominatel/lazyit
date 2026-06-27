@@ -35,6 +35,45 @@
     "CONFIRMED": "Confirmado",
     "PENDING": "Pendiente"
   },
+  "agent": {
+    "badge": "Reportado por agente",
+    "reported": "reportado {time}",
+    "staleReported": "reportado {time} · desactualizado"
+  },
+  "pending": {
+    "title": "Revisión pendiente",
+    "description": "Hosts que descubrió el agente de reporte. Confirmá para sumarlos a tu inventario, o descartalos.",
+    "confirmAction": "Confirmar",
+    "discardAction": "Descartar"
+  },
+  "confirm": {
+    "title": "Confirmar este servidor",
+    "description": "Sumá este host descubierto por el agente a tu topología activa. Podés reclasificarlo o renombrarlo antes.",
+    "labelLabel": "Nombre",
+    "kindLabel": "Tipo",
+    "trackAsAssetLabel": "Registrar como activo de inventario",
+    "trackAsAssetDescription": "Activado por defecto: también crea un activo registrado (con los datos reportados del host) para que este servidor pueda tener responsable, artículos de la base de conocimiento y secretos. Desactivalo para dejarlo solo en el grafo.",
+    "submit": "Confirmar servidor",
+    "confirmedToast": "Servidor confirmado.",
+    "error": "No se pudo confirmar el servidor."
+  },
+  "addServer": {
+    "title": "Agregar un servidor",
+    "description": "Generá un comando de instalación para el agente de reporte. Crea un token que SOLO puede reportar inventario.",
+    "nameLabel": "Nombre",
+    "namePlaceholder": "p. ej. agente de reporte web-01",
+    "nameHint": "Una etiqueta para reconocer este token más adelante (por ejemplo, el nombre del servidor).",
+    "scopeNote": "Este token solo puede reportar inventario (infra:report). No puede leer ni modificar nada más, y cada host que reporta queda en Revisión pendiente para tu aprobación.",
+    "submit": "Generar comando de instalación",
+    "createdToast": "Token creado.",
+    "error": "No se pudo crear el token.",
+    "revealTitle": "Instalar el agente de reporte",
+    "revealDescription": "Copiá el comando de abajo: el token se muestra una sola vez.",
+    "installTitle": "Comando de instalación",
+    "copyInstallAria": "Copiar el comando de instalación",
+    "installCopied": "Comando de instalación copiado.",
+    "installHint": "Ejecutá esto en el servidor Linux (como root). Aparecerá en Revisión pendiente cuando reporte."
+  },
   "view": {
     "map": "Mapa",
     "table": "Tabla"
@@ -48,6 +87,7 @@
   "servers": {
     "title": "Servidores",
     "subtitle": "Todos los nodos de tu topología: filtrá, buscá y abrí uno para ver su responsable, secretos y conexiones.",
+    "addServer": "Agregar un servidor",
     "searchLabel": "Buscar servidores",
     "searchPlaceholder": "Buscar por nombre o IP…",
     "openLabel": "Abrir en el mapa",
@@ -80,7 +120,8 @@
     "meta": {
       "asset": "Activo",
       "owner": "Responsable",
-      "ip": "Dirección IP"
+      "ip": "Dirección IP",
+      "source": "Origen"
     }
   },
   "edgeKind": {
