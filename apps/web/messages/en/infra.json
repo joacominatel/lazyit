@@ -35,6 +35,45 @@
     "CONFIRMED": "Confirmed",
     "PENDING": "Pending"
   },
+  "agent": {
+    "badge": "Agent-reported",
+    "reported": "reported {time}",
+    "staleReported": "reported {time} · stale"
+  },
+  "pending": {
+    "title": "Pending review",
+    "description": "Hosts the reporting agent discovered. Confirm to add them to your inventory, or discard.",
+    "confirmAction": "Confirm",
+    "discardAction": "Discard"
+  },
+  "confirm": {
+    "title": "Confirm this server",
+    "description": "Add this agent-discovered host to your live topology. You can re-classify or rename it first.",
+    "labelLabel": "Name",
+    "kindLabel": "Kind",
+    "trackAsAssetLabel": "Track as an inventory asset",
+    "trackAsAssetDescription": "On by default — also create a tracked Asset (with the reported host facts) so this server can carry an owner, KB links and secrets. Turn off to keep it graph-only.",
+    "submit": "Confirm server",
+    "confirmedToast": "Server confirmed.",
+    "error": "Couldn't confirm the server."
+  },
+  "addServer": {
+    "title": "Add a server",
+    "description": "Generate an install command for the reporting agent. It mints a token that can ONLY report inventory.",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. web-01 reporting agent",
+    "nameHint": "A label to recognise this token later (for example the server's name).",
+    "scopeNote": "This token can only report inventory (infra:report). It can't read or change anything else, and every host it reports lands in Pending review for your approval.",
+    "submit": "Generate install command",
+    "createdToast": "Token created.",
+    "error": "Couldn't create the token.",
+    "revealTitle": "Install the reporting agent",
+    "revealDescription": "Copy the command below — the token is shown only once.",
+    "installTitle": "Install command",
+    "copyInstallAria": "Copy the install command",
+    "installCopied": "Install command copied.",
+    "installHint": "Run this on the Linux server (as root). It'll appear in the Pending review tray once it reports in."
+  },
   "view": {
     "map": "Map",
     "table": "Table"
@@ -48,6 +87,7 @@
   "servers": {
     "title": "Servers",
     "subtitle": "Every node in your topology — filter, search and open one to see its owner, secrets and connections.",
+    "addServer": "Add a server",
     "searchLabel": "Search servers",
     "searchPlaceholder": "Search by name or IP…",
     "openLabel": "Open on the map",
@@ -80,7 +120,8 @@
     "meta": {
       "asset": "Asset",
       "owner": "Owner",
-      "ip": "IP address"
+      "ip": "IP address",
+      "source": "Source"
     }
   },
   "edgeKind": {
