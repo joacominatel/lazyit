@@ -10,6 +10,7 @@ import {
   type AgentReport,
   type AgentReportAck,
   type AttachInfraSecret,
+  type ConfirmInfraNode,
   type CreateInfraEdge,
   type CreateInfraNode,
   type InfraEdgeKind,
@@ -221,6 +222,62 @@ export class InfraService {
     });
     void this.syncNodeToSearch(created.id);
     return { nodeId: created.id, state: created.state, accepted: true };
+  }
+
+  /**
+   * Confirm a PENDING agent-reported node from the review tray (ADR-0074 §3) — the HUMAN gate that
+   * promotes a discovered host into the official inventory. 404 if the node is missing/soft-deleted.
+   *
+   *   - state flips `PENDING → CONFIRMED`; optional `kind`/`label` overrides let the operator
+   *     re-classify/rename (the agent lands every host as `PHYSICAL_HOST` with the hostname as label).
+   *   - `trackAsAsset` (default true) + no existing link → mint a backing Asset via the SAME reused
+   *     `AssetsService.create` path `createNode` uses, carrying the agent's host facts (`specs`) over so
+   *     the Asset is populated, and stamping the auto-created provenance marker so a later detach
+   *     soft-deletes it (ADR-0070 §5). `trackAsAsset: false` leaves the node graph-only.
+   *
+   * IDEMPOTENT: confirming a node that is ALREADY CONFIRMED is a no-op (no Asset minted, no re-flip) —
+   * it just returns the current detail. Re-confirming is a safe retry, not a 409 (the tray's confirm
+   * button can be double-clicked). // ponytail: there is NO reject/discard endpoint — discarding a
+   * PENDING proposal is just `DELETE /infra/nodes/:id` (the existing soft-delete), so this builds none.
+   */
+  async confirmNode(id: string, dto: ConfirmInfraNode, principal?: Principal) {
+    const node = await this.getNode(id);
+    if (node.state !== 'PENDING') {
+      // Already curated (or never pending) — idempotent no-op, return the current enriched detail.
+      return this.getNodeDetail(id, principal);
+    }
+
+    const trackAsAsset = dto.trackAsAsset ?? true;
+    const label = dto.label ?? node.label;
+
+    // Mint the backing Asset only when tracking AND the node isn't already linked. Reuse the exact
+    // createNode path: carry the agent's host facts over + stamp the auto-created provenance marker.
+    let assetId = node.assetId ?? undefined;
+    if (trackAsAsset && !node.assetId) {
+      const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
+      const created = await this.assets.create(
+        {
+          name: label,
+          status: 'UNKNOWN',
+          specs: { ...hostSpecs, [INFRA_AUTO_ASSET_MARKER]: true },
+        },
+        principal,
+      );
+      assetId = created.id;
+    }
+
+    const updated = await this.prisma.infraNode.update({
+      where: { id },
+      data: {
+        state: 'CONFIRMED',
+        ...(dto.kind !== undefined ? { kind: dto.kind } : {}),
+        ...(dto.label !== undefined ? { label: dto.label } : {}),
+        ...(assetId !== undefined ? { assetId } : {}),
+      },
+    });
+    // Fire-and-forget search re-sync: state/kind/label/asset link may have changed (ADR-0035).
+    void this.syncNodeToSearch(updated.id);
+    return this.getNodeDetail(id, principal);
   }
 
   /**
