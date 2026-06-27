@@ -45,10 +45,13 @@ generosa de ese registro, o haz clic para **fijarla** abierta. Las vistas previa
 enlace **"Abrir ficha completa"** que abre la entidad en una pestaña nueva, así puedes confirmar que
 tienes al "Juan D." correcto o el `LZ-0042` correcto antes de navegar.
 
-Solo hay una vista previa abierta a la vez, y **Esc** la cierra. La mayoría de las vistas previas se
-renderizan al instante a partir del propio resultado de búsqueda; los detalles más ricos de un activo o
-un usuario (responsable, ubicación, rol) se cargan a pedido en el momento en que abres la vista previa,
-así que abrirla nunca ralentiza la búsqueda.
+Solo hay una vista previa abierta a la vez, y **Esc** la cierra (devolviendo el foco al cuadro de
+búsqueda). Para abrir una vista previa **desde el teclado**, resaltá un resultado con las flechas
+**↑ / ↓** y presioná **Alt + Enter** — abre y fija la vista previa de ese resultado sin navegar, y el
+pie la lista junto a los demás atajos. La mayoría de las vistas previas se renderizan al instante a
+partir del propio resultado de búsqueda; los detalles más ricos de un activo o un usuario (responsable,
+ubicación, rol) se cargan a pedido en el momento en que abres la vista previa, así que abrirla nunca
+ralentiza la búsqueda.
 
 ## Lo que ves depende de tus permisos
 

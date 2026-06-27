@@ -33,10 +33,13 @@ Only one preview is open at a time — opening another row's eye closes the prev
 
 - Move through the list with the **↑ / ↓** arrows. The **eye is shown on the highlighted row**, so you
   can see at a glance which rows have a preview.
-- Press **Esc** to close an open preview without leaving the picker.
+- Press **Alt + Enter** to **open and pin** the preview of the highlighted row — exactly as if you had
+  clicked its eye. A small **Alt ↵** hint at the bottom of the list is there as a reminder.
+- Press **Esc** to close the preview and return to the list, right where you were, so you can keep
+  arrowing.
 
-Opening a preview from the keyboard alone is not available in this version — use the mouse to open it.
-A fully keyboard-operable eye is planned.
+Typing to filter, the **↑ / ↓** arrows and **Enter** to choose a row all keep working exactly as
+before — **Alt + Enter** is the only shortcut added, and it never selects the row.
 
 ## What a preview shows
 
