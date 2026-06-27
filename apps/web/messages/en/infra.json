@@ -203,6 +203,8 @@
     "closedToast": "Connection closed.",
     "closeError": "Couldn't close the connection.",
     "loadError": "Couldn't load connections.",
+    "partialError": "Some relationships couldn't be loaded.",
+    "retry": "Retry",
     "selfNode": "this node",
     "since": "since {date}",
     "ended": "ended {date}"
