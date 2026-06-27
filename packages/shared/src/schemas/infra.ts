@@ -357,6 +357,23 @@ export const AgentReportAckSchema = z.object({
 });
 export type AgentReportAck = z.infer<typeof AgentReportAckSchema>;
 
+// ── Confirm a PENDING node (ADR-0074 §3) — the review-tray approval ────────────────────────────────
+
+/**
+ * The optional overrides a human applies when CONFIRMING a PENDING agent-reported node from the review
+ * tray (`POST /infra/nodes/:id/confirm`, ADR-0074 §3). Everything is optional — a bare `{}` confirms
+ * the node as-is. `trackAsAsset` (default true) mints the backing Asset (the agent's host facts carried
+ * over) so the auto-discovered host becomes a first-class, owned, assignable Asset — only on human
+ * approval; `false` leaves it graph-only. `kind`/`label` let the operator re-classify/rename at the
+ * confirm step (the agent lands every host as `PHYSICAL_HOST` with the hostname as its label).
+ */
+export const ConfirmInfraNodeSchema = z.strictObject({
+  trackAsAsset: z.boolean().optional(),
+  kind: InfraNodeKindSchema.optional(),
+  label: z.string().trim().min(1).max(200).optional(),
+});
+export type ConfirmInfraNode = z.infer<typeof ConfirmInfraNodeSchema>;
+
 // ── Plausibility table (ADR-0070 §3) — data the API WARNS on, NOT a hard constraint ───────────────
 
 export type InfraNodeKind = z.infer<typeof InfraNodeKindSchema>;
