@@ -418,6 +418,8 @@ export class SecretManagerService {
           iv: dto.iv,
           authTag: dto.authTag,
           keyVersion: dto.keyVersion,
+          // Server-visible METADATA only (ADR-0075); GENERIC when omitted (back-compat default).
+          kind: dto.kind ?? 'GENERIC',
         },
       });
       await this.writeAudit(tx, {
@@ -464,6 +466,8 @@ export class SecretManagerService {
     const data: PrismaTypes.SecretItemUpdateInput = {};
     if (dto.handle !== undefined) data.handle = dto.handle;
     if (dto.label !== undefined) data.label = dto.label;
+    // Re-typing is a metadata-only edit (ADR-0075) — never touches the envelope.
+    if (dto.kind !== undefined) data.kind = dto.kind;
     if (envelopePresent === 4) {
       data.ciphertext = dto.ciphertext;
       data.iv = dto.iv;
@@ -1028,6 +1032,7 @@ export class SecretManagerService {
       iv: row.iv,
       authTag: row.authTag,
       keyVersion: row.keyVersion,
+      kind: row.kind,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,

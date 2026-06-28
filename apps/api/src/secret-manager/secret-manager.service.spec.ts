@@ -95,6 +95,7 @@ interface ItemRow {
   iv: string;
   authTag: string;
   keyVersion: number;
+  kind: 'GENERIC' | 'SSH_KEY' | 'TOTP' | 'CERTIFICATE';
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -531,6 +532,35 @@ describe('SecretManagerService', () => {
       expect(pub).toEqual({ userId: 'alice', publicKey: KEYPAIR.publicKey });
       expect(pub).not.toHaveProperty('privateKeyEncByPassphrase');
       expect(pub).not.toHaveProperty('privateKeyEncByRecovery');
+    });
+  });
+
+  // ── Typed secrets — server-visible `kind` METADATA only (ADR-0075) ────────────
+  describe('typed secrets (kind metadata)', () => {
+    it('persists an explicit kind (SSH_KEY) and exposes it on the wire', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const item = await svc.createItem(alice, vaultId, {
+        handle: 'host-key',
+        label: 'Host SSH key',
+        kind: 'SSH_KEY',
+        ...ENVELOPE,
+      });
+      expect(item.kind).toBe('SSH_KEY');
+      expect(db.items.find((it) => it.id === item.id)?.kind).toBe('SSH_KEY');
+    });
+
+    it('defaults to GENERIC when kind is omitted (back-compat)', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const item = await svc.createItem(alice, vaultId, {
+        handle: 'legacy',
+        label: 'Legacy plain value',
+        ...ENVELOPE,
+      });
+      expect(item.kind).toBe('GENERIC');
     });
   });
 

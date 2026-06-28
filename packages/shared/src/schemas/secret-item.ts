@@ -32,6 +32,28 @@ const BLOB_MAX = 16384;
 const base64Blob = z.base64().min(1).max(BLOB_MAX);
 
 /**
+ * The STRUCTURAL TYPE of a secret (ADR-0075) — server-visible METADATA only (same trust class as
+ * `handle`/`label`), NEVER the value. It tells the UI which typed form/icon/renderer to use WITHOUT
+ * decrypting; the typed payload itself is a CLIENT-SIDE JSON encoding serialized into the SAME opaque
+ * ciphertext, so the server never sees it (INV-10). Mirrors the Prisma `SecretItemKind` enum.
+ *
+ *   - GENERIC     — a plain string value (legacy + the back-compat default).
+ *   - SSH_KEY     — client payload e.g. `{ privateKey, publicKey?, passphrase? }`.
+ *   - TOTP        — client payload e.g. `{ secret, issuer?, account?, digits?, period?, algorithm? }`.
+ *   - CERTIFICATE — client payload e.g. `{ certificate, privateKey?, chain? }`.
+ *
+ * The payload shapes above are a CLIENT-SIDE contract (encoded/parsed entirely in the browser); the
+ * server validates none of them — it stores only `kind` + the ciphertext.
+ */
+export const SecretItemKindSchema = z.enum([
+  "GENERIC",
+  "SSH_KEY",
+  "TOTP",
+  "CERTIFICATE",
+]);
+export type SecretItemKind = z.infer<typeof SecretItemKindSchema>;
+
+/**
  * The AES-256-GCM envelope of a SecretItem value (crypto note §3) — byte-compatible with WorkflowSecret.
  * `ciphertext` excludes the 16-byte tag; `authTag` holds the trailing 16 bytes; `iv` is the 12-byte
  * nonce. `keyVersion` tracks the vault DEK version (v1 = 1). Reused by the read shape and the create/
@@ -59,6 +81,8 @@ export const SecretItemSchema = z.object({
   iv: base64Blob,
   authTag: base64Blob,
   keyVersion: int4({ min: 1 }),
+  // The structural type — metadata only, drives the typed form/render in the client (ADR-0075).
+  kind: SecretItemKindSchema,
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
@@ -78,6 +102,10 @@ export const CreateSecretItemSchema = z.strictObject({
   iv: base64Blob,
   authTag: base64Blob,
   keyVersion: int4({ min: 1 }),
+  // The structural type — metadata only; OPTIONAL on the wire, the service defaults it to GENERIC when
+  // omitted so existing clients keep working (ADR-0075). Kept `.optional()` (not zod `.default()`) so the
+  // inferred type stays optional for direct service callers; the GENERIC fill lives in the service.
+  kind: SecretItemKindSchema.optional(),
 });
 export type CreateSecretItem = z.infer<typeof CreateSecretItemSchema>;
 
@@ -95,5 +123,7 @@ export const UpdateSecretItemSchema = z.strictObject({
   iv: base64Blob.optional(),
   authTag: base64Blob.optional(),
   keyVersion: int4({ min: 1 }).optional(),
+  // A secret can be RE-TYPED (metadata only) — e.g. promoting a GENERIC value to SSH_KEY (ADR-0075).
+  kind: SecretItemKindSchema.optional(),
 });
 export type UpdateSecretItem = z.infer<typeof UpdateSecretItemSchema>;

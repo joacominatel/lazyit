@@ -1695,12 +1695,30 @@ model SecretItem {
   // version), here it tracks the per-vault DEK version. v1 writes 1 and never rotates; it is the
   // forward-compat seam for the deferred hard-revoke / DEK-rotation (ADR-0061 §5, Phase 2).
   keyVersion Int         @default(1)
+  // The STRUCTURAL TYPE of this secret (ADR-0075) — server-visible METADATA only, same trust class as
+  // `handle`/`label`, NEVER the value. It tells the UI which typed form/icon/renderer to use WITHOUT
+  // decrypting: the typed payload (e.g. an SSH key's {privateKey, publicKey}) is a CLIENT-SIDE JSON
+  // encoding serialized into the SAME opaque `ciphertext` blob — the server never sees its contents
+  // (INV-10 unchanged). GENERIC = a legacy/plain string value (the back-compat default for all existing
+  // rows and any create that omits `kind`). Additive: no crypto path or envelope shape changes.
+  kind       SecretItemKind @default(GENERIC)
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
   deletedAt  DateTime?
 
   @@index([vaultId])
   @@map("secret_items")
+}
+
+/// The structural TYPE of a SecretItem value (ADR-0075). METADATA only — it never describes the
+/// plaintext, only how the CLIENT should serialize/encrypt and later render/parse the value. GENERIC is a
+/// plain string (legacy + default); the others carry a client-side JSON payload inside the same opaque
+/// ciphertext. The server stores the enum and is otherwise blind to the payload (INV-10).
+enum SecretItemKind {
+  GENERIC
+  SSH_KEY
+  TOTP
+  CERTIFICATE
 }
 
 /// Records that a User is a CRYPTO MEMBER of a SecretVault (ADR-0061 §4, crypto note §2). The row's

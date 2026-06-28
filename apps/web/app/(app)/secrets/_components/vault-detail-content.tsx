@@ -9,7 +9,6 @@ import {
   ClipboardIcon,
   EyeIcon,
   EyeSlashIcon,
-  KeyIcon,
   PencilIcon,
   PlusIcon,
   ShieldCheckIcon,
@@ -17,7 +16,7 @@ import {
   UserMinusIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
-import type { SecretItem, User } from "@lazyit/shared";
+import type { SecretItem, SecretItemKind, User } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import {
@@ -76,8 +75,17 @@ import {
   serializeEnv,
   splitNewVsExisting,
 } from "@/lib/secret-manager/env-file";
+import { encodeSecretPayload } from "@/lib/secret-manager/typed-secret";
 import { base64ToBytes } from "./crypto-bytes";
+import { SecretKindIcon } from "./secret-kind";
 import { useSecretSession } from "./secret-session";
+import {
+  buildTypedSecret,
+  isTypedSecretComplete,
+  TypedSecretFields,
+  type TypedSecretFieldValues,
+} from "./typed-secret-fields";
+import { TypedSecretReveal } from "./typed-secret-reveal";
 import { UnlockGate } from "./unlock-gate";
 import { useVaultDek } from "./use-vault-dek";
 
@@ -608,47 +616,61 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
 
   return (
     <li className="flex items-center gap-3 rounded-lg bg-card p-3 ring-1 ring-foreground/10">
+      {/* The structural-kind glyph (ADR-0075) — server-visible metadata, no decryption needed. */}
       <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-pillar-knowledge/10 text-pillar-knowledge">
-        <KeyIcon className="size-4" aria-hidden />
+        <SecretKindIcon kind={item.kind} className="size-4" aria-hidden />
       </span>
 
       <div className="min-w-0 flex-1 space-y-0.5">
-        <p className="truncate text-sm font-medium">{item.label}</p>
+        <p className="flex items-center gap-2 text-sm font-medium">
+          <span className="truncate">{item.label}</span>
+          {item.kind !== "GENERIC" ? (
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[0.65rem] font-medium uppercase tracking-wide text-muted-foreground">
+              {t(`kinds.${item.kind}`)}
+            </span>
+          ) : null}
+        </p>
         <p className="truncate text-xs text-muted-foreground font-mono">{item.handle}</p>
 
         {/* Value area */}
-        <div className="mt-1.5 flex items-center gap-2">
+        <div className="mt-1.5">
           {plaintext !== undefined ? (
-            <>
-              <code className="max-w-xs truncate rounded bg-muted/60 px-2 py-0.5 text-xs font-mono select-all">
-                {plaintext}
-              </code>
-              <button
-                type="button"
-                onClick={handleCopy}
-                title={t("items.copy")}
-                aria-label={t("items.copy")}
-                className="shrink-0 text-muted-foreground hover:text-foreground"
-              >
+            item.kind === "GENERIC" ? (
+              <div className="flex items-center gap-2">
+                <code className="max-w-xs truncate rounded bg-muted/60 px-2 py-0.5 text-xs font-mono select-all">
+                  {plaintext}
+                </code>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  title={t("items.copy")}
+                  aria-label={t("items.copy")}
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                >
+                  {copied ? (
+                    <CheckIcon className="size-3.5 text-pillar-knowledge" aria-hidden />
+                  ) : (
+                    <ClipboardIcon className="size-3.5" aria-hidden />
+                  )}
+                </button>
+                {/* #607: a subtle "copied — clears in Ns" hint. The clear is best-effort (see
+                    clipboard.ts); this signals the intent without promising a guarantee. */}
                 {copied ? (
-                  <CheckIcon className="size-3.5 text-pillar-knowledge" aria-hidden />
-                ) : (
-                  <ClipboardIcon className="size-3.5" aria-hidden />
-                )}
-              </button>
-              {/* #607: a subtle "copied — clears in Ns" hint. The clear is best-effort (see clipboard.ts);
-                  this signals the intent without promising a guarantee the browser may not honour. */}
-              {copied ? (
-                <span className="text-xs text-muted-foreground">
-                  {t("items.copiedClears", { seconds: CLIPBOARD_CLEAR_MS / 1000 })}
-                </span>
-              ) : null}
-              {/* SECW-06: clipboard unavailable (insecure context). Prompt manual copy — the value
-                  above is `select-all`, so a manual selection still works. */}
-              {copyFailed ? (
-                <span className="text-xs text-destructive">{t("items.copyFailed")}</span>
-              ) : null}
-            </>
+                  <span className="text-xs text-muted-foreground">
+                    {t("items.copiedClears", { seconds: CLIPBOARD_CLEAR_MS / 1000 })}
+                  </span>
+                ) : null}
+                {/* SECW-06: clipboard unavailable (insecure context). Prompt manual copy — the value
+                    above is `select-all`, so a manual selection still works. */}
+                {copyFailed ? (
+                  <span className="text-xs text-destructive">{t("items.copyFailed")}</span>
+                ) : null}
+              </div>
+            ) : (
+              // ADR-0075: typed render (SSH key / TOTP live code / certificate). The component parses
+              // the already-decrypted plaintext by `kind` and degrades a legacy value to a raw block.
+              <TypedSecretReveal kind={item.kind} plaintext={plaintext} />
+            )
           ) : revealError ? (
             // SM-WEB-07: pair the genuine decrypt error with a retry affordance so it is never a dead end.
             <span className="flex items-center gap-2">
@@ -872,15 +894,28 @@ function AddItemDialog({
     keyError: false,
   });
   const { label, handle, busy, keyError } = form;
-  // Zero-knowledge: the plaintext value stays in its OWN dedicated state, never folded into the form
-  // reducer. Cleared in the mutation's finally (below), regardless of success or failure.
-  const [value, setValue] = useState("");
+  // Zero-knowledge: the typed plaintext fields live in their OWN dedicated state (ADR-0075), never folded
+  // into the form reducer. Cleared in the mutation's finally (below) and on reset — success or failure.
+  const [kind, setKind] = useState<SecretItemKind>("GENERIC");
+  const [fields, setFields] = useState<TypedSecretFieldValues>({});
 
   const preparingKey = membershipState === "loading";
+  const complete = isTypedSecretComplete(kind, fields);
+
+  const setField = (key: string, v: string) => {
+    setFields((f) => ({ ...f, [key]: v }));
+    if (keyError) dispatchForm({ type: "setKeyError", keyError: false });
+  };
+  // Switching kind clears the typed fields so a value from a previous kind never bleeds across.
+  const changeKind = (k: SecretItemKind) => {
+    setKind(k);
+    setFields({});
+  };
 
   function reset() {
     dispatchForm({ type: "reset" });
-    setValue("");
+    setKind("GENERIC");
+    setFields({});
   }
 
   function handleOpenChange(next: boolean) {
@@ -890,7 +925,7 @@ function AddItemDialog({
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (busy || preparingKey || !label.trim() || !handle.trim() || !value) return;
+    if (busy || preparingKey || !label.trim() || !handle.trim() || !complete) return;
     const dek = ensureDek();
     if (!dek) {
       // Genuinely can't unwrap — keep the typed value, surface an inline recoverable error, do NOT toast
@@ -901,13 +936,16 @@ function AddItemDialog({
     dispatchForm({ type: "setKeyError", keyError: false });
     dispatchForm({ type: "setBusy", busy: true });
     try {
-      // Seal the plaintext value in the browser — never send it.
-      const envelope = sealItem(dek, value);
+      // ADR-0075: encode the typed payload to a plaintext string, then seal it in the browser — never
+      // send the plaintext. GENERIC encodes to the plain value (back-compat); `kind` is server-visible.
+      const plaintext = encodeSecretPayload(buildTypedSecret(kind, fields));
+      const envelope = sealItem(dek, plaintext);
       await createItem.mutateAsync({
         vaultId,
         data: {
           label: label.trim(),
           handle: handle.trim(),
+          kind,
           ...envelope,
         },
       });
@@ -916,9 +954,9 @@ function AddItemDialog({
     } catch (err) {
       notifyError(err, t("items.createError"));
     } finally {
-      // Drop the entered value from state as soon as the mutation resolves,
+      // Drop the entered typed fields from state as soon as the mutation resolves,
       // regardless of success or failure — plaintext never lingers.
-      setValue("");
+      setFields({});
       dispatchForm({ type: "setBusy", busy: false });
     }
   }
@@ -962,30 +1000,25 @@ function AddItemDialog({
             />
             <FieldDescription>{t("items.handleHint")}</FieldDescription>
           </Field>
-          <Field>
-            <FieldLabel htmlFor="item-value">{t("items.valueField")}</FieldLabel>
-            <Input
-              id="item-value"
-              type="password"
-              autoComplete="new-password"
-              value={value}
-              onChange={(e) => {
-                setValue(e.target.value);
-                if (keyError) dispatchForm({ type: "setKeyError", keyError: false });
-              }}
-              disabled={busy}
-              placeholder={t("items.valuePlaceholder")}
-            />
-            {keyError ? (
-              <FieldDescription className="text-destructive">
-                {t("items.dekUnavailableInline")}
-              </FieldDescription>
-            ) : preparingKey ? (
-              <FieldDescription>{t("items.preparingKey")}</FieldDescription>
-            ) : (
-              <FieldDescription>{t("items.valueHint")}</FieldDescription>
-            )}
-          </Field>
+
+          {/* ADR-0075: kind selector + the typed value fields for the chosen kind. */}
+          <TypedSecretFields
+            kind={kind}
+            onKindChange={changeKind}
+            fields={fields}
+            onFieldChange={setField}
+            disabled={busy}
+            idPrefix="add-item"
+          />
+          {keyError ? (
+            <FieldDescription className="text-destructive">
+              {t("items.dekUnavailableInline")}
+            </FieldDescription>
+          ) : preparingKey ? (
+            <FieldDescription>{t("items.preparingKey")}</FieldDescription>
+          ) : (
+            <FieldDescription>{t("items.valueHint")}</FieldDescription>
+          )}
 
           <DialogFooter>
             <Button
@@ -998,7 +1031,7 @@ function AddItemDialog({
             </Button>
             <Button
               type="submit"
-              disabled={busy || preparingKey || !label.trim() || !handle.trim() || !value}
+              disabled={busy || preparingKey || !label.trim() || !handle.trim() || !complete}
             >
               {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : null}
               {busy ? t("items.creating") : preparingKey ? t("items.preparingKey") : t("items.addSubmit")}
@@ -1041,26 +1074,43 @@ function EditItemDialog({
     keyError: false,
   });
   const { label, handle, busy, keyError } = form;
-  // Zero-knowledge: the plaintext new value stays in its OWN dedicated state, never folded into the form
-  // reducer. Cleared in the mutation's finally (below) and on close / item-change.
-  const [newValue, setNewValue] = useState("");
+  // Zero-knowledge: the typed plaintext fields live in their OWN dedicated state (ADR-0075), never folded
+  // into the form reducer. The kind selector defaults to the item's current kind; to CHANGE the value (or
+  // re-type the secret) the user fills the typed fields. Cleared on close / item-change / submit.
+  const [kind, setKind] = useState<SecretItemKind>(item.kind);
+  const [fields, setFields] = useState<TypedSecretFieldValues>({});
   // Sync fields when item identity changes (re-open for different item) — derived during render. The
   // tracker setter (setLastItemId) under the `item.id !== lastItemId` guard keeps this the recognized,
-  // loop-safe set-state-in-render pattern; the dispatchForm/setNewValue resets ride along with it.
+  // loop-safe set-state-in-render pattern; the reducer/kind/fields resets ride along with it.
   const [lastItemId, setLastItemId] = useState(item.id);
   if (item.id !== lastItemId) {
     setLastItemId(item.id);
     dispatchForm({ type: "syncItem", item });
-    setNewValue("");
+    setKind(item.kind);
+    setFields({});
   }
 
   const preparingKey = membershipState === "loading";
-  // Only the value path needs the DEK; label/handle-only edits work without it.
-  const needsKey = newValue.length > 0;
+  // A new value is being supplied (re-encrypt) when the typed required field is filled.
+  const hasNewValue = isTypedSecretComplete(kind, fields);
+  // Re-typing the kind WITHOUT supplying a value would leave `kind` and the ciphertext inconsistent, so
+  // we require the value when the kind changes. Only the value path needs the DEK.
+  const retypedWithoutValue = kind !== item.kind && !hasNewValue;
+  const needsKey = hasNewValue;
+
+  const setField = (key: string, v: string) => {
+    setFields((f) => ({ ...f, [key]: v }));
+    if (keyError) dispatchForm({ type: "setKeyError", keyError: false });
+  };
+  const changeKind = (k: SecretItemKind) => {
+    setKind(k);
+    setFields({});
+  };
 
   function handleOpenChange(next: boolean) {
     if (!next) {
-      setNewValue("");
+      setFields({});
+      setKind(item.kind);
       dispatchForm({ type: "setKeyError", keyError: false });
     }
     onOpenChange(next);
@@ -1068,8 +1118,8 @@ function EditItemDialog({
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
-    if (busy || (needsKey && preparingKey)) return;
-    // Build partial update — envelope only if a new value was entered.
+    if (busy || (needsKey && preparingKey) || retypedWithoutValue) return;
+    // Build partial update — envelope (+ kind) only if a new value was entered.
     type PatchData = {
       label?: string;
       handle?: string;
@@ -1077,6 +1127,7 @@ function EditItemDialog({
       iv?: string;
       authTag?: string;
       keyVersion?: number;
+      kind?: SecretItemKind;
     };
     const patch: PatchData = {};
     if (label.trim() && label.trim() !== item.label) patch.label = label.trim();
@@ -1090,8 +1141,11 @@ function EditItemDialog({
         dispatchForm({ type: "setKeyError", keyError: true });
         return;
       }
-      const envelope = sealItem(dek, newValue);
+      // ADR-0075: encode the typed payload, seal it, and pair `kind` with the fresh ciphertext so the
+      // server-visible type and the encrypted shape never disagree.
+      const envelope = sealItem(dek, encodeSecretPayload(buildTypedSecret(kind, fields)));
       Object.assign(patch, envelope);
+      patch.kind = kind;
     }
 
     if (Object.keys(patch).length === 0) {
@@ -1108,7 +1162,7 @@ function EditItemDialog({
     } catch (err) {
       notifyError(err, t("items.updateError"));
     } finally {
-      setNewValue("");
+      setFields({});
       dispatchForm({ type: "setBusy", busy: false });
     }
   }
@@ -1149,30 +1203,29 @@ function EditItemDialog({
               className="font-mono"
             />
           </Field>
-          <Field>
-            <FieldLabel htmlFor="edit-item-value">{t("items.newValueField")}</FieldLabel>
-            <Input
-              id="edit-item-value"
-              type="password"
-              autoComplete="new-password"
-              value={newValue}
-              onChange={(e) => {
-                setNewValue(e.target.value);
-                if (keyError) dispatchForm({ type: "setKeyError", keyError: false });
-              }}
-              disabled={busy}
-              placeholder={t("items.newValuePlaceholder")}
-            />
-            {keyError ? (
-              <FieldDescription className="text-destructive">
-                {t("items.dekUnavailableInline")}
-              </FieldDescription>
-            ) : needsKey && preparingKey ? (
-              <FieldDescription>{t("items.preparingKey")}</FieldDescription>
-            ) : (
-              <FieldDescription>{t("items.newValueHint")}</FieldDescription>
-            )}
-          </Field>
+          {/* ADR-0075: change the type and/or replace the value. Leave the typed fields blank to keep the
+              current value (label/handle-only edits need no key). */}
+          <TypedSecretFields
+            kind={kind}
+            onKindChange={changeKind}
+            fields={fields}
+            onFieldChange={setField}
+            disabled={busy}
+            idPrefix="edit-item"
+          />
+          {keyError ? (
+            <FieldDescription className="text-destructive">
+              {t("items.dekUnavailableInline")}
+            </FieldDescription>
+          ) : retypedWithoutValue ? (
+            <FieldDescription className="text-destructive">
+              {t("items.retypeNeedsValue")}
+            </FieldDescription>
+          ) : needsKey && preparingKey ? (
+            <FieldDescription>{t("items.preparingKey")}</FieldDescription>
+          ) : (
+            <FieldDescription>{t("items.newValueHint")}</FieldDescription>
+          )}
 
           <DialogFooter>
             <Button
@@ -1185,7 +1238,9 @@ function EditItemDialog({
             </Button>
             <Button
               type="submit"
-              disabled={busy || (needsKey && preparingKey) || (!label.trim() && !newValue)}
+              disabled={
+                busy || (needsKey && preparingKey) || retypedWithoutValue || !label.trim()
+              }
             >
               {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : null}
               {busy ? t("items.updating") : needsKey && preparingKey ? t("items.preparingKey") : tc("save")}

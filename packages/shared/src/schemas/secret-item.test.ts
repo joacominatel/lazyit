@@ -49,6 +49,7 @@ describe("SecretItemSchema — read shape INCLUDES the envelope (client decrypts
         handle: "prod_db_root",
         label: "Production DB root password",
         ...envelope,
+        kind: "GENERIC",
         createdAt: ISO,
         updatedAt: ISO,
         deletedAt: null,
@@ -104,6 +105,36 @@ describe("CreateSecretItemSchema — client posts metadata + sealed envelope", (
         ciphertext: CIPHERTEXT,
         iv: IV,
         keyVersion: 1,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts an explicit typed kind, and omitting kind is valid (ADR-0075)", () => {
+    expect(
+      CreateSecretItemSchema.safeParse({
+        handle: "host_key",
+        label: "Host SSH key",
+        kind: "SSH_KEY",
+        ...envelope,
+      }).success,
+    ).toBe(true);
+    // kind is optional on the wire (the service fills GENERIC) — omitting it is accepted.
+    expect(
+      CreateSecretItemSchema.safeParse({
+        handle: "legacy",
+        label: "Legacy plain value",
+        ...envelope,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects an unknown kind value", () => {
+    expect(
+      CreateSecretItemSchema.safeParse({
+        handle: "x",
+        label: "x",
+        kind: "PASSWORD",
+        ...envelope,
       }).success,
     ).toBe(false);
   });
