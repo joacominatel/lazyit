@@ -20,26 +20,55 @@ install it on more servers.
 > The agent only ever **adds proposals**. A newly discovered host arrives in the **Pending review**
 > tray as a proposal — it never changes your live inventory until a human confirms it.
 
-## Adding a server
+## Create your first agent
 
-On the **Servers** view (the Table view of **Assets › Topology**) there's an **Add a server**
-button. (You need the manage-settings permission to use it, because it mints a token.)
+On the **Servers** view (the Table view of **Assets › Topology**), when you have no agents yet, a
+**Create your first agent** card sits at the top. Once you have agents, it collapses to a quiet
+**Add agent** button. (You need the manage-settings permission to use it, because it mints a token.)
 
-1. Click **Add a server** and give the token a name you'll recognise later (for example the server's
-   name).
-2. lazyit creates a service account scoped to **only** the `infra:report` permission and shows you a
-   one-time **install command** with the token already filled in. It looks like this:
+The button opens a short, guided wizard with three steps:
+
+1. **Name & generate.** Give the agent a name you'll recognise later (for example the server's name,
+   like `web-prod-01`) and click **Generate credentials**. lazyit creates a service account scoped to
+   **only** the `infra:report` permission.
+2. **Install.** lazyit shows a ready-to-paste **install command** with the token already filled in:
 
    ```sh
    curl -fsSL https://your-instance/install.sh | sudo sh -s -- --url https://your-instance --token <token>
    ```
 
-   The address is **your own lazyit instance** — the agent only ever talks to the server you run.
-3. Copy the command (or download the token) and run it on the Linux server **as root**. The token is
-   shown **only once**, so capture it before closing the dialog.
+   The address is **your own lazyit instance** — the agent only ever talks to the server you run. Run
+   it on a **Linux** server **as root**. The token is shown **only once**, so copy it (or download it)
+   before continuing. If you'd rather inspect every step, expand **Install manually (step by step)**
+   for the same install done by hand (download the binary, install it, write the config file, send a
+   test report).
+3. **Wait.** The wizard then waits for the server to report. As soon as the agent checks in — usually
+   within a couple of minutes — it shows a success message and an inline **Confirm** button. You can
+   confirm right there, or close the wizard and confirm later from the Pending review tray.
 
-A few minutes after the agent first runs, the server appears in the **Pending review** tray on the
-same Servers view.
+### Install manually (step by step)
+
+The wizard's collapsed **Install manually** section gives the same install command-by-command, for a
+cautious admin who prefers to download and inspect the binary first. Each step has its own copy
+button:
+
+1. **Download the binary** (use `arch=arm64` on ARM machines):
+
+   ```sh
+   curl -fsSL -H "Authorization: Bearer <token>" "https://your-instance/api/agent/download?arch=x64" -o lazyit-agent
+   ```
+2. **Make it executable and move it into place:**
+
+   ```sh
+   chmod +x lazyit-agent && sudo mv lazyit-agent /usr/local/bin/
+   ```
+3. **Create the config file** (it holds the token, so `chmod 600`) with `LAZYIT_URL` and
+   `LAZYIT_TOKEN` at `/etc/lazyit-agent/config`.
+4. **Send a first report** to check it works:
+
+   ```sh
+   sudo lazyit-agent report --once
+   ```
 
 ## Pending review
 
