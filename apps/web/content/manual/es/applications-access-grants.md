@@ -20,7 +20,8 @@ Abre una aplicación y, bajo **Acceso activo**, elige **Otorgar acceso**. Eliges
 - **Nivel de acceso** *(opcional)* — una etiqueta de formato libre como `admin`, `developer` o
   `viewer`. lazyit la guarda tal cual y nunca la interpreta; escribe el nombre que la propia
   aplicación da a sus roles.
-- **Vence** *(opcional)* — una fecha informativa. Ver "Vencimiento" más abajo.
+- **Vence** *(opcional)* — una fecha tras la cual la concesión se revoca automáticamente. Ver
+  "Vencimiento" más abajo.
 - **Notas** *(opcional)* — contexto, p. ej. "solicitado para la migración del Q3".
 
 Otorgar (y revocar) acceso es una acción solo de administrador de forma predeterminada.
@@ -51,11 +52,15 @@ concesión, por diseño.
 
 ## Vencimiento
 
-Una fecha de vencimiento es **solo informativa**. lazyit **no** revoca automáticamente una
-concesión cuando pasa su vencimiento — una concesión vencida pero no revocada sigue siendo acceso
-activo. lazyit la marca como **Vencido** para que la detectes y la revoques tú. Borra el
-vencimiento para hacer una concesión permanente. (La revocación automática al vencer es una mejora
-planificada, no el comportamiento actual.)
+Cuando una concesión pasa su fecha de vencimiento, lazyit la **revoca automáticamente** — un
+barrido en segundo plano se ejecuta periódicamente y revoca cualquier concesión activa cuyo
+vencimiento ya quedó en el pasado. La revocación automática pasa por el flujo normal de revocación,
+así que queda en el **Historial** de la aplicación y dispara cualquier flujo de desaprovisionamiento
+igual que una revocación manual; se registra como una revocación automática (del sistema) en lugar
+de atribuirse a una persona. Hay una ventana breve entre el momento en que una concesión vence y el
+siguiente barrido, durante la cual aún cuenta como activa y se marca como **Vencido**. **Borra el
+vencimiento** para hacer una concesión permanente — dejar un vencimiento ahora significa que la
+concesión será revocada.
 
 ## Dónde aparece el acceso
 
