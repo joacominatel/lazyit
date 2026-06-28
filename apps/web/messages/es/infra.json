@@ -57,22 +57,49 @@
     "confirmedToast": "Servidor confirmado.",
     "error": "No se pudo confirmar el servidor."
   },
-  "addServer": {
-    "title": "Agregar un servidor",
-    "description": "Generá un comando de instalación para el agente de reporte. Crea un token que SOLO puede reportar inventario.",
+  "onboarding": {
+    "title": "Registrá servidores automáticamente",
+    "description": "Instalá un agente liviano en un servidor Linux y reporta su hardware y software a lazyit por sí solo: solo puede reportar, nada más.",
+    "cta": "Creá tu primer agente",
+    "addAgent": "Agregar agente",
+    "noPermissionHint": "Pedile a un administrador que agregue un agente de reporte: requiere el permiso de gestión de configuración."
+  },
+  "wizard": {
+    "title": "Crear un agente de reporte",
+    "subtitle": "Instalá un agente de reporte en un servidor Linux en tres pasos.",
+    "steps": {
+      "name": "Nombre",
+      "install": "Instalar",
+      "wait": "Esperar"
+    },
+    "stepAria": "Paso {current} de {total}",
+    "whatIsAgent": "Un agente es un programa pequeño que corrés en un servidor. Reporta el hardware y el software instalado del servidor a lazyit por sí solo: no puede leer ni modificar nada más.",
     "nameLabel": "Nombre",
-    "namePlaceholder": "p. ej. agente de reporte web-01",
-    "nameHint": "Una etiqueta para reconocer este token más adelante (por ejemplo, el nombre del servidor).",
+    "namePlaceholder": "p. ej. web-prod-01",
+    "nameHint": "Un nombre para reconocer este agente más adelante (por ejemplo, el nombre del servidor).",
     "scopeNote": "Este token solo puede reportar inventario (infra:report). No puede leer ni modificar nada más, y cada host que reporta queda en Revisión pendiente para tu aprobación.",
-    "submit": "Generar comando de instalación",
-    "createdToast": "Token creado.",
-    "error": "No se pudo crear el token.",
-    "revealTitle": "Instalar el agente de reporte",
-    "revealDescription": "Copiá el comando de abajo: el token se muestra una sola vez.",
-    "installTitle": "Comando de instalación",
-    "copyInstallAria": "Copiar el comando de instalación",
-    "installCopied": "Comando de instalación copiado.",
-    "installHint": "Ejecutá esto en el servidor Linux (como root). Aparecerá en Revisión pendiente cuando reporte."
+    "generate": "Generar credenciales",
+    "createdToast": "Credenciales creadas.",
+    "error": "No se pudieron crear las credenciales.",
+    "requirements": "Vas a ejecutar esto en un servidor Linux con acceso root.",
+    "installTitle": "Ejecutá esto en tu servidor",
+    "installHint": "Copiá el comando y ejecutalo en el servidor Linux como root. El token se muestra una sola vez: capturalo antes de cerrar.",
+    "copyCommandAria": "Copiar el comando",
+    "commandCopied": "Comando copiado.",
+    "manual": {
+      "toggle": "Instalar manualmente (paso a paso)",
+      "intro": "¿Preferís revisar cada paso? Ejecutá estos en el servidor en lugar del comando de una línea de arriba.",
+      "step1": "Descargá el binario (usá arch=arm64 en máquinas ARM):",
+      "step2": "Hacelo ejecutable y movelo a su lugar:",
+      "step3": "Creá el archivo de configuración (contiene el token, así que chmod 600):",
+      "step4": "Enviá un primer reporte para verificar que funciona:"
+    },
+    "waitTitle": "Esperando que {name} reporte…",
+    "waitDescription": "Ejecutá el comando de instalación en tu servidor. Apenas el agente reporte, aparecerá acá, normalmente en un par de minutos.",
+    "successTitle": "¡{name} reportó!",
+    "successDescription": "Tu servidor reportó. Confirmalo para sumarlo a tu inventario.",
+    "confirmAction": "Confirmar servidor",
+    "checkLater": "Reviso después"
   },
   "view": {
     "map": "Mapa",
@@ -87,7 +114,6 @@
   "servers": {
     "title": "Servidores",
     "subtitle": "Todos los nodos de tu topología: filtrá, buscá y abrí uno para ver su responsable, secretos y conexiones.",
-    "addServer": "Agregar un servidor",
     "searchLabel": "Buscar servidores",
     "searchPlaceholder": "Buscar por nombre o IP…",
     "openLabel": "Abrir en el mapa",
