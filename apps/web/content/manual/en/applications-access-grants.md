@@ -20,7 +20,8 @@ Open an application and, under **Active access**, choose **Grant access**. You p
 - **Access level** *(optional)* — a free-form label such as `admin`, `developer` or `viewer`.
   lazyit stores this verbatim and never interprets it; type whatever the application itself calls
   its roles.
-- **Expires** *(optional)* — an informational date. See "Expiry" below.
+- **Expires** *(optional)* — a date after which the grant is automatically revoked. See "Expiry"
+  below.
 - **Notes** *(optional)* — context, e.g. "requested for the Q3 migration".
 
 Granting (and revoking) access is an administrator-only action by default.
@@ -50,10 +51,13 @@ it and when. Revoking is **not** a deletion — there is no way to erase a grant
 
 ## Expiry
 
-An expiry date is **informational only**. lazyit does **not** automatically revoke a grant when it
-passes its expiry — an expired-but-not-revoked grant is still active access. lazyit marks it as
-**Expired** so you can spot it and revoke it yourself. Clear the expiry to make a grant permanent.
-(Automatic revocation at expiry is a planned enhancement, not current behavior.)
+When a grant passes its expiry date, lazyit **automatically revokes it** — a background sweep runs
+periodically and revokes any active grant whose expiry is in the past. The auto-revoke goes through
+the normal revoke path, so it ends up in the application's **History** and triggers any
+deprovisioning workflow exactly as a manual revoke would; it is recorded as an automatic (system)
+revoke rather than attributed to a person. There is a short window between the moment a grant expires
+and the next sweep during which it still counts as active and is flagged **Expired**. **Clear the
+expiry** to make a grant permanent — leaving an expiry in place now means the grant will be revoked.
 
 ## Where access shows up
 
