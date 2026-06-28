@@ -79,7 +79,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
-import { useAssets } from "@/lib/api/hooks/use-assets";
+import { useAssetCompanies, useAssets } from "@/lib/api/hooks/use-assets";
 import { useAssetsOnTopology } from "@/lib/api/hooks/use-infra-nodes";
 import { useUser } from "@/lib/api/hooks/use-users";
 import {
@@ -123,6 +123,8 @@ const FILTER_DEFAULTS = {
   status: "ALL",
   category: "ALL",
   location: "ALL",
+  // Grouping filter (ADR-0076): "ALL" = no filter, otherwise an exact company value (server-side).
+  company: "ALL",
   owner: "",
   ownership: "ALL",
   archived: "ALL",
@@ -148,6 +150,7 @@ const HIDEABLE_COLUMNS = [
   "model",
   "category",
   "location",
+  "company",
   "status",
   "owners",
   "updated",
@@ -160,7 +163,7 @@ type HideableColumn = (typeof HIDEABLE_COLUMNS)[number];
  * column appears in exactly one group); it drives only the menu, never visibility.
  */
 const COLUMN_GROUPS: { id: string; keys: readonly HideableColumn[] }[] = [
-  { id: "details", keys: ["assetTag", "model", "category", "location"] },
+  { id: "details", keys: ["assetTag", "model", "category", "location", "company"] },
   { id: "status", keys: ["status", "owners"] },
   { id: "activity", keys: ["updated"] },
 ];
@@ -219,6 +222,7 @@ export function AssetsListView() {
   const statusFilter = filters.status as AssetStatus | "ALL";
   const categoryFilter = filters.category;
   const locationFilter = filters.location;
+  const companyFilter = filters.company; // "ALL" = unset; otherwise an exact company value.
   const ownerFilter = filters.owner; // "" = unset; otherwise a User uuid (server-side filter)
   const ownershipFilter = filters.ownership as OwnershipFilter;
   // Resolve the owner-filter user's name for its chip, even when not on the current search page.
@@ -235,6 +239,7 @@ export function AssetsListView() {
       status: statusFilter === "ALL" ? undefined : statusFilter,
       categoryId: categoryFilter === "ALL" ? undefined : categoryFilter,
       locationId: locationFilter === "ALL" ? undefined : locationFilter,
+      company: companyFilter === "ALL" ? undefined : companyFilter,
       assignedToUserId: ownerFilter || undefined,
       ownership: ownershipFilter === "ALL" ? undefined : ownershipFilter,
       sort,
@@ -245,6 +250,7 @@ export function AssetsListView() {
     });
   const { data: categories } = useAssetCategories();
   const { data: locations } = useLocations();
+  const { data: companies } = useAssetCompanies();
   const deleteAsset = useDeleteAsset();
   const restoreAsset = useRestoreAsset();
   const updateAsset = useUpdateAsset();
@@ -456,6 +462,11 @@ export function AssetsListView() {
         header: t("columns.location"),
         skeleton: <Skeleton className="h-4 w-24" />,
       },
+      isColumnVisible("company") && {
+        key: "company",
+        header: t("columns.company"),
+        skeleton: <Skeleton className="h-4 w-24" />,
+      },
       isColumnVisible("status") && {
         key: "status",
         header: (
@@ -507,6 +518,7 @@ export function AssetsListView() {
   const popoverFilterCount =
     (categoryFilter !== "ALL" ? 1 : 0) +
     (locationFilter !== "ALL" ? 1 : 0) +
+    (companyFilter !== "ALL" ? 1 : 0) +
     (ownerFilter ? 1 : 0) +
     (ownershipFilter !== "ALL" ? 1 : 0);
 
@@ -550,6 +562,15 @@ export function AssetsListView() {
                 locations?.find((l) => l.id === locationFilter)?.name ?? "—",
             }),
             onClear: () => setFilter("location", FILTER_DEFAULTS.location),
+          },
+        ]
+      : []),
+    ...(companyFilter !== "ALL"
+      ? [
+          {
+            key: "company",
+            label: t("chips.company", { value: companyFilter }),
+            onClear: () => setFilter("company", FILTER_DEFAULTS.company),
           },
         ]
       : []),
@@ -726,6 +747,32 @@ export function AssetsListView() {
                 </div>
                 <div className="space-y-1.5">
                   <label
+                    htmlFor="assets-filter-company"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {t("columns.company")}
+                  </label>
+                  <Select
+                    value={companyFilter}
+                    onValueChange={(value) => setFilter("company", value)}
+                  >
+                    <SelectTrigger id="assets-filter-company" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">
+                        {t("filters.allCompanies")}
+                      </SelectItem>
+                      {(companies ?? []).map((company) => (
+                        <SelectItem key={company} value={company}>
+                          {company}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <label
                     htmlFor="assets-filter-owner"
                     className="text-xs font-medium text-muted-foreground"
                   >
@@ -871,6 +918,9 @@ export function AssetsListView() {
                     <ResourceCardMeta label={t("columns.location")}>
                       {asset.location?.name ?? "—"}
                     </ResourceCardMeta>
+                    <ResourceCardMeta label={t("columns.company")}>
+                      {asset.company ?? "—"}
+                    </ResourceCardMeta>
                     <ResourceCardMeta label={t("columns.owners")}>
                       <StackedOwnerAvatars
                         assignments={asset.activeAssignments}
@@ -952,6 +1002,11 @@ export function AssetsListView() {
                 location: (
                   <TableCell key="location" className="text-muted-foreground">
                     {asset.location?.name ?? "—"}
+                  </TableCell>
+                ),
+                company: (
+                  <TableCell key="company" className="text-muted-foreground">
+                    {asset.company ?? "—"}
                   </TableCell>
                 ),
                 status: (
