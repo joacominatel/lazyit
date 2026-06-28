@@ -601,6 +601,41 @@ export class ArticlesService {
     return snapshot;
   }
 
+  /**
+   * Restore an article to a previous version (#848): replay that version's snapshotted
+   * title/content/excerpt through the normal edit path ({@link update}), so a NEW ArticleVersion is
+   * appended — history is never mutated (append-only, ADR-0042 / ADR-0006). Author-only, the same
+   * gate as a normal edit. `status` is deliberately NOT restored: update() never touches status
+   * (publish/unpublish own it), so a restore keeps the article's CURRENT published/draft state
+   * (least surprising — restoring old text must not silently un-publish a live article). 404 if the
+   * article isn't readable/owned (via loadOwned) or that version number doesn't exist. Restoring to
+   * content identical to the live article is a no-op: update()'s versionedFieldsChanged guard skips
+   * the snapshot and returns the unchanged article.
+   */
+  async restoreVersion(id: string, version: number, principal?: Principal) {
+    const cu = this.requireAuthor(principal);
+    await this.loadOwned(id, cu); // author gate + 404 (mirrors update())
+    const snapshot = await this.prisma.articleVersion.findFirst({
+      where: { articleId: id, version },
+    });
+    if (!snapshot) {
+      throw new NotFoundException(
+        `Version ${version} of article ${id} not found`,
+      );
+    }
+    // excerpt is restored only when the old version had one (UpdateArticle's excerpt is a
+    // non-empty string); a version without an excerpt leaves the current excerpt untouched.
+    return this.update(
+      id,
+      {
+        title: snapshot.title,
+        content: snapshot.content,
+        ...(snapshot.excerpt ? { excerpt: snapshot.excerpt } : {}),
+      },
+      principal,
+    );
+  }
+
   // --- links (article <-> asset/application, ADR-0042) ---------------------
 
   /**
@@ -661,7 +696,11 @@ export class ArticlesService {
   }
 
   /** All links of an article (readable by any caller who can read the article). */
-  async findLinks(articleId: string, currentUser?: User, principal?: Principal) {
+  async findLinks(
+    articleId: string,
+    currentUser?: User,
+    principal?: Principal,
+  ) {
     await this.findOne(articleId, currentUser, principal);
     return this.prisma.articleLink.findMany({
       where: { articleId },
