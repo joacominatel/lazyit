@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssetTagScheme } from "@/lib/api/hooks/use-asset-tag-scheme";
+import { useAssetCompanies } from "@/lib/api/hooks/use-assets";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { notifyError } from "@/lib/api/notify-error";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
@@ -62,6 +63,7 @@ type AssetFormValues = {
   locationId?: string;
   serial?: string;
   assetTag?: string;
+  company?: string;
   purchaseDate?: string; // ISO datetime
   warrantyEnd?: string; // ISO datetime
   notes?: string;
@@ -91,6 +93,7 @@ function toFormValues(asset?: Asset, cloneSource?: Asset): AssetFormValues {
       locationId: asset.locationId ?? undefined,
       serial: asset.serial ?? undefined,
       assetTag: asset.assetTag ?? undefined,
+      company: asset.company ?? undefined,
       purchaseDate: asset.purchaseDate ?? undefined,
       warrantyEnd: asset.warrantyEnd ?? undefined,
       notes: asset.notes ?? undefined,
@@ -106,6 +109,7 @@ function toFormValues(asset?: Asset, cloneSource?: Asset): AssetFormValues {
       // serial/assetTag are cleared by the sanitizer → render empty.
       serial: d.serial,
       assetTag: d.assetTag,
+      company: d.company,
       purchaseDate: d.purchaseDate,
       warrantyEnd: d.warrantyEnd,
       notes: d.notes,
@@ -195,6 +199,9 @@ export function AssetForm({
   // auto-assigns. The field stays optional and an explicit value still wins (the scheme only fills the
   // gap server-side). Never shown on edit, and a no-op when the scheme is OFF/absent (today's behaviour).
   const { data: tagScheme } = useAssetTagScheme();
+  // Distinct existing company values for the free-text autocomplete datalist (ADR-0076). A plain
+  // suggestion list — the operator can still type a brand-new value.
+  const { data: companies } = useAssetCompanies();
   const autoTagHint =
     !isEdit && tagScheme?.enabled
       ? renderAssetTag(tagScheme, tagScheme.nextNumber)
@@ -271,6 +278,7 @@ export function AssetForm({
         assetTag: values.assetTag,
         modelId: values.modelId,
         locationId: values.locationId,
+        company: values.company,
         purchaseDate: values.purchaseDate,
         warrantyEnd: values.warrantyEnd,
         notes: values.notes,
@@ -411,6 +419,37 @@ export function AssetForm({
                     emptyText={t("noLocations")}
                   />
                 </CreatableField>
+              </Field>
+            )}
+          />
+
+          <Controller
+            control={form.control}
+            name="company"
+            render={({ field, fieldState }) => (
+              <Field data-invalid={fieldState.invalid || undefined}>
+                <FieldLabel htmlFor="company">{t("company")}</FieldLabel>
+                <Input
+                  id="company"
+                  name={field.name}
+                  ref={field.ref}
+                  value={field.value ?? ""}
+                  onBlur={field.onBlur}
+                  onChange={(event) =>
+                    field.onChange(event.target.value || undefined)
+                  }
+                  // Free-text + autocomplete over existing values (ADR-0076): a native datalist so the
+                  // operator reuses a value or types a new one — no Company entity/picker.
+                  list="asset-company-options"
+                  placeholder={t("companyPlaceholder")}
+                  aria-invalid={fieldState.invalid || undefined}
+                />
+                <datalist id="asset-company-options">
+                  {(companies ?? []).map((company) => (
+                    <option key={company} value={company} />
+                  ))}
+                </datalist>
+                <FieldError errors={[fieldState.error]} />
               </Field>
             )}
           />

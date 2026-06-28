@@ -55,6 +55,7 @@
       "serial": "Serial number",
       "assetTag": "Asset tag",
       "status": "Status",
+      "company": "Company",
       "model": "Model",
       "location": "Location",
       "purchaseDate": "Purchase date",

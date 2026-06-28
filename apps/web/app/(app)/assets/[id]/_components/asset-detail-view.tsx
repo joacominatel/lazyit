@@ -236,6 +236,20 @@ export function AssetDetailView({ id }: { id: string }) {
               "—"
             )}
           </DetailField>
+          <DetailField label={t("company")}>
+            {asset.company ? (
+              // Deep-link to the list filtered by this grouping value (ADR-0076) — a grouping facet,
+              // not an access boundary.
+              <Link
+                href={`/assets?company=${encodeURIComponent(asset.company)}`}
+                className="hover:underline"
+              >
+                {asset.company}
+              </Link>
+            ) : (
+              "—"
+            )}
+          </DetailField>
           <DetailField label={t("serial")}>
             {asset.serial ? (
               <span className="inline-flex items-center gap-1">

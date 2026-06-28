@@ -69,6 +69,8 @@ export const assetImportDescriptor: ImportDescriptor<CreateAsset> = {
     { field: "serial", i18nKey: "import.asset.field.serial", required: false },
     { field: "assetTag", i18nKey: "import.asset.field.assetTag", required: false },
     { field: "status", i18nKey: "import.asset.field.status", required: true },
+    // Optional grouping value (ADR-0076, #857) — plain text, flows through coerceRow's text branch.
+    { field: "company", i18nKey: "import.asset.field.company", required: false },
     { field: "modelId", i18nKey: "import.asset.field.model", required: false },
     { field: "locationId", i18nKey: "import.asset.field.location", required: false },
     { field: "purchaseDate", i18nKey: "import.asset.field.purchaseDate", required: false },
@@ -163,6 +165,7 @@ export const HEADER_ALIASES: Record<string, readonly string[]> = {
   "asset:serial": ["Número de serie", "Serial Number", "Serial No"],
   "asset:assetTag": ["Placa del activo", "Asset Tag", "Asset Tag Number"],
   "asset:status": ["Estado", "Status"],
+  "asset:company": ["Empresa", "Company", "Compañía"],
   "asset:modelId": ["Modelo", "Model"],
   "asset:locationId": ["Ubicación", "Location"],
   "asset:purchaseDate": ["Comprado", "Fecha de compra", "Purchase Date", "Purchased"],

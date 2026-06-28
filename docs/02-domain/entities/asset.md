@@ -113,6 +113,7 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `status` | `AssetStatus` | required enum, **no default**. |
 | `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object for now (see debt note). The web edits this via a **custom-fields editor** (a list of `{ name, value }` string rows). On create, selecting a model with default specs pre-fills those rows; the operator can change them before saving. Detail renders specs as a label-cased key/value list, not raw JSON. |
 | `notes` | `string?` | optional. |
+| `company` | `string?` | optional **grouping** label (Snipe-IT-style) to group/filter/report assets — **NOT** per-record scoping ([[0076-asset-company-grouping-field]]; Modo B rejected, #841). Anyone with `asset:read` sees ALL assets regardless of company. Free-text + autocomplete over already-used values (`GET /assets/companies`); no Company entity. Mirrors `notes` (optional trimmed string, max 200). |
 | `purchaseDate` | `datetime?` | optional; ISO-8601 string over the wire ([[0018-api-documentation-swagger]]). |
 | `warrantyEnd` | `datetime?` | optional; ISO-8601 string over the wire. |
 | `modelId` | `cuid?` | optional FK → [[asset-model]], `onDelete: SetNull`. |
@@ -128,11 +129,15 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 `apps/api/src/assets/` (`AssetsModule`):
 
 - `GET /assets` — **expanded** list (`AssetWithRelations[]`, excludes soft-deleted, newest first)
-  with optional filters **`?categoryId=&locationId=&status=&q=&assignedToUserId=`**: `categoryId`
+  with optional filters **`?categoryId=&locationId=&status=&company=&q=&assignedToUserId=`**: `categoryId`
   matches the asset's **model's** category, `status` is validated against the enum (invalid → `400`),
+  `company` is an exact-match grouping filter over the free-text `company` column
+  ([[0076-asset-company-grouping-field]]; a grouping facet, not an access boundary),
   `q` is a case-insensitive substring over `name` / `serial` / `assetTag`, and `assignedToUserId`
   (a [[user]] `uuid`; invalid → `400`) restricts to assets with a **live** assignment
   (`releasedAt = null`) to that user — the owner filter, over the timestamped-join relation.
+- `GET /assets/companies` — the distinct, non-empty `company` values across live assets (sorted;
+  `asset:read`) — powers the form autocomplete datalist and the list filter ([[0076-asset-company-grouping-field]]).
 - `GET /assets/:id` — one **expanded** asset (`404` if missing/soft-deleted).
 - `GET /assets/:id/assignments?activeOnly=` — the asset's ownership records, each with its `user`
   inlined (`AssetAssignmentWithUser[]`); `activeOnly` defaults to true, pass `false` for full

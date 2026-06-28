@@ -7,6 +7,7 @@ import {
   type AssetFilters,
   getAsset,
   getAssetAssignments,
+  getAssetCompanies,
   getAssets,
 } from "../endpoints/assets";
 import { invalidateDashboard } from "./use-dashboard";
@@ -24,6 +25,7 @@ export const assetKeys = {
   detail: (id: string) => [...assetKeys.all, "detail", id] as const,
   assignments: (assetId: string, activeOnly: boolean) =>
     [...assetKeys.all, "detail", assetId, "assignments", activeOnly] as const,
+  companies: () => [...assetKeys.all, "companies"] as const,
 };
 
 /**
@@ -55,6 +57,18 @@ export function useAssets(filters: AssetFilters = {}) {
     queryKey: assetKeys.list(filters),
     queryFn: ({ signal }) => getAssets(filters, signal),
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * The distinct company values across live assets (ADR-0076) — the autocomplete catalog for the form's
+ * company datalist and the list's company filter. Invalidated alongside every other asset query via the
+ * shared `assetKeys.all` prefix (see {@link useInvalidateAssets}), so a newly-typed company surfaces.
+ */
+export function useAssetCompanies() {
+  return useQuery({
+    queryKey: assetKeys.companies(),
+    queryFn: ({ signal }) => getAssetCompanies(signal),
   });
 }
 
