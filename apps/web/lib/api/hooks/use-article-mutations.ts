@@ -8,7 +8,9 @@ import {
   unpublishArticle,
   updateArticle,
 } from "../endpoints/articles";
+import { restoreArticleVersion } from "../endpoints/article-versions";
 import { articleKeys } from "./use-articles";
+import { articleVersionKeys } from "./use-article-versions";
 import { invalidateDashboard } from "./use-dashboard";
 
 /**
@@ -68,6 +70,24 @@ export function useUnpublishArticle() {
   return useMutation({
     mutationFn: (id: string) => unpublishArticle(id),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * Restore an article to a previous version (#848). The API replays the snapshot through the edit
+ * path, appending a NEW version — so on success we invalidate the article state (lists/detail/slug
+ * + dashboard) AND the version history (a new snapshot now exists). Toast/dialog state is owned by
+ * the calling component.
+ */
+export function useRestoreArticleVersion(articleId: string) {
+  const invalidate = useInvalidateArticles();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (version: number) => restoreArticleVersion(articleId, version),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: articleVersionKeys.all });
+    },
   });
 }
 

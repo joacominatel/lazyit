@@ -225,7 +225,10 @@ export function ArticleDetailView({ slug }: { slug: string }) {
 
       <ArticleLinksPanel articleId={article.id} canWrite={canWrite} />
 
-      <ArticleVersionHistoryPanel articleId={article.id} />
+      <ArticleVersionHistoryPanel
+        articleId={article.id}
+        canWrite={canWrite}
+      />
 
       <DeleteConfirmDialog
         open={deleteOpen}

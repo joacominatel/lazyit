@@ -1,11 +1,22 @@
 "use client";
 
-import { ClockIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowUturnLeftIcon, ClockIcon } from "@heroicons/react/24/outline";
 import type { ArticleVersion } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { toast } from "sonner";
 import { DetailPanel } from "@/components/detail-panel";
 import { MarkdownView } from "@/components/markdown-view";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,11 +27,13 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { useRestoreArticleVersion } from "@/lib/api/hooks/use-article-mutations";
 import {
   useArticleVersion,
   useArticleVersions,
 } from "@/lib/api/hooks/use-article-versions";
 import { useUsers } from "@/lib/api/hooks/use-users";
+import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 
 /**
@@ -32,26 +45,44 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
  * (same pattern as viewing the current article, but with a frozen body). Draft versions are
  * visible only to the author — the API enforces the same rules as for the live article.
  *
- * Restore is intentionally out of scope: ADR-0042 requires restore to write a NEW version.
- * That is a separate action (not yet implemented). The Manual notes this.
+ * Restore (#848, `canWrite` only): replays a past version's title/body/excerpt through the normal
+ * edit path, which appends a NEW version — history is never rewritten (ADR-0042). It does NOT change
+ * the article's published/draft status. Gated on `article:write`; the API also enforces authorship.
  */
 export function ArticleVersionHistoryPanel({
   articleId,
+  canWrite,
 }: {
   articleId: string;
+  canWrite: boolean;
 }) {
   const t = useTranslations("kb");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<
     ArticleVersion | null
   >(null);
+  const [restoreTarget, setRestoreTarget] = useState<ArticleVersion | null>(
+    null,
+  );
 
   const { data: page, isLoading } = useArticleVersions(
     historyOpen ? articleId : undefined,
   );
   const { data: users } = useUsers();
+  const restoreVersion = useRestoreArticleVersion(articleId);
 
   const versions: ArticleVersion[] = page?.items ?? [];
+
+  function handleRestore(version: ArticleVersion) {
+    restoreVersion.mutate(version.version, {
+      onSuccess: () => {
+        toast.success(t("versions.restoreToast", { n: version.version }));
+        setRestoreTarget(null);
+        setHistoryOpen(false);
+      },
+      onError: (error) => notifyError(error, t("versions.restoreError")),
+    });
+  }
 
   return (
     <>
@@ -61,6 +92,39 @@ export function ArticleVersionHistoryPanel({
         version={selectedVersion}
         onClose={() => setSelectedVersion(null)}
       />
+
+      {/* Restore confirm — replays a past version as a NEW version (never rewrites history). */}
+      <AlertDialog
+        open={restoreTarget !== null}
+        onOpenChange={(open) => !open && setRestoreTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("versions.restoreConfirmTitle", {
+                n: restoreTarget?.version ?? 0,
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("versions.restoreConfirmDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={restoreVersion.isPending}>
+              {t("versions.restoreCancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={restoreVersion.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+                if (restoreTarget) handleRestore(restoreTarget);
+              }}
+            >
+              {t("versions.restore")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* History list sheet */}
       <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
@@ -97,7 +161,7 @@ export function ArticleVersionHistoryPanel({
               </p>
             ) : (
               <ul className="divide-y">
-                {versions.map((v) => (
+                {versions.map((v, index) => (
                   <VersionRow
                     key={v.id}
                     version={v}
@@ -105,6 +169,13 @@ export function ArticleVersionHistoryPanel({
                     onView={() => {
                       setSelectedVersion(v);
                     }}
+                    // Restore is offered for past versions only — restoring the latest (the live
+                    // content) would be a no-op (the API skips an identical snapshot anyway).
+                    onRestore={
+                      canWrite && index > 0
+                        ? () => setRestoreTarget(v)
+                        : undefined
+                    }
                     t={t}
                   />
                 ))}
@@ -134,11 +205,14 @@ function VersionRow({
   version,
   authorName,
   onView,
+  onRestore,
   t,
 }: {
   version: ArticleVersion;
   authorName: string | undefined;
   onView: () => void;
+  /** Present only when the caller may restore this (past) version (`article:write`). */
+  onRestore?: () => void;
   t: ReturnType<typeof useTranslations<"kb">>;
 }) {
   const { date } = useFormatters();
@@ -162,16 +236,31 @@ function VersionRow({
           <span className="tabular-nums">{date(version.createdAt)}</span>
         </p>
       </div>
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={onView}
-        aria-label={t("versions.viewVersionAriaLabel", {
-          n: version.version,
-        })}
-      >
-        {t("versions.viewVersion")}
-      </Button>
+      <div className="flex shrink-0 items-center gap-1">
+        {onRestore ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onRestore}
+            aria-label={t("versions.restoreVersionAriaLabel", {
+              n: version.version,
+            })}
+          >
+            <ArrowUturnLeftIcon />
+            {t("versions.restore")}
+          </Button>
+        ) : null}
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onView}
+          aria-label={t("versions.viewVersionAriaLabel", {
+            n: version.version,
+          })}
+        >
+          {t("versions.viewVersion")}
+        </Button>
+      </div>
     </li>
   );
 }

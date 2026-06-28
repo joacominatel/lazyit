@@ -742,7 +742,9 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
         categoryId: 'secret-folder',
       });
-      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['public-folder']));
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['public-folder']),
+      );
       await expect(
         service.findOne('a', OTHER_USER as never, OTHER_PRINCIPAL),
       ).rejects.toBeInstanceOf(NotFoundException);
@@ -755,7 +757,9 @@ describe('ArticlesService', () => {
         authorId: AUTHOR,
         categoryId: 'shared-folder',
       });
-      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['shared-folder']));
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['shared-folder']),
+      );
       await expect(
         service.findOne('a', OTHER_USER as never, OTHER_PRINCIPAL),
       ).resolves.toMatchObject({ id: 'a' });
@@ -1090,6 +1094,76 @@ describe('ArticlesService', () => {
       });
       await service.publish('a', AUTHOR_PRINCIPAL);
       expect(articleVersion.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('restoreVersion (#848)', () => {
+    it('replays an old version through the edit path: appends a NEW version with the old content, keeps the current status', async () => {
+      // loadOwned (here + inside update) reads the LIVE article — currently PUBLISHED.
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        title: 'New title',
+        content: 'new body',
+        excerpt: null,
+      });
+      // The old snapshot being restored — a DRAFT with different content and an excerpt.
+      articleVersion.findFirst.mockResolvedValueOnce({
+        id: 5,
+        articleId: 'a',
+        version: 1,
+        title: 'Old title',
+        content: 'old body',
+        excerpt: 'old excerpt',
+        status: 'DRAFT',
+      });
+      // update() writes the row back; status is the CURRENT status (update never touches it).
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 's',
+        title: 'Old title',
+        content: 'old body',
+        excerpt: 'old excerpt',
+        status: 'PUBLISHED',
+      });
+      // Two versions already exist → the restore appends version 3.
+      articleVersion.aggregate.mockResolvedValueOnce({ _max: { version: 2 } });
+
+      await service.restoreVersion('a', 1, AUTHOR_PRINCIPAL);
+
+      // The edit path was driven with the old content fields only — never `status`.
+      expect(lastUpdate()).toMatchObject({
+        title: 'Old title',
+        content: 'old body',
+        excerpt: 'old excerpt',
+        lastEditedById: AUTHOR,
+      });
+      expect(lastUpdate()).not.toHaveProperty('status');
+      // A NEW append-only version was written: old content, but the CURRENT (published) status.
+      expect(articleVersion.create).toHaveBeenCalledTimes(1);
+      expect(lastVersion()).toMatchObject({
+        articleId: 'a',
+        version: 3,
+        title: 'Old title',
+        content: 'old body',
+        excerpt: 'old excerpt',
+        status: 'PUBLISHED',
+        editedById: AUTHOR,
+      });
+    });
+
+    it('404s when the requested version does not exist (and writes nothing)', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+      });
+      articleVersion.findFirst.mockResolvedValueOnce(null);
+      await expect(
+        service.restoreVersion('a', 99, AUTHOR_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(article.update).not.toHaveBeenCalled();
     });
   });
 
@@ -1435,9 +1509,16 @@ describe('ArticlesService', () => {
         new Set(['public-folder']),
       );
       article.findMany.mockResolvedValueOnce([]);
-      await service.findArticlesForAsset('as1', {}, REVERSE_PAGE, OTHER_PRINCIPAL);
+      await service.findArticlesForAsset(
+        'as1',
+        {},
+        REVERSE_PAGE,
+        OTHER_PRINCIPAL,
+      );
       // The caller's visible folder set is resolved DB-first per call (never cached).
-      expect(folderAccess.visibleFolderIds).toHaveBeenCalledWith(OTHER_PRINCIPAL);
+      expect(folderAccess.visibleFolderIds).toHaveBeenCalledWith(
+        OTHER_PRINCIPAL,
+      );
       const and = lastReverseWhere().AND;
       // The folder pin is ANDed on top of the PUBLISHED + link scope, so a restricted article never
       // surfaces through the link scope (existence-hiding).
@@ -1457,9 +1538,13 @@ describe('ArticlesService', () => {
         REVERSE_PAGE,
         OTHER_PRINCIPAL,
       );
-      expect(folderAccess.visibleFolderIds).toHaveBeenCalledWith(OTHER_PRINCIPAL);
+      expect(folderAccess.visibleFolderIds).toHaveBeenCalledWith(
+        OTHER_PRINCIPAL,
+      );
       const and = lastReverseWhere().AND;
-      expect(and).toContainEqual({ links: { some: { applicationId: 'app1' } } });
+      expect(and).toContainEqual({
+        links: { some: { applicationId: 'app1' } },
+      });
       expect(and).toContainEqual({ categoryId: { in: ['public-folder'] } });
     });
 
@@ -1738,7 +1823,9 @@ describe('ArticlesService', () => {
       // surfacing an article you cannot yourself read — the alias is rejected as 404 (folder-hidden),
       // never written. Belt-and-suspenders with the author gate.
       article.findFirst.mockResolvedValue(OWNED);
-      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['some-other-folder']));
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['some-other-folder']),
+      );
       await expect(
         service.addAlias('a', { folderId: 'other' }, AUTHOR_PRINCIPAL),
       ).rejects.toBeInstanceOf(NotFoundException);

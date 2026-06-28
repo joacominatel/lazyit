@@ -241,7 +241,14 @@
     "empty": "No versions yet.",
     "versionLabel": "Version {n}",
     "viewVersion": "View",
-    "viewVersionAriaLabel": "View version {n}"
+    "viewVersionAriaLabel": "View version {n}",
+    "restore": "Restore",
+    "restoreVersionAriaLabel": "Restore version {n}",
+    "restoreConfirmTitle": "Restore version {n}?",
+    "restoreConfirmDescription": "This re-applies that version's title, body and excerpt as a new version. The earlier history is kept and the article's published status is unchanged.",
+    "restoreCancel": "Cancel",
+    "restoreToast": "Restored to version {n}",
+    "restoreError": "Couldn't restore the version"
   },
   "wikiLinks": {
     "unresolvedTooltip": "Document not created yet"

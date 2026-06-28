@@ -241,7 +241,14 @@
     "empty": "Aún no hay versiones.",
     "versionLabel": "Versión {n}",
     "viewVersion": "Ver",
-    "viewVersionAriaLabel": "Ver versión {n}"
+    "viewVersionAriaLabel": "Ver versión {n}",
+    "restore": "Restaurar",
+    "restoreVersionAriaLabel": "Restaurar versión {n}",
+    "restoreConfirmTitle": "¿Restaurar la versión {n}?",
+    "restoreConfirmDescription": "Esto vuelve a aplicar el título, el cuerpo y el extracto de esa versión como una versión nueva. El historial anterior se conserva y el estado de publicación del artículo no cambia.",
+    "restoreCancel": "Cancelar",
+    "restoreToast": "Restaurado a la versión {n}",
+    "restoreError": "No se pudo restaurar la versión"
   },
   "wikiLinks": {
     "unresolvedTooltip": "Documento aún no creado"
