@@ -6,7 +6,7 @@ import type {
   RecentActivityFilterOptions,
   RecentActivityPage,
 } from "@lazyit/shared";
-import { apiFetch } from "../client";
+import { apiFetch, apiFetchBlob } from "../client";
 
 /**
  * Data-access for the read-only dashboard aggregation. `GET /dashboard/summary` (ADR-0030 sibling,
@@ -133,4 +133,36 @@ export function getDashboardActivity(
  */
 export function getDashboardActivityFilters(): Promise<RecentActivityFilterOptions> {
   return apiFetch<RecentActivityFilterOptions>(`${BASE}/activity/filters`);
+}
+
+/**
+ * Download the WHOLE filtered activity range as a CSV blob (`GET /dashboard/activity/export`, issue
+ * #840). Serializes the SAME filters as {@link getDashboardActivity} (no `limit`/`offset` — the export
+ * is unpaginated and streams every matching row server-side). Authenticated via the Bearer the client
+ * already holds, so it can't be a plain `<a href>`; the caller turns the returned Blob into a browser
+ * download. The RFC-4180 escaping + formula-injection guard are applied server-side.
+ */
+export function downloadDashboardActivityExport(
+  {
+    entityType,
+    entityId,
+    actorId,
+    action,
+    from,
+    to,
+    q,
+  }: DashboardActivityFilters = {},
+): Promise<Blob> {
+  const params = new URLSearchParams();
+  if (entityType) params.set("entityType", entityType);
+  if (entityId) params.set("entityId", entityId);
+  if (actorId) params.set("actorId", actorId);
+  if (action) params.set("action", action);
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  if (q) params.set("q", q);
+  const qs = params.toString();
+  return apiFetchBlob(
+    qs ? `${BASE}/activity/export?${qs}` : `${BASE}/activity/export`,
+  );
 }
