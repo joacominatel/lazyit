@@ -23,6 +23,7 @@ Open **Assets** and choose **New asset**. The form captures:
 - **Location** — optional. Where the unit physically lives. See
   [Locations](/help/assets-locations).
 - **Serial** and **Asset tag** — both optional (see *Serial and asset tag* below).
+- **Company** — optional grouping label (see *Company* below).
 - **Purchase date** and **Warranty end** — optional dates.
 - **Notes** and **Custom fields** — optional free-form detail.
 
@@ -60,6 +61,22 @@ id for links and references. The asset tag is a human-facing label you can chang
 want lazyit to assign asset tags automatically from a running number, see
 [Asset tags](/help/assets-asset-tags).
 
+## Company
+
+**Company** is an optional grouping label on an asset — a way to tag which organization, business
+unit or client an asset belongs to (handy if you manage gear for several clients, or split kit by
+legal entity). It is **only for grouping, filtering and reporting**: it is **not** an access control.
+Company does not hide anything — anyone who can see assets sees *all* assets regardless of their
+company; setting it simply lets you narrow the list to one company when you want to.
+
+It is a free-text field with **autocomplete**: as you type, lazyit suggests companies you've already
+used on other assets, so you reuse the same spelling instead of creating near-duplicates — but you
+can always type a brand-new value. There is no separate "companies" screen to manage: a company
+exists simply because at least one asset uses it.
+
+On the asset detail page the company is shown when set, and links to the list filtered by that
+company. You can filter and add a **Company** column to the list (see below).
+
 ## Custom fields
 
 Different kinds of asset carry different attributes — a laptop has RAM and a CPU, a switch has a port
@@ -76,6 +93,7 @@ The **Assets** list has a search box and a **Status** dropdown right in the tool
 **Filters** button that opens a small panel for the rest:
 
 - **Category** and **Location** — narrow to one model category or one place.
+- **Company** — narrow to one company (the grouping label above). Only companies in use appear.
 - **Owner** — show only the assets currently assigned to a specific person. Start typing a name to
   pick them; the list then shows just that person's live assignments.
 - **Ownership** — filter by whether an asset has any current owner at all (*Has owners* /
@@ -88,7 +106,7 @@ filtered view is easy to undo, share or bookmark.
 ### Choosing which columns to show
 
 The **Columns** button (next to *Filters*) opens a checklist of the table's columns — asset tag,
-model, category, location, status, owners and updated. Untick the ones you don't care about to slim
+model, category, location, company, status, owners and updated. Untick the ones you don't care about to slim
 the table down to what matters for you. The **Name** column and the row actions always stay. Your
 choice is remembered in this browser, so the table keeps the same shape next time you visit. (This
 governs the desktop table; the mobile card view always shows the full set.)

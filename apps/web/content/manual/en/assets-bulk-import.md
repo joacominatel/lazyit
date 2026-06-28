@@ -65,7 +65,7 @@ For each column, open it and pick one target from the dropdown:
 
 - **A lazyit field**, grouped by entity:
   - **Asset** — **Name** (*required*), **Status** (*required*), **Serial number**, **Asset tag**,
-    **Purchase date**, **Warranty end**, **Model** and **Location**.
+    **Company**, **Purchase date**, **Warranty end**, **Model** and **Location**.
   - **Model** — **Manufacturer** and **Category** for the asset models the import creates (see
     *Model brand and category* below).
   - **Person** — the person the asset is **assigned to**: **Name**, **Email**, **Employee no.**,
@@ -88,6 +88,8 @@ A few fields behave specially:
 - **Asset tag** — a tag from your file is used as-is; a blank one is auto-assigned later if your
   instance has an asset-tag scheme enabled.
 - **Model** and **Location** are **references**, matched to existing records by name (see *Conflicts*).
+- **Company** is an optional grouping label, set as-is from your file (a *Company* / *Empresa* column
+  is recognized automatically). It groups and filters assets — it is not an access control.
 
 The importer **pre-fills a best guess** for each column, but it never decides for you — you confirm
 every column, and nothing is dropped silently. The guess understands more than exact English
