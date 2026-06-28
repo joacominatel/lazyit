@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  PlusIcon,
-  ServerStackIcon,
-  ShareIcon,
-} from "@heroicons/react/24/outline";
+import { ServerStackIcon, ShareIcon } from "@heroicons/react/24/outline";
 import {
   type InfraNodeKind,
   InfraNodeKindSchema,
@@ -30,7 +26,6 @@ import {
 } from "@/components/resource-table";
 import { SearchInput } from "@/components/search-input";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -45,8 +40,9 @@ import { useInfraNodes } from "@/lib/api/hooks/use-infra-nodes";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { statusTone } from "@/lib/infra/canvas";
-import { AddServerDialog } from "./add-server-dialog";
+import { AgentOnboarding } from "./agent-onboarding";
 import { AgentBadge, AgentFreshness } from "./agent-provenance";
+import { CreateAgentWizard } from "./create-agent-wizard";
 import { PendingReviewTray } from "./pending-review-tray";
 
 /**
@@ -91,7 +87,16 @@ export function ServersTableView() {
   // Minting the reporting-agent Service Account needs settings:manage (ADR-0074 §6 / ADR-0048), so the
   // "Add a server" affordance is gated on it — separate from the infra:read that gates the list itself.
   const canMintServer = useCan("settings:manage");
-  const [addServerOpen, setAddServerOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  // Whether the estate already has ANY agent-sourced node (across every state) — drives the onboarding
+  // hero vs. the compact "Add agent" affordance (ADR-0074 §6). Reads the unfiltered node list, which is
+  // already cached/shared by the topology canvas and the Assets "On topology" badge (#765), so this is
+  // a cache hit, not an extra round-trip. `undefined` while loading → the hero stays hidden (no flash).
+  const { data: allNodes } = useInfraNodes({});
+  const hasAgents = allNodes
+    ? allNodes.some((node) => node.source === "AGENT")
+    : undefined;
 
   const {
     q,
@@ -411,21 +416,18 @@ export function ServersTableView() {
 
   return (
     <div className="space-y-6">
-      {canMintServer ? (
-        <div className="flex justify-end">
-          <Button onClick={() => setAddServerOpen(true)}>
-            <PlusIcon />
-            {tServers("addServer")}
-          </Button>
-        </div>
-      ) : null}
+      <AgentOnboarding
+        canMint={canMintServer}
+        hasAgents={hasAgents}
+        onCreate={() => setWizardOpen(true)}
+      />
 
       <PendingReviewTray />
 
       {body}
 
       {canMintServer ? (
-        <AddServerDialog open={addServerOpen} onOpenChange={setAddServerOpen} />
+        <CreateAgentWizard open={wizardOpen} onOpenChange={setWizardOpen} />
       ) : null}
     </div>
   );
