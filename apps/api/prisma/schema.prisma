@@ -1004,7 +1004,8 @@ model AccessGrant {
   grantedAt     DateTime        @default(now())
   // null => active. Setting it ends the grant without deleting the row (not a soft delete).
   revokedAt     DateTime?
-  // Informative only — no scheduler auto-revokes at expiry (ADR-0023). null => no expiry.
+  // null => no expiry. A periodic sweeper auto-revokes a grant once it passes expiresAt, through the
+  // normal revoke() path (deprovision workflow + system attribution fire) — ADR-0023 (amended).
   expiresAt     DateTime?
   // Optional audit FKs — who granted / revoked. SetNull: losing the actor never blocks deleting
   // them, and the grant record survives. null => system / unknown.
