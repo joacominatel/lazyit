@@ -46,13 +46,26 @@ Open any article and scroll to the **Version History** panel at the bottom of th
 
 Click **View** on any row to open a read-only view of that snapshot's full title and content.
 
-## What you can and cannot do today
+## Restoring a previous version
+
+If an edit went wrong, you can **restore** an earlier snapshot. Open the **History** panel and click
+**Restore** on any past version (the latest version is the live content, so it has nothing to
+restore). Confirm, and lazyit re-applies that version's **title, body and excerpt** to the live
+article.
+
+Restoring is itself an edit, so it follows the same append-only rule: it writes a **new** version on
+top — it never rewrites or deletes the history. A few things to know:
+
+- It restores the **content** (title, body, excerpt). It does **not** change the article's
+  published/draft **status** — a published article stays published, a draft stays a draft. Use
+  Publish/Unpublish for that.
+- Restoring to text identical to the current article does nothing (no new version is written).
+- Restore needs **edit permission** and, like every edit, you must be the article's author.
+
+## What you can and cannot do
 
 - **History is kept for every article, automatically** — you do not turn it on, and you cannot turn
   it off.
-- **There is no "restore to a previous version" action** in the current release. History records
-  what an article said; replaying an old version back onto the live article is not yet available. To
-  revert a change, edit the article back to the earlier text (which itself becomes a new version).
 - **A draft's history is as private as the draft.** Snapshots of a draft are visible only to its
   author, the same as the draft itself.
 

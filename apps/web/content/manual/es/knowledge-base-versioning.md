@@ -49,14 +49,26 @@ reciente a más antigua. Cada fila muestra:
 Haz clic en **Ver** en cualquier fila para abrir una vista de solo lectura con el título y el
 contenido completo de esa instantánea.
 
-## Qué puedes y qué no puedes hacer hoy
+## Cómo restaurar una versión anterior
+
+Si una edición salió mal, puedes **restaurar** una instantánea anterior. Abre el panel **Historial**
+y haz clic en **Restaurar** en cualquier versión pasada (la última versión es el contenido vivo, así
+que no hay nada que restaurar en ella). Confirma y lazyit vuelve a aplicar el **título, el cuerpo y
+el extracto** de esa versión al artículo vivo.
+
+Restaurar es en sí mismo una edición, así que sigue la misma regla de solo anexado: escribe una
+versión **nueva** encima — nunca reescribe ni elimina el historial. Algunas cosas que conviene saber:
+
+- Restaura el **contenido** (título, cuerpo, extracto). **No** cambia el **estado** de
+  publicado/borrador del artículo — un artículo publicado sigue publicado y un borrador sigue siendo
+  borrador. Para eso usa Publicar/Despublicar.
+- Restaurar a un texto idéntico al actual no hace nada (no se escribe una versión nueva).
+- Restaurar requiere **permiso de edición** y, como toda edición, debes ser el autor del artículo.
+
+## Qué puedes y qué no puedes hacer
 
 - **El historial se guarda para cada artículo, automáticamente** — no lo activas, y no puedes
   desactivarlo.
-- **No hay una acción de "restaurar a una versión anterior"** en la versión actual. El historial
-  registra lo que decía un artículo; volver a aplicar una versión antigua sobre el artículo vivo aún
-  no está disponible. Para revertir un cambio, edita el artículo de vuelta al texto anterior (lo que a
-  su vez se convierte en una versión nueva).
 - **El historial de un borrador es tan privado como el borrador.** Las instantáneas de un borrador
   solo las ve su autor, igual que el propio borrador.
 
