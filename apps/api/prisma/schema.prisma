@@ -454,6 +454,13 @@ model Asset {
   // See docs/03-decisions/0007-flexible-asset-specs-jsonb.md
   specs        Json?
   notes        String?
+  // Optional GROUPING attribute (ADR-0076, #857): a Snipe-IT-style "Company" used to group/filter/
+  // report assets. NOT a tenancy/scoping boundary — anyone with asset:read sees ALL assets regardless
+  // of company (Modo B per-record scoping was decided against, #841). Free-text + autocomplete over
+  // already-used values (no Company entity/table/CRUD).
+  // ponytail: free-text column with a datalist of existing values — promote to a managed Company
+  // entity ONLY if governance (rename / soft-delete / merge) is ever needed.
+  company      String?
   purchaseDate DateTime?
   warrantyEnd  DateTime?
   // FKs are SetNull: deleting a Model/Location detaches assets, never deletes them.
