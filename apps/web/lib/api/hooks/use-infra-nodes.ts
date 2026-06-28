@@ -58,11 +58,20 @@ export const infraKeys = {
 };
 
 /** List topology nodes, optionally filtered. The canvas keeps the fetch client-side (React Flow is
- * client-only — no SSR prefetch, per #741). */
-export function useInfraNodes(filters: InfraNodeFilters = {}) {
+ * client-only — no SSR prefetch, per #741).
+ *
+ * `options` exposes just the two react-query knobs the agent-onboarding live-wait needs (ADR-0074
+ * §3 / #831): `enabled` to fire the poll only while the wizard's "waiting" step is open, and
+ * `refetchInterval` to poll the PENDING list every few seconds until the freshly-installed host
+ * checks in. Per-observer, so it never forces a refetch interval on the table/tray that share the key. */
+export function useInfraNodes(
+  filters: InfraNodeFilters = {},
+  options?: { enabled?: boolean; refetchInterval?: number | false },
+) {
   return useQuery({
     queryKey: infraKeys.nodes(filters),
     queryFn: ({ signal }) => getInfraNodes(filters, signal),
+    ...options,
   });
 }
 
