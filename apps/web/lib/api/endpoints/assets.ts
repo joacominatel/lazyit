@@ -51,6 +51,8 @@ export interface AssetFilters {
   categoryId?: string;
   locationId?: string;
   status?: AssetStatus;
+  /** Exact-match grouping filter on the free-text company value (ADR-0076). */
+  company?: string;
   /** Restrict to assets currently assigned (live) to this user (a User uuid). Server-side filter. */
   assignedToUserId?: string;
   /** Server-side ownership filter: `HAS` = has a live owner, `NONE` = unassigned (#824). */
@@ -82,6 +84,7 @@ export function getAssets(
   if (filters.categoryId) params.set("categoryId", filters.categoryId);
   if (filters.locationId) params.set("locationId", filters.locationId);
   if (filters.status) params.set("status", filters.status);
+  if (filters.company) params.set("company", filters.company);
   if (filters.assignedToUserId)
     params.set("assignedToUserId", filters.assignedToUserId);
   if (filters.ownership) params.set("ownership", filters.ownership);
@@ -95,6 +98,15 @@ export function getAssets(
   if (filters.deleted) params.set("deleted", filters.deleted);
   const qs = params.toString();
   return apiFetch<AssetListPage>(qs ? `${BASE}?${qs}` : BASE, { signal, token });
+}
+
+/**
+ * The distinct, non-empty company values across live assets (ADR-0076) — the autocomplete catalog for
+ * the asset form's company datalist and the list's company filter. A grouping facet, not an access
+ * boundary. Gated server-side by asset:read.
+ */
+export function getAssetCompanies(signal?: AbortSignal): Promise<string[]> {
+  return apiFetch<string[]>(`${BASE}/companies`, { signal });
 }
 
 /**
