@@ -1,7 +1,15 @@
-import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
+import { Readable } from 'node:stream';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Query,
+  StreamableFile,
+} from '@nestjs/common';
 import {
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -48,7 +56,9 @@ export class DashboardController {
   async summary(
     @Query('expiringWithinDays') expiringWithinDays?: string,
   ): Promise<DashboardSummary> {
-    return this.dashboard.getSummary(parseExpiringWithinDays(expiringWithinDays));
+    return this.dashboard.getSummary(
+      parseExpiringWithinDays(expiringWithinDays),
+    );
   }
 
   @Get('activity/filters')
@@ -148,10 +158,72 @@ export class DashboardController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     const query = this.parseActivityQuery(
-      { limit, offset, page, entityType, entityId, actorId, action, from, to, q },
+      {
+        limit,
+        offset,
+        page,
+        entityType,
+        entityId,
+        actorId,
+        action,
+        from,
+        to,
+        q,
+      },
       principal,
     );
     return this.dashboard.getActivity(query);
+  }
+
+  @Get('activity/export')
+  @RequirePermission('logs:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'Bulk CSV export of the WHOLE filtered activity range (issue #840), gated on logs:read like the feed. Takes the SAME optional filters as GET /dashboard/activity (entityType/entityId/actorId/action/from/to/q) and streams EVERY matching row newest-first — not just the visible page. limit/offset/page are ignored (the export is unpaginated). Cells are RFC-4180 escaped with a spreadsheet formula-injection guard.',
+  })
+  @ApiQuery({
+    name: 'entityType',
+    required: false,
+    enum: ['asset', 'application', 'consumable'],
+  })
+  @ApiQuery({ name: 'entityId', required: false, type: String })
+  @ApiQuery({ name: 'actorId', required: false, type: String })
+  @ApiQuery({ name: 'action', required: false, enum: RECENT_ACTIVITY_ACTIONS })
+  @ApiQuery({ name: 'from', required: false, type: String })
+  @ApiQuery({ name: 'to', required: false, type: String })
+  @ApiQuery({ name: 'q', required: false, type: String })
+  @ApiOkResponse({
+    description: 'The filtered activity log as CSV (text/csv).',
+  })
+  activityExport(
+    @Query('entityType') entityType?: string,
+    @Query('entityId') entityId?: string,
+    @Query('actorId') actorId?: string,
+    @Query('action') action?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('q') q?: string,
+    @CurrentPrincipal() principal?: Principal,
+  ): StreamableFile {
+    // Reuse the SAME parse/validate/`"me"`-resolution as the feed. limit/offset/page are absent here,
+    // so the parsed window defaults are harmless — the export reads only the filter fields.
+    const query = this.parseActivityQuery(
+      { entityType, entityId, actorId, action, from, to, q },
+      principal,
+    );
+    const filename = `lazyit-activity-${new Date().toISOString().slice(0, 10)}.csv`;
+    // Readable.from drains the async generator one chunk at a time → never the whole result in memory.
+    return new StreamableFile(
+      // objectMode:false so each yielded string is written as a UTF-8 byte chunk to the HTTP response.
+      Readable.from(this.dashboard.streamActivityCsvRows(query), {
+        objectMode: false,
+      }),
+      {
+        type: 'text/csv; charset=utf-8',
+        disposition: `attachment; filename="${filename}"`,
+      },
+    );
   }
 
   /**
