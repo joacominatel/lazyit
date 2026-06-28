@@ -56,11 +56,17 @@ The feed is a single dense **table** — when, action, entity, actor and a one-l
 event. Paging is real previous/next over the filtered result (pick how many rows per page), so each page
 is one true slice of the server's count, never a partial window.
 
-- **Export visible** — download the rows currently shown as a CSV.
+- **Export all (filtered)** — download a CSV of **every** event matching the current filters — the whole
+  range, not just the page you are looking at. The file is streamed from the server, so it works even for
+  large histories; the current page size and which page you are on are ignored.
+- **Export visible** — download just the rows currently shown (the active filters **and** the current
+  page) as a CSV.
 - **Print** — print the current view.
 
-Both export actions act on exactly what is currently visible (the active filters and the current page), so
-narrow the feed first to export just the slice you need.
+Both CSV exports produce the same columns (when, action, entity, entity id, actor, summary) and are safe
+to open in a spreadsheet. The difference is scope: **Export all** is the whole filtered history, while
+**Export visible** and **Print** act only on the page in front of you. Narrow the feed with the filters
+first to export just the slice you need.
 
 ## Reports vs the notification bell
 

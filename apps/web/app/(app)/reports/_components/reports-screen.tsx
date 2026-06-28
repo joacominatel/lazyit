@@ -46,13 +46,14 @@ import { TableCell } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { actionLabel, actionTone } from "@/lib/activity-tones";
 import type { DashboardActivityFilters } from "@/lib/api/endpoints/dashboard";
+import { notifyError } from "@/lib/api/notify-error";
 import {
   useReportsActivityFilters,
   useReportsActivityPage,
 } from "@/lib/api/hooks/use-dashboard";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
-import { downloadCsv } from "./reports-csv";
+import { downloadActivityExport, downloadCsv } from "./reports-csv";
 
 /** Stable empty breadcrumb for the reports PageHeader (no items — just the home crumb). */
 const BREADCRUMB = <Breadcrumb />;
@@ -177,6 +178,8 @@ export function ReportsScreen() {
   const tAction = useTranslations("shared.activity.action");
   // Snapshot "now" once so the relative-range presets stay pure across renders.
   const [now] = useState(() => Date.now());
+  // Bulk "export all (filtered)" is async (it streams the whole range from the API); disable while busy.
+  const [isExportingAll, setIsExportingAll] = useState(false);
   const {
     q,
     offset,
@@ -249,6 +252,19 @@ export function ReportsScreen() {
 
   const items = pageData?.items ?? [];
   const total = pageData?.total ?? 0;
+
+  // Stream the WHOLE filtered range from the API (issue #840), not just the visible page. Uses the same
+  // server filters the feed is showing, so "export all" matches what's on screen minus the paging.
+  async function handleExportAll() {
+    setIsExportingAll(true);
+    try {
+      await downloadActivityExport(serverFilters);
+    } catch (error) {
+      notifyError(error, t("export.exportAllError"));
+    } finally {
+      setIsExportingAll(false);
+    }
+  }
 
   const chips = [
     ...(q
@@ -325,6 +341,18 @@ export function ReportsScreen() {
       subtitle={t("page.subtitle")}
       actions={
         <div className="flex items-center gap-2" data-print-hide>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportAll}
+            disabled={isExportingAll || total === 0}
+            title={t("export.exportAllTitle")}
+          >
+            <ArrowDownTrayIcon />
+            {isExportingAll
+              ? t("export.exportAllBusy")
+              : t("export.exportAll")}
+          </Button>
           <Button
             variant="outline"
             size="sm"

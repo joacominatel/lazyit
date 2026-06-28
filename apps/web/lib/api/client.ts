@@ -112,3 +112,38 @@ export async function apiFetch<T>(
 
   return payload as T;
 }
+
+/**
+ * Fetch `path` and return the raw response BODY as a `Blob` (not JSON-parsed) — for authenticated file
+ * downloads where the API streams an attachment (e.g. the activity-log CSV export, issue #840). The
+ * API is Bearer-authenticated, so a plain `<a href>` can't carry the token; this resolves the same
+ * Bearer as {@link apiFetch} and hands back a Blob the caller can turn into a browser download.
+ * Throws {@link ApiError} on a non-2xx response (best-effort JSON message).
+ */
+export async function apiFetchBlob(
+  path: string,
+  { token, headers, ...init }: Omit<ApiFetchOptions, "body"> = {},
+): Promise<Blob> {
+  const resolvedToken = token ?? getSessionToken();
+  const res = await fetch(`${API_URL}${path}`, {
+    ...init,
+    headers: {
+      ...(resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}),
+      ...headers,
+    },
+  });
+
+  if (!res.ok) {
+    const isJson = res.headers
+      .get("content-type")
+      ?.includes("application/json");
+    const payload = isJson ? await res.json().catch(() => undefined) : undefined;
+    const message =
+      (payload as { message?: string } | undefined)?.message ??
+      `API request failed: ${res.status} ${res.statusText}`;
+    const requestId = res.headers.get("x-request-id") ?? undefined;
+    throw new ApiError(res.status, message, payload, requestId);
+  }
+
+  return res.blob();
+}
