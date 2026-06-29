@@ -1,0 +1,19 @@
+{
+  "name": "@lazyit/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "lazyit server reporting agent — Linux inventory collector (ADR-0074, Phase 2)",
+  "scripts": {
+    "compile:x64": "bun build --compile --target=bun-linux-x64 --outfile dist/lazyit-agent-x64 src/index.ts",
+    "compile:arm64": "bun build --compile --target=bun-linux-arm64 --outfile dist/lazyit-agent-arm64 src/index.ts",
+    "compile": "bun run compile:x64 && bun run compile:arm64",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lazyit/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

@@ -164,6 +164,15 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
     pillar: "inventory",
     tier: "coarse",
   },
+  "infra:report": {
+    // The server reporting agent (ADR-0074). A MACHINE-ONLY permission — the single grant the
+    // collector's Service Account holds to upsert inventory into the PENDING tray. Coarse tier (it is
+    // neither `:read` nor `:write`), so ADMIN-only by seed; deliberately NOT bundled into any human
+    // capability toggle (granted to the agent SA, not a role) — like the `accessGrant:write` orphan.
+    label: "Report server inventory (agent)",
+    pillar: "inventory",
+    tier: "coarse",
+  },
   // ── Access ─────────────────────────────────────────────────────────────────
   "application:read": { label: "View applications", pillar: "access", tier: "view" },
   "application:write": {

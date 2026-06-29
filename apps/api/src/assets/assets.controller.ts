@@ -91,6 +91,12 @@ export class AssetsController {
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'locationId', required: false })
   @ApiQuery({
+    name: 'company',
+    required: false,
+    description:
+      'Exact-match grouping filter on the free-text company value (ADR-0076). Not a scoping boundary — see GET /assets/companies for the distinct values.',
+  })
+  @ApiQuery({
     name: 'status',
     required: false,
     enum: [...AssetStatusSchema.options],
@@ -139,6 +145,13 @@ export class AssetsController {
     description: 'Sort direction (default asc when sort is set).',
   })
   @ApiQuery({
+    name: 'ownership',
+    required: false,
+    enum: ['HAS', 'NONE'],
+    description:
+      'Ownership slice over LIVE assignments. HAS = assets with an active owner; NONE = unassigned. Invalid value → 400.',
+  })
+  @ApiQuery({
     name: 'deleted',
     required: false,
     enum: ['active', 'only'],
@@ -150,8 +163,10 @@ export class AssetsController {
     @Query('categoryId') categoryId?: string,
     @Query('locationId') locationId?: string,
     @Query('status') status?: string,
+    @Query('company') company?: string,
     @Query('q') q?: string,
     @Query('assignedToUserId') assignedToUserId?: string,
+    @Query('ownership') ownership?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -170,6 +185,15 @@ export class AssetsController {
       }
       parsedStatus = result.data;
     }
+    let parsedOwnership: 'HAS' | 'NONE' | undefined;
+    if (ownership !== undefined) {
+      if (ownership !== 'HAS' && ownership !== 'NONE') {
+        throw new BadRequestException(
+          'Invalid ownership. Expected one of: HAS, NONE',
+        );
+      }
+      parsedOwnership = ownership;
+    }
     const pageQuery = parsePageQuery({
       limit,
       offset,
@@ -186,12 +210,26 @@ export class AssetsController {
         categoryId: parseCuidQuery(categoryId, 'categoryId'),
         locationId: parseCuidQuery(locationId, 'locationId'),
         status: parsedStatus,
+        company: company?.trim() || undefined,
         q,
         // User.id is a uuid (ADR-0005) — validate with parseUuidQuery (cf. categoryId/locationId cuid).
         assignedToUserId: parseUuidQuery(assignedToUserId, 'assignedToUserId'),
+        ownership: parsedOwnership,
       },
       pageQuery,
     );
+  }
+
+  // STATIC route declared BEFORE the `:id` param route so `/assets/companies` never resolves as an id.
+  @Get('companies')
+  @RequirePermission('asset:read')
+  @ApiOperation({
+    summary:
+      'List the distinct, non-empty company values across live assets (ADR-0076) — powers the form autocomplete and the list filter. A grouping facet, NOT an access boundary.',
+  })
+  @ApiOkResponse({ type: [String] })
+  listCompanies() {
+    return this.assets.listCompanies();
   }
 
   @Get(':id')

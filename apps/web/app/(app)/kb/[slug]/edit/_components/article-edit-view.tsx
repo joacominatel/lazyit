@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
 import { Breadcrumb } from "@/components/breadcrumb";
@@ -15,6 +16,19 @@ export function ArticleEditView({ slug }: { slug: string }) {
   const { data: article, isLoading, isError, error, refetch } =
     useArticleBySlug(slug);
   const { data: session } = useSession();
+
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: t("breadcrumb"), href: "/kb" },
+          { label: article?.title ?? "", href: article?.slug ? `/kb/${article.slug}` : undefined },
+          { label: t("form.editCrumb") },
+        ]}
+      />
+    ),
+    [t, article?.title, article?.slug],
+  );
 
   if (isLoading) {
     return (
@@ -52,15 +66,7 @@ export function ArticleEditView({ slug }: { slug: string }) {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: t("breadcrumb"), href: "/kb" },
-              { label: article.title, href: `/kb/${article.slug}` },
-              { label: t("form.editCrumb") },
-            ]}
-          />
-        }
+        breadcrumb={breadcrumb}
         title={t("form.editTitle")}
         subtitle={t("form.editSubtitle")}
       />

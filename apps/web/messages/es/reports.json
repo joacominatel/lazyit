@@ -58,6 +58,10 @@
     "filteredEmpty": "Ningún evento coincide con estos filtros."
   },
   "export": {
+    "exportAll": "Exportar todo (filtrado)",
+    "exportAllTitle": "Descarga todos los eventos que coinciden con los filtros actuales (todo el rango, no solo esta página)",
+    "exportAllBusy": "Exportando…",
+    "exportAllError": "No se pudo exportar el registro de actividad",
     "exportVisible": "Exportar eventos visibles",
     "exportTitle": "Exporta los eventos visibles actualmente (la página filtrada)",
     "print": "Imprimir",

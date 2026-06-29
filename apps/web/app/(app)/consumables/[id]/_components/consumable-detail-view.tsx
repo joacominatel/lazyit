@@ -83,6 +83,18 @@ export function ConsumableDetailView({ id }: { id: string }) {
     [users],
   );
 
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: t("list.title"), href: "/consumables" },
+          { label: consumable?.name ?? "" },
+        ]}
+      />
+    ),
+    [t, consumable?.name],
+  );
+
   if (isLoading) {
     return (
       <div className="mx-auto max-w-4xl">
@@ -112,14 +124,7 @@ export function ConsumableDetailView({ id }: { id: string }) {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: t("list.title"), href: "/consumables" },
-              { label: consumable.name },
-            ]}
-          />
-        }
+        breadcrumb={breadcrumb}
         title={consumable.name}
         subtitle={
           consumable.sku ? (

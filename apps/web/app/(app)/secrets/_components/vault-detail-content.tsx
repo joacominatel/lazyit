@@ -9,7 +9,6 @@ import {
   ClipboardIcon,
   EyeIcon,
   EyeSlashIcon,
-  KeyIcon,
   PencilIcon,
   PlusIcon,
   ShieldCheckIcon,
@@ -17,10 +16,17 @@ import {
   UserMinusIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
-import type { SecretItem, User } from "@lazyit/shared";
+import type { SecretItem, SecretItemKind, User } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { Callout } from "@/components/callout";
 import { PageHeader } from "@/components/page-header";
@@ -69,8 +75,17 @@ import {
   serializeEnv,
   splitNewVsExisting,
 } from "@/lib/secret-manager/env-file";
+import { encodeSecretPayload } from "@/lib/secret-manager/typed-secret";
 import { base64ToBytes } from "./crypto-bytes";
+import { SecretKindIcon } from "./secret-kind";
 import { useSecretSession } from "./secret-session";
+import {
+  buildTypedSecret,
+  isTypedSecretComplete,
+  TypedSecretFields,
+  type TypedSecretFieldValues,
+} from "./typed-secret-fields";
+import { TypedSecretReveal } from "./typed-secret-reveal";
 import { UnlockGate } from "./unlock-gate";
 import { useVaultDek } from "./use-vault-dek";
 
@@ -96,6 +111,112 @@ function classifyMembership(q: {
   if (q.isError) return "error";
   // No data, no error, not loading — treat as still settling.
   return "loading";
+}
+
+// ---------------------------------------------------------------------------
+// Local reducers (grouped useState → useReducer; prefer-useReducer). Pure STATE
+// GROUPING only — no change to the crypto open/seal chain, the async ordering, or
+// the error surface. The zero-knowledge line holds: plaintext (`value`/`newValue`)
+// is kept in its OWN dedicated useState in the dialogs, NEVER folded into a reducer.
+// ---------------------------------------------------------------------------
+
+/** VaultDetail's four independent dialog-open booleans. */
+type VaultDialog = "addItem" | "addMember" | "export" | "import";
+type VaultDialogsState = Record<VaultDialog, boolean>;
+function vaultDialogsReducer(
+  state: VaultDialogsState,
+  action: { dialog: VaultDialog; open: boolean },
+): VaultDialogsState {
+  return { ...state, [action.dialog]: action.open };
+}
+
+/** ItemRow's edit/delete dialog booleans (the reveal/copy state stays its own useState, untouched). */
+type RowDialogsState = { editOpen: boolean; deleteOpen: boolean };
+type RowDialogsAction =
+  | { type: "setEditOpen"; open: boolean }
+  | { type: "setDeleteOpen"; open: boolean };
+function rowDialogsReducer(
+  state: RowDialogsState,
+  action: RowDialogsAction,
+): RowDialogsState {
+  switch (action.type) {
+    case "setEditOpen":
+      return { ...state, editOpen: action.open };
+    case "setDeleteOpen":
+      return { ...state, deleteOpen: action.open };
+  }
+}
+
+/** AddItemDialog's non-secret form chrome (label/handle + submission status). The plaintext `value`
+ *  is deliberately kept OUT of here, in its own useState. `reset` clears the fields but not `busy`,
+ *  exactly like the original reset(). */
+type AddItemFormState = {
+  label: string;
+  handle: string;
+  busy: boolean;
+  keyError: boolean;
+};
+type AddItemFormAction =
+  | { type: "setLabel"; value: string }
+  | { type: "setHandle"; value: string }
+  | { type: "setBusy"; busy: boolean }
+  | { type: "setKeyError"; keyError: boolean }
+  | { type: "reset" };
+function addItemFormReducer(
+  state: AddItemFormState,
+  action: AddItemFormAction,
+): AddItemFormState {
+  switch (action.type) {
+    case "setLabel":
+      return { ...state, label: action.value };
+    case "setHandle":
+      return { ...state, handle: action.value };
+    case "setBusy":
+      return { ...state, busy: action.busy };
+    case "setKeyError":
+      return { ...state, keyError: action.keyError };
+    case "reset":
+      return { ...state, label: "", handle: "", keyError: false };
+  }
+}
+
+/** EditItemDialog's non-secret form chrome (label/handle + submission status). The plaintext `newValue`
+ *  and the `lastItemId` render-sync tracker stay their own useState — `lastItemId` keeps the
+ *  set-state-in-render tracker pattern intact. `syncItem` mirrors the item-change reset (label/handle/
+ *  keyError; busy is intentionally left as-is, like the original). */
+type EditItemFormState = {
+  label: string;
+  handle: string;
+  busy: boolean;
+  keyError: boolean;
+};
+type EditItemFormAction =
+  | { type: "setLabel"; value: string }
+  | { type: "setHandle"; value: string }
+  | { type: "setBusy"; busy: boolean }
+  | { type: "setKeyError"; keyError: boolean }
+  | { type: "syncItem"; item: SecretItem };
+function editItemFormReducer(
+  state: EditItemFormState,
+  action: EditItemFormAction,
+): EditItemFormState {
+  switch (action.type) {
+    case "setLabel":
+      return { ...state, label: action.value };
+    case "setHandle":
+      return { ...state, handle: action.value };
+    case "setBusy":
+      return { ...state, busy: action.busy };
+    case "setKeyError":
+      return { ...state, keyError: action.keyError };
+    case "syncItem":
+      return {
+        ...state,
+        label: action.item.label,
+        handle: action.item.handle,
+        keyError: false,
+      };
+  }
 }
 
 /**
@@ -133,10 +254,18 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
   // understands why values cannot be decrypted, instead of hitting a generic per-row reveal error.
   const membershipState = classifyMembership(useMyMembership(vaultId));
 
-  const [addItemOpen, setAddItemOpen] = useState(false);
-  const [addMemberOpen, setAddMemberOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
+  const [dialogs, dispatchDialogs] = useReducer(vaultDialogsReducer, {
+    addItem: false,
+    addMember: false,
+    export: false,
+    import: false,
+  });
+  const {
+    addItem: addItemOpen,
+    addMember: addMemberOpen,
+    export: exportOpen,
+    import: importOpen,
+  } = dialogs;
   // #609: client-side filter over the NON-SECRET metadata (label + handle) only — never the value
   // (which is ciphertext until revealed). INV-10 preserved: no plaintext is ever a filter input.
   const [query, setQuery] = useState("");
@@ -152,6 +281,20 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
   }, [items, query]);
 
   const hasItems = !!items && items.length > 0;
+
+  // Stable element for the PageHeader `breadcrumb` slot (jsx-no-jsx-as-prop).
+  const breadcrumb = useMemo(
+    () => (
+      <Link
+        href="/secrets"
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeftIcon className="size-3.5" />
+        {t("list.title")}
+      </Link>
+    ),
+    [t],
+  );
 
   return (
     // #616: cap the content to a centered column matching the app's other detail views
@@ -171,18 +314,13 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
         pillar="knowledge"
         icon={ShieldCheckIcon}
         subtitle={t("detail.subtitle")}
-        breadcrumb={
-          <Link
-            href="/secrets"
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeftIcon className="size-3.5" />
-            {t("list.title")}
-          </Link>
-        }
+        breadcrumb={breadcrumb}
         actions={
           canManage ? (
-            <Button size="sm" onClick={() => setAddItemOpen(true)}>
+            <Button
+              size="sm"
+              onClick={() => dispatchDialogs({ dialog: "addItem", open: true })}
+            >
               <PlusIcon className="size-4" />
               {t("items.addItem")}
             </Button>
@@ -201,7 +339,7 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => setExportOpen(true)}
+                onClick={() => dispatchDialogs({ dialog: "export", open: true })}
               >
                 <ArrowDownTrayIcon className="size-4" />
                 {t("export.trigger")}
@@ -211,7 +349,7 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => setImportOpen(true)}
+                onClick={() => dispatchDialogs({ dialog: "import", open: true })}
               >
                 <ArrowUpTrayIcon className="size-4" />
                 {t("import.trigger")}
@@ -271,7 +409,7 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setAddMemberOpen(true)}
+              onClick={() => dispatchDialogs({ dialog: "addMember", open: true })}
             >
               <UserPlusIcon className="size-4" />
               {t("members.addMember")}
@@ -319,19 +457,19 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
         <>
           <AddItemDialog
             open={addItemOpen}
-            onOpenChange={setAddItemOpen}
+            onOpenChange={(open) => dispatchDialogs({ dialog: "addItem", open })}
             vaultId={vaultId}
           />
           <AddMemberDialog
             open={addMemberOpen}
-            onOpenChange={setAddMemberOpen}
+            onOpenChange={(open) => dispatchDialogs({ dialog: "addMember", open })}
             vaultId={vaultId}
           />
           {/* #613: bulk import — manager-gated (it creates items). Mounted only while open. */}
           {importOpen ? (
             <ImportDialog
               open={importOpen}
-              onOpenChange={setImportOpen}
+              onOpenChange={(open) => dispatchDialogs({ dialog: "import", open })}
               vaultId={vaultId}
               vaultName={vault?.name ?? t("detail.unknownVault")}
               existingItems={items ?? []}
@@ -344,7 +482,7 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
       {exportOpen ? (
         <ExportDialog
           open={exportOpen}
-          onOpenChange={setExportOpen}
+          onOpenChange={(open) => dispatchDialogs({ dialog: "export", open })}
           vaultId={vaultId}
           vaultName={vault?.name ?? t("detail.unknownVault")}
           items={items ?? []}
@@ -381,8 +519,12 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
   const [copied, setCopied] = useState(false);
   // SECW-06: a copy attempt failed (insecure context — no clipboard API). Prompt manual copy.
   const [copyFailed, setCopyFailed] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  // Edit/delete dialog open-state — grouped (the reveal/copy state above stays its own useState).
+  const [rowDialogs, dispatchRowDialogs] = useReducer(rowDialogsReducer, {
+    editOpen: false,
+    deleteOpen: false,
+  });
+  const { editOpen, deleteOpen } = rowDialogs;
   const maskTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // #607: cancel handle for the pending best-effort clipboard auto-clear from the last copy.
   const clipboardClearRef = useRef<(() => void) | undefined>(undefined);
@@ -474,47 +616,61 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
 
   return (
     <li className="flex items-center gap-3 rounded-lg bg-card p-3 ring-1 ring-foreground/10">
+      {/* The structural-kind glyph (ADR-0075) — server-visible metadata, no decryption needed. */}
       <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-pillar-knowledge/10 text-pillar-knowledge">
-        <KeyIcon className="size-4" aria-hidden />
+        <SecretKindIcon kind={item.kind} className="size-4" aria-hidden />
       </span>
 
       <div className="min-w-0 flex-1 space-y-0.5">
-        <p className="truncate text-sm font-medium">{item.label}</p>
+        <p className="flex items-center gap-2 text-sm font-medium">
+          <span className="truncate">{item.label}</span>
+          {item.kind !== "GENERIC" ? (
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[0.65rem] font-medium uppercase tracking-wide text-muted-foreground">
+              {t(`kinds.${item.kind}`)}
+            </span>
+          ) : null}
+        </p>
         <p className="truncate text-xs text-muted-foreground font-mono">{item.handle}</p>
 
         {/* Value area */}
-        <div className="mt-1.5 flex items-center gap-2">
+        <div className="mt-1.5">
           {plaintext !== undefined ? (
-            <>
-              <code className="max-w-xs truncate rounded bg-muted/60 px-2 py-0.5 text-xs font-mono select-all">
-                {plaintext}
-              </code>
-              <button
-                type="button"
-                onClick={handleCopy}
-                title={t("items.copy")}
-                aria-label={t("items.copy")}
-                className="shrink-0 text-muted-foreground hover:text-foreground"
-              >
+            item.kind === "GENERIC" ? (
+              <div className="flex items-center gap-2">
+                <code className="max-w-xs truncate rounded bg-muted/60 px-2 py-0.5 text-xs font-mono select-all">
+                  {plaintext}
+                </code>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  title={t("items.copy")}
+                  aria-label={t("items.copy")}
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                >
+                  {copied ? (
+                    <CheckIcon className="size-3.5 text-pillar-knowledge" aria-hidden />
+                  ) : (
+                    <ClipboardIcon className="size-3.5" aria-hidden />
+                  )}
+                </button>
+                {/* #607: a subtle "copied — clears in Ns" hint. The clear is best-effort (see
+                    clipboard.ts); this signals the intent without promising a guarantee. */}
                 {copied ? (
-                  <CheckIcon className="size-3.5 text-pillar-knowledge" aria-hidden />
-                ) : (
-                  <ClipboardIcon className="size-3.5" aria-hidden />
-                )}
-              </button>
-              {/* #607: a subtle "copied — clears in Ns" hint. The clear is best-effort (see clipboard.ts);
-                  this signals the intent without promising a guarantee the browser may not honour. */}
-              {copied ? (
-                <span className="text-xs text-muted-foreground">
-                  {t("items.copiedClears", { seconds: CLIPBOARD_CLEAR_MS / 1000 })}
-                </span>
-              ) : null}
-              {/* SECW-06: clipboard unavailable (insecure context). Prompt manual copy — the value
-                  above is `select-all`, so a manual selection still works. */}
-              {copyFailed ? (
-                <span className="text-xs text-destructive">{t("items.copyFailed")}</span>
-              ) : null}
-            </>
+                  <span className="text-xs text-muted-foreground">
+                    {t("items.copiedClears", { seconds: CLIPBOARD_CLEAR_MS / 1000 })}
+                  </span>
+                ) : null}
+                {/* SECW-06: clipboard unavailable (insecure context). Prompt manual copy — the value
+                    above is `select-all`, so a manual selection still works. */}
+                {copyFailed ? (
+                  <span className="text-xs text-destructive">{t("items.copyFailed")}</span>
+                ) : null}
+              </div>
+            ) : (
+              // ADR-0075: typed render (SSH key / TOTP live code / certificate). The component parses
+              // the already-decrypted plaintext by `kind` and degrades a legacy value to a raw block.
+              <TypedSecretReveal kind={item.kind} plaintext={plaintext} />
+            )
           ) : revealError ? (
             // SM-WEB-07: pair the genuine decrypt error with a retry affordance so it is never a dead end.
             <span className="flex items-center gap-2">
@@ -562,7 +718,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
           <>
             <button
               type="button"
-              onClick={() => setEditOpen(true)}
+              onClick={() => dispatchRowDialogs({ type: "setEditOpen", open: true })}
               title={t("items.edit")}
               aria-label={t("items.edit")}
               className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -571,7 +727,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
             </button>
             <button
               type="button"
-              onClick={() => setDeleteOpen(true)}
+              onClick={() => dispatchRowDialogs({ type: "setDeleteOpen", open: true })}
               title={t("items.delete")}
               aria-label={t("items.delete")}
               className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
@@ -585,7 +741,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
       {/* Edit dialog */}
       <EditItemDialog
         open={editOpen}
-        onOpenChange={setEditOpen}
+        onOpenChange={(open) => dispatchRowDialogs({ type: "setEditOpen", open })}
         vaultId={vaultId}
         item={item}
       />
@@ -593,7 +749,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
       {/* Delete confirm dialog */}
       <DeleteItemDialog
         open={deleteOpen}
-        onOpenChange={setDeleteOpen}
+        onOpenChange={(open) => dispatchRowDialogs({ type: "setDeleteOpen", open })}
         vaultId={vaultId}
         item={item}
       />
@@ -731,21 +887,35 @@ function AddItemDialog({
   // disable submit with a "preparing…" hint instead of firing and dropping the user's typed plaintext.
   const membershipState = classifyMembership(useMyMembership(vaultId));
   const createItem = useCreateItem();
-  const [label, setLabel] = useState("");
-  const [handle, setHandle] = useState("");
-  const [value, setValue] = useState("");
-  const [busy, setBusy] = useState(false);
-  // SM-WEB-05: inline actionable error when the DEK cannot be unwrapped — the session can be re-driven
-  // (lock + unlock) and the typed value is preserved so nothing is lost mid-edit.
-  const [keyError, setKeyError] = useState(false);
+  const [form, dispatchForm] = useReducer(addItemFormReducer, {
+    label: "",
+    handle: "",
+    busy: false,
+    keyError: false,
+  });
+  const { label, handle, busy, keyError } = form;
+  // Zero-knowledge: the typed plaintext fields live in their OWN dedicated state (ADR-0075), never folded
+  // into the form reducer. Cleared in the mutation's finally (below) and on reset — success or failure.
+  const [kind, setKind] = useState<SecretItemKind>("GENERIC");
+  const [fields, setFields] = useState<TypedSecretFieldValues>({});
 
   const preparingKey = membershipState === "loading";
+  const complete = isTypedSecretComplete(kind, fields);
+
+  const setField = (key: string, v: string) => {
+    setFields((f) => ({ ...f, [key]: v }));
+    if (keyError) dispatchForm({ type: "setKeyError", keyError: false });
+  };
+  // Switching kind clears the typed fields so a value from a previous kind never bleeds across.
+  const changeKind = (k: SecretItemKind) => {
+    setKind(k);
+    setFields({});
+  };
 
   function reset() {
-    setLabel("");
-    setHandle("");
-    setValue("");
-    setKeyError(false);
+    dispatchForm({ type: "reset" });
+    setKind("GENERIC");
+    setFields({});
   }
 
   function handleOpenChange(next: boolean) {
@@ -755,24 +925,27 @@ function AddItemDialog({
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (busy || preparingKey || !label.trim() || !handle.trim() || !value) return;
+    if (busy || preparingKey || !label.trim() || !handle.trim() || !complete) return;
     const dek = ensureDek();
     if (!dek) {
       // Genuinely can't unwrap — keep the typed value, surface an inline recoverable error, do NOT toast
       // a dead-end. The user can lock + unlock and retry without losing their entry.
-      setKeyError(true);
+      dispatchForm({ type: "setKeyError", keyError: true });
       return;
     }
-    setKeyError(false);
-    setBusy(true);
+    dispatchForm({ type: "setKeyError", keyError: false });
+    dispatchForm({ type: "setBusy", busy: true });
     try {
-      // Seal the plaintext value in the browser — never send it.
-      const envelope = sealItem(dek, value);
+      // ADR-0075: encode the typed payload to a plaintext string, then seal it in the browser — never
+      // send the plaintext. GENERIC encodes to the plain value (back-compat); `kind` is server-visible.
+      const plaintext = encodeSecretPayload(buildTypedSecret(kind, fields));
+      const envelope = sealItem(dek, plaintext);
       await createItem.mutateAsync({
         vaultId,
         data: {
           label: label.trim(),
           handle: handle.trim(),
+          kind,
           ...envelope,
         },
       });
@@ -781,10 +954,10 @@ function AddItemDialog({
     } catch (err) {
       notifyError(err, t("items.createError"));
     } finally {
-      // Drop the entered value from state as soon as the mutation resolves,
+      // Drop the entered typed fields from state as soon as the mutation resolves,
       // regardless of success or failure — plaintext never lingers.
-      setValue("");
-      setBusy(false);
+      setFields({});
+      dispatchForm({ type: "setBusy", busy: false });
     }
   }
 
@@ -802,7 +975,7 @@ function AddItemDialog({
             <Input
               id="item-label"
               value={label}
-              onChange={(e) => setLabel(e.target.value)}
+              onChange={(e) => dispatchForm({ type: "setLabel", value: e.target.value })}
               disabled={busy}
               maxLength={200}
               placeholder={t("items.labelPlaceholder")}
@@ -815,7 +988,10 @@ function AddItemDialog({
               id="item-handle"
               value={handle}
               onChange={(e) =>
-                setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ""))
+                dispatchForm({
+                  type: "setHandle",
+                  value: e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ""),
+                })
               }
               disabled={busy}
               maxLength={80}
@@ -824,30 +1000,25 @@ function AddItemDialog({
             />
             <FieldDescription>{t("items.handleHint")}</FieldDescription>
           </Field>
-          <Field>
-            <FieldLabel htmlFor="item-value">{t("items.valueField")}</FieldLabel>
-            <Input
-              id="item-value"
-              type="password"
-              autoComplete="new-password"
-              value={value}
-              onChange={(e) => {
-                setValue(e.target.value);
-                if (keyError) setKeyError(false);
-              }}
-              disabled={busy}
-              placeholder={t("items.valuePlaceholder")}
-            />
-            {keyError ? (
-              <FieldDescription className="text-destructive">
-                {t("items.dekUnavailableInline")}
-              </FieldDescription>
-            ) : preparingKey ? (
-              <FieldDescription>{t("items.preparingKey")}</FieldDescription>
-            ) : (
-              <FieldDescription>{t("items.valueHint")}</FieldDescription>
-            )}
-          </Field>
+
+          {/* ADR-0075: kind selector + the typed value fields for the chosen kind. */}
+          <TypedSecretFields
+            kind={kind}
+            onKindChange={changeKind}
+            fields={fields}
+            onFieldChange={setField}
+            disabled={busy}
+            idPrefix="add-item"
+          />
+          {keyError ? (
+            <FieldDescription className="text-destructive">
+              {t("items.dekUnavailableInline")}
+            </FieldDescription>
+          ) : preparingKey ? (
+            <FieldDescription>{t("items.preparingKey")}</FieldDescription>
+          ) : (
+            <FieldDescription>{t("items.valueHint")}</FieldDescription>
+          )}
 
           <DialogFooter>
             <Button
@@ -860,7 +1031,7 @@ function AddItemDialog({
             </Button>
             <Button
               type="submit"
-              disabled={busy || preparingKey || !label.trim() || !handle.trim() || !value}
+              disabled={busy || preparingKey || !label.trim() || !handle.trim() || !complete}
             >
               {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : null}
               {busy ? t("items.creating") : preparingKey ? t("items.preparingKey") : t("items.addSubmit")}
@@ -894,37 +1065,61 @@ function EditItemDialog({
   // user mid-edit with their typed new value silently dropped.
   const membershipState = classifyMembership(useMyMembership(vaultId));
   const updateItem = useUpdateItem();
-  const [label, setLabel] = useState(item.label);
-  const [handle, setHandle] = useState(item.handle);
-  const [newValue, setNewValue] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [keyError, setKeyError] = useState(false);
-  // Sync fields when item identity changes (re-open for different item) — derived during render.
+  // Seeded from `item` on first mount; the render-time sync below re-seeds on item change. The object
+  // recomputed on later renders is discarded by React — same lifecycle as the original useState seeds.
+  const [form, dispatchForm] = useReducer(editItemFormReducer, {
+    label: item.label,
+    handle: item.handle,
+    busy: false,
+    keyError: false,
+  });
+  const { label, handle, busy, keyError } = form;
+  // Zero-knowledge: the typed plaintext fields live in their OWN dedicated state (ADR-0075), never folded
+  // into the form reducer. The kind selector defaults to the item's current kind; to CHANGE the value (or
+  // re-type the secret) the user fills the typed fields. Cleared on close / item-change / submit.
+  const [kind, setKind] = useState<SecretItemKind>(item.kind);
+  const [fields, setFields] = useState<TypedSecretFieldValues>({});
+  // Sync fields when item identity changes (re-open for different item) — derived during render. The
+  // tracker setter (setLastItemId) under the `item.id !== lastItemId` guard keeps this the recognized,
+  // loop-safe set-state-in-render pattern; the reducer/kind/fields resets ride along with it.
   const [lastItemId, setLastItemId] = useState(item.id);
   if (item.id !== lastItemId) {
     setLastItemId(item.id);
-    setLabel(item.label);
-    setHandle(item.handle);
-    setNewValue("");
-    setKeyError(false);
+    dispatchForm({ type: "syncItem", item });
+    setKind(item.kind);
+    setFields({});
   }
 
   const preparingKey = membershipState === "loading";
-  // Only the value path needs the DEK; label/handle-only edits work without it.
-  const needsKey = newValue.length > 0;
+  // A new value is being supplied (re-encrypt) when the typed required field is filled.
+  const hasNewValue = isTypedSecretComplete(kind, fields);
+  // Re-typing the kind WITHOUT supplying a value would leave `kind` and the ciphertext inconsistent, so
+  // we require the value when the kind changes. Only the value path needs the DEK.
+  const retypedWithoutValue = kind !== item.kind && !hasNewValue;
+  const needsKey = hasNewValue;
+
+  const setField = (key: string, v: string) => {
+    setFields((f) => ({ ...f, [key]: v }));
+    if (keyError) dispatchForm({ type: "setKeyError", keyError: false });
+  };
+  const changeKind = (k: SecretItemKind) => {
+    setKind(k);
+    setFields({});
+  };
 
   function handleOpenChange(next: boolean) {
     if (!next) {
-      setNewValue("");
-      setKeyError(false);
+      setFields({});
+      setKind(item.kind);
+      dispatchForm({ type: "setKeyError", keyError: false });
     }
     onOpenChange(next);
   }
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
-    if (busy || (needsKey && preparingKey)) return;
-    // Build partial update — envelope only if a new value was entered.
+    if (busy || (needsKey && preparingKey) || retypedWithoutValue) return;
+    // Build partial update — envelope (+ kind) only if a new value was entered.
     type PatchData = {
       label?: string;
       handle?: string;
@@ -932,6 +1127,7 @@ function EditItemDialog({
       iv?: string;
       authTag?: string;
       keyVersion?: number;
+      kind?: SecretItemKind;
     };
     const patch: PatchData = {};
     if (label.trim() && label.trim() !== item.label) patch.label = label.trim();
@@ -942,11 +1138,14 @@ function EditItemDialog({
       if (!dek) {
         // Genuinely can't unwrap — surface an inline recoverable error and PRESERVE the typed value.
         // The user can lock + unlock and retry; we never drop their entry on this path.
-        setKeyError(true);
+        dispatchForm({ type: "setKeyError", keyError: true });
         return;
       }
-      const envelope = sealItem(dek, newValue);
+      // ADR-0075: encode the typed payload, seal it, and pair `kind` with the fresh ciphertext so the
+      // server-visible type and the encrypted shape never disagree.
+      const envelope = sealItem(dek, encodeSecretPayload(buildTypedSecret(kind, fields)));
       Object.assign(patch, envelope);
+      patch.kind = kind;
     }
 
     if (Object.keys(patch).length === 0) {
@@ -954,8 +1153,8 @@ function EditItemDialog({
       return;
     }
 
-    setKeyError(false);
-    setBusy(true);
+    dispatchForm({ type: "setKeyError", keyError: false });
+    dispatchForm({ type: "setBusy", busy: true });
     try {
       await updateItem.mutateAsync({ vaultId, itemId: item.id, data: patch });
       toast.success(t("items.updated", { label: label.trim() || item.label }));
@@ -963,8 +1162,8 @@ function EditItemDialog({
     } catch (err) {
       notifyError(err, t("items.updateError"));
     } finally {
-      setNewValue("");
-      setBusy(false);
+      setFields({});
+      dispatchForm({ type: "setBusy", busy: false });
     }
   }
 
@@ -982,7 +1181,7 @@ function EditItemDialog({
             <Input
               id="edit-item-label"
               value={label}
-              onChange={(e) => setLabel(e.target.value)}
+              onChange={(e) => dispatchForm({ type: "setLabel", value: e.target.value })}
               disabled={busy}
               maxLength={200}
               autoFocus
@@ -994,37 +1193,39 @@ function EditItemDialog({
               id="edit-item-handle"
               value={handle}
               onChange={(e) =>
-                setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ""))
+                dispatchForm({
+                  type: "setHandle",
+                  value: e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ""),
+                })
               }
               disabled={busy}
               maxLength={80}
               className="font-mono"
             />
           </Field>
-          <Field>
-            <FieldLabel htmlFor="edit-item-value">{t("items.newValueField")}</FieldLabel>
-            <Input
-              id="edit-item-value"
-              type="password"
-              autoComplete="new-password"
-              value={newValue}
-              onChange={(e) => {
-                setNewValue(e.target.value);
-                if (keyError) setKeyError(false);
-              }}
-              disabled={busy}
-              placeholder={t("items.newValuePlaceholder")}
-            />
-            {keyError ? (
-              <FieldDescription className="text-destructive">
-                {t("items.dekUnavailableInline")}
-              </FieldDescription>
-            ) : needsKey && preparingKey ? (
-              <FieldDescription>{t("items.preparingKey")}</FieldDescription>
-            ) : (
-              <FieldDescription>{t("items.newValueHint")}</FieldDescription>
-            )}
-          </Field>
+          {/* ADR-0075: change the type and/or replace the value. Leave the typed fields blank to keep the
+              current value (label/handle-only edits need no key). */}
+          <TypedSecretFields
+            kind={kind}
+            onKindChange={changeKind}
+            fields={fields}
+            onFieldChange={setField}
+            disabled={busy}
+            idPrefix="edit-item"
+          />
+          {keyError ? (
+            <FieldDescription className="text-destructive">
+              {t("items.dekUnavailableInline")}
+            </FieldDescription>
+          ) : retypedWithoutValue ? (
+            <FieldDescription className="text-destructive">
+              {t("items.retypeNeedsValue")}
+            </FieldDescription>
+          ) : needsKey && preparingKey ? (
+            <FieldDescription>{t("items.preparingKey")}</FieldDescription>
+          ) : (
+            <FieldDescription>{t("items.newValueHint")}</FieldDescription>
+          )}
 
           <DialogFooter>
             <Button
@@ -1037,7 +1238,9 @@ function EditItemDialog({
             </Button>
             <Button
               type="submit"
-              disabled={busy || (needsKey && preparingKey) || (!label.trim() && !newValue)}
+              disabled={
+                busy || (needsKey && preparingKey) || retypedWithoutValue || !label.trim()
+              }
             >
               {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : null}
               {busy ? t("items.updating") : needsKey && preparingKey ? t("items.preparingKey") : tc("save")}

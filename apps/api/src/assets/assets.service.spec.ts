@@ -110,6 +110,7 @@ const EXPECTED_LIST_SELECT = {
   assetTag: true,
   status: true,
   notes: true,
+  company: true,
   purchaseDate: true,
   warrantyEnd: true,
   modelId: true,
@@ -155,6 +156,7 @@ const leanRow = (overrides: Record<string, unknown> = {}) => ({
   assetTag: null,
   status: 'OPERATIONAL',
   notes: null,
+  company: null,
   purchaseDate: null,
   warrantyEnd: null,
   modelId: 'm1',
@@ -307,6 +309,22 @@ describe('AssetsService', () => {
     const calls = tx.create.mock.calls as CreateCall[];
     expect(calls[0][0].data).not.toHaveProperty('specs');
     expect(calls[0][0].data).toEqual(dto);
+  });
+
+  // --- company grouping field (ADR-0076, #857) ----------------------------
+  it('persists the optional company grouping value on create (passed straight through)', async () => {
+    const dto = {
+      name: 'SRV-09',
+      status: 'OPERATIONAL' as const,
+      company: 'Acme Inc.',
+    };
+    tx.create.mockResolvedValue({ id: 'a9', ...dto });
+
+    await service.create(dto);
+
+    const calls = tx.create.mock.calls as CreateCall[];
+    expect(calls[0][0].data).toEqual(dto);
+    expect(calls[0][0].data.company).toBe('Acme Inc.');
   });
 
   it('copies model specs into a new asset when modelId is provided without asset specs', async () => {
@@ -722,6 +740,41 @@ describe('AssetsService', () => {
     });
   });
 
+  it('findPage narrows by company (exact-match grouping filter — ADR-0076)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { company: 'Acme Inc.' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({
+      company: 'Acme Inc.',
+      deletedAt: null,
+    });
+  });
+
+  it('listCompanies returns the distinct, non-null company values', async () => {
+    asset.findMany.mockResolvedValue([
+      { company: 'Acme Inc.' },
+      { company: 'Globex' },
+    ]);
+
+    const result = await service.listCompanies();
+
+    expect(asset.findMany).toHaveBeenCalledWith({
+      where: { company: { not: null } },
+      distinct: ['company'],
+      select: { company: true },
+      orderBy: { company: 'asc' },
+    });
+    expect(result).toEqual(['Acme Inc.', 'Globex']);
+  });
+
   it('findPage filters by assignedToUserId: only assets with a LIVE assignment to that user', async () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
@@ -745,6 +798,50 @@ describe('AssetsService', () => {
     )[0][0];
     expect(countArgs.where).toEqual({
       assignments: { some: { userId: 'u-uuid-1', releasedAt: null } },
+      deletedAt: null,
+    });
+  });
+
+  it('findPage ownership=HAS filters to assets with a LIVE assignment (some releasedAt null)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { ownership: 'HAS' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({
+      assignments: { some: { releasedAt: null } },
+      deletedAt: null,
+    });
+    // The count query must filter on the SAME where so total matches the page.
+    const countArgs = (
+      asset.count.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(countArgs.where).toEqual({
+      assignments: { some: { releasedAt: null } },
+      deletedAt: null,
+    });
+  });
+
+  it('findPage ownership=NONE filters to unassigned assets (none releasedAt null)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { ownership: 'NONE' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({
+      assignments: { none: { releasedAt: null } },
       deletedAt: null,
     });
   });
@@ -1062,6 +1159,18 @@ describe('AssetsService', () => {
       'assets',
       expect.objectContaining({ id: 'a1', status: 'RETIRED' }),
     );
+  });
+
+  it('persists the company grouping value on update (passed straight through)', async () => {
+    asset.findFirst.mockResolvedValue(beforeRow());
+    tx.update.mockResolvedValue(beforeRow({ company: 'Globex' }));
+
+    await service.update('a1', { company: 'Globex' });
+
+    expect(tx.update).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      data: { company: 'Globex' },
+    });
   });
 
   it('update throws NotFound (and never opens a transaction) when the asset is missing', async () => {

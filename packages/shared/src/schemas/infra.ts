@@ -201,9 +201,9 @@ export const InfraNodeChildSchema = z.object({
  * `label` is the human title. Deliberately carries NO ciphertext/iv/authTag — the server is
  * structurally incapable of decryption and this surface must never approach the value side.
  *
- * ponytail: v1 has NO asset→secret linkage in the data model (no FK/join exists — verified against the
- * Secret Manager schema). So the API returns an EMPTY array here today; the shape is fixed now so the
- * frontend panel and a future linkage (ADR-0070 §6) agree without a contract change.
+ * Populated from a node's `InfraNodeSecretRef` soft links, resolved to LIVE SecretItem metadata at
+ * read (ADR-0073, issue #801). A ref whose secret was soft-deleted or renamed away (the handle is
+ * editable + only live-unique) is dropped on resolution — never a dangling chip.
  */
 export const InfraSecretRefSchema = z.object({
   handle: z.string(),
@@ -225,7 +225,7 @@ export const InfraNodeDetailSchema = InfraNodeSchema.extend({
   owners: z.array(InfraNodeOwnerSchema),
   /** PUBLISHED KB articles linked to the node's Asset (folder-scoped); `[]` when graph-only. */
   articleLinks: z.array(ArticleListItemSchema),
-  /** Secret HANDLES only (never values, INV-10); `[]` in v1 — no asset→secret linkage exists yet. */
+  /** Secret HANDLES only (never values, INV-10); resolved from the node's links (ADR-0073, #801). */
   secretRefs: z.array(InfraSecretRefSchema),
   /** Nodes hosted on this one via an ACTIVE inverse RUNS_ON edge. */
   children: z.array(InfraNodeChildSchema),
@@ -246,6 +246,133 @@ export const InfraNodeListItemSchema = InfraNodeSchema.extend({
   /** Active owners via the linked Asset's `AssetAssignment`s; `[]` when graph-only or unowned. */
   owners: z.array(InfraNodeOwnerSchema),
 });
+
+// ── Node → secret linkage (ADR-0073, issue #801) ──────────────────────────────────────────────────
+
+/**
+ * Attach (or detach) a secret HANDLE reference to a node — the request body for
+ * `POST`/`DELETE /infra/nodes/:id/secrets`. A SOFT reference (handle + vaultId, NO FK), mirroring the
+ * KB chip + SecretAuditLog convention: the server stores metadata only, never a value (INV-10,
+ * [[0061-secret-manager-zero-knowledge]]). `handle` is the editable, live-unique secret identifier
+ * (max 80, matching SecretItem.handle); `vaultId` scopes it to the vault the caller must be a LIVE
+ * member of (the layer-2 authz the API enforces). The node id is the route param, the actor the
+ * X-User-Id principal — neither rides in the body (house style). Detach reuses this exact shape.
+ */
+export const AttachInfraSecretSchema = z.strictObject({
+  handle: z.string().trim().min(1).max(80),
+  vaultId: z.cuid(),
+});
+
+// ── Server reporting agent (ADR-0074 §2) — the wire contract ──────────────────────────────────────
+
+/**
+ * The report a self-installing Linux collector POSTs to `POST /infra/report` (ADR-0074). This single
+ * zod schema is the SOURCE OF TRUTH for the wire, imported by BOTH the agent binary and the API
+ * handler (the monorepo payoff — zero drift). Everything beyond the two dedup keys
+ * (`reportingSource` + `externalId`) and `host.hostname` is OPTIONAL: the agent degrades gracefully
+ * when it lacks privilege (`dmidecode` needs root) or a tool is missing, so a PARTIAL report is VALID
+ * — never a 400 (ADR-0074 §2/§3). `strictObject` rejects unknown top-level keys (the agent is
+ * version-locked to the instance — ADR-0074 §6 — so an unexpected key is a bug, not forward-compat).
+ */
+export const AgentReportSchema = z.strictObject({
+  /** The collector binary's own version (skew diagnostics). */
+  agentVersion: z.string().min(1).max(40),
+  /** Stable per install (e.g. `agent:<machine-id-prefix>`); the dedup scope. */
+  reportingSource: z.string().min(1).max(120),
+  /** `/etc/machine-id` — the stable per-OS-install dedup key. One host = one node, forever. */
+  externalId: z.string().min(1).max(200),
+  /** When the agent gathered this report (ISO-8601). */
+  reportedAt: z.iso.datetime(),
+  host: z.object({
+    /** The only REQUIRED host fact — used as the new node's label. */
+    hostname: z.string().min(1).max(255),
+    os: z
+      .object({
+        name: z.string().max(200),
+        version: z.string().max(200),
+        kernel: z.string().max(200),
+      })
+      .partial()
+      .optional(),
+    cpu: z
+      .object({
+        model: z.string().max(200),
+        cores: z.number().int().nonnegative(),
+      })
+      .partial()
+      .optional(),
+    memoryBytes: z.number().int().nonnegative().optional(),
+    disks: z
+      .array(
+        z.object({
+          device: z.string().min(1).max(255),
+          sizeBytes: z.number().int().nonnegative().optional(),
+          mountpoint: z.string().max(1024).optional(),
+        }),
+      )
+      .max(256)
+      .optional(),
+    nics: z
+      .array(
+        z.object({
+          name: z.string().min(1).max(120),
+          mac: z.string().max(64).optional(),
+          ipv4: z.array(z.string().max(64)).max(64).optional(),
+        }),
+      )
+      .max(64)
+      .optional(),
+    // dmidecode (root-only) — manufacturer/model/serial; absent on unprivileged installs.
+    hardware: z
+      .object({
+        manufacturer: z.string().max(200),
+        model: z.string().max(200),
+        serial: z.string().max(200),
+      })
+      .partial()
+      .optional(),
+  }),
+  /** Installed packages (dpkg/rpm/apk auto-detected). Capped — a sane upper bound, not a real limit. */
+  software: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(255),
+        version: z.string().max(120).optional(),
+      }),
+    )
+    .max(5000)
+    .optional(),
+});
+export type AgentReport = z.infer<typeof AgentReportSchema>;
+
+/**
+ * The minimal ack the report endpoint returns (ADR-0074 §3). Fire-and-forget by design: it confirms
+ * the node id, its lifecycle `state` (PENDING for a freshly-discovered host, CONFIRMED once a human
+ * has approved it) and that the report was accepted. Nothing more leaks back to the machine caller.
+ */
+export const AgentReportAckSchema = z.object({
+  nodeId: z.cuid(),
+  state: InfraNodeStateSchema,
+  accepted: z.literal(true),
+});
+export type AgentReportAck = z.infer<typeof AgentReportAckSchema>;
+
+// ── Confirm a PENDING node (ADR-0074 §3) — the review-tray approval ────────────────────────────────
+
+/**
+ * The optional overrides a human applies when CONFIRMING a PENDING agent-reported node from the review
+ * tray (`POST /infra/nodes/:id/confirm`, ADR-0074 §3). Everything is optional — a bare `{}` confirms
+ * the node as-is. `trackAsAsset` (default true) mints the backing Asset (the agent's host facts carried
+ * over) so the auto-discovered host becomes a first-class, owned, assignable Asset — only on human
+ * approval; `false` leaves it graph-only. `kind`/`label` let the operator re-classify/rename at the
+ * confirm step (the agent lands every host as `PHYSICAL_HOST` with the hostname as its label).
+ */
+export const ConfirmInfraNodeSchema = z.strictObject({
+  trackAsAsset: z.boolean().optional(),
+  kind: InfraNodeKindSchema.optional(),
+  label: z.string().trim().min(1).max(200).optional(),
+});
+export type ConfirmInfraNode = z.infer<typeof ConfirmInfraNodeSchema>;
 
 // ── Plausibility table (ADR-0070 §3) — data the API WARNS on, NOT a hard constraint ───────────────
 
@@ -334,4 +461,5 @@ export type InfraImpactResponse = z.infer<typeof InfraImpactResponseSchema>;
 export type InfraNodeOwner = z.infer<typeof InfraNodeOwnerSchema>;
 export type InfraNodeChild = z.infer<typeof InfraNodeChildSchema>;
 export type InfraSecretRef = z.infer<typeof InfraSecretRefSchema>;
+export type AttachInfraSecret = z.infer<typeof AttachInfraSecretSchema>;
 export type InfraNodeDetail = z.infer<typeof InfraNodeDetailSchema>;

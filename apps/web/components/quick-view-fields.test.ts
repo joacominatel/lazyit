@@ -57,6 +57,7 @@ function makeAsset(overrides: Partial<AssetListItem> = {}): AssetListItem {
     assetTag: "LZ-0001",
     status: "OPERATIONAL",
     notes: null,
+    company: null,
     purchaseDate: null,
     warrantyEnd: null,
     modelId: "model_1",

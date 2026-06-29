@@ -79,7 +79,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
-import { useAssets } from "@/lib/api/hooks/use-assets";
+import { useAssetCompanies, useAssets } from "@/lib/api/hooks/use-assets";
 import { useAssetsOnTopology } from "@/lib/api/hooks/use-infra-nodes";
 import { useUser } from "@/lib/api/hooks/use-users";
 import {
@@ -116,13 +116,15 @@ type OwnershipFilter = "ALL" | "HAS" | "NONE";
 /**
  * Filter param defaults for the URL list-state. `status`/`category`/`location` map to the server's
  * `status`/`categoryId`/`locationId` params; `owner` maps to the server's `assignedToUserId` (a
- * User uuid, "" = unset); `ownership` (Has/None) is filtered client-side over the page. `archived`
- * ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
+ * User uuid, "" = unset); `ownership` (Has/None) maps to the server's `ownership` param (#824).
+ * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
  */
 const FILTER_DEFAULTS = {
   status: "ALL",
   category: "ALL",
   location: "ALL",
+  // Grouping filter (ADR-0076): "ALL" = no filter, otherwise an exact company value (server-side).
+  company: "ALL",
   owner: "",
   ownership: "ALL",
   archived: "ALL",
@@ -148,6 +150,7 @@ const HIDEABLE_COLUMNS = [
   "model",
   "category",
   "location",
+  "company",
   "status",
   "owners",
   "updated",
@@ -160,13 +163,17 @@ type HideableColumn = (typeof HIDEABLE_COLUMNS)[number];
  * column appears in exactly one group); it drives only the menu, never visibility.
  */
 const COLUMN_GROUPS: { id: string; keys: readonly HideableColumn[] }[] = [
-  { id: "details", keys: ["assetTag", "model", "category", "location"] },
+  { id: "details", keys: ["assetTag", "model", "category", "location", "company"] },
   { id: "status", keys: ["status", "owners"] },
   { id: "activity", keys: ["updated"] },
 ];
 
 /** localStorage key persisting the visible hideable-column set (per browser). */
 const COLUMNS_STORAGE_KEY = "lazyit:assets:columns";
+
+/** Stable empty placeholder for the loading skeleton's mobile children slot. */
+const LOADING_MOBILE_CHILDREN = <></>;
+
 
 /**
  * The columns shown by default — the picker subtracts from (and adds back to) this set. Every hideable
@@ -215,6 +222,7 @@ export function AssetsListView() {
   const statusFilter = filters.status as AssetStatus | "ALL";
   const categoryFilter = filters.category;
   const locationFilter = filters.location;
+  const companyFilter = filters.company; // "ALL" = unset; otherwise an exact company value.
   const ownerFilter = filters.owner; // "" = unset; otherwise a User uuid (server-side filter)
   const ownershipFilter = filters.ownership as OwnershipFilter;
   // Resolve the owner-filter user's name for its chip, even when not on the current search page.
@@ -223,14 +231,17 @@ export function AssetsListView() {
   // the param for them, so the API stays on the active-only list.
   const archived = isAdmin && filters.archived === "only";
 
-  // Forward server-supported params; `ownership` is filtered client-side over the page below.
+  // Forward server-supported params; `ownership` (Has/None) is now a server filter too (#824), so it
+  // scopes the whole result set instead of just the current page.
   const { data: page, isLoading, isFetching, isError, error, refetch } =
     useAssets({
       q: q || undefined,
       status: statusFilter === "ALL" ? undefined : statusFilter,
       categoryId: categoryFilter === "ALL" ? undefined : categoryFilter,
       locationId: locationFilter === "ALL" ? undefined : locationFilter,
+      company: companyFilter === "ALL" ? undefined : companyFilter,
       assignedToUserId: ownerFilter || undefined,
+      ownership: ownershipFilter === "ALL" ? undefined : ownershipFilter,
       sort,
       dir: sort ? dir : undefined,
       limit,
@@ -239,6 +250,7 @@ export function AssetsListView() {
     });
   const { data: categories } = useAssetCategories();
   const { data: locations } = useLocations();
+  const { data: companies } = useAssetCompanies();
   const deleteAsset = useDeleteAsset();
   const restoreAsset = useRestoreAsset();
   const updateAsset = useUpdateAsset();
@@ -287,14 +299,9 @@ export function AssetsListView() {
     });
   }
 
-  const rows = useMemo(() => {
-    const items = page?.items ?? [];
-    return items.filter((asset) => {
-      if (ownershipFilter === "HAS") return asset.activeAssignments.length > 0;
-      if (ownershipFilter === "NONE") return asset.activeAssignments.length === 0;
-      return true;
-    });
-  }, [page?.items, ownershipFilter]);
+  // The page is already scoped server-side (status/category/location/owner/ownership/#824), so the
+  // rendered rows are the page items verbatim — no client-side post-filter over the window.
+  const rows = useMemo(() => page?.items ?? [], [page?.items]);
 
   // Multi-select over the currently visible rows — the API batch endpoints all require asset:delete
   // (bulk delete/restore/status are lifecycle ops), so gate the selection column on canDelete.
@@ -455,6 +462,11 @@ export function AssetsListView() {
         header: t("columns.location"),
         skeleton: <Skeleton className="h-4 w-24" />,
       },
+      isColumnVisible("company") && {
+        key: "company",
+        header: t("columns.company"),
+        skeleton: <Skeleton className="h-4 w-24" />,
+      },
       isColumnVisible("status") && {
         key: "status",
         header: (
@@ -506,6 +518,7 @@ export function AssetsListView() {
   const popoverFilterCount =
     (categoryFilter !== "ALL" ? 1 : 0) +
     (locationFilter !== "ALL" ? 1 : 0) +
+    (companyFilter !== "ALL" ? 1 : 0) +
     (ownerFilter ? 1 : 0) +
     (ownershipFilter !== "ALL" ? 1 : 0);
 
@@ -549,6 +562,15 @@ export function AssetsListView() {
                 locations?.find((l) => l.id === locationFilter)?.name ?? "—",
             }),
             onClear: () => setFilter("location", FILTER_DEFAULTS.location),
+          },
+        ]
+      : []),
+    ...(companyFilter !== "ALL"
+      ? [
+          {
+            key: "company",
+            label: t("chips.company", { value: companyFilter }),
+            onClear: () => setFilter("company", FILTER_DEFAULTS.company),
           },
         ]
       : []),
@@ -609,7 +631,7 @@ export function AssetsListView() {
       />
 
       {isLoading ? (
-        <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
+        <ResourceTable columns={columns} isLoading mobileChildren={LOADING_MOBILE_CHILDREN} />
       ) : isError ? (
         <ErrorState
           title={t("errorTitle")}
@@ -718,6 +740,32 @@ export function AssetsListView() {
                       {(locations ?? []).map((location) => (
                         <SelectItem key={location.id} value={location.id}>
                           {location.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="assets-filter-company"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {t("columns.company")}
+                  </label>
+                  <Select
+                    value={companyFilter}
+                    onValueChange={(value) => setFilter("company", value)}
+                  >
+                    <SelectTrigger id="assets-filter-company" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">
+                        {t("filters.allCompanies")}
+                      </SelectItem>
+                      {(companies ?? []).map((company) => (
+                        <SelectItem key={company} value={company}>
+                          {company}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -870,6 +918,9 @@ export function AssetsListView() {
                     <ResourceCardMeta label={t("columns.location")}>
                       {asset.location?.name ?? "—"}
                     </ResourceCardMeta>
+                    <ResourceCardMeta label={t("columns.company")}>
+                      {asset.company ?? "—"}
+                    </ResourceCardMeta>
                     <ResourceCardMeta label={t("columns.owners")}>
                       <StackedOwnerAvatars
                         assignments={asset.activeAssignments}
@@ -951,6 +1002,11 @@ export function AssetsListView() {
                 location: (
                   <TableCell key="location" className="text-muted-foreground">
                     {asset.location?.name ?? "—"}
+                  </TableCell>
+                ),
+                company: (
+                  <TableCell key="company" className="text-muted-foreground">
+                    {asset.company ?? "—"}
                   </TableCell>
                 ),
                 status: (

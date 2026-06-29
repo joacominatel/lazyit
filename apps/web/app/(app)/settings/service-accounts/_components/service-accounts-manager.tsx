@@ -15,7 +15,7 @@ import {
   type ServiceAccount,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useReducer, useState } from "react";
 import { toast } from "sonner";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
@@ -55,6 +55,48 @@ import {
 import { TestItDialog } from "./test-it-dialog";
 
 const MAX_PERMISSION_LABELS = 2;
+
+/** Which dialog / row-action is active. Each modal renders independently from its own field. */
+type DialogState = {
+  formOpen: boolean;
+  editing: ServiceAccount | undefined;
+  rotating: ServiceAccount | undefined;
+  revoking: ServiceAccount | undefined;
+  testing: ServiceAccount | undefined;
+};
+
+type DialogAction =
+  | { type: "createOpened" }
+  | { type: "editOpened"; account: ServiceAccount }
+  | { type: "formOpenChanged"; open: boolean }
+  | { type: "rotatingChanged"; account: ServiceAccount | undefined }
+  | { type: "revokingChanged"; account: ServiceAccount | undefined }
+  | { type: "testingChanged"; account: ServiceAccount | undefined };
+
+const INITIAL_DIALOG: DialogState = {
+  formOpen: false,
+  editing: undefined,
+  rotating: undefined,
+  revoking: undefined,
+  testing: undefined,
+};
+
+function dialogReducer(state: DialogState, action: DialogAction): DialogState {
+  switch (action.type) {
+    case "createOpened":
+      return { ...state, editing: undefined, formOpen: true };
+    case "editOpened":
+      return { ...state, editing: action.account, formOpen: true };
+    case "formOpenChanged":
+      return { ...state, formOpen: action.open };
+    case "rotatingChanged":
+      return { ...state, rotating: action.account };
+    case "revokingChanged":
+      return { ...state, revoking: action.account };
+    case "testingChanged":
+      return { ...state, testing: action.account };
+  }
+}
 
 /**
  * The Service Accounts admin list (ADR-0048). A ResourceTable of the instance's non-human credentials
@@ -132,27 +174,20 @@ export function ServiceAccountsManager() {
   const revoke = useRevokeServiceAccount();
   const restore = useRestoreServiceAccount();
 
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<ServiceAccount | undefined>(undefined);
-  const [rotating, setRotating] = useState<ServiceAccount | undefined>(
-    undefined,
-  );
-  const [revoking, setRevoking] = useState<ServiceAccount | undefined>(
-    undefined,
-  );
-  const [testing, setTesting] = useState<ServiceAccount | undefined>(undefined);
+  // Which dialog / row-action is active — grouped into one machine (see `dialogReducer`). Destructured
+  // into consts so each stays narrowable inside the dialog render closures below.
+  const [dialog, dispatchDialog] = useReducer(dialogReducer, INITIAL_DIALOG);
+  const { formOpen, editing, rotating, revoking, testing } = dialog;
 
   const accounts = data ?? [];
   const hasData = accounts.length > 0;
 
   function openCreate() {
-    setEditing(undefined);
-    setFormOpen(true);
+    dispatchDialog({ type: "createOpened" });
   }
 
   function openEdit(account: ServiceAccount) {
-    setEditing(account);
-    setFormOpen(true);
+    dispatchDialog({ type: "editOpened", account });
   }
 
   function handleRestore(account: ServiceAccount) {
@@ -280,9 +315,15 @@ export function ServiceAccountsManager() {
                   ) : (
                     <ServiceAccountRowActions
                       onEdit={() => openEdit(account)}
-                      onRotate={() => setRotating(account)}
-                      onRevoke={() => setRevoking(account)}
-                      onTest={() => setTesting(account)}
+                      onRotate={() =>
+                        dispatchDialog({ type: "rotatingChanged", account })
+                      }
+                      onRevoke={() =>
+                        dispatchDialog({ type: "revokingChanged", account })
+                      }
+                      onTest={() =>
+                        dispatchDialog({ type: "testingChanged", account })
+                      }
                       editLabel={tc("edit")}
                       testLabel={t("serviceAccounts.rowActions.testIt")}
                       rotateLabel={t("serviceAccounts.rowActions.rotateToken")}
@@ -299,7 +340,7 @@ export function ServiceAccountsManager() {
 
       <ServiceAccountFormDialog
         open={formOpen}
-        onOpenChange={setFormOpen}
+        onOpenChange={(open) => dispatchDialog({ type: "formOpenChanged", open })}
         account={editing}
       />
 
@@ -307,7 +348,8 @@ export function ServiceAccountsManager() {
         <RotateDialog
           open
           onOpenChange={(open) => {
-            if (!open) setRotating(undefined);
+            if (!open)
+              dispatchDialog({ type: "rotatingChanged", account: undefined });
           }}
           account={rotating}
         />
@@ -317,7 +359,8 @@ export function ServiceAccountsManager() {
         <DeleteConfirmDialog
           open
           onOpenChange={(open) => {
-            if (!open) setRevoking(undefined);
+            if (!open)
+              dispatchDialog({ type: "revokingChanged", account: undefined });
           }}
           entityKey="serviceAccount"
           name={revoking.name}
@@ -332,7 +375,8 @@ export function ServiceAccountsManager() {
           account={testing}
           open
           onOpenChange={(open) => {
-            if (!open) setTesting(undefined);
+            if (!open)
+              dispatchDialog({ type: "testingChanged", account: undefined });
           }}
         />
       ) : null}

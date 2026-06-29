@@ -95,6 +95,7 @@ interface ItemRow {
   iv: string;
   authTag: string;
   keyVersion: number;
+  kind: 'GENERIC' | 'SSH_KEY' | 'TOTP' | 'CERTIFICATE';
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -534,6 +535,35 @@ describe('SecretManagerService', () => {
     });
   });
 
+  // ── Typed secrets — server-visible `kind` METADATA only (ADR-0075) ────────────
+  describe('typed secrets (kind metadata)', () => {
+    it('persists an explicit kind (SSH_KEY) and exposes it on the wire', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const item = await svc.createItem(alice, vaultId, {
+        handle: 'host-key',
+        label: 'Host SSH key',
+        kind: 'SSH_KEY',
+        ...ENVELOPE,
+      });
+      expect(item.kind).toBe('SSH_KEY');
+      expect(db.items.find((it) => it.id === item.id)?.kind).toBe('SSH_KEY');
+    });
+
+    it('defaults to GENERIC when kind is omitted (back-compat)', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const item = await svc.createItem(alice, vaultId, {
+        handle: 'legacy',
+        label: 'Legacy plain value',
+        ...ENVELOPE,
+      });
+      expect(item.kind).toBe('GENERIC');
+    });
+  });
+
   // ── No-grant-what-you-can't-read (the §4 authorization fence) ──────────────────
   describe('no-grant-what-you-cannot-read', () => {
     it('a non-member with secret:manage CANNOT grant (403) even as ADMIN', async () => {
@@ -756,14 +786,14 @@ describe('SecretManagerService', () => {
      */
     function raceDeleteVault(db: FakePrisma, vaultId: string): void {
       const realTransaction = db.$transaction.bind(db);
-      db.$transaction = (async <T>(fn: (tx: FakePrisma) => Promise<T>) => {
+      db.$transaction = async <T>(fn: (tx: FakePrisma) => Promise<T>) => {
         // Concurrent deleteVault lands in the window: soft-delete the vault + drop its memberships, so the
         // in-tx re-read (assertLiveVaultMembershipTx) sees the vault as absent — exactly the orphan race.
         const vault = db.vaults.find((v) => v.id === vaultId);
         if (vault) vault.deletedAt = new Date();
         db.memberships = db.memberships.filter((m) => m.vaultId !== vaultId);
         return realTransaction(fn);
-      }) as FakePrisma['$transaction'];
+      };
     }
 
     it('createItem aborts (404) and creates NO item when the vault dies inside the transaction', async () => {
@@ -1156,6 +1186,117 @@ describe('SecretManagerService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
       const renamed = await svc.renameVault(alice, other, { name: 'Renamed' });
       expect(renamed.name).toBe('Renamed');
+    });
+  });
+
+  // ── Node → secret soft-ref helpers (ADR-0073, #801) ───────────────────────────
+  // These back the Infra topology node→secret linkage. METADATA ONLY (handle/label/vaultId), never a
+  // value/envelope (INV-10). A small inline prisma mock keeps these focused on the new authz/resolution.
+  describe('node→secret soft-ref helpers (ADR-0073, #801)', () => {
+    function makeSvc(prismaMock: unknown): SecretManagerService {
+      return new SecretManagerService(prismaMock as PrismaService);
+    }
+
+    describe('resolveHandlesMetadata', () => {
+      it('returns [] for no refs without touching the DB', async () => {
+        const findMany = jest.fn();
+        const svc = makeSvc({ secretItem: { findMany } });
+
+        await expect(svc.resolveHandlesMetadata([])).resolves.toEqual([]);
+        expect(findMany).not.toHaveBeenCalled();
+      });
+
+      it('resolves to METADATA only, DROPS dangling refs, and sorts by label then handle', async () => {
+        // The store has only the two LIVE items; the third requested ref ('gone') is absent → dropped.
+        const findMany = jest.fn().mockResolvedValue([
+          { handle: 'b_handle', label: 'Beta', vaultId: 'v-1' },
+          { handle: 'a_handle', label: 'Alpha', vaultId: 'v-1' },
+        ]);
+        const svc = makeSvc({ secretItem: { findMany } });
+
+        const out = await svc.resolveHandlesMetadata([
+          { handle: 'a_handle', vaultId: 'v-1' },
+          { handle: 'b_handle', vaultId: 'v-1' },
+          { handle: 'gone', vaultId: 'v-1' },
+        ]);
+
+        // The query is an exact (vaultId, handle) OR, selecting ONLY metadata — no crypto columns.
+        const calls = findMany.mock.calls as unknown[][];
+        const arg = calls[0][0] as {
+          where: unknown;
+          select: unknown;
+        };
+        expect(arg.select).toEqual({
+          handle: true,
+          label: true,
+          vaultId: true,
+        });
+        expect(arg.where).toEqual({
+          OR: [
+            { vaultId: 'v-1', handle: 'a_handle' },
+            { vaultId: 'v-1', handle: 'b_handle' },
+            { vaultId: 'v-1', handle: 'gone' },
+          ],
+        });
+        // Sorted (label, then handle); the dangling 'gone' ref is gone; no value/cipher leak.
+        expect(out).toEqual([
+          { handle: 'a_handle', label: 'Alpha', vaultId: 'v-1' },
+          { handle: 'b_handle', label: 'Beta', vaultId: 'v-1' },
+        ]);
+        expect(JSON.stringify(out)).not.toMatch(
+          /ciphertext|authTag|"iv"|wrappedDek/i,
+        );
+      });
+    });
+
+    describe('assertHandleAttachable', () => {
+      it('FORBIDS a non-member BEFORE probing handle existence (no information leak)', async () => {
+        const membershipFind = jest.fn().mockResolvedValue(null); // not a member
+        const itemFindFirst = jest.fn();
+        const svc = makeSvc({
+          vaultMembership: { findUnique: membershipFind },
+          secretItem: { findFirst: itemFindFirst },
+        });
+
+        await expect(
+          svc.assertHandleAttachable(human('alice'), 'v-1', 'h'),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        // The handle is NEVER probed for a non-member — membership is checked first.
+        expect(itemFindFirst).not.toHaveBeenCalled();
+      });
+
+      it('404s a member when no live handle exists in that vault', async () => {
+        const svc = makeSvc({
+          vaultMembership: {
+            findUnique: jest.fn().mockResolvedValue({ id: 'm' }),
+          },
+          secretItem: { findFirst: jest.fn().mockResolvedValue(null) },
+        });
+
+        await expect(
+          svc.assertHandleAttachable(human('alice'), 'v-1', 'h'),
+        ).rejects.toBeInstanceOf(NotFoundException);
+      });
+
+      it('passes (void) for a member with a live handle in the vault', async () => {
+        const svc = makeSvc({
+          vaultMembership: {
+            findUnique: jest.fn().mockResolvedValue({ id: 'm' }),
+          },
+          secretItem: { findFirst: jest.fn().mockResolvedValue({ id: 'it' }) },
+        });
+
+        await expect(
+          svc.assertHandleAttachable(human('alice'), 'v-1', 'h'),
+        ).resolves.toBeUndefined();
+      });
+
+      it('rejects a non-human principal (human-only, requireHumanId)', async () => {
+        const svc = makeSvc({});
+        await expect(
+          svc.assertHandleAttachable(serviceAccount(), 'v-1', 'h'),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+      });
     });
   });
 });

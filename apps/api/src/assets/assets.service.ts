@@ -35,10 +35,17 @@ export interface AssetFilters {
   categoryId?: string;
   locationId?: string;
   status?: AssetStatus;
+  /** Exact-match grouping filter over the free-text `company` column (ADR-0076). */
+  company?: string;
   /** Case-insensitive substring over name / serial / assetTag (OR). */
   q?: string;
   /** Restrict to assets with a LIVE assignment (releasedAt null) to this user (User.id is a uuid). */
   assignedToUserId?: string;
+  /**
+   * Ownership slice over LIVE assignments (releasedAt null). `HAS` = assets with at least one active
+   * owner; `NONE` = unassigned assets. Independent of `assignedToUserId` (which already implies HAS).
+   */
+  ownership?: 'HAS' | 'NONE';
 }
 
 /**
@@ -83,6 +90,7 @@ const ASSET_LIST_SELECT = {
   assetTag: true,
   status: true,
   notes: true,
+  company: true,
   purchaseDate: true,
   warrantyEnd: true,
   modelId: true,
@@ -188,12 +196,17 @@ export class AssetsService {
     categoryId,
     locationId,
     status,
+    company,
     q,
     assignedToUserId,
+    ownership,
   }: AssetFilters): Prisma.AssetWhereInput {
     return {
       ...(locationId ? { locationId } : {}),
       ...(status ? { status } : {}),
+      // Grouping filter (ADR-0076): exact match on the chosen company value (one of the distinct
+      // values offered by listCompanies). Not a scoping boundary — just narrows the list.
+      ...(company ? { company } : {}),
       // Category lives on the model, not the asset: match assets whose model is in it.
       ...(categoryId ? { model: { categoryId } } : {}),
       // Owner: assets with a LIVE (releasedAt null) assignment to this user — ownership is a
@@ -204,7 +217,13 @@ export class AssetsService {
               some: { userId: assignedToUserId, releasedAt: null },
             },
           }
-        : {}),
+        : // Ownership slice over LIVE assignments. Both filters write the `assignments` key, so apply
+          // ownership only when `assignedToUserId` is absent — a specific user already implies HAS.
+          ownership === 'HAS'
+          ? { assignments: { some: { releasedAt: null } } }
+          : ownership === 'NONE'
+            ? { assignments: { none: { releasedAt: null } } }
+            : {}),
       ...(q
         ? {
             OR: [
@@ -215,6 +234,23 @@ export class AssetsService {
           }
         : {}),
     };
+  }
+
+  /**
+   * Distinct, non-empty `company` values across LIVE assets, sorted (ADR-0076). Powers the asset
+   * form's autocomplete datalist and the list's company filter — so an operator reuses an existing
+   * grouping value instead of inventing a near-duplicate. Free-text, so this is the only "catalog":
+   * there is no Company entity. Read-only; gated like the other asset reads (asset:read).
+   */
+  async listCompanies(): Promise<string[]> {
+    const rows = await this.prisma.asset.findMany({
+      where: { company: { not: null } },
+      distinct: ['company'],
+      select: { company: true },
+      orderBy: { company: 'asc' },
+    });
+    // `company` is non-null here (filtered above), but Prisma's type keeps it `string | null`.
+    return rows.map((r) => r.company).filter((c): c is string => c !== null);
   }
 
   /** A single non-deleted asset by id, expanded with its relations; 404 if missing or deleted. */

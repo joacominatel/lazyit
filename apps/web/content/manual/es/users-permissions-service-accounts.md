@@ -39,8 +39,15 @@ usan los usuarios. **Nunca** hereda un rol ni equivale a un administrador.
 
 Crear una cuenta genera un token. **Se muestra exactamente una vez**, justo después de crear la cuenta.
 
-- Cópialo de inmediato y guárdalo en un lugar seguro. lazyit guarda solo un hash del token, así que
-  **nunca** se puede volver a mostrar ni recuperar.
+- Cáptalo de inmediato y guárdalo en un lugar seguro. Usa **Copiar** o **Descargar** (guarda el token
+  como un archivo `.txt`); además el token es totalmente seleccionable, así que puedes seleccionarlo y
+  copiarlo a mano. lazyit guarda solo un hash del token, así que **nunca** se puede volver a mostrar ni
+  recuperar.
+- El panel **permanece abierto hasta que confirmes** que guardaste el token — Escape, hacer clic fuera y
+  el botón de cerrar quedan deshabilitados hasta entonces, para que no se cierre por accidente y se pierda.
+- En una instalación por HTTP plano (sin HTTPS), el navegador puede bloquear **Copiar**; lazyit te lo
+  avisa y puedes usar **Descargar** (o seleccionar el token a mano) en su lugar — la captura nunca
+  depende del portapapeles.
 - Si lo pierdes, no puedes recuperarlo — **rota** la cuenta para generar uno nuevo.
 - En la fila de la cuenta se muestra un prefijo corto y no secreto (p. ej. `lzit_sa_…`) para que
   reconozcas qué credencial es cuál sin revelar nada utilizable.

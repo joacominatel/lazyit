@@ -1,4 +1,8 @@
-import type { ArticleVersion, ArticleVersionPage } from "@lazyit/shared";
+import type {
+  Article,
+  ArticleVersion,
+  ArticleVersionPage,
+} from "@lazyit/shared";
 import { apiFetch } from "../client";
 
 /**
@@ -49,5 +53,20 @@ export function getArticleVersion(
 ): Promise<ArticleVersion> {
   return apiFetch<ArticleVersion>(
     `/articles/${articleId}/versions/${version}`,
+  );
+}
+
+/**
+ * Restore an article to a previous version (#848): replays that version's title/body/excerpt
+ * through the normal edit path, appending a NEW version (history is never mutated). Requires
+ * `article:write` (the API also enforces authorship). Returns the updated live Article.
+ */
+export function restoreArticleVersion(
+  articleId: string,
+  version: number,
+): Promise<Article> {
+  return apiFetch<Article>(
+    `/articles/${articleId}/versions/${version}/restore`,
+    { method: "POST" },
   );
 }

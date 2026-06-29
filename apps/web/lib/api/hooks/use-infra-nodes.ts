@@ -6,6 +6,8 @@ import {
 } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type {
+  AttachInfraSecret,
+  ConfirmInfraNode,
   CreateInfraEdge,
   InfraEdge,
   InfraImpactResponse,
@@ -15,11 +17,14 @@ import type {
   UpdateInfraNode,
 } from "@lazyit/shared";
 import {
+  attachInfraNodeSecret,
   closeInfraEdge,
+  confirmInfraNode,
   createInfraEdge,
   createInfraNode,
   type CreateInfraNodeInput,
   deleteInfraNode,
+  detachInfraNodeSecret,
   getInfraNodeDetail,
   getInfraNodeEdges,
   getInfraNodeEdgesHistory,
@@ -53,11 +58,20 @@ export const infraKeys = {
 };
 
 /** List topology nodes, optionally filtered. The canvas keeps the fetch client-side (React Flow is
- * client-only — no SSR prefetch, per #741). */
-export function useInfraNodes(filters: InfraNodeFilters = {}) {
+ * client-only — no SSR prefetch, per #741).
+ *
+ * `options` exposes just the two react-query knobs the agent-onboarding live-wait needs (ADR-0074
+ * §3 / #831): `enabled` to fire the poll only while the wizard's "waiting" step is open, and
+ * `refetchInterval` to poll the PENDING list every few seconds until the freshly-installed host
+ * checks in. Per-observer, so it never forces a refetch interval on the table/tray that share the key. */
+export function useInfraNodes(
+  filters: InfraNodeFilters = {},
+  options?: { enabled?: boolean; refetchInterval?: number | false },
+) {
   return useQuery({
     queryKey: infraKeys.nodes(filters),
     queryFn: ({ signal }) => getInfraNodes(filters, signal),
+    ...options,
   });
 }
 
@@ -110,10 +124,16 @@ export function useAssetsOnTopology(enabled: boolean): ReadonlySet<string> {
  * ponytail: a per-node fan-out, not a bespoke batch endpoint — the estate is small by design
  * (ADR-0070), each query is individually cached/invalidated, and `useQueries` already shares the
  * one client. `enabled` gates each on its node id so nothing fires before the node list resolves.
+ *
+ * Surfaces `isError` (true if ANY per-node edge query failed) and an aggregate `refetch` so the
+ * canvas can flag — and retry — a partial fetch instead of silently dropping relationships: a failed
+ * edge fetch would otherwise render the touched nodes as "disconnected" with no cue (issue #778).
  */
 export function useInfraEdges(nodeIds: string[]): {
   edges: InfraEdge[];
   isLoading: boolean;
+  isError: boolean;
+  refetch: () => void;
 } {
   const results = useQueries({
     queries: nodeIds.map((nodeId) => ({
@@ -133,6 +153,13 @@ export function useInfraEdges(nodeIds: string[]): {
     edges: [...byId.values()],
     // Loading only matters before the first paint; once nodes exist we render edges as they arrive.
     isLoading: nodeIds.length > 0 && results.some((r) => r.isLoading),
+    // Any per-node failure means some relationships are missing from the graph above.
+    isError: results.some((r) => r.isError),
+    // Re-run every per-node edge query; a successful retry flips `isError` back to false (the canvas
+    // notice auto-clears). Fresh closure per render is fine — it's only called from the retry click.
+    refetch: () => {
+      for (const result of results) void result.refetch();
+    },
   };
 }
 
@@ -256,6 +283,22 @@ export function useRestoreInfraNode() {
 }
 
 /**
+ * Confirm a PENDING agent-reported node from the review tray (`POST /infra/nodes/:id/confirm`,
+ * ADR-0074 §3). `trackAsAsset` (default true) mints the backing Asset; optional `kind`/`label` override
+ * re-classify/rename at confirm. Invalidates `infraKeys.all` so the pending tray drops the node (now
+ * CONFIRMED) and the canvas/table refresh. The caller owns its own toast/close + `notifyError`.
+ */
+export function useConfirmInfraNode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: ConfirmInfraNode }) =>
+      confirmInfraNode(id, body),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
  * Open an edge (`POST /infra/edges`). The API canonicalizes CONNECTS_TO, migrates RUNS_ON, and may
  * 409 on the one-active-host / duplicate-pair invariant — the caller toasts that message verbatim via
  * `notifyError`. Invalidates `infraKeys.all` so both endpoints' edge lists + the canvas refresh.
@@ -274,6 +317,37 @@ export function useCloseInfraEdge() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => closeInfraEdge(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
+ * Attach a secret HANDLE reference to a node (`POST /infra/nodes/:id/secrets`, ADR-0073 / #801). The
+ * API gates on infra:manage + secret:read + live vault membership and may 403/404 — the caller toasts
+ * that friendly message verbatim via `notifyError`. Invalidates `infraKeys.all` so the open panel's
+ * detail refreshes with the returned `secretRefs`.
+ */
+export function useAttachInfraSecret() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, handle, vaultId }: { id: string } & AttachInfraSecret) =>
+      attachInfraNodeSecret(id, { handle, vaultId }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
+ * Detach a secret HANDLE reference from a node (`DELETE /infra/nodes/:id/secrets`, ADR-0073). A
+ * topology edit (infra:manage only); idempotent. Invalidates `infraKeys.all` so the open panel's
+ * detail refreshes with the returned `secretRefs`.
+ */
+export function useDetachInfraSecret() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, handle, vaultId }: { id: string } & AttachInfraSecret) =>
+      detachInfraNodeSecret(id, { handle, vaultId }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: infraKeys.all }),
   });

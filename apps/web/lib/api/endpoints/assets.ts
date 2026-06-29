@@ -37,8 +37,9 @@ export const deleteAsset = crud.remove;
  * Server-side filters for the asset list. `q` matches name / serial / assetTag;
  * `status`/`categoryId`/`locationId` scope the result set. `sort` is allowlisted to
  * `name|assetTag|serial|status|createdAt|updatedAt` (unknown → 400). `assignedToUserId` is a
- * server-side OWNER filter (assets with a live assignment to that user). The Has/None *ownership*
- * filter is separate and NOT a server param — the screen applies it client-side over the page.
+ * server-side OWNER filter (assets with a live assignment to that user). `ownership` is the
+ * server-side Has/None filter: `HAS` keeps only assets with a live assignment, `NONE` only those
+ * with none (#824 — moved server-side so it scopes the whole result set, not just the page).
  * `limit`/`offset` thread the
  * pagination window (ADR-0030); omit for the defaults (page size 50, offset 0).
  *
@@ -50,8 +51,12 @@ export interface AssetFilters {
   categoryId?: string;
   locationId?: string;
   status?: AssetStatus;
+  /** Exact-match grouping filter on the free-text company value (ADR-0076). */
+  company?: string;
   /** Restrict to assets currently assigned (live) to this user (a User uuid). Server-side filter. */
   assignedToUserId?: string;
+  /** Server-side ownership filter: `HAS` = has a live owner, `NONE` = unassigned (#824). */
+  ownership?: "HAS" | "NONE";
   sort?: string;
   dir?: "asc" | "desc";
   limit?: number;
@@ -79,8 +84,10 @@ export function getAssets(
   if (filters.categoryId) params.set("categoryId", filters.categoryId);
   if (filters.locationId) params.set("locationId", filters.locationId);
   if (filters.status) params.set("status", filters.status);
+  if (filters.company) params.set("company", filters.company);
   if (filters.assignedToUserId)
     params.set("assignedToUserId", filters.assignedToUserId);
+  if (filters.ownership) params.set("ownership", filters.ownership);
   if (filters.sort) {
     params.set("sort", filters.sort);
     if (filters.dir) params.set("dir", filters.dir);
@@ -91,6 +98,15 @@ export function getAssets(
   if (filters.deleted) params.set("deleted", filters.deleted);
   const qs = params.toString();
   return apiFetch<AssetListPage>(qs ? `${BASE}?${qs}` : BASE, { signal, token });
+}
+
+/**
+ * The distinct, non-empty company values across live assets (ADR-0076) — the autocomplete catalog for
+ * the asset form's company datalist and the list's company filter. A grouping facet, not an access
+ * boundary. Gated server-side by asset:read.
+ */
+export function getAssetCompanies(signal?: AbortSignal): Promise<string[]> {
+  return apiFetch<string[]>(`${BASE}/companies`, { signal });
 }
 
 /**

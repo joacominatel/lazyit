@@ -25,6 +25,7 @@ Abre **Activos** y elige **Nuevo activo**. El formulario captura:
 - **Ubicación** — opcional. Dónde reside físicamente la unidad. Ver
   [Ubicaciones](/help/assets-locations).
 - **Serie** y **Etiqueta de activo** — ambas opcionales (ver *Serie y etiqueta de activo* abajo).
+- **Empresa** — etiqueta de agrupación opcional (ver *Empresa* abajo).
 - **Fecha de compra** y **Fin de garantía** — fechas opcionales.
 - **Notas** y **Campos personalizados** — detalle libre opcional.
 
@@ -64,6 +65,23 @@ interno, permanente y aparte, para enlaces y referencias. La etiqueta de activo 
 visible que puedes cambiar en cualquier momento. Si quieres que lazyit asigne etiquetas
 automáticamente a partir de un número correlativo, ver [Etiquetas de activos](/help/assets-asset-tags).
 
+## Empresa
+
+**Empresa** es una etiqueta de agrupación opcional en un activo — una forma de marcar a qué
+organización, unidad de negocio o cliente pertenece (útil si gestionas equipos para varios clientes,
+o si separas el parque por entidad legal). Sirve **solo para agrupar, filtrar e informar**: **no** es
+un control de acceso. Empresa no oculta nada — cualquiera que pueda ver activos ve *todos* los
+activos sin importar su empresa; fijarla solo te permite acotar la lista a una empresa cuando lo
+necesites.
+
+Es un campo de texto libre con **autocompletado**: a medida que escribes, lazyit te sugiere empresas
+que ya usaste en otros activos, así reutilizas la misma forma de escribirla en vez de crear casi
+duplicados — pero siempre puedes escribir un valor nuevo. No hay una pantalla aparte de "empresas"
+que administrar: una empresa existe simplemente porque al menos un activo la usa.
+
+En la página de detalle del activo la empresa se muestra cuando está fijada, y enlaza a la lista
+filtrada por esa empresa. Puedes filtrar y agregar una columna **Empresa** a la lista (más abajo).
+
 ## Campos personalizados
 
 Distintos tipos de activo tienen distintos atributos — una notebook tiene RAM y CPU, un switch tiene
@@ -82,6 +100,7 @@ La lista de **Activos** tiene un buscador y un desplegable de **Estado** en la b
 herramientas, y además un botón **Filtros** que abre un panel con el resto:
 
 - **Categoría** y **Ubicación** — acota a una categoría de modelo o a un lugar.
+- **Empresa** — acota a una empresa (la etiqueta de agrupación de arriba). Solo aparecen las empresas en uso.
 - **Responsable** — muestra solo los activos asignados actualmente a una persona concreta. Empieza a
   escribir un nombre para elegirla; la lista mostrará únicamente las asignaciones vigentes de esa
   persona.
@@ -96,7 +115,7 @@ en marcadores.
 ### Elegir qué columnas mostrar
 
 El botón **Columnas** (junto a *Filtros*) abre una lista de las columnas de la tabla — etiqueta,
-modelo, categoría, ubicación, estado, responsables y actualizado. Desmarca las que no te interesan
+modelo, categoría, ubicación, empresa, estado, responsables y actualizado. Desmarca las que no te interesan
 para reducir la tabla a lo que te importa. La columna **Nombre** y las acciones de fila siempre se
 mantienen. Tu elección se recuerda en este navegador, así que la tabla conserva la misma forma la
 próxima vez que entres. (Esto rige la tabla de escritorio; la vista de tarjetas en móvil siempre

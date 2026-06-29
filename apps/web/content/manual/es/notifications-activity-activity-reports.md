@@ -60,11 +60,19 @@ fila por evento. La paginación es real de anterior/siguiente sobre el resultado
 filas por página), así que cada página es una porción real del recuento del servidor, nunca una ventana
 parcial.
 
-- **Exportar eventos visibles** — descarga las filas mostradas actualmente como CSV.
+- **Exportar todo (filtrado)** — descarga un CSV con **todos** los eventos que coinciden con los filtros
+  actuales — el rango completo, no solo la página que estás viendo. El archivo se transmite desde el
+  servidor, así que funciona incluso con historiales grandes; el tamaño de página y la página en la que
+  estás se ignoran.
+- **Exportar eventos visibles** — descarga solo las filas mostradas actualmente (los filtros **y** la
+  página actual) como CSV.
 - **Imprimir** — imprime la vista actual.
 
-Ambas acciones de exportación operan exactamente sobre lo que está visible en ese momento (los filtros y la
-página actual), así que acota el feed primero para exportar solo la porción que necesitas.
+Ambas exportaciones a CSV producen las mismas columnas (cuándo, acción, entidad, id de entidad,
+responsable, resumen) y son seguras de abrir en una hoja de cálculo. La diferencia es el alcance:
+**Exportar todo** es todo el historial filtrado, mientras que **Exportar eventos visibles** e **Imprimir**
+operan solo sobre la página que tienes delante. Acota el feed con los filtros primero para exportar solo la
+porción que necesitas.
 
 ## Informes frente a la campana de notificaciones
 

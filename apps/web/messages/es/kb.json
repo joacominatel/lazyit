@@ -69,6 +69,18 @@
       "saveError": "No se pudo guardar el artículo",
       "draftCreated": "Borrador creado",
       "createError": "No se pudo crear el artículo"
+    },
+    "draft": {
+      "restoreTitle": "Borrador sin guardar recuperado",
+      "restoreDescription": "Guardamos un borrador local del {time}. Restáuralo para seguir editando o descártalo.",
+      "restore": "Restaurar borrador",
+      "discard": "Descartar borrador"
+    },
+    "leaveConfirm": {
+      "title": "¿Descartar los cambios sin guardar?",
+      "description": "Tienes cambios sin guardar. Si sales ahora, no se guardarán.",
+      "stay": "Seguir editando",
+      "leave": "Descartar cambios"
     }
   },
   "detail": {
@@ -229,7 +241,14 @@
     "empty": "Aún no hay versiones.",
     "versionLabel": "Versión {n}",
     "viewVersion": "Ver",
-    "viewVersionAriaLabel": "Ver versión {n}"
+    "viewVersionAriaLabel": "Ver versión {n}",
+    "restore": "Restaurar",
+    "restoreVersionAriaLabel": "Restaurar versión {n}",
+    "restoreConfirmTitle": "¿Restaurar la versión {n}?",
+    "restoreConfirmDescription": "Esto vuelve a aplicar el título, el cuerpo y el extracto de esa versión como una versión nueva. El historial anterior se conserva y el estado de publicación del artículo no cambia.",
+    "restoreCancel": "Cancelar",
+    "restoreToast": "Restaurado a la versión {n}",
+    "restoreError": "No se pudo restaurar la versión"
   },
   "wikiLinks": {
     "unresolvedTooltip": "Documento aún no creado"

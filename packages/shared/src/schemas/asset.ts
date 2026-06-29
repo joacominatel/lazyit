@@ -33,6 +33,11 @@ export const AssetSchema = z.object({
   status: AssetStatusSchema,
   specs: AssetSpecsSchema.nullable(),
   notes: z.string().nullable(),
+  // Optional GROUPING attribute (ADR-0076, #857) — a Snipe-IT-style "Company" to group/filter/report
+  // assets. NOT per-record scoping (anyone with asset:read sees ALL assets; Modo B was decided against,
+  // #841). ponytail: free-text + an autocomplete of already-used values — promote to a managed Company
+  // entity only if governance (rename/soft-delete) is ever needed.
+  company: z.string().nullable(),
   purchaseDate: z.iso.datetime().nullable(),
   warrantyEnd: z.iso.datetime().nullable(),
   modelId: z.cuid().nullable(),
@@ -53,6 +58,8 @@ export const CreateAssetSchema = z.strictObject({
   status: AssetStatusSchema,
   specs: AssetSpecsSchema.optional(),
   notes: optionalText(2000),
+  // Optional grouping value (ADR-0076). Mirrors `notes` — optional free text, empty coerced to absent.
+  company: optionalText(200),
   purchaseDate: z.iso.datetime().optional(),
   warrantyEnd: z.iso.datetime().optional(),
   modelId: z.cuid().optional(),
@@ -69,6 +76,8 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
       status: AssetStatusSchema,
       specs: AssetSpecsSchema,
       notes: z.string().trim().min(1).max(2000),
+      // Optional grouping value (ADR-0076) — mirrors `notes` in the partial update shape.
+      company: z.string().trim().min(1).max(200),
       purchaseDate: z.iso.datetime(),
       warrantyEnd: z.iso.datetime(),
       modelId: z.cuid(),

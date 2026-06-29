@@ -144,8 +144,7 @@ async function activeLocale(): Promise<Locale> {
 export async function getManualPage(slug: string): Promise<ManualPage | null> {
   if (!SLUG_RE.test(slug)) return null;
 
-  const requested = await activeLocale();
-  const available = await availableLocalesForSlug(slug);
+  const [requested, available] = await Promise.all([activeLocale(), availableLocalesForSlug(slug)]);
   const resolution = resolvePageLocale(requested, available);
   if (!resolution) return null;
 

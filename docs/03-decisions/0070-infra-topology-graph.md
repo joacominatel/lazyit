@@ -270,6 +270,11 @@ diagram, so it ships in the MVP, not v1. **React Flow** is adopted as the one ne
 scoped to this screen (confirm version via Context7 before install). Nav: **Assets › Servers** (filtered
 list) and **Assets › Diagram** (the canvas). A static HTML tree is rejected (can't do free-move/pan/edges).
 
+> **Updated 2026-06-27 (#801): node→secret linkage now implemented — see ADR-0073.** The §5 asset-backed
+> secret surface / the `secretRefs` placeholder is no longer empty: a node carries soft secret
+> handle-refs (`InfraNodeSecretRef`), resolved at read to live secret METADATA only (INV-10), with
+> member-scoped attach. See [[0073-infra-node-secret-linkage]].
+
 > **UX round (issues #760–#767).** Post-MVP the canvas got a UX pass (design brief pinned on #723).
 > Edges became a *system*, not just colour: each kind reads by **colour + line-style + marker +
 > (DEPENDS_ON only) animated flow**, with an on-edge kind label on hover/select and a collapsible
@@ -289,6 +294,12 @@ A graph beats a picture only if you can ask **"if this node goes down, what is a
 `GET /infra/nodes/:id/impact` — a recursive traversal over inverse `RUNS_ON`/`DEPENDS_ON` edges returning
 the downstream set, surfaced in the UI as a highlight on the canvas. This is named as a v1 feature, not
 an afterthought.
+
+> **Updated 2026-06-27 (#802):** the traversal now includes `MEMBER_OF` alongside `RUNS_ON` and
+> `DEPENDS_ON` — a CLUSTER/group going down surfaces its members. This is an edge-derived heuristic (a
+> member may survive a group losing quorum), not a hand-verified guarantee. `BACKS_UP_TO` and
+> `CONNECTS_TO` remain excluded: a backup target failing does not take down the primary, and
+> `CONNECTS_TO` is symmetric with no failure direction.
 
 ### 8. Permissions
 

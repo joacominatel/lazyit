@@ -85,6 +85,7 @@ export function cloneAssetDefaults(source: Asset): Partial<{
   status: Asset["status"];
   specs: Record<string, unknown> | undefined;
   notes: string | undefined;
+  company: string | undefined;
   purchaseDate: string | undefined;
   warrantyEnd: string | undefined;
   modelId: string | undefined;
@@ -96,6 +97,8 @@ export function cloneAssetDefaults(source: Asset): Partial<{
     modelId: orUndefined(source.modelId),
     locationId: orUndefined(source.locationId),
     notes: orUndefined(source.notes),
+    // Grouping value carried verbatim onto the clone (ADR-0076) — non-unique, so no clearing needed.
+    company: orUndefined(source.company),
     purchaseDate: orUndefined(source.purchaseDate),
     warrantyEnd: orUndefined(source.warrantyEnd),
     specs: cloneJson(source.specs),

@@ -39,7 +39,7 @@ jobs:
           node-version: 24
 
       - name: Cache Bun install cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -50,7 +50,7 @@ jobs:
       # restore-key prefix so a partial (older) cache still seeds a faster rebuild. Turbo verifies
       # task inputs itself, so a stale entry is never reused incorrectly — at worst it rebuilds.
       - name: Cache Turborepo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('bun.lock', 'apps/**', 'packages/**', 'turbo.json') }}
@@ -78,6 +78,9 @@ jobs:
           bunx tsc --noEmit -p packages/shared/tsconfig.build.json
           bunx tsc --noEmit -p apps/api/tsconfig.json
           bunx tsc --noEmit -p apps/web/tsconfig.json
+          # apps/agent is shipped (compiled into the API image) but bun build --compile does NOT
+          # typecheck — so CI must, or agent type errors reach the image silently (ADR-0074 §7).
+          bunx tsc --noEmit -p apps/agent/tsconfig.json
 
       # Full-repo lint is REPORT-ONLY (`eslint .`, no --fix) — same as the repo's `lint` script;
       # `lint:fix` is the separate mutating fixer (#353). Both need the generated Prisma client,

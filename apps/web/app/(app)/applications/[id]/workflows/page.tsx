@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
@@ -22,6 +23,22 @@ export default function ApplicationWorkflowsPage() {
   const applicationId = params.id;
   const { data: application } = useApplication(applicationId);
 
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: t("breadcrumb.applications"), href: "/applications" },
+          {
+            label: application?.name ?? applicationId,
+            href: `/applications/${applicationId}`,
+          },
+          { label: t("breadcrumb.workflows") },
+        ]}
+      />
+    ),
+    [t, application?.name, applicationId],
+  );
+
   return (
     <div className="mx-auto max-w-4xl">
       <PermissionGate
@@ -31,18 +48,7 @@ export default function ApplicationWorkflowsPage() {
       >
         <div className="space-y-6">
           <PageHeader
-            breadcrumb={
-              <Breadcrumb
-                items={[
-                  { label: t("breadcrumb.applications"), href: "/applications" },
-                  {
-                    label: application?.name ?? applicationId,
-                    href: `/applications/${applicationId}`,
-                  },
-                  { label: t("breadcrumb.workflows") },
-                ]}
-              />
-            }
+            breadcrumb={breadcrumb}
             title={t("tab.title")}
             subtitle={t("tab.subtitle")}
           />

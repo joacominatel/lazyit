@@ -35,6 +35,72 @@
     "CONFIRMED": "Confirmado",
     "PENDING": "Pendiente"
   },
+  "agent": {
+    "badge": "Reportado por agente",
+    "reported": "reportado {time}",
+    "staleReported": "reportado {time} · desactualizado"
+  },
+  "pending": {
+    "title": "Revisión pendiente",
+    "description": "Hosts que descubrió el agente de reporte. Confirmá para sumarlos a tu inventario, o descartalos.",
+    "confirmAction": "Confirmar",
+    "discardAction": "Descartar"
+  },
+  "confirm": {
+    "title": "Confirmar este servidor",
+    "description": "Sumá este host descubierto por el agente a tu topología activa. Podés reclasificarlo o renombrarlo antes.",
+    "labelLabel": "Nombre",
+    "kindLabel": "Tipo",
+    "trackAsAssetLabel": "Registrar como activo de inventario",
+    "trackAsAssetDescription": "Activado por defecto: también crea un activo registrado (con los datos reportados del host) para que este servidor pueda tener responsable, artículos de la base de conocimiento y secretos. Desactivalo para dejarlo solo en el grafo.",
+    "submit": "Confirmar servidor",
+    "confirmedToast": "Servidor confirmado.",
+    "error": "No se pudo confirmar el servidor."
+  },
+  "onboarding": {
+    "title": "Registrá servidores automáticamente",
+    "description": "Instalá un agente liviano en un servidor Linux y reporta su hardware y software a lazyit por sí solo: solo puede reportar, nada más.",
+    "cta": "Creá tu primer agente",
+    "addAgent": "Agregar agente",
+    "noPermissionHint": "Pedile a un administrador que agregue un agente de reporte: requiere el permiso de gestión de configuración."
+  },
+  "wizard": {
+    "title": "Crear un agente de reporte",
+    "subtitle": "Instalá un agente de reporte en un servidor Linux en tres pasos.",
+    "steps": {
+      "name": "Nombre",
+      "install": "Instalar",
+      "wait": "Esperar"
+    },
+    "stepAria": "Paso {current} de {total}",
+    "whatIsAgent": "Un agente es un programa pequeño que corrés en un servidor. Reporta el hardware y el software instalado del servidor a lazyit por sí solo: no puede leer ni modificar nada más.",
+    "nameLabel": "Nombre",
+    "namePlaceholder": "p. ej. web-prod-01",
+    "nameHint": "Un nombre para reconocer este agente más adelante (por ejemplo, el nombre del servidor).",
+    "scopeNote": "Este token solo puede reportar inventario (infra:report). No puede leer ni modificar nada más, y cada host que reporta queda en Revisión pendiente para tu aprobación.",
+    "generate": "Generar credenciales",
+    "createdToast": "Credenciales creadas.",
+    "error": "No se pudieron crear las credenciales.",
+    "requirements": "Vas a ejecutar esto en un servidor Linux con acceso root.",
+    "installTitle": "Ejecutá esto en tu servidor",
+    "installHint": "Copiá el comando y ejecutalo en el servidor Linux como root. El token se muestra una sola vez: capturalo antes de cerrar.",
+    "copyCommandAria": "Copiar el comando",
+    "commandCopied": "Comando copiado.",
+    "manual": {
+      "toggle": "Instalar manualmente (paso a paso)",
+      "intro": "¿Preferís revisar cada paso? Ejecutá estos en el servidor en lugar del comando de una línea de arriba.",
+      "step1": "Descargá el binario (usá arch=arm64 en máquinas ARM):",
+      "step2": "Hacelo ejecutable y movelo a su lugar:",
+      "step3": "Creá el archivo de configuración (contiene el token, así que chmod 600):",
+      "step4": "Enviá un primer reporte para verificar que funciona:"
+    },
+    "waitTitle": "Esperando que {name} reporte…",
+    "waitDescription": "Ejecutá el comando de instalación en tu servidor. Apenas el agente reporte, aparecerá acá, normalmente en un par de minutos.",
+    "successTitle": "¡{name} reportó!",
+    "successDescription": "Tu servidor reportó. Confirmalo para sumarlo a tu inventario.",
+    "confirmAction": "Confirmar servidor",
+    "checkLater": "Reviso después"
+  },
   "view": {
     "map": "Mapa",
     "table": "Tabla"
@@ -80,7 +146,8 @@
     "meta": {
       "asset": "Activo",
       "owner": "Responsable",
-      "ip": "Dirección IP"
+      "ip": "Dirección IP",
+      "source": "Origen"
     }
   },
   "edgeKind": {
@@ -125,6 +192,14 @@
     "secretsTitle": "Secretos",
     "noSecrets": "No hay referencias a secretos. Los valores nunca se muestran acá, solo los identificadores.",
     "secretHandleNote": "Solo referencia: el valor nunca se revela acá.",
+    "secretAttach": "Vincular un secreto…",
+    "secretPickerSearch": "Buscar secretos por identificador…",
+    "secretPickerEmpty": "No se encontraron secretos. Solo ves los secretos a los que tenés acceso.",
+    "secretRemove": "Quitar la referencia al secreto",
+    "secretAttachedToast": "Referencia al secreto vinculada.",
+    "secretDetachedToast": "Referencia al secreto quitada.",
+    "secretAttachError": "No se pudo vincular la referencia al secreto.",
+    "secretDetachError": "No se pudo quitar la referencia al secreto.",
     "shortcutsTitle": "Accesos directos",
     "noShortcuts": "No hay accesos directos.",
     "openShortcut": "Abrir",
@@ -195,6 +270,8 @@
     "closedToast": "Conexión cerrada.",
     "closeError": "No se pudo cerrar la conexión.",
     "loadError": "No se pudieron cargar las conexiones.",
+    "partialError": "No se pudieron cargar algunas relaciones.",
+    "retry": "Reintentar",
     "selfNode": "este nodo",
     "since": "desde {date}",
     "ended": "finalizó {date}"

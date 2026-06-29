@@ -16,5 +16,8 @@ import { VaultsController } from './vaults.controller';
 @Module({
   controllers: [KeypairController, VaultsController, ItemsController],
   providers: [SecretManagerService],
+  // Exported so other modules (e.g. InfraModule, ADR-0073) can reuse the METADATA-ONLY soft-ref
+  // resolution + attach-authz helpers. Only the service is shared — never crypto, never values.
+  exports: [SecretManagerService],
 })
 export class SecretManagerModule {}

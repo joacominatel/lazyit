@@ -13,7 +13,7 @@ import {
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { EmptyState } from "@/components/empty-state";
 import {
@@ -37,8 +37,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { TableCell } from "@/components/ui/table";
 import { useInfraNodes } from "@/lib/api/hooks/use-infra-nodes";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { statusTone } from "@/lib/infra/canvas";
+import { AgentOnboarding } from "./agent-onboarding";
+import { AgentBadge, AgentFreshness } from "./agent-provenance";
+import { CreateAgentWizard } from "./create-agent-wizard";
+import { PendingReviewTray } from "./pending-review-tray";
 
 /**
  * Topology › Table (ADR-0070 §6, issues #743 + #760) — the filtered LIST view of infra topology
@@ -72,9 +77,26 @@ import { statusTone } from "@/lib/infra/canvas";
  */
 const FILTER_DEFAULTS = { kind: "ALL", status: "ALL", state: "ALL" } as const;
 
+/** Stable empty placeholder for the loading skeleton's mobile children slot. */
+const LOADING_MOBILE_CHILDREN = <></>;
+
+
 export function ServersTableView() {
   const t = useTranslations("infra");
   const tServers = useTranslations("infra.servers");
+  // Minting the reporting-agent Service Account needs settings:manage (ADR-0074 §6 / ADR-0048), so the
+  // "Add a server" affordance is gated on it — separate from the infra:read that gates the list itself.
+  const canMintServer = useCan("settings:manage");
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  // Whether the estate already has ANY agent-sourced node (across every state) — drives the onboarding
+  // hero vs. the compact "Add agent" affordance (ADR-0074 §6). Reads the unfiltered node list, which is
+  // already cached/shared by the topology canvas and the Assets "On topology" badge (#765), so this is
+  // a cache hit, not an extra round-trip. `undefined` while loading → the hero stays hidden (no flash).
+  const { data: allNodes } = useInfraNodes({});
+  const hasAgents = allNodes
+    ? allNodes.some((node) => node.source === "AGENT")
+    : undefined;
 
   const {
     q,
@@ -198,20 +220,28 @@ export function ServersTableView() {
       : []),
   ];
 
+  // The PENDING review tray + the "Add a server" affordance wrap EVERY body state (loading / error /
+  // empty / table), so they stay reachable — you can add the FIRST server while the table is still
+  // empty, and confirm a discovered host even with the table filtered to nothing (ADR-0074 §3/§6).
+  let body: React.ReactNode;
   if (isLoading) {
-    return <ResourceTable columns={columns} isLoading mobileChildren={<></>} />;
-  }
-  if (isError) {
-    return (
+    body = (
+      <ResourceTable
+        columns={columns}
+        isLoading
+        mobileChildren={LOADING_MOBILE_CHILDREN}
+      />
+    );
+  } else if (isError) {
+    body = (
       <ErrorState
         title={tServers("loadError")}
         onRetry={() => refetch()}
         error={error}
       />
     );
-  }
-  if (isEmpty && !filtersActive) {
-    return (
+  } else if (isEmpty && !filtersActive) {
+    body = (
       <EmptyState
         icon={ServerStackIcon}
         pillar="inventory"
@@ -219,9 +249,8 @@ export function ServersTableView() {
         description={t("empty.description")}
       />
     );
-  }
-
-  return (
+  } else {
+    body = (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <SearchInput
@@ -319,6 +348,21 @@ export function ServersTableView() {
                 >
                   {node.ipAddress ?? "—"}
                 </ResourceCardMeta>
+                {node.source === "AGENT" ? (
+                  <ResourceCardMeta
+                    label={tServers("meta.source")}
+                    className="col-span-2"
+                  >
+                    <div className="flex flex-col items-start gap-1">
+                      <AgentBadge />
+                      <AgentFreshness
+                        reportingSource={node.reportingSource}
+                        lastReportedAt={node.lastReportedAt}
+                        status={node.status}
+                      />
+                    </div>
+                  </ResourceCardMeta>
+                ) : null}
               </>
             }
           />
@@ -327,9 +371,24 @@ export function ServersTableView() {
         {rows.map((node) => (
           <LinkableRow key={node.id} href={diagramHref(node.id)}>
             <TableCell className="font-medium">
-              <Link href={diagramHref(node.id)} className="hover:underline">
-                {node.label}
-              </Link>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link
+                    href={diagramHref(node.id)}
+                    className="hover:underline"
+                  >
+                    {node.label}
+                  </Link>
+                  {node.source === "AGENT" ? <AgentBadge /> : null}
+                </div>
+                {node.source === "AGENT" ? (
+                  <AgentFreshness
+                    reportingSource={node.reportingSource}
+                    lastReportedAt={node.lastReportedAt}
+                    status={node.status}
+                  />
+                ) : null}
+              </div>
             </TableCell>
             <TableCell>
               <Badge variant="outline">{t(`kind.${node.kind}`)}</Badge>
@@ -351,6 +410,25 @@ export function ServersTableView() {
           </LinkableRow>
         ))}
       </ResourceTable>
+    </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <AgentOnboarding
+        canMint={canMintServer}
+        hasAgents={hasAgents}
+        onCreate={() => setWizardOpen(true)}
+      />
+
+      <PendingReviewTray />
+
+      {body}
+
+      {canMintServer ? (
+        <CreateAgentWizard open={wizardOpen} onOpenChange={setWizardOpen} />
+      ) : null}
     </div>
   );
 }

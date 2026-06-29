@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { BeakerIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { RequestIdNote } from "@/components/request-id-note";
@@ -125,22 +126,32 @@ function DryRunStepRow({ step }: { step: DryRunStep }) {
   const transition = step.transitionTaken;
   const isFailureEdge = transition ? !SUCCESS_EDGES.has(transition.edge) : false;
 
+  const badge = useMemo(
+    () => <StepKindBadge kind={step.kind} />,
+    [step.kind],
+  );
+
+  const meta = useMemo(
+    () => (
+      <span className="flex items-center gap-2">
+        {step.simulated ? (
+          <StatusBadge tone="warning">{t("dryRun.simulated")}</StatusBadge>
+        ) : null}
+        <StatusBadge tone={stepStatusTone(step.status)}>
+          {t(`stepStatus.${step.status}`)}
+        </StatusBadge>
+      </span>
+    ),
+    [t, step.simulated, step.status],
+  );
+
   return (
     <>
       <WorkflowNode
         dotTone={stepStatusTone(step.status)}
-        badge={<StepKindBadge kind={step.kind} />}
+        badge={badge}
         title={step.name || step.stepKey}
-        meta={
-          <span className="flex items-center gap-2">
-            {step.simulated ? (
-              <StatusBadge tone="warning">{t("dryRun.simulated")}</StatusBadge>
-            ) : null}
-            <StatusBadge tone={stepStatusTone(step.status)}>
-              {t(`stepStatus.${step.status}`)}
-            </StatusBadge>
-          </span>
-        }
+        meta={meta}
         isLast={false}
       >
         {step.request ? <DryRunRequest request={step.request} /> : null}

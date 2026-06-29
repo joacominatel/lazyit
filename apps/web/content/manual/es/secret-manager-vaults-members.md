@@ -60,6 +60,29 @@ otra app o un gestor de portapapeles ya capturó el valor), así que considéral
 garantía — pega cuanto antes. Puedes editar la etiqueta o el identificador de un secreto, reemplazar su
 valor o eliminarlo.
 
+## Tipos de secreto
+
+Un secreto tiene un **Tipo** para que lazyit pueda almacenar algo más que una sola cadena y mostrártelo
+en una forma útil. Todos los tipos se cifran en tu navegador exactamente de la misma manera — el tipo es
+solo una **etiqueta** que le indica a lazyit qué formulario mostrar y cómo renderizar el valor; el
+servidor sigue sin ver nunca el contenido.
+
+- **Genérico** (el predeterminado) — un único valor: una contraseña, una clave de API, un token. Nada
+  cambia respecto a antes; esto es lo que ya es cada secreto existente.
+- **Clave SSH** — una **clave privada** SSH, con una **clave pública** y una **frase de contraseña**
+  opcionales. Al revelarla, cada parte se muestra como un bloque monoespaciado que se puede copiar.
+- **Código de un solo uso (TOTP)** — una **semilla** de doble factor (el secreto base32 que te da un
+  proveedor), con emisor, cuenta, cantidad de dígitos, período y algoritmo opcionales. La semilla se
+  cifra como cualquier otro secreto; al revelarla, lazyit **calcula el código de 6 dígitos en vivo en tu
+  dispositivo** y lo muestra con una cuenta regresiva, actualizándolo cada período — el mismo código que
+  mostraría una app de autenticación. lazyit nunca envía la semilla a ningún lado para hacerlo.
+- **Certificado** — un **certificado** X.509, con una **clave privada** y una **cadena** opcionales, cada
+  una mostrada como un bloque que se puede copiar al revelarla.
+
+Puedes cambiar el tipo de un secreto al editarlo. Como el valor almacenado se vuelve a cifrar para
+coincidir con la nueva forma, cambiar el tipo te pide **reingresar el valor** para que el tipo y el valor
+cifrado queden sincronizados.
+
 ## Buscar en una bóveda
 
 Una bóveda con más de unos pocos secretos muestra un **cuadro de búsqueda** sobre la lista. Filtra por

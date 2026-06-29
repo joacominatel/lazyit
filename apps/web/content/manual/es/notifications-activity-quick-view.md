@@ -35,10 +35,14 @@ Solo hay una vista previa abierta a la vez: abrir el ojo de otra fila cierra la 
 
 - Movete por la lista con las flechas **↑ / ↓**. El **ojo se muestra en la fila resaltada**, así ves
   de un vistazo qué filas tienen vista previa.
-- Presioná **Esc** para cerrar una vista previa abierta sin salir del selector.
+- Presioná **Alt + Enter** para **abrir y fijar** la vista previa de la fila resaltada — igual que si
+  hicieras clic en su ojo. Una pequeña ayuda **Alt ↵** al pie de la lista te lo recuerda.
+- Presioná **Esc** para cerrar la vista previa y volver a la lista, justo donde estabas, así seguís
+  navegando con las flechas.
 
-Abrir una vista previa solo con el teclado no está disponible en esta versión — usá el mouse para
-abrirla. Un ojo totalmente operable por teclado está planificado.
+Escribir para filtrar, las flechas **↑ / ↓** y **Enter** para elegir una fila siguen funcionando
+exactamente igual que antes — **Alt + Enter** es el único atajo que se agrega, y nunca selecciona la
+fila.
 
 ## Qué muestra una vista previa
 

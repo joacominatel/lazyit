@@ -67,10 +67,15 @@ import {
 } from "./location-type-badge";
 
 /**
- * Filter param defaults for the URL list-state. `type` is filtered client-side over the page.
- * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
+ * Filter param defaults for the URL list-state. `type` maps to the server's `type` param (#824 —
+ * scopes the whole result set). `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only`
+ * view via the URL.
  */
 const FILTER_DEFAULTS = { type: "ALL", archived: "ALL" } as const;
+
+/** Stable empty fragment for ResourceTable mobileChildren when the table is in loading state. */
+const EMPTY_MOBILE = <></>;
+
 
 export function LocationsListView() {
   const t = useTranslations("locations");
@@ -105,12 +110,14 @@ export function LocationsListView() {
   // The archived view is ADMIN-only.
   const archived = isAdmin && filters.archived === "only";
 
-  // Forward only the server-supported params; `type` is filtered client-side over the page below.
+  // Forward the server-supported params; `type` is now a server filter too (#824), so it scopes the
+  // whole result set instead of just the current page.
   const { data: page, isLoading, isFetching, isError, error, refetch } =
     useLocationList({
       q: q || undefined,
       sort,
       dir: sort ? dir : undefined,
+      type: typeFilter === "ALL" ? undefined : typeFilter,
       limit,
       offset,
       deleted: archived ? "only" : undefined,
@@ -123,12 +130,9 @@ export function LocationsListView() {
   const [deleting, setDeleting] = useState<Location | undefined>(undefined);
   const [bulkRestoring, setBulkRestoring] = useState(false);
 
-  const rows = useMemo(() => {
-    const items = page?.items ?? [];
-    return typeFilter === "ALL"
-      ? items
-      : items.filter((location) => location.type === typeFilter);
-  }, [page?.items, typeFilter]);
+  // The page is already scoped server-side (type/#824), so rows are the page items verbatim — no
+  // client-side post-filter over the window.
+  const rows = useMemo(() => page?.items ?? [], [page?.items]);
 
   // Selection only matters in the archived view (its sole bulk action: Restore).
   const visibleIds = useMemo(() => rows.map((loc) => loc.id), [rows]);
@@ -287,7 +291,7 @@ export function LocationsListView() {
       />
 
       {isLoading ? (
-        <ResourceTable columns={columns} isLoading mobileChildren={<></>} />
+        <ResourceTable columns={columns} isLoading mobileChildren={EMPTY_MOBILE} />
       ) : isError ? (
         <ErrorState
           title={t("list.loadError")}

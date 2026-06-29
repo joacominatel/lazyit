@@ -7,6 +7,10 @@ import {
 } from '@nestjs/common';
 import {
   isPlausibleEdge,
+  type AgentReport,
+  type AgentReportAck,
+  type AttachInfraSecret,
+  type ConfirmInfraNode,
   type CreateInfraEdge,
   type CreateInfraNode,
   type InfraEdgeKind,
@@ -24,6 +28,7 @@ import { ActorService } from '../common/actor.service';
 import { AssetsService } from '../assets/assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { ArticlesService } from '../articles/articles.service';
+import { SecretManagerService } from '../secret-manager/secret-manager.service';
 import { SearchService } from '../search/search.service';
 import { projectInfraNode } from '../search/search.documents';
 import { parsePageQuery } from '../common/parse-page-query';
@@ -66,6 +71,7 @@ export class InfraService {
     private readonly assets: AssetsService,
     private readonly assignments: AssetAssignmentsService,
     private readonly articles: ArticlesService,
+    private readonly secrets: SecretManagerService,
     private readonly search: SearchService,
   ) {}
 
@@ -143,6 +149,135 @@ export class InfraService {
     // Meili is disabled. The helper re-reads with the linked Asset name for the projection.
     void this.syncNodeToSearch(node.id);
     return node;
+  }
+
+  /**
+   * Ingest one server reporting-agent report (ADR-0074 §3) — the machine-facing upsert behind
+   * `POST /infra/report`. Reconciles on the dedup key `(reportingSource, externalId)` over NON-deleted
+   * nodes (the partial-unique index from migration 20260627130000):
+   *
+   *   - UNKNOWN key → CREATE a `source=AGENT`, `state=PENDING`, `status=ONLINE` node (a PROPOSAL in the
+   *     review tray). `kind` defaults to `PHYSICAL_HOST`, `label` = hostname, `specs` = the inventory
+   *     blob. NO backing Asset is created — the Asset is minted later, only on HUMAN confirmation.
+   *   - KNOWN key → UPDATE `specs`, refresh `status=ONLINE` + `lastReportedAt`. It NEVER overwrites a
+   *     human's curation (`state`, `label`, `x`/`y`, asset link, …): the agent owns inventory FACTS,
+   *     the human owns curation. A confirmed node keeps receiving fresh facts without losing its edits.
+   *
+   * Returns a minimal ack `{ nodeId, state, accepted: true }`. The post-write search sync reuses the
+   * existing fire-and-forget helper.
+   *
+   * ponytail: no new BullMQ queue for MVP — reports are light; reuse the existing fire-and-forget
+   * search sync, add a queue only if report volume ever makes the inline upsert slow.
+   *
+   * ponytail: `kind` inference is deferred — the v1 contract carries no reliable virtualization hint,
+   * so every agent host lands as `PHYSICAL_HOST`; the human re-kinds it (VM/CONTAINER/…) on confirm.
+   */
+  async ingestReport(report: AgentReport): Promise<AgentReportAck> {
+    // The inventory blob (ADR-0074 §2 / ADR-0007 jsonb posture): host facts + software under clear
+    // keys, plus the agent's own version/timestamp for provenance. Stored verbatim — validated already
+    // by `AgentReportSchema` at the controller. `software` is omitted when the agent couldn't list it.
+    const specs: Prisma.InputJsonValue = {
+      host: report.host,
+      ...(report.software !== undefined ? { software: report.software } : {}),
+      agentVersion: report.agentVersion,
+      reportedAt: report.reportedAt,
+    };
+    const now = new Date();
+
+    // Reconcile by the dedup key over non-deleted nodes (the soft-delete extension scopes findFirst).
+    const existing = await this.prisma.infraNode.findFirst({
+      where: {
+        reportingSource: report.reportingSource,
+        externalId: report.externalId,
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      // Known host: refresh inventory facts + liveness ONLY. Curation (state/label/x/y/asset) is the
+      // human's and is deliberately left untouched.
+      const updated = await this.prisma.infraNode.update({
+        where: { id: existing.id },
+        data: { specs, status: 'ONLINE', lastReportedAt: now },
+        select: { id: true, state: true },
+      });
+      void this.syncNodeToSearch(updated.id);
+      return { nodeId: updated.id, state: updated.state, accepted: true };
+    }
+
+    // New host: a PENDING proposal in the review tray. No backing Asset until a human confirms (§3).
+    const created = await this.prisma.infraNode.create({
+      data: {
+        kind: 'PHYSICAL_HOST',
+        label: report.host.hostname,
+        status: 'ONLINE',
+        source: 'AGENT',
+        state: 'PENDING',
+        reportingSource: report.reportingSource,
+        externalId: report.externalId,
+        lastReportedAt: now,
+        specs,
+      },
+      select: { id: true, state: true },
+    });
+    void this.syncNodeToSearch(created.id);
+    return { nodeId: created.id, state: created.state, accepted: true };
+  }
+
+  /**
+   * Confirm a PENDING agent-reported node from the review tray (ADR-0074 §3) — the HUMAN gate that
+   * promotes a discovered host into the official inventory. 404 if the node is missing/soft-deleted.
+   *
+   *   - state flips `PENDING → CONFIRMED`; optional `kind`/`label` overrides let the operator
+   *     re-classify/rename (the agent lands every host as `PHYSICAL_HOST` with the hostname as label).
+   *   - `trackAsAsset` (default true) + no existing link → mint a backing Asset via the SAME reused
+   *     `AssetsService.create` path `createNode` uses, carrying the agent's host facts (`specs`) over so
+   *     the Asset is populated, and stamping the auto-created provenance marker so a later detach
+   *     soft-deletes it (ADR-0070 §5). `trackAsAsset: false` leaves the node graph-only.
+   *
+   * IDEMPOTENT: confirming a node that is ALREADY CONFIRMED is a no-op (no Asset minted, no re-flip) —
+   * it just returns the current detail. Re-confirming is a safe retry, not a 409 (the tray's confirm
+   * button can be double-clicked). // ponytail: there is NO reject/discard endpoint — discarding a
+   * PENDING proposal is just `DELETE /infra/nodes/:id` (the existing soft-delete), so this builds none.
+   */
+  async confirmNode(id: string, dto: ConfirmInfraNode, principal?: Principal) {
+    const node = await this.getNode(id);
+    if (node.state !== 'PENDING') {
+      // Already curated (or never pending) — idempotent no-op, return the current enriched detail.
+      return this.getNodeDetail(id, principal);
+    }
+
+    const trackAsAsset = dto.trackAsAsset ?? true;
+    const label = dto.label ?? node.label;
+
+    // Mint the backing Asset only when tracking AND the node isn't already linked. Reuse the exact
+    // createNode path: carry the agent's host facts over + stamp the auto-created provenance marker.
+    let assetId = node.assetId ?? undefined;
+    if (trackAsAsset && !node.assetId) {
+      const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
+      const created = await this.assets.create(
+        {
+          name: label,
+          status: 'UNKNOWN',
+          specs: { ...hostSpecs, [INFRA_AUTO_ASSET_MARKER]: true },
+        },
+        principal,
+      );
+      assetId = created.id;
+    }
+
+    const updated = await this.prisma.infraNode.update({
+      where: { id },
+      data: {
+        state: 'CONFIRMED',
+        ...(dto.kind !== undefined ? { kind: dto.kind } : {}),
+        ...(dto.label !== undefined ? { label: dto.label } : {}),
+        ...(assetId !== undefined ? { assetId } : {}),
+      },
+    });
+    // Fire-and-forget search re-sync: state/kind/label/asset link may have changed (ADR-0035).
+    void this.syncNodeToSearch(updated.id);
+    return this.getNodeDetail(id, principal);
   }
 
   /**
@@ -254,17 +389,88 @@ export class InfraService {
       articleLinks = await this.resolveArticleLinks(node.assetId, principal);
     }
 
+    // Node→secret linkage (ADR-0073, #801): resolve this node's soft handle-refs to LIVE secret
+    // METADATA only (handle/label/vaultId), never values (INV-10). Dangling refs (the secret was
+    // soft-deleted or its editable handle renamed away) are dropped during resolution.
+    const secretRefs = await this.resolveNodeSecretRefs(id);
+
     return {
       ...node,
       assetName,
       owners,
       articleLinks,
-      // ponytail: no asset→secret linkage exists in the data model (verified against the Secret Manager
-      // schema), so there is nothing to surface yet. The shape is fixed (handles only, INV-10) so a
-      // future linkage (ADR-0070 §6) needs no contract change. NEVER return ciphertext/iv/authTag.
-      secretRefs: [] as InfraSecretRef[],
+      secretRefs,
       children,
     };
+  }
+
+  /**
+   * Load a node's secret soft-links and resolve them to LIVE secret METADATA (ADR-0073, #801) — the
+   * `secretRefs` the drill-in + attach/detach return. METADATA ONLY (handle/label/vaultId), NEVER a
+   * value/envelope (INV-10); a ref whose secret is no longer live (soft-deleted / handle renamed away)
+   * is dropped by the resolver. Stable-sorted (label, then handle) by the resolver.
+   */
+  private async resolveNodeSecretRefs(
+    nodeId: string,
+  ): Promise<InfraSecretRef[]> {
+    const links = await this.prisma.infraNodeSecretRef.findMany({
+      where: { nodeId },
+      select: { handle: true, vaultId: true },
+    });
+    if (links.length === 0) return [];
+    return this.secrets.resolveHandlesMetadata(links);
+  }
+
+  /**
+   * Attach a secret HANDLE reference to a node (ADR-0073, #801). The node must be live (else 404). The
+   * caller must be a LIVE member of `dto.vaultId` AND `dto.handle` must resolve to a live secret in
+   * that vault — enforced by {@link SecretManagerService.assertHandleAttachable} (403 non-member, 404
+   * no live handle; membership FIRST so a non-member can't probe handle existence). The join is
+   * UPSERTED on the `(nodeId, vaultId, handle)` unique, so re-attaching is an idempotent no-op (NOT a
+   * 409). Returns the node's UPDATED resolved `secretRefs` (handles only — INV-10).
+   */
+  async attachSecret(
+    nodeId: string,
+    dto: AttachInfraSecret,
+    principal?: Principal,
+  ): Promise<InfraSecretRef[]> {
+    await this.getNode(nodeId);
+    // Layer-2 authz: live vault membership + a live handle in that vault (metadata-only; no envelope).
+    await this.secrets.assertHandleAttachable(
+      principal,
+      dto.vaultId,
+      dto.handle,
+    );
+    await this.prisma.infraNodeSecretRef.upsert({
+      where: {
+        nodeId_vaultId_handle: {
+          nodeId,
+          vaultId: dto.vaultId,
+          handle: dto.handle,
+        },
+      },
+      create: { nodeId, vaultId: dto.vaultId, handle: dto.handle },
+      update: {},
+    });
+    return this.resolveNodeSecretRefs(nodeId);
+  }
+
+  /**
+   * Detach a secret HANDLE reference from a node (ADR-0073, #801). The node must be live (else 404).
+   * This is a TOPOLOGY edit — the route permission (`infra:manage`) is the only gate; NO secret
+   * membership is required (no value is touched). HARD-deletes the matching join row and is idempotent
+   * (deleting a missing ref is a no-op via `deleteMany`, never P2025). Returns the UPDATED resolved
+   * `secretRefs` (handles only — INV-10).
+   */
+  async detachSecret(
+    nodeId: string,
+    dto: AttachInfraSecret,
+  ): Promise<InfraSecretRef[]> {
+    await this.getNode(nodeId);
+    await this.prisma.infraNodeSecretRef.deleteMany({
+      where: { nodeId, vaultId: dto.vaultId, handle: dto.handle },
+    });
+    return this.resolveNodeSecretRefs(nodeId);
   }
 
   /** Active owners of an asset (multi-owner), each a lean summary; via the active AssetAssignment join. */
@@ -561,8 +767,12 @@ export class InfraService {
     await this.getNode(id); // 404 if the root is missing or soft-deleted.
 
     // The downstream/inverse traversal kinds (ADR-0070 §7). Bound as a SQL array literal cast to the
-    // enum type so the IN-list is parameterized, not concatenated.
-    const kinds: InfraEdgeKind[] = ['RUNS_ON', 'DEPENDS_ON'];
+    // enum type so the IN-list is parameterized, not concatenated. MEMBER_OF is included (#802): a
+    // CLUSTER/group going down ⇒ its members are surfaced (member=sourceId, group=targetId, so a group
+    // root surfaces its members at depth 1) — an edge-derived heuristic, not a hand-verified guarantee.
+    // BACKS_UP_TO and CONNECTS_TO are deliberately excluded: a backup target failing doesn't take down
+    // the primary, and CONNECTS_TO is symmetric (no failure direction).
+    const kinds: InfraEdgeKind[] = ['RUNS_ON', 'DEPENDS_ON', 'MEMBER_OF'];
 
     const rows = await this.prisma.$queryRaw<
       Array<{

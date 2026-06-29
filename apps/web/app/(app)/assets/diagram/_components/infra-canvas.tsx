@@ -22,12 +22,14 @@ import "@xyflow/react/dist/style.css";
 import {
   ChevronDownIcon,
   ChevronUpIcon,
+  ExclamationTriangleIcon,
   Squares2X2Icon,
 } from "@heroicons/react/24/outline";
 import type { InfraEdge, InfraEdgeKind, InfraNode } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Callout } from "@/components/callout";
 import { ErrorState } from "@/components/resource-table";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -111,7 +113,11 @@ export function InfraCanvas({
   const t = useTranslations("infra");
   const { data: rawNodes, isLoading, isError, error, refetch } = useInfraNodes();
   const nodeIds = useMemo(() => (rawNodes ?? []).map((n) => n.id), [rawNodes]);
-  const { edges: rawEdges } = useInfraEdges(nodeIds);
+  const {
+    edges: rawEdges,
+    isError: edgesError,
+    refetch: refetchEdges,
+  } = useInfraEdges(nodeIds);
 
   if (isLoading) return <CanvasSkeleton label={t("loading")} />;
   if (isError) {
@@ -135,6 +141,8 @@ export function InfraCanvas({
       <CanvasBoard
         nodes={nodes}
         edges={rawEdges}
+        edgesError={edgesError}
+        onRetryEdges={refetchEdges}
         onSelectNode={onSelectNode}
         impactRootId={impactRootId}
         affectedIds={affectedIds}
@@ -148,6 +156,8 @@ export function InfraCanvas({
 function CanvasBoard({
   nodes: infraNodes,
   edges: infraEdges,
+  edgesError,
+  onRetryEdges,
   onSelectNode,
   impactRootId,
   affectedIds,
@@ -155,6 +165,10 @@ function CanvasBoard({
 }: {
   nodes: InfraNode[];
   edges: InfraEdge[];
+  /** At least one per-node edge fetch failed — some relationships are missing from the graph (#778). */
+  edgesError: boolean;
+  /** Re-run the per-node edge fetches; on success the inline notice auto-clears. */
+  onRetryEdges: () => void;
   onSelectNode?: (nodeId: string | null) => void;
   impactRootId: string | null;
   affectedIds?: Set<string>;
@@ -578,6 +592,32 @@ function CanvasBoard({
               <Squares2X2Icon />
               {t("tidy.action")}
             </Button>
+          </Panel>
+        ) : null}
+
+        {/* Partial edge-fetch notice (issue #778) — a per-node edge fetch failed, so some relationships
+            are missing from the graph. A subtle, non-blocking banner (NOT a toast — this state persists
+            while edges are absent) over the still-valid nodes, with a Retry that re-runs the fetches;
+            it auto-clears the moment a retry succeeds. */}
+        {edgesError ? (
+          <Panel position="top-center">
+            <Callout
+              tone="warning"
+              icon={<ExclamationTriangleIcon />}
+              className="items-center py-2 shadow-md backdrop-blur-sm"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-sm">{t("edges.partialError")}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onRetryEdges()}
+                >
+                  {t("edges.retry")}
+                </Button>
+              </div>
+            </Callout>
           </Panel>
         ) : null}
 

@@ -35,8 +35,13 @@ use. It **never** inherits a role and is never admin-equivalent.
 
 Creating an account mints a token. **It is shown exactly once**, right after you create the account.
 
-- Copy it immediately and store it somewhere safe. lazyit keeps only a hash of the token, so it can
-  **never** be shown or recovered again.
+- Capture it immediately and store it somewhere safe. Use **Copy** or **Download** (saves the token as
+  a `.txt` file); the token is also fully selectable, so you can select it and copy it by hand. lazyit
+  keeps only a hash of the token, so it can **never** be shown or recovered again.
+- The reveal **stays open until you confirm** you've saved the token — Escape, clicking outside and the
+  close button are disabled until then, so it can't be dismissed by accident and lost.
+- On a plain-HTTP install (no HTTPS), the browser may block **Copy**; lazyit tells you so and you can use
+  **Download** (or select the token manually) instead — capture never depends on the clipboard.
 - If you lose it, you cannot retrieve it — **rotate** the account to mint a fresh one.
 - A short, non-secret prefix (e.g. `lzit_sa_…`) is shown on the account row so you can recognize which
   credential is which without revealing anything usable.

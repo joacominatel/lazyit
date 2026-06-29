@@ -310,7 +310,9 @@
       "updateError": "No se pudo actualizar la cuenta de servicio",
       "rotated": "Token rotado",
       "rotateError": "No se pudo rotar el token",
-      "tokenCopied": "Token copiado"
+      "tokenCopied": "Token copiado",
+      "tokenDownloaded": "Token descargado",
+      "copyUnavailable": "Copiar no está disponible aquí (requiere HTTPS) — usa Descargar o selecciona el token y cópialo manualmente."
     },
     "form": {
       "entityLabel": "cuenta de servicio",
@@ -350,6 +352,7 @@
       "rotatedMessage": "<b>{name}</b> se rotó. Este es su token.",
       "warning": "Cópialo ahora — no volverás a verlo. Solo almacenamos un hash del token, así que nunca podrá mostrarse ni recuperarse después. Si lo pierdes, rota la cuenta para generar uno nuevo.",
       "copyTokenAria": "Copiar token",
+      "downloadTokenAria": "Descargar el token como archivo de texto",
       "acknowledge": "He guardado este token en un lugar seguro.",
       "done": "Listo"
     },

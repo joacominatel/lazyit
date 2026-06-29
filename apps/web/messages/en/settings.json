@@ -310,7 +310,9 @@
       "updateError": "Couldn't update service account",
       "rotated": "Token rotated",
       "rotateError": "Couldn't rotate token",
-      "tokenCopied": "Token copied"
+      "tokenCopied": "Token copied",
+      "tokenDownloaded": "Token downloaded",
+      "copyUnavailable": "Copy isn't available here (it needs HTTPS) — use Download or select the token and copy it manually."
     },
     "form": {
       "entityLabel": "service account",
@@ -350,6 +352,7 @@
       "rotatedMessage": "<b>{name}</b> was rotated. Here is its token.",
       "warning": "Copy it now — you won't see it again. We only store a hash of the token, so it can never be shown or recovered later. If you lose it, rotate the account to mint a new one.",
       "copyTokenAria": "Copy token",
+      "downloadTokenAria": "Download token as a text file",
       "acknowledge": "I've saved this token in a secure place.",
       "done": "Done"
     },

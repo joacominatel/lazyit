@@ -5,10 +5,17 @@ import type {
   Page,
   RecentActivityAction,
   RecentActivityFilterOptions,
+  RecentActivityFilters,
   RecentActivityItem,
   RecentActivityQuery,
 } from '@lazyit/shared';
-import { offsetOf, pageOf, RECENT_ACTIVITY_ACTIONS } from '@lazyit/shared';
+import {
+  offsetOf,
+  pageOf,
+  RECENT_ACTIVITY_ACTIONS,
+  RECENT_ACTIVITY_CSV_HEADER,
+  recentActivityCsvRow,
+} from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import {
   LIKE_ESCAPE_CHAR,
@@ -32,7 +39,44 @@ const DEFAULT_EXPIRING_WITHIN_DAYS = 30;
 /** How many recent AssetHistory rows the activity slice returns. */
 const RECENT_ACTIVITY_LIMIT = 10;
 
+/**
+ * Rows per round-trip when STREAMING the full filtered activity export (issue #840). The export
+ * batches over the view so the whole filtered range never sits in memory at once.
+ *
+ * ponytail: bounded LIMIT/OFFSET loop at 1000 rows/iteration — the laziest strategy that matches the
+ * feed's existing OFFSET pagination and reuses the exact same `buildActivityWhere`. CEILINGS: (1) deep
+ * OFFSET is O(offset) per page, so a multi-hundred-thousand-row export degrades toward the tail (fine
+ * for an admin audit dump; a keyset cursor would fix it, but the `recent_activity` UNION-ALL view has
+ * no unique stable key — `occurredAt` collides, see #719 — so keyset isn't a one-liner). (2) Not
+ * snapshot-isolated across batches, so a concurrent insert mid-export can shift the OFFSET window and
+ * dup/skip a boundary row. Acceptable for a "best-effort point-in-time" CSV; tighten only if needed.
+ */
+export const ACTIVITY_EXPORT_BATCH_SIZE = 1000;
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * The shared `recent_activity` read projection + source (view + actor LEFT JOIN), factored out so the
+ * page read, the count, AND the bulk export (issue #840) all read identical columns from the identical
+ * source — they can never drift. Composed via nested `Prisma.sql` (parameterized, never concatenated).
+ */
+const ACTIVITY_SELECT_COLUMNS = Prisma.sql`
+  ra."occurredAt",
+  ra."actorId",
+  CASE WHEN u."id" IS NULL THEN NULL
+       ELSE u."firstName" || ' ' || u."lastName" END AS "actorName",
+  ra."entityType",
+  ra."entityId",
+  ra."action",
+  ra."summary",
+  ra."subjectName",
+  ra."targetUserId",
+  ra."targetUserName"
+`;
+const ACTIVITY_FROM = Prisma.sql`
+  FROM "recent_activity" ra
+  LEFT JOIN "users" u ON u."id" = ra."actorId"
+`;
 
 /**
  * Read-only dashboard aggregation (CTO Round 1). Composes cheap counts/groupBys across the three
@@ -55,7 +99,9 @@ export class DashboardService {
     expiringWithinDays = DEFAULT_EXPIRING_WITHIN_DAYS,
   ): Promise<DashboardSummary> {
     const now = new Date();
-    const expiryCutoff = new Date(now.getTime() + expiringWithinDays * MS_PER_DAY);
+    const expiryCutoff = new Date(
+      now.getTime() + expiringWithinDays * MS_PER_DAY,
+    );
 
     const [
       assetTotal,
@@ -105,8 +151,9 @@ export class DashboardService {
         })
         .then(
           (rows) =>
-            rows.filter((c) => c.minStock !== null && c.currentStock <= c.minStock)
-              .length,
+            rows.filter(
+              (c) => c.minStock !== null && c.currentStock <= c.minStock,
+            ).length,
         ),
 
       // --- Knowledge ---------------------------------------------------------
@@ -139,19 +186,21 @@ export class DashboardService {
       byStatus[group.status] = group._count._all;
     }
 
-    const recentActivity: DashboardActivityItem[] = recentHistory.map((row) => ({
-      id: row.id,
-      assetId: row.assetId,
-      eventType: row.eventType,
-      payload: (row.payload as Record<string, unknown> | null) ?? null,
-      performedById: row.performedById,
-      createdAt: row.createdAt.toISOString(),
-    }));
+    const recentActivity: DashboardActivityItem[] = recentHistory.map(
+      (row) => ({
+        id: row.id,
+        assetId: row.assetId,
+        eventType: row.eventType,
+        payload: (row.payload as Record<string, unknown> | null) ?? null,
+        performedById: row.performedById,
+        createdAt: row.createdAt.toISOString(),
+      }),
+    );
 
     return {
       assets: {
         total: assetTotal,
-        byStatus: byStatus as DashboardSummary['assets']['byStatus'],
+        byStatus: byStatus,
         assigned: assignedAssets,
       },
       access: {
@@ -209,24 +258,12 @@ export class DashboardService {
     const where = this.buildActivityWhere(query);
 
     const [rows, totalRows] = await this.prisma.$transaction([
+      // Subject enrichment (issue #311) rides in ACTIVITY_SELECT_COLUMNS: the view resolves the
+      // affected entity's name + the target user the event concerns from each source's existing
+      // relations, so the web renders a specific, click-through headline.
       this.prisma.$queryRaw<RecentActivityRow[]>(Prisma.sql`
-        SELECT
-          ra."occurredAt",
-          ra."actorId",
-          CASE WHEN u."id" IS NULL THEN NULL
-               ELSE u."firstName" || ' ' || u."lastName" END AS "actorName",
-          ra."entityType",
-          ra."entityId",
-          ra."action",
-          ra."summary",
-          -- Subject enrichment (issue #311): the view resolves these from each source's existing
-          -- relations — the affected entity's name + the target user the event concerns — so the web
-          -- can render a specific, click-through headline instead of "Access revoked from a user".
-          ra."subjectName",
-          ra."targetUserId",
-          ra."targetUserName"
-        FROM "recent_activity" ra
-        LEFT JOIN "users" u ON u."id" = ra."actorId"
+        SELECT ${ACTIVITY_SELECT_COLUMNS}
+        ${ACTIVITY_FROM}
         ${where}
         ORDER BY ra."occurredAt" DESC
         LIMIT ${take} OFFSET ${skip}
@@ -235,28 +272,54 @@ export class DashboardService {
       // to what the page returns — `total` is the FILTERED count, never the whole view.
       this.prisma.$queryRaw<[{ count: bigint }]>(Prisma.sql`
         SELECT COUNT(*)::bigint AS count
-        FROM "recent_activity" ra
-        LEFT JOIN "users" u ON u."id" = ra."actorId"
+        ${ACTIVITY_FROM}
         ${where}
       `),
     ]);
 
     const total = Number(totalRows[0]?.count ?? 0);
-    const items: RecentActivityItem[] = rows.map((row) => ({
-      occurredAt: row.occurredAt.toISOString(),
-      actorId: row.actorId,
-      actorName: row.actorName,
-      entityType: row.entityType,
-      entityId: row.entityId,
-      action: row.action,
-      summary: row.summary,
-      // Subject enrichment (issue #311) — surfaced straight from the view (all nullable).
-      subjectName: row.subjectName,
-      targetUserId: row.targetUserId,
-      targetUserName: row.targetUserName,
-    }));
+    const items: RecentActivityItem[] = rows.map(rowToActivityItem);
 
     return pageOf(items, total, query);
+  }
+
+  /**
+   * Bulk CSV export of the WHOLE filtered activity range (issue #840) — newest first, every row that
+   * matches the filters, not just the visible page. Reuses {@link buildActivityWhere} verbatim, so the
+   * export filters identically to the feed, and {@link recentActivityCsvRow} from `@lazyit/shared`, so
+   * the RFC-4180 escaping + formula-injection guard are byte-identical to the browser "export visible"
+   * path (one source of truth for the output-boundary security guards).
+   *
+   * Streams as an async generator of CSV chunks ({@link ACTIVITY_EXPORT_BATCH_SIZE} rows per chunk) so
+   * the controller can pipe it out via a `Readable` without ever holding the full result set in memory.
+   * Batching strategy + its ceilings: see {@link ACTIVITY_EXPORT_BATCH_SIZE}.
+   */
+  async *streamActivityCsvRows(
+    query: RecentActivityFilters,
+  ): AsyncGenerator<string> {
+    const where = this.buildActivityWhere(query);
+
+    yield `${RECENT_ACTIVITY_CSV_HEADER}\n`;
+
+    let offset = 0;
+    for (;;) {
+      const rows = await this.prisma.$queryRaw<RecentActivityRow[]>(Prisma.sql`
+        SELECT ${ACTIVITY_SELECT_COLUMNS}
+        ${ACTIVITY_FROM}
+        ${where}
+        ORDER BY ra."occurredAt" DESC
+        LIMIT ${ACTIVITY_EXPORT_BATCH_SIZE} OFFSET ${offset}
+      `);
+      if (rows.length === 0) break;
+
+      yield `${rows
+        .map((row) => recentActivityCsvRow(rowToActivityItem(row)))
+        .join('\n')}\n`;
+
+      offset += rows.length;
+      // A short batch means the view is exhausted — stop without an extra empty round-trip.
+      if (rows.length < ACTIVITY_EXPORT_BATCH_SIZE) break;
+    }
   }
 
   /**
@@ -296,7 +359,9 @@ export class DashboardService {
       actors: actorRows.map((row) => ({ id: row.id, name: row.name })),
       actions: actionRows
         .map((row) => row.action)
-        .filter((action): action is RecentActivityAction => allowed.has(action)),
+        .filter((action): action is RecentActivityAction =>
+          allowed.has(action),
+        ),
     };
   }
 
@@ -312,7 +377,7 @@ export class DashboardService {
    * injection into the query structure). LIKE metachars in `q` are escaped + paired with `ESCAPE '\'`
    * so a literal `%`/`_`/`\` matches literally (issue #593). The `[from, to)` window is closed-open.
    */
-  private buildActivityWhere(query: RecentActivityQuery): Prisma.Sql {
+  private buildActivityWhere(query: RecentActivityFilters): Prisma.Sql {
     const conditions: Prisma.Sql[] = [];
 
     if (query.entityType !== undefined) {
@@ -354,9 +419,29 @@ export class DashboardService {
 }
 
 /**
+ * Narrow a raw view row to the {@link RecentActivityItem} wire shape (ISO timestamp; nullable fields
+ * surfaced as-is). Shared by the page read and the bulk CSV export so both serialize identically.
+ */
+function rowToActivityItem(row: RecentActivityRow): RecentActivityItem {
+  return {
+    occurredAt: row.occurredAt.toISOString(),
+    actorId: row.actorId,
+    actorName: row.actorName,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    action: row.action,
+    summary: row.summary,
+    // Subject enrichment (issue #311) — surfaced straight from the view (all nullable).
+    subjectName: row.subjectName,
+    targetUserId: row.targetUserId,
+    targetUserName: row.targetUserName,
+  };
+}
+
+/**
  * Raw row shape returned by the `recent_activity` view read (the pg driver maps `timestamptz` to a JS
  * `Date`; `actorId`/`actorName` are nullable). Narrowed to the {@link RecentActivityItem} wire shape
- * (ISO timestamp) in {@link DashboardService.getActivity}.
+ * (ISO timestamp) in {@link rowToActivityItem}.
  */
 interface RecentActivityRow {
   occurredAt: Date;

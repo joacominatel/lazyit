@@ -38,15 +38,17 @@ export function restoreConsumable(id: string): Promise<Consumable> {
 /**
  * Server-side params for the consumable list (#104). `q` matches name/sku/description; `sort` is
  * allowlisted to `name|sku|currentStock|createdAt|updatedAt` (unknown → 400); `lowStock=true` keeps
- * only items at or below their reorder threshold (`currentStock <= minStock`). Category is NOT a
- * server param — the screen filters it client-side over the page. `limit`/`offset` thread the
- * pagination window (ADR-0030). `deleted: "only"` is the ADMIN-only archived view (soft-deleted rows).
+ * only items at or below their reorder threshold (`currentStock <= minStock`). `category` is the
+ * server-side category filter (a category cuid), scoping the whole result set (#824). `limit`/`offset`
+ * thread the pagination window (ADR-0030). `deleted: "only"` is the ADMIN-only archived view (soft-deleted rows).
  */
 export interface ConsumableListParams {
   q?: string;
   sort?: string;
   dir?: "asc" | "desc";
   lowStock?: boolean;
+  /** Server-side category filter (a category cuid); scopes the whole result set (#824). */
+  category?: string;
   limit?: number;
   offset?: number;
   deleted?: "only";
@@ -71,6 +73,7 @@ export function getConsumables(
     if (params.dir) qs.set("dir", params.dir);
   }
   if (params.lowStock) qs.set("lowStock", "true");
+  if (params.category) qs.set("category", params.category);
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   if (params.deleted) qs.set("deleted", params.deleted);

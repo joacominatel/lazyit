@@ -4,7 +4,11 @@ import { CheckIcon, ChevronUpDownIcon } from "@heroicons/react/16/solid";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { type QuickViewData } from "@/components/quick-view-fields";
-import { QuickViewEye } from "@/components/quick-view-eye";
+import {
+  QuickViewEye,
+  QuickViewHint,
+  quickViewChordKeyDown,
+} from "@/components/quick-view-eye";
 import {
   Command,
   CommandEmpty,
@@ -171,6 +175,12 @@ export function Combobox({
     setQuickViewPinned(false);
   }
 
+  // Alt+Enter chord (#793): open + pin the cmdk-HIGHLIGHTED row's preview (wired on the Command root).
+  function pinQuickView(id: string) {
+    setOpenQuickViewId(id);
+    setQuickViewPinned(true);
+  }
+
   const isServerSearch = onSearchChange !== undefined;
 
   // Server-search: debounce the raw input and hand the settled query back to the caller's paged hook.
@@ -229,13 +239,13 @@ export function Combobox({
         disabled={disabled}
         className={cn(
           "flex h-8 w-full items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
-          className
+          className,
         )}
       >
         <span
           className={cn(
             "line-clamp-1 text-left",
-            !triggerLabel && "text-muted-foreground"
+            !triggerLabel && "text-muted-foreground",
           )}
         >
           {triggerLabel ?? placeholder}
@@ -246,7 +256,17 @@ export function Combobox({
         align="start"
         className="w-(--radix-popover-trigger-width) p-0"
       >
-        <Command shouldFilter={!isServerSearch}>
+        <Command
+          shouldFilter={!isServerSearch}
+          // Keyboard-open path (#793): Alt+Enter pins the highlighted row's preview. Only wired when
+          // Quick View is on; cmdk runs this before its own handler and the chord preventDefaults, so
+          // arrow-nav / type-to-filter / plain Enter-to-select are untouched.
+          onKeyDown={
+            quickView
+              ? (event) => quickViewChordKeyDown(event, pinQuickView)
+              : undefined
+          }
+        >
           <CommandInput
             value={query}
             onValueChange={setQuery}
@@ -254,7 +274,10 @@ export function Combobox({
           />
           <CommandList id={listId} aria-label={searchPlaceholder}>
             {showTypeToSearch ? (
-              <p className="py-6 text-center text-sm text-muted-foreground" role="status">
+              <p
+                className="py-6 text-center text-sm text-muted-foreground"
+                role="status"
+              >
                 {typeToSearchText}
               </p>
             ) : loading ? (
@@ -285,6 +308,9 @@ export function Combobox({
                         keywords={item.keywords}
                         disabled={item.disabled}
                         onSelect={() => handleSelect(item.value)}
+                        // Robust highlighted→id mapping for the Alt+Enter chord: stamp the entity id so
+                        // quickViewChordKeyDown reads it off the selected row (never parses `value`).
+                        data-quick-view-id={view ? item.value : undefined}
                         // `group/row` so the eye can reveal on hover OR on the cmdk-selected row.
                         className="group/row"
                       >
@@ -295,7 +321,8 @@ export function Combobox({
                               view={view}
                               open={openQuickViewId === item.value}
                               pinned={
-                                openQuickViewId === item.value && quickViewPinned
+                                openQuickViewId === item.value &&
+                                quickViewPinned
                               }
                               onPreview={() => {
                                 setOpenQuickViewId(item.value);
@@ -311,7 +338,9 @@ export function Combobox({
                           <CheckIcon
                             className={cn(
                               "size-4",
-                              item.value === value ? "opacity-100" : "opacity-0"
+                              item.value === value
+                                ? "opacity-100"
+                                : "opacity-0",
                             )}
                           />
                         </span>
@@ -322,6 +351,10 @@ export function Combobox({
               </>
             )}
           </CommandList>
+          {/* Discoverability for the Alt+Enter keyboard-open chord (#793) — only when rows have eyes. */}
+          {quickView && !showTypeToSearch && !loading && items.length > 0 ? (
+            <QuickViewHint />
+          ) : null}
         </Command>
       </PopoverContent>
     </Popover>

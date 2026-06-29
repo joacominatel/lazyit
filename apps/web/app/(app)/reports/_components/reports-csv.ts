@@ -1,67 +1,31 @@
-import type { RecentActivityItem } from "@lazyit/shared";
+import { recentActivityToCsv, type RecentActivityItem } from "@lazyit/shared";
+import {
+  downloadDashboardActivityExport,
+  type DashboardActivityFilters,
+} from "@/lib/api/endpoints/dashboard";
 
 /**
- * Build a CSV string for the currently-visible Reports rows, and trigger a download. Honest scope:
- * this exports exactly what's on screen — the rows of the current (server-filtered) page/window —
- * never the whole filtered history in one file. Columns match the table: occurredAt, action,
- * entityType, entityId, actorName, summary.
+ * Reports CSV export — two scopes:
  *
- * Pure-ish: {@link toCsv} is a pure function (unit-testable); {@link downloadCsv} wraps it with the
- * Blob + anchor side-effect. No new dependency — a small, escaped CSV writer is enough here.
+ *  - {@link downloadCsv} exports exactly what's ON SCREEN (the current server-filtered page/window),
+ *    built client-side. Honest, zero-network, but only the visible rows.
+ *  - {@link downloadActivityExport} (issue #840) downloads the WHOLE filtered range from the API's
+ *    streaming `GET /dashboard/activity/export`, so the file is the complete filtered history, not just
+ *    the page.
+ *
+ * Both write identical CSV: the column order + RFC-4180 escaping + spreadsheet formula-injection guard
+ * live ONCE in `@lazyit/shared` ({@link recentActivityToCsv}), shared with the server-side exporter, so
+ * the two paths can never drift on the security-relevant escaping.
  */
 
-const COLUMNS = [
-  "occurredAt",
-  "action",
-  "entityType",
-  "entityId",
-  "actorName",
-  "summary",
-] as const;
-
-/**
- * RFC-4180 cell escaping + spreadsheet formula-injection guard. A leading `=`/`+`/`-`/`@` (or a
- * control char) is defused with a single quote so a crafted `actorName`/`summary` can't execute as
- * a formula when the export is opened in Excel/Sheets; then quote-wrap (doubling embedded quotes)
- * when the cell holds a comma/quote/newline.
- */
-function escapeCell(value: string): string {
-  const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-  if (/[",\n\r]/.test(guarded)) {
-    return `"${guarded.replace(/"/g, '""')}"`;
-  }
-  return guarded;
+/** Default download filename, dated so repeated exports don't collide. */
+function defaultFilename(): string {
+  return `reports-${new Date().toISOString().slice(0, 10)}.csv`;
 }
 
-/** Serialize the given rows to a CSV string (header + one line per row). */
-export function toCsv(items: RecentActivityItem[]): string {
-  const header = COLUMNS.join(",");
-  const lines = items.map((item) =>
-    [
-      item.occurredAt,
-      item.action,
-      item.entityType,
-      item.entityId,
-      item.actorName ?? "",
-      item.summary,
-    ]
-      .map((cell) => escapeCell(String(cell)))
-      .join(","),
-  );
-  return [header, ...lines].join("\n");
-}
-
-/**
- * Download the given rows as a CSV file. The filename carries the local date so repeated exports
- * don't collide. No-op safely on the server (guards `document`).
- */
-export function downloadCsv(
-  items: RecentActivityItem[],
-  filename = `reports-${new Date().toISOString().slice(0, 10)}.csv`,
-): void {
+/** Trigger a browser download of a Blob. No-op safely on the server (guards `document`). */
+function triggerBlobDownload(blob: Blob, filename: string): void {
   if (typeof document === "undefined") return;
-  const csv = toCsv(items);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -70,4 +34,30 @@ export function downloadCsv(
   anchor.click();
   document.body.removeChild(anchor);
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Download the given (currently-visible) rows as a CSV file, built client-side. Exports exactly the
+ * rows passed in — the active filters AND the current page.
+ */
+export function downloadCsv(
+  items: RecentActivityItem[],
+  filename = defaultFilename(),
+): void {
+  const csv = recentActivityToCsv(items);
+  triggerBlobDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), filename);
+}
+
+/**
+ * Download the ENTIRE filtered activity range (issue #840) by streaming `GET
+ * /dashboard/activity/export` with the current filters, then triggering a browser download. The server
+ * applies the identical escaping/injection guard. Throws on a failed request so the caller can surface
+ * an error.
+ */
+export async function downloadActivityExport(
+  filters: DashboardActivityFilters,
+  filename = defaultFilename(),
+): Promise<void> {
+  const blob = await downloadDashboardActivityExport(filters);
+  triggerBlobDownload(blob, filename);
 }

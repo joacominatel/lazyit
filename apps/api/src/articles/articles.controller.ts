@@ -296,6 +296,25 @@ export class ArticlesController {
     return this.articles.findVersion(id, parsed, user, principal);
   }
 
+  @Post(':id/versions/:version/restore')
+  @RequirePermission('article:write')
+  @ApiOperation({
+    summary:
+      "Restore an article to a previous version: replays that version's title/body/excerpt through the normal edit path, appending a NEW version (history is never mutated). Author only; keeps the article's current status. (ADMIN or MEMBER) (ADR-0042)",
+  })
+  @ApiOkResponse({ type: ArticleDto })
+  restoreVersion(
+    @Param('id') id: string,
+    @Param('version') version: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    const parsed = Number(version);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      throw new BadRequestException('version must be a positive integer');
+    }
+    return this.articles.restoreVersion(id, parsed, principal);
+  }
+
   @Get(':id/links')
   @RequirePermission('article:read')
   @ApiOperation({

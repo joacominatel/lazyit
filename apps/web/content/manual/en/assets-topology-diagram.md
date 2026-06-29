@@ -118,8 +118,14 @@ Every node carries a status, shown as a colored pill on its card and badge in th
 - **Offline** — down.
 - **Unknown** — not established (the default for a new node).
 
-With the manage permission you set the status from the details panel. (Status is hand-set today;
-automatic liveness is a future addition.)
+With the manage permission you set the status from the details panel. Nodes reported by the
+[reporting agent](/help/assets-topology-reporting-agent) carry their status (and an *Agent-reported*
+badge with a "reported … ago" freshness) automatically; you can still set it by hand for nodes you
+manage yourself.
+
+> **Auto-discovered nodes.** Servers reported by the [reporting agent](/help/assets-topology-reporting-agent)
+> don't appear on the map straight away — they wait in the **Pending review** tray on the
+> [Servers list](/help/assets-topology-servers) until you confirm them.
 
 ## Taking a node off the map
 
@@ -143,8 +149,12 @@ one place:
 - **Knowledge-base articles** — published articles linked to the node's asset, each a click away.
 - **Secret references** — *handles only, never the secret values themselves.* A reference shows the
   `{{ lazyit_secret.… }}` handle and a label so you know which credential goes with this machine;
-  there is no reveal here and lazyit never exposes the value on this surface. (No asset-to-secret
-  link exists yet, so this list is empty for now; the panel is ready for it.)
+  there is no reveal here and lazyit never exposes the value on this surface. With the manage
+  permission you attach a reference from the **Attach a secret** picker — it lists only the secrets
+  **you can access** (the vaults you're a member of) and you choose one by its handle; the **×** next
+  to a reference detaches it. References are stored by handle and resolved live, so the label always
+  reflects the current secret — and if the secret is removed (or its handle changed) the reference
+  simply drops from the list.
 - **Shortcuts** — quick links (SSH, web UI, console) that open in a new tab. With the manage
   permission you edit them inline: each shortcut is a label + URL pair you can change, add or remove,
   then **Save** the list (lazyit checks each URL is valid before saving).
@@ -160,9 +170,14 @@ you can jump from the table to a machine's full picture in one click.
 
 The headline question a map can answer that a drawing can't: **"if this node goes down, what is
 affected?"** In the details panel, toggle **Show impact** to highlight the downstream set — every
-node that runs on, or depends on, this one (directly or transitively). The canvas dims everything
-outside the radius so the affected region stands out, and the panel lists each affected node with
-how many hops away it is.
+node that runs on, depends on, or is a member of this one (directly or transitively). Taking down a
+cluster or group therefore surfaces its members. The canvas dims everything outside the radius so the
+affected region stands out, and the panel lists each affected node with how many hops away it is.
+
+Impact is an **edge-derived estimate**, not a hand-verified guarantee — it follows the edges you've
+drawn, so a member might survive a group losing one node. Backup-target and network-only links are
+deliberately ignored: a backup target failing doesn't take down the primary, and a plain network
+connection has no failure direction.
 
 An **empty result is good news** — it means nothing depends on this node, so it's safe to take
 down. lazyit shows that as reassurance, not as an error.
@@ -170,5 +185,6 @@ down. lazyit shows that as reassurance, not as an error.
 ## What's next
 
 - [Servers list](/help/assets-topology-servers) — the same estate as a filterable table.
+- [Reporting agent](/help/assets-topology-reporting-agent) — auto-populate the map from your servers.
 - [Asset basics](/help/assets-asset-basics) — the inventory record behind an asset-backed node.
 - [Assignments & history](/help/assets-assignments-history) — how ownership (the panel's owner) works.

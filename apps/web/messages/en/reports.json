@@ -58,6 +58,10 @@
     "filteredEmpty": "No events match these filters."
   },
   "export": {
+    "exportAll": "Export all (filtered)",
+    "exportAllTitle": "Download every event matching the current filters (the whole range, not just this page)",
+    "exportAllBusy": "Exporting…",
+    "exportAllError": "Couldn't export the activity log",
     "exportVisible": "Export visible events",
     "exportTitle": "Export the events currently visible (the filtered page)",
     "print": "Print",

@@ -10,7 +10,7 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailSkeleton } from "@/components/detail-panel";
@@ -61,6 +61,18 @@ export function ArticleDetailView({ slug }: { slug: string }) {
   const resolveWikiLink = useWikiLinkResolver();
   const [deleteOpen, setDeleteOpen] = useState(false);
 
+  const breadcrumb = useMemo(
+    () => (
+      <Breadcrumb
+        items={[
+          { label: t("breadcrumb"), href: "/kb" },
+          { label: article?.title ?? "" },
+        ]}
+      />
+    ),
+    [t, article?.title],
+  );
+
   if (isLoading) {
     return (
       <div className="mx-auto max-w-3xl">
@@ -107,14 +119,7 @@ export function ArticleDetailView({ slug }: { slug: string }) {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: t("breadcrumb"), href: "/kb" },
-              { label: article.title },
-            ]}
-          />
-        }
+        breadcrumb={breadcrumb}
         title={article.title}
         badge={isDraft ? <ArticleStatusBadge status="DRAFT" /> : undefined}
         subtitle={
@@ -220,7 +225,10 @@ export function ArticleDetailView({ slug }: { slug: string }) {
 
       <ArticleLinksPanel articleId={article.id} canWrite={canWrite} />
 
-      <ArticleVersionHistoryPanel articleId={article.id} />
+      <ArticleVersionHistoryPanel
+        articleId={article.id}
+        canWrite={canWrite}
+      />
 
       <DeleteConfirmDialog
         open={deleteOpen}

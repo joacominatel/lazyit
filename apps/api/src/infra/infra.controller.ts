@@ -4,10 +4,13 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
@@ -18,6 +21,10 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  AgentReportAckSchema,
+  AgentReportSchema,
+  AttachInfraSecretSchema,
+  ConfirmInfraNodeSchema,
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
   InfraEdgeSchema,
@@ -28,6 +35,7 @@ import {
   InfraNodeSchema,
   InfraNodeStateSchema,
   InfraNodeStatusSchema,
+  InfraSecretRefSchema,
   UpdateInfraNodeSchema,
 } from '@lazyit/shared';
 import { z } from 'zod';
@@ -36,6 +44,7 @@ import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
+import { HumanOnlyGuard } from '../secret-manager/human-only.guard';
 
 class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
 class InfraNodeListItemDto extends createZodDto(InfraNodeListItemSchema) {}
@@ -44,6 +53,11 @@ class InfraImpactResponseDto extends createZodDto(InfraImpactResponseSchema) {}
 class UpdateInfraNodeDto extends createZodDto(UpdateInfraNodeSchema) {}
 class InfraEdgeDto extends createZodDto(InfraEdgeSchema) {}
 class CreateInfraEdgeDto extends createZodDto(CreateInfraEdgeSchema) {}
+class InfraSecretRefDto extends createZodDto(InfraSecretRefSchema) {}
+class AttachInfraSecretDto extends createZodDto(AttachInfraSecretSchema) {}
+class AgentReportDto extends createZodDto(AgentReportSchema) {}
+class AgentReportAckDto extends createZodDto(AgentReportAckSchema) {}
+class ConfirmInfraNodeDto extends createZodDto(ConfirmInfraNodeSchema) {}
 
 /**
  * The "track as asset" toggle on node create (ADR-0070 §5), DEFAULT-ON. It is API logic, not part of
@@ -65,6 +79,20 @@ class PatchPositionDto extends createZodDto(PatchPositionSchema) {}
 @Controller('infra')
 export class InfraController {
   constructor(private readonly infra: InfraService) {}
+
+  // ── Reporting agent (ADR-0074) ───────────────────────────────────────────────
+
+  @Post('report')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('infra:report')
+  @ApiOperation({
+    summary:
+      'Ingest a server reporting-agent inventory report (ADR-0074). MACHINE-intended: authenticated by the agent Service Account holding infra:report. Upserts on (reportingSource, externalId) — a new host lands in the PENDING review tray (no Asset yet); a known host refreshes its inventory + liveness without touching human curation. Returns a minimal ack.',
+  })
+  @ApiOkResponse({ type: AgentReportAckDto })
+  report(@Body() report: AgentReportDto) {
+    return this.infra.ingestReport(report);
+  }
 
   // ── Nodes ──────────────────────────────────────────────────────────────────
 
@@ -178,6 +206,54 @@ export class InfraController {
   @ApiOkResponse({ type: InfraNodeDto })
   restoreNode(@Param('id') id: string) {
     return this.infra.restoreNode(id);
+  }
+
+  @Post('nodes/:id/confirm')
+  // Asset-backed by default (mirrors POST /nodes), so the same infra:manage + asset:write posture.
+  @RequirePermission('infra:manage', 'asset:write')
+  // HUMAN-ONLY: confirming is human curation — the whole point of PENDING is a human gate, so a
+  // machine (the reporting agent SA) must never self-confirm its own proposals (ADR-0074 §1/§8).
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Confirm a PENDING agent-reported node from the ADR-0074 review tray: flips state to CONFIRMED and (trackAsAsset, default true) mints the backing Asset with the agent host facts carried over — making the auto-discovered host a first-class Asset only on human approval. Optional kind/label overrides re-classify/rename. Idempotent on an already-confirmed node. To DISCARD a proposal instead, soft-delete it (DELETE /infra/nodes/:id).',
+  })
+  @ApiOkResponse({ type: InfraNodeDetailDto })
+  confirmNode(
+    @Param('id') id: string,
+    @Body() dto: ConfirmInfraNodeDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.infra.confirmNode(id, dto, principal);
+  }
+
+  // ── Node → secret linkage (ADR-0073, #801) ──────────────────────────────────
+
+  @Post('nodes/:id/secrets')
+  @RequirePermission('infra:manage', 'secret:read')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Attach a secret HANDLE reference to a node (handle + vaultId in the body; never a value — INV-10). Requires infra:manage + secret:read AND live membership of the vault (enforced server-side). Idempotent on (node, vault, handle). Returns the node’s updated resolved secretRefs (ADR-0073).',
+  })
+  @ApiOkResponse({ type: [InfraSecretRefDto] })
+  attachSecret(
+    @Param('id') id: string,
+    @Body() dto: AttachInfraSecretDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.infra.attachSecret(id, dto, principal);
+  }
+
+  @Delete('nodes/:id/secrets')
+  @RequirePermission('infra:manage')
+  @ApiOperation({
+    summary:
+      'Detach a secret HANDLE reference from a node (handle + vaultId in the BODY — handles can contain dots). A topology edit: infra:manage only, no vault membership needed. Idempotent. Returns the node’s updated resolved secretRefs (ADR-0073).',
+  })
+  @ApiOkResponse({ type: [InfraSecretRefDto] })
+  detachSecret(@Param('id') id: string, @Body() dto: AttachInfraSecretDto) {
+    return this.infra.detachSecret(id, dto);
   }
 
   // ── Edges ──────────────────────────────────────────────────────────────────

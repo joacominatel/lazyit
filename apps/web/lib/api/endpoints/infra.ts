@@ -1,4 +1,6 @@
 import type {
+  AttachInfraSecret,
+  ConfirmInfraNode,
   CreateInfraEdge,
   CreateInfraNode,
   InfraEdge,
@@ -6,6 +8,7 @@ import type {
   InfraNode,
   InfraNodeDetail,
   InfraNodeListItem,
+  InfraSecretRef,
   UpdateInfraNode,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
@@ -134,6 +137,23 @@ export function restoreInfraNode(nodeId: string): Promise<InfraNode> {
 }
 
 /**
+ * Confirm a PENDING agent-reported node from the review tray (`POST /infra/nodes/:id/confirm`,
+ * ADR-0074 §3). Flips `state` to CONFIRMED; `trackAsAsset` (default true server-side) mints the backing
+ * Asset carrying the agent's host facts, so the auto-discovered host becomes a first-class Asset only on
+ * human approval. Optional `kind`/`label` re-classify/rename at the confirm step. Returns the enriched
+ * `InfraNodeDetail`. To DISCARD a proposal instead, soft-delete it (`deleteInfraNode`).
+ */
+export function confirmInfraNode(
+  nodeId: string,
+  body: ConfirmInfraNode,
+): Promise<InfraNodeDetail> {
+  return apiFetch<InfraNodeDetail>(`${BASE}/nodes/${nodeId}/confirm`, {
+    method: "POST",
+    body,
+  });
+}
+
+/**
  * Blast radius (`GET /infra/nodes/:id/impact`, ADR-0070 §7) — the downstream set affected if this
  * node goes down: a transitive traversal over ACTIVE inverse RUNS_ON/DEPENDS_ON edges, each affected
  * node carrying its minimum hop `depth`. The query that justifies a graph over a static picture; the
@@ -176,5 +196,38 @@ export function createInfraEdge(input: CreateInfraEdge): Promise<InfraEdge> {
 export function closeInfraEdge(edgeId: string): Promise<InfraEdge> {
   return apiFetch<InfraEdge>(`${BASE}/edges/${edgeId}/close`, {
     method: "POST",
+  });
+}
+
+/**
+ * Attach a secret HANDLE reference to a node (`POST /infra/nodes/:id/secrets`, ADR-0073 / issue #801).
+ * A SOFT reference (handle + vaultId in the body, never a value — INV-10). The API enforces
+ * infra:manage + secret:read AND live membership of the vault (403 non-member, 404 no live handle),
+ * and upserts on `(node, vault, handle)` so re-attaching is idempotent. Returns the node's FULL
+ * updated resolved `secretRefs` (handles only).
+ */
+export function attachInfraNodeSecret(
+  nodeId: string,
+  body: AttachInfraSecret,
+): Promise<InfraSecretRef[]> {
+  return apiFetch<InfraSecretRef[]>(`${BASE}/nodes/${nodeId}/secrets`, {
+    method: "POST",
+    body,
+  });
+}
+
+/**
+ * Detach a secret HANDLE reference from a node (`DELETE /infra/nodes/:id/secrets`, ADR-0073). The
+ * handle + vaultId ride in the BODY (not the path — handles can contain dots). A topology edit:
+ * infra:manage only, no vault membership needed; idempotent. Returns the node's FULL updated
+ * resolved `secretRefs`.
+ */
+export function detachInfraNodeSecret(
+  nodeId: string,
+  body: AttachInfraSecret,
+): Promise<InfraSecretRef[]> {
+  return apiFetch<InfraSecretRef[]>(`${BASE}/nodes/${nodeId}/secrets`, {
+    method: "DELETE",
+    body,
   });
 }

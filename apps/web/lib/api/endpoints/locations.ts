@@ -1,6 +1,7 @@
 import type {
   CreateLocation,
   Location,
+  LocationType,
   Page,
   UpdateLocation,
 } from "@lazyit/shared";
@@ -24,14 +25,16 @@ const locations = createCrudEndpoints<Location, CreateLocation, UpdateLocation>(
 
 /**
  * Server-side params for the location list (#104). `q` matches name/address/floor/description;
- * `sort` is allowlisted to `name|type|createdAt|updatedAt` (unknown → 400). The location-type filter
- * is NOT a server param — the screen applies it client-side over the page. `limit`/`offset` thread
+ * `sort` is allowlisted to `name|type|createdAt|updatedAt` (unknown → 400). `type` is the
+ * server-side location-type filter, scoping the whole result set (#824). `limit`/`offset` thread
  * the pagination window (ADR-0030). `deleted: "only"` is the ADMIN-only archived view.
  */
 export interface LocationListParams {
   q?: string;
   sort?: string;
   dir?: "asc" | "desc";
+  /** Server-side location-type filter; scopes the whole result set (#824). */
+  type?: LocationType;
   limit?: number;
   offset?: number;
   deleted?: "only";
@@ -55,6 +58,7 @@ export function getLocations(
     qs.set("sort", params.sort);
     if (params.dir) qs.set("dir", params.dir);
   }
+  if (params.type) qs.set("type", params.type);
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   if (params.deleted) qs.set("deleted", params.deleted);

@@ -17,6 +17,7 @@ WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
+COPY apps/agent/package.json apps/agent/
 COPY packages/shared/package.json packages/shared/
 RUN ok=0; for i in 1 2 3; do bun install --frozen-lockfile && ok=1 && break || { echo "bun install failed (attempt $i/3), retrying in 5s..."; sleep 5; }; done; [ "$ok" -eq 1 ]
 
@@ -30,6 +31,15 @@ RUN bunx prisma generate          # -> apps/api/generated/prisma (compiled into 
 RUN bun run build                 # nest build -> apps/api/dist/src/main.js (sourceRoot: src)
 WORKDIR /app
 
+# ---- Agent binaries: Bun-compile the reporting agent for both Linux arches (ADR-0074 §6) ----
+# Reuses the builder (it already has bun + the built @lazyit/shared the agent imports for the SAME
+# zod contract the API validates — zero drift). Cross-compiles x64 + arm64; the API serves whichever
+# the operator's host needs via GET /agent/download. CI's "Build api image" job validates this stage.
+FROM builder AS agent-builder
+WORKDIR /app
+COPY apps/agent/ apps/agent/
+RUN bun run --filter @lazyit/agent compile   # -> apps/agent/dist/lazyit-agent-{x64,arm64}
+
 # ---- Prod deps: only the API's production tree, hoisted (flat node_modules) ----
 # --filter keeps the lockfile intact (so --production's implicit frozen check passes) while
 # excluding the web app's deps; --linker hoisted gives a flat node_modules for plain Node resolution.
@@ -39,6 +49,7 @@ WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
+COPY apps/agent/package.json apps/agent/
 COPY packages/shared/package.json packages/shared/
 RUN ok=0; for i in 1 2 3; do bun install --production --linker hoisted --filter "@lazyit/api" && ok=1 && break || { echo "bun install failed (attempt $i/3), retrying in 5s..."; sleep 5; }; done; [ "$ok" -eq 1 ]
 
@@ -58,6 +69,12 @@ COPY --from=builder   /app/packages/shared/dist        ./packages/shared/dist
 COPY --from=builder   /app/packages/shared/package.json ./packages/shared/package.json
 COPY --from=builder   /app/apps/api/dist               ./apps/api/dist
 COPY --from=builder   /app/apps/api/package.json       ./apps/api/package.json
+
+# Baked reporting-agent binaries (ADR-0074 §6) — served by GET /agent/download. AGENT_BIN_DIR points
+# the controller here; the binaries are streamed, never executed in this container.
+ENV AGENT_BIN_DIR=/app/agent/bin
+COPY --from=agent-builder /app/apps/agent/dist/lazyit-agent-x64   /app/agent/bin/lazyit-agent-x64
+COPY --from=agent-builder /app/apps/agent/dist/lazyit-agent-arm64 /app/agent/bin/lazyit-agent-arm64
 
 USER node
 EXPOSE 3001

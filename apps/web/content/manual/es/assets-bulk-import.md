@@ -68,7 +68,7 @@ Para cada columna, ábrela y elige un destino en el desplegable:
 
 - **Un campo de lazyit**, agrupado por entidad:
   - **Activo** — **Nombre** (*obligatorio*), **Estado** (*obligatorio*), **Número de serie**,
-    **Etiqueta de activo**, **Fecha de compra**, **Fin de garantía**, **Modelo** y **Ubicación**.
+    **Etiqueta de activo**, **Empresa**, **Fecha de compra**, **Fin de garantía**, **Modelo** y **Ubicación**.
   - **Modelo** — **Fabricante** y **Categoría** para los modelos de activo que cree la importación
     (consulta *Marca y categoría del modelo* más abajo).
   - **Persona** — la persona a la que está **asignado** el activo: **Nombre**, **Correo**, **Legajo**,
@@ -95,6 +95,8 @@ Algunos campos se comportan de forma especial:
   automáticamente más tarde si tu instancia tiene un esquema de etiquetas activado.
 - **Modelo** y **Ubicación** son **referencias**, asociadas a registros existentes por nombre
   (consulta *Conflictos*).
+- **Empresa** es una etiqueta de agrupación opcional, tomada tal cual de tu archivo (una columna
+  *Empresa* / *Company* se reconoce automáticamente). Agrupa y filtra activos — no es un control de acceso.
 
 El importador **pre-rellena una mejor suposición** para cada columna, pero nunca decide por ti —
 confirmas cada columna, y nada se descarta en silencio. La suposición entiende más que los encabezados

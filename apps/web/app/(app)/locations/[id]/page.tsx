@@ -18,8 +18,7 @@ export default async function LocationDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { id } = await params;
-  const session = await auth();
+  const [{ id }, session] = await Promise.all([params, auth()]);
   const queryClient = getServerQueryClient();
 
   await queryClient.prefetchQuery({

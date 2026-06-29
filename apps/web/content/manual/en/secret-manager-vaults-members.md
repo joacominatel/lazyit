@@ -58,6 +58,28 @@ browser may not allow it (for example over plain HTTP, or if another app or a cl
 already captured the value), so treat it as a convenience, not a guarantee — paste promptly. You can
 edit a secret's label or handle, replace its value, or delete it.
 
+## Secret types
+
+A secret has a **Type** so lazyit can store more than a single string and show it back in a useful
+shape. Every type is encrypted in your browser exactly the same way — the type is only a **label** that
+tells lazyit which form to show and how to render the value; the server still never sees the contents.
+
+- **Generic** (the default) — a single value: a password, an API key, a token. Nothing changes from
+  before; this is what every existing secret already is.
+- **SSH key** — an SSH **private key**, with an optional **public key** and **passphrase**. On reveal,
+  each part is shown as a copyable monospace block.
+- **One-time code (TOTP)** — a two-factor **seed** (the base32 secret a provider gives you), with
+  optional issuer, account, digit count, period and algorithm. The seed is encrypted like any other
+  secret; when you reveal it, lazyit **derives the live 6-digit code on your device** and shows it with
+  a countdown, refreshing each period — the same code an authenticator app would show. lazyit never
+  sends the seed anywhere to do this.
+- **Certificate** — an X.509 **certificate**, with an optional **private key** and **chain**, each shown
+  as a copyable block on reveal.
+
+You can change a secret's type when you edit it. Because the stored value is re-encrypted to match the
+new shape, changing the type asks you to **re-enter the value** so the type and the encrypted value stay
+in sync.
+
 ## Searching a vault
 
 A vault with more than a handful of secrets shows a **search box** above the list. It filters by

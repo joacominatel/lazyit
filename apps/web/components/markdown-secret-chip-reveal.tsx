@@ -4,6 +4,7 @@ import {
   ArrowPathIcon,
   CheckIcon,
   ClipboardIcon,
+  ExclamationTriangleIcon,
   EyeSlashIcon,
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
@@ -73,6 +74,10 @@ export function SecretChipReveal({
   // SECW-06: a copy attempt failed (insecure context — no navigator.clipboard). Prompt the user to
   // select & copy manually instead of implying success.
   const [copyFailed, setCopyFailed] = useState(false);
+  // #814: a decrypt attempt FAILED (wrong DEK, or a tampered/corrupt ciphertext = a possible integrity
+  // attack). Surface it inline with a Retry instead of silently masking — a failed decrypt must never be
+  // indistinguishable from a clean masked-but-fine state, which would hide a tamper signal.
+  const [revealError, setRevealError] = useState(false);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const maskTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // #607: cancel handle for the pending best-effort clipboard auto-clear from the last copy.
@@ -86,12 +91,16 @@ export function SecretChipReveal({
         authTag: item.authTag,
         keyVersion: item.keyVersion,
       });
+      setRevealError(false);
       setPlaintext(value);
       clearTimeout(maskTimerRef.current);
       maskTimerRef.current = setTimeout(() => mask(), REVEAL_TIMEOUT_MS);
     } catch {
-      // Wrong DEK or tampered ciphertext — surface nothing; collapse back to the shell.
-      mask();
+      // #814: wrong DEK or tampered/corrupt ciphertext. AES-GCM cannot tell a wrong key from a tampered
+      // ciphertext — `crypto.ts`/`aead.ts` throw a SINGLE generic auth failure — so we surface ONE clear,
+      // retryable error rather than collapsing back to an indistinguishable masked state and hiding a
+      // possible tamper. (Error types are not separable here; see the limitation note in the PR.)
+      setRevealError(true);
     }
   }
 
@@ -139,6 +148,19 @@ export function SecretChipReveal({
       setTimeout(() => setCopied(false), 2000);
     } else {
       setCopyFailed(true);
+    }
+  }
+
+  // #814: retry a failed decrypt — clear the error, then re-run the same path the mount effect uses
+  // (decrypt when the DEK is available, otherwise re-open the unlock gate). Mirrors the vault-detail
+  // reveal retry (SM-WEB-07) so a failed decrypt is never a dead end.
+  function handleRetry() {
+    setRevealError(false);
+    const dek = ensureDek();
+    if (dek) {
+      decrypt(dek);
+    } else {
+      setUnlockOpen(true);
     }
   }
 
@@ -203,6 +225,36 @@ export function SecretChipReveal({
             </span>
           ) : null}
         </>
+      ) : revealError ? (
+        // #814: a FAILED decrypt is shown LOUDLY — never an indistinguishable silent mask. `role="alert"`
+        // announces it to assistive tech (reveal is keyboard-operable). Paired with a Retry and a hide (to
+        // collapse back to the shell), mirroring the vault-detail reveal-error UX (SM-WEB-07). The copy is
+        // necessarily generic: AES-GCM cannot separate "wrong key" from "tampered ciphertext".
+        <span role="alert" className="flex items-center gap-1">
+          <span className="mx-0.5 text-muted-foreground/40" aria-hidden>
+            ·
+          </span>
+          <ExclamationTriangleIcon className="size-3 shrink-0 text-destructive" aria-hidden />
+          <span className="text-[0.65rem] text-destructive" data-secret-chip-reveal-error>
+            {t("chip.revealError")}
+          </span>
+          <button
+            type="button"
+            onClick={handleRetry}
+            className="shrink-0 text-[0.65rem] font-medium text-primary underline-offset-2 hover:underline"
+          >
+            {t("chip.revealRetry")}
+          </button>
+          <button
+            type="button"
+            onClick={mask}
+            title={t("chip.hide")}
+            aria-label={t("chip.hide")}
+            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <EyeSlashIcon className="size-3" aria-hidden />
+          </button>
+        </span>
       ) : (
         // Locked-session interim: decryption is pending the unlock gate. A tiny spinner keeps the
         // chip from looking inert while the modal is open.

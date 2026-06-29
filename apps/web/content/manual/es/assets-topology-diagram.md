@@ -129,8 +129,15 @@ panel:
 - **Fuera de línea** — caído.
 - **Desconocido** — no establecido (el valor por defecto de un nodo nuevo).
 
-Con el permiso de gestión defines el estado desde el panel de detalle. (El estado se fija a mano hoy;
-la detección automática de actividad es una incorporación futura.)
+Con el permiso de gestión defines el estado desde el panel de detalle. Los nodos reportados por el
+[agente de reporte](/help/assets-topology-reporting-agent) llevan su estado (y una insignia
+*Reportado por agente* con una frescura "reportado hace …") automáticamente; igual podés fijarlo a
+mano para los nodos que gestionás vos.
+
+> **Nodos descubiertos automáticamente.** Los servidores reportados por el
+> [agente de reporte](/help/assets-topology-reporting-agent) no aparecen en el mapa de inmediato:
+> esperan en la bandeja de **Revisión pendiente** en la
+> [lista de servidores](/help/assets-topology-servers) hasta que los confirmás.
 
 ## Quitar un nodo del mapa
 
@@ -158,8 +165,12 @@ estático. Reúne, en un solo lugar:
 - **Referencias de secretos** — *solo identificadores, nunca los valores de los secretos.* Una
   referencia muestra el identificador `{{ lazyit_secret.… }}` y una etiqueta para que sepas qué
   credencial corresponde a esta máquina; aquí no hay forma de revelarlo y lazyit nunca expone el
-  valor en esta superficie. (Todavía no existe un vínculo activo-a-secreto, así que esta lista está
-  vacía por ahora; el panel está listo para ello.)
+  valor en esta superficie. Con el permiso de gestión vinculás una referencia desde el selector
+  **Vincular un secreto** — lista solo los secretos **a los que tenés acceso** (las bóvedas de las
+  que sos miembro) y elegís uno por su identificador; la **×** junto a una referencia la quita. Las
+  referencias se guardan por identificador y se resuelven en vivo, así que la etiqueta siempre refleja
+  el secreto actual; y si el secreto se elimina (o su identificador cambia) la referencia simplemente
+  desaparece de la lista.
 - **Accesos directos** — enlaces rápidos (SSH, interfaz web, consola) que se abren en una pestaña
   nueva. Con el permiso de gestión los editás ahí mismo: cada acceso directo es un par etiqueta + URL
   que podés cambiar, agregar o quitar, y luego **Guardás** la lista (lazyit verifica que cada URL sea
@@ -176,9 +187,15 @@ panel, así puedes saltar de la tabla a la imagen completa de una máquina con u
 
 La pregunta estrella que un mapa puede responder y un dibujo no: **"si este nodo se cae, ¿qué se ve
 afectado?"** En el panel de detalle, activa **Mostrar impacto** para resaltar el conjunto aguas
-abajo — cada nodo que corre sobre, o depende de, este (directa o transitivamente). El lienzo atenúa
-todo lo que queda fuera del radio para que la región afectada destaque, y el panel lista cada nodo
-afectado con a cuántos saltos de distancia está.
+abajo — cada nodo que corre sobre, depende de, o es miembro de este (directa o transitivamente). Por
+eso, dar de baja un clúster o grupo también muestra sus miembros. El lienzo atenúa todo lo que queda
+fuera del radio para que la región afectada destaque, y el panel lista cada nodo afectado con a
+cuántos saltos de distancia está.
+
+El impacto es una **estimación derivada de las aristas**, no una garantía verificada a mano — sigue
+las aristas que dibujaste, así que un miembro podría sobrevivir si el grupo pierde un solo nodo. Los
+enlaces de destino de respaldo y los puramente de red se ignoran a propósito: que falle un destino de
+respaldo no tumba al primario, y una conexión de red simple no tiene dirección de fallo.
 
 Un **resultado vacío es buena noticia** — significa que nada depende de este nodo, así que es seguro
 darlo de baja. lazyit lo muestra como tranquilidad, no como un error.
@@ -186,5 +203,6 @@ darlo de baja. lazyit lo muestra como tranquilidad, no como un error.
 ## Qué sigue
 
 - [Lista de servidores](/help/assets-topology-servers) — el mismo parque como tabla filtrable.
+- [Agente de reporte](/help/assets-topology-reporting-agent) — completá el mapa desde tus servidores.
 - [Conceptos de activos](/help/assets-asset-basics) — el registro de inventario detrás de un nodo respaldado por un activo.
 - [Asignaciones e historial](/help/assets-assignments-history) — cómo funciona la propiedad (el responsable del panel).

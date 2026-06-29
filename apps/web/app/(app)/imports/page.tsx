@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
@@ -17,6 +18,10 @@ import { ImportWizard } from "./_components/import-wizard";
 // first-paint read (a session id only exists after the upload step), so there is nothing to prefetch.
 export default function ImportsPage() {
   const t = useTranslations("imports");
+  const breadcrumb = useMemo(
+    () => <Breadcrumb items={[{ label: t("nav") }]} />,
+    [t],
+  );
   return (
     <div className="space-y-6">
       <PermissionGate
@@ -25,7 +30,7 @@ export default function ImportsPage() {
         description={t("gate.description")}
       >
         <PageHeader
-          breadcrumb={<Breadcrumb items={[{ label: t("nav") }]} />}
+          breadcrumb={breadcrumb}
           title={t("title")}
           subtitle={t("subtitle")}
         />

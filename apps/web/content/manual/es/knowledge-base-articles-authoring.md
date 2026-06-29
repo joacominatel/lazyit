@@ -27,14 +27,9 @@ Abre la Base de conocimiento y elige **Nuevo artículo**. El formulario es breve
 - **Contenido** — el cuerpo, en Markdown.
 
 El editor es un editor de Markdown plano con vista previa en vivo: por diseño no hay un modo de texto
-enriquecido/WYSIWYG. Mientras escribes, el **panel de redacción colorea la fuente sobre la marcha**:
-los encabezados se ven en negrita y con color, los marcadores de negrita/cursiva, las listas, el
-código en línea, las citas y los enlaces se tiñen, y los tokens reservados `[[` y `{{` destacan, de
-modo que el Markdown en bruto se mantiene legible sin cambiar a la vista previa. Sigue siendo texto
-plano editable, no renderizado: el formato completo aparece igualmente en la vista previa en vivo y
-en la página publicada. Los bloques de código se resaltan con sintaxis en la página publicada, cada
-uno con un botón de copia, y un bloque ` ```mermaid ` se renderiza como un diagrama. Tú escribes
-Markdown en bruto; el formato aparece cuando se ve el artículo.
+enriquecido/WYSIWYG. Los bloques de código se resaltan con sintaxis en la página publicada, cada uno
+con un botón de copia, y un bloque ` ```mermaid ` se renderiza como un diagrama. Tú escribes Markdown
+en bruto; el formato aparece cuando se ve el artículo.
 
 Mientras escribes, dos ayudas ofrecen autocompletado:
 
@@ -61,6 +56,23 @@ y — lo más útil — los dos **tokens reservados** de lazyit, cada uno con un
 Copia un ejemplo, pégalo en el cuerpo y la vista previa en vivo muestra exactamente cómo se resuelve
 el token. El mismo `?` y la vista previa están disponibles tanto en **Nuevo artículo** como en
 **Editar**.
+
+### Tu trabajo está protegido
+
+El editor evita perder el trabajo en curso:
+
+- **Autoguardado local** — mientras escribes, tu borrador se guarda en **este navegador** cada pocos
+  segundos. Es una red de seguridad privada en tu propio equipo, *no* un guardado en el servidor: el
+  artículo solo cambia cuando pulsas **Crear borrador** / **Guardar cambios**. Si la pestaña falla o
+  se cierra por accidente, no se pierde nada.
+- **Restaurar al volver** — vuelve a abrir **Nuevo artículo** o **Editar** y, si hay un borrador local
+  sin guardar, un aviso ofrece **Restaurarlo** (o **Descartarlo**). Un artículo guardado nunca se
+  sobrescribe sin tu permiso.
+- **Aviso al salir** — cerrar la pestaña, recargar o pulsar **Cancelar** con cambios sin guardar te
+  pide confirmación antes de descartarlos. Un guardado correcto borra el borrador local.
+
+El borrador local vive solo en el navegador donde lo escribiste; no se comparte con tu equipo ni se
+sincroniza entre dispositivos.
 
 ## Borradores y publicación
 

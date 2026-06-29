@@ -35,6 +35,72 @@
     "CONFIRMED": "Confirmed",
     "PENDING": "Pending"
   },
+  "agent": {
+    "badge": "Agent-reported",
+    "reported": "reported {time}",
+    "staleReported": "reported {time} · stale"
+  },
+  "pending": {
+    "title": "Pending review",
+    "description": "Hosts the reporting agent discovered. Confirm to add them to your inventory, or discard.",
+    "confirmAction": "Confirm",
+    "discardAction": "Discard"
+  },
+  "confirm": {
+    "title": "Confirm this server",
+    "description": "Add this agent-discovered host to your live topology. You can re-classify or rename it first.",
+    "labelLabel": "Name",
+    "kindLabel": "Kind",
+    "trackAsAssetLabel": "Track as an inventory asset",
+    "trackAsAssetDescription": "On by default — also create a tracked Asset (with the reported host facts) so this server can carry an owner, KB links and secrets. Turn off to keep it graph-only.",
+    "submit": "Confirm server",
+    "confirmedToast": "Server confirmed.",
+    "error": "Couldn't confirm the server."
+  },
+  "onboarding": {
+    "title": "Track servers automatically",
+    "description": "Install a lightweight agent on a Linux server and it reports its hardware & software to lazyit by itself — it can only report, nothing else.",
+    "cta": "Create your first agent",
+    "addAgent": "Add agent",
+    "noPermissionHint": "Ask an administrator to add a reporting agent — it needs the manage-settings permission."
+  },
+  "wizard": {
+    "title": "Create a reporting agent",
+    "subtitle": "Install a reporting agent on a Linux server in three steps.",
+    "steps": {
+      "name": "Name",
+      "install": "Install",
+      "wait": "Wait"
+    },
+    "stepAria": "Step {current} of {total}",
+    "whatIsAgent": "An agent is a tiny program you run on a server. It reports the server's hardware and installed software to lazyit by itself — it can't read or change anything else.",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. web-prod-01",
+    "nameHint": "A name to recognise this agent later (for example the server's name).",
+    "scopeNote": "This token can only report inventory (infra:report). It can't read or change anything else, and every host it reports lands in Pending review for your approval.",
+    "generate": "Generate credentials",
+    "createdToast": "Credentials created.",
+    "error": "Couldn't create the credentials.",
+    "requirements": "You'll run this on a Linux server with root access.",
+    "installTitle": "Run this on your server",
+    "installHint": "Copy the command and run it on the Linux server as root. The token is shown only once — capture it before closing.",
+    "copyCommandAria": "Copy the command",
+    "commandCopied": "Command copied.",
+    "manual": {
+      "toggle": "Install manually (step by step)",
+      "intro": "Prefer to inspect each step? Run these on the server instead of the one-liner above.",
+      "step1": "Download the binary (use arch=arm64 on ARM machines):",
+      "step2": "Make it executable and move it into place:",
+      "step3": "Create the config file (it holds the token, so chmod 600):",
+      "step4": "Send a first report to check it works:"
+    },
+    "waitTitle": "Waiting for {name} to report…",
+    "waitDescription": "Run the install command on your server. As soon as the agent checks in, it'll show up here — usually within a couple of minutes.",
+    "successTitle": "{name} reported!",
+    "successDescription": "Your server checked in. Confirm it to add it to your inventory.",
+    "confirmAction": "Confirm server",
+    "checkLater": "I'll check later"
+  },
   "view": {
     "map": "Map",
     "table": "Table"
@@ -80,7 +146,8 @@
     "meta": {
       "asset": "Asset",
       "owner": "Owner",
-      "ip": "IP address"
+      "ip": "IP address",
+      "source": "Source"
     }
   },
   "edgeKind": {
@@ -125,6 +192,14 @@
     "secretsTitle": "Secrets",
     "noSecrets": "No secret references. Values are never shown here — only handles.",
     "secretHandleNote": "Reference only — the value is never revealed here.",
+    "secretAttach": "Attach a secret…",
+    "secretPickerSearch": "Search secrets by handle…",
+    "secretPickerEmpty": "No secrets found. You only see secrets you can access.",
+    "secretRemove": "Remove secret reference",
+    "secretAttachedToast": "Secret reference attached.",
+    "secretDetachedToast": "Secret reference removed.",
+    "secretAttachError": "Couldn't attach the secret reference.",
+    "secretDetachError": "Couldn't remove the secret reference.",
     "shortcutsTitle": "Shortcuts",
     "noShortcuts": "No shortcuts.",
     "openShortcut": "Open",
@@ -195,6 +270,8 @@
     "closedToast": "Connection closed.",
     "closeError": "Couldn't close the connection.",
     "loadError": "Couldn't load connections.",
+    "partialError": "Some relationships couldn't be loaded.",
+    "retry": "Retry",
     "selfNode": "this node",
     "since": "since {date}",
     "ended": "ended {date}"

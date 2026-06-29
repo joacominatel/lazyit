@@ -44,6 +44,10 @@ depende de su acceso:
   secreto. Ve el identificador y un candado, y no puede revelar nada.
 - **Un chip roto.** El identificador no coincide con ningún secreto actual — por ejemplo, se renombró o
   se eliminó. El chip queda marcado para que un autor pueda corregir la referencia.
+- **Un error de descifrado.** El lector es miembro de la bóveda pero el valor no se pudo descifrar — la
+  clave de la bóveda es incorrecta, o el valor almacenado está corrupto o alterado. El chip muestra un
+  error claro y un **Reintentar**, sin fallar en silencio. Si Reintentar sigue fallando, el valor puede
+  haber sido alterado — rota la credencial real y vuelve a agregar el secreto.
 
 ## La regla de las dos llaves
 

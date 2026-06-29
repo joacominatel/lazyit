@@ -1,7 +1,7 @@
 ---
 title: "ADR-0071: KB write-mode syntax highlighting — overlay over the textarea, not a code-editor replatform"
 tags: [adr, knowledge-base, kb, editor, frontend]
-status: accepted
+status: superseded
 created: 2026-06-24
 updated: 2026-06-24
 deciders: [Joaquín Minatel]
@@ -10,6 +10,14 @@ deciders: [Joaquín Minatel]
 # ADR-0071: KB write-mode syntax highlighting — overlay over the textarea
 
 ## Status
+
+> **Superseded — 2026-06-24 (issue #803).** The overlay was reverted: in practice the write pane kept
+> showing caret/glyph drift even after the color-only fix (#796), and the legibility-only payoff did not
+> justify the fragile transparent-textarea-over-`<pre>` metric parity. The KB editor is back to a plain
+> visible-text `<textarea>` (ADR-0021 fully intact). **The `[[` / `{{` autocompletes and the caret-aware
+> popup placement (#797) were retained** — only the colouring layer (`markdown-source-highlight.tsx`,
+> `markdown-source-theme.ts`) was removed. A future code-editor surface, if ever wanted, would be its own
+> epic + ADR.
 
 **accepted** — 2026-06-24. Built for issue #736. Extends — does **not** supersede —
 [[0021-knowledge-base-design]] (the deliberately lightweight `<textarea>` + live-preview editor) and

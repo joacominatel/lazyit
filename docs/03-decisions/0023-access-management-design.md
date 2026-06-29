@@ -3,7 +3,7 @@ title: "ADR-0023: Access management design (Application + AccessGrant)"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-30
+updated: 2026-06-28
 deciders: [Joaquín Minatel]
 ---
 
@@ -127,10 +127,10 @@ directly by the IT team.
 - **[[access-request]]** — the approval workflow (`requested → approved / rejected → provisioned`)
   and the **approver** concept. Grants are created directly for now; a real workflow gets its own
   design later (and likely revives approvers). The entity note stays ⚪ planned.
-- **Auto-revoke on `expiresAt`** — `expiresAt` is **informative only**; no scheduler mutates data.
-  The list endpoints accept an optional `includeExpired=false` to *hide* past-expiry active grants,
-  but nothing is changed in the database. A worker that auto-revokes is a future decision (note the
-  BullMQ/Redis tension in [[0009-bun-first-vs-app-stack]]).
+- **Auto-revoke on `expiresAt`** — ✅ **superseded by the addendum below (2026-06-28, #843).**
+  Originally deferred: `expiresAt` was **informative only**; no scheduler mutated data and the list
+  endpoints' optional `includeExpired=false` only *hid* past-expiry active grants. A sweeper now
+  auto-revokes them.
 - **`Application.metadata` validation** — unvalidated jsonb, the same debt as `Asset.specs` /
   `Article.metadata` ([[0007-flexible-asset-specs-jsonb]]).
 
@@ -143,6 +143,45 @@ directly by the IT team.
   append-only joins. The two no longer differ.
 - AccessRequest approval workflow; expiry auto-revoke scheduler; a soft-delete-time guard on
   apps/users with active grants; `metadata` validation.
+
+## Addendum (2026-06-28, #843): expiry now auto-revokes
+
+The original ADR (option 5, Deferred) made `expiresAt` **informative only** — an expired-but-not-revoked
+grant stayed active until a human revoked it, on the reasoning that an MVP's grants are created directly
+by the IT team and a scheduler was out of scope. With the team now relying on expiry for time-boxed
+access (contractor windows, "until the Q3 migration"), an expired grant silently retaining live access
+is a real offboarding gap. We reverse the deferral.
+
+**Decision:** a periodic `AccessGrantExpirySweeper` auto-revokes every active grant
+(`revokedAt = null`) whose `expiresAt` is in the past.
+
+- **Through the normal revoke path, not a blind `updateMany`.** Each expired grant is revoked via
+  `AccessGrantsService.revoke()`, so the **deprovision workflow fires** (under the LAST_ACTIVE_GRANT
+  policy, race-safe via the existing advisory lock) and the revoke is **audited** — exactly like an
+  offboarding revoke. A bulk `updateMany` would set `revokedAt` while skipping the workflow, leaving
+  external access provisioned (the very thing expiry exists to prevent).
+- **System actor.** An automatic revoke has no human/SA actor: it runs `revoke()` with an *undefined
+  principal* → the documented system/unknown sentinel (`revokedById` **and** `revokedBySaId` null,
+  per the option-4 design — "a future scheduler leaves them `null`"). The grant's existing `notes`
+  are preserved (no `revokedReason` column exists; a set `revokedAt` with a null actor already marks
+  an automatic revoke).
+- **Mechanism — a plain `setInterval` sweeper.** Mirrors the other in-process sweepers (e.g.
+  `InfraAgentStalenessSweeper`): `unref`'d, re-entrancy guarded, idle under `NODE_ENV=test`, the whole
+  pass try/caught, interval env-tunable via `ACCESS_GRANT_EXPIRY_SWEEP_INTERVAL_MS` (default 15 min).
+  Deliberately **not** a BullMQ job — no `@nestjs/schedule`, no new queue (resolves the BullMQ/Redis
+  tension the original deferral flagged, [[0009-bun-first-vs-app-stack]]). A bounded per-pass batch
+  (200) keeps a backlog from stampeding; the next pass drains the rest.
+
+**Consequences:** expiry is now load-bearing — clearing it (not just ignoring it) is how you keep a
+grant permanent. The list endpoints' `includeExpired` filter stays, but the window between expiry and
+the next sweep is the only time a grant is "expired but still active". `updateExpiry` is unchanged
+(still no actor); shortening an expiry now means the next sweep may revoke it.
+
+## Follow-ups (addendum)
+
+- A possible future refinement: an explicit `revokedReason`/`revokedVia` enum to distinguish
+  manual vs automatic vs workflow revokes in the UI, instead of inferring "automatic" from a null
+  actor. Not built — the null-actor sentinel is sufficient today.
 
 Related: [[application]] · [[access-grant]] · [[access-request]] · [[user]] ·
 [[0019-asset-assignment-integrity]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·

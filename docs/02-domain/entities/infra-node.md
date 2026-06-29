@@ -56,9 +56,16 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   validation/IPAM), `shortcuts` is `[{ label, url }]` (URLs validated by zod), `specs` is a loose
   jsonb of per-kind attrs ([[0007-flexible-asset-specs-jsonb]] posture; per-kind schema validation
   deferred — the shared `TODO(specs)` debt).
+- **Secret linkage is a soft handle-ref ([[0073-infra-node-secret-linkage]], #801).** A node can
+  attach secret HANDLE references (`InfraNodeSecretRef`: `handle` + `vaultId`, **no FK** to the
+  `SecretItem` — mirrors KB chips + `SecretAuditLog`). Resolved at read to live secret METADATA only
+  (handle/label/vaultId, **never a value** — INV-10, [[0061-secret-manager-zero-knowledge]]); a ref
+  whose secret is soft-deleted or whose editable handle was renamed away is **dropped**. Attach is
+  member-scoped (live `VaultMembership` of the vault, human-only); detach is a plain topology edit.
 - **Permissions** ([[0046-roles-permissions-v2]]): `infra:read` to view the map/list/detail (the
   link is hidden without it; the API is the real gate), `infra:manage` for create/edit/connect/
-  status/remove. Asset-backed create also needs the relevant `assets:*`.
+  status/remove. Asset-backed create also needs the relevant `assets:*`. Attaching a secret handle
+  also needs `secret:read` **and** live vault membership.
 
 ## Conventions
 
@@ -107,8 +114,13 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   owner is a tracked follow-up (#750).
 - `GET /infra/nodes/:id` — the enriched **drill-in** (`InfraNodeDetail`): the node plus its
   asset-backed payoff — `assetName`, active `owners`, published `articleLinks`, `secretRefs`
-  (HANDLES only, never values — INV-10, [[0061-secret-manager-zero-knowledge]]; **empty in v1** — no
-  asset→secret linkage exists yet), `shortcuts`, IP, and `children` (active inverse RUNS_ON).
+  (HANDLES only, never values — INV-10, [[0061-secret-manager-zero-knowledge]]; resolved from the
+  node's secret links, dangling refs dropped — [[0073-infra-node-secret-linkage]], #801),
+  `shortcuts`, IP, and `children` (active inverse RUNS_ON).
+- `POST /infra/nodes/:id/secrets` / `DELETE /infra/nodes/:id/secrets` — attach / detach a secret
+  HANDLE reference (`{ handle, vaultId }` in the body; never a value). Attach needs `infra:manage` +
+  `secret:read` **and** live vault membership (human-only); detach needs only `infra:manage`. Both
+  return the node's updated resolved `secretRefs` ([[0073-infra-node-secret-linkage]], #801).
 - `POST /infra/nodes` — create; default asset-backed (`trackAsAsset`, §5).
 - `PATCH /infra/nodes/:id` — partial update (`status` toggle, `label`, `kind`, `ipAddress`,
   `shortcuts`, `assetId: null` to detach).
@@ -124,7 +136,6 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
 
 - The **v2 reporting agent** (auto-discovery → PENDING tray, liveness, reconciliation/merge-on-confirm)
   — its columns exist nullable now; its own major epic.
-- **asset→secret linkage** so `secretRefs` populates (the shape is honoured; the array is empty today).
 - List-row asset name/owner enrichment (#750); deep network model (VLAN/ports/IPAM); metrics/alerting;
   per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]]; a
   dedicated `InfraNodeHistory`. → [[0070-infra-topology-graph]] "Future".
