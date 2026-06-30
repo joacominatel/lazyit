@@ -1,172 +1,172 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-06-04T00:00:00Z",
+  "generatedAt": "2026-06-30T00:00:00Z",
   "title": "Design System: lazyit",
   "extensions": {
     "colorMeta": {
       "primary": {
         "role": "primary",
-        "displayName": "Brand Indigo",
-        "canonical": "oklch(0.55 0.18 275)",
+        "displayName": "Brand Oxblood",
+        "canonical": "oklch(0.52 0.2 25)",
         "tonalRamp": [
-          "oklch(0.20 0.08 275)",
-          "oklch(0.28 0.11 275)",
-          "oklch(0.36 0.14 275)",
-          "oklch(0.45 0.16 275)",
-          "oklch(0.55 0.18 275)",
-          "oklch(0.66 0.15 275)",
-          "oklch(0.78 0.10 275)",
-          "oklch(0.92 0.04 275)"
+          "oklch(0.20 0.09 25)",
+          "oklch(0.28 0.12 25)",
+          "oklch(0.36 0.15 25)",
+          "oklch(0.44 0.18 25)",
+          "oklch(0.52 0.20 25)",
+          "oklch(0.64 0.17 25)",
+          "oklch(0.78 0.10 25)",
+          "oklch(0.92 0.04 25)"
         ]
       },
       "background": {
         "role": "neutral",
-        "displayName": "Bone",
-        "canonical": "oklch(0.985 0.004 95)",
+        "displayName": "Paper",
+        "canonical": "oklch(0.985 0 0)",
         "tonalRamp": [
-          "oklch(0.21 0.006 75)",
-          "oklch(0.30 0.006 80)",
-          "oklch(0.42 0.006 85)",
-          "oklch(0.55 0.005 90)",
-          "oklch(0.70 0.005 92)",
-          "oklch(0.85 0.004 94)",
-          "oklch(0.94 0.004 95)",
-          "oklch(0.985 0.004 95)"
+          "oklch(0.18 0 0)",
+          "oklch(0.28 0 0)",
+          "oklch(0.40 0 0)",
+          "oklch(0.53 0 0)",
+          "oklch(0.68 0 0)",
+          "oklch(0.84 0 0)",
+          "oklch(0.94 0 0)",
+          "oklch(0.985 0 0)"
         ]
       },
       "foreground": {
         "role": "neutral",
-        "displayName": "Warm Ink",
-        "canonical": "oklch(0.21 0.006 75)",
+        "displayName": "Ink",
+        "canonical": "oklch(0.18 0 0)",
         "tonalRamp": [
-          "oklch(0.18 0.006 75)",
-          "oklch(0.21 0.006 75)",
-          "oklch(0.30 0.006 75)",
-          "oklch(0.42 0.007 75)",
-          "oklch(0.52 0.008 75)",
-          "oklch(0.66 0.006 80)",
-          "oklch(0.82 0.005 90)",
-          "oklch(0.96 0.004 95)"
+          "oklch(0.18 0 0)",
+          "oklch(0.24 0 0)",
+          "oklch(0.34 0 0)",
+          "oklch(0.45 0 0)",
+          "oklch(0.56 0 0)",
+          "oklch(0.70 0 0)",
+          "oklch(0.84 0 0)",
+          "oklch(0.96 0 0)"
         ]
       },
       "card": {
         "role": "neutral",
-        "displayName": "Raised Paper",
-        "canonical": "oklch(0.995 0.003 95)",
+        "displayName": "Tape",
+        "canonical": "oklch(0.965 0 0)",
         "tonalRamp": [
-          "oklch(0.255 0.007 75)",
-          "oklch(0.34 0.006 80)",
-          "oklch(0.46 0.005 85)",
-          "oklch(0.60 0.005 90)",
-          "oklch(0.74 0.004 92)",
-          "oklch(0.88 0.003 94)",
-          "oklch(0.95 0.003 95)",
-          "oklch(0.995 0.003 95)"
+          "oklch(0.195 0 0)",
+          "oklch(0.30 0 0)",
+          "oklch(0.42 0 0)",
+          "oklch(0.55 0 0)",
+          "oklch(0.69 0 0)",
+          "oklch(0.83 0 0)",
+          "oklch(0.92 0 0)",
+          "oklch(0.965 0 0)"
         ]
       },
       "muted": {
         "role": "neutral",
         "displayName": "Quiet Gray",
-        "canonical": "oklch(0.955 0.005 95)",
+        "canonical": "oklch(0.945 0 0)",
         "tonalRamp": [
-          "oklch(0.30 0.007 75)",
-          "oklch(0.40 0.006 80)",
-          "oklch(0.52 0.008 75)",
-          "oklch(0.64 0.006 85)",
-          "oklch(0.76 0.005 90)",
-          "oklch(0.88 0.005 93)",
-          "oklch(0.93 0.005 95)",
-          "oklch(0.955 0.005 95)"
+          "oklch(0.225 0 0)",
+          "oklch(0.33 0 0)",
+          "oklch(0.45 0 0)",
+          "oklch(0.57 0 0)",
+          "oklch(0.70 0 0)",
+          "oklch(0.83 0 0)",
+          "oklch(0.91 0 0)",
+          "oklch(0.945 0 0)"
         ]
       },
       "border": {
         "role": "neutral",
         "displayName": "Hairline",
-        "canonical": "oklch(0.9 0.005 95)",
+        "canonical": "oklch(0.88 0 0)",
         "tonalRamp": [
-          "oklch(0.30 0.006 75)",
-          "oklch(0.42 0.006 80)",
-          "oklch(0.55 0.005 85)",
-          "oklch(0.68 0.005 90)",
-          "oklch(0.80 0.005 93)",
-          "oklch(0.88 0.005 94)",
-          "oklch(0.90 0.005 95)",
-          "oklch(0.95 0.004 95)"
+          "oklch(0.32 0 0)",
+          "oklch(0.44 0 0)",
+          "oklch(0.56 0 0)",
+          "oklch(0.67 0 0)",
+          "oklch(0.77 0 0)",
+          "oklch(0.84 0 0)",
+          "oklch(0.88 0 0)",
+          "oklch(0.95 0 0)"
         ]
       },
       "pillar-inventory": {
         "role": "categorical",
-        "displayName": "Inventory Teal",
-        "canonical": "oklch(0.62 0.14 200)",
+        "displayName": "Inventory Cyan",
+        "canonical": "oklch(0.68 0.11 200)",
         "tonalRamp": [
-          "oklch(0.25 0.06 200)",
-          "oklch(0.33 0.08 200)",
-          "oklch(0.42 0.10 200)",
-          "oklch(0.52 0.12 200)",
-          "oklch(0.62 0.14 200)",
-          "oklch(0.72 0.11 200)",
-          "oklch(0.83 0.07 200)",
-          "oklch(0.93 0.03 200)"
+          "oklch(0.28 0.05 200)",
+          "oklch(0.37 0.06 200)",
+          "oklch(0.47 0.08 200)",
+          "oklch(0.57 0.10 200)",
+          "oklch(0.68 0.11 200)",
+          "oklch(0.77 0.09 200)",
+          "oklch(0.86 0.06 200)",
+          "oklch(0.94 0.03 200)"
         ]
       },
       "pillar-access": {
         "role": "categorical",
-        "displayName": "Access Indigo",
-        "canonical": "oklch(0.55 0.18 275)",
+        "displayName": "Access Blue",
+        "canonical": "oklch(0.55 0.17 255)",
         "tonalRamp": [
-          "oklch(0.20 0.08 275)",
-          "oklch(0.28 0.11 275)",
-          "oklch(0.36 0.14 275)",
-          "oklch(0.45 0.16 275)",
-          "oklch(0.55 0.18 275)",
-          "oklch(0.66 0.15 275)",
-          "oklch(0.78 0.10 275)",
-          "oklch(0.92 0.04 275)"
+          "oklch(0.22 0.08 255)",
+          "oklch(0.30 0.11 255)",
+          "oklch(0.39 0.14 255)",
+          "oklch(0.47 0.16 255)",
+          "oklch(0.55 0.17 255)",
+          "oklch(0.66 0.15 255)",
+          "oklch(0.79 0.10 255)",
+          "oklch(0.92 0.04 255)"
         ]
       },
       "pillar-knowledge": {
         "role": "categorical",
-        "displayName": "Knowledge Green",
-        "canonical": "oklch(0.65 0.15 150)",
+        "displayName": "Knowledge Amber",
+        "canonical": "oklch(0.76 0.14 80)",
         "tonalRamp": [
-          "oklch(0.27 0.07 150)",
-          "oklch(0.35 0.09 150)",
-          "oklch(0.45 0.11 150)",
-          "oklch(0.55 0.13 150)",
-          "oklch(0.65 0.15 150)",
-          "oklch(0.74 0.12 150)",
-          "oklch(0.84 0.08 150)",
-          "oklch(0.93 0.04 150)"
+          "oklch(0.34 0.06 80)",
+          "oklch(0.44 0.08 80)",
+          "oklch(0.54 0.10 80)",
+          "oklch(0.65 0.12 80)",
+          "oklch(0.76 0.14 80)",
+          "oklch(0.83 0.12 80)",
+          "oklch(0.90 0.08 80)",
+          "oklch(0.96 0.03 80)"
         ]
       },
       "pillar-manage": {
         "role": "categorical",
-        "displayName": "Manage Rose",
-        "canonical": "oklch(0.62 0.2 15)",
+        "displayName": "Manage Violet",
+        "canonical": "oklch(0.52 0.18 300)",
         "tonalRamp": [
-          "oklch(0.26 0.10 15)",
-          "oklch(0.34 0.13 15)",
-          "oklch(0.43 0.16 15)",
-          "oklch(0.52 0.18 15)",
-          "oklch(0.62 0.20 15)",
-          "oklch(0.72 0.16 15)",
-          "oklch(0.83 0.10 15)",
-          "oklch(0.93 0.04 15)"
+          "oklch(0.22 0.08 300)",
+          "oklch(0.30 0.11 300)",
+          "oklch(0.38 0.14 300)",
+          "oklch(0.45 0.16 300)",
+          "oklch(0.52 0.18 300)",
+          "oklch(0.63 0.16 300)",
+          "oklch(0.77 0.11 300)",
+          "oklch(0.91 0.05 300)"
         ]
       },
-      "chart-4": {
+      "chart-5": {
         "role": "categorical",
-        "displayName": "Series Amber",
-        "canonical": "oklch(0.74 0.16 75)",
+        "displayName": "Series Magenta",
+        "canonical": "oklch(0.6 0.2 335)",
         "tonalRamp": [
-          "oklch(0.32 0.07 75)",
-          "oklch(0.42 0.09 75)",
-          "oklch(0.52 0.11 75)",
-          "oklch(0.63 0.14 75)",
-          "oklch(0.74 0.16 75)",
-          "oklch(0.82 0.13 75)",
-          "oklch(0.89 0.09 75)",
-          "oklch(0.95 0.04 75)"
+          "oklch(0.26 0.09 335)",
+          "oklch(0.34 0.12 335)",
+          "oklch(0.43 0.15 335)",
+          "oklch(0.51 0.18 335)",
+          "oklch(0.60 0.20 335)",
+          "oklch(0.71 0.17 335)",
+          "oklch(0.83 0.11 335)",
+          "oklch(0.93 0.05 335)"
         ]
       },
       "success": {
@@ -182,6 +182,21 @@
           "oklch(0.66 0.13 150)",
           "oklch(0.80 0.09 150)",
           "oklch(0.92 0.04 150)"
+        ]
+      },
+      "verify": {
+        "role": "semantic",
+        "displayName": "Verify Green",
+        "canonical": "oklch(0.5 0.105 162)",
+        "tonalRamp": [
+          "oklch(0.24 0.05 162)",
+          "oklch(0.31 0.06 162)",
+          "oklch(0.38 0.08 162)",
+          "oklch(0.44 0.09 162)",
+          "oklch(0.50 0.105 162)",
+          "oklch(0.62 0.10 162)",
+          "oklch(0.77 0.07 162)",
+          "oklch(0.91 0.03 162)"
         ]
       },
       "warning": {
@@ -202,49 +217,49 @@
       "info": {
         "role": "semantic",
         "displayName": "Info Blue",
-        "canonical": "oklch(0.54 0.14 240)",
+        "canonical": "oklch(0.52 0.115 240)",
         "tonalRamp": [
-          "oklch(0.24 0.06 240)",
-          "oklch(0.31 0.08 240)",
-          "oklch(0.39 0.10 240)",
-          "oklch(0.46 0.12 240)",
-          "oklch(0.54 0.14 240)",
-          "oklch(0.66 0.12 240)",
-          "oklch(0.80 0.08 240)",
-          "oklch(0.92 0.04 240)"
+          "oklch(0.24 0.05 240)",
+          "oklch(0.31 0.07 240)",
+          "oklch(0.39 0.09 240)",
+          "oklch(0.46 0.10 240)",
+          "oklch(0.52 0.115 240)",
+          "oklch(0.64 0.10 240)",
+          "oklch(0.79 0.07 240)",
+          "oklch(0.92 0.03 240)"
         ]
       },
       "destructive": {
         "role": "semantic",
         "displayName": "Destructive Red",
-        "canonical": "oklch(0.577 0.245 27.325)",
+        "canonical": "oklch(0.55 0.21 30)",
         "tonalRamp": [
-          "oklch(0.26 0.11 27)",
-          "oklch(0.34 0.15 27)",
-          "oklch(0.43 0.19 27)",
-          "oklch(0.50 0.22 27)",
-          "oklch(0.577 0.245 27)",
-          "oklch(0.70 0.19 27)",
-          "oklch(0.83 0.12 27)",
-          "oklch(0.93 0.05 27)"
+          "oklch(0.26 0.10 30)",
+          "oklch(0.34 0.14 30)",
+          "oklch(0.42 0.17 30)",
+          "oklch(0.49 0.19 30)",
+          "oklch(0.55 0.21 30)",
+          "oklch(0.67 0.18 30)",
+          "oklch(0.81 0.11 30)",
+          "oklch(0.92 0.05 30)"
         ]
       }
     },
     "typographyMeta": {
-      "display": { "displayName": "Display", "purpose": "Dashboard hero metrics (text-display); pairs with mono tabular numerics." },
-      "headline": { "displayName": "Headline", "purpose": "Page titles, rendered through the PageHeader primitive." },
+      "display": { "displayName": "Display", "purpose": "Redaction (--font-display) — the ONE display face, used SPARINGLY on login + empty-states ONLY; never tables/labels/buttons/dense UI. The text-display hero-metric SCALE itself rides the body face (Hanken Grotesk) + mono tabular numerics." },
+      "headline": { "displayName": "Headline", "purpose": "Page titles, rendered through the PageHeader primitive — on the body face (Hanken Grotesk)." },
       "title": { "displayName": "Section", "purpose": "Panel headings (text-section) — 'Needs attention' / 'Recent activity'." },
       "body": { "displayName": "Body", "purpose": "The workhorse — table cells, form fields, copy. Prose at 65-75ch; dense tables may run wider." },
       "label": { "displayName": "Label", "purpose": "Uppercase eyebrows and nav section headings (text-label), used sparingly." },
-      "mono": { "displayName": "Mono", "purpose": "Geist Mono for identifiers, metrics, and tabular numerics." }
+      "mono": { "displayName": "Mono", "purpose": "Commit Mono for identifiers, serials, timestamps, audit lines and tabular numerics (tabular-nums)." }
     },
     "shadows": [
-      { "name": "e1", "value": "0 1px 2px oklch(0.21 0.006 75 / 0.06), 0 1px 1px oklch(0.21 0.006 75 / 0.04)", "purpose": "Resting cards, panels, the DetailPanel. The default surface elevation. Dark mode adds an inset top-highlight." },
-      { "name": "e2", "value": "0 4px 12px -2px oklch(0.21 0.006 75 / 0.1), 0 2px 4px -2px oklch(0.21 0.006 75 / 0.06)", "purpose": "Hover/focus on interactive cards — the lift target." },
-      { "name": "e3", "value": "0 12px 28px -6px oklch(0.21 0.006 75 / 0.14)", "purpose": "Dialogs, dropdowns, sticky batch bars." },
-      { "name": "e1-dark", "value": "inset 0 1px 0 oklch(0.97 0.004 95 / 0.04), 0 1px 2px oklch(0.21 0.006 75 / 0.12), 0 1px 1px oklch(0.21 0.006 75 / 0.08)", "purpose": "Dark-mode e1 — same shape at ~2x alpha plus a bone top-highlight so raised surfaces catch light on near-black." },
-      { "name": "e2-dark", "value": "inset 0 1px 0 oklch(0.97 0.004 95 / 0.04), 0 4px 12px -2px oklch(0.21 0.006 75 / 0.2), 0 2px 4px -2px oklch(0.21 0.006 75 / 0.12)", "purpose": "Dark-mode e2 hover/focus elevation." },
-      { "name": "e3-dark", "value": "inset 0 1px 0 oklch(0.97 0.004 95 / 0.04), 0 12px 28px -6px oklch(0.21 0.006 75 / 0.28)", "purpose": "Dark-mode e3 for dialogs/dropdowns." }
+      { "name": "e1", "value": "0 1px 2px oklch(0.21 0 0 / 0.06), 0 1px 1px oklch(0.21 0 0 / 0.04)", "purpose": "Resting cards, panels, the DetailPanel. The default surface elevation. Dark mode adds an inset top-highlight." },
+      { "name": "e2", "value": "0 4px 12px -2px oklch(0.21 0 0 / 0.1), 0 2px 4px -2px oklch(0.21 0 0 / 0.06)", "purpose": "Hover/focus on interactive cards — the lift target." },
+      { "name": "e3", "value": "0 12px 28px -6px oklch(0.21 0 0 / 0.14)", "purpose": "Dialogs, dropdowns, sticky batch bars." },
+      { "name": "e1-dark", "value": "inset 0 1px 0 oklch(0.97 0 0 / 0.04), 0 1px 2px oklch(0.21 0 0 / 0.12), 0 1px 1px oklch(0.21 0 0 / 0.08)", "purpose": "Dark-mode e1 — same shape at ~2x alpha plus a faint neutral top-highlight so raised surfaces catch light on the carbon canvas." },
+      { "name": "e2-dark", "value": "inset 0 1px 0 oklch(0.97 0 0 / 0.04), 0 4px 12px -2px oklch(0.21 0 0 / 0.2), 0 2px 4px -2px oklch(0.21 0 0 / 0.12)", "purpose": "Dark-mode e2 hover/focus elevation." },
+      { "name": "e3-dark", "value": "inset 0 1px 0 oklch(0.97 0 0 / 0.04), 0 12px 28px -6px oklch(0.21 0 0 / 0.28)", "purpose": "Dark-mode e3 for dialogs/dropdowns." }
     ],
     "motion": [
       { "name": "ease-out-quad", "value": "cubic-bezier(0.25, 0.46, 0.45, 0.94)", "purpose": "The workhorse easing — settles, never bounces. Default for transitions and entrances." },
@@ -271,9 +286,9 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The single primary action per view — indigo fill, used under the One Voice Rule.",
+      "description": "The single primary action per view — oxblood stamp fill, used under the One Voice Rule.",
       "html": "<button class=\"ds-btn-primary\">Add asset</button>",
-      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--primary, oklch(0.55 0.18 275)); color: var(--primary-foreground, oklch(0.985 0 0)); font-family: Geist, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1.25rem; padding: 0.5rem 1rem; border: none; border-radius: 0.5rem; box-shadow: 0 1px 2px oklch(0.21 0.006 75 / 0.06); cursor: pointer; transition: background 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-btn-primary:hover { filter: brightness(1.06); } .ds-btn-primary:focus-visible { outline: 2px solid var(--ring, oklch(0.55 0.18 275)); outline-offset: 2px; } .ds-btn-primary:active { filter: brightness(0.96); }"
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--primary, oklch(0.52 0.2 25)); color: var(--primary-foreground, oklch(0.985 0 0)); font-family: \"Hanken Grotesk\", ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1.25rem; padding: 0.5rem 1rem; border: none; border-radius: 0.5rem; box-shadow: 0 1px 2px oklch(0.21 0 0 / 0.06); cursor: pointer; transition: background 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-btn-primary:hover { filter: brightness(1.06); } .ds-btn-primary:focus-visible { outline: 2px solid var(--ring, oklch(0.52 0.2 25)); outline-offset: 2px; } .ds-btn-primary:active { filter: brightness(0.96); }"
     },
     {
       "name": "Secondary Button",
@@ -281,74 +296,77 @@
       "refersTo": "button-secondary",
       "description": "A quiet, neutral-fill action for everything that isn't the one primary.",
       "html": "<button class=\"ds-btn-secondary\">Cancel</button>",
-      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--muted, oklch(0.955 0.005 95)); color: var(--foreground, oklch(0.21 0.006 75)); font-family: Geist, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1.25rem; padding: 0.5rem 1rem; border: 1px solid var(--border, oklch(0.9 0.005 95)); border-radius: 0.5rem; cursor: pointer; transition: background 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-btn-secondary:hover { background: oklch(0.93 0.005 95); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--ring, oklch(0.55 0.18 275)); outline-offset: 2px; }"
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--muted, oklch(0.945 0 0)); color: var(--foreground, oklch(0.18 0 0)); font-family: \"Hanken Grotesk\", ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1.25rem; padding: 0.5rem 1rem; border: 1px solid var(--border, oklch(0.88 0 0)); border-radius: 0.5rem; cursor: pointer; transition: background 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-btn-secondary:hover { background: oklch(0.93 0 0); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--ring, oklch(0.52 0.2 25)); outline-offset: 2px; }"
     },
     {
       "name": "Status Chip",
       "kind": "chip",
       "refersTo": "status-chip",
-      "description": "A solid-fill semantic status pill (StatusBadge) — readable on the bone because it fills solid, never tints text. Includes a leading dot so color is not the sole carrier of meaning.",
+      "description": "A solid-fill semantic status pill (StatusBadge) — readable on the paper because it fills solid, never tints text. Includes a leading dot so color is not the sole carrier of meaning.",
       "html": "<span class=\"ds-status-chip\"><span class=\"ds-status-dot\"></span>Active</span>",
-      "css": ".ds-status-chip { display: inline-flex; align-items: center; gap: 0.375rem; background: var(--success, oklch(0.53 0.14 150)); color: var(--success-foreground, oklch(0.985 0 0)); font-family: Geist, ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; line-height: 1rem; letter-spacing: 0.01em; padding: 0.125rem 0.5rem; border-radius: 0.375rem; } .ds-status-dot { width: 0.375rem; height: 0.375rem; border-radius: 9999px; background: currentColor; }"
+      "css": ".ds-status-chip { display: inline-flex; align-items: center; gap: 0.375rem; background: var(--success, oklch(0.53 0.14 150)); color: var(--success-foreground, oklch(0.985 0 0)); font-family: \"Hanken Grotesk\", ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; line-height: 1rem; letter-spacing: 0.01em; padding: 0.125rem 0.5rem; border-radius: 0.375rem; } .ds-status-dot { width: 0.375rem; height: 0.375rem; border-radius: 9999px; background: currentColor; }"
     },
     {
       "name": "Card",
       "kind": "card",
       "refersTo": "card",
-      "description": "An object on the bench — raised a hair above the bone, resting at e1, lifting to e2 on hover via the coordinated lift triad. No nested cards.",
+      "description": "An entry on the page — the recessed 'tape' read by its hairline rule, resting at e1, lifting to e2 on hover via the coordinated lift triad. No nested cards.",
       "html": "<div class=\"ds-card\"><h3 class=\"ds-card-title\">MacBook Pro 14\"</h3><p class=\"ds-card-body\">Assigned to Dana Ruiz · Floor 3</p></div>",
-      "css": ".ds-card { background: var(--card, oklch(0.995 0.003 95)); color: var(--card-foreground, oklch(0.21 0.006 75)); border: 1px solid var(--border, oklch(0.9 0.005 95)); border-radius: 0.875rem; padding: 1.5rem; box-shadow: 0 1px 2px oklch(0.21 0.006 75 / 0.06), 0 1px 1px oklch(0.21 0.006 75 / 0.04); transition: transform 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px -2px oklch(0.21 0.006 75 / 0.1), 0 2px 4px -2px oklch(0.21 0.006 75 / 0.06); } @media (prefers-reduced-motion: reduce) { .ds-card { transition: box-shadow 0.01ms; } .ds-card:hover { transform: none; } } .ds-card-title { font-family: Geist, ui-sans-serif, system-ui, sans-serif; font-size: 1.125rem; font-weight: 600; line-height: 1.5rem; letter-spacing: -0.01em; margin: 0 0 0.25rem; } .ds-card-body { font-size: 0.875rem; line-height: 1.25rem; color: var(--muted-foreground, oklch(0.52 0.008 75)); margin: 0; }"
+      "css": ".ds-card { background: var(--card, oklch(0.965 0 0)); color: var(--card-foreground, oklch(0.18 0 0)); border: 1px solid var(--border, oklch(0.88 0 0)); border-radius: 0.875rem; padding: 1.5rem; box-shadow: 0 1px 2px oklch(0.21 0 0 / 0.06), 0 1px 1px oklch(0.21 0 0 / 0.04); transition: transform 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px -2px oklch(0.21 0 0 / 0.1), 0 2px 4px -2px oklch(0.21 0 0 / 0.06); } @media (prefers-reduced-motion: reduce) { .ds-card { transition: box-shadow 0.01ms; } .ds-card:hover { transform: none; } } .ds-card-title { font-family: \"Hanken Grotesk\", ui-sans-serif, system-ui, sans-serif; font-size: 1.125rem; font-weight: 600; line-height: 1.5rem; letter-spacing: -0.01em; margin: 0 0 0.25rem; } .ds-card-body { font-size: 0.875rem; line-height: 1.25rem; color: var(--muted-foreground, oklch(0.45 0 0)); margin: 0; }"
     },
     {
       "name": "Search Input",
       "kind": "input",
       "refersTo": "input",
-      "description": "A calm field with an inline search glyph that comes alive on focus with the indigo ring — no glow, no glassmorphism.",
+      "description": "A calm field with an inline search glyph that comes alive on focus with the oxblood ring — no glow, no glassmorphism.",
       "html": "<div class=\"ds-field\"><svg class=\"ds-field-icon\" viewBox=\"0 0 20 20\" fill=\"currentColor\" aria-hidden=\"true\"><path fill-rule=\"evenodd\" d=\"M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z\" clip-rule=\"evenodd\" /></svg><input class=\"ds-input\" type=\"search\" placeholder=\"Search assets\" aria-label=\"Search assets\" /></div>",
-      "css": ".ds-field { position: relative; display: inline-flex; align-items: center; width: 100%; max-width: 20rem; } .ds-field-icon { position: absolute; left: 0.625rem; width: 1rem; height: 1rem; color: var(--muted-foreground, oklch(0.52 0.008 75)); pointer-events: none; } .ds-input { width: 100%; background: var(--card, oklch(0.995 0.003 95)); color: var(--foreground, oklch(0.21 0.006 75)); font-family: Geist, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; line-height: 1.25rem; padding: 0.5rem 0.75rem 0.5rem 2rem; border: 1px solid var(--border, oklch(0.9 0.005 95)); border-radius: 0.5rem; outline: none; transition: border-color 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-input::placeholder { color: var(--muted-foreground, oklch(0.52 0.008 75)); } .ds-input:focus-visible { border-color: var(--ring, oklch(0.55 0.18 275)); box-shadow: 0 0 0 3px oklch(0.55 0.18 275 / 0.25); }"
+      "css": ".ds-field { position: relative; display: inline-flex; align-items: center; width: 100%; max-width: 20rem; } .ds-field-icon { position: absolute; left: 0.625rem; width: 1rem; height: 1rem; color: var(--muted-foreground, oklch(0.45 0 0)); pointer-events: none; } .ds-input { width: 100%; background: var(--card, oklch(0.965 0 0)); color: var(--foreground, oklch(0.18 0 0)); font-family: \"Hanken Grotesk\", ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; line-height: 1.25rem; padding: 0.5rem 0.75rem 0.5rem 2rem; border: 1px solid var(--border, oklch(0.88 0 0)); border-radius: 0.5rem; outline: none; transition: border-color 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-input::placeholder { color: var(--muted-foreground, oklch(0.45 0 0)); } .ds-input:focus-visible { border-color: var(--ring, oklch(0.52 0.2 25)); box-shadow: 0 0 0 3px oklch(0.52 0.2 25 / 0.25); }"
     },
     {
       "name": "Sidebar Nav Item (active)",
       "kind": "nav",
       "refersTo": "nav-item-active",
-      "description": "A sidebar entry in its active state — a muted tint plus the indigo icon and a 2px state rule, so wayfinding is quiet and never carried by color alone.",
+      "description": "A sidebar entry in its active state — a muted tint plus the oxblood icon and a 2px state rule, so wayfinding is quiet and never carried by color alone.",
       "html": "<a class=\"ds-nav-item ds-nav-item--active\" href=\"#\" aria-current=\"page\"><svg class=\"ds-nav-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M2.25 12.75 12 3l9.75 9.75M4.5 9.75v10.5a.75.75 0 0 0 .75.75H9.75v-6h4.5v6h4.5a.75.75 0 0 0 .75-.75V9.75\" /></svg><span>Assets</span></a>",
-      "css": ".ds-nav-item { display: flex; align-items: center; gap: 0.625rem; font-family: Geist, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1.25rem; color: var(--foreground, oklch(0.21 0.006 75)); padding: 0.5rem 0.75rem; border-radius: 0.5rem; text-decoration: none; transition: background 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-nav-icon { width: 1.125rem; height: 1.125rem; flex: none; color: var(--muted-foreground, oklch(0.52 0.008 75)); } .ds-nav-item:hover { background: var(--sidebar-accent, oklch(0.94 0.006 95)); } .ds-nav-item--active { background: var(--muted, oklch(0.955 0.005 95)); color: var(--foreground, oklch(0.21 0.006 75)); font-weight: 600; box-shadow: inset 2px 0 0 var(--primary, oklch(0.55 0.18 275)); } .ds-nav-item--active .ds-nav-icon { color: var(--primary, oklch(0.55 0.18 275)); } .ds-nav-item:focus-visible { outline: 2px solid var(--ring, oklch(0.55 0.18 275)); outline-offset: 2px; }"
+      "css": ".ds-nav-item { display: flex; align-items: center; gap: 0.625rem; font-family: \"Hanken Grotesk\", ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1.25rem; color: var(--foreground, oklch(0.18 0 0)); padding: 0.5rem 0.75rem; border-radius: 0.5rem; text-decoration: none; transition: background 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-nav-icon { width: 1.125rem; height: 1.125rem; flex: none; color: var(--muted-foreground, oklch(0.45 0 0)); } .ds-nav-item:hover { background: var(--sidebar-accent, oklch(0.93 0 0)); } .ds-nav-item--active { background: var(--muted, oklch(0.945 0 0)); color: var(--foreground, oklch(0.18 0 0)); font-weight: 600; box-shadow: inset 2px 0 0 var(--primary, oklch(0.52 0.2 25)); } .ds-nav-item--active .ds-nav-icon { color: var(--primary, oklch(0.52 0.2 25)); } .ds-nav-item:focus-visible { outline: 2px solid var(--ring, oklch(0.52 0.2 25)); outline-offset: 2px; }"
     },
     {
       "name": "Empty State",
       "kind": "custom",
       "refersTo": "empty-state",
-      "description": "The warm 'nothing here yet' surface — a pillar-tinted icon chip plus a one-line invitation and an action. Teaches the interface instead of saying 'nothing here'.",
+      "description": "The 'nothing here yet' surface — a pillar-tinted icon chip plus a one-line invitation and an action. One of the two sparse moments where Redaction (the display face) is allowed. Teaches the interface instead of saying 'nothing here'.",
       "html": "<div class=\"ds-empty\"><span class=\"ds-empty-chip\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M20.25 7.5 12 12m0 0L3.75 7.5M12 12v9.75M3.75 7.5 12 2.25l8.25 5.25v9L12 21.75 3.75 16.5v-9Z\" /></svg></span><p class=\"ds-empty-title\">Nothing here yet</p><p class=\"ds-empty-body\">Add your first asset and it shows up here.</p><button class=\"ds-btn-primary\">Add asset</button></div>",
-      "css": ".ds-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.5rem; padding: 2.5rem 1.5rem; animation: ds-rise-in 220ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both; } @keyframes ds-rise-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } } @media (prefers-reduced-motion: reduce) { .ds-empty { animation-duration: 0.01ms; } } .ds-empty-chip { display: inline-flex; align-items: center; justify-content: center; width: 3rem; height: 3rem; border-radius: 9999px; margin-bottom: 0.25rem; background: oklch(0.62 0.14 200 / 0.1); color: var(--pillar-inventory, oklch(0.62 0.14 200)); } .ds-empty-chip svg { width: 1.5rem; height: 1.5rem; } .ds-empty-title { font-family: Geist, ui-sans-serif, system-ui, sans-serif; font-size: 1.125rem; font-weight: 600; line-height: 1.5rem; letter-spacing: -0.01em; color: var(--foreground, oklch(0.21 0.006 75)); margin: 0; } .ds-empty-body { font-size: 0.875rem; line-height: 1.25rem; color: var(--muted-foreground, oklch(0.52 0.008 75)); margin: 0 0 0.5rem; } .ds-btn-primary { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--primary, oklch(0.55 0.18 275)); color: var(--primary-foreground, oklch(0.985 0 0)); font-family: Geist, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1.25rem; padding: 0.5rem 1rem; border: none; border-radius: 0.5rem; cursor: pointer; transition: filter 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-btn-primary:hover { filter: brightness(1.06); } .ds-btn-primary:focus-visible { outline: 2px solid var(--ring, oklch(0.55 0.18 275)); outline-offset: 2px; }"
+      "css": ".ds-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.5rem; padding: 2.5rem 1.5rem; animation: ds-rise-in 220ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both; } @keyframes ds-rise-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } } @media (prefers-reduced-motion: reduce) { .ds-empty { animation-duration: 0.01ms; } } .ds-empty-chip { display: inline-flex; align-items: center; justify-content: center; width: 3rem; height: 3rem; border-radius: 9999px; margin-bottom: 0.25rem; background: oklch(0.68 0.11 200 / 0.1); color: var(--pillar-inventory, oklch(0.68 0.11 200)); } .ds-empty-chip svg { width: 1.5rem; height: 1.5rem; } .ds-empty-title { font-family: \"Hanken Grotesk\", ui-sans-serif, system-ui, sans-serif; font-size: 1.125rem; font-weight: 600; line-height: 1.5rem; letter-spacing: -0.01em; color: var(--foreground, oklch(0.18 0 0)); margin: 0; } .ds-empty-body { font-size: 0.875rem; line-height: 1.25rem; color: var(--muted-foreground, oklch(0.45 0 0)); margin: 0 0 0.5rem; } .ds-btn-primary { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--primary, oklch(0.52 0.2 25)); color: var(--primary-foreground, oklch(0.985 0 0)); font-family: \"Hanken Grotesk\", ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1.25rem; padding: 0.5rem 1rem; border: none; border-radius: 0.5rem; cursor: pointer; transition: filter 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94); } .ds-btn-primary:hover { filter: brightness(1.06); } .ds-btn-primary:focus-visible { outline: 2px solid var(--ring, oklch(0.52 0.2 25)); outline-offset: 2px; }"
     }
   ],
   "narrative": {
-    "northStar": "The Calm Workshop",
-    "overview": "lazyit is the bench of a craftsperson who keeps a tidy shop. The canvas is a warm bone — paper on a desk, not a white screen — and the surfaces on it are objects you can pick up: cards lift when you reach for them, shadows fall warm like afternoon light, and a single disciplined indigo marks the one tool you're holding. Color is the labelled drawer (teal for Inventory, indigo for Access, green for Knowledge, rose for Manage), never wallpaper. The system is calm because the operator is mid-task and the work, not the chrome, deserves their attention — but it is alive: things move, settle, and layer with intention. This is the difference between a cared-for workshop and an austere SaaS. Density is earned, not feared. This is the product register: when an operator needs a table of 200 assets or a panel of forty labels, the system gives it to them densely and legibly — tabular numerics, a tight type scale, consistent affordances screen to screen. The energy never comes from louder buttons or more CTAs; it comes from motion, depth, and color identity layered onto an otherwise quiet surface. Restraint is the floor; craft is how we activate it. The Calm Workshop explicitly rejects the things that make internal tools feel un-cared-for: the generic AI-slop dashboard, heavy/dated ServiceNow, SaaS landing-page clichés, glassmorphism, gradient text, tiny uppercase eyebrows on every section, the hollow hero-metric template, and austere SaaS coldness. It does not chase delight on every page — delight is saved for moments (a success checkmark, an empty state that invites), never sprayed across the surface.",
+    "northStar": "The Ledger",
+    "overview": "lazyit is a system of record kept by an operator who trusts the page. The canvas is pure paper white — chroma-zero, near-white but never #fff — and the surfaces on it are entries you can act on: cards are the recessed 'tape' just below the paper, read by a hairline rule and lifting when you reach for them under neutral ink shadows. A single disciplined oxblood stamp marks the one action you're taking — a registration mark, not a wall. Color is the labelled column (blue for Access, amber for Knowledge, violet for Manage, cyan for Inventory), never wallpaper, and a cooler security-green seal is reserved for the zero-knowledge verify mark. Data reads in Commit Mono with tabular numerics so identifiers, timestamps and ledger lines are instrument-grade. The system is calm because the operator is mid-task and the record, not the chrome, deserves their attention — but it is alive: things move, settle, and layer with intention. This is the difference between a cared-for ledger and an austere SaaS. Density is earned, not feared. This is the product register: when an operator needs a table of 200 assets or a panel of forty labels, the system gives it to them densely and legibly — tabular numerics, a tight type scale, consistent affordances screen to screen. The energy never comes from louder buttons or more CTAs; it comes from motion, depth, and color identity layered onto an otherwise quiet surface. Restraint is the floor; craft is how we activate it. The Ledger explicitly rejects the things that make internal tools feel un-cared-for: the generic AI-slop dashboard, the AI-cream tell, heavy/dated ServiceNow, SaaS landing-page clichés, glassmorphism, gradient text, tiny uppercase eyebrows on every section, the hollow hero-metric template, and austere SaaS coldness. It does not chase delight on every page — delight is saved for moments (a success checkmark, an empty state that invites), never sprayed across the surface.",
     "keyCharacteristics": [
-      "Warm-bone canvas, never #fff/#000 — a committed brand decision (ADR-0011), not a default.",
-      "One disciplined indigo for action, selection, and state — ≤10% of any screen.",
-      "Four pillar hues as a labelling layer — tint/chip/dot/border only, never as readable text.",
-      "A warm, named elevation scale — objects rest at e1 and lift on interaction.",
+      "Pure-neutral paper/carbon canvas, chroma 0 — near-white paper, near-black carbon, never #fff/#000 or the warm 'bone'/AI-cream tell (ADR-0077).",
+      "One disciplined oxblood stamp for action, selection, and state — ≤10% of any screen; a registration mark, not a wall.",
+      "Five categorical/pillar hues DECOUPLED from the brand — tint/chip/dot/border only, never readable text (Access→blue, Knowledge→amber, Manage→violet, Inventory→cyan, + a magenta 5th series).",
+      "A security-green verify seal (--verify) reserved for the zero-knowledge / Secret-Manager mark, distinct from the everyday emerald --success.",
+      "A neutral, named elevation scale — chroma-0 ink shadows; objects rest at e1 and lift on interaction.",
       "A single CSS motion vocabulary — 120–220ms, state-conveying, reduced-motion-safe, zero JS lib.",
-      "One type family (Geist + Geist Mono) on a fixed rem scale — dense when the task is dense.",
+      "A type trio — Hanken Grotesk (body/UI/headings) + Commit Mono (data/IDs/numerics) + Redaction (display, login + empty-states only) — on a fixed rem scale.",
       "WCAG-AA by construction in both themes; color never carries meaning alone."
     ],
     "rules": [
-      { "name": "The One Voice Rule", "body": "Brand indigo is reserved for action, selection, and state — primary buttons, focus rings, the active nav item — and used on ≤10% of any given screen. Its rarity is the point. Indigo is never decoration, never a section background, never a 'let's add some color here' flourish.", "section": "colors" },
-      { "name": "The Pillar-as-Decoration Rule", "body": "A pillar or chart hue may be a tint, a border, a dot, or a chip background — never readable text on bone or on a /10 tint. Each pillar token aliases a --chart-* hue (which .dark redefines lighter), so it cannot clear 4.5:1 as body text. Decorative glyphs ≥24px inside a bg-pillar-*/10 chip are exempt; everything readable stays on --foreground / --card-foreground or a semantic *-foreground.", "section": "colors" },
-      { "name": "The One-Family Rule", "body": "Geist (and Geist Mono for numerics/identifiers) carries the entire UI. No display face, no second sans, never a display font in a label, button, or data cell. The discipline is the IT-native voice.", "section": "typography" },
-      { "name": "The Warm-Paper Rule", "body": "Shadows are warm-tinted (the foreground hue), never neutral gray — paper on a desk, lit by afternoon light. Surfaces rest at e1 and lift on interaction. The signature is the lift recipe: the coordinated hover triad -translate-y-0.5 + e1→e2 + ring /10→/15, fired together, so a card hover feels crafted, not a flat background swap. Never apply lift to static table rows. Audit test: if a card looks like a 2014 app, the shadow is too dark, too tight, and too gray — warm it and spread it.", "section": "elevation" }
+      { "name": "The One Voice Rule", "body": "The oxblood stamp is reserved for action, selection, and state — primary buttons, focus rings, the active nav item — and used on ≤10% of any given screen. Its rarity is the point: it is a registration mark, not a wall. Oxblood is never decoration, never a section background, never a 'let's add some color here' flourish.", "section": "colors" },
+      { "name": "The Pillar-as-Decoration Rule", "body": "A pillar or chart hue may be a tint, a border, a dot, or a chip background — never readable text on the paper or on a /10 tint. The categorical ramp is DECOUPLED from the brand (oxblood ~25) and from verify (green ~162): Access→blue, Knowledge→amber, Manage→violet, Inventory(+Consumables)→cyan, plus a magenta 5th series. Each pillar aliases a --chart-* hue (which .dark redefines lighter), so it cannot clear 4.5:1 as body text. Decorative glyphs ≥24px inside a bg-pillar-*/10 chip are exempt; everything readable stays on --foreground / --card-foreground or a semantic *-foreground.", "section": "colors" },
+      { "name": "The Verify-Seal Rule", "body": "The security-green --verify seal is RESERVED for the Secret Manager / zero-knowledge mark — the cryptographic 'VERIFIED' seal — and is kept DISTINCT from the everyday emerald --success (operational/good), so 'operational' never reads as 'cryptographically verified'. Like every semantic token it fills solid with its AA-cleared --verify-foreground; it is never a decorative green.", "section": "colors" },
+      { "name": "The Body-Carries-Everything Rule", "body": "The body face — Hanken Grotesk, with Commit Mono for data/IDs/numerics — carries the entire UI: headings, buttons, labels, body, tables, dense data. Redaction is the ONE display face, used SPARINGLY on login + empty-states ONLY — never in a label, button, data cell, or any product-register surface. The rare display face is the exception that proves the discipline, not a free-for-all; the IT-native voice holds.", "section": "typography" },
+      { "name": "The Paper-and-Ink Rule", "body": "Shadows are neutral chroma-0 ink (oklch 0.21 0 0), never warm-tinted or clinical gray — paper on a desk under even light. Surfaces rest at e1 and lift on interaction. The signature is the lift recipe: the coordinated hover triad -translate-y-0.5 + e1→e2 + ring /10→/15, fired together, so a card hover feels crafted, not a flat background swap. In dark the same shapes run at ~2x alpha plus a faint neutral inset top-highlight (oklch 0.97 0 0 / 0.04) so raised surfaces catch light on the carbon canvas. Never apply lift to static table rows.", "section": "elevation" }
     ],
     "dos": [
-      "Do keep brand indigo to ≤10% of a screen — action, selection, and state only (The One Voice Rule).",
-      "Do express pillar identity via a tinted icon chip (bg-pillar-*/10 + an aria-hidden glyph), a dot, or a subtle background tint.",
+      "Do keep the oxblood stamp to ≤10% of a screen — action, selection, and state only (The One Voice Rule).",
+      "Do express pillar identity via a tinted icon chip (bg-pillar-*/10 + an aria-hidden glyph), a dot, or a subtle background tint — on the brand-decoupled categorical ramp.",
       "Do rest surfaces at shadow-e1 and lift on interaction with the lift recipe (-translate-y-0.5 + e1→e2 + ring /10→/15).",
+      "Do reserve the security-green --verify seal for the zero-knowledge / Secret-Manager mark, kept distinct from the everyday --success.",
       "Do keep all motion in CSS + tw-animate-css, 150–250ms, conveying state, and reduced-motion-safe.",
-      "Do treat the warm --bone canvas as a deliberate, committed brand decision (ADR-0011); warmth is also carried by motion, color identity, and personality.",
-      "Do give metric cards real substance — deep-linked breakdowns, tabular numerics — not a hollow number.",
+      "Do treat the pure-neutral paper/carbon canvas as a deliberate, committed brand decision (ADR-0077) — chroma 0, never the warm bone or the AI-cream tell.",
+      "Do give metric cards real substance — deep-linked breakdowns, tabular numerics in Commit Mono — not a hollow number.",
       "Do keep readable text on --foreground / --card-foreground, or use a semantic StatusBadge solid-fill with its AA-verified *-foreground.",
       "Do ship the full state set on every interactive component (default, hover, focus, active, disabled, loading) and the same vocabulary screen to screen."
     ],
@@ -363,9 +381,10 @@
       "Don't fall into 'austere SaaS' coldness.",
       "Don't use border-left / border-right greater than 1px as a colored pillar accent on cards, rows, callouts, or alerts (an absolute ban). The narrow exception: a ≤2px active-nav selection rule is allowed as a state indicator — but prefer bg-tint + weight + icon color.",
       "Don't add a JS motion library (framer-motion, gsap, anime, lenis). No orchestrated page-load choreography: the route settle is a subtle opacity fade, and the metric stagger is minimal and initial-mount only.",
-      "Don't read the warm --bone canvas as the 'AI cream default' — it is a committed brand decision (ADR-0011), not a fallback.",
+      "Don't reintroduce a warm or cream tint to the neutral canvas — the chroma-0 paper is a committed decision (ADR-0077); warmth now reads as the AI-cream tell it replaced.",
       "Don't use nested cards.",
-      "Don't use a pillar/chart hue as readable text on bone or on a /10 tint. Keep text on --foreground / --card-foreground or a semantic StatusBadge solid-fill."
+      "Don't use a pillar/chart hue as readable text on the paper or on a /10 tint. Keep text on --foreground / --card-foreground or a semantic StatusBadge solid-fill.",
+      "Don't put Redaction in product-register UI — labels, buttons, data cells, dense tables; the display face is login + empty-states only."
     ]
   }
 }

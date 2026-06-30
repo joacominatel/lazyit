@@ -17,6 +17,16 @@ adds an expression layer (motion, depth, per-pillar colour) on top of the warm-b
 single-indigo system; it does not repaint or replace it. Web-only; no API or contract change.
 Wave 0 (this ADR's foundation) shipped under epic #157 / issue #158.
 
+> **Amended by [[0077-ledger-design-language-frontend-refactor]] (2026-06-30).** «The Ledger»
+> refactor revises this ADR's **colour + type identity** (its *restraint* spine and the
+> motion/depth/elevation machinery hold). **Delta — palette:** the single accent moves from
+> deep-indigo to **oxblood** (`--brand oklch(0.52 0.2 25)` light / `oklch(0.62 0.19 25)` dark) on
+> **pure-neutral** surfaces (chroma 0, not the warm bone), the categorical/pillar ramp is
+> **decoupled** from the brand (blue/amber/violet/cyan/magenta) and a reserved security-green
+> `--verify` seal is added; elevation is re-tinted to neutral ink. **Delta — type:** **Hanken
+> Grotesk** (body) / **Commit Mono** (data) / **Redaction** (display, login + empty-states only)
+> replace Geist / Geist Mono. The pillar map (§3) and token values below are historical.
+
 ## Context
 
 A UX audit found the UI "half-built": the warm-bone + single-indigo system (ADR-0011) is

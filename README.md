@@ -11,7 +11,7 @@
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg"></a>
   <img alt="Status: MVP" src="https://img.shields.io/badge/status-MVP-orange.svg">
   <img alt="Self-hosted" src="https://img.shields.io/badge/deploy-self--hosted-success.svg">
-  <img alt="Stack" src="https://img.shields.io/badge/stack-Next.js%20%C2%B7%20NestJS%20%C2%B7%20Postgres-1f6feb.svg">
+  <img alt="Stack" src="https://img.shields.io/badge/stack-Next.js%20%C2%B7%20NestJS%20%C2%B7%20Postgres-9e2b25.svg">
 </p>
 
 ---
