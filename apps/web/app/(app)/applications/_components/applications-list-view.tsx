@@ -398,14 +398,16 @@ export function ApplicationsListView() {
                               users={granteeUsers}
                               deactivatedCount={deactivatedGrantees}
                             />
-                            <span className="tabular-nums text-muted-foreground">
+                            <span className="font-mono tabular-nums text-muted-foreground">
                               {count}
                             </span>
                           </span>
                         )}
                       </ResourceCardMeta>
                       <ResourceCardMeta label={t("list.columns.updated")}>
-                        {date(application.updatedAt)}
+                        <span className="font-mono tabular-nums">
+                          {date(application.updatedAt)}
+                        </span>
                       </ResourceCardMeta>
                     </>
                   }
@@ -483,13 +485,13 @@ export function ApplicationsListView() {
                           users={granteeUsers}
                           deactivatedCount={deactivatedGrantees}
                         />
-                        <span className="text-sm text-muted-foreground tabular-nums">
+                        <span className="font-mono text-sm text-muted-foreground tabular-nums">
                           {count}
                         </span>
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground tabular-nums">
+                  <TableCell className="font-mono text-muted-foreground tabular-nums">
                     {date(application.updatedAt)}
                   </TableCell>
                   <TableCell className="text-right">
