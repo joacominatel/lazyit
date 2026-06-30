@@ -61,6 +61,21 @@ oxblood fails AA → use `stamp-fill` 0.49 for fills, not the lifted mark color)
 Mono is *earned* (asset IDs, timestamps, audit lines, commands) with `font-variant-numeric:
 tabular-nums`. Display ceiling ≤ 6rem, letter-spacing ≥ -0.04em (impeccable rules).
 
+## 2b. Icon / favicon
+
+The mark: **ink "lz" on paper + the oxblood square tick** — the wordmark (`lazyit ▪`) reduced to its
+initials. Reference asset (this branch): [`assets/ledger-favicon.svg`](assets/ledger-favicon.svg).
+Source of truth: `lazyit-landing` `public/favicon.svg`.
+
+- **Colors:** paper `#f7f6f4`, ink `#1a1a1a`, oxblood tick `#9e2b25` (≈ `--stamp`).
+- **Construction (do this):** letters are **vector paths**, NOT `<text>`, and the `<svg>` carries
+  explicit `width`/`height`. **Lesson from the landing:** a `<text>`-based favicon (font-dependent,
+  no intrinsic size) failed to render in Firefox and VS Code; paths + dimensions render everywhere
+  (browser tabs, favicon, standalone `<object>`). Keep it path-based.
+- **Wordmark lockup:** mono `lazyit` + the oxblood square tick (the same tick the favicon abstracts).
+- **App migration:** replace the `apps/web` favicon and the in-app logo/wordmark with this mark when
+  the refactor lands (icon is brand identity → part of the same swap, not a separate decision).
+
 ## 3. From → To token map (`apps/web/app/globals.css`)
 
 The app uses the **shadcn CSS-var system**. Swap the **values**; keep the **names** so the change
