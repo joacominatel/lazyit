@@ -21,16 +21,23 @@ import { cn } from "@/lib/utils"
 
 export type StatusTone = "success" | "warning" | "info" | "danger" | "neutral"
 
+// The Ledger status mark (ADR-0077). A flat, square-cornered "ledger tag", not a pill: solid
+// tone fill (the AA contract stays — text on the token's `-foreground`), `rounded-sm` corners,
+// uppercase tracked label, and a faint INSET hairline ring that reads as a pressed stamp edge at
+// zero AA cost (decorative — the label still sits on the AA-verified solid fill). No rotation, no
+// over-ink, no display/mono face — those are brand-register theater, banned in dense product UI.
 const statusBadgeVariants = cva(
-  "inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1.5 rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap [&>svg]:pointer-events-none [&>svg]:size-3!",
+  "inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1.5 rounded-sm px-1.5 py-0.5 text-[11px] font-medium tracking-[0.04em] uppercase whitespace-nowrap ring-1 ring-inset ring-foreground/10 [&>svg]:pointer-events-none [&>svg]:size-3!",
   {
     variants: {
       tone: {
         success: "bg-success text-success-foreground",
         warning: "bg-warning text-warning-foreground",
         info: "bg-info text-info-foreground",
-        // danger maps to the existing --destructive token (AA-verified solid fill).
-        danger: "bg-destructive text-white",
+        // danger maps to --destructive paired with its AA-verified --destructive-foreground
+        // (white in light, near-black ink in dark — the dark fill is light, so white text there
+        // would fail; ADR-0077 added the foreground token).
+        danger: "bg-destructive text-destructive-foreground",
         // neutral is the muted, non-status state (e.g. retired / unknown / inactive).
         neutral: "bg-secondary text-secondary-foreground",
       },

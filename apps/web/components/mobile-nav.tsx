@@ -50,8 +50,16 @@ export function MobileNav() {
       <SheetContent side="left" className="w-64 p-0 sm:max-w-xs">
         <SheetHeader className="h-14 justify-center border-b border-border px-4">
           <SheetTitle asChild>
-            <Link href="/dashboard" className="text-sm font-semibold tracking-tight">
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-1.5 font-mono text-sm font-semibold tracking-tight"
+            >
+              {/* ponytail: same Ledger wordmark lockup as the desktop rail (spec §2b). */}
               lazyit
+              <span
+                aria-hidden="true"
+                className="size-1.5 rounded-[2px] bg-primary"
+              />
             </Link>
           </SheetTitle>
         </SheetHeader>

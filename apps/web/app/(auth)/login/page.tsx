@@ -91,7 +91,7 @@ export default async function LoginPage({
   return (
     <Card className="w-full animate-rise-in shadow-e2">
       <CardHeader>
-        <CardTitle>{t("login.title")}</CardTitle>
+        <CardTitle className="font-display">{t("login.title")}</CardTitle>
         <CardDescription>{t("login.subtitle")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

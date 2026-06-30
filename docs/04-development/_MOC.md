@@ -26,5 +26,11 @@ Everything a developer needs to work on lazyit.
   Component + `prefetchQuery` + `dehydrate` + `<HydrationBoundary>` mold). The operating manual for
   copying the pattern onto a new route. Decision: [[0067-server-prefetch-ssr-strategy]].
 
+- [[ledger-design-language]] — **The Ledger design language reference** for the `apps/web`
+  frontend refactor: concrete OKLCH palette (paper/carbon + oxblood + verify), the type trio
+  (Hanken / Commit Mono / Redaction), the shadcn from→to token map, ledger-native patterns, and the
+  brand→product register translation. Decision: [[0077-ledger-design-language-frontend-refactor]]
+  (#863, branch `refac/frontend-design`).
+
 Domain/data conventions live separately in [[conventions]] (under
 [[02-domain/_MOC|Domain]]).

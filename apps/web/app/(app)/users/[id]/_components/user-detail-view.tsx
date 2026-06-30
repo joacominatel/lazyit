@@ -188,7 +188,7 @@ export function UserDetailView({ id }: { id: string }) {
           <DetailField label={t("detail.fields.manager")}>
             <ManagerDisplay manager={user.manager} />
           </DetailField>
-          <DetailField label={t("detail.fields.legajo")}>
+          <DetailField label={t("detail.fields.legajo")} mono>
             {user.legajo ?? (
               <span className="text-muted-foreground">
                 {t("detail.fieldEmpty")}
@@ -202,10 +202,10 @@ export function UserDetailView({ id }: { id: string }) {
               </span>
             )}
           </DetailField>
-          <DetailField label={t("detail.fields.joined")}>
+          <DetailField label={t("detail.fields.joined")} mono>
             {date(user.createdAt)}
           </DetailField>
-          <DetailField label={t("detail.fields.lastUpdated")}>
+          <DetailField label={t("detail.fields.lastUpdated")} mono>
             {date(user.updatedAt)}
           </DetailField>
         </dl>
@@ -359,11 +359,13 @@ export function UserDetailView({ id }: { id: string }) {
 
       {assignmentHistory.length > 0 && (
         <DetailPanel title={t("detail.ownershipHistory.title")}>
-          <ul className="divide-y text-sm">
+          {/* The ownership record as ledger lines (ADR-0077): asset (body face) · the assignedAt →
+              releasedAt span in Commit Mono tabular figures, baseline-aligned like a printed row. */}
+          <ul className="divide-y divide-border text-sm">
             {assignmentHistory.map((assignment) => (
               <li
                 key={assignment.id}
-                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0"
+                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0"
               >
                 <Link
                   href={`/assets/${assignment.assetId}`}
@@ -372,11 +374,12 @@ export function UserDetailView({ id }: { id: string }) {
                   {assetNameById.get(assignment.assetId) ??
                     t("detail.ownershipHistory.assetFallback")}
                 </Link>
-                <span className="tabular-nums text-muted-foreground">
-                  {date(assignment.assignedAt)} →{" "}
-                  {assignment.releasedAt
-                    ? date(assignment.releasedAt)
-                    : "—"}
+                <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                  {date(assignment.assignedAt)}
+                  <span className="mx-1.5 text-muted-foreground/70" aria-hidden>
+                    →
+                  </span>
+                  {assignment.releasedAt ? date(assignment.releasedAt) : "—"}
                 </span>
               </li>
             ))}
@@ -386,11 +389,13 @@ export function UserDetailView({ id }: { id: string }) {
 
       {grantHistory.length > 0 && (
         <DetailPanel title={t("detail.accessHistory.title")}>
-          <ul className="divide-y text-sm">
+          {/* The access record as ledger lines (ADR-0077): application (body face) · the grantedAt →
+              revokedAt span in Commit Mono tabular figures, baseline-aligned like a printed row. */}
+          <ul className="divide-y divide-border text-sm">
             {grantHistory.map((grant) => (
               <li
                 key={grant.id}
-                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0"
+                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0"
               >
                 <span className="flex items-center gap-2 font-medium">
                   <Link
@@ -404,8 +409,11 @@ export function UserDetailView({ id }: { id: string }) {
                     <Badge variant="outline">{grant.accessLevel}</Badge>
                   )}
                 </span>
-                <span className="tabular-nums text-muted-foreground">
-                  {date(grant.grantedAt)} →{" "}
+                <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                  {date(grant.grantedAt)}
+                  <span className="mx-1.5 text-muted-foreground/70" aria-hidden>
+                    →
+                  </span>
                   {grant.revokedAt ? date(grant.revokedAt) : "—"}
                 </span>
               </li>

@@ -51,9 +51,16 @@ export function SidebarShell() {
         {!collapsed && (
           <Link
             href="/dashboard"
-            className="text-sm font-semibold tracking-tight"
+            className="inline-flex items-center gap-1.5 font-mono text-sm font-semibold tracking-tight"
           >
+            {/* ponytail: Ledger wordmark lockup (spec §2b) — mono "lazyit" + the oxblood
+                registration tick the favicon abstracts. radius-sm is 6px here, so the 2px tick
+                is explicit. Mono (not Redaction, which is reserved for login/empty-states). */}
             lazyit
+            <span
+              aria-hidden="true"
+              className="size-1.5 rounded-[2px] bg-primary"
+            />
           </Link>
         )}
         <button

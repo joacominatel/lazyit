@@ -901,7 +901,9 @@ export function AssetsListView() {
                 meta={
                   <>
                     <ResourceCardMeta label={t("columns.assetTag")}>
-                      <span className="font-mono">{asset.assetTag ?? "—"}</span>
+                      <span className="font-mono tabular-nums">
+                        {asset.assetTag ?? "—"}
+                      </span>
                     </ResourceCardMeta>
                     <ResourceCardMeta label={t("columns.model")}>
                       {asset.model?.name ?? "—"}
@@ -927,7 +929,9 @@ export function AssetsListView() {
                       />
                     </ResourceCardMeta>
                     <ResourceCardMeta label={t("columns.updated")}>
-                      {date(asset.updatedAt)}
+                      <span className="font-mono tabular-nums">
+                        {date(asset.updatedAt)}
+                      </span>
                     </ResourceCardMeta>
                   </>
                 }
@@ -978,7 +982,7 @@ export function AssetsListView() {
                 assetTag: (
                   <TableCell
                     key="assetTag"
-                    className="font-mono text-muted-foreground"
+                    className="font-mono text-muted-foreground tabular-nums"
                   >
                     {asset.assetTag ?? "—"}
                   </TableCell>
@@ -1024,7 +1028,7 @@ export function AssetsListView() {
                 updated: (
                   <TableCell
                     key="updated"
-                    className="text-muted-foreground tabular-nums"
+                    className="font-mono text-muted-foreground tabular-nums"
                   >
                     {date(asset.updatedAt)}
                   </TableCell>

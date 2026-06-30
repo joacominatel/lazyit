@@ -295,11 +295,14 @@ export function ApplicationDetailView({ id }: { id: string }) {
 
       {history.length > 0 && (
         <DetailPanel title={t("detail.historyTitle")}>
-          <ul className="divide-y text-sm">
+          {/* The access record as ledger lines (ADR-0077): user (body face) · the grantedAt →
+              revokedAt span in Commit Mono tabular figures so the dates lock into columns · the
+              "by {name}" actor stays on the body face. Baseline-aligned like a printed row. */}
+          <ul className="divide-y divide-border text-sm">
             {history.map((grant) => (
               <li
                 key={grant.id}
-                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0"
+                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0"
               >
                 <span className="flex items-center gap-2 font-medium">
                   {userLink(grant.userId)}
@@ -307,9 +310,14 @@ export function ApplicationDetailView({ id }: { id: string }) {
                     <Badge variant="outline">{grant.accessLevel}</Badge>
                   )}
                 </span>
-                <span className="tabular-nums text-muted-foreground">
-                  {date(grant.grantedAt)} →{" "}
-                  {grant.revokedAt ? date(grant.revokedAt) : "—"}
+                <span className="text-xs text-muted-foreground">
+                  <span className="font-mono tabular-nums">
+                    {date(grant.grantedAt)}
+                    <span className="mx-1.5 text-muted-foreground/70" aria-hidden>
+                      →
+                    </span>
+                    {grant.revokedAt ? date(grant.revokedAt) : "—"}
+                  </span>
                   {grant.revokedById
                     ? t("detail.historyRevokedByPart", {
                         name: userName(grant.revokedById),

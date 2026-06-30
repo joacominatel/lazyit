@@ -168,7 +168,7 @@ export function LocationDetailView({ id }: { id: string }) {
           <DetailField label={t("detail.fields.address")}>
             {location.address ?? "—"}
           </DetailField>
-          <DetailField label={t("detail.fields.lastUpdated")}>
+          <DetailField label={t("detail.fields.lastUpdated")} mono>
             {date(location.updatedAt)}
           </DetailField>
         </dl>

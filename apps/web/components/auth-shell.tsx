@@ -9,10 +9,11 @@ import { cn } from "@/lib/utils";
  * centering wrapper verbatim; this is the single source of truth so login and the wizard never jump
  * (same vertical rhythm, same wordmark, same theme toggle).
  *
- * Layout: a fixed top bar carrying the typographic "lazyit" wordmark (interim brand — there is no
- * logo asset yet, so we lean on the mono font) and the theme toggle, over a vertically-centered
- * content column. `contentClassName` lets each surface set its own card width (login is narrow,
- * the wizard is wider) without re-implementing the shell.
+ * Layout: a fixed top bar carrying the canonical "lazyit" wordmark lockup (mono + the oxblood
+ * registration tick — the same lockup as the in-app rail and the favicon) and the theme toggle, over
+ * a vertically-centered content column. Redaction (the display face) is reserved for the login *title*
+ * and empty-states, not the wordmark. `contentClassName` lets each surface set its own card width
+ * (login is narrow, the wizard is wider) without re-implementing the shell.
  */
 export function AuthShell({
   children,
@@ -26,9 +27,15 @@ export function AuthShell({
       <header className="flex h-16 shrink-0 items-center justify-between px-6">
         <Link
           href="/"
-          className="font-mono text-base font-semibold tracking-tight"
+          className="inline-flex items-center gap-1.5 font-mono text-base font-semibold tracking-tight"
         >
+          {/* ponytail: canonical Ledger wordmark lockup (spec §2b) — mono "lazyit" + the oxblood
+              registration tick the favicon abstracts; matches the in-app rail. */}
           lazyit
+          <span
+            aria-hidden="true"
+            className="size-1.5 rounded-[2px] bg-primary"
+          />
         </Link>
         <ThemeToggle />
       </header>
