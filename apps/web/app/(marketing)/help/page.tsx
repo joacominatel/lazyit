@@ -56,7 +56,8 @@ export default async function HelpIndexPage() {
                         <li key={page.slug}>
                           <Link
                             href={`/help/${page.slug}`}
-                            className="text-sm font-medium text-primary underline-offset-2 hover:underline"
+                            // ponytail: neutral resting links (oxblood stays reserved); the accent + underline land on hover only, so the index isn't a wall of brand color.
+                            className="text-sm font-medium text-foreground underline-offset-2 transition-colors hover:text-primary hover:underline"
                           >
                             {page.frontmatter.title}
                           </Link>
