@@ -9,9 +9,15 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  /* The Ledger type trio (ADR-0077). Body/UI = Hanken Grotesk (--font-sans), data/mono = Commit
+     Mono (--font-mono), both self-hosted via next/font in layout.tsx. Headings stay on the body
+     face — Redaction is NOT a heading face. */
   --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-mono: var(--font-mono);
   --font-heading: var(--font-sans);
+  /* Display = Redaction (the "record" face). Opt-in ONLY on auth + empty-state moments; NEVER on
+     tables/labels/buttons/dense UI (brand-register theater, banned in product register). */
+  --font-display: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -33,25 +39,28 @@
   --color-avatar-4: var(--avatar-4);
   --color-avatar-5: var(--avatar-5);
   --color-avatar-foreground: var(--avatar-foreground);
-  /* Pillar identity palette (ADR-0049). Registered exactly like --color-avatar-* /
-     --color-chart-* so Tailwind emits scanner-safe `bg-pillar-*` / `text-pillar-*`
-     utilities — NOT bg-[var(--pillar)]/10 (the JIT scanner needs full, non-interpolated
-     class strings; see lib/avatar-color.ts). Each pillar aliases one chart hue, which
-     already carries light/dark parity, so the utilities are theme-correct for free.
-     LOCKED map: Inventory=teal · Access=indigo (the brand hue) · Knowledge=green ·
-     Manage=rose. Consumables shares Inventory teal (it IS inventory — differentiate by
-     icon, never invent a 5th hue).
-       AA RULE: pillar hue is a tint/border/dot/chip ONLY — never small text on bone
-       (teal 0.62L / rose can't clear 4.5:1 as body text). Decorative ≥24px glyphs are
-       exempt; readable text always stays on --foreground/--card-foreground. */
-  --color-pillar-inventory: var(--chart-2);
+  /* Pillar identity palette (ADR-0049, re-mapped under ADR-0077). Registered exactly like
+     --color-avatar-* / --color-chart-* so Tailwind emits scanner-safe `bg-pillar-*` /
+     `text-pillar-*` utilities — NOT bg-[var(--pillar)]/10 (the JIT scanner needs full,
+     non-interpolated class strings; see lib/avatar-color.ts). Each pillar aliases one chart
+     hue, which already carries light/dark parity, so the utilities are theme-correct for free.
+     RE-MAP (ADR-0077): the data ramp is now DECOUPLED from the brand (oxblood). Access left the
+     old indigo/brand hue → blue (chart-1); Knowledge left green (green now == --verify) → amber
+     (chart-2); Manage left rose (rose now collides with the brand red) → violet (chart-3);
+     Inventory keeps the cyan/teal heritage (chart-4). Consumables shares Inventory (it IS
+     inventory — differentiate by icon, never invent a 5th hue).
+       AA RULE: pillar hue is a tint/border/dot/chip ONLY — never small text on the neutral
+       canvas. Decorative ≥24px glyphs are exempt; readable text always stays on
+       --foreground/--card-foreground. */
+  --color-pillar-inventory: var(--chart-4);
   --color-pillar-access: var(--chart-1);
-  --color-pillar-knowledge: var(--chart-3);
-  --color-pillar-manage: var(--chart-5);
+  --color-pillar-knowledge: var(--chart-2);
+  --color-pillar-manage: var(--chart-3);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -66,6 +75,11 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  /* Verify — the security-green VERIFIED / zero-knowledge mark (ADR-0077). Distinct from
+     --success (everyday "good/operational"): verify is reserved for the Secret Manager /
+     zero-knowledge seal so "operational" never reads as "cryptographically verified". */
+  --color-verify: var(--verify);
+  --color-verify-foreground: var(--verify-foreground);
   /* Tinted-text tokens (issue #812) — AA-safe text colours for the tinted (non-solid)
      warning/info/destructive variants. Registered here exactly like --color-warning so
      Tailwind emits full, scanner-safe utilities (text-warning-text / text-info-text /
@@ -92,8 +106,8 @@
   --shadow-e3: var(--elevation-3);
   /* Named type tokens (ADR-0049). Tailwind v4 emits `text-display` / `text-section` /
      `text-label` carrying the size + line-height + tracking triple, so "big metric" vs
-     "small eyebrow" is intentional, not pixel-guessed. No font change — Geist stays; AA
-     is untouched (these only size foreground-on-card text).
+     "small eyebrow" is intentional, not pixel-guessed. The font family swap (Geist → Hanken
+     Grotesk / Commit Mono, ADR-0077) was AA-re-verified separately; these tokens only size text.
        display — dashboard hero metrics (mono tabular pairs well here)
        section — "Needs attention" / "Recent activity" headings
        label   — uppercase eyebrows / nav section headings */
@@ -109,81 +123,95 @@
 }
 
 :root {
-  /* Brand accent: one disciplined deep-indigo hue (~275) on an otherwise neutral
-     canvas. Wired to --primary / --ring / --sidebar-primary so the single accent
-     drives buttons, focus rings and the active nav item. CTO default; ADR-0011. */
-  --brand: oklch(0.55 0.18 275);
-  /* Softened neutral ramp (CEO direction, ADR-0011): no pure white / pure black.
-     Light canvas is a warm "bone" (low chroma at hue ~95), text a very dark warm
-     gray (~hue 75) — calmer than #000/#fff while keeping AA contrast (fg-on-bg
-     ~16.9:1). Card/popover sit just above the bone so surfaces stay distinguishable. */
-  --background: oklch(0.985 0.004 95);
-  --foreground: oklch(0.21 0.006 75);
-  --card: oklch(0.995 0.003 95);
-  --card-foreground: oklch(0.21 0.006 75);
-  --popover: oklch(0.995 0.003 95);
-  --popover-foreground: oklch(0.21 0.006 75);
+  /* Brand accent: ONE oxblood stamp hue (~25) on an otherwise pure-neutral canvas (The Ledger,
+     ADR-0077 — replaces the old deep-indigo). Wired to --primary / --ring / --sidebar-primary so
+     the single accent drives buttons, focus rings, links and the active nav item. Lifted in .dark
+     so it stays legible AS TEXT on the carbon canvas (the ~41 text-primary links): a dark oxblood
+     fill that clears white-text AA fails as text on near-black, so dark mode trades a hair of
+     button-fill contrast (white-on-fill 3.82:1, large-text AA — parity with the prior indigo's
+     3.63:1) for AA-legible links (4.90:1). */
+  --brand: oklch(0.52 0.2 25);
+  /* Pure-neutral surfaces (The Ledger, ADR-0077): chroma 0 — paper white, NOT the old warm
+     "bone". The brand lives in the stamp, never in a tinted body. Cards are the recessed "tape"
+     just below the paper (0.965 < 0.985), defined by their hairline ring; popovers float on the
+     paper white. fg-on-bg ~18:1. */
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.18 0 0);
+  --card: oklch(0.965 0 0);
+  --card-foreground: oklch(0.18 0 0);
+  --popover: oklch(0.985 0 0);
+  --popover-foreground: oklch(0.18 0 0);
   --primary: var(--brand);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.955 0.005 95);
-  --secondary-foreground: oklch(0.27 0.006 75);
-  --muted: oklch(0.955 0.005 95);
-  --muted-foreground: oklch(0.52 0.008 75);
-  --accent: oklch(0.955 0.005 95);
-  --accent-foreground: oklch(0.27 0.006 75);
-  --destructive: oklch(0.577 0.245 27.325);
-  /* Semantic status tokens — the single source of truth for status color. Hue-aligned
-     with the chart ramp (green ~150 / amber ~85 / blue ~240) and the brand's single-hue
-     discipline. Each token is paired with a foreground that clears WCAG AA (≥4.5:1) as a
-     SOLID fill, so a solid status pill is always readable on the warm "bone" canvas — a
-     tinted amber-text-on-amber-tint pill cannot reach AA on light, which is why StatusBadge
-     fills solid. Kept distinct from --destructive (already defined). Light fg-on-token:
-     success 4.74:1 · warning 8.58:1 · info 4.69:1. */
+  --secondary: oklch(0.945 0 0);
+  --secondary-foreground: oklch(0.27 0 0);
+  --muted: oklch(0.945 0 0);
+  --muted-foreground: oklch(0.45 0 0);
+  --accent: oklch(0.945 0 0);
+  --accent-foreground: oklch(0.27 0 0);
+  /* Danger ≠ brand: the brand is a darker, muted, magenta-leaning oxblood wine (hue 25); danger
+     is a brighter, hotter, more-saturated scarlet shifted to hue 30, so "danger" never reads as
+     "brand". White text clears AA on it (5.17:1). */
+  --destructive: oklch(0.55 0.21 30);
+  --destructive-foreground: oklch(0.985 0 0);
+  /* Semantic status tokens — the single source of truth for status color. Each token is paired
+     with a foreground that clears WCAG AA (≥4.5:1) as a SOLID fill, so a solid status mark is
+     always readable on the neutral canvas — a tinted amber-text-on-amber-tint pill cannot reach
+     AA, which is why StatusBadge fills solid. Light fg-on-token: success 4.74:1 · warning 8.55:1
+     · info 5.20:1. --success (everyday "good/operational") is kept DISTINCT from --verify (the
+     zero-knowledge seal, below). */
   --success: oklch(0.53 0.14 150);
   --success-foreground: oklch(0.985 0 0);
   --warning: oklch(0.82 0.15 85);
-  --warning-foreground: oklch(0.27 0.03 75);
-  --info: oklch(0.54 0.14 240);
+  --warning-foreground: oklch(0.27 0 0);
+  --info: oklch(0.52 0.115 240);
   --info-foreground: oklch(0.985 0 0);
-  /* Tinted-text tokens (issue #812). The tinted button/badge/banner variants paint status
-     text on a `bg-<token>/10` tint of the SAME hue (amber-on-amber, etc.). Using the raw fill hue
-     as text fails AA badly on the bone canvas (warning ~1.6:1, the #496 regression), so each
-     of these is the fill hue darkened until it clears ≥4.5:1 as text on its own /10 tint AND
-     through the /20 hover. Precomputed OKLCH (no color-mix), in-gamut so it renders exactly.
-     On the bone /10 tint: warning 5.11:1 · info 5.43:1 · destructive 5.80:1 (hover /20 still
-     ≥4.7:1). Emitted as text-*-text utilities via @theme inline. */
-  --warning-text: oklch(0.52 0.11 75);
+  /* Verify — the security-green VERIFIED / zero-knowledge / success-seal mark (ADR-0077). A
+     cooler, deeper green than --success, RESERVED for the Secret Manager / zero-knowledge seal so
+     "operational" never blurs into "cryptographically verified". White text AA 5.44:1. The spec's
+     0.13 chroma is out of sRGB gamut at this L/hue → shipped at the in-gamut max 0.105. */
+  --verify: oklch(0.5 0.105 162);
+  --verify-foreground: oklch(0.985 0 0);
+  /* Tinted-text tokens (issue #812). The tinted button/badge/banner variants paint status text
+     on a `bg-<token>/10` tint of the SAME hue. Using the raw fill hue as text fails AA, so each is
+     the fill hue darkened until it clears ≥4.5:1 as text on its own /10 tint AND through the /20
+     hover. Precomputed OKLCH (no color-mix), in-gamut. On the neutral /10 tint (/20 hover):
+     warning 5.09:1 (4.83) · info 5.42:1 (4.69) · destructive 5.65:1 (4.78). */
+  --warning-text: oklch(0.52 0.1 75);
   --info-text: oklch(0.48 0.12 245);
-  --destructive-text: oklch(0.48 0.19 27);
-  --border: oklch(0.9 0.005 95);
-  --input: oklch(0.9 0.005 95);
+  --destructive-text: oklch(0.49 0.195 30);
+  --border: oklch(0.88 0 0);
+  --input: oklch(0.88 0 0);
   --ring: var(--brand);
-  /* Chart ramp anchored on the brand indigo, fanning out through teal/amber/rose
-     for categorical series (replaces the old grayscale ramp). */
-  --chart-1: oklch(0.55 0.18 275);
-  --chart-2: oklch(0.62 0.14 200);
-  --chart-3: oklch(0.65 0.15 150);
-  --chart-4: oklch(0.74 0.16 75);
-  --chart-5: oklch(0.62 0.2 15);
-  /* Avatar/categorical fills — same 5 hues as the chart ramp (indigo/teal/green/amber/rose),
-     darkened to the lightness where white text clears AA on both themes (≈4.7–6.1:1), so one
-     set serves light and dark. Seed → index maps a person to a stable color everywhere. */
-  --avatar-1: oklch(0.5 0.18 275);
-  --avatar-2: oklch(0.52 0.13 200);
-  --avatar-3: oklch(0.5 0.14 150);
-  --avatar-4: oklch(0.52 0.13 75);
-  --avatar-5: oklch(0.52 0.2 15);
+  /* Categorical data ramp (ADR-0077) — 5 hues DECOUPLED from the brand (oxblood ~25) and from
+     --verify (green ~162): blue 255 · amber 80 · violet 300 · cyan 200 · magenta 335. The ramp
+     deliberately vacates the red and green bands so no data color reads as "brand" or "verified",
+     and carries a lightness ladder so series stay separable under deuteranopia/protanopia/
+     tritanopia (no categorical red↔green pair). */
+  --chart-1: oklch(0.55 0.17 255);
+  --chart-2: oklch(0.76 0.14 80);
+  --chart-3: oklch(0.52 0.18 300);
+  --chart-4: oklch(0.68 0.11 200);
+  --chart-5: oklch(0.6 0.2 335);
+  /* Avatar/categorical fills — the same 5 hues as the chart ramp, darkened to the lightness where
+     WHITE text clears AA on the fill in BOTH themes (5.34–6.36:1), so one set serves light and
+     dark (NOT redefined in .dark). Seed → index maps a person to a stable color everywhere. */
+  --avatar-1: oklch(0.5 0.16 255);
+  --avatar-2: oklch(0.52 0.1 80);
+  --avatar-3: oklch(0.5 0.2 300);
+  --avatar-4: oklch(0.5 0.08 200);
+  --avatar-5: oklch(0.52 0.2 335);
   --avatar-foreground: oklch(0.985 0 0);
   --radius: 0.625rem;
-  /* Sidebar tracks the bone canvas: a hair deeper than --background so the rail
-     reads as a distinct surface without going gray. */
-  --sidebar: oklch(0.97 0.005 95);
-  --sidebar-foreground: oklch(0.21 0.006 75);
+  /* Sidebar tracks the paper canvas: a hair deeper than --background so the rail reads as a
+     distinct surface (pure neutral, ADR-0077). */
+  --sidebar: oklch(0.97 0 0);
+  --sidebar-foreground: oklch(0.18 0 0);
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.94 0.006 95);
-  --sidebar-accent-foreground: oklch(0.27 0.006 75);
-  --sidebar-border: oklch(0.9 0.005 95);
+  --sidebar-accent: oklch(0.93 0 0);
+  --sidebar-accent-foreground: oklch(0.27 0 0);
+  --sidebar-border: oklch(0.88 0 0);
   --sidebar-ring: var(--brand);
   /* Motion vocabulary (ADR-0049 «Activated Restraint»). One shared dialect so every
      surface eases and settles the same way. `--ease-out-quad` is the workhorse (settles,
@@ -194,98 +222,96 @@
   --dur-fast: 120ms;
   --dur-base: 180ms;
   --dur-slow: 220ms;
-  /* Warm elevation scale (ADR-0049). The codebase had no depth language; these three
-     steps are tinted with the foreground hue (oklch ~0.21 0.006 75) so shadows sit in
-     the bone system — "paper on a warm desk", not a gray sticker. Exposed as
-     shadow-e1/e2/e3 utilities via @theme inline below.
+  /* Elevation scale (ADR-0049, neutralized under ADR-0077). Three steps in a chroma-0 neutral
+     ink (oklch 0.21 0 0) — "paper on a desk" in the pure-neutral Ledger system, not a tinted
+     sticker. Exposed as shadow-e1/e2/e3 utilities via @theme inline below.
        e1 — resting cards / panels   e2 — hover/focus   e3 — dialogs/dropdowns/sticky */
-  --elevation-1: 0 1px 2px oklch(0.21 0.006 75 / 0.06),
-    0 1px 1px oklch(0.21 0.006 75 / 0.04);
-  --elevation-2: 0 4px 12px -2px oklch(0.21 0.006 75 / 0.1),
-    0 2px 4px -2px oklch(0.21 0.006 75 / 0.06);
-  --elevation-3: 0 12px 28px -6px oklch(0.21 0.006 75 / 0.14);
-  /* Code-block accent (ADR-0049, issue #200). The single brand-indigo hue darkened to
-     the lightness where it clears WCAG AA (≥4.5:1) as token text on the --muted code
-     surface — the raw --chart-1 indigo lands at ~4.48:1 light / ~3.60:1 dark and fails,
-     so syntax tokens use this AA-safe literal instead (precomputed oklch, no color-mix).
-     On --muted: 6.29:1 here. Drives the MarkdownView highlight theme (token color = ~5%
-     of pixels; keywords get the accent, everything else stays on --foreground/--muted-
-     foreground). */
-  --code-accent: oklch(0.47 0.16 275);
+  --elevation-1: 0 1px 2px oklch(0.21 0 0 / 0.06),
+    0 1px 1px oklch(0.21 0 0 / 0.04);
+  --elevation-2: 0 4px 12px -2px oklch(0.21 0 0 / 0.1),
+    0 2px 4px -2px oklch(0.21 0 0 / 0.06);
+  --elevation-3: 0 12px 28px -6px oklch(0.21 0 0 / 0.14);
+  /* Code-block accent (ADR-0049, issue #200; re-hued to oxblood under ADR-0077). The brand
+     oxblood darkened to where it clears WCAG AA (≥4.5:1) as token text on the --muted code
+     surface (6.39:1 here). Drives the MarkdownView highlight theme (keywords get the accent,
+     everything else stays on --foreground/--muted-foreground). */
+  --code-accent: oklch(0.47 0.18 25);
 }
 
 .dark {
-  /* Lighter indigo so the accent keeps contrast on the near-black canvas. This
-     is the SAME single brand hue as light mode — there is no second orphan blue. */
-  --brand: oklch(0.62 0.17 275);
-  /* Softened neutral ramp (CEO direction, ADR-0011): the canvas is a very dark
-     warm gray (hue ~75), not pure black; text is the same warm "bone" as light
-     mode's background. fg-on-bg ~16:1, well past AA. Card/popover step up in
-     lightness so surfaces are layered, not flat. */
-  --background: oklch(0.205 0.006 75);
-  --foreground: oklch(0.96 0.004 95);
-  --card: oklch(0.255 0.007 75);
-  --card-foreground: oklch(0.96 0.004 95);
-  --popover: oklch(0.255 0.007 75);
-  --popover-foreground: oklch(0.96 0.004 95);
+  /* Lifted oxblood so the accent keeps contrast on the carbon canvas — the SAME single brand hue
+     as light mode (ADR-0077). Lifted (vs the light 0.52) so text-primary links clear AA on
+     near-black (4.90:1); the trade is white-on-fill at large-text AA (3.82:1, parity with the
+     prior indigo's 3.63:1). */
+  --brand: oklch(0.62 0.19 25);
+  /* Pure-neutral "carbon copy" surfaces (The Ledger, ADR-0077): chroma 0 — carbon black, NOT a
+     warm gray. Text is the paper white. fg-on-bg ~17:1. Cards step UP from the canvas; popovers
+     sit at the card level and float via the elevation shadow + inset top-highlight. */
+  --background: oklch(0.155 0 0);
+  --foreground: oklch(0.96 0 0);
+  --card: oklch(0.195 0 0);
+  --card-foreground: oklch(0.96 0 0);
+  --popover: oklch(0.195 0 0);
+  --popover-foreground: oklch(0.96 0 0);
   --primary: var(--brand);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.3 0.007 75);
-  --secondary-foreground: oklch(0.96 0.004 95);
-  --muted: oklch(0.3 0.007 75);
-  --muted-foreground: oklch(0.715 0.006 90);
-  --accent: oklch(0.3 0.007 75);
-  --accent-foreground: oklch(0.96 0.004 95);
-  --destructive: oklch(0.704 0.191 22.216);
-  /* Dark status: lighter tokens so the fill carries the near-black canvas, with a dark
-     foreground (the same near-black) — all clear AA comfortably. Same hues as light.
-     Dark fg-on-token: success 8.08:1 · warning 10.99:1 · info 7.16:1. */
+  --secondary: oklch(0.225 0 0);
+  --secondary-foreground: oklch(0.96 0 0);
+  --muted: oklch(0.225 0 0);
+  --muted-foreground: oklch(0.7 0 0);
+  --accent: oklch(0.225 0 0);
+  --accent-foreground: oklch(0.96 0 0);
+  --destructive: oklch(0.7 0.19 32);
+  --destructive-foreground: oklch(0.18 0 0);
+  /* Dark status: lighter fills carry the carbon canvas, with a near-black foreground — all clear
+     AA comfortably. Same hues as light. Dark fg-on-token: success 8.08:1 · warning 10.98:1 · info
+     7.16:1 · destructive 6.49:1. */
   --success: oklch(0.72 0.16 150);
   --success-foreground: oklch(0.18 0 0);
   --warning: oklch(0.84 0.15 85);
-  --warning-foreground: oklch(0.2 0.02 80);
+  --warning-foreground: oklch(0.2 0 0);
   --info: oklch(0.7 0.13 240);
   --info-foreground: oklch(0.18 0 0);
-  /* Tinted-text tokens, dark (issue #812): the fill hue brightened until it clears ≥4.5:1 as
-     text on its own tint over the near-black canvas — the raw fill hue fails here too
-     (warning 3.66:1 / info 3.15:1 / destructive 3.02:1 per the audit). On the /20 tint:
-     warning 8.38:1 · info 7.02:1 · destructive 6.84:1 (the /10 dev-banner tint reads higher,
-     the /30 hover still ≥5:1). In-gamut OKLCH; same hues as light. */
+  /* Verify (dark) — the lifted security-green seal; near-black foreground clears AA (6.45:1).
+     Reserved for the zero-knowledge seal, distinct from --success. */
+  --verify: oklch(0.66 0.14 162);
+  --verify-foreground: oklch(0.18 0 0);
+  /* Tinted-text tokens, dark (issue #812): the fill hue brightened until it clears ≥4.5:1 as text
+     on its own /10–/20 tint over the carbon canvas. In-gamut OKLCH; same hues as the light fills.
+     On the /10 tint (/20 hover): warning 12.25:1 (9.55) · info 9.41:1 (7.90) · destructive 9.06:1
+     (7.77). */
   --warning-text: oklch(0.9 0.12 90);
   --info-text: oklch(0.8 0.11 240);
-  --destructive-text: oklch(0.8 0.11 22);
-  /* Warm-tinted hairlines: a touch of the bone hue in the translucent white so
-     borders read warm against the dark warm-gray canvas. */
-  --border: oklch(0.97 0.004 95 / 10%);
-  --input: oklch(0.97 0.004 95 / 15%);
+  --destructive-text: oklch(0.8 0.11 30);
+  /* Neutral hairlines: a solid mid-gray rule against the carbon canvas (chroma 0, ADR-0077). */
+  --border: oklch(0.32 0 0);
+  --input: oklch(0.32 0 0);
   --ring: var(--brand);
-  --chart-1: oklch(0.62 0.17 275);
-  --chart-2: oklch(0.68 0.13 200);
-  --chart-3: oklch(0.7 0.14 150);
-  --chart-4: oklch(0.8 0.15 80);
-  --chart-5: oklch(0.68 0.18 15);
-  /* Sidebar a hair darker than the dark canvas so the rail recedes slightly. */
-  --sidebar: oklch(0.175 0.006 75);
-  --sidebar-foreground: oklch(0.96 0.004 95);
+  --chart-1: oklch(0.64 0.16 255);
+  --chart-2: oklch(0.82 0.14 80);
+  --chart-3: oklch(0.62 0.17 300);
+  --chart-4: oklch(0.75 0.11 200);
+  --chart-5: oklch(0.7 0.18 335);
+  /* Sidebar a hair darker than the carbon canvas so the rail recedes slightly. */
+  --sidebar: oklch(0.175 0 0);
+  --sidebar-foreground: oklch(0.96 0 0);
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.3 0.007 75);
-  --sidebar-accent-foreground: oklch(0.96 0.004 95);
-  --sidebar-border: oklch(0.97 0.004 95 / 10%);
+  --sidebar-accent: oklch(0.255 0 0);
+  --sidebar-accent-foreground: oklch(0.96 0 0);
+  --sidebar-border: oklch(0.32 0 0);
   --sidebar-ring: var(--brand);
-  /* Dark elevation (ADR-0049): warm shadows vanish on near-black, so each step uses the
-     SAME shapes at ~2x alpha PLUS a 1px inset top-highlight (a faint bone line) so a
-     raised surface catches light against the dark canvas — depth via highlight, not just
-     shadow. Tokens keep the e1/e2/e3 names; only the values change here. */
-  --elevation-1: inset 0 1px 0 oklch(0.97 0.004 95 / 0.04),
-    0 1px 2px oklch(0.21 0.006 75 / 0.12), 0 1px 1px oklch(0.21 0.006 75 / 0.08);
-  --elevation-2: inset 0 1px 0 oklch(0.97 0.004 95 / 0.04),
-    0 4px 12px -2px oklch(0.21 0.006 75 / 0.2), 0 2px 4px -2px oklch(0.21 0.006 75 / 0.12);
-  --elevation-3: inset 0 1px 0 oklch(0.97 0.004 95 / 0.04),
-    0 12px 28px -6px oklch(0.21 0.006 75 / 0.28);
-  /* Code accent on the dark --muted surface (oklch 0.3): lightened indigo literal that
-     clears AA (5.68:1) — the raw dark --chart-1 (~3.60:1) does not. */
-  --code-accent: oklch(0.74 0.15 275);
+  /* Dark elevation (ADR-0049, neutralized under ADR-0077): each step uses the SAME shapes at ~2x
+     alpha PLUS a 1px inset top-highlight (a faint neutral line) so a raised surface catches light
+     against the carbon canvas — depth via highlight, not just shadow. Chroma-0 ink. */
+  --elevation-1: inset 0 1px 0 oklch(0.97 0 0 / 0.04),
+    0 1px 2px oklch(0.21 0 0 / 0.12), 0 1px 1px oklch(0.21 0 0 / 0.08);
+  --elevation-2: inset 0 1px 0 oklch(0.97 0 0 / 0.04),
+    0 4px 12px -2px oklch(0.21 0 0 / 0.2), 0 2px 4px -2px oklch(0.21 0 0 / 0.12);
+  --elevation-3: inset 0 1px 0 oklch(0.97 0 0 / 0.04),
+    0 12px 28px -6px oklch(0.21 0 0 / 0.28);
+  /* Code accent on the dark --muted surface: lightened oxblood that clears AA (6.96:1). */
+  --code-accent: oklch(0.74 0.15 25);
 }
 
 /* ---------------------------------------------------------------------------
@@ -481,7 +507,7 @@
    keeps its scroll behaviour without the chunky default gutter reading as visual
    noise. Firefox honours `scrollbar-width: thin`; WebKit (Chrome/Safari) ignores
    it, so the `::-webkit-scrollbar` pseudo is required there — a thin track with a
-   `--border`-tinted thumb that sits inside the bone system on both themes. No new
+   `--border`-tinted thumb that sits inside the neutral system on both themes. No new
    colour or motion: the thumb reuses the existing `--border` token. Tailwind v4
    `@utility` so it composes like any other class and the JIT scanner sees it. */
 @utility scrollbar-quiet {
@@ -541,7 +567,7 @@
     size: A4;
   }
 
-  /* A true white sheet with black ink — the warm bone canvas is for the screen. */
+  /* A true white sheet with black ink — the neutral paper canvas is for the screen. */
   html,
   body {
     background: #fff !important;
@@ -563,10 +589,10 @@
   [data-print-document] {
     max-width: none !important;
     padding: 0 !important;
-    --foreground: oklch(0.21 0.006 75);
-    --card-foreground: oklch(0.21 0.006 75);
-    --popover-foreground: oklch(0.21 0.006 75);
-    --border: oklch(0.9 0.005 95);
+    --foreground: oklch(0.18 0 0);
+    --card-foreground: oklch(0.18 0 0);
+    --popover-foreground: oklch(0.18 0 0);
+    --border: oklch(0.88 0 0);
   }
 
   /* Keep a single checklist row whole, but let `section` break naturally: a long (25+ asset)
@@ -579,7 +605,7 @@
   /* De-emphasized meta prints as near-ink, not mid-gray — `muted-foreground` washes out on a
      B&W laser. Screen tone is unchanged; this only applies inside the printed document. */
   [data-print-document] .text-muted-foreground {
-    color: oklch(0.4 0.008 75) !important;
+    color: oklch(0.4 0 0) !important;
   }
 }
 
