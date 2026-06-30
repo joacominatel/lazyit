@@ -1,20 +1,35 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Hanken_Grotesk } from "next/font/google";
+import localFont from "next/font/local";
 import { getLocale, getMessages } from "next-intl/server";
 import { auth } from "@/auth";
 import { Providers } from "./providers";
 import "./globals.css";
 
-// Geist is bound to --font-sans / --font-geist-mono to match the CSS variables
-// the shadcn (radix-nova) theme expects in globals.css (@theme inline).
-const geistSans = Geist({
+// The Ledger type trio (ADR-0077), bound to the CSS variables the shadcn (radix-nova) theme reads
+// in globals.css (@theme inline): body/UI = Hanken Grotesk (--font-sans), data/mono = Commit Mono
+// (--font-mono), display = Redaction (--font-display, opt-in ONLY on auth + empty-states). Commit
+// Mono and Redaction are self-hosted woff2 via next/font/local — neither is on Google Fonts.
+const hankenGrotesk = Hanken_Grotesk({
   variable: "--font-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const commitMono = localFont({
+  variable: "--font-mono",
+  src: [
+    { path: "./fonts/commit-mono-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/commit-mono-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/commit-mono-latin-600-normal.woff2", weight: "600", style: "normal" },
+  ],
+});
+
+const redaction = localFont({
+  variable: "--font-display",
+  src: [
+    { path: "./fonts/redaction-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/redaction-latin-700-normal.woff2", weight: "700", style: "normal" },
+  ],
 });
 
 export const metadata: Metadata = {
@@ -48,7 +63,7 @@ export default async function RootLayout({
     <html
       lang={locale}
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable}`}
+      className={`${hankenGrotesk.variable} ${commitMono.variable} ${redaction.variable}`}
     >
       <body className="min-h-svh antialiased">
         <Providers locale={locale} messages={messages} session={session}>
