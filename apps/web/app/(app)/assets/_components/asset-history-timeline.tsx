@@ -59,7 +59,23 @@ const EVENT_BADGE: Record<AssetHistoryEventType, EventBadgeSpec> = {
   SPECS_CHANGED: { kind: "categorical", dot: "bg-muted-foreground" },
 };
 
-/** Renders the event label as either a solid status pill or a neutral pill with a hue dot. */
+/** The rail tick colour (ADR-0077): a semantic event lights its tick with its status tone;
+ *  categorical events keep a neutral tick, so the ledger margin only colours up for real state
+ *  changes. Decorative (the badge already carries the meaning). */
+const TICK_TONE: Record<StatusTone, string> = {
+  success: "bg-success",
+  warning: "bg-warning",
+  info: "bg-info",
+  danger: "bg-destructive",
+  neutral: "bg-muted-foreground",
+};
+
+function tickClass(eventType: AssetHistoryEventType): string {
+  const badge = EVENT_BADGE[eventType];
+  return badge.kind === "status" ? TICK_TONE[badge.tone] : "bg-border";
+}
+
+/** Renders the event label as either a solid status mark or a neutral ledger-tag with a hue dot. */
 function EventBadge({ eventType }: { eventType: AssetHistoryEventType }) {
   const t = useTranslations("assets.detail.timeline.events");
   const badge = EVENT_BADGE[eventType];
@@ -67,8 +83,11 @@ function EventBadge({ eventType }: { eventType: AssetHistoryEventType }) {
   if (badge.kind === "status") {
     return <StatusBadge tone={badge.tone}>{label}</StatusBadge>;
   }
+  // Categorical events get a neutral ledger-tag matching the StatusMark geometry (rounded-sm,
+  // uppercase, inset ring) with a small hue dot carrying the category colour — the AA-safe shape
+  // (label on --secondary-foreground, colour rides the decorative dot; ADR-0049 §4 / ADR-0077).
   return (
-    <span className="inline-flex h-5 w-fit shrink-0 items-center gap-1.5 rounded-md bg-secondary px-2 py-0.5 text-xs font-medium whitespace-nowrap text-secondary-foreground">
+    <span className="inline-flex h-5 w-fit shrink-0 items-center gap-1.5 rounded-sm bg-secondary px-1.5 py-0.5 text-[11px] font-medium tracking-[0.04em] uppercase whitespace-nowrap text-secondary-foreground ring-1 ring-inset ring-foreground/10">
       <span
         className={cn("size-1.5 shrink-0 rounded-full", badge.dot)}
         aria-hidden
@@ -196,7 +215,10 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
                 />
               )}
               <span
-                className="mt-1.5 size-2.5 shrink-0 rounded-full bg-border ring-2 ring-background"
+                className={cn(
+                  "mt-1.5 size-2.5 shrink-0 rounded-[2px] ring-2 ring-background",
+                  tickClass(event.eventType),
+                )}
                 aria-hidden
               />
               <div className="min-w-0 flex-1 space-y-1">
@@ -204,7 +226,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
                   <EventBadge eventType={event.eventType} />
                   {text && <span className="text-sm">{text}</span>}
                   <span
-                    className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground"
+                    className="ml-auto shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
                     title={dateTime(event.createdAt)}
                   >
                     {relative(event.createdAt)}
