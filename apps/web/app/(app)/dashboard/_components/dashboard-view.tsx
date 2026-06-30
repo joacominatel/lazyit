@@ -373,7 +373,7 @@ function PillarCard({
           {/* Metric settles in on first mount with a subtle, capped stagger (initial-mount
               only; reduced-motion collapses it to instant via the globals.css guard). */}
           <span
-            className="inline-block animate-rise-in text-display font-semibold tabular-nums text-foreground [animation-delay:calc(var(--i)*60ms)]"
+            className="inline-block animate-rise-in font-mono text-display font-semibold tabular-nums text-foreground [animation-delay:calc(var(--i)*60ms)]"
             style={{ "--i": index } as CSSProperties}
           >
             {metric}
@@ -393,7 +393,7 @@ function PillarCard({
                 className="-mx-1.5 flex items-center justify-between gap-2 rounded px-1.5 py-1 outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <dt className="text-muted-foreground">{row.label}</dt>
-                <dd className="font-medium tabular-nums">{row.value}</dd>
+                <dd className="font-mono font-medium tabular-nums">{row.value}</dd>
               </Link>
             ))
           )}
@@ -530,7 +530,7 @@ function AssetHealthBar({
                 aria-hidden
               />
               <span>{segment.label}</span>
-              <span className="font-medium tabular-nums text-foreground">
+              <span className="font-mono font-medium tabular-nums text-foreground">
                 {segment.value}
               </span>
             </>
@@ -784,7 +784,7 @@ function AttentionRow({
           />
         </span>
         <span className="flex-1">{label}</span>
-        <span className="text-base font-semibold tabular-nums">{count}</span>
+        <span className="font-mono text-base font-semibold tabular-nums">{count}</span>
         <ArrowRightIcon className="size-4 text-muted-foreground" />
       </Link>
       <Button
