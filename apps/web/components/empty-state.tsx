@@ -71,7 +71,9 @@ export function EmptyState({
         <Icon className="size-7" />
       </span>
       <div className="space-y-1">
-        <p className="text-sm font-medium text-foreground">{title}</p>
+        {/* ponytail: the warm "nothing here yet" title carries the Ledger display face (Redaction);
+            bumped text-sm → text-base so the lightly-engraved 400 weight stays legible. */}
+        <p className="font-display text-base text-foreground">{title}</p>
         {description && (
           <p className="mx-auto max-w-sm text-sm text-muted-foreground">
             {description}
