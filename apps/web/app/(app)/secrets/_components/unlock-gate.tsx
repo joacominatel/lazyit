@@ -153,8 +153,11 @@ function UnlockFlow({ keypair, embedded = false }: { keypair: UserKeypair; embed
   return (
     <div className={embedded ? "space-y-5" : "mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10"}>
       <div className="flex flex-col items-center gap-2 text-center">
-        <span className="flex size-12 items-center justify-center rounded-full bg-pillar-knowledge/10">
-          <LockClosedIcon className="size-6 text-pillar-knowledge" aria-hidden />
+        {/* The Ledger seal (ADR-0077): a sealed vault wears the security-green `verify` mark — the
+            zero-knowledge "locked by crypto" payoff. This is the one earned green moment per unlock
+            screen; the pillar hue stays the feature's chrome, green is reserved for the seal. */}
+        <span className="flex size-12 items-center justify-center rounded-full bg-verify/10">
+          <LockClosedIcon className="size-6 text-verify" aria-hidden />
         </span>
         <h2 className="text-lg font-semibold">{t("unlock.title")}</h2>
         <p className="text-sm text-muted-foreground">{t("unlock.description")}</p>
@@ -381,6 +384,7 @@ function ResetPasswordFlow({
             }
             disabled={busy}
             placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+            className="font-mono"
             autoFocus
           />
           {failed ? (
@@ -619,8 +623,9 @@ function BootstrapFlow({ embedded = false }: { embedded?: boolean }) {
   return (
     <div className={embedded ? "space-y-5" : "mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10"}>
       <div className="flex flex-col items-center gap-2 text-center">
-        <span className="flex size-12 items-center justify-center rounded-full bg-pillar-knowledge/10">
-          <LockClosedIcon className="size-6 text-pillar-knowledge" aria-hidden />
+        {/* The Ledger seal (ADR-0077): the sealed-vault lock wears the security-green `verify` mark. */}
+        <span className="flex size-12 items-center justify-center rounded-full bg-verify/10">
+          <LockClosedIcon className="size-6 text-verify" aria-hidden />
         </span>
         <h2 className="text-lg font-semibold">{t("bootstrap.title")}</h2>
         <p className="text-sm text-muted-foreground">{t("bootstrap.description")}</p>
@@ -950,8 +955,9 @@ function PostCreateUnlockRecovery({
   return (
     <div className={embedded ? "space-y-5" : "mx-auto max-w-md space-y-5 rounded-xl bg-card p-8 ring-1 ring-foreground/10"}>
       <div className="flex flex-col items-center gap-2 text-center">
-        <span className="flex size-12 items-center justify-center rounded-full bg-pillar-knowledge/10">
-          <LockClosedIcon className="size-6 text-pillar-knowledge" aria-hidden />
+        {/* The Ledger seal (ADR-0077): the sealed-vault lock wears the security-green `verify` mark. */}
+        <span className="flex size-12 items-center justify-center rounded-full bg-verify/10">
+          <LockClosedIcon className="size-6 text-verify" aria-hidden />
         </span>
         <h2 className="text-lg font-semibold">{title}</h2>
         <p className="text-sm text-muted-foreground">{description}</p>
