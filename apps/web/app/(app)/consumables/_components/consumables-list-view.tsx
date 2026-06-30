@@ -434,10 +434,14 @@ export function ConsumablesListView() {
                       {consumable.unit}
                     </ResourceCardMeta>
                     <ResourceCardMeta label={t("list.meta.sku")}>
-                      <span className="font-mono">{consumable.sku ?? "—"}</span>
+                      <span className="font-mono tabular-nums">
+                        {consumable.sku ?? "—"}
+                      </span>
                     </ResourceCardMeta>
                     <ResourceCardMeta label={t("list.meta.updated")}>
-                      {date(consumable.updatedAt)}
+                      <span className="font-mono tabular-nums">
+                        {date(consumable.updatedAt)}
+                      </span>
                     </ResourceCardMeta>
                   </>
                 }
@@ -530,10 +534,10 @@ export function ConsumablesListView() {
                 <TableCell className="text-muted-foreground">
                   {consumable.unit}
                 </TableCell>
-                <TableCell className="font-mono text-muted-foreground">
+                <TableCell className="font-mono text-muted-foreground tabular-nums">
                   {consumable.sku ?? "—"}
                 </TableCell>
-                <TableCell className="text-muted-foreground tabular-nums">
+                <TableCell className="font-mono text-muted-foreground tabular-nums">
                   {date(consumable.updatedAt)}
                 </TableCell>
                 <TableCell>
