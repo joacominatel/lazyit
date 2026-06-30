@@ -195,7 +195,7 @@ export function ActivityRow({
           )}
           <time
             dateTime={item.occurredAt}
-            className="ml-auto shrink-0 cursor-default pl-1 tabular-nums underline decoration-dotted decoration-muted-foreground/40 underline-offset-2 hover:decoration-muted-foreground"
+            className="ml-auto shrink-0 cursor-default pl-1 font-mono text-[11px] tabular-nums underline decoration-dotted decoration-muted-foreground/40 underline-offset-2 hover:decoration-muted-foreground"
             title={t("activity.occurredAt", { datetime: absolute })}
             aria-label={t("activity.occurredAt", { datetime: absolute })}
           >
