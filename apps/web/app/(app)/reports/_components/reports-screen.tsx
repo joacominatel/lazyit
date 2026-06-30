@@ -22,15 +22,7 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { RowsPerPageSelect } from "@/components/rows-per-page-select";
-import {
-  ErrorState,
-  LinkableRow,
-  Pagination,
-  ResourceCard,
-  ResourceCardMeta,
-  type ResourceColumn,
-  ResourceTable,
-} from "@/components/resource-table";
+import { ErrorState, Pagination } from "@/components/resource-table";
 import { SearchInput } from "@/components/search-input";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,7 +34,6 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { TableCell } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { actionLabel, actionTone } from "@/lib/activity-tones";
 import type { DashboardActivityFilters } from "@/lib/api/endpoints/dashboard";
@@ -68,8 +59,10 @@ const BREADCRUMB = <Breadcrumb />;
  * the returned values map straight onto the request — there is no more client-side `.filter()` over a
  * partial window, so the `total` and the table pagination are the server's real filtered figures.
  *
- * The feed is rendered as a dense Table (`ResourceTable` with true server-side prev/next paging);
- * the earlier Timeline view was dropped (#696). CSV + Print export exactly the rows currently visible.
+ * The feed is rendered as a LEDGER TAPE (ADR-0077): one hairline-ruled, baseline-aligned record per
+ * row (mono+tabular timestamp · actor · ACTION stamp · → target · `// <entity>`), with true
+ * server-side prev/next paging; the earlier Timeline and dense-Table views were dropped (#696). CSV +
+ * Print export exactly the rows currently visible.
  */
 
 /**
@@ -571,7 +564,6 @@ export function ReportsScreen() {
           limit={limit}
           total={total}
           onOffsetChange={setOffset}
-          onClearFilters={clearFilters}
         />
       )}
     </div>
@@ -588,144 +580,85 @@ function TableView({
   limit,
   total,
   onOffsetChange,
-  onClearFilters,
 }: {
   items: RecentActivityItem[];
   offset: number;
   limit: number;
   total: number;
   onOffsetChange: (offset: number) => void;
-  onClearFilters: () => void;
 }) {
   const t = useTranslations("reports");
   const tAction = useTranslations("shared.activity.action");
   const { dateTime, relative } = useFormatters();
-  const columns: ResourceColumn[] = [
-    {
-      key: "when",
-      header: t("table.columns.when"),
-      skeleton: <Skeleton className="h-4 w-20" />,
-    },
-    {
-      key: "action",
-      header: t("table.columns.action"),
-      skeleton: <Skeleton className="h-5 w-20 rounded-full" />,
-    },
-    {
-      key: "entity",
-      header: t("table.columns.entity"),
-      skeleton: <Skeleton className="h-4 w-16" />,
-    },
-    {
-      key: "actor",
-      header: t("table.columns.actor"),
-      skeleton: <Skeleton className="h-4 w-24" />,
-    },
-    {
-      key: "summary",
-      header: t("table.columns.summary"),
-      skeleton: <Skeleton className="h-4 w-48" />,
-    },
-  ];
 
   return (
     <>
-      <ResourceTable
-        columns={columns}
-        isFilteredEmpty={items.length === 0}
-        filteredEmptyMessage={t("table.filteredEmpty")}
-        filteredEmptyAction={<ClearFiltersLink onClick={onClearFilters} />}
-        mobileChildren={items.map((item, i) => {
-          const meta = ENTITY_META[item.entityType];
-          return (
-            <ResourceCard
-              // The `recent_activity` view is a UNION ALL with no unique row id, so two rows can
-              // share (entityType, entityId, action, occurredAt-to-the-ms) — e.g. an asset with
-              // multiple assignments created in the same transaction (#719). The page is read-only
-              // and paginated, so the map index is a safe tiebreaker.
-              // ponytail: index-in-key (rung 5, one line) — the proper fix (a stable per-row id in
-              // the view) needs a migration + a widened wire type; not worth it for a read-only list.
-              key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}-${i}`}
-              href={meta.href(item.entityId)}
-              title={item.summary}
-              badge={
-                <StatusBadge tone={actionTone(item.action)}>
-                  {actionLabel(item.action, tAction)}
-                </StatusBadge>
-              }
-              meta={
-                <>
-                  <ResourceCardMeta label={t("table.columns.when")}>
-                    <span className="tabular-nums" title={dateTime(item.occurredAt)}>
-                      {relative(item.occurredAt)}
-                    </span>
-                  </ResourceCardMeta>
-                  <ResourceCardMeta label={t("table.columns.entity")}>
-                    <span>{t(`table.entityLabel.${item.entityType}`)}</span>
-                  </ResourceCardMeta>
-                  <ResourceCardMeta label={t("table.columns.actor")}>
-                    {item.actorName ?? t("table.system")}
-                  </ResourceCardMeta>
-                </>
-              }
-            />
-          );
-        })}
-      >
+      {/* The audit feed as a LEDGER TAPE (ADR-0077): one hairline-ruled record per row, folding
+          the former dense table (and its mobile cards) into a single responsive register line —
+          the timestamp in Commit Mono tabular figures (locks into a column) · the actor · the
+          ACTION stamp · → the target record · a `// <entity>` annotation. Baseline-aligned like a
+          printed line; the server paging, filters and links are untouched. The `recent_activity`
+          view is a UNION ALL with no unique row id, so two rows can share (entityType, entityId,
+          action, occurredAt-to-the-ms) — e.g. an asset with multiple assignments created in the
+          same transaction (#719); the page is read-only and paginated, so the map index is a safe
+          tiebreaker in the key.
+          ponytail: index-in-key (rung 5, one line) — the proper fix (a stable per-row id in the
+          view) needs a migration + a widened wire type; not worth it for a read-only list. */}
+      <ul className="divide-y divide-border">
         {items.map((item, i) => {
           const meta = ENTITY_META[item.entityType];
           const EntityIcon = meta.icon;
           return (
-            <LinkableRow
-              // Same UNION-ALL key collision as the mobile cards above (#719) — index tiebreaker.
+            <li
               key={`${item.entityType}-${item.entityId}-${item.action}-${item.occurredAt}-${i}`}
-              href={meta.href(item.entityId)}
+              className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2.5 text-sm first:pt-0 last:pb-0"
             >
-              <TableCell
-                className="text-muted-foreground tabular-nums whitespace-nowrap"
+              <time
+                dateTime={item.occurredAt}
+                className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
                 title={dateTime(item.occurredAt)}
               >
                 {relative(item.occurredAt)}
-              </TableCell>
-              <TableCell>
-                <StatusBadge tone={actionTone(item.action)}>
-                  {actionLabel(item.action, tAction)}
-                </StatusBadge>
-              </TableCell>
-              <TableCell>
-                <span className="inline-flex items-center gap-1.5">
-                  <EntityIcon
-                    className="size-4 text-muted-foreground"
-                    aria-hidden
-                  />
-                  <span>{t(`table.entityLabel.${item.entityType}`)}</span>
-                </span>
-              </TableCell>
-              <TableCell>
+              </time>
+              <span className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground">
                 {item.actorName ? (
-                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <>
                     <ActorAvatar name={item.actorName} seed={item.actorId} />
                     <span className="min-w-0 truncate">{item.actorName}</span>
-                  </span>
+                  </>
                 ) : (
-                  <span className="text-muted-foreground">
-                    {t("table.system")}
-                  </span>
+                  <span>{t("table.system")}</span>
                 )}
-              </TableCell>
-              <TableCell className="max-w-md">
+              </span>
+              <StatusBadge tone={actionTone(item.action)}>
+                {actionLabel(item.action, tAction)}
+              </StatusBadge>
+              <span className="inline-flex min-w-0 flex-1 items-baseline gap-1.5">
+                <span aria-hidden className="font-mono text-muted-foreground/60">
+                  →
+                </span>
+                <EntityIcon
+                  className="size-4 shrink-0 self-center text-muted-foreground"
+                  aria-hidden
+                />
                 <Link
                   href={meta.href(item.entityId)}
-                  className="block truncate font-medium hover:underline"
+                  className="min-w-0 truncate font-medium hover:underline"
                   title={item.summary}
                 >
                   {item.summary}
                 </Link>
-              </TableCell>
-            </LinkableRow>
+              </span>
+              <span className="shrink-0 text-muted-foreground">
+                <span aria-hidden className="font-mono text-muted-foreground/60">
+                  {"// "}
+                </span>
+                {t(`table.entityLabel.${item.entityType}`)}
+              </span>
+            </li>
           );
         })}
-      </ResourceTable>
+      </ul>
 
       <Pagination
         total={total}
@@ -740,18 +673,22 @@ function TableView({
 
 const SKELETON_KEYS = ["a", "b", "c", "d", "e"] as const;
 
-/** Loading placeholder shown while the first activity page resolves. */
+/** Loading placeholder shown while the first activity page resolves — shaped like the ledger tape
+ *  (hairline rows, a mono-width time stub, an avatar, the rounded-sm action stamp) so the
+ *  skeleton→loaded swap doesn't reflow. */
 function TableSkeleton() {
   return (
-    <ul className="space-y-5">
+    <ul className="divide-y divide-border">
       {SKELETON_KEYS.map((key) => (
-        <li key={key} className="flex gap-3">
-          <Skeleton className="size-7 shrink-0 rounded-lg animate-shimmer" />
-          <div className="flex-1 space-y-2">
-            <Skeleton className="h-4 w-2/3 animate-shimmer" />
-            <Skeleton className="h-3 w-1/4 animate-shimmer" />
-          </div>
-          <Skeleton className="h-5 w-16 rounded-full animate-shimmer" />
+        <li
+          key={key}
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5"
+        >
+          <Skeleton className="h-3.5 w-16 shrink-0 animate-shimmer" />
+          <Skeleton className="size-6 shrink-0 rounded-full animate-shimmer" />
+          <Skeleton className="h-3.5 w-24 shrink-0 animate-shimmer" />
+          <Skeleton className="h-5 w-16 shrink-0 rounded-sm animate-shimmer" />
+          <Skeleton className="h-3.5 flex-1 animate-shimmer" />
         </li>
       ))}
     </ul>

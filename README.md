@@ -3,15 +3,15 @@
 </p>
 
 <p align="center">
-  <strong>The IT inventory & access tool small teams actually want to open.</strong><br/>
-  Self-hosted. Asset-centric. Auditable by default.
+  <strong>The system of record for the small team that runs everything.</strong><br/>
+  Self-hosted · asset-centric · auditable by default. Append-only history — nothing quietly disappears.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg"></a>
   <img alt="Status: MVP" src="https://img.shields.io/badge/status-MVP-orange.svg">
   <img alt="Self-hosted" src="https://img.shields.io/badge/deploy-self--hosted-success.svg">
-  <img alt="Stack" src="https://img.shields.io/badge/stack-Next.js%20%C2%B7%20NestJS%20%C2%B7%20Postgres-1f6feb.svg">
+  <img alt="Stack" src="https://img.shields.io/badge/stack-Next.js%20%C2%B7%20NestJS%20%C2%B7%20Postgres-9e2b25.svg">
 </p>
 
 ---
@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <em>▶ <a href="brand/video.mp4">Watch the demo</a> — a quick tour of lazyit (inventory, access, knowledge base and the secret manager).</em>
+  <em>▶ <a href="brand/video.mp4">Watch the demo</a> — “On the Record”: a short tour through the audit tape, topology blast-radius, the self-installing agent, and the zero-knowledge vault.</em>
 </p>
 
 ---
@@ -63,7 +63,7 @@ for years. Boring, durable technology. No Kubernetes required.
 ## Screenshots
 
 <p align="center">
-  <em>Dark mode · expand a view below to browse.</em>
+  <em>Paper by day, carbon by night — the same record in both themes. Expand a view to browse.</em>
 </p>
 
 <details open>
@@ -78,23 +78,23 @@ for years. Boring, durable technology. No Kubernetes required.
 <summary><strong>Assets</strong> — search, filter, and manage the full inventory</summary>
 <br/>
 <p align="center">
-  <img src="brand/assets-page.png" alt="lazyit assets page — inventory table with status, owners, and locations" width="920">
+  <img src="brand/assets-page.png" alt="lazyit assets — inventory table with asset tags, status, owners and locations" width="920">
 </p>
 </details>
 
 <details>
-<summary><strong>Reports</strong> — estate-wide activity history with filters and export</summary>
+<summary><strong>Asset detail</strong> — specs, the current owner, and the append-only ownership ledger</summary>
 <br/>
 <p align="center">
-  <img src="brand/reports.png" alt="lazyit reports — timeline of who did what, when" width="920">
+  <img src="brand/asset-detail.png" alt="lazyit asset detail — specs and the timestamped ownership history" width="920">
 </p>
 </details>
 
 <details>
-<summary><strong>Offboarding</strong> — guided handover, assets to return, and a printable act</summary>
+<summary><strong>Knowledge base</strong> — versioned runbooks with wiki-links and full-text search</summary>
 <br/>
 <p align="center">
-  <img src="brand/offboard-user.png" alt="lazyit offboarding — asset return checklist and handover note" width="920">
+  <img src="brand/kb.png" alt="lazyit knowledge base — folders, articles and full-text search" width="920">
 </p>
 </details>
 

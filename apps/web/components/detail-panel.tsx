@@ -48,17 +48,24 @@ export function DetailPanel({
  */
 export function DetailField({
   label,
+  mono = false,
   className,
   children,
 }: {
   label: ReactNode;
+  /**
+   * Render the value in the Ledger data face (Commit Mono) with tabular figures — for machine
+   * strings and temporal/numeric columns (IDs, serials, dates, counts). Names/prose stay on the
+   * body face (ADR-0077). Default off.
+   */
+  mono?: boolean;
   className?: string;
   children: ReactNode;
 }) {
   return (
     <div className={cn("space-y-1", className)}>
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="text-sm">{children}</dd>
+      <dd className={cn("text-sm", mono && "font-mono tabular-nums")}>{children}</dd>
     </div>
   );
 }

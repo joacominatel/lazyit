@@ -226,7 +226,9 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
         <div key={section.headingKey ?? `section-${index}`} className="space-y-0.5">
           {/* section heading - hidden when collapsed, a divider line takes its place */}
           {section.headingKey && !collapsed ? (
-            <p className="px-3 pb-1 pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
+            <p className="px-3 pb-1 pt-1 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
+              {/* ponytail: Ledger label idiom — mono + wider tracking reads like a ledger
+                  column header. Same color/opacity as before, so AA is unchanged. */}
               {t(section.headingKey)}
             </p>
           ) : section.headingKey && collapsed ? (

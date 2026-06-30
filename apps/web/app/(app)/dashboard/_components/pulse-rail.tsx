@@ -164,7 +164,7 @@ function AssetStatusDonut({
                     <span className="flex-1 text-muted-foreground">
                       {assetStatusLabel(segment.status)}
                     </span>
-                    <span className="font-medium tabular-nums text-foreground">
+                    <span className="font-mono font-medium tabular-nums text-foreground">
                       {segment.value}
                     </span>
                   </Link>
@@ -227,7 +227,7 @@ function DonutRing({
     >
       {/* Inner disc punches the ring into a donut and carries the total. */}
       <div className="flex size-[6.5rem] flex-col items-center justify-center rounded-full bg-card text-center shadow-e1">
-        <span className="text-display font-semibold tabular-nums leading-none text-foreground">
+        <span className="font-mono text-display font-semibold tabular-nums leading-none text-foreground">
           {total}
         </span>
         <span className="mt-1 text-xs text-muted-foreground">
@@ -328,7 +328,7 @@ function AccessHealthRow({ row }: { row: AccessRow }) {
       {clear ? (
         <span className="text-xs text-muted-foreground">{empty}</span>
       ) : (
-        <span className="text-base font-semibold tabular-nums text-foreground">
+        <span className="font-mono text-base font-semibold tabular-nums text-foreground">
           {count}
         </span>
       )}

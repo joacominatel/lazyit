@@ -180,7 +180,7 @@ export function ConsumableDetailView({ id }: { id: string }) {
         }
       >
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="text-display font-semibold tabular-nums">
+          <span className="text-display font-mono font-semibold tabular-nums">
             {consumable.currentStock}
           </span>
           <span className="text-lg text-muted-foreground">{consumable.unit}</span>
@@ -230,8 +230,8 @@ export function ConsumableDetailView({ id }: { id: string }) {
 
       <DetailPanel title={t("detail.detailsSection")}>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <DetailField label={t("detail.skuLabel")}>
-            <span className="font-mono">{consumable.sku ?? "—"}</span>
+          <DetailField label={t("detail.skuLabel")} mono>
+            {consumable.sku ?? "—"}
           </DetailField>
           <DetailField label={t("detail.categoryLabel")}>
             {categoryName ? <Badge variant="outline">{categoryName}</Badge> : "—"}
@@ -293,7 +293,7 @@ export function ConsumableDetailView({ id }: { id: string }) {
                       <TableCell>
                         <MovementTypeBadge type={movement.type} />
                       </TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
+                      <TableCell className="text-right font-mono font-medium tabular-nums">
                         {quantityLabel(movement.type, movement.quantity)}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
@@ -321,7 +321,7 @@ export function ConsumableDetailView({ id }: { id: string }) {
                           </span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                      <TableCell className="text-right font-mono tabular-nums text-muted-foreground">
                         {date(movement.createdAt)}
                       </TableCell>
                     </TableRow>

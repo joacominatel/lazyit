@@ -731,7 +731,9 @@ export function UsersListView() {
                       <UserRoleSelect user={user} size="sm" />
                     </ResourceCardMeta>
                     <ResourceCardMeta label={t("list.meta.updated")}>
-                      {date(user.updatedAt)}
+                      <span className="font-mono tabular-nums">
+                        {date(user.updatedAt)}
+                      </span>
                     </ResourceCardMeta>
                   </>
                 }
@@ -799,7 +801,7 @@ export function UsersListView() {
                   </TableCell>
                 ),
                 legajo: (
-                  <TableCell key="legajo">
+                  <TableCell key="legajo" className="font-mono tabular-nums">
                     {user.legajo ? (
                       user.legajo
                     ) : (
@@ -828,7 +830,7 @@ export function UsersListView() {
                 assetsInPossession: (
                   <TableCell
                     key="assetsInPossession"
-                    className="text-right tabular-nums"
+                    className="text-right font-mono tabular-nums"
                   >
                     <CountCell value={user.assetsInPossession} />
                   </TableCell>
@@ -836,7 +838,7 @@ export function UsersListView() {
                 appAccesses: (
                   <TableCell
                     key="appAccesses"
-                    className="text-right tabular-nums"
+                    className="text-right font-mono tabular-nums"
                   >
                     <CountCell value={user.appAccesses} />
                   </TableCell>
@@ -844,7 +846,7 @@ export function UsersListView() {
                 updated: (
                   <TableCell
                     key="updated"
-                    className="text-muted-foreground tabular-nums"
+                    className="font-mono text-muted-foreground tabular-nums"
                   >
                     {date(user.updatedAt)}
                   </TableCell>

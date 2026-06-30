@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="lazyit">
+  <!-- Ledger mark: ink "lz" on paper + the oxblood tick (the wordmark, reduced).
+       Letters are vector paths (no font dependency) so it renders everywhere. -->
+  <rect width="32" height="32" rx="6" fill="#f7f6f4"/>
+  <g fill="none" stroke="#1a1a1a" stroke-width="3" stroke-linecap="butt" stroke-linejoin="miter">
+    <path d="M8.5 7.5 V23.5"/>
+    <path d="M12.8 13.5 H21.2 L13 22 H21.4"/>
+  </g>
+  <rect x="23.4" y="19.4" width="4.4" height="4.4" fill="#9e2b25"/>
+</svg>

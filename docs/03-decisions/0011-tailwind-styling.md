@@ -14,6 +14,15 @@ deciders: [Joaquín Minatel]
 accepted — Tailwind v4 + shadcn/ui both **installed and configured** in `apps/web`
 (`radix-nova` preset, Radix primitives, `neutral` base color, CSS variables).
 
+> **Amended by [[0077-ledger-design-language-frontend-refactor]] (2026-06-30).** «The Ledger»
+> refactor revises the **palette + type identity** layered on this token system (the shadcn CSS-var
+> architecture, the AA discipline and the owned component layer are unchanged). **Delta — palette:**
+> warm-bone + single-indigo → **pure-neutral surfaces** (chroma 0) + one **oxblood** brand accent
+> (`--brand oklch(0.52 0.2 25)` light / `oklch(0.62 0.19 25)` dark), plus a reserved security-green
+> `--verify` seal. **Delta — type:** Geist / Geist Mono → **Hanken Grotesk** (body) / **Commit
+> Mono** (data) / **Redaction** (display, login + empty-states only). The amendments below (warm
+> neutrals, status tokens, tinted-text family) record the pre-Ledger state.
+
 ## Context
 
 The product aims for a modern, consistent, opinionated UI ([[vision]]) built by a small

@@ -388,7 +388,9 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
             {t("items.searchEmpty", { query: query.trim() })}
           </div>
         ) : (
-          <ul className="space-y-2">
+          // ponytail: the items list IS a ledger — one card, hairline-divided rows (ADR-0077),
+          // not a stack of separately-ringed mini-cards.
+          <ul className="divide-y overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
             {(filteredItems ?? []).map((item) => (
               <ItemRow
                 key={item.id}
@@ -431,7 +433,8 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
             {t("members.empty")}
           </div>
         ) : (
-          <ul className="space-y-2">
+          // ponytail: members as a ledger too — hairline-divided rows in one card (ADR-0077).
+          <ul className="divide-y overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
             {members.map((m) => (
               <MemberRow
                 key={m.userId}
@@ -615,7 +618,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
           : t("items.reveal");
 
   return (
-    <li className="flex items-center gap-3 rounded-lg bg-card p-3 ring-1 ring-foreground/10">
+    <li className="flex items-center gap-3 p-3">
       {/* The structural-kind glyph (ADR-0075) — server-visible metadata, no decryption needed. */}
       <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-pillar-knowledge/10 text-pillar-knowledge">
         <SecretKindIcon kind={item.kind} className="size-4" aria-hidden />
@@ -800,7 +803,7 @@ function MemberRow({
   }
 
   return (
-    <li className="flex items-center gap-3 rounded-lg bg-card p-3 ring-1 ring-foreground/10">
+    <li className="flex items-center gap-3 p-3">
       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold uppercase text-muted-foreground">
         {member.firstName[0]}{member.lastName[0]}
       </span>

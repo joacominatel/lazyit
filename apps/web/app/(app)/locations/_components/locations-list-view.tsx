@@ -381,7 +381,9 @@ export function LocationsListView() {
                       {location.floor ?? "—"}
                     </ResourceCardMeta>
                     <ResourceCardMeta label={t("list.meta.updated")}>
-                      {date(location.updatedAt)}
+                      <span className="font-mono tabular-nums">
+                        {date(location.updatedAt)}
+                      </span>
                     </ResourceCardMeta>
                     {location.address ? (
                       <ResourceCardMeta
@@ -452,7 +454,7 @@ export function LocationsListView() {
                 >
                   {location.address ?? "—"}
                 </TableCell>
-                <TableCell className="text-muted-foreground tabular-nums">
+                <TableCell className="font-mono text-muted-foreground tabular-nums">
                   {date(location.updatedAt)}
                 </TableCell>
                 <TableCell className="text-right">
