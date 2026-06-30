@@ -278,10 +278,10 @@ export function AssetDetailView({ id }: { id: string }) {
               <span className="font-mono">—</span>
             )}
           </DetailField>
-          <DetailField label={t("purchaseDate")}>
+          <DetailField label={t("purchaseDate")} mono>
             {asset.purchaseDate ? date(asset.purchaseDate) : "—"}
           </DetailField>
-          <DetailField label={t("warrantyEnd")}>
+          <DetailField label={t("warrantyEnd")} mono>
             {asset.warrantyEnd ? date(asset.warrantyEnd) : "—"}
           </DetailField>
         </dl>
@@ -402,11 +402,14 @@ export function AssetDetailView({ id }: { id: string }) {
 
       {history.length > 0 && (
         <DetailPanel title={t("ownershipHistoryTitle")}>
-          <ul className="divide-y text-sm">
+          {/* The ownership record as ledger lines (ADR-0077): owner (body face) · the
+              assignedAt → releasedAt span in Commit Mono tabular figures so the dates lock into
+              columns · an optional `// note` annotation. Baseline-aligned like a printed row. */}
+          <ul className="divide-y divide-border text-sm">
             {history.map((assignment) => (
               <li
                 key={assignment.id}
-                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0"
+                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0"
               >
                 <Link
                   href={`/users/${assignment.userId}`}
@@ -414,14 +417,18 @@ export function AssetDetailView({ id }: { id: string }) {
                 >
                   {ownerName(assignment)}
                 </Link>
-                <span className="tabular-nums text-muted-foreground">
-                  {date(assignment.assignedAt)} →{" "}
-                  {assignment.releasedAt
-                    ? date(assignment.releasedAt)
-                    : "—"}
+                <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                  {date(assignment.assignedAt)}
+                  <span className="mx-1.5 text-muted-foreground/70" aria-hidden>
+                    →
+                  </span>
+                  {assignment.releasedAt ? date(assignment.releasedAt) : "—"}
                 </span>
                 {assignment.notes && (
                   <span className="w-full text-muted-foreground">
+                    <span aria-hidden className="font-mono text-muted-foreground/60">
+                      {"// "}
+                    </span>
                     {assignment.notes}
                   </span>
                 )}
