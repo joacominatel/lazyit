@@ -1252,6 +1252,32 @@ describe('SecretManagerService', () => {
         ),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
+
+    it('a member cannot beacon a FOREIGN/nonexistent itemId (item not in this vault) → 404, NO audit row', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      // Two vaults alice is a member of; the item lives in the OTHER vault.
+      const vaultA = await makeVault(svc, alice, 'A');
+      const vaultB = await makeVault(svc, alice, 'B');
+      const foreign = await svc.createItem(alice, vaultB, {
+        handle: 'other-db',
+        label: 'Other DB',
+        ...ENVELOPE,
+      });
+      db.audit.length = 0; // isolate: prove no reveal row is written on the rejected call
+
+      // Revealing vaultB's item THROUGH vaultA must 404 (IDOR / audit-trail-poisoning fence) — even though
+      // alice is a live member of vaultA, the itemId does not belong to it.
+      await expect(
+        svc.recordReveal(alice, vaultA, foreign.id),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      // A plain nonexistent itemId is likewise a 404.
+      await expect(
+        svc.recordReveal(alice, vaultA, 'citem00000000000000nope'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(db.audit).toHaveLength(0);
+    });
   });
 
   // ── revoke / rename basics ────────────────────────────────────────────────────
