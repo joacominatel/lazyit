@@ -4,6 +4,7 @@ import {
   ArrowPathIcon,
   ComputerDesktopIcon,
   KeyIcon,
+  LockClosedIcon,
   PrinterIcon,
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
@@ -27,6 +28,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { UserAvatar } from "@/components/user-avatar";
+import type { OffboardResult } from "@/lib/api/endpoints/users";
 import { useOffboardUser } from "@/lib/api/hooks/use-user-mutations";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
@@ -73,12 +75,13 @@ interface OffboardingSheetProps {
   };
 }
 
-/** A pillar-tinted icon chip — decorative ≥24px glyph, so pillar hue is AA-safe here. */
+/** A pillar-tinted icon chip — decorative ≥24px glyph, so pillar hue is AA-safe here. Secrets ride the
+ * knowledge pillar (their home in the nav), matching the Secret Manager surface. */
 function PillarChip({
   pillar,
   children,
 }: {
-  pillar: "inventory" | "access";
+  pillar: "inventory" | "access" | "knowledge";
   children: React.ReactNode;
 }) {
   return (
@@ -88,7 +91,9 @@ function PillarChip({
         "flex size-9 shrink-0 items-center justify-center rounded-lg",
         pillar === "inventory"
           ? "bg-pillar-inventory/10 text-pillar-inventory"
-          : "bg-pillar-access/10 text-pillar-access",
+          : pillar === "access"
+            ? "bg-pillar-access/10 text-pillar-access"
+            : "bg-pillar-knowledge/10 text-pillar-knowledge",
       )}
     >
       {children}
@@ -183,33 +188,90 @@ function ListSkeleton() {
   );
 }
 
-/** The sober success confirmation — a drawn check, no confetti. Respectful, not whimsical. */
-function DoneState({ name }: { name: string }) {
+/**
+ * The sober success confirmation — a drawn check, no confetti. Respectful, not whimsical. When the
+ * departing person held Secret-vault memberships, it also surfaces a rotation prompt (issue #869):
+ * those vaults were revoked, but their secrets could have been read and must be rotated BY HAND —
+ * lazyit is zero-knowledge (INV-10) and cannot re-encrypt them. Display-only; nothing to rotate → the
+ * check stays centered and the sheet auto-closes as before.
+ */
+function DoneState({
+  name,
+  rotationVaults,
+  onClose,
+}: {
+  name: string;
+  rotationVaults: OffboardResult["rotationVaults"];
+  onClose: () => void;
+}) {
   const t = useTranslations("users.offboarding");
+  const tc = useTranslations("common");
+  const hasRotation = rotationVaults.length > 0;
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-12 text-center">
-      <span className="flex size-14 items-center justify-center rounded-full bg-success/10 text-success">
-        <svg
-          viewBox="0 0 24 24"
-          className="size-8"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2.5}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <path className="animate-check-draw" d="M5 13l4 4L19 7" />
-        </svg>
-      </span>
-      <div className="space-y-1">
-        <p className="font-heading text-base font-medium text-foreground">
-          {t("doneTitle", { name })}
-        </p>
-        <p className="mx-auto max-w-xs text-sm text-muted-foreground">
-          {t("doneSubtitle")}
-        </p>
+    <div
+      className={cn(
+        "flex flex-1 flex-col px-6",
+        hasRotation
+          ? "gap-6 overflow-y-auto py-10"
+          : "items-center justify-center gap-4 py-12 text-center",
+      )}
+    >
+      <div className="flex flex-col items-center gap-4 text-center">
+        <span className="flex size-14 items-center justify-center rounded-full bg-success/10 text-success">
+          <svg
+            viewBox="0 0 24 24"
+            className="size-8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path className="animate-check-draw" d="M5 13l4 4L19 7" />
+          </svg>
+        </span>
+        <div className="space-y-1">
+          <p className="font-heading text-base font-medium text-foreground">
+            {t("doneTitle", { name })}
+          </p>
+          <p className="mx-auto max-w-xs text-sm text-muted-foreground">
+            {t("doneSubtitle")}
+          </p>
+        </div>
       </div>
+
+      {hasRotation ? (
+        <section className="space-y-3 text-left">
+          <h3 className="text-label uppercase text-muted-foreground">
+            {t("secretsToRotate")}
+          </h3>
+          <ul className="divide-y">
+            {rotationVaults.map((vault) => (
+              <li
+                key={vault.vaultId}
+                className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
+              >
+                <PillarChip pillar="knowledge">
+                  <LockClosedIcon className="size-5" />
+                </PillarChip>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium text-foreground">
+                    {vault.name}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground tabular-nums">
+                    {t("vaultItems", { count: vault.itemCount })}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted-foreground">{t("rotateHelp")}</p>
+          <Button variant="outline" className="w-full" onClick={onClose}>
+            {tc("close")}
+          </Button>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -244,6 +306,11 @@ export function OffboardingSheet({
     DEFAULT_SHOW_ACCESS,
   );
   const [done, setDone] = useState(false);
+  // The Secret-vaults the offboarded person could read, from the offboard RESULT (issue #869) — a
+  // rotation prompt shown in the success state. Empty unless they held vault memberships.
+  const [rotationVaults, setRotationVaults] = useState<
+    OffboardResult["rotationVaults"]
+  >([]);
 
   const fullName = `${user.firstName} ${user.lastName}`;
 
@@ -255,24 +322,36 @@ export function OffboardingSheet({
     );
   }
 
+  function finish() {
+    setDone(false);
+    setRotationVaults([]);
+    onOpenChange(false);
+    router.push("/users");
+  }
+
   async function confirm() {
     try {
-      await offboard.mutateAsync(user.id);
+      const result = await offboard.mutateAsync(user.id);
       toast.success(t("toast.archived"));
-      // Hold the sheet open briefly to show the sober "done" before navigating away.
+      setRotationVaults(result.rotationVaults);
+      // Hold the sheet open on the sober "done". With NO secrets to rotate, auto-close after a beat as
+      // before; when there ARE vaults to rotate, hold open so the operator can read + act on the SOC2
+      // rotation prompt (flashing it for a beat would defeat the purpose) — they close it themselves.
       setDone(true);
-      window.setTimeout(() => {
-        onOpenChange(false);
-        router.push("/users");
-      }, 1100);
+      if (result.rotationVaults.length === 0) {
+        window.setTimeout(finish, 1100);
+      }
     } catch (error) {
       notifyError(error, t("toast.error"));
     }
   }
 
-  // Reset the local "done" flag whenever the sheet is re-opened for a fresh run.
+  // Reset the local success state whenever the sheet is re-opened for a fresh run.
   function handleOpenChange(next: boolean) {
-    if (!next) setDone(false);
+    if (!next) {
+      setDone(false);
+      setRotationVaults([]);
+    }
     onOpenChange(next);
   }
 
@@ -282,7 +361,11 @@ export function OffboardingSheet({
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent side="right" className="sm:max-w-md">
         {done ? (
-          <DoneState name={fullName} />
+          <DoneState
+            name={fullName}
+            rotationVaults={rotationVaults}
+            onClose={finish}
+          />
         ) : (
           <>
             <SheetHeader className="gap-3">
