@@ -144,7 +144,20 @@
       "addField": "Add field",
       "nameRequired": "Name is required.",
       "duplicateName": "Duplicate field name.",
-      "copiedFromModel": "Copied from {model}. Edit anything for this unit."
+      "copiedFromModel": "Copied from {model}. Edit anything for this unit.",
+      "specsHints": {
+        "title": "This category suggests some fields",
+        "missingRequired": "{label} is usually filled in for this category.",
+        "unknownKey": "“{key}” isn't a field this category declares.",
+        "wrongType": "{label} should be a {type} value.",
+        "notInEnum": "{label} should be one of: {values}.",
+        "types": {
+          "string": "text",
+          "number": "number",
+          "boolean": "yes/no",
+          "enum": "choice"
+        }
+      }
     }
   },
   "detail": {

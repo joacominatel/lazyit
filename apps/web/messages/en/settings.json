@@ -644,6 +644,32 @@
         "orderPlaceholder": "Optional — lower sorts first",
         "saveChanges": "Save changes",
         "createButton": "Create {label}",
+        "specsDictionary": {
+          "label": "Specs dictionary",
+          "description": "Declare the custom fields assets in this category should have. Advisory only — it powers autocomplete and soft hints on the asset form; it never blocks a save or invalidates existing assets.",
+          "empty": "No declared fields yet.",
+          "addField": "Add field",
+          "keyPlaceholder": "Key (e.g. ram)",
+          "labelPlaceholder": "Label (e.g. RAM)",
+          "typeLabel": "Type",
+          "typeOptions": {
+            "string": "Text",
+            "number": "Number",
+            "boolean": "Yes / No",
+            "enum": "Choice list"
+          },
+          "requiredLabel": "Required",
+          "enumValuesPlaceholder": "8GB, 16GB, 32GB",
+          "enumValuesHint": "Comma-separated allowed values.",
+          "removeFieldTitle": "Remove field",
+          "removeFieldLabel": "Remove field {index}",
+          "fieldKeyLabel": "Field {index} key",
+          "fieldLabelLabel": "Field {index} label",
+          "fieldEnumValuesLabel": "Field {index} allowed values",
+          "errors": {
+            "invalid": "Check the dictionary: every field needs a key and a label, choice-list fields need at least one value, and keys must be unique."
+          }
+        },
         "errors": {
           "nameRequired": "Name is required.",
           "orderInteger": "Order must be a whole number."

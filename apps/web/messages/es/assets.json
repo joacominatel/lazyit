@@ -144,7 +144,20 @@
       "addField": "Agregar campo",
       "nameRequired": "El nombre es obligatorio.",
       "duplicateName": "Nombre de campo duplicado.",
-      "copiedFromModel": "Copiado desde {model}. Cambia lo que necesites para esta unidad."
+      "copiedFromModel": "Copiado desde {model}. Cambia lo que necesites para esta unidad.",
+      "specsHints": {
+        "title": "Esta categoría sugiere algunos campos",
+        "missingRequired": "{label} suele completarse para esta categoría.",
+        "unknownKey": "«{key}» no es un campo que declare esta categoría.",
+        "wrongType": "{label} debería ser un valor de tipo {type}.",
+        "notInEnum": "{label} debería ser uno de: {values}.",
+        "types": {
+          "string": "texto",
+          "number": "número",
+          "boolean": "sí/no",
+          "enum": "opción"
+        }
+      }
     }
   },
   "detail": {
