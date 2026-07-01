@@ -64,6 +64,11 @@ import { useListParams } from "@/lib/hooks/use-list-params";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
+import {
+  USER_FILTER_DEFAULTS as FILTER_DEFAULTS,
+  USER_LIST_OPTIONS,
+  deriveUserParams,
+} from "./users-list-query";
 import { ByoiBanner } from "./byoi-banner";
 import { CloneUserWizard } from "./clone-user-wizard";
 import { ManagerDisplay } from "./manager-display";
@@ -88,19 +93,6 @@ type DirectoryFilter = "ALL" | "directory" | "accounts";
  * "View N members" link (`/users?role=VIEWER`) — because the value lives in the URL, the link just works.
  */
 type RoleFilter = "ALL" | Role;
-
-/**
- * Filter param defaults. `status` (active/inactive) is filtered client-side over the page.
- * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL. `directory`
- * ("ALL" | "directory" | "accounts") drives the server-side `directoryOnly` slice. `role` ("ALL" |
- * ADMIN | MEMBER | VIEWER) drives the server-side `?role=` slice (#693).
- */
-const FILTER_DEFAULTS = {
-  status: "ALL",
-  archived: "ALL",
-  directory: "ALL",
-  role: "ALL",
-} as const;
 
 /**
  * The Users-table columns an operator can show/hide via the column picker (#368, extended in #386).
@@ -230,40 +222,19 @@ export function UsersListView() {
     setOffset,
     clearFilters,
     filtersActive,
-  } = useListParams({
-    filters: FILTER_DEFAULTS,
-    defaultSort: "createdAt",
-    defaultDir: "desc",
-  });
+  } = useListParams(USER_LIST_OPTIONS);
 
   const statusFilter = filters.status as StatusFilter;
   // The archived view is ADMIN-only.
   const archived = isAdmin && filters.archived === "only";
   const directoryFilter = filters.directory as DirectoryFilter;
-  // Map the three-way segmented filter to the server's optional `directoryOnly` slice (omit for "ALL").
-  const directoryOnly =
-    directoryFilter === "directory"
-      ? true
-      : directoryFilter === "accounts"
-        ? false
-        : undefined;
   const roleFilter = filters.role as RoleFilter;
-  // Map the role filter to the server's optional `?role=` slice (omit for "ALL"). The Roles deep-link
-  // (`/users?role=VIEWER`) lands here via the URL, so no extra handling is needed for it (#693).
-  const role = roleFilter === "ALL" ? undefined : roleFilter;
 
-  // Forward only the server-supported params; `status` is filtered client-side over the page below.
+  // `deriveUserParams` is the SAME URL→query mapping the server prefetch uses — `directory`→
+  // `directoryOnly`, `role`→`?role=`, archived→`deleted` (#693) — so this hook's key and the
+  // SSR-prefetched key are byte-identical (ADR-0067 / #733). `status` stays a client-side post-filter.
   const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useUserList({
-      q: q || undefined,
-      sort,
-      dir: sort ? dir : undefined,
-      limit,
-      offset,
-      deleted: archived ? "only" : undefined,
-      directoryOnly,
-      role,
-    });
+    useUserList(deriveUserParams({ q, sort, dir, offset, limit, filters }, { isAdmin }));
   const restoreUserMutation = useRestoreUser();
 
   // The server-orchestrated clone wizard (ADR-0058) is `cloning` — distinct from the create/edit form.
