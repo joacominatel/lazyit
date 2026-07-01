@@ -129,6 +129,11 @@ services:
       # OPTIONAL override: pin the project id to fail clear if it ever drifts. Normally LEFT UNSET —
       # it comes from oidc-client.json (bundled flow). Set only for BYOI without the sidecar.
       ZITADEL_MGMT_PROJECT_ID: ${ZITADEL_MGMT_PROJECT_ID:-}
+    volumes:
+      # User-uploaded attachment blobs (ADR-0082): asset documents + KB inline images,
+      # content-addressed by sha256, served API-only behind per-parent authz. ⚠ NOT covered by any
+      # backup yet (deferred to v1.1 by decision — ADR-0082; see docs/05-runbooks/backups.md).
+      - attachments_data:/app/attachments
     depends_on:
       db:
         condition: service_healthy
@@ -608,6 +613,12 @@ volumes:
   valkey_data:
   caddy_data:
   caddy_config:
+  # User-uploaded attachment blobs (ADR-0082): `<sha[0:2]>/<sha256>` content-addressed files + a
+  # tmp/ staging dir, mounted on the api at /app/attachments. Domain data — NOT rebuildable.
+  # ⚠ DR gap (accepted, loud): the backup sidecar does NOT tar this volume yet (deferred to v1.1 —
+  # ADR-0082); a host disk loss loses all attachments while the DB restores. See
+  # docs/05-runbooks/backups.md before relying on it.
+  attachments_data:
   # Shared secrets volume for the zero-touch Zitadel bootstrap (ADR-0043 §4 / §9e). Zitadel writes
   # the FirstInstance machine key here; the zitadel-bootstrap sidecar reads it and writes back
   # oidc-client.json + sa-key.json for api/web. Persisted (a named volume) so creds survive `down`;
