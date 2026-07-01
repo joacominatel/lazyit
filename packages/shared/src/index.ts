@@ -62,6 +62,7 @@ export * from "./schemas/secret-vault";
 export * from "./schemas/user-keypair";
 export * from "./schemas/vault-membership";
 export * from "./schemas/service-account";
+export * from "./schemas/smtp";
 export * from "./schemas/user";
 export * from "./schemas/user-history";
 export * from "./schemas/user-list";
