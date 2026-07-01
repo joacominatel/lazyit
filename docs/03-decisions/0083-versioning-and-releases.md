@@ -14,7 +14,7 @@ deciders: [Joaquín Minatel]
 accepted — issue #903. Establishes the version *identity* half only: how a lazyit build knows
 and displays its own version, and how releases are cut. The consumption half — the in-app
 "latest known / N versions behind" check, the update notifier and any guided updater — is
-deferred to [[0084-versioning-updater]] (future). Builds on [[0025-containerization-strategy]]
+deferred to [[0084-update-awareness-and-guided-update]] (future). Builds on [[0025-containerization-strategy]]
 (images built on the host from the git checkout) and [[0027-ci-pipeline]] (CD deferred, GHCR
 reserved, CI stays `push: false`). Release mechanics ride the existing dev→master promotion flow
 ([[git-workflow]]).
@@ -89,7 +89,7 @@ For a self-hosted end-user app, MAJOR is defined by **operator impact**, not API
   when the update is **not cleanly reversible**.
 
 This makes the version number itself the **machine-readable "is this one-click-safe?" contract**
-that the future updater ([[0084-versioning-updater]]) keys off — no separate breaking-flag manifest
+that the future updater ([[0084-update-awareness-and-guided-update]]) keys off — no separate breaking-flag manifest
 is needed. "Target is N majors ahead" ⇒ the updater blocks one-click and forces reading the notes.
 
 ### Version source of truth — the git tag, injected at build
@@ -109,7 +109,7 @@ Settings → Instance displays it. Off-tag builds (a rebuild that isn't exactly 
 show the `git describe` form `v1.4.2-3-gabc1234` rather than lying about being a clean release.
 
 > This ADR defines **only the identity half** (`current` + `gitSha`). The "latest known" version,
-> the "N behind" comparison and any network check belong to [[0084-versioning-updater]].
+> the "N behind" comparison and any network check belong to [[0084-update-awareness-and-guided-update]].
 
 ### Signed tags — SSH, verifiable, no registry machinery
 
@@ -198,6 +198,6 @@ Publishing versioned images is recorded as a deferred optimization (below), not 
   compose/migrations changed anyway. CI stays `push: false` here.
 - **Offline `CHANGELOG.md`.** A generated, committed changelog for egress-restricted/air-gapped
   operators who can't reach GitHub Releases — revisit only if that need is real.
-- **The consumption half — [[0084-versioning-updater]]** (future): latest-known-version check,
+- **The consumption half — [[0084-update-awareness-and-guided-update]]** (future): latest-known-version check,
   "N versions behind" indicator, weekly digest email, and any guided updater. This ADR deliberately
   stops at version *identity*.
