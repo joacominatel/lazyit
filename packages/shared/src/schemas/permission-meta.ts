@@ -267,6 +267,16 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
     pillar: "knowledge",
     tier: "coarse",
   },
+  "secret:fetch": {
+    // Programmatic secret retrieval by a SERVICE ACCOUNT (ADR-0080) — the single narrow verb an SA holds
+    // to pull a vault's ciphertext over the headless endpoint for client-side decryption by the CLI. A
+    // MACHINE-ONLY permission (like `infra:report`): coarse tier (neither `:read` nor `:write`), ADMIN-only
+    // by seed, and deliberately NOT bundled into any human capability toggle — it is granted to the SA, not
+    // a role, and the fetch route is service-principal-only.
+    label: "Fetch secrets programmatically (service account)",
+    pillar: "knowledge",
+    tier: "coarse",
+  },
   // ── Automation (Applications Workflow Engine, epic #248) ─────────────────────
   "workflow:read": {
     label: "View workflows & runs",
