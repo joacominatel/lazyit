@@ -63,6 +63,27 @@ export const VaultMemberMetaSchema = z.object({
 export type VaultMemberMeta = z.infer<typeof VaultMemberMetaSchema>;
 
 /**
+ * A vault SERVICE-ACCOUNT member's NON-secret display metadata — the shape of
+ * `GET /secret-vaults/:id/service-account-members` (ADR-0080). Parallels {@link VaultMemberMetaSchema}
+ * for the human case, but for a machine member: `serviceAccountId` + the account's non-secret display
+ * fields (name, optional description, the short non-secret `tokenPrefix` for recognition, and whether it
+ * is currently enabled). NEVER a wrapped-DEK blob and NEVER the token/secret — server-visible metadata
+ * only (ADR-0061 §9). `memberSince` is the membership `createdAt` (ISO-8601). The read is member-scoped
+ * (an ADMIN or a live human member of the vault), exactly like the human members list.
+ */
+export const VaultServiceAccountMemberMetaSchema = z.object({
+  serviceAccountId: z.cuid(),
+  name: z.string(),
+  description: z.string().nullable(),
+  tokenPrefix: z.string(),
+  isActive: z.boolean(),
+  memberSince: z.iso.datetime(),
+});
+export type VaultServiceAccountMemberMeta = z.infer<
+  typeof VaultServiceAccountMemberMetaSchema
+>;
+
+/**
  * A vault with its embedded member list — the shape of `GET /secret-vaults/:id` (the detail endpoint
  * inlines `members`, unlike the standalone `/members` list). Metadata only — never a DEK.
  */
