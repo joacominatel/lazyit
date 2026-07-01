@@ -435,6 +435,67 @@ describe("selectFields — location", () => {
   });
 });
 
+// A consumable row (#873 regression fix): stock is the headline disambiguator, pushed first as
+// "<N> <unit>", then sku (mono) / category / description. Guarded on `currentStock != null` so a
+// legitimate zero-stock item still shows its "0 <unit>" line.
+describe("selectFields — consumable", () => {
+  it("emits stock first, then sku (mono), category, description", () => {
+    const fields = selectFields({
+      entity: "consumable",
+      data: {
+        id: "con_1",
+        name: "USB-C cable",
+        sku: "CBL-001",
+        currentStock: 42,
+        unit: "units",
+        categoryName: "Cables",
+        description: "1m braided",
+      },
+    });
+    expect(fields.map((f) => f.labelKey)).toEqual([
+      "stock",
+      "sku",
+      "category",
+      "description",
+    ]);
+    expect(fields.find((f) => f.labelKey === "stock")?.value).toBe("42 units");
+    expect(fields.find((f) => f.labelKey === "sku")).toMatchObject({
+      value: "CBL-001",
+      mono: true,
+    });
+  });
+
+  it("still shows a zero-stock line (0 is a real value, not missing)", () => {
+    const fields = selectFields({
+      entity: "consumable",
+      data: {
+        id: "con_2",
+        name: "Toner",
+        currentStock: 0,
+        unit: "units",
+      },
+    });
+    expect(fields.find((f) => f.labelKey === "stock")?.value).toBe("0 units");
+  });
+
+  it("drops the stock line when the row has no unit (or no stock)", () => {
+    // Stock present but no unit ⇒ dropped (can't render a bare number without its unit).
+    expect(
+      selectFields({
+        entity: "consumable",
+        data: { id: "con_3", name: "Mystery", currentStock: 5, unit: null },
+      }).find((f) => f.labelKey === "stock"),
+    ).toBeUndefined();
+    // No stock at all ⇒ dropped.
+    expect(
+      selectFields({
+        entity: "consumable",
+        data: { id: "con_4", name: "Mystery", unit: "units" },
+      }).find((f) => f.labelKey === "stock"),
+    ).toBeUndefined();
+  });
+});
+
 // An infra node (wave 3, #791) — the new entity variant. The basics (kind/status/IP/linked asset)
 // come straight from the lean search hit (zero fetch); status is the identity badge, so the <dl>
 // fields are kind, linkedAsset, ip. `kind` is localized via the threaded `infraKind` label (the raw
