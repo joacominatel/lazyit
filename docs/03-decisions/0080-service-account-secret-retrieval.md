@@ -12,7 +12,9 @@ deciders: [Joaquín Minatel]
 ## Status
 
 accepted — extends [[0061-secret-manager-zero-knowledge]] (the zero-knowledge Secret Manager, INV-10)
-and [[0048-service-accounts]] (the non-human principal). Issue #614.
+and [[0048-service-accounts]] (the non-human principal). Issue #614; amended by #883 (auto-generate the
+keypair for every SA on create + regenerate it on token rotation — no schema change, the models already
+carry the 1:1 `@unique` this needs).
 
 ## Context
 
@@ -51,7 +53,10 @@ change to the crypto invariant** — the SA token plays the role the human vault
 
 ### 1. The SA keypair — a separate model, token-wrapped private key
 
-On SA creation a browser generates a fresh **X25519 keypair** (client-side). The private key is wrapped
+On SA creation a browser generates a fresh **X25519 keypair** (client-side) for **every** service account
+— issue #883 dropped the earlier `secret:fetch`-only gate, since a keyless SA later granted Fetch (or one
+created before #614) was a footgun: it could not be granted vault access and "recreating" it lost its
+identity + grants. An unused keypair on a non-fetch SA is negligible cost. The private key is wrapped
 **once**, under a KEK derived by **Argon2id** from the **SA token secret** (the `lzit_sa_<id>_<secret>`
 plaintext, known only at mint time + to the token holder). The server stores ONLY:
 
@@ -60,6 +65,16 @@ plaintext, known only at mint time + to the token holder). The server stores ONL
 - and (already, from ADR-0048) the token **SHA-256 hash** for auth.
 
 It stores **neither the token plaintext, nor the unwrapped private key, nor the KEK**.
+
+**Lifecycle — regenerate on rotation (#883).** The keypair is wrapped under the token, so a **token rotation**
+kills the old wrap (nobody holds the old token after the one-time reveal). On rotation the browser therefore
+**re-generates the keypair under the NEW token** and it **REPLACES** the stored `ServiceAccountKeypair` in
+place (1:1 `@unique`) — the same `POST …/:saId/keypair` write, now create-or-replace. This is also the
+**retrofit path** for a pre-#883 keyless SA (its first keypair). Because the regenerated keypair carries a
+**new public key**, every DEK previously wrapped to the old key is undecryptable, so the SA's
+`ServiceAccountVaultMembership` rows are **hard-dropped in the same transaction**: the SA cleanly loses its
+grants and must be **re-granted** (exactly the ADR's "rotation = re-issue keypair + re-grant" framing above).
+The regeneration is client-side and token-wrapped like the create path — INV-10 is untouched.
 
 **Fork — schema shape (decided): a dedicated `ServiceAccountKeypair` model**, NOT a polymorphic
 `UserKeypair` union. ADR-0048 makes the SA a **separate principal** (not a `User`); a decoupled keypair
@@ -178,13 +193,18 @@ CHECK on `SecretAuditLog`. A `--create-only` migration (no reset). New catalog v
   crypto; the fence opens for exactly one audited, ciphertext-only, service-only path. Per-vault scoping
   bounds blast radius; every read is attributable.
 - **Negative / accepted.** The **token-as-keymaster** residual (a live token can decrypt its vault; the
-  token transits the server on the request). **Rotation is manual** in v1 (re-issue keypair + re-grant) —
-  see follow-ups. A **compromised deploy box** that holds the token is out of scope (the same irreducible
+  token transits the server on the request). **Rotation regenerates the keypair automatically** (client-side,
+  #883) but still **requires re-granting** the SA's vaults — the fresh public key orphans the old wrapped
+  DEKs. A **compromised deploy box** that holds the token is out of scope (the same irreducible
   client-compromise residual as any password manager, ADR-0061 threat model).
-- **Follow-ups (not built here).** (a) **Token rotation → re-wrap**: on rotate, re-derive the KEK from the
-  new token and re-wrap the *same* SA private key (keeps existing vault grants valid) — noted, build when
-  trivial. (b) **Visually mark machine-granted vaults** so operators know a token can read them. (c) The
-  export/import overlap (#612/#613). (d) A first-class `SecretAuditLog` read surface (#870).
+- **Follow-ups.** (a) **Token rotation → regenerate keypair — DONE (#883).** On rotate the browser
+  re-generates the keypair under the new token and it REPLACES the stored row; this is also how a pre-#883
+  keyless SA is retrofitted. We chose **regenerate** (fresh keypair, re-grant required) over the originally
+  sketched *same-key re-wrap* (which would preserve grants) because same-key re-wrap needs the OLD token to
+  unwrap the old private key — unavailable in the rotate flow and impossible for a keyless retrofit; the
+  server-side membership-drop is conditional on a changed public key, so a future same-key re-wrap would
+  keep grants for free. (b) **Visually mark machine-granted vaults** so operators know a token can read them.
+  (c) The export/import overlap (#612/#613). (d) A first-class `SecretAuditLog` read surface (#870).
 
 ---
 
