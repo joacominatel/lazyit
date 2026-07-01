@@ -19,6 +19,7 @@ export const SEARCH_ENTITIES = [
   "locations",
   "applications",
   "infra", // topology nodes (ADR-0070 v1 — kind/status/state filterable, label/ip/asset name searchable)
+  "consumables", // #873 — name/sku/description searchable, currentStock/unit for the lean hit preview
 ] as const;
 
 export const SearchEntitySchema = z.enum(SEARCH_ENTITIES);
@@ -79,12 +80,25 @@ export const InfraNodeHitSchema = z.object({
   assetName: z.string().nullable(),
 });
 
+// A consumable hit (#873). `name`/`sku`/`description` are the searchable fields; `currentStock` (the
+// cached on-hand count, kept fresh by re-indexing on every movement) + `unit` let the lean hit render
+// a "12 units" preview with zero extra fetch. No `category` yet (deferred — YAGNI, would need a join).
+export const ConsumableHitSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  sku: z.string().nullable(),
+  description: z.string().nullable(),
+  currentStock: z.number().int(),
+  unit: z.string(),
+});
+
 export type AssetHit = z.infer<typeof AssetHitSchema>;
 export type ArticleHit = z.infer<typeof ArticleHitSchema>;
 export type UserHit = z.infer<typeof UserHitSchema>;
 export type LocationHit = z.infer<typeof LocationHitSchema>;
 export type ApplicationHit = z.infer<typeof ApplicationHitSchema>;
 export type InfraNodeHit = z.infer<typeof InfraNodeHitSchema>;
+export type ConsumableHit = z.infer<typeof ConsumableHitSchema>;
 
 /** One result block per entity: the hits for that index plus Meili's total estimate. */
 function entityResult<Hit extends z.ZodType>(hit: Hit) {
@@ -113,6 +127,7 @@ export const SearchResultsSchema = z
     locations: entityResult(LocationHitSchema),
     applications: entityResult(ApplicationHitSchema),
     infra: entityResult(InfraNodeHitSchema),
+    consumables: entityResult(ConsumableHitSchema),
   })
   .partial()
   .extend({
