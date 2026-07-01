@@ -45,7 +45,8 @@
       "configured": "Configured",
       "identityProvider": "Identity provider",
       "administrators": "Administrators",
-      "runtimePosture": "Runtime posture"
+      "runtimePosture": "Runtime posture",
+      "version": "Version"
     },
     "configuredBadge": "Configured",
     "setupPending": "Setup pending",
