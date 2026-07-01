@@ -67,15 +67,17 @@ concrete instance of a generic [[asset-model]].
 - Ownership is **never a column** on the asset — it is the [[asset-assignment]] join, so
   ownership history is automatic ([[0019-asset-assignment-integrity]]).
 
-> [!warning] Known debt — dynamic `specs` validation
-> `Asset.specs` (and [[asset-model]]`.specs`) currently accept **any JSON object**
-> (`z.record(z.string(), z.unknown())`). The intent ([[0007-flexible-asset-specs-jsonb]]) is to
-> validate `specs` against a per-[[asset-category]] schema (e.g. a future
-> `AssetCategory.specsSchema`), which does not exist yet. Tracked as a `TODO(specs)` in the
-> shared zod schemas. The web's custom-fields editor only authors **scalar string values**
-> (one `{ name, value }` row each), but pre-existing non-scalar entries (arrays/objects) are
-> **preserved untouched** on edit — they round-trip and render as compact JSON, they just
-> aren't editable inline.
+> [!note] `specs` governance — advisory per-category dictionary (2026-06-30, #851)
+> `Asset.specs` (and [[asset-model]]`.specs`) still accept **any JSON object**
+> (`z.record(z.string(), z.unknown())`) — the wire schema deliberately never narrows. Governance is
+> now **advisory**: an [[asset-category]] may declare a `specsSchema` dictionary
+> ([[0078-asset-category-specs-dictionary]]) that drives **UI hints + soft warnings** (missing-required
+> / wrong-type / not-in-enum / unknown-key) for the `specs` of assets whose model points at it —
+> resolved `asset → model → category`, computed by the pure `validateSpecsAgainstDictionary` helper.
+> It is **never hard validation** (no `400`) and existing rows are never migrated, so the old
+> `TODO(specs)` is closed without breaking anything. The web's custom-fields editor authors **scalar
+> string values** (one `{ name, value }` row each); pre-existing non-scalar entries (arrays/objects) are
+> **preserved untouched** on edit — they round-trip and render as compact JSON, just not editable inline.
 
 > [!note] Expanded read shape (reads only)
 > `GET /assets` and `GET /assets/:id` return an **`AssetWithRelations`**: the asset plus its `model`
@@ -156,7 +158,9 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 
 ## Not yet implemented (deferred)
 
-- Dynamic per-category `specs` validation (see debt note above).
+- **Hard/blocking** per-category `specs` validation. The **advisory** dictionary is done (#851, see the
+  `specs` governance note above and [[0078-asset-category-specs-dictionary]]); flipping it into an
+  enforced `400` is a deliberate future upgrade path, not v1.
 - **Advanced asset search** — `?q=` today is a simple case-insensitive substring (ILIKE) over
   `name`/`serial`/`assetTag`, **unindexed** (fine at small-team scale). Full-text / indexed search
   is deferred to its own task.
