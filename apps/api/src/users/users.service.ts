@@ -121,6 +121,18 @@ export interface OffboardResult {
   releasedAssignments: { id: string; assetId: string }[];
   /** Count of active access grants revoked. */
   revokedGrants: number;
+  /**
+   * Count of Secret-vault crypto memberships hard-dropped (issue #869). INV-10-safe: a membership is a
+   * wrapped-DEK row, so revoking it is a pure row-delete — the server never decrypts anything.
+   */
+  revokedVaultMemberships: number;
+  /**
+   * The vaults the departing user could read, as a ROTATION PROMPT (issue #869). Pure metadata only —
+   * vault name + live item count, left of the ADR-0061 §9 zero-knowledge line: NEVER a value, key or
+   * ciphertext. Purely informational: lazyit cannot auto-rotate (the server can't re-encrypt), so an
+   * operator must rotate these secrets manually. Empty when the user was a member of no vault.
+   */
+  rotationVaults: { vaultId: string; name: string; itemCount: number }[];
 }
 
 @Injectable()
@@ -244,7 +256,11 @@ export class UsersService {
   }
 
   /** The shared `where` for the user list — used identically by findPage and its count. */
-  private buildWhere({ q, directoryOnly, role }: UserFilters): Prisma.UserWhereInput {
+  private buildWhere({
+    q,
+    directoryOnly,
+    role,
+  }: UserFilters): Prisma.UserWhereInput {
     return {
       ...(q
         ? {
@@ -1063,10 +1079,17 @@ export class UsersService {
   /**
    * Soft-delete (offboard) a user. Never hard-delete (auditability is a first principle), but a
    * soft delete alone left the user's access live — the audit gap this closes. In ONE transaction
-   * we (1) revoke every active AccessGrant the user holds, (2) release every active AssetAssignment
-   * (reclaiming the assets) and append a RELEASED asset-history event for each, then (3) stamp
-   * `deletedAt`. All-or-nothing: a failure rolls the whole offboarding back, so a user is never left
-   * half-offboarded (deleted but still holding grants/assets, or vice-versa).
+   * we (1) revoke every active AccessGrant the user holds, (1b) hard-drop every Secret-vault
+   * membership the user holds (issue #869 — else a departed user keeps a wrapped-DEK copy and retains
+   * cryptographic read access; a SOC2 offboarding-control gap), (2) release every active
+   * AssetAssignment (reclaiming the assets) and append a RELEASED asset-history event for each, then
+   * (3) stamp `deletedAt`. All-or-nothing: a failure rolls the whole offboarding back, so a user is
+   * never left half-offboarded (deleted but still holding grants/assets/vault access, or vice-versa).
+   *
+   * INV-10 (ADR-0061 §9) is preserved: revoking a vault membership is a PURE ROW-DELETE of wrapped key
+   * material — the server never decrypts anything. lazyit CANNOT auto-rotate (it can't re-encrypt), so
+   * the result also carries a `rotationVaults` flag (vault name + live item count — pure metadata) as an
+   * informational prompt for the operator to rotate those secrets manually.
    *
    * `actor` is the authenticated principal performing the offboarding (from @CurrentPrincipal via the
    * controller). A human is stamped as `revokedById` / `releasedById`; a service account holding
@@ -1117,6 +1140,62 @@ export class UsersService {
         },
       });
 
+      // 1b. Revoke the user's Secret-vault crypto memberships (issue #869, SOC2 offboarding control).
+      // A departing member otherwise keeps their wrapped-DEK rows and retains cryptographic READ access
+      // to every vault they belonged to. INV-10 (ADR-0061 §9) is preserved: revoking a membership is a
+      // PURE ROW-DELETE of wrapped key material — the server never decrypts anything.
+      //
+      // First READ the affected vaults' METADATA (name + live item count — pure metadata, left of the
+      // §9 zero-knowledge line), BEFORE the delete, because the rows vanish and this feeds the response's
+      // rotation prompt (lazyit can't auto-rotate; the operator rotates those secrets manually).
+      const rotationVaults = (
+        await tx.vaultMembership.findMany({
+          where: { userId: id },
+          select: {
+            vaultId: true,
+            vault: {
+              select: {
+                name: true,
+                _count: { select: { items: { where: { deletedAt: null } } } },
+              },
+            },
+          },
+        })
+      ).map((m) => ({
+        vaultId: m.vaultId,
+        name: m.vault.name,
+        itemCount: m.vault._count.items,
+      }));
+
+      // Then HARD-DROP the rows. VaultMembership is a hard-drop join (no `deletedAt`), so deleteMany is
+      // correct — it mirrors the single revoke in SecretManagerService.revokeMembership (ADR-0061 §5:
+      // soft revoke = the row ceases to exist).
+      const { count: revokedVaultMemberships } =
+        await tx.vaultMembership.deleteMany({ where: { userId: id } });
+
+      // Audit parity (in-lane): one MEMBERSHIP_REVOKED SecretAuditLog row per revoked vault, written via a
+      // direct createMany — we deliberately do NOT call SecretManagerService, keeping the offboard tx
+      // self-contained (lanes disjoint). Attribute the SAME human-vs-SA actor branch the grant revocation
+      // uses (a human → actorId, a service account → serviceAccountId); the secret_audit_logs CHECK
+      // enforces exactly one actor (ADR-0048). This is the SOC2 "who removed this person's vault access,
+      // when" answer, feeding the #871 audit read surface. Skip the write when the user held no membership.
+      if (rotationVaults.length > 0) {
+        const actorCols =
+          actor.userId != null
+            ? { actorId: actor.userId }
+            : actor.serviceAccountId != null
+              ? { serviceAccountId: actor.serviceAccountId }
+              : {};
+        await tx.secretAuditLog.createMany({
+          data: rotationVaults.map((v) => ({
+            action: 'MEMBERSHIP_REVOKED' as const,
+            vaultId: v.vaultId,
+            targetUserId: id,
+            ...actorCols,
+          })),
+        });
+      }
+
       // 2. Release all the user's active asset assignments (+ RELEASED history per asset). The actor is
       // threaded so the releases attribute to the right column (releasedById / releasedBySaId).
       const releasedAssignments = await this.assignments.releaseAllForUser(
@@ -1141,7 +1220,13 @@ export class UsersService {
         actor,
       });
 
-      return { userId: id, releasedAssignments, revokedGrants };
+      return {
+        userId: id,
+        releasedAssignments,
+        revokedGrants,
+        revokedVaultMemberships,
+        rotationVaults,
+      };
     });
 
     // Drop from the index so soft-deleted users never surface in search (ADR-0035). Outside the tx:
