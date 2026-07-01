@@ -6,9 +6,19 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   buildFiltersPatch,
   buildNextUrl,
+  deriveListState,
   multiFilterPatch,
   singleFilterPatch,
 } from "./list-params-url";
+import type {
+  ListQuery,
+  SortDir,
+  UseListParamsOptions,
+} from "./list-params-url";
+
+// The reader-side types + the pure derivation now live in the framework-agnostic `list-params-url`
+// (so a Server Component can reuse them, ADR-0067 / #733); re-exported here for existing importers.
+export type { ListQuery, SortDir, UseListParamsOptions } from "./list-params-url";
 
 /**
  * URL-synced list view-state (q / filters / sort / paging) for App Router list pages.
@@ -31,42 +41,6 @@ import {
  * Resetting behaviour: any change that yields a different result set — `setQ`, `setFilter`,
  * `clearFilters` — resets `offset`/`page` back to the first page. Re-sorting and paging do not.
  */
-
-/** Sort direction, matching the backend `dir` param. */
-export type SortDir = "asc" | "desc";
-
-export interface UseListParamsOptions {
-  /**
-   * The named string filters this list supports (e.g. `status`, `role`, `type`, `lowStock`,
-   * `isCritical`), each mapped to its **default** value. A filter equal to its default is treated as
-   * inactive: it is omitted from the URL and from `query`, and does not count toward `filtersActive`.
-   * Use a sentinel like `"ALL"` (or `""`) for "no filter". A filter not listed here is ignored.
-   */
-  filters?: Record<string, string>;
-  /** Default page size (`limit`). Defaults to 50, matching the API list default (ADR-0030). */
-  defaultLimit?: number;
-  /** Default sort field (a name from the resource's server allowlist). Optional. */
-  defaultSort?: string;
-  /** Default sort direction when `defaultSort` is set. Defaults to `"desc"`. */
-  defaultDir?: SortDir;
-}
-
-/**
- * The backend-shaped query object. Keys map 1:1 to the #104 list-contract param names. Undefined
- * keys are omitted (a value at its default / empty is dropped) so the object can be spread straight
- * into a data hook without sending defaults. `dir` is only present when `sort` is.
- */
-export interface ListQuery {
-  q?: string;
-  sort?: string;
-  dir?: SortDir;
-  limit: number;
-  offset: number;
-  /** Page number derived from offset/limit (1-based), for endpoints that prefer `page` over `offset`. */
-  page: number;
-  /** Active named filters (default-valued ones omitted), spread alongside the params above. */
-  [filterName: string]: string | number | undefined;
-}
 
 export interface ListParams {
   /** Current search text (`""` when absent). */
@@ -155,36 +129,25 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
   const searchParams = useSearchParams();
 
   // --- derive current state from the URL (source of truth) ---
-  const q = searchParams.get("q") ?? "";
-
-  const sort = searchParams.get("sort") ?? defaultSort;
-  const rawDir = searchParams.get("dir");
-  const dir: SortDir = rawDir === "asc" || rawDir === "desc" ? rawDir : defaultDir;
-
-  // Clamp the URL `limit` to the API's hard cap (ADR-0030): the server REJECTS (400) a limit over
-  // MAX_PAGE_LIMIT — never silently clamps — and `resource-table.tsx` renders rows unvirtualized, so
-  // a hand-edited/bookmarked `?limit=5000` would both 400 and (if honoured) freeze the tab. We cap
-  // here so a tampered URL degrades to the max page instead of erroring (issue #508).
-  const limitParam = Number(searchParams.get("limit"));
-  const limit =
-    Number.isFinite(limitParam) && limitParam > 0
-      ? Math.min(limitParam, MAX_PAGE_LIMIT)
-      : defaultLimit;
-
-  const offsetParam = Number(searchParams.get("offset"));
-  const offset = Number.isFinite(offsetParam) && offsetParam >= 0 ? offsetParam : 0;
-
-  const page = Math.floor(offset / limit) + 1;
+  // The read side is a PURE function shared with Server Components (ADR-0067 / #733): `deriveListState`
+  // reads `searchParams` through its `.get` interface — the same one `useSearchParams()` exposes — so a
+  // server-prefetch can reproduce this exact query key without a bespoke re-derivation that would drift.
+  // Memoized on the stable inputs (`filterDefaults` is a caller module-const; `searchParams` identity
+  // only changes on navigation) so `filters`/`query` keep the constant identity the derived setters and
+  // child effects rely on (#487).
+  const derived = useMemo(
+    () =>
+      deriveListState(searchParams, {
+        filters: filterDefaults,
+        defaultLimit,
+        defaultSort,
+        defaultDir,
+      }),
+    [searchParams, filterDefaults, defaultLimit, defaultSort, defaultDir],
+  );
+  const { q, sort, dir, offset, page, limit, filters, filtersActive, query } = derived;
 
   const filterNames = useMemo(() => Object.keys(filterDefaults), [filterDefaults]);
-
-  const filters = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const name of filterNames) {
-      out[name] = searchParams.get(name) ?? filterDefaults[name];
-    }
-    return out;
-  }, [filterNames, filterDefaults, searchParams]);
 
   // --- writer: rebuild the param string from the current URL + a patch, then replace() ---
   // The patch is applied as a whole (see buildNextUrl), so a multi-key patch lands in one
@@ -316,25 +279,8 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
     commit(patch);
   }, [commit, filterNames]);
 
-  // --- derived: backend-shaped query + the active flag ---
-  const filtersActive = useMemo(() => {
-    if (q !== "") return true;
-    return filterNames.some((name) => filters[name] !== (filterDefaults[name] ?? ""));
-  }, [q, filterNames, filters, filterDefaults]);
-
-  const query = useMemo<ListQuery>(() => {
-    const out: ListQuery = { limit, offset, page };
-    if (q) out.q = q;
-    if (sort) {
-      out.sort = sort;
-      out.dir = dir;
-    }
-    for (const name of filterNames) {
-      const value = filters[name];
-      if (value !== (filterDefaults[name] ?? "")) out[name] = value;
-    }
-    return out;
-  }, [q, sort, dir, limit, offset, page, filterNames, filters, filterDefaults]);
+  // `query` + `filtersActive` come from `derived` above (the shared pure `deriveListState`), so the
+  // hook's read side is byte-identical to what a Server Component derives for the same URL (#733).
 
   return {
     q,
