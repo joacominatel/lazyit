@@ -58,26 +58,38 @@ remove action (this stops future reads; rotate the underlying credential if you 
 
 ## Step 3 — Fetch secrets on the deploy machine
 
-Use the **`lazyit-fetch`** command-line tool (in `packages/fetch-cli`). Give it the token, the API URL and
-the vault id:
+The **`lazyit-fetch`** command-line tool lives in the monorepo (`packages/fetch-cli`) and is **not**
+published to a package registry — so there is no `npx`/`bunx` install. Instead you run a **standalone
+binary** compiled from it. From a checkout of the monorepo, build the binaries once:
+
+```sh
+# Compiles dist/lazyit-fetch-x64 and dist/lazyit-fetch-arm64 (self-contained Linux executables).
+bun run --filter @lazyit/fetch-cli compile
+```
+
+Copy the binary that matches your server's architecture (e.g. `lazyit-fetch-x64`) to the deploy machine.
+It needs **no Bun or Node runtime** there. Then give it the token, the API URL and the vault id:
 
 ```sh
 # The token is read from an env var so it never lands in your shell history or `ps` output.
 export LAZYIT_SA_TOKEN="lzit_sa_…"
-export LAZYIT_API_URL="https://lazyit.example.com/api"
 
 # Write a .env file in the current directory:
-lazyit-fetch --vault <vaultId> --out .env
+./lazyit-fetch-x64 --api https://lazyit.example.com/api --vault <vaultId> --out .env
 
 # …or print to stdout to compose with other tools:
-lazyit-fetch --vault <vaultId> > .env
+./lazyit-fetch-x64 --api https://lazyit.example.com/api --vault <vaultId> > .env
 
 # List the vaults this service account may fetch:
-lazyit-fetch --list
+./lazyit-fetch-x64 --api https://lazyit.example.com/api --list
 
-# Verify the tool's crypto without touching the server:
-lazyit-fetch --self-check
+# Verify the tool's crypto without touching the server (no API, no token needed):
+./lazyit-fetch-x64 --self-check
 ```
+
+> **Running from a checkout (for testing).** If you already have the monorepo, you can run the tool
+> straight from source with Bun instead of compiling — handy while trying things out:
+> `bun packages/fetch-cli/src/index.ts --api <url> --vault <vaultId>`.
 
 Each secret becomes one line, `HANDLE=value`. The **handle** is upper-cased and non-alphanumeric
 characters become `_`, so `prod-db-password` becomes `PROD_DB_PASSWORD`. Choose handles that make good

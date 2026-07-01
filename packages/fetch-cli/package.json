@@ -8,7 +8,10 @@
   },
   "scripts": {
     "test": "bun test",
-    "self-check": "bun run src/index.ts --self-check"
+    "self-check": "bun run src/index.ts --self-check",
+    "compile:x64": "bun build --compile --target=bun-linux-x64 --outfile dist/lazyit-fetch-x64 src/index.ts",
+    "compile:arm64": "bun build --compile --target=bun-linux-arm64 --outfile dist/lazyit-fetch-arm64 src/index.ts",
+    "compile": "bun run compile:x64 && bun run compile:arm64"
   },
   "dependencies": {
     "@lazyit/shared": "workspace:*",
