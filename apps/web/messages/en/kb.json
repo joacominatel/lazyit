@@ -14,6 +14,7 @@
     "emptyAction": "Write your first article",
     "readingTime": "{minutes} min read",
     "unknownAuthor": "Unknown author",
+    "formerMember": "Former member",
     "uncategorized": "Uncategorized",
     "linkedCount": "{count} linked",
     "linkedTooltip": "{count, plural, one {Linked to # item} other {Linked to # items}}"
@@ -87,6 +88,7 @@
     "notFoundTitle": "Article not found",
     "notFoundDescription": "It may be a draft you can't see, it was deleted, or the API is unreachable.",
     "unknownAuthor": "Unknown author",
+    "formerMember": "Former member",
     "updated": "Updated {date}",
     "published": "Published {date}",
     "edit": "Edit",

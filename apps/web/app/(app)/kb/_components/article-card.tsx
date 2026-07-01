@@ -1,5 +1,5 @@
 import { ClockIcon, LinkIcon } from "@heroicons/react/16/solid";
-import type { ArticleListItem, User } from "@lazyit/shared";
+import type { ArticleListItem } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { UserAvatar } from "@/components/user-avatar";
@@ -15,21 +15,26 @@ import { ArticleStatusBadge } from "./article-status-badge";
  * a "linked" indicator when the article points at ≥1 Asset/Application.
  *
  * `linkCount` and `readingMinutes` come straight off the lean list item
- * (ADR-0042) — the card never loads the body. `author` is resolved by the page
- * from `authorId`; when it can't be found we fall back to a neutral label.
+ * (ADR-0042) — the card never loads the body. The author name is EMBEDDED on the
+ * list item (#900: `article.author`) so it renders even for an OFFBOARDED
+ * (soft-deleted) author — where the old `authorId`→active-directory join showed
+ * "Unknown author". An offboarded author (`author.deletedAt != null`) still shows
+ * their real name, marked with a subtle "Former member" hint.
  */
 export function ArticleCard({
   article,
   categoryName,
-  author,
 }: {
   article: ArticleListItem;
   categoryName: string;
-  /** The resolved owner/author (from `authorId`), or `undefined` when unknown. */
-  author: User | undefined;
 }) {
   const t = useTranslations("kb");
   const isLinked = article.linkCount > 0;
+  const author = article.author;
+  const authorName = author
+    ? `${author.firstName} ${author.lastName}`.trim()
+    : null;
+  const isFormerMember = author?.deletedAt != null;
 
   return (
     <Link
@@ -77,16 +82,19 @@ export function ArticleCard({
             size="sm"
             firstName={author?.firstName}
             lastName={author?.lastName}
-            email={author?.email ?? ""}
-            title={
-              author ? `${author.firstName} ${author.lastName}` : undefined
-            }
+            // The embedded author carries no email; seed the avatar color by name so a person keeps a
+            // stable color (and initials still come from first/last name).
+            email={authorName ?? ""}
+            title={authorName ?? undefined}
           />
           <span className="truncate text-xs text-muted-foreground">
-            {author
-              ? `${author.firstName} ${author.lastName}`
-              : t("list.unknownAuthor")}
+            {authorName ?? t("list.unknownAuthor")}
           </span>
+          {isFormerMember ? (
+            <span className="shrink-0 text-xs text-muted-foreground/70 italic">
+              {t("list.formerMember")}
+            </span>
+          ) : null}
         </div>
         <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums">
           <ClockIcon className="size-3.5" />

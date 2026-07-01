@@ -28,7 +28,6 @@ import {
   usePublishArticle,
   useUnpublishArticle,
 } from "@/lib/api/hooks/use-article-mutations";
-import { useUsers } from "@/lib/api/hooks/use-users";
 import { useWikiLinkResolver } from "@/lib/api/hooks/use-wiki-link-resolver";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
@@ -47,7 +46,6 @@ export function ArticleDetailView({ slug }: { slug: string }) {
   const { data: article, isLoading, isError, error, refetch } =
     useArticleBySlug(slug);
   const { data: categories } = useArticleCategories();
-  const { data: users } = useUsers();
   // Edit / Publish / Unpublish / link are article:write; deletion is article:delete. The API
   // additionally enforces authorship (only the author may mutate), so a holder who isn't the author
   // still gets a 403 — the permission is the coarse gate, authorship the finer server-side one.
@@ -95,7 +93,14 @@ export function ArticleDetailView({ slug }: { slug: string }) {
   }
 
   const category = categories?.find((item) => item.id === article.categoryId);
-  const author = users?.find((item) => item.id === article.authorId);
+  // #900: the author name is EMBEDDED on the detail read (`article.author`) so it renders even for an
+  // OFFBOARDED (soft-deleted) author — where the old `authorId`→active-directory join showed "Unknown
+  // author". `author.deletedAt != null` marks a former member; we still show their real name.
+  const author = article.author;
+  const authorName = author
+    ? `${author.firstName} ${author.lastName}`.trim()
+    : null;
+  const isFormerMember = author?.deletedAt != null;
   const isDraft = article.status === "DRAFT";
 
   function handlePublish() {
@@ -125,11 +130,12 @@ export function ArticleDetailView({ slug }: { slug: string }) {
         subtitle={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             {category && <Badge variant="outline">{category.name}</Badge>}
-            <span>
-              {author
-                ? `${author.firstName} ${author.lastName}`
-                : t("detail.unknownAuthor")}
-            </span>
+            <span>{authorName ?? t("detail.unknownAuthor")}</span>
+            {isFormerMember ? (
+              <span className="text-muted-foreground/70 italic">
+                {t("detail.formerMember")}
+              </span>
+            ) : null}
             <span aria-hidden>·</span>
             <span className="tabular-nums">
               {t("detail.updated", { date: date(article.updatedAt) })}

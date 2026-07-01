@@ -117,9 +117,20 @@ const ARTICLE_LIST_SELECT = {
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
+  // Embedded author name (#900): the card renders the author WITHOUT joining `authorId` against the
+  // ACTIVE user directory (which dropped an offboarded author to "Unknown author"). `deletedAt` marks
+  // an offboarded author so the UI can flag "Former member". Name only — no id/email (INV: keep the
+  // list lean; the surface shows a name + avatar initials, not a mailto).
+  author: { select: { firstName: true, lastName: true, deletedAt: true } },
   // Per-row link tally in ONE query (no N+1) — mapped to the flat `linkCount` before returning.
   _count: { select: { links: true } },
 } satisfies Prisma.ArticleSelect;
+
+// Detail reads (findOne / findBySlug) return the full Article incl. `content`; they only need the
+// author relation added (#900) — same lean author projection as the list.
+const ARTICLE_AUTHOR_INCLUDE = {
+  author: { select: { firstName: true, lastName: true, deletedAt: true } },
+} satisfies Prisma.ArticleInclude;
 
 /**
  * Knowledge-base articles. Authorship/visibility (DRAFT private to its author; the author — or, since
@@ -335,6 +346,7 @@ export class ArticlesService {
     const cu = this.resolveCurrentUser(currentUser);
     const article = await this.prisma.article.findFirst({
       where: { id },
+      include: ARTICLE_AUTHOR_INCLUDE,
     });
     if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
       throw new NotFoundException(`Article ${id} not found`);
@@ -355,6 +367,7 @@ export class ArticlesService {
     const cu = this.resolveCurrentUser(currentUser);
     const article = await this.prisma.article.findFirst({
       where: { slug },
+      include: ARTICLE_AUTHOR_INCLUDE,
     });
     if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
       throw new NotFoundException(`Article with slug "${slug}" not found`);

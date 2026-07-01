@@ -30,6 +30,22 @@ const SlugSchema = z
     "slug must be lowercase letters, numbers and single hyphens (e.g. 'network-setup')",
   );
 
+/**
+ * Embedded author identity on the article READ DTOs (#900). The author's NAME travels on the wire so
+ * the KB card/detail no longer resolve it by joining `authorId` against the ACTIVE user directory —
+ * a join that dropped an OFFBOARDED (soft-deleted) author to "Unknown author". `deletedAt` marks such
+ * an author so the UI can show the real name plus a subtle "Former member" hint. Name-only (no
+ * id/email — the surfaces render a name + avatar initials, never a mailto); the canonical, immutable
+ * attribution still lives in `ArticleVersion`. Optional/nullable on the schema so a caller that didn't
+ * load the relation simply omits it (the reads DO populate it).
+ */
+export const ArticleAuthorSchema = z.object({
+  firstName: z.string(),
+  lastName: z.string(),
+  /** Non-null ⇒ the author has been offboarded (soft-deleted). The UI still shows their name. */
+  deletedAt: z.iso.datetime().nullable(),
+});
+
 /** The full persisted Article entity (API representation of the `articles` row). */
 export const ArticleSchema = z.object({
   id: z.cuid(),
@@ -46,6 +62,8 @@ export const ArticleSchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
+  // Read-only embedded author name (#900). The list + detail projections populate it; not an input.
+  author: ArticleAuthorSchema.nullish(),
 });
 
 /**
@@ -93,6 +111,7 @@ export const ImportArticleSchema = z.strictObject({
 });
 
 export type ArticleStatus = z.infer<typeof ArticleStatusSchema>;
+export type ArticleAuthor = z.infer<typeof ArticleAuthorSchema>;
 export type Article = z.infer<typeof ArticleSchema>;
 export type CreateArticle = z.infer<typeof CreateArticleSchema>;
 export type UpdateArticle = z.infer<typeof UpdateArticleSchema>;

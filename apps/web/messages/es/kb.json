@@ -14,6 +14,7 @@
     "emptyAction": "Escribe tu primer artículo",
     "readingTime": "{minutes} min de lectura",
     "unknownAuthor": "Autor desconocido",
+    "formerMember": "Ex-miembro",
     "uncategorized": "Sin categoría",
     "linkedCount": "{count} vinculados",
     "linkedTooltip": "{count, plural, one {Vinculado a # elemento} other {Vinculado a # elementos}}"
@@ -87,6 +88,7 @@
     "notFoundTitle": "Artículo no encontrado",
     "notFoundDescription": "Puede ser un borrador que no puedes ver, fue eliminado o la API no está disponible.",
     "unknownAuthor": "Autor desconocido",
+    "formerMember": "Ex-miembro",
     "updated": "Actualizado {date}",
     "published": "Publicado {date}",
     "edit": "Editar",
