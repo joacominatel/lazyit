@@ -426,8 +426,8 @@
     "keypairSetup": {
       "working": "Setting up the encryption key…",
       "done": "Encryption key set up. This service account can now retrieve secrets from vaults you grant it access to.",
-      "forbidden": "You need Secret Manager manage permission to set up programmatic access. The service account was created, but without an encryption key.",
-      "error": "Couldn't set up the encryption key. The service account was created without one — recreate it to enable programmatic secret retrieval."
+      "forbidden": "You need Secret Manager manage permission to set up the encryption key. The service account is fine, but can't retrieve secrets until an admin sets it up (rotate its token).",
+      "error": "Couldn't set up the encryption key. The service account is fine — rotate its token to try again and enable programmatic secret retrieval."
     },
     "testIt": {
       "title": "Test it works",
