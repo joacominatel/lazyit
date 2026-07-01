@@ -10,7 +10,7 @@ import type {
   CreateAsset,
   UpdateAsset,
 } from "@lazyit/shared";
-import { apiFetch } from "../client";
+import { apiFetch, apiFetchBlob } from "../client";
 import { createCrudEndpoints } from "../crud-endpoints";
 
 /**
@@ -71,6 +71,26 @@ export interface AssetFilters {
  * pagination controls. `limit`/`offset` are echoed by the server. By default only active rows are
  * returned; pass `deleted: "only"` (ADMIN) for the archived view of soft-deleted rows.
  */
+/**
+ * Append the additive FILTER params (not paging/sort) shared by the list read and the CSV export —
+ * `q`, `categoryId`, `locationId`, `status`, `company`, `assignedToUserId`, `ownership`, `deleted`. The
+ * export reuses this so it serializes every filter IDENTICALLY to the list and can never drift from it.
+ */
+function appendAssetFilterParams(
+  params: URLSearchParams,
+  filters: AssetFilters,
+): void {
+  if (filters.q) params.set("q", filters.q);
+  if (filters.categoryId) params.set("categoryId", filters.categoryId);
+  if (filters.locationId) params.set("locationId", filters.locationId);
+  if (filters.status) params.set("status", filters.status);
+  if (filters.company) params.set("company", filters.company);
+  if (filters.assignedToUserId)
+    params.set("assignedToUserId", filters.assignedToUserId);
+  if (filters.ownership) params.set("ownership", filters.ownership);
+  if (filters.deleted) params.set("deleted", filters.deleted);
+}
+
 export function getAssets(
   filters: AssetFilters = {},
   signal?: AbortSignal,
@@ -80,14 +100,7 @@ export function getAssets(
   token?: string,
 ): Promise<AssetListPage> {
   const params = new URLSearchParams();
-  if (filters.q) params.set("q", filters.q);
-  if (filters.categoryId) params.set("categoryId", filters.categoryId);
-  if (filters.locationId) params.set("locationId", filters.locationId);
-  if (filters.status) params.set("status", filters.status);
-  if (filters.company) params.set("company", filters.company);
-  if (filters.assignedToUserId)
-    params.set("assignedToUserId", filters.assignedToUserId);
-  if (filters.ownership) params.set("ownership", filters.ownership);
+  appendAssetFilterParams(params, filters);
   if (filters.sort) {
     params.set("sort", filters.sort);
     if (filters.dir) params.set("dir", filters.dir);
@@ -95,9 +108,23 @@ export function getAssets(
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));
-  if (filters.deleted) params.set("deleted", filters.deleted);
   const qs = params.toString();
   return apiFetch<AssetListPage>(qs ? `${BASE}?${qs}` : BASE, { signal, token });
+}
+
+/**
+ * Download the WHOLE filtered asset inventory as a CSV blob (`GET /assets/export`, issue #872).
+ * Serializes the SAME filters as {@link getAssets} MINUS paging/sort — the export streams every matching
+ * asset server-side, not just the visible page. `deleted=only` (archived) stays ADMIN-only server-side.
+ * RFC-4180 escaping + the formula-injection guard are applied server-side (shared with the list).
+ */
+export function downloadAssetInventoryExport(
+  filters: AssetFilters = {},
+): Promise<Blob> {
+  const params = new URLSearchParams();
+  appendAssetFilterParams(params, filters);
+  const qs = params.toString();
+  return apiFetchBlob(qs ? `${BASE}/export?${qs}` : `${BASE}/export`);
 }
 
 /**
