@@ -3,7 +3,7 @@ title: "SSR server-prefetch recipe (apply the ADR-0067 mold to a new route)"
 tags: [development, frontend, ssr, tanstack-query, nextjs]
 status: accepted
 created: 2026-06-23
-updated: 2026-06-23
+updated: 2026-06-30
 ---
 
 # SSR server-prefetch recipe
@@ -76,11 +76,15 @@ unchanged — on first paint they hit the dehydrated cache and render immediatel
    (`thingKeys.detail(id)` / `thingKeys.list(DEFAULT_FILTERS)`). TanStack hashes keys
    deterministically (object property order doesn't matter), but the **set of keys and their
    values** must match.
-5. **For list pages, replicate the first-paint filter object.** Build a `DEFAULT_FILTERS`/
-   `DEFAULT_PARAMS` const that matches what the child's `useThings({...})` call yields on a load
-   with **no URL params** — every `"ALL"`/empty filter → `undefined`, the `useListParams`
-   defaults (`limit` 50, `offset` 0, the page's `defaultSort`/`defaultDir`). See the assets page
-   for the canonical doc comment.
+5. **For list pages, prefetch the CURRENT URL — via the shared derivation, not a bespoke copy.**
+   Don't hand-roll a `DEFAULT_FILTERS` const or re-map the URL in the page — that risks silent key
+   drift. Instead reuse the ONE mapping the client hook uses (see *Filtered/paged/searched first paint*
+   below): a co-located non-`"use client"` module (`_components/<entity>-list-query.ts`) exports the
+   `useListParams` options and a pure `derive<Entity>Filters(state, opts)`; the page derives the
+   view-state with `deriveListState(toURLSearchParams(await searchParams), OPTIONS)`, maps it with the
+   same `derive<Entity>Filters`, and prefetches that key. A no-param URL yields the same first-paint key
+   the unfiltered prefetch produced. See the assets route (`page.tsx` + `_components/assets-list-query.ts`)
+   for the canonical shape.
 
 ## The `queryFn` wrap gotcha
 
@@ -114,14 +118,47 @@ Most hooks already wrap; watch for the ones that didn't (`use-config-status`,
 
 Mark any deliberate skip with a `// ponytail:` comment (why + when to revisit).
 
-## Deliberately deferred — filtered/paged/searched first paint
+## Filtered/paged/searched first paint (done — #733)
 
-Only the **unfiltered** first paint of a list is prefetched. A filtered/paged/searched URL
-(`?status=ACTIVE&category=…&offset=50`) misses the dehydrated cache and the client fetches it. To
-prefetch the filtered key you would read `searchParams` on the server and rebuild the exact filter
-object the client's `useListParams` derives — but that derivation is **per-page bespoke** (URL
-filter names map to different API params: `category`→`categoryId`, `archived`→`deleted`; `ownership`
-is client-only; KB multi-value filters are comma-encoded). Duplicating that mapping in each server
-page risks silent key drift → cache-miss double-fetches. The lazy-correct call is to keep the
-graceful client-fetch fallback for the lower-frequency filtered case; revisit only if the
-param-derivation is first extracted into a single pure function shared by client and server.
+The **current** filtered/paged/searched URL is now prefetched on the five uniform CRUD list routes
+(assets, applications, consumables, locations, users), keyed byte-identically to the client. The
+precondition that makes this drift-proof: the URL→view-state derivation is a single **pure** function
+`deriveListState(params, options)` in `apps/web/lib/hooks/list-params-url.ts`, shared by the client
+hook (`useListParams` calls it) AND by Server Components. It reads params through a `.get()` interface,
+so it takes the browser's `useSearchParams()` on the client and a `URLSearchParams` built from the
+page's `searchParams` prop (`toURLSearchParams`, same module) on the server — one derivation, no
+re-implementation to drift.
+
+The per-page URL→API mapping (`category`→`categoryId`, `owner`→`assignedToUserId`, `archived`→
+`deleted`, the boolean/multi-value collapses, etc.) also lives in ONE place per page — a co-located
+non-`"use client"` module `_components/<entity>-list-query.ts` exporting the `useListParams` options
+and a pure `derive<Entity>Filters(state, opts)` — imported by BOTH the client view (`useThings(...)`)
+and the server page (prefetch). Same function on both sides ⇒ the keys **cannot** drift. TanStack
+hashes keys via `JSON.stringify` with sorted object keys and drops `undefined` properties, so only the
+set of *defined* keys and their values must agree (which the shared function guarantees).
+
+**One deliberate skip:** the ADMIN-only archived slice (`?archived=only` → `deleted=only`) is gated
+on the client by `isAdmin`; reproducing that key server-side would need the session's role, so the
+page skips the prefetch when the archived sentinel is present and lets the client fetch it (a
+low-frequency slice — graceful degrade, no key mismatch). Marked with `// ponytail:` in each page.
+
+### Still deferred (diminishing returns — #733)
+
+- **KB (`/kb`) and Reports (`/reports`) filtered prefetch.** Left on the unfiltered/first-paint
+  prefetch. Their URL→query mappings are materially more bespoke (KB comma-encodes multi-value filters
+  and derives `linked=only` implicitly from any narrowing entity; Reports maps a tab + actor/action +
+  date-range into a filter object over a different hook), and both are lower-traffic than the CRUD
+  lists. The shared `deriveListState` is in place, so adopting the same per-page-module pattern later
+  is mechanical — do it if a filtered KB/Reports deep-link ever shows a *visible* skeleton flash.
+- **Secondary reads (categories/locations lookups, the Access grants/directory join).** Still
+  client-fetched. The primary read is prefetched, so no page is blank. The filter-dropdown lookups sit
+  behind a popover (not first-paint-critical), and the applications access counts/avatars are a *minor
+  derived shimmer* — prefetching that join would add two heavy server reads (grants at the 200 cap +
+  the full user directory) to every applications SSR and needs an SSR `token?` threaded through
+  `getAccessGrants`. Poor cost/benefit for a shimmer; revisit only if it becomes a visible blocking
+  waterfall.
+- **Per-segment detail skeletons.** The group-level `app/(app)/loading.tsx` (a list-shaped skeleton)
+  already covers first-paint suspense for the piloted list routes. Detail routes prefetch their primary
+  read, so their loading flash is brief; authoring a bespoke shape-matched `loading.tsx` per detail
+  segment is gold-plating for a momentary mismatch. Add one only for a segment with a genuinely slow or
+  janky first paint.
