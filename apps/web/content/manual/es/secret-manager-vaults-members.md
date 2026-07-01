@@ -60,6 +60,12 @@ otra app o un gestor de portapapeles ya capturó el valor), así que considéral
 garantía — pega cuanto antes. Puedes editar la etiqueta o el identificador de un secreto, reemplazar su
 valor o eliminarlo.
 
+> **Las revelaciones quedan registradas.** Cuando revelas el valor de un secreto — desde una bóveda, o
+> desde un chip enmascarado en un artículo de la Base de conocimiento — lazyit registra *que* lo revelaste
+> (quién, qué secreto, cuándo) para el registro de auditoría. Fiel al modelo de seguridad, nunca registra
+> el valor en sí: el descifrado ocurre en tu dispositivo, así que el registro es solo que ocurrió un
+> acceso, no lo que se vio.
+
 ## Tipos de secreto
 
 Un secreto tiene un **Tipo** para que lazyit pueda almacenar algo más que una sola cadena y mostrártelo

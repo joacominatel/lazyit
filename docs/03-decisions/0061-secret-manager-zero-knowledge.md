@@ -311,6 +311,18 @@ custodian of the left column and is **structurally incapable** of producing the 
   redaction). A **decrypt-failure error carries NO plaintext and NO key material** — it mirrors
   `secret.service.ts`'s `reveal()` catch ("authentication failed or wrong key", no payload in the
   message). Audit rows record **who acted on which vault/item** (metadata), never the value.
+- **Reveal is audited too (`ITEM_REVEALED`, #870).** Every time a **human member reveals a single item's
+  value** in the UI (the vault-detail row *and* the KB masked-chip), the browser writes one metadata-only
+  `SecretAuditLog` row — `actorId` = the member, `vaultId` + `itemId` = what was revealed, `createdAt` =
+  when — via `POST /secret-vaults/:vaultId/items/:itemId/reveal` (gated `secret:read` + `HumanOnlyGuard` +
+  live membership). This answers the auditor's standard question — *"show me every access to this
+  credential and by whom"* — **INV-10-safe**: the decrypt happens client-side, so the row records the
+  **fact** of a reveal, never the plaintext, ciphertext, DEK, or wrapped key. It is distinct from
+  `ITEMS_FETCHED` ([[0080-programmatic-secret-retrieval]] — a *machine* / service-account, whole-vault read
+  with no `itemId`): `ITEM_REVEALED` is the *human*, per-item event. The beacon is **best-effort /
+  fire-and-forget** — a failed audit write never blocks a member from seeing their own secret. Copy is
+  **not** separately logged (it always follows a reveal that already logged), keeping the trail un-chatty.
+  The read/reporting surface for these rows is a sibling issue (#871).
 - **DR:** the **recovery key is the user's PERSONAL, off-host, shown-once DR artifact** — it is the
   zero-knowledge analogue of `ZITADEL_MASTERKEY`/`WORKFLOW_SECRET_KEY` in [[backups]], except it is **per
   user and never on the host**, so a DB + `.env` restore **does NOT** make the vaults readable. Restoring
