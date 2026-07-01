@@ -120,7 +120,9 @@ never a 400.
 
 ### §4 — Liveness & staleness
 
-`lastReportedAt` is the heartbeat. A periodic **sweeper** (BullMQ repeatable job) flips any node whose
+`lastReportedAt` is the heartbeat. A periodic **sweeper** (a plain in-process `setInterval`, `unref`'d
+— no BullMQ/`@nestjs/schedule` dependency; re-entrancy-guarded and skipped under `NODE_ENV=test`,
+structured like the `ImportSessionGcSweeper`) flips any node whose
 `lastReportedAt` is older than a threshold (default: a small multiple of the report interval) to
 `status=OFFLINE`. The next report flips it back `ONLINE`. This is the *only* "monitoring-ish" feature
 and it is deliberately coarse — a liveness bit, not a metric. // a downed agent ⇒ OFFLINE on the map,
