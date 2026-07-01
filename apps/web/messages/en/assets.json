@@ -3,6 +3,12 @@
     "title": "Assets",
     "subtitle": "Everything your team tracks and owns.",
     "newAsset": "New asset",
+    "export": {
+      "button": "Export (filtered)",
+      "exporting": "Exporting…",
+      "exportTitle": "Download every asset matching the current filters as a CSV",
+      "error": "Couldn't export the inventory"
+    },
     "searchLabel": "Search assets",
     "searchPlaceholder": "Search by name, serial, tag…",
     "selectAllLabel": "Select all assets on this page",

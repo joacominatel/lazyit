@@ -108,6 +108,17 @@ The **Filters** button shows a small count of how many of these are active. Ever
 also appears as a removable chip below the toolbar, and the filters live in the page address, so a
 filtered view is easy to undo, share or bookmark.
 
+### Exporting the inventory
+
+The **Export (filtered)** button at the top of the Assets page downloads a **CSV** of the inventory
+that matches your **current filters** — the whole result set, not just the page in front of you. Set
+the status, category, location, company, owner or search you care about first (for example *all the
+Dell servers in the colo that are out of warranty*), then export just that slice. The file carries one
+row per asset with its name, asset tag, serial, status, category, manufacturer, model, location,
+company, purchase and warranty dates, current owners, notes and the created/updated timestamps, and is
+safe to open in a spreadsheet. Custom **specs** fields are not included in this version. If you have
+the *Show archived* view open, the export is that archived slice instead.
+
 ### Choosing which columns to show
 
 The **Columns** button (next to *Filters*) opens a checklist of the table's columns — asset tag,
