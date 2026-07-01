@@ -8,6 +8,7 @@
 > Refreshed 2026-06-01 (post auth epic) — covered all 44 ADRs (0001–0044).
 > Refreshed 2026-06-01 (post UX northstar cycle, PRs #100–#115) — now covers all 45 ADRs (0001–0045; ADR-0045 = heroicons) + the ADR-0011/0030 amendments.
 > Refreshed 2026-06-03 (post RBAC v2 + Service-Accounts epic) — now covers all 48 ADRs (0001–0048; ADR-0046 = Roles & Permissions v2, ADR-0047 = `start.sh`, ADR-0048 = Service Accounts). Read-authorization is now CLOSED; `@Roles` retired in favor of `@RequirePermission`.
+> Refreshed 2026-07-01 (CTO memory refresh) — now covers all **81 ADRs (0001–0081)**. Added 0049–0081 as a chronological continuation block below (§"Index continued — ADRs 0049–0081"). Headline arc since 0048: async workers (BullMQ/Valkey, 0053) + Workflow Engine (0054/0055/0057) + Secret Manager zero-knowledge (0061/0065/0066/0075/0080) + Infra topology CMDB (0070/0073) + the Linux reporting agent (0074) + KB v2 folders/ACL (0059/0060) + i18n en/es (0051) + in-app Help/Manual (0062) + the "Ledger" design refactor (0077) + instance SMTP (0079, *proposed*) + the audit read surface (0081). New invariants: **INV-9** (KB folder ACL, ADR-0060) + **INV-10** (Secret Manager server-never-decrypts, ADR-0061).
 
 ---
 
@@ -367,6 +368,241 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 
 ---
 
+## Index continued — ADRs 0049–0081
+
+> Added 2026-07-01. These extend the thematic index above but are listed **chronologically by number** (easier to verify against `docs/03-decisions/` and to scan by ADR id). Status in each line reflects the file's frontmatter. **Numbering caution:** the "Decisions made outside ADRs" table below still calls the 2026-06-06/-07 Settings-&-Notifications work "ADR-0052" — that predates renumbering. In the accepted tree **ADR-0052 is the CI-docker-parallelization ADR**; that early notifications/SMTP work actually landed as the **notification bell (ADR-0056)** + **instance SMTP (ADR-0079, proposed)**. Treat the old "ADR-0052 settings/notifications" references as stale labels, not the current ADR-0052.
+
+**ADR-0049** — *«Activated Restraint» — design-system activation direction*
+**Status**: accepted
+**One-liner**: adds an *expression layer* over the ADR-0011 tokens — a reduced-motion-safe motion vocabulary, an elevation language, and activation of the dormant categorical/semantic hues — all via `globals.css` tokens + composition (no `components/ui/*` hand-edits, no new runtime deps).
+**CTO note**: closes the CEO's "no onda / half-built UI" gap by *activation + craft*, not by brightening the dial. Its palette is later **re-tuned onto the Ledger neutrals** by ADR-0077.
+
+---
+
+**ADR-0050** — *UserHistory append-only log + a `user` entity in recent-activity*
+**Status**: accepted
+**One-liner**: adds `UserHistory` (table `user_history`, a 1:1 structural copy of `asset_history`) — append-only, same nullable-actor pair + at-most-one-actor CHECK as the ADR-0048 audit tables — and surfaces a `user` source in the ADR-0044 `recent_activity` view. Events: `CREATED, UPDATED, ROLE_CHANGED, DELETED, RESTORED, PASSWORD_RESET_SENT`.
+**CTO note**: mirrors ADR-0033/0048 exactly; new user-mutation paths must emit `UserHistory` transactionally.
+
+---
+
+**ADR-0051** — *i18n with next-intl (cookie-mode, en + es)*
+**Status**: accepted
+**One-liner**: next-intl 4.x in **cookie-mode** for `apps/web`; **English default+fallback, Spanish second**; active locale in the `NEXT_LOCALE` cookie — no URL prefix, no route restructure.
+**CTO note**: every user-facing string is now bilingual. i18n-key-path errors are a class **CI cannot catch** — en/es parity is a review gate. This is *why* the Manual + every web change ship en+es.
+
+---
+
+**ADR-0052** — *Parallelize CI Docker builds (matrix) + decouple from verify*
+**Status**: accepted
+**One-liner**: CI `docker` becomes a `matrix` job over `[api, web, migrate]` (`fail-fast:false`) that **no longer `needs: verify`** (build + quality gate run in parallel); `verify` persists the Turborepo cache.
+**CTO note**: CI-only change. NOTE the numbering caution above — this is the *real* ADR-0052.
+
+---
+
+**ADR-0053** — *Async workers — BullMQ on Valkey, sandboxed processors*
+**Status**: accepted
+**One-liner**: adopts **BullMQ on a self-hosted Valkey** via `@nestjs/bullmq` (ioredis), **app-layer only** (ADR-0009 carve-out); Valkey is a new backing service (unprofiled for dev + `prod` profile, AOF persistence); untrusted/memory-heavy jobs run in **sandboxed child processors**.
+**CTO note**: **resolves the long-parked "async workers deferred" open question.** Unblocks SEC-002 (docx bomb), the workflow engine, and email dispatch. Worker co-located in the `api` container for now; `REDIS_URL` from env.
+
+---
+
+**ADR-0054** — *Applications Workflow Engine — data model & engine foundations*
+**Status**: accepted
+**One-liner**: an **opt-in extension of the Access pillar** — BullMQ-on-Valkey as transport, **PostgreSQL as the durable system of record**; the engine fires from a domain event emitted **AFTER the `AccessGrant` tx commits — never inside it** (the inverse of INV-5).
+**CTO note**: a failing external provisioning call **never** rolls back / blocks / 503s the grant — the grant is the durable audit fact; an un-provisioned account is a recoverable `FAILED` run + notification, not a split-brain. Phase-1a lands entities/enums/`@lazyit/shared` contracts. Entities: ApplicationWorkflow, WorkflowVersion, WorkflowRun, WorkflowStepRun, WorkflowConnection, WorkflowSecret, ManualTask.
+
+---
+
+**ADR-0055** — *On-prem / internal-target connectors — a per-connection audited allowlist*
+**Status**: **proposed**
+**One-liner**: an ADMIN-gated, per-`WorkflowConnection` **audited allowlist** wired to the `isInternalTargetAllowed` seam; the IP classifier (`common/egress/ip-rules.ts`) is the **un-allowlistable hard floor** — loopback/IMDS/link-local/CGNAT/reserved are denied *before* the allowlist is consulted; the allowlist can only widen reach within RFC1918/ULA.
+**CTO note**: **PROPOSED, not accepted** — the gate before workflow connectors may target internal hosts. Protects the engine's co-located secrets (Valkey/Postgres/Zitadel) + cloud IMDS unconditionally.
+
+---
+
+**ADR-0056** — *In-app notification bell — append-only Notification + per-admin read state (admin-only, v1)*
+**Status**: accepted
+**One-liner**: an append-only `Notification` + per-admin `NotificationRead` join (fan-out-on-read); **ADMIN-only v1**; poll delivery; a closed shared `type` enum; redacted metadata only (names/ids, never bodies/secrets — INV-6); deep-link `entityType`/`entityId`; `dedupeKey`.
+**CTO note**: this is the ADR that *actually numbers* the notification-bell work (the old outside-ADR "ADR-0052 notifications" reference is stale — see numbering caution).
+
+---
+
+**ADR-0057** — *Retry-after-fix vs pinned-version replay*
+**Status**: accepted
+**One-liner**: ships **both** clone-to-new-run from the latest version (Option 3, primary/invariant-clean) **and** a transient payload-override break-glass on retry (Option 2, INV-6-safe); idempotency via a **sequence-suffix** key `<trigger>:<accessGrantId>:<n>`; double-provision **fails closed** unless every step up to the failure is `idempotent:true`.
+**CTO note**: workflow-engine follow-on to ADR-0054; a `supersedesRunId` records run lineage. In-place re-pin (Option 1) stays rejected.
+
+---
+
+**ADR-0058** — *User identity graph (legajo / username / manager) + clone-with-actions*
+**Status**: accepted
+**One-liner**: adds optional `User` fields `legajo`, `username` (each **live-only partial-unique** — soft-delete frees them, like `email`) and `managerId` (self-FK, SetNull) **XOR** `managerName` (free-text) enforced by a DB CHECK; plus a **clone-user-with-chosen-actions** flow.
+**CTO note**: **`username` is NOT an auth credential** and **never** an account-linking key — the linking key stays `email`/`externalId` (INV-2); `username` is a directory/display field only.
+
+---
+
+**ADR-0059** — *Knowledge Base v2 — folders, aliases, wiki-links & bulk import*
+**Status**: accepted
+**One-liner**: evolves the flat `ArticleCategory` into a hierarchical **Folder** (self-ref `parentId`); every article keeps **exactly one required home folder**; adds **aliases** + **wiki-links** navigation primitives + a **bulk-import** worker.
+**CTO note**: the home folder is the single governing folder read by ADR-0060's access control. Deepens ADR-0021/0042. New entities: ArticleAlias, ArticleWikiLink.
+
+---
+
+**ADR-0060** — *Knowledge Base access control — folders as the permission boundary*
+**Status**: accepted
+**One-liner**: access attaches to a **Folder**; an article **inherits** its home folder's rule; **no per-article ACL**. A **new orthogonal data-scoping axis** layered on the role→permission catalog — `article:read` gates whether you can act on the KB *at all*; the **folder ACL** gates **which** articles you see.
+**CTO note**: **INV-9.** v1 is evaluated on the article's home-folder rule with restriction inherited *down* the tree.
+
+---
+
+**ADR-0061** — *Secret Manager — zero-knowledge vaults beside the Knowledge Base*
+**Status**: accepted
+**One-liner**: a **third, deliberately divergent secret store** — **envelope crypto** (random per-vault DEK + per-user asymmetric keypair); the server can **NEVER read the value** (zero-knowledge); **server / DB-dump / ADMIN / subpoena are IN scope** of the threat model; recovery via a recovery key or peer re-wrap, else **permanent loss**.
+**CTO note**: **INV-10 = the server never decrypts.** Entities: SecretVault, SecretItem, UserKeypair, VaultMembership, SecretAuditLog (+ ServiceAccountKeypair / ServiceAccountVaultMembership via ADR-0080). The load-bearing inversion vs `WorkflowSecret` (ADR-0054, server-decryptable **by design**) and the SA token (ADR-0048, one-way hash). Before building near it: **there is NO `Secret` model** — the entities are `SecretItem` / `SecretVault`.
+
+---
+
+**ADR-0062** — *In-app Help / Manual surface — shipped product documentation, distinct from the KB*
+**Status**: accepted
+**One-liner**: a fixed, **shipped-with-the-code** product-documentation surface — markdown files in the repo, rendered by the markdown view, **PUBLIC / login-free**, in the Next.js `(marketing)` route group; distinct from the KB (**product-authored** vs operator-authored, code-versioned vs DB rows).
+**CTO note**: the **STANDING Manual-sync rule** (CLAUDE.md #7) — every user-facing change updates its Manual page **en+es** in the same change. Amended 2026-06-16 to live on the public landing side.
+
+---
+
+**ADR-0063** — *Configurable Asset Tag Scheme — instance config + monotonic counter, OFF by default*
+**Status**: accepted
+**One-liner**: lazyit's **first instance-config entity** — a **single-row `AssetTagScheme`** (template with a mandatory `{num}` token + optional prefix/suffix + zero-pad width) + a **global monotonic counter** allocated in-tx with retry; **OFF by default**.
+**CTO note**: one org-wide sequence (not per-prefix/category in v1); **gaps accepted**. Extended by ADR-0068 (existing-estate awareness).
+
+---
+
+**ADR-0064** — *Admin user provisioning credentials — temporary password only, forced change at first login*
+**Status**: accepted
+**One-liner**: a **full-page, asset-style** user-creation flow with **optional** assign-asset / grant-app at create time; credential provisioning is a **bounded carve-out** — **temporary password only, `changeRequired=true`, email auto-verified, HIDDEN under BYOI**, gated by the existing `user:manage`.
+**CTO note**: reuses existing assignment/grant write paths + authz (a UX convenience, not a new authz surface); the temp-password path exists only when the bundled IdP owns identity.
+
+---
+
+**ADR-0065** — *Secret Manager — regenerate the recovery key for an existing keypair*
+**Status**: **superseded** (by ADR-0066, 2026-06-15)
+**One-liner**: would let a user who can still unlock with their **passphrase** mint a new recovery key + re-wrap the **existing** private key (a recovery-wrap re-mint — keypair unchanged, memberships intact).
+**CTO note**: **superseded same-cycle by ADR-0066**, which made the recovery key a **fixed root** (rotation deferred). Do NOT implement 0065.
+
+---
+
+**ADR-0066** — *Secret Manager — password is the daily entry credential, recovery key is the root that resets it*
+**Status**: accepted (supersedes ADR-0065)
+**One-liner**: the two credentials are **asymmetric** — the **password** is the daily **ENTRY** credential (mutable, direct-unlock); the **recovery key** is the **ROOT / DR** artifact (fixed at bootstrap, shown once, **not** a direct entry path). The root can reset the password; the password can never touch the root.
+**CTO note**: reverts ADR-0065's recovery-key rotation. Decisive rule: the weaker credential can never replace the root.
+
+---
+
+**ADR-0067** — *Server-prefetch + hydration rendering strategy for high-traffic routes*
+**Status**: accepted
+**One-liner**: **Option C** — targeted server-prefetch on **6 high-traffic routes** (`/dashboard`, `/assets`, `/applications`, `/consumables`, `/users`, `/locations`) that become thin Server Components prefetching their primary list query before sending HTML.
+**CTO note**: a scoped pilot, **not** app-wide SSR; first-paint paths only.
+
+---
+
+**ADR-0068** — *Asset Tag Scheme — existing-estate awareness (skip-existing invariant + backfill with preview)*
+**Status**: accepted (extends ADR-0063)
+**One-liner**: **an auto-allocated tag is NEVER one already on a LIVE asset** (skip-on-exists, by construction + defended by the live-only partial-unique index `assets_assetTag_active_key`); adds **backfill with preview**; the old `MAX_ALLOCATION_ATTEMPTS` cap survives only as an infinite-loop sanity bound.
+**CTO note**: monotonic-with-gaps; must **never** surface a false 409 in a dense-occupancy estate.
+
+---
+
+**ADR-0069** — *Migrator — guided bulk import (phase 1: Asset slice, JSON + CSV)*
+**Status**: accepted
+**One-liner**: **phase 1 imports exactly `Asset`** from JSON/CSV, building the full machinery (parse/coerce, reference resolution, interactive conflict menu, stateful wizard, per-row commit) on the pure-DB asset path; **dry-run → persisted plan → replay-at-commit**, no human in the loop mid-commit.
+**CTO note**: async sandboxed parse (`import:run`); architecture proven on the simplest slice before phase 2 layers on more entities. Entities: ImportSession, ImportRun, ImportRow.
+
+---
+
+**ADR-0070** — *Infra topology graph — a generic visual CMDB of the server estate (InfraNode + InfraEdge)*
+**Status**: accepted
+**One-liner**: a **generic topology graph** — `InfraNode` (the things) + `InfraEdge` (typed, timestamped relationships) — on a free-move canvas; a node is **Asset-backed by default** (inherits owner/KB/secrets/warranty/shortcuts) and can be **detached** to a graph-only node for ephemerals.
+**CTO note**: a **new pillar**. Rejected: overloading `AssetCategory` / a `Server` 1:1 table / platform-specific node kinds. §7 impact (blast-radius) walks `RUNS_ON`/`DEPENDS_ON` + (amended) `MEMBER_OF` (#802). Extended by ADR-0073 (node→secret) + ADR-0074 (agent-reported nodes).
+
+---
+
+**ADR-0071** — *KB write-mode syntax highlighting — overlay over the textarea*
+**Status**: **superseded** (reverted 2026-06-24, issue #803)
+**One-liner**: a highlighted `<pre>` layer **behind** the ADR-0021 `<textarea>` (transparent text, visible caret, shared typographic box, `react-syntax-highlighter`); the `[[`/`{{` autocompletes unchanged.
+**CTO note**: **REVERTED** — the overlay kept drifting caret↔glyph even after the color-only fix; removed (`markdown-source-highlight.tsx`/`-theme.ts` deleted, textarea back to plain visible text) while **keeping** the autocompletes + caret-aware popups. Do NOT reintroduce the overlay. (ADR-0021 always intact.)
+
+---
+
+**ADR-0072** — *Quick View — entity-preview popover in pickers & search*
+**Status**: accepted
+**One-liner**: an entity-preview popover built on the **vendored radix `Popover`** (NOT HoverCard/Tooltip) — controlled `open`+`pinned`, hover-preview + **click/Enter/Space-to-pin**, reusing `DetailField`/status badges; keyboard-open via an **Alt+Enter** chord on the cmdk root.
+**CTO note**: data reused **in-memory** (zero fetch); applied to combobox / entity-multi-select / global search.
+
+---
+
+**ADR-0073** — *Infra node → secret linkage (soft handle-refs, member-scoped attach)*
+**Status**: accepted
+**One-liner**: `InfraNodeSecretRef {nodeId, vaultId, handle}` — a **real FK to `InfraNode`** (Cascade) but **NO FK to `SecretItem`** (soft metadata, mirroring KB chips + `SecretAuditLog`); resolved at read against live secrets, dangling refs **dropped**; `handle`/`vaultId` are **metadata only, never a value** (INV-10).
+**CTO note**: **attach is member-scoped** — asserts a live `VaultMembership` (checked **first**, so no existence leak); discrete `POST`/`DELETE /infra/nodes/:id/secrets`, not whole-array replacement.
+
+---
+
+**ADR-0074** — *Server reporting agent — self-installing Linux collector that auto-reports inventory*
+**Status**: accepted
+**One-liner**: a **self-installing Linux** (x64/arm64) agent that auto-reports **INVENTORY ONLY** (host identity / hardware / installed software) for **SELF only**; new hosts arrive **`PENDING`, `source=AGENT`** in a **review tray** (a human confirms); **one shared `AgentReportSchema`** in `@lazyit/shared` imported by both the agent binary and the API (`POST /infra/report`).
+**CTO note**: lives in **`apps/agent`** (`collect.ts`/`config.ts`/`index.ts`); reports land as `InfraNode` rows (ADR-0070) with liveness via the staleness sweeper. Rejected health/metrics, network scanning, auto-confirm; OS-neutral contract so Windows/macOS can be added later. `apps/api/src/agent-dist` serves the installer/binary.
+
+---
+
+**ADR-0075** — *Typed secrets via client-side structured payload + server-visible `kind` metadata*
+**Status**: accepted
+**One-liner**: a "typed secret" is a **client-side JSON encoding inside the SAME opaque ciphertext** (no crypto-path change, no new value column, **no server-side payload validation**); the only server-visible addition is a `SecretItem.kind` enum (`GENERIC` default / `SSH_KEY` / `TOTP` / `CERTIFICATE`) — **metadata only**, telling the UI which form/renderer to use **without decrypting**.
+**CTO note**: preserves INV-10; `kind` never describes the plaintext, only how the client encodes/renders it.
+
+---
+
+**ADR-0076** — *Optional Company grouping field on assets (not a tenancy boundary)*
+**Status**: accepted
+**One-liner**: an **optional free-text `Asset.company`** column (mutable-domain, rides the asset's soft-delete) — a **GROUPING** attribute, **NOT** a tenancy/access boundary; free-text + `<datalist>` autocomplete from used values (`GET /assets/companies`); **Modo B (per-record scoping) REJECTED (#841)**.
+**CTO note**: **no RBAC change** — anyone with `asset:read` sees every asset; company only **narrows a list you could already see**. No Company entity/table/CRUD.
+
+---
+
+**ADR-0077** — *«The Ledger» — adopt the landing's design language in the app*
+**Status**: accepted
+**One-liner**: adopt **The Ledger** as the app's design language via a **layered, tokens-first migration** (never big-bang) — **oxblood becomes THE lazyit brand color, replacing indigo** across app + landing + docs + logo; swap token **values** (names stay) to the Ledger palette + Hanken/Commit Mono; Ledger-native patterns (status→**stamp**, audit→**ledger tape**) applied selectively where the data IS a record.
+**CTO note**: supersedes the indigo era (ADR-0011/0049 palette) **in spirit**; re-tunes the pillar/chart data palette onto the new neutrals. Big frontend refactor (branch `refac/frontend-design`).
+
+---
+
+**ADR-0078** — *Advisory per-category specs dictionary (extends ADR-0007)*
+**Status**: accepted
+**One-liner**: an `AssetCategory` MAY declare a declarative **`specsSchema Json?`** (a small field list `{key,label,type,required?,enumValues?}`, **NOT** executable zod / a JSON-Schema engine) that is **ADVISORY** — produces soft warnings + UI hints, **never a 400**; extra keys allowed (just flagged).
+**CTO note**: extends ADR-0007 — `Asset.specs` stays an **open** jsonb; `null` dictionary = no governance (default). Pure helper `validateSpecsAgainstDictionary` in `@lazyit/shared`.
+
+---
+
+**ADR-0079** — *Instance SMTP + outbound email for notifications*
+**Status**: **proposed**
+**One-liner**: a **singleton `SmtpSettings`** instance-config store (mirrors `AssetTagScheme`, `id='singleton'`) + a **BullMQ email-dispatch worker** wired as a channel behind `emit()`; the SMTP password is **AES-256-GCM at rest, write-only, on its own key axis**; `GET`/`PUT /config/smtp` + `POST /config/smtp/test`, gated `settings:manage` + `ServicePrincipalForbiddenGuard`.
+**CTO note**: frontmatter says **proposed** (2026-06-30) — **verify accepted before treating as final**, though the `apps/api/src/smtp` module exists in the tree. This is the ADR that *actually numbers* instance SMTP (the old "ADR-0052 SMTP" reference is stale). Builds on ADR-0053 (workers) + ADR-0056 (notifications).
+
+---
+
+**ADR-0080** — *Programmatic secret retrieval via a service account (headless, client-side decrypt)*
+**Status**: accepted
+**One-liner**: a **service account becomes another keypair holder** in the ADR-0061 envelope — a client-generated **X25519 keypair per SA**, private key wrapped **once** under an **Argon2id** KEK derived from the **SA token secret** (the SA token plays the human passphrase's role — **no crypto-invariant change**); the server stores only the SA public key + wrapped private key + the token SHA-256 hash.
+**CTO note**: headless client-side decrypt via **`packages/fetch-cli`**. A keypair is now minted for **every** SA (#883 dropped the earlier `secret:fetch`-only gate — a keyless SA was a footgun). **INV-10 preserved.** Entities: ServiceAccountKeypair, ServiceAccountVaultMembership.
+
+---
+
+**ADR-0081** — *In-app read + CSV export for the security audit logs*
+**Status**: accepted
+**One-liner**: a thin **reader-only** module `apps/api/src/audit/` (`AuditModule`/`Controller`/`Service` — readers live HERE, writers stay in their own modules) exposing `GET /audit/logs` (paged/filtered read of ONE source: `secret` | `permission` | `serviceAccount`, newest first), `GET /audit/logs/export` (**streamed CSV**, `StreamableFile`, never buffers), and `GET /audit/logs/filters`; all `@RequirePermission('logs:read')`.
+**CTO note**: surfaces the existing append-only audit ledgers for reading; a new `logs:read` capability; reuses the ADR-0044 / #840 CSV-export mold. Web surface at `/reports/audit`.
+
+---
+
 ## Decisions made outside ADRs
 
 | Date | Decision | Context | Implication |
@@ -421,6 +657,8 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 | ADR-0037 §6 manual OIDC-client registration (primary path) | ADR-0043 §4 (zero-touch sidecar + in-app wizard) | "One build, one run"; manual runbook kept as the BYOI/fallback path |
 | ADR-0038 "roles never sync to the IdP" posture | ADR-0043 §3 (roles written back to Zitadel) | One-way mirror app→Zitadel; the reverse (token role→authZ) is explicitly NOT adopted |
 | ADR-0040 authZ MECHANISM (`@Roles` + `RolesGuard`, hardcoded role→capability) | ADR-0046 (`@RequirePermission` + `PermissionGuard` + `PermissionResolverService`, configurable `RolePermission` matrix) | RBAC v2: 3 roles stay FIXED, but capabilities become a runtime-configurable permission catalog; the DB-first, per-domain philosophy is kept |
+| ADR-0065 (regenerate the Secret Manager recovery key) | ADR-0066 (password=entry / recovery-key=fixed root) | Recovery-key rotation reverted; the root is fixed at bootstrap, its sole power is to reset the password |
+| ADR-0071 (KB write-mode highlight overlay) | *reverted, no successor* (issue #803, 2026-06-24) | The overlay drifted caret↔glyph and was removed; the `[[`/`{{` autocompletes were kept |
 
 ---
 
@@ -430,12 +668,13 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 
 | Question | Blocker | How to unblock |
 |----------|---------|---------------|
-| Async workers (BullMQ + Redis) + a scheduler (cron/queue) | SEC-002 fix; expiry reminders / periodic role-sync; **now also gates backups-from-frontend + the Application workflow engine (P4)** | CEO decision; an ADR needed before implementation |
+| ~~Async workers (BullMQ + Redis) + a scheduler~~ | **RESOLVED** → **ADR-0053** (BullMQ on Valkey, sandboxed processors) + **ADR-0054** (Workflow Engine on that transport). SEC-002, the workflow engine, and email dispatch (ADR-0079) all unblocked. | — |
 | **ServiceAccountAuditLog SA-actor column** (a SA managing another SA is attributed `null`) | Carved out of ADR-0048 | Its own future ADR when SA-on-SA attribution is needed |
 | BYOI write-back interface (SCIM/webhook) + bidirectional role sync | Deferred in ADR-0043 (Fork #5) | When a BYOI customer needs write-back |
-| CD / image publishing (GHCR + deploy flow + tagging) | Deferred in ADR-0027 | When a deploy target exists |
+| CD / image publishing (GHCR + deploy flow + tagging) | Deferred in ADR-0027 (ADR-0052 parallelized CI docker builds but publishing/CD is still not built) | When a deploy target exists |
 | E2E / integration testing tooling | Deferred in ADR-0012 | When critical flows stabilize |
-| Settings backend (general app settings store) | Deferred; `/config` covers first-run only. The new `/settings` web area (#108) is ADMIN UI over existing endpoints (taxonomies, asset-models, roles, config-status) — no general settings store yet | When a general settings need appears |
+| Settings backend (general app settings store) | **Partially resolved** — instance-config stores now exist per-concern: `AssetTagScheme` (ADR-0063), `SmtpSettings` (ADR-0079, *proposed*), the RolePermission matrix (ADR-0046). There is still **no single general key-value settings store**; the `/settings` web area remains ADMIN UI over discrete endpoints | When a general settings need appears that doesn't fit a purpose-built store |
+| On-prem / internal-target workflow connectors (**ADR-0055 is *proposed***) | Awaiting acceptance; the `isInternalTargetAllowed` seam + IP classifier floor are already built | CEO acceptance of ADR-0055 |
 
 ---
 
