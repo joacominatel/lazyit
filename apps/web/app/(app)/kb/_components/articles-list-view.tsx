@@ -33,7 +33,6 @@ import { useApplication } from "@/lib/api/hooks/use-applications";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useArticles } from "@/lib/api/hooks/use-articles";
 import { useAsset } from "@/lib/api/hooks/use-assets";
-import { useUsers } from "@/lib/api/hooks/use-users";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import {
@@ -161,7 +160,6 @@ export function ArticlesListView() {
     offset,
   });
   const { data: categories } = useArticleCategories();
-  const { data: users } = useUsers();
 
   const articles = page?.items;
 
@@ -230,8 +228,6 @@ export function ArticlesListView() {
   const categoryName = (id: string) =>
     categories?.find((category) => category.id === id)?.name ??
     t("list.uncategorized");
-  const authorOf = (id: string) =>
-    users?.find((candidate) => candidate.id === id);
 
   const total = page?.total ?? 0;
   const isEmpty = total === 0;
@@ -500,7 +496,6 @@ export function ArticlesListView() {
               <ArticleCard
                 article={article}
                 categoryName={categoryName(article.categoryId)}
-                author={authorOf(article.authorId)}
               />
             </li>
           ))}
