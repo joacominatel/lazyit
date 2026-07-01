@@ -63,3 +63,18 @@ export function deleteItem(
     method: "DELETE",
   });
 }
+
+/**
+ * Record a single-item secret REVEAL (`POST /secret-vaults/:id/items/:itemId/reveal`, #870). The decrypt
+ * itself happens ENTIRELY CLIENT-SIDE (the browser already holds the unwrapped DEK after unlock); this
+ * call only writes the metadata-only audit row (`ITEM_REVEALED`) — WHO revealed WHICH item, when.
+ *
+ * INV-10 / ADR-0061: there is NO body — the path params carry `vaultId` + `itemId`, and NO plaintext,
+ * ciphertext, DEK, or key material is ever sent (the server is structurally incapable of seeing a value).
+ * Returns 204 (no content). Called fire-and-forget: a failed audit write must never block the reveal.
+ */
+export function recordReveal(vaultId: string, itemId: string): Promise<void> {
+  return apiFetch<void>(`${BASE}/${vaultId}/items/${itemId}/reveal`, {
+    method: "POST",
+  });
+}
