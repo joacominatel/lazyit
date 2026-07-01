@@ -23,6 +23,7 @@ import { ConsumableCategoriesModule } from './consumable-categories/consumable-c
 import { ConsumablesModule } from './consumables/consumables.module';
 import { AssetHistoryModule } from './asset-history/asset-history.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { AuditModule } from './audit/audit.module';
 import { HealthModule } from './health/health.module';
 import { CommonModule } from './common/common.module';
 import { ConfigModule } from './config/config.module';
@@ -79,6 +80,10 @@ import { buildLoggerParams } from './logging/logging.config';
     ConsumablesModule,
     // Read-only cross-pillar aggregation for the web dashboard (CTO Round 1). Additive — no schema.
     DashboardModule,
+    // Read + filtered CSV export of the three security audit logs (ADR-0081, #871): secret /
+    // permission / service-account. Reader-only, gated on logs:read (reuses the Reports gate); the
+    // writers stay in their own modules. INV-10-safe secret-ref resolution (metadata only). No schema.
+    AuditModule,
     // Service Accounts management (ADR-0048): ADMIN-gated /service-accounts CRUD + token lifecycle.
     // The SA authentication branch itself lives in AuthModule's JwtAuthGuard.
     ServiceAccountsModule,

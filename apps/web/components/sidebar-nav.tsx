@@ -10,6 +10,7 @@ import {
   LockClosedIcon,
   ServerStackIcon,
   ShareIcon,
+  ShieldCheckIcon,
   Squares2X2Icon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -165,6 +166,14 @@ const NAV: NavSection[] = [
         labelKey: "reports",
         href: "/reports",
         icon: ClockIcon,
+        permission: "logs:read",
+      },
+      {
+        // Security audit log (issue #871, ADR-0081): the read + CSV export of the three security
+        // audit logs (secret / permission / service-account). Same `logs:read` gate as Reports.
+        labelKey: "auditLog",
+        href: "/reports/audit",
+        icon: ShieldCheckIcon,
         permission: "logs:read",
       },
     ],
