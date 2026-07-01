@@ -122,6 +122,16 @@ crypto — with Argon2id from the same `hash-wasm` the browser uses. It ships a 
 that performs the full wrap→fetch-shape→decrypt round-trip with no server, proving the chain agrees with
 the shared primitives byte-for-byte.
 
+**Distribution — a compiled standalone binary, not an npm package (#887).** `@lazyit/fetch-cli` is a
+**workspace-only** package; it is deliberately **not published to a registry**, so `bunx lazyit-fetch` (or
+`npx`) resolves to a 404 and a deploy/CI box with no monorepo has nothing to run. The runnable artifact is a
+**Bun-compiled standalone binary**, mirroring the reporting agent (ADR-0074 §7): `bun run --filter
+@lazyit/fetch-cli compile` produces `packages/fetch-cli/dist/lazyit-fetch-{x64,arm64}` via `bun build
+--compile --target=bun-linux-{x64,arm64}`. The binary is self-contained (no Bun/Node on the target). For
+in-repo testing the CLI still runs straight from source (`bun packages/fetch-cli/src/index.ts …`). The
+Manual (`secret-manager-programmatic-access`, en+es) documents building + running the binary — never a
+`bunx`/`npx` install. See follow-up (e) for serving the binary from the instance.
+
 ### 5. The new verb `secret:fetch` and the fences it widens
 
 `secret:fetch` is the **single machine verb** for programmatic retrieval — the SA twin of the human
@@ -205,6 +215,11 @@ CHECK on `SecretAuditLog`. A `--create-only` migration (no reset). New catalog v
   server-side membership-drop is conditional on a changed public key, so a future same-key re-wrap would
   keep grants for free. (b) **Visually mark machine-granted vaults** so operators know a token can read them.
   (c) The export/import overlap (#612/#613). (d) A first-class `SecretAuditLog` read surface (#870).
+  (e) **Serve the compiled `lazyit-fetch` binary from the instance for a one-line download (#887)** — exactly
+  the reporting agent's token-gated `GET /agent/download` pattern (ADR-0074 §6, `agent-dist.controller.ts`):
+  bake `lazyit-fetch-{x64,arm64}` into the API image build stage and stream it from a `secret:fetch`-gated
+  route (no anonymous binary surface, version-locked to the running server). #887 added only the `compile`
+  scripts + corrected the Manual; the serve endpoint is deferred to this follow-up.
 
 ---
 
