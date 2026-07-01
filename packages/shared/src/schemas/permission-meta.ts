@@ -220,6 +220,15 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
     pillar: "knowledge",
     tier: "delete",
   },
+  "article:manage": {
+    // Coarse capability (#877): edit / publish / delete / restore ANY article regardless of
+    // authorship — the delegatable twin of ADMIN god-mode over the KB. Distinct from `article:write`
+    // (which only lets you author + edit your OWN articles). ADMIN-only by seed default; a non-admin
+    // holder still passes the folder ACL (ADR-0060 §4) and the base route capability.
+    label: "Edit any article",
+    pillar: "knowledge",
+    tier: "coarse",
+  },
   // ── Manage ─────────────────────────────────────────────────────────────────
   "user:read": {
     label: "View the user directory",
@@ -346,6 +355,7 @@ export const CAPABILITY_IDS = [
   "article.view",
   "article.edit",
   "article.delete",
+  "article.manage",
   // Secret Manager (ADR-0061)
   "secret.view",
   "secret.manage",
@@ -519,6 +529,19 @@ export const CAPABILITIES: readonly Capability[] = [
     description: "Archive Knowledge Base articles.",
     pillar: "knowledge",
     permissions: ["article:delete"],
+  },
+  {
+    // #877 — the delegatable "edit any runbook" verb. Above-default tier (coarse, ⚠ admin-level) and on
+    // its own toggle because it is a distinct, consequential decision: a holder may edit, publish,
+    // delete and restore articles they did NOT author (ADMIN already can via god-mode). Editing/deleting
+    // still requires the base article:write/article:delete capability; this only bypasses authorship, and
+    // a non-admin holder still respects the folder ACL (ADR-0060 §4).
+    id: "article.manage",
+    label: "Edit any article",
+    description:
+      "Edit, publish, delete and restore ANY Knowledge Base article — not just your own. Still requires the write/delete capability for the action, and folder access is still respected.",
+    pillar: "knowledge",
+    permissions: ["article:manage"],
   },
   // Secret Manager (ADR-0061) — `read` and `manage` are kept as separate toggles for separation
   // of duties (who can view vault metadata ≠ who can administer vaults), mirroring the

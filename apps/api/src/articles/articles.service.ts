@@ -25,7 +25,12 @@ import { Prisma } from '../../generated/prisma/client';
 import type { Article, User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
-import { isServicePrincipal, type Principal } from '../auth/principal';
+import {
+  isHumanPrincipal,
+  isServicePrincipal,
+  type Principal,
+} from '../auth/principal';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { SearchService } from '../search/search.service';
 import { projectArticle, type ArticleRow } from '../search/search.documents';
 import {
@@ -117,8 +122,9 @@ const ARTICLE_LIST_SELECT = {
 } satisfies Prisma.ArticleSelect;
 
 /**
- * Knowledge-base articles. Authorship/visibility (DRAFT private to its author; only the author may
- * write) is enforced here from the authenticated User (ADR-0038). The guard (JwtAuthGuard) already
+ * Knowledge-base articles. Authorship/visibility (DRAFT private to its author; the author — or, since
+ * #877, an ADMIN / `article:manage` holder — may write) is enforced here from the authenticated User
+ * (ADR-0022/0038). The guard (JwtAuthGuard) already
  * validates the caller; services receive a `user?: User` and extract the id via ActorService. See
  * docs/03-decisions/0022-draft-visibility-auth-shim.md and docs/03-decisions/0038-jit-user-provisioning.md.
  */
@@ -129,6 +135,9 @@ export class ArticlesService {
     private readonly actor: ActorService,
     private readonly search: SearchService,
     private readonly folderAccess: FolderAccessService,
+    // #877 — resolve the caller's `article:manage` grant so an admin / manage-holder can edit ANY
+    // article, not just their own. Provided by the @Global AuthModule (no ArticlesModule edit needed).
+    private readonly permissions: PermissionResolverService,
   ) {}
 
   /**
@@ -399,14 +408,16 @@ export class ArticlesService {
   }
 
   /**
-   * Partial update (author only). Records the editor; never changes status (use publish). When the
+   * Partial update (author, admins, or `article:manage` holders — #877). Records the editor as
+   * `lastEditedById` (never rewrites `authorId`); never changes status (use publish). When the
    * edit changes any versioned field (title/content/excerpt), it appends a new ArticleVersion in the
    * same transaction (ADR-0042) — so the prior body is preserved, not overwritten (ADR-0006). A
    * metadata-only or no-op edit does NOT create a version (status is never touched by PATCH).
    */
   async update(id: string, data: UpdateArticle, principal?: Principal) {
     const cu = this.requireAuthor(principal);
-    const current = await this.loadOwned(id, cu);
+    const manageAny = await this.canManageAny(principal);
+    const current = await this.loadOwned(id, cu, manageAny, principal);
     if (data.categoryId) await this.assertCategoryUsable(data.categoryId);
     const { metadata, ...rest } = data;
     const article = await this.prisma.$transaction(async (tx) => {
@@ -449,10 +460,11 @@ export class ArticlesService {
     return article;
   }
 
-  /** Soft delete (author only). */
+  /** Soft delete (author, admins, or `article:manage` holders — #877). */
   async remove(id: string, principal?: Principal) {
     const cu = this.requireAuthor(principal);
-    await this.loadOwned(id, cu);
+    const manageAny = await this.canManageAny(principal);
+    await this.loadOwned(id, cu, manageAny, principal);
     const article = await this.prisma.article.update({
       where: { id },
       data: { deletedAt: new Date(), lastEditedById: cu },
@@ -463,9 +475,10 @@ export class ArticlesService {
   }
 
   /**
-   * Restore a soft-deleted article: clear `deletedAt` (ADR-0041). The route is ADMIN-gated, but
-   * authorship still governs WHICH article an actor may restore (mirroring remove): only the original
-   * author may restore their own article. Found via the `includeSoftDeleted` escape hatch (the read
+   * Restore a soft-deleted article: clear `deletedAt` (ADR-0041). The route is ADMIN-gated, and
+   * authorship governs WHICH article an actor may restore (mirroring remove): the original author, or —
+   * since #877 — an ADMIN / `article:manage` holder for ANY article (a non-admin holder still passing
+   * the folder ACL, ADR-0060 §4). Found via the `includeSoftDeleted` escape hatch (the read
    * filter would hide it). 404 if it never existed; 403 if owned by someone else; idempotent if
    * already live. The partial unique index frees `slug` on delete, so a restore can 409 if another
    * live article took the slug (mapped by the global PrismaExceptionFilter). On success the article is
@@ -473,6 +486,7 @@ export class ArticlesService {
    */
   async restore(id: string, principal?: Principal) {
     const cu = this.requireAuthor(principal);
+    const manageAny = await this.canManageAny(principal);
     const article = await this.prisma.article.findFirst({
       where: { id },
       includeSoftDeleted: true,
@@ -481,7 +495,16 @@ export class ArticlesService {
       throw new NotFoundException(`Article ${id} not found`);
     }
     if (article.authorId !== cu) {
-      throw new ForbiddenException('Only the author can restore this article');
+      // #877 authorship bypass: an ADMIN / `article:manage` holder may restore ANY article. A non-admin
+      // manage-holder still passes the folder ACL (ADR-0060 §4; ADMIN → 'ALL' no-op) — mirrors loadOwned.
+      if (!manageAny) {
+        throw new ForbiddenException(
+          'Only the author can restore this article',
+        );
+      }
+      await this.assertFolderVisible(article.categoryId, principal, () => {
+        throw new NotFoundException(`Article ${id} not found`);
+      });
     }
     if (article.deletedAt === null) {
       return article; // already live — idempotent
@@ -496,13 +519,15 @@ export class ArticlesService {
   }
 
   /**
-   * Publish (author only). Sets publishedAt on the first publish; idempotent if already published.
+   * Publish (author, admins, or `article:manage` holders — #877). Sets publishedAt on the first
+   * publish; idempotent if already published.
    * A real transition (DRAFT → PUBLISHED) changes `status`, so it snapshots a new version in the
    * same transaction (ADR-0042); the idempotent no-op does not.
    */
   async publish(id: string, principal?: Principal) {
     const cu = this.requireAuthor(principal);
-    const article = await this.loadOwned(id, cu);
+    const manageAny = await this.canManageAny(principal);
+    const article = await this.loadOwned(id, cu, manageAny, principal);
     if (article.status === 'PUBLISHED') return article;
     const published = await this.prisma.$transaction(async (tx) => {
       const next = await tx.article.update({
@@ -522,13 +547,15 @@ export class ArticlesService {
   }
 
   /**
-   * Unpublish back to DRAFT (author only). Keeps publishedAt ("was published once"). A real
+   * Unpublish back to DRAFT (author, admins, or `article:manage` holders — #877). Keeps publishedAt
+   * ("was published once"). A real
    * transition (PUBLISHED → DRAFT) changes `status`, so it snapshots a new version in the same
    * transaction (ADR-0042); the idempotent no-op does not.
    */
   async unpublish(id: string, principal?: Principal) {
     const cu = this.requireAuthor(principal);
-    const article = await this.loadOwned(id, cu);
+    const manageAny = await this.canManageAny(principal);
+    const article = await this.loadOwned(id, cu, manageAny, principal);
     if (article.status === 'DRAFT') return article;
     const unpublished = await this.prisma.$transaction(async (tx) => {
       const next = await tx.article.update({
@@ -604,8 +631,9 @@ export class ArticlesService {
   /**
    * Restore an article to a previous version (#848): replay that version's snapshotted
    * title/content/excerpt through the normal edit path ({@link update}), so a NEW ArticleVersion is
-   * appended — history is never mutated (append-only, ADR-0042 / ADR-0006). Author-only, the same
-   * gate as a normal edit. `status` is deliberately NOT restored: update() never touches status
+   * appended — history is never mutated (append-only, ADR-0042 / ADR-0006). Same write gate as a normal
+   * edit (author, admins, or `article:manage` holders — #877). `status` is deliberately NOT restored:
+   * update() never touches status
    * (publish/unpublish own it), so a restore keeps the article's CURRENT published/draft state
    * (least surprising — restoring old text must not silently un-publish a live article). 404 if the
    * article isn't readable/owned (via loadOwned) or that version number doesn't exist. Restoring to
@@ -614,7 +642,8 @@ export class ArticlesService {
    */
   async restoreVersion(id: string, version: number, principal?: Principal) {
     const cu = this.requireAuthor(principal);
-    await this.loadOwned(id, cu); // author gate + 404 (mirrors update())
+    const manageAny = await this.canManageAny(principal);
+    await this.loadOwned(id, cu, manageAny, principal); // author/manage gate + 404 (mirrors update())
     const snapshot = await this.prisma.articleVersion.findFirst({
       where: { articleId: id, version },
     });
@@ -658,7 +687,8 @@ export class ArticlesService {
     principal?: Principal,
   ) {
     const cu = this.requireAuthor(principal);
-    const article = await this.loadOwned(articleId, cu);
+    const manageAny = await this.canManageAny(principal);
+    const article = await this.loadOwned(articleId, cu, manageAny, principal);
     await this.assertFolderVisible(article.categoryId, principal, () => {
       throw new NotFoundException(`Article ${articleId} not found`);
     });
@@ -683,7 +713,8 @@ export class ArticlesService {
    */
   async removeLink(articleId: string, linkId: string, principal?: Principal) {
     const cu = this.requireAuthor(principal);
-    await this.loadOwned(articleId, cu);
+    const manageAny = await this.canManageAny(principal);
+    await this.loadOwned(articleId, cu, manageAny, principal);
     const link = await this.prisma.articleLink.findFirst({
       where: { id: linkId, articleId },
     });
@@ -777,7 +808,8 @@ export class ArticlesService {
     principal?: Principal,
   ) {
     const cu = this.requireAuthor(principal);
-    const article = await this.loadOwned(articleId, cu);
+    const manageAny = await this.canManageAny(principal);
+    const article = await this.loadOwned(articleId, cu, manageAny, principal);
     // No-escalation (ADR-0060 §6 / INV-9): the actor must pass §4 READ access to the TARGET article
     // before aliasing it — you can never surface an article you cannot yourself read. The author owns
     // it (loadOwned), but the home folder's rule still binds: re-check the actor can see the target's
@@ -804,7 +836,8 @@ export class ArticlesService {
    */
   async removeAlias(articleId: string, aliasId: string, principal?: Principal) {
     const cu = this.requireAuthor(principal);
-    await this.loadOwned(articleId, cu);
+    const manageAny = await this.canManageAny(principal);
+    await this.loadOwned(articleId, cu, manageAny, principal);
     const alias = await this.prisma.articleAlias.findFirst({
       where: { id: aliasId, articleId },
     });
@@ -1011,21 +1044,66 @@ export class ArticlesService {
   /**
    * Load an article for a write and enforce author-only: 404 if missing or a draft the caller can't
    * see (hides existence), 403 if it's a published article owned by someone else.
+   *
+   * `canManageAny` (#877) is the AUTHORSHIP bypass: an ADMIN (god-mode, ADR-0060 §5) or a holder of the
+   * delegatable `article:manage` verb may edit/publish/delete/restore ANY article, including another
+   * author's DRAFT. The bypass is scoped to authorship ONLY — the route capability (`article:write`/
+   * `article:delete`) is unchanged, and a NON-admin manage-holder still has to pass the folder ACL
+   * (ADR-0060 §4): they must be able to READ the article's home folder to touch it (ADMIN resolves to
+   * `'ALL'`, so this is a no-op for admins; folder-hidden → 404, never an info-leaking 403). The author
+   * path is completely unchanged; `authorId` is never rewritten (attribution stays with the editor via
+   * `lastEditedById` / `ArticleVersion.editedById`).
    */
-  private async loadOwned(id: string, currentUserId: string) {
+  private async loadOwned(
+    id: string,
+    currentUserId: string,
+    canManageAny = false,
+    principal?: Principal,
+  ) {
     const article = await this.prisma.article.findFirst({
       where: { id },
     });
     if (!article) {
       throw new NotFoundException(`Article ${id} not found`);
     }
-    if (article.status === 'DRAFT' && article.authorId !== currentUserId) {
-      throw new NotFoundException(`Article ${id} not found`);
+    if (article.authorId === currentUserId) {
+      return article; // the author — unchanged path
     }
-    if (article.authorId !== currentUserId) {
+    // Not the author.
+    if (!canManageAny) {
+      // Original author-only gate: hide a foreign DRAFT's existence (404), else 403.
+      if (article.status === 'DRAFT') {
+        throw new NotFoundException(`Article ${id} not found`);
+      }
       throw new ForbiddenException('Only the author can modify this article');
     }
+    // #877 authorship bypass: still enforce the folder ACL for a non-admin manage-holder so they can't
+    // reach a folder-hidden article they can't READ (ADR-0060 §4). ADMIN → 'ALL' → no-op.
+    await this.assertFolderVisible(article.categoryId, principal, () => {
+      throw new NotFoundException(`Article ${id} not found`);
+    });
     return article;
+  }
+
+  /** True when the principal is a human ADMIN — god-mode over the KB (ADR-0060 §5). */
+  private isAdmin(principal?: Principal): boolean {
+    return isHumanPrincipal(principal) && principal.user.role === 'ADMIN';
+  }
+
+  /**
+   * Whether the caller may edit/publish/delete/restore ANY article regardless of authorship (#877):
+   * an ADMIN (god-mode) OR a human holding the delegatable `article:manage` verb. A service account
+   * never qualifies (it can neither author nor manage articles — see {@link requireAuthor}); a plain
+   * `article:write` MEMBER who is not the author is UNCHANGED (still author-gated).
+   */
+  private async canManageAny(principal?: Principal): Promise<boolean> {
+    if (this.isAdmin(principal)) {
+      return true;
+    }
+    if (!isHumanPrincipal(principal)) {
+      return false;
+    }
+    return this.permissions.hasAll(principal.user.role, ['article:manage']);
   }
 
   /**

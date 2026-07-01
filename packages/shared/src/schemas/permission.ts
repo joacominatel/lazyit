@@ -99,10 +99,16 @@ export const PERMISSIONS = [
   "consumable:read",
   "consumable:write",
   "consumable:delete",
-  // article (KB)
+  // article (KB) — `manage` is the coarse ADMIN capability that bypasses AUTHORSHIP (edit/publish/
+  // delete/restore ANY article, not just your own — #877). It gates NO route on its own (the route
+  // capability stays `article:write`/`article:delete`); it only lets its holder act on articles they
+  // did not author. ADMIN holds it via the complete catalog; a non-admin holder still passes the folder
+  // ACL (ADR-0060 §4). A coarse verb (neither `:read` nor `:write`), so ADMIN-only by seed construction
+  // and never in the MEMBER/VIEWER default sets — admin-grantable from the role matrix (ADR-0022 §877).
   "article:read",
   "article:write",
   "article:delete",
+  "article:manage",
   // location
   "location:read",
   "location:write",

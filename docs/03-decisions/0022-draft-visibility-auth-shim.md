@@ -3,7 +3,7 @@ title: "ADR-0022: Draft visibility & the X-User-Id auth shim"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-30
+updated: 2026-07-01
 deciders: [Joaquín Minatel]
 ---
 
@@ -35,10 +35,33 @@ auth lands** — when [[0016-auth-strategy-deferred]] is resolved, this ADR is r
 > access. None of the draft-visibility *rules* below change — folder access is an additional, orthogonal
 > filter that runs alongside them.
 
+> [!note] Amendment 2026-07-01 (#877) — author-only is no longer the *only* write path
+> The **write** rule below ("only the author may modify") is relaxed: an article may now also be
+> edited / published / unpublished / deleted / restored by an **ADMIN** (KB god-mode, mirroring
+> [[0060-kb-folder-access-control]] §5) **or** a holder of the new coarse capability **`article:manage`**
+> ([[0046-roles-permissions-v2]]). This closes the operational gap where a teammate could not fix a
+> wrong command in a runbook whose author was unavailable. Precise semantics:
+> - **Authorship bypass only.** `article:manage` does **not** gate any route — the base route capability
+>   is unchanged (editing needs `article:write`, deleting needs `article:delete`). It only lets its
+>   holder act on articles they did **not** author. ADMIN holds all three via the complete catalog.
+> - **Reaches other authors' `DRAFT`s** (consistent with the §5 ADMIN god-mode) — an admin / manage
+>   holder is **not** 404'd on a foreign draft.
+> - **Folder ACL still binds for a NON-admin holder.** A non-admin `article:manage` holder must still
+>   pass [[0060-kb-folder-access-control]] §4 for the article's home folder (a folder-hidden article →
+>   **404**, never a 403) — so `article:manage` cannot escalate past folder access. ADMIN resolves to
+>   folder `'ALL'`, so the check is a no-op for admins.
+> - **Attribution is intact (append-only).** `authorId` is **never** rewritten; the acting editor is
+>   recorded as `lastEditedById` / `ArticleVersion.editedById` ([[0042-kb-article-versioning]]), so the
+>   history ledger truthfully shows who made each edit.
+> - `article:manage` is a **coarse verb**: ADMIN-only by seed construction (never seeded to
+>   MEMBER/VIEWER), delegatable from the role matrix (`PUT /config/permissions`). See
+>   [[0046-roles-permissions-v2]].
+
 ## Context
 
 KB articles need authorship rules: a `DRAFT` is private to its author, and **only the author** may
-edit, delete, publish or unpublish an article. But real authentication is **deferred**
+edit, delete, publish or unpublish an article (relaxed since #877 — see the amendment above:
+admins and `article:manage` holders may act on any article). But real authentication is **deferred**
 ([[0016-auth-strategy-deferred]]) — the API is currently unauthenticated, so the server has no
 trustworthy "who is calling". We still want to build and unit-test the authorization logic now, so
 that when auth arrives it slots in **without rewriting the KB**.
