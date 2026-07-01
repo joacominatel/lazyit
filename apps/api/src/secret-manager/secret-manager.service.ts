@@ -705,13 +705,27 @@ export class SecretManagerService {
   // a key that decrypts a value. The read endpoint returns ciphertext only; the CLI does every unwrap.
 
   /**
-   * Bootstrap a SERVICE ACCOUNT's keypair (`POST /secret-manager/service-accounts/:saId/keypair`). Performed
-   * by a HUMAN with `secret:manage` (the controller) during SA creation — the SA cannot act for itself. All
-   * material is CLIENT-GENERATED (the browser wrapped the private key under the token-derived KEK); the
-   * server stores public + wrapped blobs only, never the token, private key, or KEK (INV-10). 404 if the SA
-   * is missing/revoked; 409 if a keypair already exists. Audited SA_KEYPAIR_CREATED (metadata only).
+   * Create OR REPLACE a SERVICE ACCOUNT's keypair (`POST /secret-manager/service-accounts/:saId/keypair`),
+   * ADR-0080 (auto-gen on create + regenerate on token rotation, issue #883). Performed by a HUMAN with
+   * `secret:manage` (the controller) — the SA cannot act for itself. All material is CLIENT-GENERATED (the
+   * browser wrapped the private key under the token-derived KEK); the server stores public + wrapped blobs
+   * only, never the token, the private key, or the KEK (INV-10).
+   *
+   * Two call sites:
+   *   - SA CREATE — the browser generates the keypair while the one-time creation token is in memory and
+   *     uploads it for EVERY new SA (no row yet → create).
+   *   - TOKEN ROTATION — the browser re-generates the keypair under the NEW token (the old wrap is dead the
+   *     moment the token rotates) and re-uploads it; the 1:1 row (@unique serviceAccountId) is REPLACED in
+   *     place. This is also the retrofit path for a pre-#883 keyless SA (no row → create its first keypair).
+   *
+   * A regenerated keypair carries a NEW public key, so every DEK previously wrapped to the OLD public key
+   * (the SA's `ServiceAccountVaultMembership` rows) is now undecryptable. Those memberships are HARD-DROPPED
+   * in the SAME transaction, so the SA cleanly loses its grants and must be re-granted (ADR-0080: rotation =
+   * re-issue keypair + re-grant) — leaving them would only make the fetch-CLI decrypt fail confusingly. An
+   * idempotent re-upload of the SAME public key keeps the memberships. 404 if the SA is missing/revoked.
+   * Audited SA_KEYPAIR_CREATED (metadata only) whether the keypair was created or replaced.
    */
-  async bootstrapServiceAccountKeypair(
+  async setServiceAccountKeypair(
     principal: Principal | undefined,
     serviceAccountId: string,
     dto: CreateServiceAccountKeypair,
@@ -721,23 +735,33 @@ export class SecretManagerService {
     const existing = await this.prisma.serviceAccountKeypair.findFirst({
       where: { serviceAccountId },
     });
-    if (existing) {
-      throw new ConflictException(
-        'A keypair already exists for this service account',
-      );
-    }
-    const created = await this.prisma.$transaction(async (tx) => {
-      const row = await tx.serviceAccountKeypair.create({
-        data: { serviceAccountId, ...this.saKeypairData(dto) },
-      });
+    const row = await this.prisma.$transaction(async (tx) => {
+      let saved: ServiceAccountKeypair;
+      if (existing) {
+        // A fresh keypair (changed public key) orphans every DEK wrapped to the old key — drop those
+        // memberships so the SA cleanly loses its grants (re-grant required). A same-key re-submit keeps them.
+        if (existing.publicKey !== dto.publicKey) {
+          await tx.serviceAccountVaultMembership.deleteMany({
+            where: { serviceAccountId },
+          });
+        }
+        saved = await tx.serviceAccountKeypair.update({
+          where: { serviceAccountId },
+          data: this.saKeypairData(dto),
+        });
+      } else {
+        saved = await tx.serviceAccountKeypair.create({
+          data: { serviceAccountId, ...this.saKeypairData(dto) },
+        });
+      }
       await this.writeAudit(tx, {
         action: 'SA_KEYPAIR_CREATED',
         actorId,
         targetServiceAccountId: serviceAccountId,
       });
-      return row;
+      return saved;
     });
-    return this.saKeypairToWire(created);
+    return this.saKeypairToWire(row);
   }
 
   /**
