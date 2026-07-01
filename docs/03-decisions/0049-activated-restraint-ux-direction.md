@@ -27,6 +27,22 @@ Wave 0 (this ADR's foundation) shipped under epic #157 / issue #158.
 > Grotesk** (body) / **Commit Mono** (data) / **Redaction** (display, login + empty-states only)
 > replace Geist / Geist Mono. The pillar map (§3) and token values below are historical.
 
+> **Extended by #869 (2026-07-01) — offboarding scope + a rotation prompt.** The offboarding flow
+> this ADR's restraint governs (the impact sheet + sober "done" state) now also covers **Secret
+> vaults**. On confirm, the one offboard transaction **hard-drops every [[vault-membership]] the
+> departing user holds** (they otherwise keep a wrapped-DEK copy and retain cryptographic read access
+> — a SOC2 offboarding-control gap). This is **INV-10-safe** ([[0061-secret-manager-zero-knowledge]]
+> §9): revoking a membership is a **pure row-delete** of wrapped key material — the server never
+> decrypts anything, and lazyit **cannot auto-rotate** (it can't re-encrypt). So the success state
+> surfaces a display-only **"Secrets to rotate"** section — vault name + live secret count (pure
+> metadata, never a value/key/ciphertext) — as an honest prompt to rotate those secrets by hand, in
+> the same restrained register as the assets/access lists (knowledge-pillar chip, no whimsy). For
+> audit parity the transaction also writes one **`MEMBERSHIP_REVOKED` `SecretAuditLog`** row per
+> revoked vault, attributed to the offboarder with the **same human-XOR-SA actor** mapping the grant
+> revocation uses (human → `actorId`, service account → `serviceAccountId`; the table's at-most-one
+> actor CHECK, ADR-0048). No new endpoint, permission, enum value or migration. See
+> [[vault-membership]] and `apps/api/src/users/users.service.ts` (`remove`).
+
 ## Context
 
 A UX audit found the UI "half-built": the warm-bone + single-indigo system (ADR-0011) is
