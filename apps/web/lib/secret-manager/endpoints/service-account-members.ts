@@ -4,6 +4,7 @@ import type {
   ServiceAccountKeypair,
   ServiceAccountPublicKey,
   ServiceAccountVaultMembership,
+  VaultServiceAccountMemberMeta,
 } from "@lazyit/shared";
 import { apiFetch } from "../../api/client";
 
@@ -31,6 +32,20 @@ const VAULT_BASE = "/secret-vaults";
 /** The `DELETE …/service-account-members/:saId` literal response. */
 export interface RevokeServiceAccountResult {
   revoked: true;
+}
+
+/**
+ * List a vault's SERVICE-ACCOUNT members (`GET /secret-vaults/:vaultId/service-account-members`, #888).
+ * The machine-member counterpart to `getMembers` — non-secret display metadata only (id + name +
+ * tokenPrefix + isActive), never a wrapped DEK or the token. Member-scoped (ADMIN or a live human member),
+ * same as the human members list. Without this the members UI could never show a granted SA.
+ */
+export function getServiceAccountMembers(
+  vaultId: string,
+): Promise<VaultServiceAccountMemberMeta[]> {
+  return apiFetch<VaultServiceAccountMemberMeta[]>(
+    `${VAULT_BASE}/${vaultId}/service-account-members`,
+  );
 }
 
 /**
