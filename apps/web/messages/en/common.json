@@ -78,6 +78,7 @@
       "manager": "Manager",
       "assets": "Assets",
       "apps": "App access",
+      "stock": "On hand",
       "sku": "SKU",
       "manufacturer": "Manufacturer",
       "description": "Description",
