@@ -374,6 +374,9 @@
     "nothingToReturn": "Nothing to return.",
     "accessToRevoke": "Access to revoke",
     "noActiveAccess": "No active application access.",
+    "secretsToRotate": "Secrets to rotate",
+    "vaultItems": "{count, plural, =1 {# secret} other {# secrets}}",
+    "rotateHelp": "This person could read these vaults. Rotate their secrets manually — lazyit can't auto-rotate (zero-knowledge).",
     "loadError": {
       "impact": "Impact unavailable — couldn't load.",
       "title": "Couldn't load what to return",
