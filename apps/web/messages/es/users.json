@@ -374,6 +374,9 @@
     "nothingToReturn": "Nada que devolver.",
     "accessToRevoke": "Accesos a revocar",
     "noActiveAccess": "Sin acceso activo a aplicaciones.",
+    "secretsToRotate": "Secretos a rotar",
+    "vaultItems": "{count, plural, =1 {# secreto} other {# secretos}}",
+    "rotateHelp": "Esta persona pudo leer estas bóvedas. Rota sus secretos manualmente — lazyit no puede rotar automáticamente (zero-knowledge).",
     "loadError": {
       "impact": "Impacto no disponible — no se pudo cargar.",
       "title": "No se pudo cargar qué devolver",
