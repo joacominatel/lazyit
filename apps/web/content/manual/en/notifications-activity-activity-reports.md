@@ -68,6 +68,32 @@ to open in a spreadsheet. The difference is scope: **Export all** is the whole f
 **Export visible** and **Print** act only on the page in front of you. Narrow the feed with the filters
 first to export just the slice you need.
 
+## The security audit log
+
+Reports covers the operational estate (assets, access, stock, people). The **security audit log** — a
+separate view under Reports, at **Reports → Audit log** — is the read + export surface for the three
+security trails that are not part of the activity feed:
+
+- **Secrets** — every Secret Manager action: vaults and items created / updated / deleted, memberships
+  granted / revoked, keypair and password events, exports, programmatic fetches by a service account,
+  and single-item reveals in the UI.
+- **Permissions** — every permission granted to or revoked from a role.
+- **Service accounts** — the lifecycle of each service account: minted, rotated, revoked, restored, and
+  permission changes.
+
+It is gated by the **same permission as Reports** — no extra role is needed. Pick a **source** tab
+(Secrets, Permissions, Service accounts), then narrow with the **actor**, **action** and **date-range**
+filters. The secret log can also be pinned to a single **vault** or **item** — that is the per-vault /
+per-item timeline (usually reached by a deep link, shown as an active-filter chip you can clear).
+
+The list, the **Export all (filtered)** / **Export visible** / **Print** actions, and the paging behave
+exactly like the activity feed above. The CSV columns are the audit fields (when, source, action,
+actor, service account, vault, item, target, role, permission, detail).
+
+**Secrets stay secret.** The secret audit log records only *metadata* — which vault, which item, who,
+and when — never a secret's value. lazyit cannot decrypt your secrets, so a value can never appear here
+or in the export; a vault or item that was later deleted simply shows its id.
+
 ## Reports vs the notification bell
 
 They are different surfaces for different jobs:
