@@ -178,7 +178,8 @@
       "users": "Users",
       "locations": "Locations",
       "applications": "Applications",
-      "infra": "Infrastructure"
+      "infra": "Infrastructure",
+      "consumables": "Consumables"
     }
   },
   "field": {
