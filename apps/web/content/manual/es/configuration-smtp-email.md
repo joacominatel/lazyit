@@ -55,12 +55,12 @@ notificaciones **operativas** — las mismas que aparecen en la campana:
 - **Stock bajo** — un consumible llegó a su mínimo o por debajo.
 - **Un flujo de trabajo necesita una persona** y **una ejecución de flujo de trabajo falló**.
 - **Se concedió acceso a una aplicación crítica** y **un usuario fue elevado a administrador**.
+- **Un cambio de permiso sensible** y **un agente de reportes que se desconecta** (las alertas de auditoría sensible).
 
 Cada correo llega a las **mismas personas que ven esa notificación en la campana**: una difusión llega a
 tus administradores; una notificación dirigida a una persona llega a esa persona. Los correos de difusión
-usan **Cco** para que los destinatarios no vean las direcciones de los demás. Otros tipos de notificación
-(como el aviso de configuración de la bóveda al iniciar sesión y las alertas de auditoría sensible)
-permanecen **solo en la campana** por ahora.
+usan **Cco** para que los destinatarios no vean las direcciones de los demás. El aviso de configuración de
+la bóveda al iniciar sesión permanece **solo en la campana**.
 
 > El correo es **de mejor esfuerzo**: si tu servidor está caído o mal configurado, la notificación dentro
 > de la app igual aparece y nada más se rompe — el correo simplemente se reintenta unas cuantas veces y

@@ -49,11 +49,11 @@ ones that appear in the bell:
 - **Low stock** — a consumable dropped to or below its minimum.
 - **A workflow needs a human** and **a workflow run failed**.
 - **Access to a critical application was granted**, and **a user was raised to administrator**.
+- **A sensitive permission change** and **a reporting agent going offline** (the sensitive-audit alerts).
 
 Each email goes to the **same people who see that notification in the bell**: a broadcast goes to your
 administrators; a notification addressed to one person goes to that person. Broadcast emails use **Bcc**
-so recipients don't see each other's addresses. Other notification types (such as the vault-setup login
-nudge and the sensitive-audit alerts) stay **bell-only** for now.
+so recipients don't see each other's addresses. The vault-setup sign-in nudge stays **bell-only**.
 
 > Email is **best-effort**: if your relay is down or misconfigured, the in-app notification still appears
 > and nothing else breaks — the email is simply retried a few times and then dropped. Email is a
