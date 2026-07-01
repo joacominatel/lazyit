@@ -62,16 +62,14 @@ import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
 import { LocationFormDialog } from "./location-form-dialog";
 import {
+  LOCATION_FILTER_DEFAULTS as FILTER_DEFAULTS,
+  LOCATION_LIST_OPTIONS,
+  deriveLocationParams,
+} from "./locations-list-query";
+import {
   LocationTypeBadge,
   useLocationTypeLabel,
 } from "./location-type-badge";
-
-/**
- * Filter param defaults for the URL list-state. `type` maps to the server's `type` param (#824 —
- * scopes the whole result set). `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only`
- * view via the URL.
- */
-const FILTER_DEFAULTS = { type: "ALL", archived: "ALL" } as const;
 
 /** Stable empty fragment for ResourceTable mobileChildren when the table is in loading state. */
 const EMPTY_MOBILE = <></>;
@@ -100,28 +98,18 @@ export function LocationsListView() {
     setOffset,
     clearFilters,
     filtersActive,
-  } = useListParams({
-    filters: FILTER_DEFAULTS,
-    defaultSort: "updatedAt",
-    defaultDir: "desc",
-  });
+  } = useListParams(LOCATION_LIST_OPTIONS);
 
   const typeFilter = filters.type as LocationType | "ALL";
   // The archived view is ADMIN-only.
   const archived = isAdmin && filters.archived === "only";
 
-  // Forward the server-supported params; `type` is now a server filter too (#824), so it scopes the
-  // whole result set instead of just the current page.
+  // `deriveLocationParams` is the SAME URL→query mapping the server prefetch uses (`type` is a server
+  // filter, #824), so this hook's key and the SSR-prefetched key are byte-identical (ADR-0067 / #733).
   const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useLocationList({
-      q: q || undefined,
-      sort,
-      dir: sort ? dir : undefined,
-      type: typeFilter === "ALL" ? undefined : typeFilter,
-      limit,
-      offset,
-      deleted: archived ? "only" : undefined,
-    });
+    useLocationList(
+      deriveLocationParams({ q, sort, dir, offset, limit, filters }, { isAdmin }),
+    );
   const deleteLocation = useDeleteLocation();
   const restoreLocationMutation = useRestoreLocation();
 
