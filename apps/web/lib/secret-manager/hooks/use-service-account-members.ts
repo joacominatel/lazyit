@@ -6,11 +6,26 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addServiceAccountMember,
   createServiceAccountKeypair,
+  getServiceAccountMembers,
   getServiceAccountPublicKey,
   removeServiceAccountMember,
 } from "../endpoints/service-account-members";
 import { membershipKeys, saKeypairKeys, vaultKeys } from "../query-keys";
 import { skip4xxRetry } from "./retry";
+
+/**
+ * List a vault's SERVICE-ACCOUNT members (metadata only — no wrapped DEKs). The machine-member sibling of
+ * `useMembers`; the vault-detail Members section merges the two so a granted SA is visible and revocable
+ * (#888). A 403 (removed from the vault mid-session) is terminal — skip 4xx retries so the list settles.
+ */
+export function useServiceAccountMembers(vaultId: string | undefined) {
+  return useQuery({
+    queryKey: membershipKeys.serviceAccountMembers(vaultId ?? ""),
+    queryFn: () => getServiceAccountMembers(vaultId as string),
+    enabled: Boolean(vaultId),
+    retry: skip4xxRetry,
+  });
+}
 
 /**
  * Read + write hooks for the SERVICE-ACCOUNT crypto surface (ADR-0080). The keypair-bootstrap and
@@ -77,6 +92,10 @@ export function useAddServiceAccountMember() {
       data: CreateServiceAccountVaultMembership;
     }) => addServiceAccountMember(vaultId, data),
     onSuccess: (_result, { vaultId }) => {
+      // #888: refresh the SA-members list so the newly-granted machine member appears immediately.
+      queryClient.invalidateQueries({
+        queryKey: membershipKeys.serviceAccountMembers(vaultId),
+      });
       queryClient.invalidateQueries({
         queryKey: membershipKeys.members(vaultId),
       });
@@ -96,6 +115,10 @@ export function useRemoveServiceAccountMember() {
     mutationFn: ({ vaultId, saId }: { vaultId: string; saId: string }) =>
       removeServiceAccountMember(vaultId, saId),
     onSuccess: (_result, { vaultId }) => {
+      // #888: refresh the SA-members list so the revoked machine member disappears immediately.
+      queryClient.invalidateQueries({
+        queryKey: membershipKeys.serviceAccountMembers(vaultId),
+      });
       queryClient.invalidateQueries({
         queryKey: membershipKeys.members(vaultId),
       });
