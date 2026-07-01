@@ -6,6 +6,7 @@ import { AssetsModule } from '../assets/assets.module';
 import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.module';
 import { ArticlesModule } from '../articles/articles.module';
 import { SecretManagerModule } from '../secret-manager/secret-manager.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   // The infra topology graph (ADR-0070). Reuses the existing machinery rather than reinventing it:
@@ -20,6 +21,9 @@ import { SecretManagerModule } from '../secret-manager/secret-manager.module';
     AssetAssignmentsModule,
     ArticlesModule,
     SecretManagerModule,
+    // NotificationsModule (exports NotificationsService): the agent-OFFLINE nudge the staleness
+    // sweeper broadcasts on a CONFIRMED→OFFLINE transition (ADR-0056 amendment / #852; ADR-0074 §4).
+    NotificationsModule,
   ],
   controllers: [InfraController],
   // InfraAgentStalenessSweeper: the periodic OFFLINE flip for stale agent nodes (ADR-0074 §4) — same
