@@ -30,6 +30,7 @@ import { QueueModule } from './queue/queue.module';
 import { ServiceAccountsModule } from './service-accounts/service-accounts.module';
 import { WorkflowEngineModule } from './workflow-engine/workflow-engine.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { SmtpModule } from './smtp/smtp.module';
 import { SecretManagerModule } from './secret-manager/secret-manager.module';
 import { InfraModule } from './infra/infra.module';
 import { AgentDistModule } from './agent-dist/agent-dist.module';
@@ -88,6 +89,10 @@ import { buildLoggerParams } from './logging/logging.config';
     // In-app notification bell (ADR-0056): the four poll endpoints (gated notification:read), the
     // 90-day retention sweep, and the exported NotificationsService the post-commit emitters use.
     NotificationsModule,
+    // Instance SMTP + outbound email (ADR-0079, #615): the admin-only /config/smtp surface, the
+    // encrypted-at-rest password (SMTP_SECRET_KEY), and the BullMQ email worker that delivers a curated
+    // set of bell notifications to email. Also imported by NotificationsModule for the producer relay.
+    SmtpModule,
     // Zero-knowledge Secret Manager (ADR-0061, #366): the ciphertext-custodian backend — keypair +
     // vault/item/membership CRUD + KB-chip resolution. Two-layer authz (RBAC secret:read/secret:manage
     // ⟂ per-vault crypto membership), human-only. The server stores wrapped blobs + ciphertext and can
