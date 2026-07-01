@@ -137,6 +137,20 @@
         "typescript": "^6.0.3",
       },
     },
+    "packages/fetch-cli": {
+      "name": "@lazyit/fetch-cli",
+      "version": "0.0.0",
+      "bin": {
+        "lazyit-fetch": "./src/index.ts",
+      },
+      "dependencies": {
+        "@lazyit/shared": "workspace:*",
+        "hash-wasm": "4.12.0",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+    },
     "packages/shared": {
       "name": "@lazyit/shared",
       "version": "0.0.0",
@@ -524,6 +538,8 @@
     "@lazyit/agent": ["@lazyit/agent@workspace:apps/agent"],
 
     "@lazyit/api": ["@lazyit/api@workspace:apps/api"],
+
+    "@lazyit/fetch-cli": ["@lazyit/fetch-cli@workspace:packages/fetch-cli"],
 
     "@lazyit/shared": ["@lazyit/shared@workspace:packages/shared"],
 
