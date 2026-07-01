@@ -15,10 +15,13 @@ import { useCreateServiceAccountKeypair } from "@/lib/secret-manager/hooks/use-s
 type SetupState = "working" | "done" | "forbidden" | "error";
 
 /**
- * SaKeypairSetup (ADR-0080) — auto-bootstraps a freshly-created service account's zero-knowledge keypair
- * while its one-time token is STILL in memory. Rendered inside the create secret-reveal ONLY when the new
- * SA was granted `secret:fetch` (the parent gates on that): a `secret:fetch` account is worthless without a
- * keypair, so we set one up immediately rather than making the operator do a second step.
+ * SaKeypairSetup (ADR-0080, #883) — generates/replaces a service account's zero-knowledge keypair while a
+ * one-time token is STILL in memory. Rendered in the token-reveal of BOTH flows:
+ *   - CREATE — for EVERY new SA (not just `secret:fetch` ones); an unused keypair is negligible and it
+ *     removes the "no encryption key" footgun if the SA is later granted `secret:fetch`.
+ *   - ROTATION — the new token re-wraps a fresh keypair, which REPLACES the stored one server-side (the
+ *     retrofit path for a pre-#883 keyless SA). The old keypair was wrapped under the now-dead token, so
+ *     regenerating is mandatory for the SA to keep working — and it drops the SA's vault grants (re-grant).
  *
  * INV-10: the token is used ONLY to derive the key that wraps the fresh private key, entirely in the
  * browser (`bootstrapServiceAccountKeypair`). What we POST is the public key + the wrapped blob — never the
@@ -26,7 +29,7 @@ type SetupState = "working" | "done" | "forbidden" | "error";
  *
  * Non-fatal by design: the SA already exists. If the keypair setup fails — most commonly because the
  * operator holds `settings:manage` but not `secret:manage` (a 403) — we say so plainly; the account is
- * fine, it just has no encryption key and can be recreated to get one.
+ * fine, it just has no encryption key and can get one by rotating its token with the right permission.
  */
 export function SaKeypairSetup({
   saId,

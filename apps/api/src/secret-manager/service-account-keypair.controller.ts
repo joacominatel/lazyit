@@ -26,8 +26,9 @@ class ServiceAccountPublicKeyDto extends createZodDto(
  * Secret Manager — SERVICE ACCOUNT keypair surface (ADR-0080, programmatic secret retrieval). The MACHINE
  * twin of the human {@link KeypairController}, but these routes are HUMAN-ONLY (`HumanOnlyGuard`): a
  * service account cannot bootstrap its OWN crypto identity, so a HUMAN ADMIN (`secret:manage`) uploads the
- * client-generated material during SA creation. All material is CLIENT-GENERATED; the server stores public
- * + wrapped blobs only and can NEVER reconstruct a private key or the token (INV-10).
+ * client-generated material — on SA creation, and again on token rotation (#883), which regenerates the
+ * keypair under the new token. All material is CLIENT-GENERATED; the server stores public + wrapped blobs
+ * only and can NEVER reconstruct a private key or the token (INV-10).
  *
  * `saId` is a cuid (no `ParseUUIDPipe`) — validated by existence in the service (404 if missing). The
  * public-key route exposes ONLY the SA's public key (the material a granter wraps a DEK to), never a
@@ -43,15 +44,15 @@ export class ServiceAccountKeypairController {
   @RequirePermission('secret:manage')
   @ApiOperation({
     summary:
-      "Bootstrap a service account's keypair (client-generated, token-wrapped; 409 if one exists)",
+      "Set a service account's keypair (client-generated, token-wrapped). Creates on SA creation; on token rotation REPLACES it in place and drops the SA's now-orphaned vault grants (#883).",
   })
   @ApiOkResponse({ type: ServiceAccountKeypairDto })
-  bootstrapKeypair(
+  setKeypair(
     @Param('saId') saId: string,
     @Body() dto: CreateServiceAccountKeypairDto,
     @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.secrets.bootstrapServiceAccountKeypair(principal, saId, dto);
+    return this.secrets.setServiceAccountKeypair(principal, saId, dto);
   }
 
   @Get(':saId/public-key')

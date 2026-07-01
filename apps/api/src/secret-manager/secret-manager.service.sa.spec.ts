@@ -249,6 +249,26 @@ class FakePrisma {
       this.saKeypairs.push(row);
       return row;
     },
+    update: ({
+      where,
+      data,
+    }: {
+      where: { serviceAccountId: string };
+      data: {
+        publicKey: string;
+        privateKeyEnc: string;
+        privateKeySalt: string;
+        privateKeyIv: string;
+        kdfParams: unknown;
+      };
+    }) => {
+      const row = this.saKeypairs.find(
+        (k) => k.serviceAccountId === where.serviceAccountId,
+      );
+      if (!row) throw new Error('keypair not found');
+      Object.assign(row, data, { updatedAt: new Date() });
+      return row;
+    },
   };
 
   readonly serviceAccountVaultMembership = {
@@ -303,6 +323,13 @@ class FakePrisma {
       if (idx === -1) throw new Error('membership not found');
       return this.saMemberships.splice(idx, 1)[0];
     },
+    deleteMany: ({ where }: { where: { serviceAccountId: string } }) => {
+      const before = this.saMemberships.length;
+      this.saMemberships = this.saMemberships.filter(
+        (m) => m.serviceAccountId !== where.serviceAccountId,
+      );
+      return { count: before - this.saMemberships.length };
+    },
   };
 
   readonly secretAuditLog = {
@@ -354,17 +381,13 @@ function seed(
 }
 
 describe('SecretManagerService — SA programmatic retrieval (ADR-0080)', () => {
-  // ── bootstrap SA keypair ──────────────────────────────────────────────────────
-  describe('bootstrapServiceAccountKeypair', () => {
+  // ── set SA keypair (create on creation, replace on rotation) — #883 ─────────────
+  describe('setServiceAccountKeypair', () => {
     it('stores the client-generated public + wrapped-private material and audits SA_KEYPAIR_CREATED', async () => {
       const { svc, db } = build();
       db.serviceAccounts.push({ id: 'sa1', deletedAt: null });
       const admin = human('admin');
-      const kp = await svc.bootstrapServiceAccountKeypair(
-        admin,
-        'sa1',
-        SA_KEYPAIR,
-      );
+      const kp = await svc.setServiceAccountKeypair(admin, 'sa1', SA_KEYPAIR);
       expect(kp.serviceAccountId).toBe('sa1');
       expect(kp.publicKey).toBe(SA_KEYPAIR.publicKey);
       expect(kp.privateKeyEnc).toBe(SA_KEYPAIR.privateKeyEnc);
@@ -381,23 +404,64 @@ describe('SecretManagerService — SA programmatic retrieval (ADR-0080)', () => 
     it('404 if the service account is missing/revoked', async () => {
       const { svc } = build();
       await expect(
-        svc.bootstrapServiceAccountKeypair(human('admin'), 'ghost', SA_KEYPAIR),
+        svc.setServiceAccountKeypair(human('admin'), 'ghost', SA_KEYPAIR),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
-    it('409 if a keypair already exists', async () => {
+    it('REPLACES an existing keypair in place (rotation retrofit) and re-audits SA_KEYPAIR_CREATED', async () => {
       const { svc, db } = build();
       seed(db, { withKeypair: true });
-      await expect(
-        svc.bootstrapServiceAccountKeypair(human('admin'), 'sa1', SA_KEYPAIR),
-      ).rejects.toBeInstanceOf(ConflictException);
+      const rotated = { ...SA_KEYPAIR, publicKey: 'cm90YXRlZFB1Yg==' };
+      const kp = await svc.setServiceAccountKeypair(
+        human('admin'),
+        'sa1',
+        rotated,
+      );
+      // One keypair row, now carrying the NEW public key — never a second row (1:1 @unique).
+      expect(db.saKeypairs).toHaveLength(1);
+      expect(kp.publicKey).toBe('cm90YXRlZFB1Yg==');
+      expect(db.audit.at(-1)!.action).toBe('SA_KEYPAIR_CREATED');
+    });
+
+    it('DROPS the SA vault grants when the regenerated keypair has a new public key (must re-grant)', async () => {
+      const { svc, db } = build();
+      const { vaultId, saId } = seed(db, { withKeypair: true });
+      db.saMemberships.push({
+        id: 'sam1',
+        vaultId,
+        serviceAccountId: saId,
+        ...WRAP,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await svc.setServiceAccountKeypair(human('admin'), saId, {
+        ...SA_KEYPAIR,
+        publicKey: 'cm90YXRlZFB1Yg==',
+      });
+      // The old DEK was wrapped to the old public key — now undecryptable, so the membership is hard-dropped.
+      expect(db.saMemberships).toHaveLength(0);
+    });
+
+    it('KEEPS the SA vault grants on an idempotent re-upload of the SAME public key', async () => {
+      const { svc, db } = build();
+      const { vaultId, saId } = seed(db, { withKeypair: true });
+      db.saMemberships.push({
+        id: 'sam1',
+        vaultId,
+        serviceAccountId: saId,
+        ...WRAP,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await svc.setServiceAccountKeypair(human('admin'), saId, SA_KEYPAIR);
+      expect(db.saMemberships).toHaveLength(1);
     });
 
     it('403 if the caller is a service account (human-only)', async () => {
       const { svc, db } = build();
       db.serviceAccounts.push({ id: 'sa1', deletedAt: null });
       await expect(
-        svc.bootstrapServiceAccountKeypair(service(), 'sa1', SA_KEYPAIR),
+        svc.setServiceAccountKeypair(service(), 'sa1', SA_KEYPAIR),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });

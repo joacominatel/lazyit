@@ -426,8 +426,8 @@
     "keypairSetup": {
       "working": "Configurando la clave de cifrado…",
       "done": "Clave de cifrado configurada. Esta cuenta de servicio ya puede recuperar secretos de las bóvedas a las que le des acceso.",
-      "forbidden": "Necesitas el permiso de gestión del Gestor de secretos para configurar el acceso programático. La cuenta de servicio se creó, pero sin clave de cifrado.",
-      "error": "No se pudo configurar la clave de cifrado. La cuenta de servicio se creó sin ella; vuelve a crearla para habilitar la recuperación programática de secretos."
+      "forbidden": "Necesitas el permiso de gestión del Gestor de secretos para configurar la clave de cifrado. La cuenta de servicio está bien, pero no podrá recuperar secretos hasta que un administrador la configure (rota su token).",
+      "error": "No se pudo configurar la clave de cifrado. La cuenta de servicio está bien; rota su token para reintentar y habilitar la recuperación programática de secretos."
     },
     "testIt": {
       "title": "Comprueba que funciona",
