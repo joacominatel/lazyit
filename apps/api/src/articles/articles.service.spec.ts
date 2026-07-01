@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { SearchService } from '../search/search.service';
 import { FolderAccessService } from '../article-categories/folder-access.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -30,6 +31,18 @@ const OTHER_USER: MinimalUser = { id: OTHER };
 // Human principals for the write paths; cast through `never` (only the user id drives authorship).
 const AUTHOR_PRINCIPAL = { kind: 'human', user: { id: AUTHOR } } as never;
 const OTHER_PRINCIPAL = { kind: 'human', user: { id: OTHER } } as never;
+// #877 — an ADMIN (god-mode) and a non-admin `article:manage` holder. Both are NON-authors here; the
+// ADMIN bypasses authorship via role, the MANAGER via the resolved `article:manage` grant (mocked).
+const ADMIN_ID = '33333333-3333-3333-3333-333333333333';
+const ADMIN_PRINCIPAL = {
+  kind: 'human',
+  user: { id: ADMIN_ID, role: 'ADMIN' },
+} as never;
+const MANAGER_ID = '44444444-4444-4444-4444-444444444444';
+const MANAGER_PRINCIPAL = {
+  kind: 'human',
+  user: { id: MANAGER_ID, role: 'MEMBER' },
+} as never;
 // A service-account principal — an SA can never author/own an article (Article.authorId is a non-null
 // User FK), so the write paths must reject it (403) rather than write a null-attributed version.
 const SA_PRINCIPAL = {
@@ -112,6 +125,9 @@ describe('ArticlesService', () => {
   // tests are unaffected. Folder-access invariants are tested in folder-access.service.spec.ts; the
   // 404/no-escalation paths here override visibleFolderIds with a Set.
   let folderAccess: { visibleFolderIds: jest.Mock };
+  // PermissionResolverService (#877) — mocked; defaults to NOT holding `article:manage`, so a non-author
+  // non-admin is still author-gated. The manage tests override hasAll to resolve true.
+  let permissions: { hasAll: jest.Mock };
 
   beforeEach(async () => {
     article = {
@@ -194,6 +210,9 @@ describe('ArticlesService', () => {
     // The dedicated folder-access invariant tests live in folder-access.service.spec.ts; the few here
     // override visibleFolderIds to a Set to drive the folder-hidden 404 / no-escalation paths.
     folderAccess = { visibleFolderIds: jest.fn().mockResolvedValue('ALL') };
+    // PermissionResolverService (#877): by default the caller does NOT hold `article:manage` — so the
+    // author-only gate is unchanged for a plain writer. Manage tests override this to resolve true.
+    permissions = { hasAll: jest.fn().mockResolvedValue(false) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -215,6 +234,7 @@ describe('ArticlesService', () => {
         { provide: ActorService, useValue: actor },
         { provide: SearchService, useValue: search },
         { provide: FolderAccessService, useValue: folderAccess },
+        { provide: PermissionResolverService, useValue: permissions },
       ],
     }).compile();
 
@@ -878,6 +898,116 @@ describe('ArticlesService', () => {
       await expect(
         service.update('a', { categoryId: 'gone' }, AUTHOR_PRINCIPAL),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  // --- #877: admins & article:manage holders edit ANY article --------------
+  describe('manage-any authorization (#877)', () => {
+    it("lets an ADMIN edit another author's PUBLISHED article; records the editor, never rewrites authorId", async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'c1',
+      });
+      await service.update('a', { title: 'Fixed command' }, ADMIN_PRINCIPAL);
+      const data = lastUpdate();
+      // The acting editor is recorded; authorId is NOT in the update payload (attribution stays put).
+      expect(data.lastEditedById).toBe(ADMIN_ID);
+      expect(data).not.toHaveProperty('authorId');
+      // ADMIN bypasses authorship via role — no article:manage resolution needed.
+      expect(permissions.hasAll).not.toHaveBeenCalled();
+    });
+
+    it("lets an ADMIN edit another author's DRAFT (not a 404)", async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'DRAFT',
+        authorId: AUTHOR,
+        categoryId: 'c1',
+      });
+      await expect(
+        service.update('a', { title: 'x' }, ADMIN_PRINCIPAL),
+      ).resolves.toBeDefined();
+      expect(article.update).toHaveBeenCalled();
+    });
+
+    it("lets a non-admin article:manage holder edit another author's article in a VISIBLE folder", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['shared-folder']),
+      );
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'shared-folder',
+      });
+      await service.update('a', { title: 'Corrected' }, MANAGER_PRINCIPAL);
+      const data = lastUpdate();
+      expect(data.lastEditedById).toBe(MANAGER_ID);
+      expect(data).not.toHaveProperty('authorId');
+      expect(permissions.hasAll).toHaveBeenCalledWith('MEMBER', [
+        'article:manage',
+      ]);
+    });
+
+    it('BLOCKS a non-admin article:manage holder on a folder-HIDDEN article (404, ADR-0060 §4)', async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['public-folder']),
+      );
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'secret-folder',
+      });
+      await expect(
+        service.update('a', { title: 'x' }, MANAGER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(article.update).not.toHaveBeenCalled();
+    });
+
+    it('still 403s a plain article:write MEMBER who is not the author (no article:manage grant)', async () => {
+      // hasAll defaults to false → canManageAny false → the author-only gate is unchanged.
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'c1',
+      });
+      await expect(
+        service.update('a', { title: 'x' }, MANAGER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(article.update).not.toHaveBeenCalled();
+    });
+
+    it("lets an ADMIN publish another author's DRAFT", async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'DRAFT',
+        authorId: AUTHOR,
+        publishedAt: null,
+        categoryId: 'c1',
+      });
+      await service.publish('a', ADMIN_PRINCIPAL);
+      const data = lastUpdate();
+      expect(data.status).toBe('PUBLISHED');
+      expect(data.lastEditedById).toBe(ADMIN_ID);
+    });
+
+    it("lets an ADMIN soft-delete another author's article", async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'c1',
+      });
+      await service.remove('a', ADMIN_PRINCIPAL);
+      const data = lastUpdate();
+      expect(data.deletedAt).toBeInstanceOf(Date);
+      expect(data.lastEditedById).toBe(ADMIN_ID);
     });
   });
 
