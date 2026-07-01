@@ -6,11 +6,7 @@ import type {
 } from '@lazyit/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { SMTP_SETTINGS_SINGLETON_ID } from './email.constants';
-import {
-  decryptSmtpPassword,
-  encryptSmtpPassword,
-  isSmtpSecretKeyConfigured,
-} from './smtp.crypto';
+import { decryptSmtpPassword, encryptSmtpPassword } from './smtp.crypto';
 import {
   buildTransport,
   formatFrom,
@@ -188,11 +184,6 @@ export class SmtpService {
     } catch (err) {
       return { ok: false, error: errText(err) };
     }
-  }
-
-  /** Whether a usable SMTP master key is configured (surfaced so the UI can warn before a password write). */
-  isSecretKeyConfigured(): boolean {
-    return isSmtpSecretKeyConfigured();
   }
 
   /** Map the Prisma row to the redacted wire shape — drops the password envelope columns entirely. */
