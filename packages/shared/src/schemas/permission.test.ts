@@ -135,13 +135,14 @@ describe("Notification permission (in-app notification bell, ADR-0056)", () => {
   });
 });
 
-describe("Secret permissions (human Secret Manager, ADR-0061)", () => {
+describe("Secret permissions (human Secret Manager, ADR-0061; SA fetch, ADR-0080)", () => {
   const SECRET_PERMISSIONS = [
     "secret:read",
     "secret:manage",
+    "secret:fetch",
   ] as const satisfies readonly Permission[];
 
-  test("the `secret` domain is in the catalog with exactly two verbs: read + manage", () => {
+  test("the `secret` domain has read + manage (human) + fetch (machine); no write/delete", () => {
     expect(PERMISSION_DOMAINS).toContain("secret");
     for (const p of SECRET_PERMISSIONS) {
       expect(PERMISSIONS).toContain(p);
@@ -150,6 +151,14 @@ describe("Secret permissions (human Secret Manager, ADR-0061)", () => {
     // mirroring the workflow domain's coarse-verb model.
     expect(PERMISSIONS).not.toContain("secret:write" as Permission);
     expect(PERMISSIONS).not.toContain("secret:delete" as Permission);
+  });
+
+  test("secret:fetch is the machine-only programmatic-retrieval verb (ADR-0080), distinct from read/manage", () => {
+    // The single narrow verb a SERVICE ACCOUNT holds to pull ciphertext over the headless endpoint. It is
+    // deliberately SEPARATE from the human read/manage surface (which stays SA-ungrantable).
+    expect(PERMISSIONS).toContain("secret:fetch" as Permission);
+    expect("secret:fetch").not.toBe("secret:read");
+    expect("secret:fetch").not.toBe("secret:manage");
   });
 
   test("secret:manage is DISTINCT from secret:read (separation of duties, ADR-0061 §7)", () => {

@@ -115,8 +115,10 @@ describe("Above-default-tier markers", () => {
           "workflow:run",
           "workflow:task",
           "workflow:secrets",
-          // secret coarse verb (ADR-0061 §7) — `read` is a view tier (admin-only); `manage` is coarse
+          // secret coarse verbs — `manage` (ADR-0061 §7; `read` is a view tier, admin-only) + the
+          // machine-only `secret:fetch` (ADR-0080, the SA programmatic-retrieval verb). Both coarse.
           "secret:manage",
+          "secret:fetch",
           // import coarse verb (Migrator, ADR-0069 §11) — the run-only verb that gates the import wizard
           "import:run",
           // infra coarse verbs (ADR-0070 §8 / ADR-0074 §5) — `manage` (human) + `report` (the agent SA's
