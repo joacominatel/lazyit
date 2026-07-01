@@ -3,7 +3,7 @@ title: Backups & Disaster Recovery
 tags: [runbook, database, backups, disaster-recovery]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-13
+updated: 2026-07-01
 ---
 
 # Runbook — backups & disaster recovery
@@ -30,6 +30,7 @@ right order. lazyit holds sensitive inventory/access data on a single host
 | 4 | Meilisearch index | `meili_data` volume | No (rebuildable) | Re-run `reindex:all` — it rebuilds the index from the DBs ([[0035-search-architecture]]). |
 | 5 | Caddy TLS state | `caddy_data` / `caddy_config` volumes | No (re-issuable) | Caddy re-obtains certs from Let's Encrypt (or re-mints its internal CA) automatically. |
 | 6 | **Secret Manager vault values** | App database (rows in `secret_vaults` / `secret_items` / `vault_memberships` / `user_keypairs`) | Covered by item #2 (**no extra backup needed**) | Zero-knowledge: a DB restore brings back ciphertext + wrapped DEKs. Values are readable only by a surviving member's vault passphrase or off-host recovery key — the server cannot re-enter them, unlike `WORKFLOW_SECRET_KEY`. See below. |
+| 7 | **File attachments (blobs)** | `attachments_data` volume (asset documents + KB inline images, [[0082-attachments-storage]]) | ⚠ **NOT covered by any backup yet** — deferred to v1.1 **by decision** (see ADR-0082 "Deferred") | **Not recoverable today.** `pg_dump` captures only the `attachments` metadata rows (item #2), never the bytes. Until the sidecar tars the volume, copy it off-host manually if you care: `docker run --rm -v lazyit_attachments_data:/a -v "$PWD/backups":/b alpine tar czf /b/attachments-$(date +%F).tgz -C /a .` |
 
 > [!warning] `ZITADEL_MASTERKEY` is unrotatable and irreplaceable
 > It decrypts Zitadel's store. Losing it = losing all logins, even with a perfect DB dump. Keep a
@@ -53,6 +54,17 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > and the loss is **cheap to recover** (one field, re-typed by an admin) — so it is a "nice to back up
 > alongside `.env.prod`", not a DR linchpin. Keep it with the same off-host copy of `.env.prod` for
 > zero-touch restores; regenerating it just means re-entering one SMTP password.
+
+> [!warning] Attachments are NOT backed up yet (item #7) — an accepted, LOUD gap
+> [[0082-attachments-storage]] puts uploaded files (warranty PDFs, receipts, damage photos, KB
+> images) on the `attachments_data` **filesystem volume** — which **no `pg_dump` captures and the
+> backup sidecar does not tar yet**. A host disk loss today loses **every attachment** while the DB
+> restores cleanly: the `attachments` rows come back pointing at vanished blobs (they degrade to a
+> broken-file 404, never a crash — the soft-ref design). This is precisely the partial-backup
+> mistake the danger callout above warns about, accepted **only** because backup coverage was
+> explicitly deferred to v1.1 (extend the sidecar to `tar` the volume on the same `BACKUP_CRON` /
+> `BACKUP_RETENTION_DAYS` / `BACKUP_OFFSITE_CMD` knobs — ADR-0082 "Deferred"). Until that ships,
+> treat attachments as expendable or run the manual `tar` in row #7 alongside your dumps.
 
 > [!info] Automation: the opt-in backup sidecar (see below)
 > Items #2 and #3 can be automated by the `backup` profile service in the canonical `compose.yaml`
