@@ -29,22 +29,25 @@ function mailArg(sendMail: jest.Mock): {
   return args[0] as { to?: unknown; bcc?: unknown; subject?: unknown };
 }
 
-describe('email allowlist (curated, start-small)', () => {
-  it('routes the operational nudges and NOT the login/audit ones', () => {
+describe('email allowlist (curated)', () => {
+  it('routes the operational nudges AND the sensitive-audit alerts (CEO opt-in 2026-06-30)', () => {
     expect(isEmailableNotificationType('low_stock')).toBe(true);
     expect(isEmailableNotificationType('workflow.run_failed')).toBe(true);
     expect(isEmailableNotificationType('critical_app_access')).toBe(true);
-    // Bell-only in v1 (see ADR-0079 forks):
+    // Sensitive-audit alerts (#852) — now INCLUDED (ADR-0079 fork #1):
+    expect(isEmailableNotificationType('permission_widened')).toBe(true);
+    expect(isEmailableNotificationType('infra.agent_offline')).toBe(true);
+    // Still bell-only — the per-user login nudge is not inbox-worthy:
     expect(isEmailableNotificationType('secret.vault_setup')).toBe(false);
-    expect(isEmailableNotificationType('permission_widened')).toBe(false);
-    expect(isEmailableNotificationType('infra.agent_offline')).toBe(false);
   });
-  it('the allowlist is the five clearly-operational types', () => {
+  it('the allowlist is the seven emailed types', () => {
     expect([...EMAIL_NOTIFICATION_TYPES].sort()).toEqual(
       [
         'admin_granted',
         'critical_app_access',
+        'infra.agent_offline',
         'low_stock',
+        'permission_widened',
         'workflow.manual_task',
         'workflow.run_failed',
       ].sort(),
