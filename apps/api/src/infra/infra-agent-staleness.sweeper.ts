@@ -5,6 +5,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /** Read a positive-integer ms env var, falling back to `fallback` when unset/blank/non-numeric. */
 function envMs(name: string, fallback: number): number {
@@ -58,7 +59,10 @@ export class InfraAgentStalenessSweeper
     INFRA_AGENT_SWEEP_INTERVAL_MS_DEFAULT,
   );
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   onModuleInit(): void {
     if (process.env.NODE_ENV === 'test') {
@@ -91,19 +95,51 @@ export class InfraAgentStalenessSweeper
     this.running = true;
     try {
       const cutoff = new Date(Date.now() - this.staleAfterMs);
+      const where = {
+        source: 'AGENT',
+        status: { not: 'OFFLINE' },
+        deletedAt: null,
+        lastReportedAt: { lt: cutoff },
+      } as const;
+      // Snapshot the nodes about to transition INTO OFFLINE — the `status != OFFLINE` filter guarantees
+      // these are genuine transitions, so we get the transition set the bulk `updateMany` can't return.
+      const transitioning = await this.prisma.infraNode.findMany({
+        where,
+        select: { id: true, label: true, lastReportedAt: true },
+      });
       const { count } = await this.prisma.infraNode.updateMany({
-        where: {
-          source: 'AGENT',
-          status: { not: 'OFFLINE' },
-          deletedAt: null,
-          lastReportedAt: { lt: cutoff },
-        },
+        where,
         data: { status: 'OFFLINE' },
       });
       if (count > 0) {
         this.logger.log(
           `Flipped ${count} stale agent node(s) to OFFLINE (no report since ${cutoff.toISOString()}).`,
         );
+      }
+      // One broadcast nudge per OFFLINE transition (ADR-0056 amendment / #852), POST-flip + best-effort
+      // (emit never throws — a failed nudge must not abort the sweep). Deduped on the node's last-report
+      // instant, so a node stuck OFFLINE across many sweeps is not re-selected (status is now OFFLINE)
+      // and a genuinely NEW outage (a fresh lastReportedAt) yields a fresh key ⇒ a fresh nudge.
+      // ponytail: emitting for the SNAPSHOT set, not the exact rows updateMany flipped — a node that
+      // reports in between the two queries is excluded from the flip (its lastReportedAt is fresh) yet
+      // may still get one nudge. Accepted: a two-query race window, deduped, on a small agent cohort.
+      // Ceiling: the exact flipped set would need a RETURNING clause (raw SQL) or a per-node update.
+      for (const node of transitioning) {
+        await this.notifications.emit({
+          type: 'infra.agent_offline',
+          dedupeKey: `infra.agent_offline:${node.id}:${node.lastReportedAt?.toISOString() ?? 'never'}`,
+          severity: 'warning',
+          title: `Agent offline: ${node.label}`,
+          summary: node.lastReportedAt
+            ? `No report from ${node.label} since ${node.lastReportedAt.toISOString()}. It may be down or disconnected.`
+            : `${node.label} has stopped reporting. It may be down or disconnected.`,
+          // No entityType — the bell deep-links this type to the topology map.
+          metadata: {
+            nodeId: node.id,
+            label: node.label,
+            lastReportedAt: node.lastReportedAt?.toISOString() ?? null,
+          },
+        });
       }
       return count;
     } catch (err) {
