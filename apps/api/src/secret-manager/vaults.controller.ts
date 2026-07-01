@@ -275,6 +275,19 @@ export class VaultsController {
 
   // ── Service-account members (ADR-0080, programmatic secret retrieval) ──────────
 
+  @Get(':vaultId/service-account-members')
+  @RequirePermission('secret:read')
+  @ApiOperation({
+    summary:
+      'Service-account member list (id + name + tokenPrefix; ADMIN or member)',
+  })
+  listServiceAccountMembers(
+    @Param('vaultId') vaultId: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.secrets.listServiceAccountMembers(principal, vaultId);
+  }
+
   @Post(':vaultId/service-account-members')
   @RequirePermission('secret:manage')
   @ApiOperation({
