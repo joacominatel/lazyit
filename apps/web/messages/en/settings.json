@@ -145,6 +145,73 @@
       }
     }
   },
+  "smtp": {
+    "title": "Outbound email (SMTP)",
+    "subtitle": "Connect an SMTP relay so lazyit can send email notifications. Off until you turn it on; the password is stored encrypted and never shown again.",
+    "loadError": "Could not load the SMTP settings.",
+    "loadErrorHint": "Check your connection and try again.",
+    "retry": "Retry",
+    "save": "Save settings",
+    "disabledHint": "Outbound email is off. Turn it on to email notifications — you can still send a test below.",
+    "fields": {
+      "enabled": {
+        "label": "Enable outbound email",
+        "description": "When on, eligible notifications are also emailed. When off, nothing is emailed (you can still send a test)."
+      },
+      "host": {
+        "label": "SMTP host",
+        "placeholder": "smtp.example.com"
+      },
+      "port": {
+        "label": "Port",
+        "placeholder": "587"
+      },
+      "security": {
+        "label": "Security",
+        "options": {
+          "none": "None (plaintext)",
+          "starttls": "STARTTLS (recommended, port 587)",
+          "tls": "Implicit TLS (port 465)"
+        }
+      },
+      "username": {
+        "label": "Username",
+        "placeholder": "Optional"
+      },
+      "password": {
+        "label": "Password",
+        "placeholderSet": "Configured — leave blank to keep",
+        "placeholderUnset": "Password",
+        "hintSet": "A password is stored. Leave blank to keep it, or type a new one to replace it."
+      },
+      "fromAddress": {
+        "label": "From address",
+        "placeholder": "lazyit@example.com"
+      },
+      "fromName": {
+        "label": "From name",
+        "placeholder": "lazyit (optional)"
+      },
+      "rejectUnauthorized": {
+        "label": "Verify TLS certificate",
+        "description": "Reject relays whose TLS certificate can't be verified. Turn off only to allow a self-signed certificate on a trusted relay."
+      }
+    },
+    "test": {
+      "heading": "Send a test email",
+      "description": "Sends a one-off email using the saved settings. Save your changes first — the test uses what's stored, not the form above.",
+      "placeholder": "you@example.com",
+      "send": "Send test",
+      "invalidEmail": "Enter a valid destination email address.",
+      "success": "Test email sent to {to}.",
+      "failure": "The test email could not be sent.",
+      "error": "Could not send the test email."
+    },
+    "toast": {
+      "saved": "SMTP settings saved.",
+      "saveError": "Could not save the SMTP settings."
+    }
+  },
   "roles": {
     "title": "Roles",
     "subtitle": "Who holds which access level, and what each role can do. Change a role from the Users section.",

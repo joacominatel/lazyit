@@ -145,6 +145,73 @@
       }
     }
   },
+  "smtp": {
+    "title": "Correo saliente (SMTP)",
+    "subtitle": "Conecta un relay SMTP para que lazyit pueda enviar notificaciones por correo. Desactivado hasta que lo actives; la contraseña se guarda cifrada y no se vuelve a mostrar.",
+    "loadError": "No se pudo cargar la configuración de SMTP.",
+    "loadErrorHint": "Verifica tu conexión e inténtalo de nuevo.",
+    "retry": "Reintentar",
+    "save": "Guardar configuración",
+    "disabledHint": "El correo saliente está desactivado. Actívalo para enviar notificaciones por correo — aún puedes enviar una prueba abajo.",
+    "fields": {
+      "enabled": {
+        "label": "Activar correo saliente",
+        "description": "Cuando está activo, las notificaciones que corresponda también se envían por correo. Cuando está desactivado, no se envía nada (aún puedes enviar una prueba)."
+      },
+      "host": {
+        "label": "Host SMTP",
+        "placeholder": "smtp.example.com"
+      },
+      "port": {
+        "label": "Puerto",
+        "placeholder": "587"
+      },
+      "security": {
+        "label": "Seguridad",
+        "options": {
+          "none": "Ninguna (texto plano)",
+          "starttls": "STARTTLS (recomendado, puerto 587)",
+          "tls": "TLS implícito (puerto 465)"
+        }
+      },
+      "username": {
+        "label": "Usuario",
+        "placeholder": "Opcional"
+      },
+      "password": {
+        "label": "Contraseña",
+        "placeholderSet": "Configurada — deja en blanco para mantenerla",
+        "placeholderUnset": "Contraseña",
+        "hintSet": "Hay una contraseña guardada. Déjala en blanco para mantenerla, o escribe una nueva para reemplazarla."
+      },
+      "fromAddress": {
+        "label": "Dirección de remitente",
+        "placeholder": "lazyit@example.com"
+      },
+      "fromName": {
+        "label": "Nombre de remitente",
+        "placeholder": "lazyit (opcional)"
+      },
+      "rejectUnauthorized": {
+        "label": "Verificar certificado TLS",
+        "description": "Rechaza relays cuyo certificado TLS no se pueda verificar. Desactívalo solo para permitir un certificado autofirmado en un relay de confianza."
+      }
+    },
+    "test": {
+      "heading": "Enviar un correo de prueba",
+      "description": "Envía un correo puntual usando la configuración guardada. Guarda tus cambios primero — la prueba usa lo almacenado, no el formulario de arriba.",
+      "placeholder": "tu@example.com",
+      "send": "Enviar prueba",
+      "invalidEmail": "Introduce una dirección de correo de destino válida.",
+      "success": "Correo de prueba enviado a {to}.",
+      "failure": "No se pudo enviar el correo de prueba.",
+      "error": "No se pudo enviar el correo de prueba."
+    },
+    "toast": {
+      "saved": "Configuración de SMTP guardada.",
+      "saveError": "No se pudo guardar la configuración de SMTP."
+    }
+  },
   "roles": {
     "title": "Roles",
     "subtitle": "Quién tiene cada nivel de acceso y qué puede hacer cada rol. Cambia un rol desde la sección de Usuarios.",
