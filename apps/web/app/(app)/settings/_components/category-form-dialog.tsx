@@ -1,7 +1,11 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
-import { cloneCategoryDefaults } from "@lazyit/shared";
+import {
+  type AssetCategory,
+  AssetSpecsDictionarySchema,
+  cloneCategoryDefaults,
+} from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -39,6 +43,12 @@ import {
   useUpdateConsumableCategory,
 } from "@/lib/api/hooks/use-consumable-categories";
 import { notifyError } from "@/lib/api/notify-error";
+import {
+  dictionaryToRows,
+  rowsToDictionary,
+  SpecsDictionaryEditor,
+  type SpecsDictRow,
+} from "./specs-dictionary-editor";
 import {
   type AnyCategory,
   type CategoryKind,
@@ -127,7 +137,10 @@ export function CategoryFormDialog({
       : "new";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      {/* Asset categories carry the specs-dictionary editor, so they need more room. */}
+      <DialogContent
+        className={kind === "asset" ? "sm:max-w-2xl" : "sm:max-w-md"}
+      >
         {open ? (
           <CategoryForm
             key={`${kind}:${recordKey}`}
@@ -189,6 +202,13 @@ function CategoryForm({
     toFormState(category, cloneSource),
   );
   const [error, setError] = useState<string | undefined>(undefined);
+  // Advisory specs dictionary (ADR-0078) — asset kind only. Pre-fill on EDIT; blank on create/clone.
+  const [dictRows, setDictRows] = useState<SpecsDictRow[]>(() =>
+    kind === "asset" && category
+      ? dictionaryToRows((category as AssetCategory).specsSchema)
+      : [],
+  );
+  const [dictError, setDictError] = useState<string | undefined>(undefined);
 
   function set<K extends keyof FormState>(key: K, value: string) {
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -231,6 +251,24 @@ function CategoryForm({
       return;
     }
     setError(undefined);
+
+    // Asset kind: serialize + advisory-validate the specs dictionary (ponytail: reuse the shared zod
+    // schema instead of re-implementing the shape checks; the API hard-validates it too).
+    if (kind === "asset") {
+      const dictionary = rowsToDictionary(dictRows);
+      const parsed = AssetSpecsDictionarySchema.safeParse(dictionary);
+      if (!parsed.success) {
+        setDictError(
+          t("taxonomies.categories.form.specsDictionary.errors.invalid"),
+        );
+        return;
+      }
+      setDictError(undefined);
+      // Omit on CREATE when empty (keeps the payload lean); send [] on EDIT so clearing works.
+      if (isEdit || parsed.data.length > 0) {
+        built.payload.specsSchema = parsed.data;
+      }
+    }
 
     if (category) {
       // PATCH accepts a partial; an unchanged-but-required body still validates (≥1 key present).
@@ -340,6 +378,14 @@ function CategoryForm({
                 placeholder={t("taxonomies.categories.form.orderPlaceholder")}
               />
             </Field>
+          ) : null}
+
+          {kind === "asset" ? (
+            <SpecsDictionaryEditor
+              rows={dictRows}
+              error={dictError}
+              onChange={setDictRows}
+            />
           ) : null}
         </FieldGroup>
       </form>

@@ -1,6 +1,7 @@
 "use client";
 
 import { PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { useId } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -104,14 +105,24 @@ export function SpecsFieldsEditor({
   errors,
   labels,
   note,
+  keySuggestions,
   onChange,
 }: {
   rows: SpecsFieldRow[];
   errors: Record<string, SpecsFieldError>;
   labels: SpecsFieldsEditorLabels;
   note?: string;
+  /**
+   * Optional autocomplete for the key input — declared field keys from the asset's category dictionary
+   * (ADR-0078). When present + non-empty a `<datalist>` is wired to every key input; absent → today's
+   * behavior (no datalist). Advisory only: the operator can still type any key.
+   */
+  keySuggestions?: string[];
   onChange: (rows: SpecsFieldRow[]) => void;
 }) {
+  const datalistId = useId();
+  const hasSuggestions = keySuggestions != null && keySuggestions.length > 0;
+
   function updateRow(id: string, patch: Partial<SpecsFieldRow>) {
     onChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   }
@@ -150,6 +161,7 @@ export function SpecsFieldsEditor({
                     }
                     placeholder={labels.namePlaceholder}
                     className="flex-1"
+                    list={hasSuggestions ? datalistId : undefined}
                   />
                   <Input
                     aria-label={labels.fieldValueLabel(index + 1)}
@@ -181,6 +193,14 @@ export function SpecsFieldsEditor({
           })}
         </ul>
       )}
+
+      {hasSuggestions ? (
+        <datalist id={datalistId}>
+          {keySuggestions.map((key) => (
+            <option key={key} value={key} />
+          ))}
+        </datalist>
+      ) : null}
 
       <div>
         <Button

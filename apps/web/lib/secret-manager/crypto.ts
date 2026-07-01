@@ -30,6 +30,7 @@
 
 import type {
   ChangeKeypairPassword,
+  CreateServiceAccountKeypair,
   CreateUserKeypair,
   UserKeypair,
 } from "@lazyit/shared";
@@ -204,6 +205,49 @@ export async function bootstrapKeypair(
   };
 
   return { wire, recoveryKeyDisplay: recovery.display };
+}
+
+/**
+ * Bootstrap a brand-new SERVICE-ACCOUNT keypair (ADR-0080, the machine twin of {@link bootstrapKeypair}).
+ * Runs entirely in the browser while the SA's one-time token is still in memory:
+ *   1. generate a fresh X25519 keypair;
+ *   2. seal the private key under `Argon2id(token)` → the SINGLE token-wrapped copy;
+ *   3. assemble the `CreateServiceAccountKeypair` wire DTO (public key in clear + the wrapped blob +
+ *      salt/IV/KDF params).
+ *
+ * The load-bearing difference from a human keypair: the token plays the role the human passphrase plays
+ * (Copy A), and there is NO recovery-key copy — the token is the only credential (losing it means
+ * rotating, a documented follow-up). The token, the derived wrapping key, and the unwrapped private key
+ * are all EPHEMERAL: only the public key and the AES-GCM-sealed private-key copy (with its clear salt/IV)
+ * appear in the returned DTO. INV-10 holds — the token never crosses the wire, only wrapped material does.
+ *
+ * @param token the SA's cleartext token (`lzit_sa_<id>_<secret>`; never persisted/logged/sent).
+ */
+export async function bootstrapServiceAccountKeypair(
+  token: string,
+): Promise<CreateServiceAccountKeypair> {
+  const keyPair = generateKeyPair();
+
+  // Copy A — Argon2id(token) over the private key (identical discipline to bootstrapKeypair's Copy A).
+  const salt = randomBytes(SALT_BYTES);
+  const key = await deriveKeyArgon2id(token, salt);
+  const sealed = sealBytes(key, keyPair.secretKey);
+
+  return {
+    publicKey: bytesToBase64(keyPair.publicKey),
+    privateKeyEnc: joinSealedBlob(sealed),
+    privateKeySalt: bytesToBase64(salt),
+    privateKeyIv: sealed.iv,
+    kdfParams: {
+      alg: ARGON2ID_PARAMS.alg,
+      memorySize: ARGON2ID_PARAMS.memorySize,
+      iterations: ARGON2ID_PARAMS.iterations,
+      parallelism: ARGON2ID_PARAMS.parallelism,
+      saltLength: ARGON2ID_PARAMS.saltLength,
+      hashLength: ARGON2ID_PARAMS.hashLength,
+      v: ARGON2ID_PARAMS.v,
+    },
+  };
 }
 
 /**

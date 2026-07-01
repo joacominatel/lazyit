@@ -87,6 +87,11 @@ Add, edit or remove rows in the **Custom fields** section of the form. When you 
 default specs, those values are copied in as a starting point — you can change them for this
 individual unit before saving. Custom fields are shown as a tidy label/value list on the detail page.
 
+If the asset's category defines a
+[specs dictionary](/help/assets-models-categories), the form **suggests** those expected fields and
+shows gentle **warnings** (a required field left blank, a value that doesn't match its type, or an
+unexpected field). These hints are advisory only — you can always save.
+
 ## Finding assets in the list
 
 The **Assets** list has a search box and a **Status** dropdown right in the toolbar, plus a

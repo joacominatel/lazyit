@@ -1,0 +1,23 @@
+{
+  "name": "@lazyit/fetch-cli",
+  "version": "0.0.0",
+  "description": "lazyit-fetch — headless CLI that pulls a vault's secrets over the API and decrypts them CLIENT-SIDE from a service-account token (ADR-0080). The server never decrypts (INV-10).",
+  "type": "module",
+  "bin": {
+    "lazyit-fetch": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "self-check": "bun run src/index.ts --self-check",
+    "compile:x64": "bun build --compile --target=bun-linux-x64 --outfile dist/lazyit-fetch-x64 src/index.ts",
+    "compile:arm64": "bun build --compile --target=bun-linux-arm64 --outfile dist/lazyit-fetch-arm64 src/index.ts",
+    "compile": "bun run compile:x64 && bun run compile:arm64"
+  },
+  "dependencies": {
+    "@lazyit/shared": "workspace:*",
+    "hash-wasm": "4.12.0"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14"
+  }
+}

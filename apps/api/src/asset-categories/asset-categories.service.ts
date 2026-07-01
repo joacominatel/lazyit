@@ -26,12 +26,23 @@ export class AssetCategoriesService {
   }
 
   create(data: CreateAssetCategory) {
-    return this.prisma.assetCategory.create({ data });
+    // specsSchema is the advisory declarative dictionary (ADR-0007 amendment, #851): a jsonb field.
+    // Omitted from the write when absent so an unset category stores NULL (no governance) —
+    // byte-for-byte the pre-#851 create path for callers that don't use it.
+    const { specsSchema, ...rest } = data;
+    return this.prisma.assetCategory.create({
+      data: { ...rest, ...(specsSchema !== undefined ? { specsSchema } : {}) },
+    });
   }
 
   async update(id: string, data: UpdateAssetCategory) {
     await this.findOne(id); // 404 if missing or already soft-deleted
-    return this.prisma.assetCategory.update({ where: { id }, data });
+    // A caller replaces the whole dictionary; `specsSchema: []` clears it (no governance).
+    const { specsSchema, ...rest } = data;
+    return this.prisma.assetCategory.update({
+      where: { id },
+      data: { ...rest, ...(specsSchema !== undefined ? { specsSchema } : {}) },
+    });
   }
 
   /** Soft delete: set deletedAt. Never hard-delete (auditability is a first principle). */

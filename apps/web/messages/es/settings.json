@@ -145,6 +145,73 @@
       }
     }
   },
+  "smtp": {
+    "title": "Correo saliente (SMTP)",
+    "subtitle": "Conecta un relay SMTP para que lazyit pueda enviar notificaciones por correo. Desactivado hasta que lo actives; la contraseña se guarda cifrada y no se vuelve a mostrar.",
+    "loadError": "No se pudo cargar la configuración de SMTP.",
+    "loadErrorHint": "Verifica tu conexión e inténtalo de nuevo.",
+    "retry": "Reintentar",
+    "save": "Guardar configuración",
+    "disabledHint": "El correo saliente está desactivado. Actívalo para enviar notificaciones por correo — aún puedes enviar una prueba abajo.",
+    "fields": {
+      "enabled": {
+        "label": "Activar correo saliente",
+        "description": "Cuando está activo, las notificaciones que corresponda también se envían por correo. Cuando está desactivado, no se envía nada (aún puedes enviar una prueba)."
+      },
+      "host": {
+        "label": "Host SMTP",
+        "placeholder": "smtp.example.com"
+      },
+      "port": {
+        "label": "Puerto",
+        "placeholder": "587"
+      },
+      "security": {
+        "label": "Seguridad",
+        "options": {
+          "none": "Ninguna (texto plano)",
+          "starttls": "STARTTLS (recomendado, puerto 587)",
+          "tls": "TLS implícito (puerto 465)"
+        }
+      },
+      "username": {
+        "label": "Usuario",
+        "placeholder": "Opcional"
+      },
+      "password": {
+        "label": "Contraseña",
+        "placeholderSet": "Configurada — deja en blanco para mantenerla",
+        "placeholderUnset": "Contraseña",
+        "hintSet": "Hay una contraseña guardada. Déjala en blanco para mantenerla, o escribe una nueva para reemplazarla."
+      },
+      "fromAddress": {
+        "label": "Dirección de remitente",
+        "placeholder": "lazyit@example.com"
+      },
+      "fromName": {
+        "label": "Nombre de remitente",
+        "placeholder": "lazyit (opcional)"
+      },
+      "rejectUnauthorized": {
+        "label": "Verificar certificado TLS",
+        "description": "Rechaza relays cuyo certificado TLS no se pueda verificar. Desactívalo solo para permitir un certificado autofirmado en un relay de confianza."
+      }
+    },
+    "test": {
+      "heading": "Enviar un correo de prueba",
+      "description": "Envía un correo puntual usando la configuración guardada. Guarda tus cambios primero — la prueba usa lo almacenado, no el formulario de arriba.",
+      "placeholder": "tu@example.com",
+      "send": "Enviar prueba",
+      "invalidEmail": "Introduce una dirección de correo de destino válida.",
+      "success": "Correo de prueba enviado a {to}.",
+      "failure": "No se pudo enviar el correo de prueba.",
+      "error": "No se pudo enviar el correo de prueba."
+    },
+    "toast": {
+      "saved": "Configuración de SMTP guardada.",
+      "saveError": "No se pudo guardar la configuración de SMTP."
+    }
+  },
   "roles": {
     "title": "Roles",
     "subtitle": "Quién tiene cada nivel de acceso y qué puede hacer cada rol. Cambia un rol desde la sección de Usuarios.",
@@ -356,6 +423,12 @@
       "acknowledge": "He guardado este token en un lugar seguro.",
       "done": "Listo"
     },
+    "keypairSetup": {
+      "working": "Configurando la clave de cifrado…",
+      "done": "Clave de cifrado configurada. Esta cuenta de servicio ya puede recuperar secretos de las bóvedas a las que le des acceso.",
+      "forbidden": "Necesitas el permiso de gestión del Gestor de secretos para configurar la clave de cifrado. La cuenta de servicio está bien, pero no podrá recuperar secretos hasta que un administrador la configure (rota su token).",
+      "error": "No se pudo configurar la clave de cifrado. La cuenta de servicio está bien; rota su token para reintentar y habilitar la recuperación programática de secretos."
+    },
     "testIt": {
       "title": "Comprueba que funciona",
       "description": "Ejecuta una verificación rápida desde tu terminal para confirmar que el token autentica y tiene el alcance esperado. Reemplaza el marcador por el token que copiaste.",
@@ -427,6 +500,9 @@
       "location:write": { "label": "Agregar y editar ubicaciones" },
       "location:delete": { "label": "Eliminar ubicaciones" },
       "import:run": { "label": "Ejecutar importaciones" },
+      "infra:read": { "label": "Ver el mapa de infraestructura" },
+      "infra:manage": { "label": "Gestionar el mapa de infraestructura" },
+      "infra:report": { "label": "Reportar inventario de servidores (agente)" },
       "application:read": { "label": "Ver aplicaciones" },
       "application:write": { "label": "Agregar y editar aplicaciones" },
       "application:delete": { "label": "Eliminar aplicaciones" },
@@ -453,7 +529,8 @@
       "workflow:secrets": { "label": "Gestionar credenciales de conectores" },
       "notification:read": { "label": "Ver notificaciones" },
       "secret:read": { "label": "Ver el Gestor de Secretos" },
-      "secret:manage": { "label": "Gestionar bóvedas y membresías" }
+      "secret:manage": { "label": "Gestionar bóvedas y membresías" },
+      "secret:fetch": { "label": "Obtener secretos de forma programática (cuenta de servicio)" }
     },
     "capabilities": {
       "inventory:view": {
@@ -467,6 +544,18 @@
       "inventory:delete": {
         "label": "Eliminar inventario",
         "description": "Archivar activos, consumibles, modelos, categorías y ubicaciones."
+      },
+      "inventory:import": {
+        "label": "Ejecutar importaciones masivas",
+        "description": "Usa el asistente guiado para importar activos de forma masiva desde un archivo CSV o JSON. También requiere los permisos de edición correspondientes (activos, modelos, categorías, ubicaciones), verificados por fila al confirmar."
+      },
+      "infra:view": {
+        "label": "Ver el mapa de infraestructura",
+        "description": "Ver el lienzo de topología — nodos, conexiones y el detalle por nodo (responsable, base de conocimiento, IP, accesos directos)."
+      },
+      "infra:manage": {
+        "label": "Gestionar el mapa de infraestructura",
+        "description": "Crear, editar y eliminar nodos de la topología, abrir y cerrar conexiones, y conservar las posiciones de los nodos en el lienzo. Crear un nodo respaldado por un activo también requiere el permiso de edición de activos."
       },
       "application:view": {
         "label": "Ver aplicaciones",
@@ -644,6 +733,32 @@
         "orderPlaceholder": "Opcional — el menor se ordena primero",
         "saveChanges": "Guardar cambios",
         "createButton": "Crear {label}",
+        "specsDictionary": {
+          "label": "Diccionario de especificaciones",
+          "description": "Declara los campos personalizados que deberían tener los activos de esta categoría. Solo es orientativo — impulsa el autocompletado y las sugerencias suaves en el formulario del activo; nunca bloquea el guardado ni invalida los activos existentes.",
+          "empty": "Aún no hay campos declarados.",
+          "addField": "Agregar campo",
+          "keyPlaceholder": "Clave (p. ej. ram)",
+          "labelPlaceholder": "Etiqueta (p. ej. RAM)",
+          "typeLabel": "Tipo",
+          "typeOptions": {
+            "string": "Texto",
+            "number": "Número",
+            "boolean": "Sí / No",
+            "enum": "Lista de opciones"
+          },
+          "requiredLabel": "Obligatorio",
+          "enumValuesPlaceholder": "8GB, 16GB, 32GB",
+          "enumValuesHint": "Valores permitidos separados por comas.",
+          "removeFieldTitle": "Quitar campo",
+          "removeFieldLabel": "Quitar campo {index}",
+          "fieldKeyLabel": "Clave del campo {index}",
+          "fieldLabelLabel": "Etiqueta del campo {index}",
+          "fieldEnumValuesLabel": "Valores permitidos del campo {index}",
+          "errors": {
+            "invalid": "Revisa el diccionario: cada campo necesita una clave y una etiqueta, los campos de lista de opciones necesitan al menos un valor y las claves deben ser únicas."
+          }
+        },
         "errors": {
           "nameRequired": "El nombre es obligatorio.",
           "orderInteger": "El orden debe ser un número entero."

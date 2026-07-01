@@ -17,6 +17,13 @@ jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 import { PermissionsConfigService } from './permissions-config.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import type {
+  EmitNotificationInput,
+  NotificationsService,
+} from '../notifications/notifications.service';
+
+/** The single-arg tuple of a `NotificationsService.emit` call — cast `mock.calls` to read it typed. */
+type EmitCall = [EmitNotificationInput];
 
 type Row = { role: string; permission: string };
 type AuditRow = {
@@ -72,11 +79,7 @@ class FakePrisma {
   // The matrix read the service issues for getMatrix (filtered to the editable roles in one call).
   get rolePermission() {
     return {
-      findMany: ({
-        where,
-      }: {
-        where: { role: string | { in: string[] } };
-      }) => {
+      findMany: ({ where }: { where: { role: string | { in: string[] } } }) => {
         const filter = where.role;
         const match =
           typeof filter === 'string'
@@ -118,12 +121,19 @@ describe('PermissionsConfigService (ADR-0046 P5)', () => {
   let store: FakePrisma;
   let resolver: PermissionResolverService;
   let service: PermissionsConfigService;
+  let notifications: { emit: jest.Mock };
 
   beforeEach(() => {
     store = new FakePrisma();
     seedDefault(store);
     resolver = new PermissionResolverService(asPrisma(store));
-    service = new PermissionsConfigService(asPrisma(store), resolver);
+    // Best-effort emit double (ADR-0056 §3): the sensitive-permission-change nudge (#852).
+    notifications = { emit: jest.fn().mockResolvedValue('notif-id') };
+    service = new PermissionsConfigService(
+      asPrisma(store),
+      resolver,
+      notifications as unknown as NotificationsService,
+    );
   });
 
   // ── GET — the materialized matrix ────────────────────────────────────────────────────────────────
@@ -131,8 +141,12 @@ describe('PermissionsConfigService (ADR-0046 P5)', () => {
   it('getMatrix reports the seeded MEMBER/VIEWER sets and ADMIN as the COMPLETE catalog', async () => {
     const matrix = await service.getMatrix();
     expect(new Set(matrix.ADMIN)).toEqual(new Set(PERMISSIONS));
-    expect(new Set(matrix.MEMBER)).toEqual(new Set(DEFAULT_ROLE_PERMISSIONS.MEMBER));
-    expect(new Set(matrix.VIEWER)).toEqual(new Set(DEFAULT_ROLE_PERMISSIONS.VIEWER));
+    expect(new Set(matrix.MEMBER)).toEqual(
+      new Set(DEFAULT_ROLE_PERMISSIONS.MEMBER),
+    );
+    expect(new Set(matrix.VIEWER)).toEqual(
+      new Set(DEFAULT_ROLE_PERMISSIONS.VIEWER),
+    );
   });
 
   it('getMatrix ignores catalog-foreign rows (a stray DB literal never surfaces)', async () => {
@@ -177,7 +191,7 @@ describe('PermissionsConfigService (ADR-0046 P5)', () => {
     ];
 
     await service.updateMatrix(
-      { MEMBER: next as Permission[], VIEWER: DEFAULT_ROLE_PERMISSIONS.VIEWER },
+      { MEMBER: next, VIEWER: DEFAULT_ROLE_PERMISSIONS.VIEWER },
       'actor-42',
     );
 
@@ -244,7 +258,7 @@ describe('PermissionsConfigService (ADR-0046 P5)', () => {
       (p) => p !== 'asset:write',
     );
     await service.updateMatrix(
-      { MEMBER: next as Permission[], VIEWER: DEFAULT_ROLE_PERMISSIONS.VIEWER },
+      { MEMBER: next, VIEWER: DEFAULT_ROLE_PERMISSIONS.VIEWER },
       'actor-1',
     );
 
@@ -277,5 +291,81 @@ describe('PermissionsConfigService (ADR-0046 P5)', () => {
     );
     const mine = await service.resolveFor('VIEWER');
     expect(mine.permissions).toEqual(['asset:read']);
+  });
+
+  // ── SENSITIVE-CHANGE ALERT — the permission_widened nudge (ADR-0056 amendment / #852) ─────────────
+
+  it('broadcasts ONE permission_widened nudge when a non-admin role gains a high-risk verb', async () => {
+    // `user:manage` is a coarse ADMIN capability — MEMBER never holds it by default. Granting it widens.
+    const next = [
+      ...DEFAULT_ROLE_PERMISSIONS.MEMBER,
+      'user:manage',
+    ] as Permission[];
+    await service.updateMatrix(
+      { MEMBER: next, VIEWER: DEFAULT_ROLE_PERMISSIONS.VIEWER },
+      'actor-9',
+    );
+
+    expect(notifications.emit).toHaveBeenCalledTimes(1);
+    const input = (notifications.emit.mock.calls as EmitCall[])[0][0];
+    expect(input.type).toBe('permission_widened');
+    expect(input.severity).toBe('warning');
+    expect(input.recipientUserId).toBeUndefined(); // broadcast to the admin feed
+    const meta = input.metadata as {
+      roles: string[];
+      permissions: string[];
+      actorId: string | null;
+    };
+    expect(meta.roles).toContain('MEMBER');
+    expect(meta.permissions).toContain('user:manage');
+    expect(meta.actorId).toBe('actor-9');
+  });
+
+  it('folds several high-risk grants across roles into ONE nudge', async () => {
+    await service.updateMatrix(
+      {
+        MEMBER: [
+          ...DEFAULT_ROLE_PERMISSIONS.MEMBER,
+          'accessGrant:grant',
+        ] as Permission[],
+        VIEWER: [
+          ...DEFAULT_ROLE_PERMISSIONS.VIEWER,
+          'asset:delete',
+        ] as Permission[],
+      },
+      'actor-1',
+    );
+    expect(notifications.emit).toHaveBeenCalledTimes(1);
+    const input = (notifications.emit.mock.calls as EmitCall[])[0][0];
+    const meta = input.metadata as { permissions: string[] };
+    expect(meta.permissions).toContain('accessGrant:grant');
+    expect(meta.permissions).toContain('asset:delete');
+  });
+
+  it('stays SILENT when the widening is not a high-risk verb (no alert fatigue)', async () => {
+    // Grant VIEWER a plain `asset:write` it lacks — a real change (audited), but NOT a sensitive verb.
+    await service.updateMatrix(
+      {
+        MEMBER: DEFAULT_ROLE_PERMISSIONS.MEMBER,
+        VIEWER: [
+          ...DEFAULT_ROLE_PERMISSIONS.VIEWER,
+          'asset:write',
+        ] as Permission[],
+      },
+      'actor-1',
+    );
+    expect(store.audit.length).toBeGreaterThan(0); // the change WAS audited
+    expect(notifications.emit).not.toHaveBeenCalled(); // but it did NOT nudge
+  });
+
+  it('stays SILENT on a no-op PUT', async () => {
+    await service.updateMatrix(
+      {
+        MEMBER: DEFAULT_ROLE_PERMISSIONS.MEMBER,
+        VIEWER: DEFAULT_ROLE_PERMISSIONS.VIEWER,
+      },
+      'actor-1',
+    );
+    expect(notifications.emit).not.toHaveBeenCalled();
   });
 });

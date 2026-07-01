@@ -53,9 +53,11 @@ anti-join over the small admin cohort.
 ## Types (closed shared enum — `@lazyit/shared`)
 
 `critical_app_access` · `admin_granted` · `low_stock` · `workflow.manual_task` · `workflow.run_failed` ·
-**`secret.vault_setup`** (the targeted login nudge, #453). Catalog-as-code: a typo can't mint a type, and
-`api` (emit) + `web` (render a closed set of icons/copy) agree by construction. Adding a type later is an
-additive shared-package change (and a web exhaustive-map re-typecheck — `TYPE_META` is keyed on the enum).
+**`secret.vault_setup`** (the targeted login nudge, #453) · **`permission_widened`** + **`infra.agent_offline`**
+(the two sensitive-audit / liveness alerts, #852 — [[0056-in-app-notification-bell]] amendment 2026-06-30).
+Catalog-as-code: a typo can't mint a type, and `api` (emit) + `web` (render a closed set of icons/copy) agree
+by construction. Adding a type later is an additive shared-package change (and a web exhaustive-map
+re-typecheck — `TYPE_META` is keyed on the enum).
 
 ## Emitters (best-effort, POST-COMMIT)
 
@@ -76,6 +78,19 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   ever**; none re-fires once a keypair exists. Wired **fail-soft** in `VaultSetupNudgeService` (a
   notification problem never blocks login or `/me`). **INV-10-safe** — carries no key material, only "set
   up your vault passphrase" + a link to `/secrets`.
+- **`PUT /config/permissions`** (`PermissionsConfigService.updateMatrix`) → **`permission_widened`**, a
+  broadcast admin nudge when a matrix edit **GRANTED** MEMBER or VIEWER a high-risk verb (`settings:manage`,
+  `user:manage`, `accessGrant:grant`, or any `:delete`). ONE nudge per edit (folds all widened verbs);
+  dedupe `permission_widened:<actorId>:<emit-instant>` (a retry re-diffs to an empty grant set, so it never
+  re-fires). Redacted metadata = role + verb literals only. ponytail: no "self-escalation" axis — only an
+  ADMIN (`settings:manage`) can edit the matrix, ADMIN is immutable/full (INV-8), and edits target the
+  MEMBER/VIEWER role sets, never the actor's own account.
+- **The staleness sweeper** (`InfraAgentStalenessSweeper.sweep`, [[0074-server-reporting-agent]] §4) →
+  **`infra.agent_offline`**, a broadcast admin nudge, ONE per node **transitioning** CONFIRMED→OFFLINE (the
+  sweep snapshots the `status != OFFLINE` set before the bulk flip). Dedupe
+  `infra.agent_offline:<nodeId>:<lastReportedAt>` → one nudge per outage (a node stuck OFFLINE across sweeps
+  is not re-selected; a genuinely new outage has a fresh last-report instant ⇒ a fresh nudge), never
+  once-per-sweep. Metadata = nodeId + label + last-report time.
 
 ## API (poll) — read-path authZ (the auth contract)
 

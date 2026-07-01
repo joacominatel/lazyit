@@ -33,6 +33,11 @@ describe("Notification type catalog (catalog-as-code)", () => {
     expect(NOTIFICATION_TYPES).toContain("secret.vault_setup");
   });
 
+  test("the sensitive-audit alert types are present (ADR-0056 amendment, #852)", () => {
+    expect(NOTIFICATION_TYPES).toContain("permission_widened");
+    expect(NOTIFICATION_TYPES).toContain("infra.agent_offline");
+  });
+
   test("rejects an unknown type literal", () => {
     expect(NotificationTypeSchema.safeParse("nope").success).toBe(false);
     expect(NotificationTypeSchema.safeParse("workflow.unknown").success).toBe(

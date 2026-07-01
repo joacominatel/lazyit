@@ -16,8 +16,9 @@ ledgers. The bell is allowed to forget; the history is not.
 The bell shows for **every signed-in person**, but what each person sees is scoped:
 
 - **Broadcast notifications** — the estate-wide operational nudges (a critical-app grant, an admin
-  elevation, low stock, a workflow that needs a human or failed) are visible only to people whose
-  role holds the **notification** permission. By default that is **administrators only**.
+  elevation, low stock, a workflow that needs a human or failed, a sensitive permission grant, an
+  offline agent) are visible only to people whose role holds the **notification** permission. By
+  default that is **administrators only**.
 - **Targeted notifications** — a notification addressed to one specific person lands in **their own**
   bell, even if they are not an administrator and hold no notification permission. Today the only
   targeted notification is the **vault-setup nudge** (see below).
@@ -36,6 +37,8 @@ The set of triggers is fixed and deliberately small — the bell is a curated nu
 | **Low stock** | A consumable crossed from above its minimum stock to at or below it. |
 | **Manual task** | A workflow run paused and is waiting for a person to act. |
 | **Run failed** | A workflow run failed or escalated and stopped. |
+| **Sensitive permission granted** | A role-permission edit gave the Member or Viewer role a high-risk capability — instance settings, user management, access-grant control, or any delete permission. Links to the role-permission editor. |
+| **Agent offline** | A reporting agent stopped sending reports and its node was flipped offline. One notification per outage — not once per check. Links to the topology map. |
 | **Vault setup** | (Targeted, one-time) A person who can read secrets but has never set a vault passphrase is nudged at sign-in to set one up. |
 
 Notifications are emitted **after** the originating action completes and are **best-effort**: a

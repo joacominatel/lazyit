@@ -44,6 +44,16 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > `ZITADEL_MASTERKEY`: it is unrotatable, lives in item #1 (`.env.prod`), and must be backed up
 > off-host with the *matching* DB dump. Never generate a fresh one on a restore.
 
+> [!warning] `SMTP_SECRET_KEY` is a *fourth* server-held master key — but OPTIONAL and trivially recoverable (ADR-0079)
+> The instance SMTP password (Settings → Instance → SMTP) is encrypted at rest (`SmtpSettings`,
+> AES-256-GCM) under `SMTP_SECRET_KEY` — its own key axis, SEPARATE from `WORKFLOW_SECRET_KEY` ("one key
+> per subsystem"). A DB restore **without the matching `SMTP_SECRET_KEY`** yields an **undecryptable SMTP
+> password**: outbound email stops until an admin re-enters the password in the UI. Unlike the three
+> linchpins above, this key is **OPTIONAL** (unset ⇒ the app boots fine and email is simply unavailable)
+> and the loss is **cheap to recover** (one field, re-typed by an admin) — so it is a "nice to back up
+> alongside `.env.prod`", not a DR linchpin. Keep it with the same off-host copy of `.env.prod` for
+> zero-touch restores; regenerating it just means re-entering one SMTP password.
+
 > [!info] Automation: the opt-in backup sidecar (see below)
 > Items #2 and #3 can be automated by the `backup` profile service in the canonical `compose.yaml`
 > (cron + `pg_dump` for both DBs to a host-mounted `./backups`, with retention). Item #1 is **your

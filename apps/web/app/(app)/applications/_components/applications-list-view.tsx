@@ -43,15 +43,14 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { cn } from "@/lib/utils";
+import {
+  APPLICATION_FILTER_DEFAULTS as FILTER_DEFAULTS,
+  APPLICATION_LIST_OPTIONS,
+  deriveApplicationParams,
+} from "./applications-list-query";
 import { StackedUserAvatars } from "./stacked-user-avatars";
 
 type CriticalityFilter = "ALL" | "CRITICAL" | "NORMAL";
-
-/**
- * Filter param defaults. `category` and `criticality` are filtered client-side over the page (the
- * Access API has no category/criticality params — it already joins category + grants client-side).
- */
-const FILTER_DEFAULTS = { category: "ALL", criticality: "ALL" } as const;
 
 /** Stable empty placeholder for the loading skeleton's mobile children slot. */
 const LOADING_MOBILE_CHILDREN = <></>;
@@ -76,11 +75,7 @@ export function ApplicationsListView() {
     setOffset,
     clearFilters,
     filtersActive,
-  } = useListParams({
-    filters: FILTER_DEFAULTS,
-    defaultSort: "name",
-    defaultDir: "asc",
-  });
+  } = useListParams(APPLICATION_LIST_OPTIONS);
 
   const categoryFilter = filters.category;
   const criticality = filters.criticality as CriticalityFilter;
@@ -91,14 +86,10 @@ export function ApplicationsListView() {
     NORMAL: t("list.nonCritical"),
   };
 
+  // `deriveApplicationParams` is the SAME URL→query mapping the server prefetch uses, so this hook's
+  // key and the SSR-prefetched key are byte-identical (ADR-0067 / #733).
   const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useApplicationList({
-      q: q || undefined,
-      sort,
-      dir: sort ? dir : undefined,
-      limit,
-      offset,
-    });
+    useApplicationList(deriveApplicationParams({ q, sort, dir, offset, limit }));
   const { data: categories } = useApplicationCategories();
   // All active grants across apps + the full user directory — joined client-side for the
   // counts/avatars (ADR-0020). The counts must see every active grant, so we request the hard-max

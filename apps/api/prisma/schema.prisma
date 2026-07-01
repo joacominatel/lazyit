@@ -17,46 +17,46 @@ datasource db {
 /// A person in the organization. Central to access, peripheral to assets:
 /// users come and go while assets persist. See docs/02-domain/entities/user.md
 model User {
-  id          String    @id @default(uuid()) @db.Uuid
+  id             String    @id @default(uuid()) @db.Uuid
   // Case-insensitive (citext, ADR-0041): "Bob@x" and "bob@x" are the same address, so OIDC/JIT can
   // never mint two users from one mailbox. UNIQUENESS is a PARTIAL unique index WHERE "deletedAt" IS
   // NULL (raw SQL in the migration — Prisma can't express partial uniques), so a soft-deleted user
   // frees its email for reuse and Restore can reclaim it. No `@unique` here: that would emit a FULL
   // unique index, re-introducing the ghost-row collision. Follows the AssetAssignment precedent.
-  email       String    @db.Citext
-  firstName   String
-  lastName    String
-  isActive    Boolean   @default(true)
+  email          String    @db.Citext
+  firstName      String
+  lastName       String
+  isActive       Boolean   @default(true)
   // RBAC role (ADR-0040, default flipped by ADR-0043). Default VIEWER (least-privilege): app-created
   // users AND non-first JIT users land read-only until an ADMIN promotes them. The first JIT user /
   // seed still becomes ADMIN so a fresh install is never un-administrable. The RolesGuard gates
   // Access-grant writes, Users administration and destructive deletes to ADMIN; VIEWER is read-only.
   // Only an ADMIN (via the ADMIN-gated Users controller) can change a role.
-  role        Role      @default(VIEWER)
+  role           Role      @default(VIEWER)
   // Maps to the IdP `sub` once auth is integrated; null until then (no auth yet).
   // Nullable + unique: many users may be unlinked, but a linked sub is 1:1. See ADR-0016.
-  externalId  String?   @unique
+  externalId     String?   @unique
   // Employee/file number (LATAM payroll/HR) — ADR-0058. Optional; stored verbatim (trim on write).
   // UNIQUE among LIVE rows only via a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL in the
   // migration, no `@unique`), so a soft-deleted user frees its legajo for reuse/restore, exactly like
   // `email` (ADR-0041). lazyit never parses it.
-  legajo      String?
+  legajo         String?
   // Human-facing directory/display handle distinct from email/externalId — ADR-0058. Optional.
   // Normalized on write (trim + lowercase, like email) so `Ana`/`ana` collide. Same LIVE-only partial
   // unique index. NOT an auth credential (auth stays the IdP's job, ADR-0016/0043) and NEVER an
   // account-linking key (that stays email/externalId, INV-2) — a directory/display field only.
-  username    String?
+  username       String?
   // Manager when they ARE a lazyit user — ADR-0058. Self-FK → User, onDelete: SetNull (a hard delete
   // never blocks/dangles; soft delete is an UPDATE deletedAt and never fires onDelete, so a report keeps
   // pointing at a soft-deleted manager — the read layer surfaces that as isOffboarded, never a dangle).
   // Mutually exclusive with `managerName`: a DB CHECK `users_manager_at_most_one` enforces at-most-one
   // (both-null = "no manager recorded"), mirroring the at-most-one-actor CHECKs (ADR-0048). A DB CHECK
   // `users_manager_not_self` forbids managerId = id; the SERVICE additionally rejects a cycle (DFS up).
-  managerId   String?   @db.Uuid
-  manager     User?     @relation("UserManager", fields: [managerId], references: [id], onDelete: SetNull)
+  managerId      String?   @db.Uuid
+  manager        User?     @relation("UserManager", fields: [managerId], references: [id], onDelete: SetNull)
   // Free-text fallback when the manager is NOT a lazyit user — ADR-0058 (the manager is in HR's system,
   // not IT's). Normalized (trim). Mutually exclusive with `managerId`.
-  managerName String?
+  managerName    String?
   // Directory-only person (ADR-0069 amendment / ADR-0038 amendment): a row created by the bulk import
   // for an asset's "assigned to" that has NO login and NO Zitadel mirror (externalId stays null, role
   // stays VIEWER). It IS a User so AssetAssignment.userId (uuid FK) points at it with zero schema churn.
@@ -73,9 +73,9 @@ model User {
   // and any person sub-field with no native home). Same posture as Asset.specs (ADR-0007): jsonb,
   // optional, only populated on directory rows. NOT validated per-field in this MVP.
   directoryAttrs Json?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
 
   // Direct reports — the inverse of the `manager` self-relation (ADR-0058). A user has many reports;
   // each report's `managerId` points back here. No cascade behaviour beyond the FK's SetNull above.
@@ -301,6 +301,13 @@ model ServiceAccount {
   workflowRunsExecutedAs   WorkflowRun[]         @relation("WorkflowRunExecutedAsSa")
   manualTasksCompleted     ManualTask[]          @relation("ManualTaskCompletedBySa")
 
+  // Programmatic secret retrieval (ADR-0080, extends ADR-0061 + ADR-0048). The SA's X25519 crypto
+  // identity (1:1) + the vaults it is a crypto member of (wrapped-DEK rows). BOTH hold ONLY ciphertext /
+  // public material — the server can never decrypt (INV-10). Cascade on both sides: a keypair / wrapped-
+  // DEK row is meaningless without its service account (a — never-issued — hard delete drops them).
+  keypair          ServiceAccountKeypair?
+  vaultMemberships ServiceAccountVaultMembership[]
+
   @@index([isActive])
   @@map("service_accounts")
 }
@@ -404,6 +411,11 @@ model AssetCategory {
   description String?
   // Free string: a heroicon name for the web UI (e.g. "ServerStackIcon"). Not validated.
   icon        String?
+  // ADVISORY specs dictionary (ADR-0007 amendment, #851): a declarative field list
+  // (`{ key, label, type, required?, enumValues? }[]`) that drives hints + soft warnings for the
+  // Asset.specs of this category's models — validated in the app (zod, @lazyit/shared), NEVER in the
+  // DB and NEVER hard-blocking. Nullable/non-destructive: existing rows keep NULL = no governance.
+  specsSchema Json?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
@@ -540,6 +552,50 @@ model AssetTagScheme {
   // No deletedAt: mutable instance config, never soft-deleted (ADR-0006 / ADR-0063 §1). Keep OUT of
   // SOFT_DELETABLE_MODELS so reads are not auto-scoped to `deletedAt: null` (the column doesn't exist).
   @@map("asset_tag_scheme")
+}
+
+/// Instance SMTP settings — the singleton config store for OUTBOUND EMAIL (issue #615, ADR-0079).
+/// Same singleton pattern as AssetTagScheme (ADR-0063): ONE admin-only row (`settings:manage`), a
+/// migration CHECK pins the id. Unlocks an email CHANNEL behind the notification bell (ADR-0056); a
+/// curated set of operational nudges is emailed (via a BullMQ worker, ADR-0053) when `enabled` is on.
+///
+/// The password is a SERVER-MANAGED machine credential (the server MUST read it to authenticate to the
+/// relay — the explicit inverse of the zero-knowledge Secret Manager, INV-10). It is encrypted at rest
+/// as an AES-256-GCM envelope (the same {ciphertext,iv,authTag,keyVersion} shape as WorkflowSecret, but
+/// under its OWN key axis `SMTP_SECRET_KEY` — "one key per subsystem", ADR-0054/0079). The envelope
+/// columns are NEVER returned on the wire (write-only; the read shape exposes only "passwordSet").
+model SmtpSettings {
+  /// Fixed singleton key — the only valid value is "singleton" (a migration CHECK pins it). Not a
+  /// generated id: there is one SMTP config row for the whole instance.
+  id                 String   @id @default("singleton")
+  /// Master switch for outbound email. false (default) = never email; the test action still works.
+  enabled            Boolean  @default(false)
+  /// SMTP relay hostname. null until configured.
+  host               String?
+  /// SMTP relay port (1–65535). null until configured.
+  port               Int?
+  /// Transport security mode: "none" | "starttls" | "tls" (validated by the shared SmtpSecurity enum).
+  security           String   @default("starttls")
+  /// SMTP auth username. null = open/unauthenticated relay (the api only sends `auth` when set).
+  username           String?
+  /// Encrypted password envelope (AES-256-GCM under SMTP_SECRET_KEY). All four are null when no
+  /// password is stored. WRITE-ONLY: never returned on the wire (the read shape exposes only passwordSet).
+  passwordCiphertext String?
+  passwordIv         String?
+  passwordAuthTag    String?
+  passwordKeyVersion Int?
+  /// Envelope From address (messages are sent from here). null until configured.
+  fromAddress        String?
+  /// Optional human display name for the From header (e.g. "lazyit").
+  fromName           String?
+  /// TLS cert verification. true (default, secure) rejects an unverifiable cert; false allows a
+  /// self-signed cert on a self-hosted relay (opt-in insecurity).
+  rejectUnauthorized Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // No deletedAt: mutable instance config, never soft-deleted (same posture as AssetTagScheme).
+  @@map("smtp_settings")
 }
 
 /// Timestamped join recording who owns an Asset, over time (asset-centric ownership; ADR-0004).
@@ -1552,20 +1608,20 @@ model WorkflowSecret {
 /// user in their own bell, even when they hold no `notification:read`. Same FK shape as `targetUserId`
 /// (optional, SetNull, @db.Uuid): losing the recipient never blocks deletion and the event survives.
 model Notification {
-  id           String   @id @default(cuid())
+  id              String   @id @default(cuid())
   // The closed catalog type (NotificationType in @lazyit/shared) — drives the bell's icon + copy.
   // Plain String, mirroring RolePermission.permission: the closed catalog lives as zod in shared, so
   // adding a type never needs an enum migration.
-  type         String
+  type            String
   // Presentation severity ramp (info | warning | critical) — a render cue, not a business criticality.
-  severity     String   @default("info")
+  severity        String   @default("info")
   // The dedupe key — `<type>:<entityId>` (+ a coarse time bucket for low_stock). Makes emitters
   // IDEMPOTENT: a retry / a flapping consumable / a re-fired listener collapses to ONE row per logical
   // event (ADR-0056 §4). UNIQUE — full unique (this table has no soft delete, so no ghost-row concern).
-  dedupeKey    String   @unique
+  dedupeKey       String   @unique
   // Soft, polymorphic deep-link target (NOT a FK — see model doc). null entityType ⇒ no click-through.
-  entityType   String?
-  entityId     String?
+  entityType      String?
+  entityId        String?
   // The person the nudge is ABOUT (grantee / elevated user). Optional FK, SetNull: losing the user
   // never blocks deletion and the event survives. @db.Uuid to match User.id.
   targetUserId    String?  @db.Uuid
@@ -1657,10 +1713,13 @@ model SecretVault {
 
   // The encrypted values stored under this vault's DEK. onDelete Restrict on the item side: a vault
   // with items cannot be hard-purged (history/ciphertext is preserved). Vaults normally soft-delete.
-  items       SecretItem[]
+  items                     SecretItem[]
   // One row per crypto member, each carrying the DEK wrapped to that member's public key. onDelete
   // Cascade on the membership side: a membership is a current-state join, meaningless without its vault.
-  memberships VaultMembership[]
+  memberships               VaultMembership[]
+  // Service-account crypto members (ADR-0080): the same wrapped-DEK join keyed to a ServiceAccount, so a
+  // headless caller can retrieve this vault's ciphertext. Same Cascade semantics as `memberships`.
+  serviceAccountMemberships ServiceAccountVaultMembership[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1681,11 +1740,11 @@ model SecretVault {
 /// PARTIAL unique index `WHERE "deletedAt" IS NULL` (the §8 chip must resolve to exactly one item — the
 /// deliberate contract for slice 4; never a PSL @unique). See docs/02-domain/entities/secret-item.md.
 model SecretItem {
-  id         String      @id @default(cuid())
+  id         String         @id @default(cuid())
   // Scope: every item belongs to a vault. Restrict — a vault with items can't be hard-purged (matches
   // WorkflowSecret.applicationId Restrict). Vaults soft-delete (UPDATE deletedAt), which bypasses the FK.
   vaultId    String
-  vault      SecretVault @relation(fields: [vaultId], references: [id], onDelete: Restrict)
+  vault      SecretVault    @relation(fields: [vaultId], references: [id], onDelete: Restrict)
   // The §8 KB-chip reference ({{ lazyit_secret.HANDLE }}) — server-visible metadata, never the value.
   // GLOBALLY unique among LIVE rows via the raw-SQL partial unique index in the migration (NOT @unique).
   handle     String
@@ -1701,7 +1760,7 @@ model SecretItem {
   // Which DEK VERSION produced this envelope (crypto note §3). Unlike WorkflowSecret (server env-key
   // version), here it tracks the per-vault DEK version. v1 writes 1 and never rotates; it is the
   // forward-compat seam for the deferred hard-revoke / DEK-rotation (ADR-0061 §5, Phase 2).
-  keyVersion Int         @default(1)
+  keyVersion Int            @default(1)
   // The STRUCTURAL TYPE of this secret (ADR-0075) — server-visible METADATA only, same trust class as
   // `handle`/`label`, NEVER the value. It tells the UI which typed form/icon/renderer to use WITHOUT
   // decrypting: the typed payload (e.g. an SSH key's {privateKey, publicKey}) is a CLIENT-SIDE JSON
@@ -1709,8 +1768,8 @@ model SecretItem {
   // (INV-10 unchanged). GENERIC = a legacy/plain string value (the back-compat default for all existing
   // rows and any create that omits `kind`). Additive: no crypto path or envelope shape changes.
   kind       SecretItemKind @default(GENERIC)
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
   deletedAt  DateTime?
 
   @@index([vaultId])
@@ -1808,6 +1867,70 @@ model UserKeypair {
   @@map("user_keypairs")
 }
 
+/// One keypair per ServiceAccount (1:1 with the cuid ServiceAccount) — the X25519 identity a headless
+/// caller uses to be a crypto member of a vault (ADR-0080, extends ADR-0061 §3 + ADR-0048). The MACHINE
+/// twin of UserKeypair, kept in a SEPARATE model (not a user/SA union) because a service account is a
+/// SEPARATE principal, never a User. `publicKey` is stored in CLEAR (DEKs are wrapped to it). The X25519
+/// private key is wrapped ONCE — under `Argon2id(SA token secret)` (the token plays the role the human
+/// vault passphrase plays) — so ONLY `privateKeyEnc` + `privateKeySalt` + `privateKeyIv` + `kdfParams`
+/// exist; there is NO recovery copy (the token is the only credential; loss = rotate, a documented
+/// follow-up). The server holds public material + the wrapped blob ONLY, NEVER the token plaintext (only
+/// its SHA-256 hash on ServiceAccount.tokenHash), NEVER the unwrapped private key, and NEVER the derived
+/// KEK — the derivation + unwrap run CLIENT-SIDE in the CLI (INV-10). Mutable → cuid + soft delete; a
+/// key rotation replaces the row in place. See docs/03-decisions/0080-service-account-secret-retrieval.md.
+model ServiceAccountKeypair {
+  id               String         @id @default(cuid())
+  // 1:1 with the cuid ServiceAccount. Cascade: the keypair is meaningless without its account. @unique
+  // enforces the 1:1 (one account → one live keypair; a rotation REPLACES the row in place via upsert,
+  // never a second) — same discipline as UserKeypair.userId.
+  serviceAccountId String         @unique
+  serviceAccount   ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  // The X25519 public key (base64, 32 raw bytes) — the ONLY clear column. DEKs are wrapped to it.
+  publicKey        String
+  // The X25519 private key wrapped under `Argon2id(SA token secret)`: the wrapped blob + its KDF inputs.
+  // All base64 text except kdfParams (jsonb). NEVER the unwrapped private key, NEVER the token.
+  privateKeyEnc    String
+  privateKeySalt   String
+  privateKeyIv     String
+  kdfParams        Json
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  deletedAt        DateTime?
+
+  @@map("service_account_keypairs")
+}
+
+/// Records that a ServiceAccount is a CRYPTO MEMBER of a SecretVault, carrying the vault DEK WRAPPED to
+/// that account's public key (ADR-0080, extends ADR-0061 §4). The MACHINE twin of VaultMembership, keyed
+/// to the cuid ServiceAccount (not the uuid User) so the human zero-knowledge tables stay untouched and
+/// there is no nullable union. Granting = a HUMAN member re-wraps the DEK (which they can already unwrap)
+/// to the SA's public key ("no grant-what-you-can't-read" still holds). The server stores the wrapped blob
+/// and can NEVER unwrap it (INV-10). A CURRENT-STATE JOIN: createdAt + updatedAt (re-wrap on key rotation),
+/// NO deletedAt — revoke HARD-DROPs the row. See docs/03-decisions/0080-service-account-secret-retrieval.md.
+model ServiceAccountVaultMembership {
+  id                 String         @id @default(cuid())
+  // The vault this membership grants crypto access to. Cascade: a wrapped-DEK copy is meaningless
+  // without its vault.
+  vaultId            String
+  vault              SecretVault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  // The service-account member. Cascade: a wrapped-DEK copy is meaningless without its account.
+  serviceAccountId   String
+  serviceAccount     ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  // The wrapped-DEK blob (ADR-0061 §2). base64 text; none discloses the DEK without the SA's private key.
+  ephemeralPublicKey String
+  wrapNonce          String
+  wrappedDek         String
+  wrapVersion        Int            @default(1)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  // At most one membership per (vault, service account). A PLAIN @@unique (not a partial index): this row
+  // HARD-deletes on revoke, so there is no soft-delete ghost row to exclude.
+  @@unique([vaultId, serviceAccountId])
+  @@index([serviceAccountId])
+  @@map("service_account_vault_memberships")
+}
+
 /// The discrete actions recorded in SecretAuditLog (ADR-0061 §10). Metadata-only: these name WHO acted
 /// on WHICH vault/item/target — NEVER a secret value, key, or blob.
 enum SecretAuditAction {
@@ -1832,6 +1955,13 @@ enum SecretAuditAction {
   // the member unlocks the vault (INV-10: the server never sees plaintext); this row records ONLY that an
   // export occurred — WHO exported WHICH vault, when, and an optional non-secret item count. NEVER a value.
   ITEMS_EXPORTED
+  // A human bootstrapped a SERVICE ACCOUNT's keypair (ADR-0080): actorId = the ADMIN, targetServiceAccountId
+  // = the SA. Records the crypto identity creation; the wrapped blob is never recorded, only that it happened.
+  SA_KEYPAIR_CREATED
+  // A SERVICE ACCOUNT programmatically fetched a vault's ciphertext over the headless endpoint (ADR-0080):
+  // serviceAccountId = the SA actor (actorId is null — a bot is never a human), vaultId = the vault. The
+  // decryption happens CLIENT-SIDE in the CLI (INV-10); this row records ONLY that a fetch occurred.
+  ITEMS_FETCHED
 }
 
 /// An APPEND-ONLY audit log of Secret Manager actions (ADR-0061 §10, crypto note §8) — records WHO acted
@@ -1839,26 +1969,35 @@ enum SecretAuditAction {
 /// passphrase, or a recovery key. Append-only (ADR-0006): rows are only ever INSERTed — autoincrement id
 /// (a log table, never exposed externally — ADR-0005), `createdAt` ONLY, no updatedAt/deletedAt.
 /// `actorId` is the only FK (→ uuid User, SetNull — the metadata row survives the actor's deletion;
-/// null = system/unknown). `vaultId`/`itemId`/`targetUserId` are PLAIN STRING columns with NO FK on
-/// purpose: the audit trail must survive even if the vault/item/target is later removed (the
-/// notification-bell soft-target precedent). See docs/02-domain/entities/secret-vault.md.
+/// null = system/unknown). `vaultId`/`itemId`/`targetUserId`/`serviceAccountId`/`targetServiceAccountId`
+/// are PLAIN STRING columns with NO FK on purpose: the audit trail must survive even if the vault/item/
+/// target/service-account is later removed (the notification-bell soft-target precedent). See
+/// docs/02-domain/entities/secret-vault.md.
 model SecretAuditLog {
   // autoincrement: a log table, never exposed externally (ADR-0005).
-  id           Int               @id @default(autoincrement())
-  action       SecretAuditAction
+  id                     Int               @id @default(autoincrement())
+  action                 SecretAuditAction
   // Who acted — the authenticated human actor (ADR-0022). SetNull: losing the actor never blocks
   // deleting them and the log row survives. null = system/unknown. @db.Uuid to match User.id.
-  actorId      String?           @db.Uuid
-  actor        User?             @relation("SecretAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorId                String?           @db.Uuid
+  actor                  User?             @relation("SecretAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  // The SERVICE-ACCOUNT ACTOR (ADR-0048 fork #4 pattern, ADR-0080): set instead of actorId when a bot
+  // acted (ITEMS_FETCHED). A SOFT REF (cuid, NO FK) — this log table already treats every non-human ref
+  // as a soft ref (survives the SA's removal). A raw-SQL CHECK enforces at most one actor (human XOR SA).
+  serviceAccountId       String?
   // Soft metadata references (NO FK) — the row must survive even if the vault/item/target is removed.
-  vaultId      String?
-  itemId       String?
-  targetUserId String?
-  createdAt    DateTime          @default(now())
+  vaultId                String?
+  itemId                 String?
+  targetUserId           String?
+  // The SERVICE-ACCOUNT TARGET (ADR-0080): set on SA_KEYPAIR_CREATED and on a MEMBERSHIP_GRANTED/REVOKED
+  // whose subject is an SA (targetUserId stays null then). A soft ref (cuid, NO FK) like the others.
+  targetServiceAccountId String?
+  createdAt              DateTime          @default(now())
 
-  // No updatedAt / deletedAt: append-only (ADR-0006). Indexes: the per-vault audit timeline and the
-  // newest-first / retention age scan.
+  // No updatedAt / deletedAt: append-only (ADR-0006). Indexes: the per-vault audit timeline, the SA-actor
+  // programmatic-read timeline (ITEMS_FETCHED — partly serves #870), and the newest-first / retention scan.
   @@index([vaultId])
+  @@index([serviceAccountId])
   @@index([createdAt])
   @@map("secret_audit_logs")
 }
@@ -1870,28 +2009,28 @@ model SecretAuditLog {
 /// frozen resolution-plan blobs (jsonb; @lazyit/shared zod wire shapes). The raw file is parsed once
 /// and discarded — only the coerced rows persist, under TTL. See docs/03-decisions/0069-migrator-import.md.
 model ImportSession {
-  id      String              @id @default(cuid())
-  entity  ImportEntity
-  status  ImportSessionStatus @default(PENDING)
+  id             String              @id @default(cuid())
+  entity         ImportEntity
+  status         ImportSessionStatus @default(PENDING)
   // The human operator who started the import (ADR-0022). Restrict: do not orphan an in-flight import
   // by deleting its owner; the session is short-lived and GC-swept anyway. @db.Uuid to match User.id.
-  ownerId String              @db.Uuid
-  owner   User                @relation("ImportSessionOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  ownerId        String              @db.Uuid
+  owner          User                @relation("ImportSessionOwner", fields: [ownerId], references: [id], onDelete: Restrict)
   // Confirmed column/value/FK mapping blob (ImportMappingSchema) — null until the map step.
   mapping        Json?
   // Frozen per-conflict resolution plan (ImportResolutionPlanSchema) — null until the dry-run step.
   resolutionPlan Json?
   // Detected source shape from the parse step (wave 2, #629): { headers, dialect, encoding, rowCount }.
   // Null until PARSED; lets the map step render columns without re-reading the (discarded) file.
-  detected  Json?
+  detected       Json?
   // Session-level failure detail when status is FAILED (e.g. a malformed file) — PII-free (§11). A
   // ROW-level error lives on ImportRow.error; this is the whole-file error that prevented any rows.
-  error     Json?
+  error          Json?
   // SHA-256 of the uploaded file (never its contents) for the audit/idempotency correlation (§9).
-  fileHash  String?
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  fileHash       String?
+  expiresAt      DateTime
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
   // ImportRow cascade-deletes with the session (transient scratch). ImportRun does NOT — it is the
   // append-only audit ledger and survives session GC (it correlates back via the durable `sessionId`
@@ -1916,12 +2055,12 @@ model ImportRow {
   rowIndex  Int
   status    ImportRowStatus @default(PENDING)
   // Parsed source values (column → string) and the coercion-pre-pass output (field → coerced value).
-  raw     Json
-  coerced Json?
+  raw       Json
+  coerced   Json?
   // Field-level / row error detail when status is INVALID/FAILED (PII-free in logs — §11).
   error     Json?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 
   @@index([sessionId, rowIndex])
   @@index([sessionId, status])
@@ -1938,20 +2077,20 @@ model ImportRow {
 /// `sessionId` provenance — ADR-0069 §8/§9). `actorId` is SetNull so the ledger survives the actor's
 /// deletion. NOT in `SOFT_DELETABLE_MODELS`.
 model ImportRun {
-  id        Int    @id @default(autoincrement())
+  id              Int          @id @default(autoincrement())
   // Durable correlation to the originating session. NOT an FK (see model doc): the value is retained
   // after the session row is GC-deleted, so the ledger outlives its transient session.
-  sessionId String
-  entity    ImportEntity
+  sessionId       String
+  entity          ImportEntity
   // Who ran the commit (ADR-0022). SetNull: the audit row survives the actor's deletion. @db.Uuid.
-  actorId String? @db.Uuid
-  actor   User?   @relation("ImportRunActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorId         String?      @db.Uuid
+  actor           User?        @relation("ImportRunActor", fields: [actorId], references: [id], onDelete: SetNull)
   // Counts (ImportCountsSchema) and the distinct-conflict summary (ImportResolutionPlanSchema) — jsonb.
   counts          Json
   conflictSummary Json?
   // SHA-256 of the imported file (never contents) for audit / undo correlation.
-  fileHash  String?
-  createdAt DateTime @default(now())
+  fileHash        String?
+  createdAt       DateTime     @default(now())
 
   @@index([sessionId, id])
   @@index([actorId])
@@ -2041,25 +2180,25 @@ enum InfraEdgeKind {
 /// owner/KB/secrets/warranty/shortcuts via the linked Asset). Mutable domain entity: createdAt +
 /// updatedAt + deletedAt (soft delete = off the map, history kept; ADR-0006).
 model InfraNode {
-  id              String          @id @default(cuid())
+  id String @id @default(cuid())
 
-  kind            InfraNodeKind
-  label           String // canvas display name — always wins for display (ADR-0070 §5)
-  status          InfraNodeStatus @default(UNKNOWN)
+  kind   InfraNodeKind
+  label  String // canvas display name — always wins for display (ADR-0070 §5)
+  status InfraNodeStatus @default(UNKNOWN)
 
   // Asset linkage — DEFAULT-ON. SetNull: deleting the asset detaches, never deletes the node
   // (audit > strict integrity). The default-asset create flow is API logic (ADR-0070 §5).
-  assetId         String?
-  asset           Asset?          @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
   // Access surface (NOT a network model — ADR-0070 scope cuts).
-  ipAddress       String? // primary IP, label-only (no validation/IPAM)
-  shortcuts       Json? // [{ label, url }] — SSH/web UI/console links (validated by zod in @lazyit/shared)
-  specs           Json? // loose per-kind attrs (ADR-0007 posture)
+  ipAddress String? // primary IP, label-only (no validation/IPAM)
+  shortcuts Json? // [{ label, url }] — SSH/web UI/console links (validated by zod in @lazyit/shared)
+  specs     Json? // loose per-kind attrs (ADR-0007 posture)
 
   // Canvas layout (free-move). v1: one board, x/y on the node. Multi-board => join later.
-  x               Float?
-  y               Float?
+  x Float?
+  y Float?
 
   // Provenance + lifecycle (columns exist now; the agent that exercises them is v2 — ADR-0070 §4).
   source          InfraNodeSource @default(MANUAL)
@@ -2068,16 +2207,16 @@ model InfraNode {
   externalId      String? // platform id (vmid/container-id) for reconciliation
   lastReportedAt  DateTime? // agent liveness; stale => OFFLINE
 
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  deletedAt       DateTime? // soft delete = off the map, history kept
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft delete = off the map, history kept
 
-  edgesFrom       InfraEdge[]     @relation("EdgeSource")
-  edgesTo         InfraEdge[]     @relation("EdgeTarget")
+  edgesFrom InfraEdge[] @relation("EdgeSource")
+  edgesTo   InfraEdge[] @relation("EdgeTarget")
 
   // Soft secret-handle references attached to this node (ADR-0073, #801). Metadata only (handle +
   // vaultId), NO FK to the SecretItem — mirrors KB chips + SecretAuditLog. INV-10: never a value.
-  secretLinks     InfraNodeSecretRef[]
+  secretLinks InfraNodeSecretRef[]
 
   @@index([assetId])
   @@index([kind])
@@ -2102,8 +2241,8 @@ model InfraEdge {
   startedAt DateTime      @default(now())
   endedAt   DateTime? // null = active; migration = close one, open next
 
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Two raw-SQL PARTIAL UNIQUE indexes Prisma can't express live in the migration (ADR-0070 §3,
   // docs/05-runbooks/prisma-migrations.md §3):

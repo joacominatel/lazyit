@@ -54,19 +54,13 @@ import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
+import {
+  CONSUMABLE_FILTER_DEFAULTS as FILTER_DEFAULTS,
+  CONSUMABLE_LIST_OPTIONS,
+  deriveConsumableParams,
+} from "./consumables-list-query";
 import { QuickAdjustButtons } from "./quick-adjust-buttons";
 import { StockBadge } from "./stock-badge";
-
-/**
- * Filter param defaults. `lowStock` is a server filter ("true"); `category` is the server-side
- * category filter (#824 — a category cuid, "ALL" = unset). `archived` ("ALL" | "only") drives the
- * ADMIN-only `deleted=only` view via the URL.
- */
-const FILTER_DEFAULTS = {
-  lowStock: "",
-  category: "ALL",
-  archived: "ALL",
-} as const;
 
 /** Stable empty placeholder for the loading skeleton's mobile children slot. */
 const LOADING_MOBILE_CHILDREN = <></>;
@@ -95,30 +89,20 @@ export function ConsumablesListView() {
     setOffset,
     clearFilters,
     filtersActive,
-  } = useListParams({
-    filters: FILTER_DEFAULTS,
-    defaultSort: "updatedAt",
-    defaultDir: "desc",
-  });
+  } = useListParams(CONSUMABLE_LIST_OPTIONS);
 
   const categoryFilter = filters.category;
   const lowStockOnly = filters.lowStock === "true";
   // The archived view is ADMIN-only.
   const archived = isAdmin && filters.archived === "only";
 
-  // Forward the server-supported params; `category` is now a server filter too (#824), so it scopes
-  // the whole result set instead of just the current page.
+  // `deriveConsumableParams` is the SAME URL→query mapping the server prefetch uses (`category`/
+  // `lowStock`/archived all resolved server-side, #824), so this hook's key and the SSR-prefetched key
+  // are byte-identical (ADR-0067 / #733).
   const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useConsumables({
-      q: q || undefined,
-      sort,
-      dir: sort ? dir : undefined,
-      lowStock: lowStockOnly,
-      category: categoryFilter !== "ALL" ? categoryFilter : undefined,
-      limit,
-      offset,
-      deleted: archived ? "only" : undefined,
-    });
+    useConsumables(
+      deriveConsumableParams({ q, sort, dir, offset, limit, filters }, { isAdmin }),
+    );
   const { data: categories } = useConsumableCategories();
   const deleteConsumable = useDeleteConsumable();
   const restoreConsumableMutation = useRestoreConsumable();

@@ -9,7 +9,7 @@ import { userKeys } from "./use-users";
  */
 export const configKeys = {
   all: ["config"] as const,
-  status: () => [...["config"], "status"] as const,
+  status: () => [...configKeys.all, "status"] as const,
 };
 
 /**

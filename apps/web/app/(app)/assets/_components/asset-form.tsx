@@ -1,6 +1,9 @@
 "use client";
 
-import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowPathIcon,
+  ExclamationTriangleIcon,
+} from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   applyAssetModelSpecsDefaults,
@@ -11,15 +14,18 @@ import {
   cloneAssetDefaults,
   CreateAssetSchema,
   renderAssetTag,
+  type SpecsWarning,
   UpdateAssetSchema,
+  validateSpecsAgainstDictionary,
 } from "@lazyit/shared";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useReducer } from "react";
-import { Controller, type Resolver, useForm } from "react-hook-form";
+import { Controller, type Resolver, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { LocationFormDialog } from "@/app/(app)/locations/_components/location-form-dialog";
 import { AssetModelCombobox } from "@/components/asset-model-combobox";
+import { Callout } from "@/components/callout";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { LocationCombobox } from "@/components/location-combobox";
@@ -39,6 +45,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
+import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
 import { useAssetTagScheme } from "@/lib/api/hooks/use-asset-tag-scheme";
 import { useAssetCompanies } from "@/lib/api/hooks/use-assets";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
@@ -232,6 +240,46 @@ export function AssetForm({
   function applyModelSpecs(model: AssetModel) {
     if (isEdit) return;
     dispatchSpec({ type: "modelApplied", model });
+  }
+
+  // Advisory specs dictionary (ADR-0078, #851): resolve the selected model's category dictionary and
+  // drive key autocomplete + soft warnings. ponytail: derive the category from the RHF-watched
+  // `modelId` (the single source of truth for the selection) instead of threading `categoryId`
+  // through the specs reducer — this covers edit-init, select, create and clear reactively. A
+  // just-created model resolves once the models list refetches; the feature is advisory, never blocks.
+  const { data: assetCategories } = useAssetCategories();
+  const { data: assetModels } = useAssetModels();
+  // `useWatch` (not `form.watch`) so the React Compiler can subscribe safely.
+  const selectedModelId = useWatch({ control: form.control, name: "modelId" });
+  const categoryId =
+    assetModels?.find((m) => m.id === selectedModelId)?.categoryId ?? null;
+  const specsDictionary =
+    assetCategories?.find((c) => c.id === categoryId)?.specsSchema ?? null;
+  const specsWarnings = validateSpecsAgainstDictionary(
+    rowsToSpecs(specState.rows, specState.preserved),
+    specsDictionary,
+  );
+
+  /** Friendly, localized message for one advisory warning (label/allowed values resolved by key). */
+  function specsHint(warning: SpecsWarning): string {
+    const field = specsDictionary?.find((f) => f.key === warning.key);
+    const label = field?.label ?? warning.key;
+    switch (warning.code) {
+      case "missingRequired":
+        return t("customFields.specsHints.missingRequired", { label });
+      case "unknownKey":
+        return t("customFields.specsHints.unknownKey", { key: warning.key });
+      case "wrongType":
+        return t("customFields.specsHints.wrongType", {
+          label,
+          type: t(`customFields.specsHints.types.${field?.type ?? "string"}`),
+        });
+      case "notInEnum":
+        return t("customFields.specsHints.notInEnum", {
+          label,
+          values: (field?.enumValues ?? []).join(", "),
+        });
+    }
   }
 
   const specLabels = {
@@ -586,8 +634,25 @@ export function AssetForm({
                 })
               : undefined
           }
+          keySuggestions={specsDictionary?.map((f) => f.key)}
           onChange={(rows) => dispatchSpec({ type: "rowsChanged", rows })}
         />
+
+        {/* Advisory-only: never blocks submit (the validateRows gate is untouched). */}
+        {specsWarnings.length > 0 ? (
+          <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
+            <p className="text-sm font-medium">
+              {t("customFields.specsHints.title")}
+            </p>
+            <ul className="mt-1 list-disc space-y-1 pl-4 text-sm">
+              {specsWarnings.map((warning) => (
+                <li key={`${warning.code}:${warning.key}`}>
+                  {specsHint(warning)}
+                </li>
+              ))}
+            </ul>
+          </Callout>
+        ) : null}
       </FieldGroup>
 
       <div className="flex justify-end gap-2">

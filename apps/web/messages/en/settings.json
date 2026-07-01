@@ -145,6 +145,73 @@
       }
     }
   },
+  "smtp": {
+    "title": "Outbound email (SMTP)",
+    "subtitle": "Connect an SMTP relay so lazyit can send email notifications. Off until you turn it on; the password is stored encrypted and never shown again.",
+    "loadError": "Could not load the SMTP settings.",
+    "loadErrorHint": "Check your connection and try again.",
+    "retry": "Retry",
+    "save": "Save settings",
+    "disabledHint": "Outbound email is off. Turn it on to email notifications — you can still send a test below.",
+    "fields": {
+      "enabled": {
+        "label": "Enable outbound email",
+        "description": "When on, eligible notifications are also emailed. When off, nothing is emailed (you can still send a test)."
+      },
+      "host": {
+        "label": "SMTP host",
+        "placeholder": "smtp.example.com"
+      },
+      "port": {
+        "label": "Port",
+        "placeholder": "587"
+      },
+      "security": {
+        "label": "Security",
+        "options": {
+          "none": "None (plaintext)",
+          "starttls": "STARTTLS (recommended, port 587)",
+          "tls": "Implicit TLS (port 465)"
+        }
+      },
+      "username": {
+        "label": "Username",
+        "placeholder": "Optional"
+      },
+      "password": {
+        "label": "Password",
+        "placeholderSet": "Configured — leave blank to keep",
+        "placeholderUnset": "Password",
+        "hintSet": "A password is stored. Leave blank to keep it, or type a new one to replace it."
+      },
+      "fromAddress": {
+        "label": "From address",
+        "placeholder": "lazyit@example.com"
+      },
+      "fromName": {
+        "label": "From name",
+        "placeholder": "lazyit (optional)"
+      },
+      "rejectUnauthorized": {
+        "label": "Verify TLS certificate",
+        "description": "Reject relays whose TLS certificate can't be verified. Turn off only to allow a self-signed certificate on a trusted relay."
+      }
+    },
+    "test": {
+      "heading": "Send a test email",
+      "description": "Sends a one-off email using the saved settings. Save your changes first — the test uses what's stored, not the form above.",
+      "placeholder": "you@example.com",
+      "send": "Send test",
+      "invalidEmail": "Enter a valid destination email address.",
+      "success": "Test email sent to {to}.",
+      "failure": "The test email could not be sent.",
+      "error": "Could not send the test email."
+    },
+    "toast": {
+      "saved": "SMTP settings saved.",
+      "saveError": "Could not save the SMTP settings."
+    }
+  },
   "roles": {
     "title": "Roles",
     "subtitle": "Who holds which access level, and what each role can do. Change a role from the Users section.",
@@ -356,6 +423,12 @@
       "acknowledge": "I've saved this token in a secure place.",
       "done": "Done"
     },
+    "keypairSetup": {
+      "working": "Setting up the encryption key…",
+      "done": "Encryption key set up. This service account can now retrieve secrets from vaults you grant it access to.",
+      "forbidden": "You need Secret Manager manage permission to set up the encryption key. The service account is fine, but can't retrieve secrets until an admin sets it up (rotate its token).",
+      "error": "Couldn't set up the encryption key. The service account is fine — rotate its token to try again and enable programmatic secret retrieval."
+    },
     "testIt": {
       "title": "Test it works",
       "description": "Run a quick check from your terminal to confirm the token authenticates and is scoped as expected. Replace the placeholder with the token you copied.",
@@ -427,6 +500,9 @@
       "location:write": { "label": "Add & edit locations" },
       "location:delete": { "label": "Delete locations" },
       "import:run": { "label": "Run imports" },
+      "infra:read": { "label": "View the server map" },
+      "infra:manage": { "label": "Manage the server map" },
+      "infra:report": { "label": "Report server inventory (agent)" },
       "application:read": { "label": "View applications" },
       "application:write": { "label": "Add & edit applications" },
       "application:delete": { "label": "Delete applications" },
@@ -453,7 +529,8 @@
       "workflow:secrets": { "label": "Manage connector credentials" },
       "notification:read": { "label": "View notifications" },
       "secret:read": { "label": "View the Secret Manager" },
-      "secret:manage": { "label": "Manage vaults & memberships" }
+      "secret:manage": { "label": "Manage vaults & memberships" },
+      "secret:fetch": { "label": "Fetch secrets programmatically (service account)" }
     },
     "capabilities": {
       "inventory:view": {
@@ -467,6 +544,18 @@
       "inventory:delete": {
         "label": "Delete inventory",
         "description": "Archive assets, consumables, models, categories and locations."
+      },
+      "inventory:import": {
+        "label": "Run bulk imports",
+        "description": "Use the guided Migrator to bulk-import assets from a CSV/JSON file. Also requires the relevant write permissions (assets, models, categories, locations), checked per row at commit."
+      },
+      "infra:view": {
+        "label": "View the server map",
+        "description": "See the infra topology canvas — nodes, edges and the per-node drill-in (owner, KB, IP, shortcuts)."
+      },
+      "infra:manage": {
+        "label": "Manage the server map",
+        "description": "Create, edit and delete topology nodes, open and close edges, and persist node positions on the canvas. Asset-backed node creation also requires the asset edit permission."
       },
       "application:view": {
         "label": "View applications",
@@ -644,6 +733,32 @@
         "orderPlaceholder": "Optional — lower sorts first",
         "saveChanges": "Save changes",
         "createButton": "Create {label}",
+        "specsDictionary": {
+          "label": "Specs dictionary",
+          "description": "Declare the custom fields assets in this category should have. Advisory only — it powers autocomplete and soft hints on the asset form; it never blocks a save or invalidates existing assets.",
+          "empty": "No declared fields yet.",
+          "addField": "Add field",
+          "keyPlaceholder": "Key (e.g. ram)",
+          "labelPlaceholder": "Label (e.g. RAM)",
+          "typeLabel": "Type",
+          "typeOptions": {
+            "string": "Text",
+            "number": "Number",
+            "boolean": "Yes / No",
+            "enum": "Choice list"
+          },
+          "requiredLabel": "Required",
+          "enumValuesPlaceholder": "8GB, 16GB, 32GB",
+          "enumValuesHint": "Comma-separated allowed values.",
+          "removeFieldTitle": "Remove field",
+          "removeFieldLabel": "Remove field {index}",
+          "fieldKeyLabel": "Field {index} key",
+          "fieldLabelLabel": "Field {index} label",
+          "fieldEnumValuesLabel": "Field {index} allowed values",
+          "errors": {
+            "invalid": "Check the dictionary: every field needs a key and a label, choice-list fields need at least one value, and keys must be unique."
+          }
+        },
         "errors": {
           "nameRequired": "Name is required.",
           "orderInteger": "Order must be a whole number."

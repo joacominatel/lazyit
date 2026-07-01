@@ -15,6 +15,7 @@ import { ApiError } from "@/lib/api/client";
 import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { AdminGate } from "../../_components/admin-gate";
 import { AssetTagSchemeEditor } from "./asset-tag-scheme-editor";
+import { SmtpSettingsEditor } from "./smtp-settings-editor";
 
 /** Stable empty breadcrumb for the instance settings PageHeader. */
 const BREADCRUMB = <Breadcrumb />;
@@ -76,62 +77,68 @@ export function InstanceSettingsView() {
           }
         />
 
-        <Card className="max-w-xl">
-          <CardHeader>
-            <CardTitle>{t("instance.cardTitle")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="space-y-3">
-                <Skeleton className="h-5 w-full" />
-                <Skeleton className="h-5 w-full" />
-                <Skeleton className="h-5 w-full" />
-                <Skeleton className="h-5 w-full" />
-              </div>
-            ) : isError ? (
-              <div className="flex flex-col items-center gap-3 py-2 text-center">
-                <p className="text-sm font-medium">
-                  {t("instance.loadError")}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {t("instance.loadErrorHint")}
-                </p>
-                <RequestIdNote requestId={requestId} />
-                <Button variant="outline" onClick={() => refetch()}>
-                  <ArrowPathIcon />
-                  {tc("retry")}
-                </Button>
-              </div>
-            ) : data ? (
-              <div className="divide-y">
-                <InfoRow label={t("instance.rows.configured")}>
-                  {data.isConfigured ? (
-                    <StatusBadge tone="success" dot>
-                      {t("instance.configuredBadge")}
-                    </StatusBadge>
-                  ) : (
-                    <StatusBadge tone="warning" dot>
-                      {t("instance.setupPending")}
-                    </StatusBadge>
-                  )}
-                </InfoRow>
-                <InfoRow label={t("instance.rows.identityProvider")}>
-                  {identityProviderLabel[data.integrationMode]}
-                </InfoRow>
-                <InfoRow label={t("instance.rows.administrators")}>
-                  <span className="tabular-nums">{data.adminCount}</span>
-                </InfoRow>
-                <InfoRow label={t("instance.rows.runtimePosture")}>
-                  <StatusBadge tone={posture.tone} dot>
-                    {posture.label}
-                  </StatusBadge>
-                </InfoRow>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+        <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("instance.cardTitle")}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-5 w-full" />
+                    <Skeleton className="h-5 w-full" />
+                    <Skeleton className="h-5 w-full" />
+                    <Skeleton className="h-5 w-full" />
+                  </div>
+                ) : isError ? (
+                  <div className="flex flex-col items-center gap-3 py-2 text-center">
+                    <p className="text-sm font-medium">
+                      {t("instance.loadError")}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {t("instance.loadErrorHint")}
+                    </p>
+                    <RequestIdNote requestId={requestId} />
+                    <Button variant="outline" onClick={() => refetch()}>
+                      <ArrowPathIcon />
+                      {tc("retry")}
+                    </Button>
+                  </div>
+                ) : data ? (
+                  <div className="divide-y">
+                    <InfoRow label={t("instance.rows.configured")}>
+                      {data.isConfigured ? (
+                        <StatusBadge tone="success" dot>
+                          {t("instance.configuredBadge")}
+                        </StatusBadge>
+                      ) : (
+                        <StatusBadge tone="warning" dot>
+                          {t("instance.setupPending")}
+                        </StatusBadge>
+                      )}
+                    </InfoRow>
+                    <InfoRow label={t("instance.rows.identityProvider")}>
+                      {identityProviderLabel[data.integrationMode]}
+                    </InfoRow>
+                    <InfoRow label={t("instance.rows.administrators")}>
+                      <span className="tabular-nums">{data.adminCount}</span>
+                    </InfoRow>
+                    <InfoRow label={t("instance.rows.runtimePosture")}>
+                      <StatusBadge tone={posture.tone} dot>
+                        {posture.label}
+                      </StatusBadge>
+                    </InfoRow>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
 
-        <AssetTagSchemeEditor />
+            <AssetTagSchemeEditor />
+          </div>
+
+          <SmtpSettingsEditor />
+        </div>
       </div>
     </AdminGate>
   );

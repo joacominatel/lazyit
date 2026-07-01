@@ -19,9 +19,11 @@ export const AssetStatusSchema = z.enum([
   "UNKNOWN",
 ]);
 
-// TODO(specs): once an AssetCategory can declare a `specsSchema`, validate this Asset's specs
-// against the category of its model. For now any JSON object is accepted. Distinct from
-// AssetModel.specs (per-unit vs type-level). See docs/03-decisions/0007-flexible-asset-specs-jsonb.md.
+// specs stays an OPEN record here on purpose. Per-category governance (ADR-0007 amendment, #851) is
+// ADVISORY: an AssetCategory can declare a `specsSchema` dictionary, but it drives soft warnings +
+// hints via `validateSpecsAgainstDictionary` (asset-specs-dictionary.ts) — NOT hard validation. The
+// wire schema never narrows, so legacy rows keep validating. Distinct from AssetModel.specs (per-unit
+// vs type-level). See docs/03-decisions/0007-flexible-asset-specs-jsonb.md.
 const AssetSpecsSchema = z.record(z.string(), z.unknown());
 
 /** The full persisted Asset entity (API representation of the `assets` row). */

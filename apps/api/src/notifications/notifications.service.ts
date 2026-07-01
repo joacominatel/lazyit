@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   offsetOf,
   pageOf,
@@ -13,6 +13,7 @@ import {
 import { Prisma, type Role } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { NotificationEmailRelay } from '../smtp/notification-email.relay';
 
 /**
  * The input an emitter hands {@link NotificationsService.emit} to record one curated nudge (ADR-0056
@@ -84,6 +85,12 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly permissions: PermissionResolverService,
+    /**
+     * The email channel producer (ADR-0079). OPTIONAL so contexts that construct this service without the
+     * SMTP wiring (unit tests) still work — when absent, emit() simply never emails. In the running app
+     * it is provided by SmtpModule (imported by NotificationsModule).
+     */
+    @Optional() private readonly emailRelay?: NotificationEmailRelay,
   ) {}
 
   /**
@@ -131,7 +138,11 @@ export class NotificationsService {
         skip,
         // Only the CALLER's read row (if any) — the anti-join that yields the per-caller `read` flag.
         include: {
-          reads: { where: { userId: viewer.userId }, select: { id: true }, take: 1 },
+          reads: {
+            where: { userId: viewer.userId },
+            select: { id: true },
+            take: 1,
+          },
         },
       }),
       this.prisma.notification.count({ where }),
@@ -211,7 +222,10 @@ export class NotificationsService {
       return { marked: 0, unread: 0 };
     }
     const result = await this.prisma.notificationRead.createMany({
-      data: unreadIds.map((n) => ({ notificationId: n.id, userId: viewer.userId })),
+      data: unreadIds.map((n) => ({
+        notificationId: n.id,
+        userId: viewer.userId,
+      })),
       skipDuplicates: true,
     });
     const unread = await this.unreadCount(viewer);
@@ -249,6 +263,19 @@ export class NotificationsService {
             : {}),
         },
         select: { id: true },
+      });
+      // Email channel (ADR-0079): a NEW (non-deduped) notification of an emailable type is ALSO sent to
+      // email — best-effort and fail-soft (the relay never throws; bell-only types are ignored by it, and
+      // a missing broker/config never affects this write). No await-nothing side effects on the bell.
+      await this.emailRelay?.enqueue({
+        notificationId: created.id,
+        type: input.type,
+        severity: input.severity ?? this.defaultSeverity(input.type),
+        title: input.title,
+        summary: input.summary ?? null,
+        entityType: input.entityType ?? null,
+        entityId: input.entityId ?? null,
+        recipientUserId: input.recipientUserId ?? null,
       });
       return created.id;
     } catch (err) {
@@ -321,7 +348,8 @@ export class NotificationsService {
   /** True when an error is the expected dedupeKey-unique collision (P2002) — the idempotent no-op. */
   private isDuplicateDedupe(err: unknown): boolean {
     return (
-      err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002'
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002'
     );
   }
 

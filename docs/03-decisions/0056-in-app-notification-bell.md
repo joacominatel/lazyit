@@ -350,6 +350,60 @@ the FK now encodes the correct intent rather than relying on that. The two FKs a
 **different**: `targetUserId` stays `SetNull` (the event survives the loss of the person it was *about*);
 `recipientUserId` is `Cascade` (the event has no reason to exist once the person it was *for* is gone).
 
+## Amendment (2026-06-30) — sensitive-audit + agent-liveness alerts (issue #852)
+
+**Status: accepted.** Two new **broadcast** notification types extend the curated catalog (§5) so the
+bell carries a tight, on-positioning **security signal** for a single-org IT team — NOT a SIEM, NOT a
+rules engine, NOT configurable retention. Both are `recipientUserId == null` broadcasts, so they land
+in the existing admin feed (every `notification:read` holder — ADMIN-only by default, §6), which is the
+right audience for sensitive operational state. Reuses `NotificationsService.emit` unchanged; adds **no**
+queue, DSL or config.
+
+### A. The two new types (additive, closed-enum change)
+
+- **`permission_widened`** — emitted **post-commit, best-effort** from `PermissionsConfigService.updateMatrix`
+  ([[0046-roles-permissions-v2]] P5) when a `PUT /config/permissions` edit **GRANTED** MEMBER or VIEWER a
+  **high-risk verb**: `settings:manage`, `user:manage`, `accessGrant:grant`, or **any `:delete`**. ONE nudge
+  per edit (folds every widened verb across both roles), `severity: warning`, redacted metadata (role + verb
+  literals + actorId). Dedupe `permission_widened:<actorId>:<emit-instant>` — a matrix PUT is not
+  infra-retried and a re-run diffs to an **empty** grant set, so the key never suppresses a real event.
+  Deep-links (by type) to the role→permission editor. **ponytail:** there is **no "self-escalation" axis to
+  distinguish** here — only an ADMIN (`settings:manage`) may edit the matrix, ADMIN is immutable/full
+  (INV-8), and edits target the MEMBER/VIEWER **role** sets, never the actor's own account, so an admin can
+  never widen *themselves*. Ceiling: revisit only if per-user permission overrides ever land (#615).
+- **`infra.agent_offline`** — emitted from `InfraAgentStalenessSweeper.sweep` ([[0074-server-reporting-agent]]
+  §4) for each node **transitioning** CONFIRMED→OFFLINE. The bulk `updateMany` can't say which rows it
+  flipped, so the sweep **snapshots the `status != OFFLINE` doomed set** (a `findMany` on the same predicate)
+  *before* the flip and emits one nudge per snapshot node, `severity: warning`, metadata = nodeId + label +
+  last-report time. Dedupe `infra.agent_offline:<nodeId>:<lastReportedAt>` → **one nudge per outage** (a node
+  stuck OFFLINE is not re-selected next sweep; a genuinely new outage has a fresh last-report instant ⇒ a
+  fresh key ⇒ a fresh nudge), never once-per-sweep. Deep-links (by type) to the topology map. **ponytail:**
+  emitting for the snapshot set, not the exact flipped rows — a node that reports in between the two queries
+  is excluded from the flip yet may still get one nudge (a tiny two-query race, deduped, on a small cohort).
+  Ceiling: the exact flipped set would need a `RETURNING` clause (raw SQL) or a per-node update.
+
+Both are additive closed-enum literals (§5): the golden shared test asserts them, and — because the web bell's
+`TYPE_META` is an **exhaustive `Record<NotificationType, …>`** that CI type-checks — each new literal needs a
+`TYPE_META` entry (icon + tone + by-type deep-link) or `apps/web` fails to compile. That one-entry-per-type
+cost is the standard catalog-as-code tax (§6), not scope creep into web app logic.
+
+### B. Deferred — repeated secret-decrypt / vault-access failure alert
+
+Issue #852 also floated an alert on **repeated secret-decrypt failures**. It is **deferred**, not built,
+because it is not cheaply/unambiguously detectable today: the Secret Manager is **zero-knowledge (INV-10,
+[[0061-secret-manager-zero-knowledge]])** — the server **never** receives a passphrase and **never** performs
+a decrypt, so a genuine "failed decrypt" (a wrong passphrase, unwrapping the private key browser-side) is
+**structurally invisible** server-side. The only server-observable signal is scattered **authorization
+denials** (`ForbiddenException` on non-membership across several service methods), a *different* signal with
+real false-positive risk (a user clicking a vault they aren't a member of ≠ an attack) that would need new
+plumbing — an attempt counter or failure-audit rows — **and a product call** on what counts as "suspicious".
+Rather than force an ambiguous proxy, we shipped `permission_widened` + `infra.agent_offline` and left the
+secret-failure alert for its own small design.
+
+Related: #852 · #615 (per-user overrides — the only thing that would add a "self-escalation" axis) ·
+[[0074-server-reporting-agent]] (the staleness sweeper) · [[0061-secret-manager-zero-knowledge]] (INV-10 —
+why the secret-failure alert is deferred) ·
+
 Related: #313 · #248 · #453 · #470 · [[0054-applications-workflow-engine]] · [[0048-service-accounts]] ·
 [[0046-roles-permissions-v2]] · [[0044-recent-activity-view]] · [[0034-consumables-design]] ·
 [[0033-asset-history-event-model]] · [[0031-logging-strategy]] · [[0030-list-pagination-contract]] ·

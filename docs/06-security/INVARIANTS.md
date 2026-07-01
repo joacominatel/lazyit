@@ -502,6 +502,22 @@ reach.
   clear; plaintext keys/values/passwords/recovery-keys are NEVER persisted or logged ([[0031-logging-strategy]]).
 - Decision + data model: [[0061-secret-manager-zero-knowledge]] · [[secret-manager-crypto-design]].
 
+**Programmatic retrieval by a service account ([[0080-service-account-secret-retrieval]], #614) — INV-10
+preserved.** An SA can pull a vault's ciphertext headlessly for **client-side** decryption; the server
+still never decrypts. The SA gets its own X25519 keypair whose private key is wrapped under
+`Argon2id(SA token secret)` (a `ServiceAccountKeypair` — generated **client-side** for **every** SA on
+create, and **regenerated under the new token on rotation**, #883; the server never sees the token, the KEK,
+or the unwrapped key, so INV-10 holds through the whole lifecycle); a human member re-wraps the vault DEK to
+the SA's public key (a `ServiceAccountVaultMembership` — the existing grant flow; a rotation's fresh public
+key orphans these, so they are dropped and the SA must be re-granted). The **service-only**
+`GET /secret-fetch/:vaultId` (new verb **`secret:fetch`**; `service-only.guard.ts`; `secret:read`/`:manage`
+stay SA-ungrantable) returns the SA's **wrapped** private key + the **wrapped** DEK + item **ciphertext**
+ONLY — the token→KEK→private-key→DEK→value unwrap chain runs **exclusively in the `lazyit-fetch` CLI**
+(`packages/fetch-cli`), never on the server (the INV-10 guard test pins the new fetch path by name). Every
+read is audited (`ITEMS_FETCHED`, SA actor). **Residual (accepted):** the token is a per-vault keymaster and
+transits the server on the request (`Authorization` header) — mitigated by per-vault scope, audit, and
+rotation; the API imports no crypto capable of exploiting it.
+
 ## INV-DIR-1 — `directoryOnly = true` ⇒ never login / never administrative role / excluded from bootstrap and last-admin counts
 
 **Rule.** A row with `directoryOnly = true` (a **directory person** created by the bulk import,

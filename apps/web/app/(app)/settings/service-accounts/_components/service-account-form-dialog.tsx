@@ -39,6 +39,7 @@ import {
   useUpdateServiceAccount,
 } from "@/lib/api/hooks/use-service-accounts";
 import { PermissionPicker } from "./permission-picker";
+import { SaKeypairSetup } from "./sa-keypair-setup";
 import { SecretReveal } from "./secret-reveal";
 
 const FORM_ID = "service-account-form";
@@ -166,6 +167,7 @@ function ServiceAccountForm({
   const [error, setError] = useState<string | undefined>(undefined);
   // After a successful CREATE, the once-only token to reveal. Held in local state only — never cached.
   const [secret, setSecret] = useState<{
+    id: string;
     name: string;
     token: string;
     permissions: Permission[];
@@ -257,6 +259,7 @@ function ServiceAccountForm({
         toast.success(t("serviceAccounts.toast.created"));
         // Swap to the one-time reveal instead of closing — the token is only available now.
         setSecret({
+          id: result.id,
           name: result.name,
           token: result.token,
           permissions: result.permissions,
@@ -285,6 +288,11 @@ function ServiceAccountForm({
           permissions={secret.permissions}
           onLockedChange={onLockChange}
         />
+        {/* ADR-0080 (#883): generate the zero-knowledge keypair for EVERY new SA — not just secret:fetch
+            ones — while the one-time token is still in memory (the token is the KEK; never sent). An unused
+            keypair on a non-fetch SA is negligible, and it removes the "no encryption key" footgun for an
+            SA later granted secret:fetch. */}
+        <SaKeypairSetup saId={secret.id} token={secret.token} />
       </>
     );
   }

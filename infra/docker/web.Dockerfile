@@ -25,6 +25,7 @@ COPY apps/web/package.json apps/web/
 # sees the full workspace graph in bun.lock (ADR-0074 added the workspace).
 COPY apps/agent/package.json apps/agent/
 COPY packages/shared/package.json packages/shared/
+COPY packages/fetch-cli/package.json packages/fetch-cli/
 RUN ok=0; for i in 1 2 3; do bun install --frozen-lockfile && ok=1 && break || { echo "bun install failed (attempt $i/3), retrying in 5s..."; sleep 5; }; done; [ "$ok" -eq 1 ]
 
 COPY packages/shared/ packages/shared/

@@ -30,6 +30,7 @@ export * from "./schemas/asset-history";
 export * from "./schemas/asset-list";
 export * from "./schemas/asset-model";
 export * from "./schemas/asset-model-list";
+export * from "./schemas/asset-specs-dictionary";
 export * from "./schemas/asset-tag-backfill";
 export * from "./schemas/asset-tag-scheme";
 export * from "./schemas/application-list";
@@ -61,6 +62,11 @@ export * from "./schemas/secret-vault";
 export * from "./schemas/user-keypair";
 export * from "./schemas/vault-membership";
 export * from "./schemas/service-account";
+// Programmatic secret retrieval via a service account (ADR-0080, extends ADR-0061 + ADR-0048). PURE zod
+// (base64 blobs + metadata) — no `@noble/*`, no `@lazyit/shared/crypto`, so apps/api's Jest loads them.
+export * from "./schemas/service-account-keypair";
+export * from "./schemas/service-account-vault-membership";
+export * from "./schemas/smtp";
 export * from "./schemas/user";
 export * from "./schemas/user-history";
 export * from "./schemas/user-list";

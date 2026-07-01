@@ -121,7 +121,9 @@ describe("titleFor", () => {
   });
 
   it("uses the entity name for the default case", () => {
-    expect(titleFor({ entity: "asset", data: makeAsset() })).toBe("MacBook Pro");
+    expect(titleFor({ entity: "asset", data: makeAsset() })).toBe(
+      "MacBook Pro",
+    );
   });
 });
 
@@ -144,7 +146,10 @@ describe("selectFields — asset", () => {
 
   it("drops fields whose value is missing (no model ⇒ no model/category)", () => {
     const fields = selectFields(
-      { entity: "asset", data: makeAsset({ serial: null, model: null, location: null }) },
+      {
+        entity: "asset",
+        data: makeAsset({ serial: null, model: null, location: null }),
+      },
       LABELS,
     );
     // owner is still present (it's the localized "Unassigned" when there are no owners).
@@ -162,7 +167,9 @@ describe("asset owner (CEO headline disambiguator)", () => {
     const fields = selectFields(
       {
         entity: "asset",
-        data: makeAsset({ activeAssignments: [makeAssignment("Ana", "Pérez")] }),
+        data: makeAsset({
+          activeAssignments: [makeAssignment("Ana", "Pérez")],
+        }),
       },
       LABELS,
     );
@@ -193,7 +200,9 @@ describe("asset owner (CEO headline disambiguator)", () => {
       { entity: "asset", data: makeAsset({ activeAssignments: [] }) },
       LABELS,
     );
-    expect(fields.find((f) => f.labelKey === "owner")?.value).toBe("Unassigned");
+    expect(fields.find((f) => f.labelKey === "owner")?.value).toBe(
+      "Unassigned",
+    );
   });
 
   it("formatOwners is a pure function over the loaded assignments", () => {
@@ -500,6 +509,52 @@ describe("titleFor / detailHref — infra", () => {
 
   it("deep-links to the canvas with the focus flag", () => {
     expect(detailHref(node)).toBe("/assets/diagram?node=node_1&focus=1");
+  });
+});
+
+describe("serviceAccount (#888 — SA member preview)", () => {
+  const sa: QuickViewData = {
+    entity: "serviceAccount",
+    data: {
+      id: "sa_1",
+      name: "CI Runner",
+      description: "nightly deploy",
+      tokenPrefix: "lzit_sa_ci",
+      isActive: true,
+    },
+  };
+
+  it("titles by name and has no standalone detail route", () => {
+    expect(titleFor(sa)).toBe("CI Runner");
+    expect(detailHref(sa)).toBeNull();
+  });
+
+  it("emits description + tokenPrefix (mono); isActive is the identity badge, not a field", () => {
+    const fields = selectFields(sa);
+    expect(fields.map((f) => f.labelKey)).toEqual([
+      "description",
+      "tokenPrefix",
+    ]);
+    expect(fields.find((f) => f.labelKey === "tokenPrefix")).toMatchObject({
+      value: "lzit_sa_ci",
+      mono: true,
+    });
+    // status/isActive never leaks as a plain field.
+    expect(fields.find((f) => f.labelKey === "isActive")).toBeUndefined();
+  });
+
+  it("drops an absent description", () => {
+    const fields = selectFields({
+      entity: "serviceAccount",
+      data: {
+        id: "sa_2",
+        name: "Bare",
+        description: null,
+        tokenPrefix: "lzit_sa_bare",
+        isActive: false,
+      },
+    });
+    expect(fields.map((f) => f.labelKey)).toEqual(["tokenPrefix"]);
   });
 });
 

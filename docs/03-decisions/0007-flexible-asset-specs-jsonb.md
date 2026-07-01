@@ -46,7 +46,13 @@ to existing assets.
   index/query jsonb when needed.
 - **Trade-offs:** weaker DB-level typing/validation for `specs` — validate in the app layer
   (zod schema in `@lazyit/shared`, see [[monorepo]]).
-- **Follow-ups:** define per-category `specs` zod schemas when categories are implemented.
+- **Follow-ups:** ~~define per-category `specs` zod schemas when categories are implemented.~~
+  **Done (2026-06-30, #851) — see [[0078-asset-category-specs-dictionary]].** An `AssetCategory` can
+  declare a small **declarative** specs dictionary (`{ key, label, type, required?, enumValues? }[]`,
+  stored in `AssetCategory.specsSchema`) that drives **advisory** hints + soft warnings for
+  `Asset.specs` (via the pure `validateSpecsAgainstDictionary` helper) — resolved through
+  `Asset → model → category`. It is **not** executable zod and **not** hard-blocking: the wire schema
+  below stays the open `z.record(...)`, so legacy rows keep validating.
 - **Web (delivered):** the asset create/edit form authors `specs` through a **custom-fields
   editor** — a dynamic list of `{ name, value }` string rows (keys validated non-empty + unique)
   that serialize into the `specs` object; the asset detail renders `specs` as a label-cased

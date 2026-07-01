@@ -14,10 +14,12 @@ import { createZodDto } from 'nestjs-zod';
 import {
   CreateSecretItemSchema,
   CreateSecretVaultWithMembershipSchema,
+  CreateServiceAccountVaultMembershipSchema,
   CreateVaultMembershipSchema,
   ExportSecretsAuditSchema,
   SecretItemSchema,
   SecretVaultSchema,
+  ServiceAccountVaultMembershipSchema,
   UpdateSecretItemSchema,
   UpdateSecretVaultSchema,
   VaultMembershipSchema,
@@ -46,6 +48,12 @@ class CreateVaultMembershipDto extends createZodDto(
 ) {}
 class VaultMembershipDto extends createZodDto(VaultMembershipSchema) {}
 class ExportSecretsAuditDto extends createZodDto(ExportSecretsAuditSchema) {}
+class CreateServiceAccountVaultMembershipDto extends createZodDto(
+  CreateServiceAccountVaultMembershipSchema,
+) {}
+class ServiceAccountVaultMembershipDto extends createZodDto(
+  ServiceAccountVaultMembershipSchema,
+) {}
 
 /**
  * Secret Manager — vaults, items, and members (ADR-0061). EVERY route is HUMAN-ONLY (`HumanOnlyGuard`)
@@ -263,5 +271,53 @@ export class VaultsController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.secrets.revokeMembership(principal, vaultId, userId);
+  }
+
+  // ── Service-account members (ADR-0080, programmatic secret retrieval) ──────────
+
+  @Get(':vaultId/service-account-members')
+  @RequirePermission('secret:read')
+  @ApiOperation({
+    summary:
+      'Service-account member list (id + name + tokenPrefix; ADMIN or member)',
+  })
+  listServiceAccountMembers(
+    @Param('vaultId') vaultId: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.secrets.listServiceAccountMembers(principal, vaultId);
+  }
+
+  @Post(':vaultId/service-account-members')
+  @RequirePermission('secret:manage')
+  @ApiOperation({
+    summary:
+      'GRANT a SERVICE ACCOUNT as a crypto member (DEK wrapped to the SA pubkey). Human granter MUST be a live member (no-grant-what-you-cant-read).',
+  })
+  @ApiOkResponse({ type: ServiceAccountVaultMembershipDto })
+  grantServiceAccount(
+    @Param('vaultId') vaultId: string,
+    @Body() dto: CreateServiceAccountVaultMembershipDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.secrets.grantServiceAccountMembership(principal, vaultId, dto);
+  }
+
+  @Delete(':vaultId/service-account-members/:saId')
+  @RequirePermission('secret:manage')
+  @ApiOperation({
+    summary:
+      "REVOKE a service account's membership (hard-drop the wrapped-DEK row)",
+  })
+  revokeServiceAccount(
+    @Param('vaultId') vaultId: string,
+    @Param('saId') saId: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.secrets.revokeServiceAccountMembership(
+      principal,
+      vaultId,
+      saId,
+    );
   }
 }
