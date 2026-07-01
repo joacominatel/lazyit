@@ -267,6 +267,13 @@ export function selectFields(
     }
     case "consumable": {
       const c = view.data;
+      // Stock is the headline disambiguator ("how many left?") — pushed first so it leads the grid.
+      // Guarded on `currentStock != null` (NOT truthiness) so a legitimate "0 units" still shows;
+      // `push` drops it only when the value is null/empty (e.g. stock present but no unit).
+      push(
+        "stock",
+        c.currentStock != null && c.unit ? `${c.currentStock} ${c.unit}` : null,
+      );
       push("sku", c.sku ?? null, true);
       push("category", c.categoryName ?? null);
       push("description", c.description ?? null);
