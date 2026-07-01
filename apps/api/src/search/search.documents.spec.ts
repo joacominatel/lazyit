@@ -2,10 +2,12 @@ import {
   projectApplication,
   projectArticle,
   projectAsset,
+  projectConsumable,
   projectInfraNode,
   projectLocation,
   projectUser,
   type AssetRow,
+  type ConsumableRow,
   type InfraNodeRow,
 } from './search.documents';
 
@@ -159,6 +161,51 @@ describe('search document projectors', () => {
     expect(doc).not.toHaveProperty('specs');
     expect(doc).not.toHaveProperty('shortcuts');
     expect(JSON.stringify(doc)).not.toContain('lazyit_secret');
+  });
+
+  it('projectConsumable keeps id/name/sku/description/currentStock/unit and nothing else (#873)', () => {
+    // A wider row (extra columns the full Prisma consumable carries) assigned to ConsumableRow, to
+    // prove the projector copies only the searchable/preview subset and drops everything else.
+    const row: ConsumableRow & Record<string, unknown> = {
+      id: 'k1',
+      name: 'HDMI cable',
+      sku: 'HDMI-2M',
+      description: '2m HDMI 2.1 cable',
+      currentStock: 12,
+      unit: 'units',
+      categoryId: 'cat1',
+      minStock: 5,
+      notes: 'shelf B',
+      deletedAt: null,
+    };
+    expect(projectConsumable(row)).toEqual({
+      id: 'k1',
+      name: 'HDMI cable',
+      sku: 'HDMI-2M',
+      description: '2m HDMI 2.1 cable',
+      currentStock: 12,
+      unit: 'units',
+    });
+  });
+
+  it('projectConsumable passes nullable fields through as null (#873)', () => {
+    expect(
+      projectConsumable({
+        id: 'k2',
+        name: 'Dock',
+        sku: null,
+        description: null,
+        currentStock: 0,
+        unit: 'units',
+      }),
+    ).toEqual({
+      id: 'k2',
+      name: 'Dock',
+      sku: null,
+      description: null,
+      currentStock: 0,
+      unit: 'units',
+    });
   });
 
   it('projectInfraNode passes a graph-only node (no asset) through with assetName null', () => {
