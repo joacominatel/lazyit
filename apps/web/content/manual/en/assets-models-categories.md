@@ -46,6 +46,28 @@ Categories drive grouping and the category filter on the Assets list.
 
 Manage categories under **Settings → Taxonomies → Asset categories**.
 
+### Specs dictionary (field hints)
+
+A category can also declare an optional **specs dictionary** — a list of the
+[custom fields](/help/assets-asset-basics) you expect on assets of that type (for example, every
+Server should carry `cpu`, `ramGb` and a `formFactor`). It's a lightweight consistency aid, not a
+straitjacket.
+
+- Each field has a **key** (the custom-field name it governs), a **label**, a **type** (text, number,
+  yes/no, or a **choice** list), and can be marked **required**. A choice field lists its allowed
+  values.
+- The dictionary is **advisory**: when you edit an asset whose model belongs to this category, the
+  declared fields are suggested as you type and lazyit shows **soft warnings** — a required field left
+  blank, a value that doesn't match its type, a choice outside the list, or a custom field that isn't
+  in the dictionary. **Nothing is blocked**: you can always save, and existing assets are never
+  changed or invalidated.
+- Leave the dictionary empty for no governance (the default) — any custom fields are accepted, exactly
+  as before.
+- Editing the dictionary later does **not** rewrite assets already saved; it only changes the hints
+  shown next time someone edits one.
+
+Set a category's dictionary from its editor under **Settings → Taxonomies → Asset categories**.
+
 ## How they fit together
 
 The relationship is a simple chain:

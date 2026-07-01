@@ -94,6 +94,11 @@ modelo con valores por defecto, esos valores se copian como punto de partida —
 esta unidad concreta antes de guardar. Los campos personalizados se muestran como una lista ordenada
 de etiqueta/valor en la página de detalle.
 
+Si la categoría del activo define un
+[diccionario de specs](/help/assets-models-categories), el formulario **sugiere** esos campos
+esperados y muestra **avisos** suaves (un campo obligatorio vacío, un valor que no coincide con su tipo
+o un campo inesperado). Estas sugerencias son solo orientativas — siempre podés guardar.
+
 ## Encontrar activos en la lista
 
 La lista de **Activos** tiene un buscador y un desplegable de **Estado** en la barra de
