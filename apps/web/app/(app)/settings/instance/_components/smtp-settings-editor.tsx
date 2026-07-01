@@ -158,7 +158,7 @@ export function SmtpSettingsEditor() {
   };
 
   return (
-    <Card className="max-w-xl">
+    <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
           <EnvelopeIcon className="size-5 text-muted-foreground" />
