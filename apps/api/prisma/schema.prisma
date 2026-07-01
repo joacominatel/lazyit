@@ -158,6 +158,10 @@ model User {
   importSessions ImportSession[] @relation("ImportSessionOwner")
   importRuns     ImportRun[]     @relation("ImportRunActor")
 
+  // File attachments this user uploaded (Attachment.uploadedById, SetNull — the file outlives its
+  // uploader; attribution degrades to null, mirroring articlesEdited). ADR-0082.
+  attachmentsUploaded Attachment[] @relation("AttachmentUploader")
+
   @@map("users")
 }
 
@@ -2283,4 +2287,50 @@ model InfraNodeSecretRef {
   @@unique([nodeId, vaultId, handle])
   @@index([nodeId])
   @@map("infra_node_secret_refs")
+}
+
+/// Which parent kind an Attachment hangs off (ADR-0082). Polymorphic by design — the model extends
+/// to a CONSUMABLE entityType later without a schema rework (deferred).
+enum AttachmentEntityType {
+  ASSET
+  ARTICLE
+}
+
+/// A user-uploaded file on an Asset (documents: warranty PDFs, receipts, damage photos) or an
+/// Article (inline KB images) — ADR-0082, lazyit's first binary-upload subsystem. The row is
+/// METADATA ONLY: the bytes live on the api's `attachments_data` volume as
+/// `attachments/<sha[0:2]>/<sha256>` (content-addressed — two identical files share ONE blob).
+/// `entityId` is a SOFT ref (no FK), the KB-chip / InfraNodeSecretRef house style: the parent is
+/// validated live at attach time; a dangling ref degrades gracefully, it never crashes.
+/// `mimeType` is SERVER-DERIVED (magic-byte sniff + allowlist) — never the client value; SVG/HTML
+/// are rejected outright. Serving is API-only behind the PARENT's authz with hardened headers.
+/// Soft delete (ADR-0006): a delete stamps `deletedAt`; the daily GC sweep physically unlinks a
+/// blob only when no live row references its sha256 AND no article body (live or soft-deleted) or
+/// ArticleVersion snapshot references any of its rows — a version restore never shows a broken image.
+/// See docs/02-domain/entities/attachment.md
+model Attachment {
+  id           String               @id @default(cuid())
+  entityType   AttachmentEntityType
+  // Soft ref to the parent Asset/Article id — NO FK (see above).
+  entityId     String
+  // Content hash → the on-disk blob key (dedup). Updated in place when the sandboxed re-encode
+  // replaces a raster blob (EXIF strip / polyglot neutralization, ADR-0082 §3).
+  sha256       String
+  byteSize     Int
+  // Server-derived, allowlisted MIME — the value later served as Content-Type (never the client's).
+  mimeType     String
+  // The client's filename — METADATA ONLY, never a filesystem path or storage key (red line).
+  originalName String
+  // Who uploaded it (a human). SetNull: the file outlives its uploader. @db.Uuid to match User.id.
+  uploadedById String?              @db.Uuid
+  uploadedBy   User?                @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  deletedAt    DateTime?
+
+  // (entityType, entityId): the per-parent list. (sha256): dedup + the GC's "who still references
+  // this blob" reverse lookup.
+  @@index([entityType, entityId])
+  @@index([sha256])
+  @@map("attachments")
 }
