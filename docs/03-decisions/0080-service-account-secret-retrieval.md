@@ -203,7 +203,12 @@ CHECK on `SecretAuditLog`. A `--create-only` migration (no reset). New catalog v
   sketched *same-key re-wrap* (which would preserve grants) because same-key re-wrap needs the OLD token to
   unwrap the old private key — unavailable in the rotate flow and impossible for a keyless retrofit; the
   server-side membership-drop is conditional on a changed public key, so a future same-key re-wrap would
-  keep grants for free. (b) **Visually mark machine-granted vaults** so operators know a token can read them.
+  keep grants for free. (b) **Surface machine members — vault detail DONE (#888).** The vault-detail Members section now
+  lists a vault's service-account members (via a new member-scoped `GET /secret-vaults/:id/service-account-members`
+  read, `VaultServiceAccountMemberMeta` — non-secret metadata only) as clickable Quick-View cards with a
+  robot badge + a per-card revoke, so operators can see and remove which machines can read the vault (before
+  this the members read returned humans only, leaving granted SAs invisible). Still open: a vault-LIST marker
+  so the machine-readable vaults are flagged before opening one.
   (c) The export/import overlap (#612/#613). (d) A first-class `SecretAuditLog` read surface (#870).
 
 ---
