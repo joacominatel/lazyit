@@ -85,14 +85,16 @@ nodemailer. **Fail-soft end-to-end** (fork #4): the enqueue is wrapped and never
 affects the in-app notification or the originating domain write. `nodemailer` is the mailer (zero extra
 runtime deps of note; `transporter.sendMail` for both the queued send and the inline test).
 
-### 4. Event → email set (the "start small" allowlist) — **fork #1**
+### 4. Event → email set (the allowlist) — **fork #1 (CEO-decided 2026-06-30)**
 
 A single **global on/off** (`SmtpSettings.enabled`) + a flat, code-level allowlist of notification types
-that ALSO go to email — **no per-event rules engine**. The allowlist is the clearly-operational set:
-`critical_app_access`, `admin_granted`, `low_stock`, `workflow.manual_task`, `workflow.run_failed`.
-Bell-only in v1 (candidate additions): `secret.vault_setup` (a per-user login nudge), `permission_widened`
-+ `infra.agent_offline` (the sensitive-audit stream, #852). Email **audience mirrors the bell exactly**
-(broadcast → `notification:read` holders with an email; targeted → that one user).
+that ALSO go to email — **no per-event rules engine**. The allowlist is the clearly-operational set
+`critical_app_access`, `admin_granted`, `low_stock`, `workflow.manual_task`, `workflow.run_failed`
+**plus the two sensitive-audit alerts `permission_widened` + `infra.agent_offline` (#852)** — the CEO
+**opted these IN on 2026-06-30** (they were proposed bell-only in the first draft; the people-panel
+demand to have security/liveness alerts hit the inbox won). Seven emailed types in total. The only type
+still **bell-only** is `secret.vault_setup` (a per-user login nudge — not inbox-worthy). Email **audience
+mirrors the bell exactly** (broadcast → `notification:read` holders with an email; targeted → that user).
 
 ### 5. Opt-out — **fork #1b (the brief's premise was false)**
 
@@ -120,8 +122,9 @@ allow a self-signed cert on a self-hosted relay (opt-in insecurity). `security` 
 
 ## Forks requiring CTO/CEO ratification
 
-1. **Allowlist (§4):** the five operational types above. OK to add `infra.agent_offline` /
-   `permission_widened` later?
+1. **Allowlist (§4): ✅ DECIDED (CEO, 2026-06-30)** — the five operational types **plus**
+   `permission_widened` + `infra.agent_offline` (the sensitive-audit alerts). Seven emailed types;
+   `secret.vault_setup` stays bell-only.
 2. **No per-user opt-out (§5):** global on/off only in v1 (the "reuse existing prefs" premise was false).
    Accept as a follow-up?
 3. **A second server-held master key `SMTP_SECRET_KEY` (§2):** new outbound egress + a new (optional) key
