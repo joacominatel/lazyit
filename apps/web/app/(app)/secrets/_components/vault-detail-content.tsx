@@ -1969,8 +1969,9 @@ function AddServiceAccountDialogBody({
   // A single in-flight action at a time — which one is running (for the per-button spinner).
   const [busy, setBusy] = useState<null | "grant" | "revoke">(null);
 
-  // Fetch the target SA's public key only when one is selected. A 404 means the SA has no keypair (it was
-  // never created with the Fetch permission) — surfaced distinctly and it blocks the grant.
+  // Fetch the target SA's public key only when one is selected. A 404 means the SA has no keypair (a
+  // pre-#883 SA created before keypairs were auto-generated) — surfaced distinctly and it blocks the grant.
+  // The fix: rotate the SA's token (Settings → Service accounts), which regenerates its keypair (#883).
   const {
     data: saPublicKey,
     isLoading: publicKeyLoading,
@@ -2078,7 +2079,13 @@ function AddServiceAccountDialogBody({
         )}
         {targetNoKeypair ? (
           <FieldDescription className="text-destructive">
-            {t("serviceAccountMembers.noKeypair")}
+            {t("serviceAccountMembers.noKeypair")}{" "}
+            <Link
+              href="/settings/service-accounts"
+              className="font-medium underline underline-offset-2"
+            >
+              {t("serviceAccountMembers.noKeypairAction")}
+            </Link>
           </FieldDescription>
         ) : (
           <FieldDescription>
