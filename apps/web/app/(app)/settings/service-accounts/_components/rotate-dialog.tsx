@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { notifyError } from "@/lib/api/notify-error";
 import { useRotateServiceAccount } from "@/lib/api/hooks/use-service-accounts";
+import { SaKeypairSetup } from "./sa-keypair-setup";
 import { SecretReveal } from "./secret-reveal";
 
 interface RotateDialogProps {
@@ -103,6 +104,10 @@ function RotateBody({
           permissions={account.permissions}
           onLockedChange={onLockChange}
         />
+        {/* ADR-0080 (#883): rotation invalidates the old token, so the keypair wrapped under it is dead.
+            Re-generate the keypair under the NEW token (client-side) and replace the stored one — this also
+            retrofits a pre-#883 keyless SA. Replacing the keypair drops the SA's vault grants (re-grant). */}
+        <SaKeypairSetup saId={account.id} token={token} />
       </>
     );
   }
