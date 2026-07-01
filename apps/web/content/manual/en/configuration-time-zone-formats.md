@@ -2,7 +2,7 @@
 title: Time zone & formats
 category: configuration
 subcategory: time-zone-formats
-order: 4
+order: 5
 ---
 
 # Time zone & formats

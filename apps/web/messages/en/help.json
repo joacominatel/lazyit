@@ -106,6 +106,7 @@
       "instance-settings": "Instance settings",
       "taxonomies": "Taxonomies",
       "asset-tag-scheme": "Asset tag scheme",
+      "smtp-email": "Email & SMTP",
       "time-zone-formats": "Time zone & formats",
       "search-index": "Search index"
     },

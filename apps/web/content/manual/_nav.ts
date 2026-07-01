@@ -118,6 +118,7 @@ export const MANUAL_NAV: readonly ManualNavCategory[] = [
       "instance-settings",
       "taxonomies",
       "asset-tag-scheme",
+      "smtp-email",
       "time-zone-formats",
       "search-index",
     ],

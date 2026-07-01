@@ -2,7 +2,7 @@
 title: Search index
 category: configuration
 subcategory: search-index
-order: 5
+order: 6
 ---
 
 # Search index

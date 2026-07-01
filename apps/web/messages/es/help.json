@@ -106,6 +106,7 @@
       "instance-settings": "Ajustes de la instancia",
       "taxonomies": "Taxonomías",
       "asset-tag-scheme": "Esquema de etiquetas de activos",
+      "smtp-email": "Correo y SMTP",
       "time-zone-formats": "Zona horaria y formatos",
       "search-index": "Índice de búsqueda"
     },

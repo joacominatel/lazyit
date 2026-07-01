@@ -15,6 +15,7 @@ import { ApiError } from "@/lib/api/client";
 import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { AdminGate } from "../../_components/admin-gate";
 import { AssetTagSchemeEditor } from "./asset-tag-scheme-editor";
+import { SmtpSettingsEditor } from "./smtp-settings-editor";
 
 /** Stable empty breadcrumb for the instance settings PageHeader. */
 const BREADCRUMB = <Breadcrumb />;
@@ -132,6 +133,8 @@ export function InstanceSettingsView() {
         </Card>
 
         <AssetTagSchemeEditor />
+
+        <SmtpSettingsEditor />
       </div>
     </AdminGate>
   );
