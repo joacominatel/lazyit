@@ -38,9 +38,14 @@ service account only there.
 1. In **Settings → Service accounts**, create a service account and grant it the **Fetch secrets
    programmatically** permission (`secret:fetch`). This is the only secret permission a service account can
    hold — it can never be given the human "view" or "manage" permissions.
-2. On creation the app also generates an **encryption keypair** for the service account, locked with its
-   token. **Copy the token now** — it is shown once and is what the fetch tool uses to decrypt. If you lose
-   it, rotate the service account (which re-issues the key) and add it to the vaults again.
+2. On creation the app generates an **encryption keypair** for **every** service account (not only Fetch
+   ones), locked with its token. **Copy the token now** — it is shown once and is what the fetch tool uses to
+   decrypt. If you lose it, **rotate the token** (see below), which re-issues the key.
+
+> **Older service accounts without a key.** A service account created before this feature has no encryption
+> key, so it can't be added to a vault yet (the grant dialog will say so). **Rotate its token** in
+> **Settings → Service accounts** — that generates a key for it. Rotating always re-issues the key, so it
+> **removes the service account from every vault** it belonged to; add it back afterwards (Step 2).
 
 ## Step 2 — Add the service account to a vault
 

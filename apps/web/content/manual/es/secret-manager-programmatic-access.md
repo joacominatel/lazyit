@@ -38,10 +38,15 @@ y agregá la cuenta de servicio solo ahí.
 1. En **Configuración → Cuentas de servicio**, creá una cuenta de servicio y otorgale el permiso **Traer
    secretos programáticamente** (`secret:fetch`). Es el único permiso de secretos que una cuenta de servicio
    puede tener — nunca se le pueden dar los permisos humanos de "ver" o "gestionar".
-2. Al crearla, la app también genera un **par de claves de cifrado** para la cuenta de servicio, protegido
-   con su token. **Copiá el token ahora** — se muestra una sola vez y es lo que la herramienta usa para
-   descifrar. Si lo perdés, rotá la cuenta de servicio (lo que reemite la clave) y volvé a agregarla a las
-   bóvedas.
+2. Al crearla, la app genera un **par de claves de cifrado** para **todas** las cuentas de servicio (no solo
+   las de Fetch), protegido con su token. **Copiá el token ahora** — se muestra una sola vez y es lo que la
+   herramienta usa para descifrar. Si lo perdés, **rotá el token** (ver abajo), lo que reemite la clave.
+
+> **Cuentas de servicio antiguas sin clave.** Una cuenta de servicio creada antes de esta función no tiene
+> clave de cifrado, así que todavía no se puede agregar a una bóveda (el diálogo de acceso te lo indicará).
+> **Rotá su token** en **Configuración → Cuentas de servicio** — eso le genera una clave. Rotar siempre
+> reemite la clave, por lo que **quita la cuenta de servicio de todas las bóvedas** a las que pertenecía;
+> volvé a agregarla después (Paso 2).
 
 ## Paso 2 — Agregar la cuenta de servicio a una bóveda
 
