@@ -1962,6 +1962,11 @@ enum SecretAuditAction {
   // serviceAccountId = the SA actor (actorId is null — a bot is never a human), vaultId = the vault. The
   // decryption happens CLIENT-SIDE in the CLI (INV-10); this row records ONLY that a fetch occurred.
   ITEMS_FETCHED
+  // A HUMAN member REVEALED a single item's value in the UI (#870): actorId = the member, vaultId = the
+  // vault, itemId = the item. Distinct from ITEMS_FETCHED (machine/whole-vault, no itemId — ADR-0080).
+  // The decrypt happens CLIENT-SIDE (INV-10); this row records ONLY that a per-item reveal occurred — WHO
+  // revealed WHICH item, when. NEVER the plaintext, ciphertext, DEK, or wrapped key.
+  ITEM_REVEALED
 }
 
 /// An APPEND-ONLY audit log of Secret Manager actions (ADR-0061 §10, crypto note §8) — records WHO acted

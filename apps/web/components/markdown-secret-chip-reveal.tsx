@@ -17,6 +17,7 @@ import {
   copyTextWithAutoClear,
 } from "@/lib/secret-manager/clipboard";
 import { openItem } from "@/lib/secret-manager/crypto";
+import { useRecordReveal } from "@/lib/secret-manager/hooks/use-items";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,8 @@ const REVEAL_TIMEOUT_MS = 15_000;
 /** The decrypt-able shape carried out of the resolved chip envelope. */
 export interface RevealItem {
   vaultId: string;
+  /** #870: the item id, carried so the reveal can beacon a metadata-only ITEM_REVEALED audit row. */
+  itemId: string;
   ciphertext: string;
   iv: string;
   authTag: string;
@@ -67,6 +70,8 @@ export function SecretChipReveal({
   const t = useTranslations("secrets");
   const { isUnlocked } = useSecretSession();
   const { ensureDek } = useVaultDek(item.vaultId);
+  // #870: fire-and-forget audit beacon written when the chip decrypts (INV-10 metadata-only). Best-effort.
+  const recordReveal = useRecordReveal();
 
   // SECURITY: plaintext in local state only — never a query key, never persisted.
   const [plaintext, setPlaintext] = useState<string | undefined>(undefined);
@@ -93,6 +98,9 @@ export function SecretChipReveal({
       });
       setRevealError(false);
       setPlaintext(value);
+      // #870: the decrypt SUCCEEDED → beacon the reveal (metadata-only, INV-10). Fire-and-forget: a
+      // failed/blocked audit write must never stop the member from seeing their own secret.
+      recordReveal.mutate({ vaultId: item.vaultId, itemId: item.itemId });
       clearTimeout(maskTimerRef.current);
       maskTimerRef.current = setTimeout(() => mask(), REVEAL_TIMEOUT_MS);
     } catch {

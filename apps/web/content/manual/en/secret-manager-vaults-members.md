@@ -58,6 +58,11 @@ browser may not allow it (for example over plain HTTP, or if another app or a cl
 already captured the value), so treat it as a convenience, not a guarantee — paste promptly. You can
 edit a secret's label or handle, replace its value, or delete it.
 
+> **Reveals are recorded.** When you reveal a secret's value — from a vault, or from a masked chip in a
+> Knowledge Base article — lazyit records *that* you revealed it (who, which secret, when) for the audit
+> trail. True to the security model, it never records the value itself: the decryption happens on your
+> device, so the record is only that an access occurred, not what was seen.
+
 ## Secret types
 
 A secret has a **Type** so lazyit can store more than a single string and show it back in a useful
