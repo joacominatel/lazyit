@@ -944,7 +944,15 @@ describe('SecretManagerService', () => {
       expect(row.targetUserId).toBe('alice'); // self-only
       // metadata only — no blob/value field leaked into the audit row
       expect(Object.keys(row).sort()).toEqual(
-        ['action', 'actorId', 'itemId', 'targetUserId', 'vaultId'].sort(),
+        [
+          'action',
+          'actorId',
+          'serviceAccountId',
+          'itemId',
+          'targetUserId',
+          'targetServiceAccountId',
+          'vaultId',
+        ].sort(),
       );
       expect(JSON.stringify(row)).not.toContain(
         NEW_PASSWORD.privateKeyEncByPassphrase,
@@ -1081,7 +1089,15 @@ describe('SecretManagerService', () => {
       // metadata only — no blob/value field on any audit row
       for (const row of db.audit) {
         expect(Object.keys(row).sort()).toEqual(
-          ['action', 'actorId', 'itemId', 'targetUserId', 'vaultId'].sort(),
+          [
+            'action',
+            'actorId',
+            'serviceAccountId',
+            'itemId',
+            'targetUserId',
+            'targetServiceAccountId',
+            'vaultId',
+          ].sort(),
         );
         expect(row.actorId).toBe('alice');
       }
@@ -1118,7 +1134,15 @@ describe('SecretManagerService', () => {
       expect(row.vaultId).toBe(vaultId);
       // METADATA ONLY: the row carries no value/key/blob — only the standard audit columns.
       expect(Object.keys(row).sort()).toEqual(
-        ['action', 'actorId', 'itemId', 'targetUserId', 'vaultId'].sort(),
+        [
+          'action',
+          'actorId',
+          'serviceAccountId',
+          'itemId',
+          'targetUserId',
+          'targetServiceAccountId',
+          'vaultId',
+        ].sort(),
       );
     });
 

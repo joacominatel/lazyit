@@ -7,6 +7,7 @@ import {
   ArrowUpTrayIcon,
   CheckIcon,
   ClipboardIcon,
+  CpuChipIcon,
   EyeIcon,
   EyeSlashIcon,
   PencilIcon,
@@ -16,7 +17,12 @@ import {
   UserMinusIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
-import type { SecretItem, SecretItemKind, User } from "@lazyit/shared";
+import type {
+  SecretItem,
+  SecretItemKind,
+  ServiceAccount,
+  User,
+} from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import {
@@ -45,6 +51,7 @@ import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api/client";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { useServiceAccounts } from "@/lib/api/hooks/use-service-accounts";
 import { useUsers } from "@/lib/api/hooks/use-users";
 import {
   CLIPBOARD_CLEAR_MS,
@@ -67,6 +74,11 @@ import {
   useMyMembership,
   useRemoveMember,
 } from "@/lib/secret-manager/hooks/use-members";
+import {
+  useAddServiceAccountMember,
+  useRemoveServiceAccountMember,
+  useServiceAccountPublicKey,
+} from "@/lib/secret-manager/hooks/use-service-account-members";
 import { useUserPublicKey } from "@/lib/secret-manager/hooks/use-keypair";
 import { useRecordExport, useVault } from "@/lib/secret-manager/hooks/use-vaults";
 import {
@@ -120,8 +132,13 @@ function classifyMembership(q: {
 // is kept in its OWN dedicated useState in the dialogs, NEVER folded into a reducer.
 // ---------------------------------------------------------------------------
 
-/** VaultDetail's four independent dialog-open booleans. */
-type VaultDialog = "addItem" | "addMember" | "export" | "import";
+/** VaultDetail's independent dialog-open booleans. */
+type VaultDialog =
+  | "addItem"
+  | "addMember"
+  | "addServiceAccount"
+  | "export"
+  | "import";
 type VaultDialogsState = Record<VaultDialog, boolean>;
 function vaultDialogsReducer(
   state: VaultDialogsState,
@@ -257,12 +274,14 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
   const [dialogs, dispatchDialogs] = useReducer(vaultDialogsReducer, {
     addItem: false,
     addMember: false,
+    addServiceAccount: false,
     export: false,
     import: false,
   });
   const {
     addItem: addItemOpen,
     addMember: addMemberOpen,
+    addServiceAccount: addServiceAccountOpen,
     export: exportOpen,
     import: importOpen,
   } = dialogs;
@@ -408,14 +427,27 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-semibold">{t("members.sectionTitle")}</h2>
           {canManage ? (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => dispatchDialogs({ dialog: "addMember", open: true })}
-            >
-              <UserPlusIcon className="size-4" />
-              {t("members.addMember")}
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* ADR-0080: grant a service account programmatic read of this vault (machine member). */}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  dispatchDialogs({ dialog: "addServiceAccount", open: true })
+                }
+              >
+                <CpuChipIcon className="size-4" />
+                {t("serviceAccountMembers.addAction")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => dispatchDialogs({ dialog: "addMember", open: true })}
+              >
+                <UserPlusIcon className="size-4" />
+                {t("members.addMember")}
+              </Button>
+            </div>
           ) : null}
         </div>
 
@@ -466,6 +498,13 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
           <AddMemberDialog
             open={addMemberOpen}
             onOpenChange={(open) => dispatchDialogs({ dialog: "addMember", open })}
+            vaultId={vaultId}
+          />
+          <AddServiceAccountDialog
+            open={addServiceAccountOpen}
+            onOpenChange={(open) =>
+              dispatchDialogs({ dialog: "addServiceAccount", open })
+            }
             vaultId={vaultId}
           />
           {/* #613: bulk import — manager-gated (it creates items). Mounted only while open. */}
@@ -1843,6 +1882,262 @@ function AddMemberDialogBody({
       ) : (
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+            {tc("cancel")}
+          </Button>
+        </DialogFooter>
+      )}
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AddServiceAccountDialog — grant/revoke a SERVICE ACCOUNT as a crypto member (ADR-0080)
+// ---------------------------------------------------------------------------
+
+/**
+ * AddServiceAccountDialog — the OUTER shell (mirrors {@link AddMemberDialog}). The body (and its
+ * service-account + membership + public-key queries) mounts ONLY while `open`, so nothing fetches until an
+ * admin opens the dialog.
+ *
+ * ponytail: the backend exposes POST (grant) + DELETE (revoke) for SA memberships but NO endpoint to LIST
+ * a vault's current service-account members (`loadMembers` returns human members only). So this dialog
+ * grants/revokes BY SELECTION and relies on the server for truth (409 = already a member, 404 = not a
+ * member) rather than rendering an inline SA-member list. Ceiling: an inline "current machine members"
+ * list is a follow-up once the API exposes a read.
+ */
+function AddServiceAccountDialog({
+  open,
+  onOpenChange,
+  vaultId,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  vaultId: string;
+}) {
+  const t = useTranslations("secrets");
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t("serviceAccountMembers.addTitle")}</DialogTitle>
+          <DialogDescription>
+            {t("serviceAccountMembers.addDescription")}
+          </DialogDescription>
+        </DialogHeader>
+        {open ? (
+          <AddServiceAccountDialogBody
+            vaultId={vaultId}
+            onClose={() => onOpenChange(false)}
+          />
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The grant/revoke form + its data hooks. Mounted only while the dialog is open. */
+function AddServiceAccountDialogBody({
+  vaultId,
+  onClose,
+}: {
+  vaultId: string;
+  onClose: () => void;
+}) {
+  const t = useTranslations("secrets");
+  const tc = useTranslations("common");
+  const { getPrivateKey } = useSecretSession();
+  const { membership } = useVaultDek(vaultId);
+  const { data: myMembership } = useMyMembership(vaultId);
+  const addServiceAccount = useAddServiceAccountMember();
+  const removeServiceAccount = useRemoveServiceAccountMember();
+
+  // Live service accounts; only those holding `secret:fetch` can crypto-read a vault (ADR-0080), so we
+  // offer just those — an SA without the Fetch permission has no keypair to wrap the DEK to.
+  const {
+    data: allAccounts,
+    isLoading: accountsLoading,
+    isError: accountsLoadError,
+  } = useServiceAccounts();
+  const fetchAccounts = useMemo<ServiceAccount[]>(
+    () =>
+      (allAccounts ?? []).filter((a) => a.permissions.includes("secret:fetch")),
+    [allAccounts],
+  );
+
+  const [targetSaId, setTargetSaId] = useState("");
+  // A single in-flight action at a time — which one is running (for the per-button spinner).
+  const [busy, setBusy] = useState<null | "grant" | "revoke">(null);
+
+  // Fetch the target SA's public key only when one is selected. A 404 means the SA has no keypair (it was
+  // never created with the Fetch permission) — surfaced distinctly and it blocks the grant.
+  const {
+    data: saPublicKey,
+    isLoading: publicKeyLoading,
+    isError: publicKeyError,
+    error: publicKeyErrorObj,
+  } = useServiceAccountPublicKey(targetSaId || undefined);
+
+  const noEligible =
+    !accountsLoading && !accountsLoadError && fetchAccounts.length === 0;
+  const targetNoKeypair =
+    !!targetSaId &&
+    !publicKeyLoading &&
+    publicKeyError &&
+    publicKeyErrorObj instanceof ApiError &&
+    publicKeyErrorObj.status === 404;
+
+  const targetName =
+    fetchAccounts.find((a) => a.id === targetSaId)?.name ?? targetSaId;
+
+  async function handleGrant(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy || !targetSaId || !saPublicKey) return;
+
+    const privateKey = getPrivateKey();
+    const mship = myMembership ?? membership;
+    if (!privateKey || !mship) {
+      toast.error(t("members.grantDekUnavailable"));
+      return;
+    }
+
+    setBusy("grant");
+    try {
+      // "No grant-what-you-can't-read": wrapDekForMember FIRST unwraps the DEK from our own membership,
+      // THEN wraps it to the SA's public key. Only the wrapped blob crosses the wire (INV-10).
+      const targetPubKeyBytes = base64ToBytes(saPublicKey.publicKey);
+      const wrappedDek = wrapDekForMember(privateKey, mship, targetPubKeyBytes);
+      await addServiceAccount.mutateAsync({
+        vaultId,
+        data: { serviceAccountId: targetSaId, ...wrappedDek },
+      });
+      toast.success(t("serviceAccountMembers.granted", { name: targetName }));
+      onClose();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Desired end-state already holds — the SA is a member. Inform, don't alarm.
+        toast.info(t("serviceAccountMembers.alreadyMember", { name: targetName }));
+      } else {
+        notifyError(err, t("serviceAccountMembers.grantError"));
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRevoke() {
+    if (busy || !targetSaId) return;
+    setBusy("revoke");
+    try {
+      await removeServiceAccount.mutateAsync({ vaultId, saId: targetSaId });
+      toast.success(t("serviceAccountMembers.revoked", { name: targetName }));
+      onClose();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        // Desired end-state already holds — the SA is not a member.
+        toast.info(t("serviceAccountMembers.notMember", { name: targetName }));
+      } else {
+        notifyError(err, t("serviceAccountMembers.revokeError"));
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <form onSubmit={handleGrant} className="space-y-4">
+      <Field>
+        <FieldLabel htmlFor="grant-sa">
+          {t("serviceAccountMembers.accountLabel")}
+        </FieldLabel>
+        {accountsLoading ? (
+          <div className="h-9 animate-pulse rounded-md bg-muted" />
+        ) : accountsLoadError ? (
+          <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {t("serviceAccountMembers.loadError")}
+          </p>
+        ) : noEligible ? (
+          <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            {t("serviceAccountMembers.noEligible")}
+          </p>
+        ) : (
+          <select
+            id="grant-sa"
+            value={targetSaId}
+            onChange={(e) => setTargetSaId(e.target.value)}
+            disabled={busy !== null}
+            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="">{t("serviceAccountMembers.selectAccount")}</option>
+            {fetchAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {targetNoKeypair ? (
+          <FieldDescription className="text-destructive">
+            {t("serviceAccountMembers.noKeypair")}
+          </FieldDescription>
+        ) : (
+          <FieldDescription>
+            {t("serviceAccountMembers.grantHint")}
+          </FieldDescription>
+        )}
+      </Field>
+
+      {!accountsLoading && !accountsLoadError && !noEligible ? (
+        <DialogFooter className="sm:justify-between">
+          {/* Revoke is available by selection too (no membership-list endpoint — see ponytail note). A 404
+              is treated as an informational no-op, so this is safe to offer for any selected account. */}
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={handleRevoke}
+            disabled={busy !== null || !targetSaId}
+            className="text-destructive hover:text-destructive"
+          >
+            {busy === "revoke" ? (
+              <ArrowPathIcon className="size-4 animate-spin" />
+            ) : null}
+            {t("serviceAccountMembers.revokeAction")}
+          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={busy !== null}
+            >
+              {tc("cancel")}
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                busy !== null ||
+                !targetSaId ||
+                publicKeyLoading ||
+                !saPublicKey
+              }
+            >
+              {busy === "grant" || publicKeyLoading ? (
+                <ArrowPathIcon className="size-4 animate-spin" />
+              ) : null}
+              {busy === "grant"
+                ? t("serviceAccountMembers.granting")
+                : t("serviceAccountMembers.grantSubmit")}
+            </Button>
+          </div>
+        </DialogFooter>
+      ) : (
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={busy !== null}
+          >
             {tc("cancel")}
           </Button>
         </DialogFooter>

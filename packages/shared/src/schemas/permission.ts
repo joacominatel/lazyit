@@ -42,7 +42,8 @@ export const PERMISSION_DOMAINS = [
   "settings",
   "workflow", // the Applications Workflow Engine (epic #248) — pre-provisioned RBAC; NO routes yet
   "notification", // the in-app notification bell (ADR-0056) — operational nudges; read is ADMIN-only
-  "secret", // the human Secret Manager (ADR-0061) — zero-knowledge vaults; ALL ADMIN-only by default
+  "secret", // the human Secret Manager (ADR-0061) — zero-knowledge vaults; read/manage ADMIN-only by
+  // default, plus the machine-only `secret:fetch` for programmatic retrieval by a service account (ADR-0080)
   "import", // the guided bulk Migrator (ADR-0069) — a single coarse `:run` verb; ADMIN-only by default
   "infra", // the infra topology graph (ADR-0070) — the generic visual CMDB of the server estate
 ] as const;
@@ -150,6 +151,16 @@ export const PERMISSIONS = [
   // `workflow:manage` (ADR-0061 §7). Neither is ever seeded to MEMBER or VIEWER.
   "secret:read",
   "secret:manage",
+  // secret:fetch (programmatic secret retrieval, ADR-0080) — the SINGLE narrow verb a SERVICE ACCOUNT
+  // holds to pull a vault's CIPHERTEXT over the headless read endpoint (`GET /secret-fetch/:vaultId`) for
+  // client-side decryption by the `lazyit-fetch` CLI. It is the MACHINE twin of the human `secret:read`,
+  // deliberately kept SEPARATE so the SA never touches the human read/manage surface: `secret:read` and
+  // `secret:manage` stay HUMAN-ONLY (SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS), while `secret:fetch` is the
+  // only secret verb an SA may hold. The endpoint returns CIPHERTEXT + the SA's wrapped DEK only — the
+  // server never decrypts (INV-10). A coarse verb (neither `:read` nor `:write`), so ADMIN-only by seed
+  // construction and never in the MEMBER/VIEWER default sets; in practice granted ONLY to a machine SA
+  // (like `infra:report`), never a human role — the fetch route is service-principal-only.
+  "secret:fetch",
   // import (guided bulk Migrator, ADR-0069 §11) — a SINGLE coarse verb `import:run`, ADMIN-only by
   // default. It is the route gate for the whole import wizard (upload → map → dry-run → commit). The
   // `import` domain is deliberately RUN-ONLY: there is no `import:read`/`import:write`/`import:delete`

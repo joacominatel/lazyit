@@ -19,6 +19,7 @@ COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY apps/agent/package.json apps/agent/
 COPY packages/shared/package.json packages/shared/
+COPY packages/fetch-cli/package.json packages/fetch-cli/
 RUN ok=0; for i in 1 2 3; do bun install --frozen-lockfile && ok=1 && break || { echo "bun install failed (attempt $i/3), retrying in 5s..."; sleep 5; }; done; [ "$ok" -eq 1 ]
 
 # Sources needed to build the API (shared is a workspace dependency).
@@ -51,6 +52,7 @@ COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY apps/agent/package.json apps/agent/
 COPY packages/shared/package.json packages/shared/
+COPY packages/fetch-cli/package.json packages/fetch-cli/
 RUN ok=0; for i in 1 2 3; do bun install --production --linker hoisted --filter "@lazyit/api" && ok=1 && break || { echo "bun install failed (attempt $i/3), retrying in 5s..."; sleep 5; }; done; [ "$ok" -eq 1 ]
 
 # ---- Runtime: minimal Node (Alpine) ----

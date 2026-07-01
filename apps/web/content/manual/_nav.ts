@@ -82,6 +82,7 @@ export const MANUAL_NAV: readonly ManualNavCategory[] = [
       "passwords-recovery-keys",
       "security-model",
       "secret-references",
+      "programmatic-access",
     ],
   },
   {

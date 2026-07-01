@@ -21,6 +21,15 @@ export const keypairKeys = {
     [...keypairBase.all, "public-key", userId] as const,
 };
 
+/** A service account's public key (the SA-grant wrap target, ADR-0080). `saId` is a public identifier. */
+const saKeypairBase = createQueryKeys("secret-sa-keypair");
+export const saKeypairKeys = {
+  ...saKeypairBase,
+  /** A service account's public key. `serviceAccountId` is a public identifier, never secret. */
+  publicKey: (saId: string) =>
+    [...saKeypairBase.all, "public-key", saId] as const,
+};
+
 /** Vaults — the list and per-vault detail (with embedded members). */
 const vaultBase = createQueryKeys("secret-vaults");
 export const vaultKeys = {

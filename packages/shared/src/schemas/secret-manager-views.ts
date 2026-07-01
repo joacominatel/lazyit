@@ -1,6 +1,11 @@
 import { z } from "zod";
-import { SecretItemSchema } from "./secret-item";
+import {
+  SecretEnvelopeSchema,
+  SecretItemKindSchema,
+  SecretItemSchema,
+} from "./secret-item";
 import { CreateSecretVaultSchema, SecretVaultSchema } from "./secret-vault";
+import { KdfParamsSchema } from "./user-keypair";
 import { VaultMembershipSchema, WrappedDekSchema } from "./vault-membership";
 
 /**
@@ -89,3 +94,51 @@ export const ResolvedHandleSchema = z.object({
   membership: VaultMembershipSchema,
 });
 export type ResolvedHandle = z.infer<typeof ResolvedHandleSchema>;
+
+// ── Programmatic secret retrieval via a service account (ADR-0080) ───────────────
+
+/**
+ * A single item in a headless fetch response — server-visible METADATA (`handle`/`label`/`kind`) plus the
+ * at-rest AES-256-GCM envelope (ciphertext only). NEVER the plaintext value: the `lazyit-fetch` CLI
+ * decrypts it locally under the unwrapped vault DEK. A subset of {@link SecretItemSchema} (no id /
+ * timestamps — the CLI only needs the key name + the ciphertext to emit a `.env`).
+ */
+export const ServiceAccountFetchItemSchema = z.object({
+  handle: z.string(),
+  label: z.string(),
+  kind: SecretItemKindSchema,
+  ...SecretEnvelopeSchema.shape,
+});
+export type ServiceAccountFetchItem = z.infer<
+  typeof ServiceAccountFetchItemSchema
+>;
+
+/**
+ * The headless fetch response (`GET /secret-fetch/:vaultId`, ADR-0080) — everything a STATELESS caller (the
+ * `lazyit-fetch` CLI, holding ONLY the SA token) needs to decrypt a vault CLIENT-SIDE, in one round-trip:
+ *
+ *   1. `keypair`     — the SA's wrapped private key + its Argon2id inputs. The CLI re-derives the KEK from
+ *                      the token (Argon2id over `privateKeySalt`) and unwraps the private key locally.
+ *   2. `membership`  — the vault DEK wrapped to the SA's public key. The CLI unwraps it with the private
+ *                      key from step 1.
+ *   3. `items`       — the ciphertext envelopes. The CLI decrypts each under the DEK from step 2.
+ *
+ * EVERYTHING here is CIPHERTEXT or public material (left of the ADR-0061 §9 line). The server produces NO
+ * plaintext — it never holds the token-derived KEK, never unwraps the private key or the DEK, and never
+ * decrypts a value (INV-10). The `keypair.publicKey` is deliberately OMITTED (the CLI does not need it to
+ * unwrap). Every call to this endpoint is audited (ITEMS_FETCHED — which SA, which vault, when).
+ */
+export const ServiceAccountVaultFetchSchema = z.object({
+  vaultId: z.cuid(),
+  keypair: z.object({
+    privateKeyEnc: z.base64().min(1).max(4096),
+    privateKeySalt: z.base64().min(1).max(4096),
+    privateKeyIv: z.base64().min(1).max(4096),
+    kdfParams: KdfParamsSchema,
+  }),
+  membership: WrappedDekSchema,
+  items: z.array(ServiceAccountFetchItemSchema),
+});
+export type ServiceAccountVaultFetch = z.infer<
+  typeof ServiceAccountVaultFetchSchema
+>;

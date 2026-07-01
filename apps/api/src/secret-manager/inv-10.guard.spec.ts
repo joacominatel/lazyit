@@ -181,7 +181,8 @@ describe('INV-10 architectural guard (ADR-0061 — the merge gate)', () => {
     // a real `crypto.subtle.decrypt(...)` call still trips it (`.subtle` is hard to obfuscate away).
     const webcryptoAccess = /\.subtle\b|\bSubtleCrypto\b|\bwebcrypto\b/;
     const offenders = moduleFiles.filter(
-      (f) => cipherProviderImport.test(read(f)) || webcryptoAccess.test(readCode(f)),
+      (f) =>
+        cipherProviderImport.test(read(f)) || webcryptoAccess.test(readCode(f)),
     );
     expect(offenders).toEqual([]);
   });
@@ -220,5 +221,52 @@ describe('INV-10 architectural guard (ADR-0061 — the merge gate)', () => {
       expect(envMasterKey.test(readCode(file))).toBe(false);
     }
     expect(serviceCode).toMatch(/return\s+this\.keypairToWire\(/);
+  });
+
+  // ── ADR-0080 programmatic secret retrieval (the headless SA fetch path) ──────────────
+  // The module-wide scans (#1–#4) already cover the new controllers/guard/service methods added for
+  // ADR-0080 (they inherit the structural fence automatically). This PINS the headless-fetch path by
+  // name so a future refactor that re-introduces crypto on it (or serves a decrypted value) fails CI
+  // BY NAME. The fetch endpoint is the ONE Secret-Manager route a service account may reach; it must
+  // stay a pure ciphertext-custodian read — the token→KEK→private-key→DEK→value unwrap chain runs ONLY
+  // client-side (the `lazyit-fetch` CLI), never here.
+  it('6. the SA headless-fetch path exists, imports NO cipher, and serves only the ciphertext view', () => {
+    const fetchController = join(MODULE_DIR, 'secret-fetch.controller.ts');
+    const saKeypairController = join(
+      MODULE_DIR,
+      'service-account-keypair.controller.ts',
+    );
+    const serviceOnlyGuard = join(MODULE_DIR, 'service-only.guard.ts');
+    const service = join(MODULE_DIR, 'secret-manager.service.ts');
+
+    // (a) The fetch route is SERVICE-ONLY (ServiceOnlyGuard) and gated on the machine-only `secret:fetch`
+    //     verb — never HumanOnly, never a human read verb.
+    const fetchCode = readCode(fetchController);
+    expect(fetchCode).toMatch(/ServiceOnlyGuard/);
+    expect(read(fetchController)).toMatch(/secret:fetch/);
+    expect(fetchCode).toMatch(/fetchVaultForServiceAccount\s*\(/); // delegates to the service
+
+    // (b) The service method exists and returns the ciphertext view (never a raw row / plaintext value).
+    const serviceCode = readCode(service);
+    expect(serviceCode).toMatch(/fetchVaultForServiceAccount\s*\(/);
+    // It projects into the wire fetch shape: wrapped keypair + wrapped DEK + item ciphertext only.
+    expect(serviceCode).toMatch(/privateKeyEnc:\s*keypair\.privateKeyEnc/);
+    expect(serviceCode).toMatch(/wrappedDek:\s*membership\.wrappedDek/);
+
+    // (c) INV-10 on the whole new path: none of these files imports a cipher provider nor reads a
+    //     master-key env — the API stays structurally incapable of decrypting.
+    const cipherProviderImport =
+      /(?:from\s+|require\(\s*|import\s*\(\s*)['"](?:node:crypto|crypto|@noble\/[^'"]+|@lazyit\/shared\/crypto)['"]/;
+    const envMasterKey =
+      /process\.env(?:\.[A-Za-z0-9_]*(?:SECRET_MANAGER|SECRET_KEY|VAULT_KEY|MANAGER_KEY)[A-Za-z0-9_]*|\[)/i;
+    for (const file of [
+      fetchController,
+      saKeypairController,
+      serviceOnlyGuard,
+      service,
+    ]) {
+      expect(cipherProviderImport.test(read(file))).toBe(false);
+      expect(envMasterKey.test(readCode(file))).toBe(false);
+    }
   });
 });
