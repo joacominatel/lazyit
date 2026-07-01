@@ -547,6 +547,50 @@ model AssetTagScheme {
   @@map("asset_tag_scheme")
 }
 
+/// Instance SMTP settings — the singleton config store for OUTBOUND EMAIL (issue #615, ADR-0079).
+/// Same singleton pattern as AssetTagScheme (ADR-0063): ONE admin-only row (`settings:manage`), a
+/// migration CHECK pins the id. Unlocks an email CHANNEL behind the notification bell (ADR-0056); a
+/// curated set of operational nudges is emailed (via a BullMQ worker, ADR-0053) when `enabled` is on.
+///
+/// The password is a SERVER-MANAGED machine credential (the server MUST read it to authenticate to the
+/// relay — the explicit inverse of the zero-knowledge Secret Manager, INV-10). It is encrypted at rest
+/// as an AES-256-GCM envelope (the same {ciphertext,iv,authTag,keyVersion} shape as WorkflowSecret, but
+/// under its OWN key axis `SMTP_SECRET_KEY` — "one key per subsystem", ADR-0054/0079). The envelope
+/// columns are NEVER returned on the wire (write-only; the read shape exposes only "passwordSet").
+model SmtpSettings {
+  /// Fixed singleton key — the only valid value is "singleton" (a migration CHECK pins it). Not a
+  /// generated id: there is one SMTP config row for the whole instance.
+  id                 String   @id @default("singleton")
+  /// Master switch for outbound email. false (default) = never email; the test action still works.
+  enabled            Boolean  @default(false)
+  /// SMTP relay hostname. null until configured.
+  host               String?
+  /// SMTP relay port (1–65535). null until configured.
+  port               Int?
+  /// Transport security mode: "none" | "starttls" | "tls" (validated by the shared SmtpSecurity enum).
+  security           String   @default("starttls")
+  /// SMTP auth username. null = open/unauthenticated relay (the api only sends `auth` when set).
+  username           String?
+  /// Encrypted password envelope (AES-256-GCM under SMTP_SECRET_KEY). All four are null when no
+  /// password is stored. WRITE-ONLY: never returned on the wire (the read shape exposes only passwordSet).
+  passwordCiphertext String?
+  passwordIv         String?
+  passwordAuthTag    String?
+  passwordKeyVersion Int?
+  /// Envelope From address (messages are sent from here). null until configured.
+  fromAddress        String?
+  /// Optional human display name for the From header (e.g. "lazyit").
+  fromName           String?
+  /// TLS cert verification. true (default, secure) rejects an unverifiable cert; false allows a
+  /// self-signed cert on a self-hosted relay (opt-in insecurity).
+  rejectUnauthorized Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // No deletedAt: mutable instance config, never soft-deleted (same posture as AssetTagScheme).
+  @@map("smtp_settings")
+}
+
 /// Timestamped join recording who owns an Asset, over time (asset-centric ownership; ADR-0004).
 /// Append-only with a release marker: rows are never deleted, only "closed" by setting
 /// releasedAt (ADR-0006). Multi-owner: an asset may have several active assignments at once.
