@@ -1,0 +1,49 @@
+{
+  "page": {
+    "title": "Registro de auditoría",
+    "subtitle": "Rastro de auditoría de seguridad — eventos de secretos, permisos y cuentas de servicio.",
+    "accessDeniedTitle": "El registro de auditoría es solo para administradores",
+    "accessDeniedDescription": "El rastro de auditoría de seguridad requiere el permiso de Informes. Consultá con un administrador si necesitás acceso a esta vista.",
+    "accessDeniedAction": "Volver a Informes"
+  },
+  "sources": {
+    "secret": "Secretos",
+    "permission": "Permisos",
+    "serviceAccount": "Cuentas de servicio"
+  },
+  "filters": {
+    "anyActor": "Cualquier actor",
+    "allActions": "Todas las acciones",
+    "fromDate": "Fecha desde",
+    "toDate": "Fecha hasta",
+    "selectedUser": "Usuario seleccionado",
+    "chips": {
+      "action": "Acción: {value}",
+      "actor": "Actor: {value}",
+      "vault": "Bóveda: {value}",
+      "item": "Ítem: {value}",
+      "serviceAccount": "Cuenta de servicio: {value}",
+      "rangeCustom": "Rango: {from} → {to}"
+    }
+  },
+  "table": {
+    "system": "Sistema",
+    "noSubject": "—"
+  },
+  "export": {
+    "exportAll": "Exportar todo (filtrado)",
+    "exportAllTitle": "Descargar todos los eventos que coinciden con los filtros actuales (todo el rango, no solo esta página)",
+    "exportAllBusy": "Exportando…",
+    "exportAllError": "No se pudo exportar el registro de auditoría",
+    "exportVisible": "Exportar eventos visibles",
+    "exportTitle": "Exportar los eventos visibles actualmente (la página filtrada)",
+    "print": "Imprimir",
+    "printTitle": "Imprimir el registro de auditoría"
+  },
+  "empty": {
+    "errorTitle": "No se pudo cargar el registro de auditoría",
+    "title": "Ningún evento de auditoría coincide con estos filtros",
+    "descriptionFiltered": "Nada en este registro coincide con estos filtros. Probá quitando alguno.",
+    "description": "Las acciones relevantes para la seguridad en esta fuente aparecerán aquí a medida que tu equipo trabaje."
+  }
+}
