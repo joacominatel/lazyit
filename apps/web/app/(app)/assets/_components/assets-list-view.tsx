@@ -103,6 +103,11 @@ import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
+import {
+  ASSET_FILTER_DEFAULTS as FILTER_DEFAULTS,
+  ASSET_LIST_OPTIONS,
+  deriveAssetFilters,
+} from "./assets-list-query";
 import { AssetRowActions } from "./asset-row-actions";
 import {
   AssetStatusBadge,
@@ -112,23 +117,6 @@ import { AssignUserDialog } from "./assign-user-dialog";
 import { StackedOwnerAvatars } from "./stacked-owner-avatars";
 
 type OwnershipFilter = "ALL" | "HAS" | "NONE";
-
-/**
- * Filter param defaults for the URL list-state. `status`/`category`/`location` map to the server's
- * `status`/`categoryId`/`locationId` params; `owner` maps to the server's `assignedToUserId` (a
- * User uuid, "" = unset); `ownership` (Has/None) maps to the server's `ownership` param (#824).
- * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
- */
-const FILTER_DEFAULTS = {
-  status: "ALL",
-  category: "ALL",
-  location: "ALL",
-  // Grouping filter (ADR-0076): "ALL" = no filter, otherwise an exact company value (server-side).
-  company: "ALL",
-  owner: "",
-  ownership: "ALL",
-  archived: "ALL",
-} as const;
 
 /** Maps each ownership filter to its label key under `assets.list.ownership`. */
 const OWNERSHIP_LABEL_KEY: Record<OwnershipFilter, "any" | "has" | "none"> = {
@@ -213,11 +201,7 @@ export function AssetsListView() {
     setOffset,
     clearFilters,
     filtersActive,
-  } = useListParams({
-    filters: FILTER_DEFAULTS,
-    defaultSort: "updatedAt",
-    defaultDir: "desc",
-  });
+  } = useListParams(ASSET_LIST_OPTIONS);
 
   const statusFilter = filters.status as AssetStatus | "ALL";
   const categoryFilter = filters.category;
@@ -232,22 +216,12 @@ export function AssetsListView() {
   const archived = isAdmin && filters.archived === "only";
 
   // Forward server-supported params; `ownership` (Has/None) is now a server filter too (#824), so it
-  // scopes the whole result set instead of just the current page.
+  // scopes the whole result set instead of just the current page. `deriveAssetFilters` is the SAME
+  // URL→query mapping the server prefetch uses, so this hook's key and the SSR-prefetched key are
+  // byte-identical (ADR-0067 / #733) — a filtered/paged/searched first paint hits the dehydrated cache
+  // instead of double-fetching.
   const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useAssets({
-      q: q || undefined,
-      status: statusFilter === "ALL" ? undefined : statusFilter,
-      categoryId: categoryFilter === "ALL" ? undefined : categoryFilter,
-      locationId: locationFilter === "ALL" ? undefined : locationFilter,
-      company: companyFilter === "ALL" ? undefined : companyFilter,
-      assignedToUserId: ownerFilter || undefined,
-      ownership: ownershipFilter === "ALL" ? undefined : ownershipFilter,
-      sort,
-      dir: sort ? dir : undefined,
-      limit,
-      offset,
-      deleted: archived ? "only" : undefined,
-    });
+    useAssets(deriveAssetFilters({ q, sort, dir, offset, limit, filters }, { isAdmin }));
   const { data: categories } = useAssetCategories();
   const { data: locations } = useLocations();
   const { data: companies } = useAssetCompanies();
