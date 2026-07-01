@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AssetSpecsDictionarySchema } from "./asset-specs-dictionary";
 import { requireAtLeastOneKey } from "./primitives";
 
 /**
@@ -17,6 +18,10 @@ export const AssetCategorySchema = z.object({
   description: z.string().nullable(),
   // Free string: a heroicon name for the web UI (e.g. "ServerStackIcon"). Not validated.
   icon: z.string().nullable(),
+  // ADVISORY specs dictionary (ADR-0007 amendment, #851): a declarative field list that drives
+  // hints + soft warnings for Asset.specs of this category's models. `null` = no governance (any
+  // jsonb object accepted, the ADR-0007 default). See asset-specs-dictionary.ts.
+  specsSchema: AssetSpecsDictionarySchema.nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
@@ -27,6 +32,8 @@ export const CreateAssetCategorySchema = z.strictObject({
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().min(1).max(1000).optional(),
   icon: z.string().trim().min(1).max(100).optional(),
+  // Optional declarative specs dictionary (advisory — see AssetCategorySchema). Omit for none.
+  specsSchema: AssetSpecsDictionarySchema.optional(),
 });
 
 /** Partial update; any subset of the editable fields (an empty body is rejected). */
@@ -36,6 +43,8 @@ export const UpdateAssetCategorySchema = requireAtLeastOneKey(
       name: z.string().trim().min(1).max(100),
       description: z.string().trim().min(1).max(1000),
       icon: z.string().trim().min(1).max(100),
+      // Replace the whole dictionary; send `[]` to clear it (no governance).
+      specsSchema: AssetSpecsDictionarySchema,
     })
     .partial(),
 );
