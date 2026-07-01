@@ -288,11 +288,11 @@ function ServiceAccountForm({
           permissions={secret.permissions}
           onLockedChange={onLockChange}
         />
-        {/* ADR-0080: a secret:fetch SA needs a zero-knowledge keypair to retrieve secrets. Bootstrap it
-            here, while the one-time token is still in memory (the token is the KEK; never sent). */}
-        {secret.permissions.includes("secret:fetch") ? (
-          <SaKeypairSetup saId={secret.id} token={secret.token} />
-        ) : null}
+        {/* ADR-0080 (#883): generate the zero-knowledge keypair for EVERY new SA — not just secret:fetch
+            ones — while the one-time token is still in memory (the token is the KEK; never sent). An unused
+            keypair on a non-fetch SA is negligible, and it removes the "no encryption key" footgun for an
+            SA later granted secret:fetch. */}
+        <SaKeypairSetup saId={secret.id} token={secret.token} />
       </>
     );
   }
