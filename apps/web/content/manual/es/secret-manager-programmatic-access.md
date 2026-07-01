@@ -60,26 +60,38 @@ el token se filtró).
 
 ## Paso 3 — Traer secretos en la máquina de despliegue
 
-Usá la herramienta de línea de comandos **`lazyit-fetch`** (en `packages/fetch-cli`). Dale el token, la URL
-de la API y el id de la bóveda:
+La herramienta de línea de comandos **`lazyit-fetch`** vive en el monorepo (`packages/fetch-cli`) y **no**
+se publica en un registro de paquetes — así que no hay instalación con `npx`/`bunx`. En su lugar corrés un
+**binario autónomo** compilado a partir de ella. Desde una copia del monorepo, generá los binarios una vez:
+
+```sh
+# Compila dist/lazyit-fetch-x64 y dist/lazyit-fetch-arm64 (ejecutables Linux autocontenidos).
+bun run --filter @lazyit/fetch-cli compile
+```
+
+Copiá el binario que coincida con la arquitectura de tu servidor (por ej. `lazyit-fetch-x64`) a la máquina
+de despliegue. Ahí **no necesita Bun ni Node**. Después dale el token, la URL de la API y el id de la bóveda:
 
 ```sh
 # El token se lee de una variable de entorno para que no quede en el historial del shell ni en `ps`.
 export LAZYIT_SA_TOKEN="lzit_sa_…"
-export LAZYIT_API_URL="https://lazyit.example.com/api"
 
 # Escribir un archivo .env en el directorio actual:
-lazyit-fetch --vault <vaultId> --out .env
+./lazyit-fetch-x64 --api https://lazyit.example.com/api --vault <vaultId> --out .env
 
 # …o imprimir a stdout para componer con otras herramientas:
-lazyit-fetch --vault <vaultId> > .env
+./lazyit-fetch-x64 --api https://lazyit.example.com/api --vault <vaultId> > .env
 
 # Listar las bóvedas que esta cuenta de servicio puede traer:
-lazyit-fetch --list
+./lazyit-fetch-x64 --api https://lazyit.example.com/api --list
 
-# Verificar el cifrado de la herramienta sin tocar el servidor:
-lazyit-fetch --self-check
+# Verificar el cifrado de la herramienta sin tocar el servidor (sin API ni token):
+./lazyit-fetch-x64 --self-check
 ```
+
+> **Correr desde una copia (para probar).** Si ya tenés el monorepo, podés correr la herramienta
+> directamente desde el código con Bun en lugar de compilar — práctico mientras probás:
+> `bun packages/fetch-cli/src/index.ts --api <url> --vault <vaultId>`.
 
 Cada secreto se convierte en una línea, `HANDLE=valor`. El **handle** se pasa a mayúsculas y los caracteres
 no alfanuméricos se vuelven `_`, así que `prod-db-password` queda `PROD_DB_PASSWORD`. Elegí handles que sean
