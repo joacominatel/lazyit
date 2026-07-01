@@ -17,13 +17,15 @@ This file is structured for **scanning, not reading end-to-end**. The CTO opens 
 ## High-level shape
 
 > **Monorepo**: Bun `1.3.14` workspaces + Turborepo `^2.9`
-> **Apps**: `apps/api` (NestJS `11.0.1`), `apps/web` (Next.js `16.2.6` + React `19.2.4`)
-> **Shared**: `packages/shared` (zod schemas, types, utilities)
-> **Infra**: consolidated root `compose.yaml` (canonical, all services) + committed `compose.override.yaml` (dev tuning) + a `prod` profile + a thin `infra/docker-compose.prod.yaml` overlay; Caddy, env templates, Dockerfiles, bootstrap scripts
-> **Docs**: `docs/` (Obsidian vault — 48 ADRs (0001–0048) as of 2026-06-03) + `docs/06-security/INVARIANTS.md` (the 7 auth non-negotiables + INV-8 [ADMIN immutable/full] + the INV-SA-1..4 Service-Account guardrails)
-> **Skills**: `.claude/skills/` (cto, navigator, devops, sentinel, remediator)
+> **Apps**: `apps/api` (NestJS `11.0.1`), `apps/web` (Next.js `16.2.9` + React `19.2.4`), **`apps/agent`** (the self-installing Linux reporting agent — ADR-0074)
+> **Shared**: `packages/shared` (zod schemas, types, utilities) + **`packages/fetch-cli`** (headless SA secret-retrieval CLI + client-side decrypt — ADR-0080)
+> **Infra**: consolidated root `compose.yaml` (canonical, all services) + committed `compose.override.yaml` (dev tuning) + a `prod` profile + a thin `infra/docker-compose.prod.yaml` overlay; Caddy, env templates, Dockerfiles, bootstrap scripts. **Now also `valkey`** (Redis-compatible; backs BullMQ — ADR-0053).
+> **Docs**: `docs/` (Obsidian vault — **81 ADRs (0001–0081) as of 2026-07-01**; ADR-0055 & ADR-0079 are *proposed*, 0013/0065/0071 *superseded*) + `docs/06-security/INVARIANTS.md` (the 7 auth non-negotiables + INV-8 [ADMIN immutable/full] + INV-SA-1..4 Service-Account guardrails + **INV-9** [KB folder ACL, ADR-0060] + **INV-10** [Secret Manager: server never decrypts, ADR-0061])
+> **Skills**: `.claude/skills/` (cto, navigator, devops, sentinel, remediator) — these are **skills loaded by general-purpose worktree agents**, not distinct Agent-tool agentTypes (see `agents-roster.md`)
 
-Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` (loopback) · Meilisearch → `:7700` (loopback). In prod only Caddy publishes ports (8080/8443 by default); db/api/web/zitadel stay internal.
+Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` (loopback) · Meilisearch → `:7700` (loopback) · **Valkey → `:6379` (loopback, dev only)**. In prod only Caddy publishes ports (8080/8443 by default); db/api/web/zitadel/valkey stay internal.
+
+> **⚠ Freshness note (2026-07-01):** the module/screen/entity/debt tables below were last fully rewritten **2026-06-03 (ADR-0048)**. The subsystems added since (ADRs 0049–0081) are captured in the **"Subsystems added since ADR-0048"** section (added right after the backend modules table) plus targeted patches. When a table row and that section disagree, trust the newer section + the actual tree.
 
 ---
 
@@ -63,8 +65,80 @@ Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` (loopback) · 
 | ConsumableCategoriesModule | `consumable-categories/` | ConsumableCategory; **added to ADR-0032 `SOFT_DELETABLE_MODELS` (#114) — was leaking soft-deleted rows** | stable |
 | ConsumablesModule | `consumables/` | Consumable + ConsumableMovement (int4-guarded, stock-race-safe); **list now `Page<T>` + server `q`/sort/`deleted`; FIXED a pre-existing soft-delete leak (Consumable/ConsumableCategory were missing from `SOFT_DELETABLE_MODELS`, #114)** | stable |
 | LoggingModule (via LoggerModule.forRoot) | `logging/` | Pino config (ADR-0031) | stable |
+| **UserHistoryModule** | `user-history/` | **NEW (ADR-0050)** — append-only `UserHistory` (table `user_history`, 1:1 with `asset_history`); read-only; feeds the `user` source in `recent_activity` | stable |
+| **AssetTagSchemeModule** | `asset-tag-scheme/` | **NEW (ADR-0063/0068)** — single-row `AssetTagScheme` config + global monotonic counter (OFF by default); skip-existing allocation invariant + backfill-with-preview | stable |
+| **ImportModule** | `import/` | **NEW (ADR-0069)** — the Migrator: guided bulk Asset import (JSON+CSV); `ImportSession`/`ImportRun`/`ImportRow`; sandboxed parse; dry-run→persisted plan→replay-at-commit (`import:run`) | stable |
+| **InfraModule** | `infra/` | **NEW (ADR-0070/0073/0074)** — the topology CMDB: `InfraNode` + `InfraEdge` + `InfraNodeSecretRef`; `POST /infra/report` (agent ingest → PENDING review tray), impact/blast-radius, node↔secret attach (member-scoped), agent-staleness sweeper | stable |
+| **AgentDistModule** | `agent-dist/` | **NEW (ADR-0074)** — serves the self-installing Linux agent binary/installer | stable |
+| **SecretManagerModule** | `secret-manager/` | **NEW (ADR-0061/0075/0080)** — **zero-knowledge** vaults: `SecretVault`/`SecretItem`/`UserKeypair`/`VaultMembership`/`SecretAuditLog` (+ SA keypair/membership). Guards: `human-only`, `service-only`, **`inv-10.guard`** (server never sees plaintext). Controllers: vaults/items/keypair/service-account-keypair/**secret-fetch** (ADR-0080). Typed secrets via `kind` metadata (ADR-0075) | stable |
+| **NotificationsModule** | `notifications/` | **NEW (ADR-0056)** — append-only `Notification` + per-admin `NotificationRead` (fan-out-on-read, ADMIN-only v1); poll delivery; SSE bell feed | stable |
+| **SmtpModule** | `smtp/` | **NEW (ADR-0079, *proposed*)** — singleton `SmtpSettings` (`GET`/`PUT /config/smtp` + test), AES-256-GCM password (own key axis), **BullMQ email-dispatch worker** + notification→email relay | stable (ADR *proposed*) |
+| **QueueModule** | `queue/` | **NEW (ADR-0053)** — BullMQ/Valkey connection wiring (`REDIS_URL`); shared by the workflow engine + email worker | stable |
+| **WorkflowEngineModule** (+ WorkflowConnectorsModule) | `workflow-engine/` | **NEW (ADR-0054/0055/0057)** — Applications Workflow Engine: `ApplicationWorkflow`/`WorkflowVersion`/`WorkflowRun`/`WorkflowStepRun`/`WorkflowConnection`/`WorkflowSecret`/`ManualTask`. Fires AFTER the AccessGrant tx commits (never inside); Postgres = system of record; egress IP-classifier floor + per-connection allowlist seam (ADR-0055 *proposed*); retry/replay (ADR-0057) | stable |
+| **AuditModule** | `audit/` | **NEW (ADR-0081)** — reader-only surface over the append-only ledgers: `GET /audit/logs` (paged/filtered, one source: secret\|permission\|serviceAccount), `/audit/logs/export` (streamed CSV), `/audit/logs/filters`; all `logs:read` | stable |
+
+> ConfigModule also grew (since ADR-0048): `GET`/`PUT /config/smtp` + `POST /config/smtp/test` (ADR-0079) and the asset-tag-scheme config live alongside the permission-matrix endpoints.
 
 Module registration order is load-bearing in two places: `LoggerModule.forRoot(...)` is imported first (wraps every route), and inside AuthModule the two `APP_GUARD`s run in registration order — `JwtAuthGuard` (sets `request.user` from an OIDC JWT / shim, OR resolves a ServiceAccount principal on the SA-token branch) **then** `PermissionGuard` (enforces `@RequirePermission()` via PermissionResolverService). `RolesGuard`/`@Roles` are gone — authZ is now the single `@RequirePermission` primitive.
+
+---
+
+## Subsystems added since ADR-0048 (refresh 2026-07-01)
+
+> This section is the **current-state overlay** for everything built after the 2026-06-03 (ADR-0048) freeze. The older tables in this file don't mention these; trust this section + the tree.
+
+### Secret Manager — zero-knowledge vaults (ADR-0061; typed ADR-0075; SA-fetch ADR-0080)
+
+- **The load-bearing invariant is INV-10: the server NEVER decrypts.** Envelope crypto — a random per-vault DEK, wrapped to each member's asymmetric public key; the private key is wrapped under a KEK derived from the user's passphrase (Argon2id) or, for a service account, from the SA token secret (ADR-0080). Server / DB-dump / ADMIN / subpoena are **in scope** of the threat model.
+- **Entities**: `SecretVault`, `SecretItem` (**note: there is NO `Secret` model** — verify names before building near it), `UserKeypair`, `VaultMembership`, `SecretAuditLog`, plus `ServiceAccountKeypair` + `ServiceAccountVaultMembership` (ADR-0080).
+- **Module** `secret-manager/`: `vaults`/`items`/`keypair`/`service-account-keypair`/`secret-fetch` controllers; `human-only`/`service-only`/**`inv-10`** guards (with specs). Recovery model: password = daily ENTRY credential (mutable), recovery key = fixed ROOT that resets the password (ADR-0066; ADR-0065 recovery-key rotation was reverted).
+- **Typed secrets (ADR-0075)**: a client-side JSON payload inside the *same* ciphertext + a server-visible `SecretItem.kind` enum (`GENERIC`/`SSH_KEY`/`TOTP`/`CERTIFICATE`) that is **metadata only** — the server still can't see the plaintext.
+- **SA secret-fetch (ADR-0080)**: headless client-side decrypt via **`packages/fetch-cli`**; a keypair is minted for **every** SA (#883). Web surface: `/secrets` + `/secrets/[vaultId]`.
+
+### Infra topology CMDB + reporting agent (ADR-0070/0073; ADR-0074)
+
+- **`InfraNode` + `InfraEdge`** (typed, timestamped relationships) — a generic visual CMDB; a node is **Asset-backed by default** (inherits owner/KB/secrets/warranty/shortcuts), detachable to graph-only. Blast-radius (`getImpact`) walks `RUNS_ON`/`DEPENDS_ON` + (amended #802) `MEMBER_OF`.
+- **`InfraNodeSecretRef` (ADR-0073)** — a **soft handle-ref** to a secret (no FK to `SecretItem`; resolved at read, dangling dropped); **attach is member-scoped** (asserts live `VaultMembership` first → no existence leak).
+- **The Linux reporting agent (ADR-0074)** lives in **`apps/agent`** (`collect.ts`/`config.ts`/`index.ts`) — self-installing, **inventory-only, self-only**; reports via `POST /infra/report` (one shared `AgentReportSchema` in `@lazyit/shared`) → `InfraNode` rows arrive **`state=PENDING`, `source=AGENT`** in a **review tray**; the `infra-agent-staleness.sweeper` marks stale hosts OFFLINE. `apps/api/src/agent-dist` serves the installer.
+- **Web**: the topology canvas is `app/(app)/assets/diagram/` (`diagram-view`, `infra-node-*`, `node-edges-manager`, `create-node-dialog`, `create-agent-wizard`, `pending-review-tray`, `servers-table-view`) + `app/(app)/assets/servers/`.
+
+### Applications Workflow Engine + async workers (ADR-0053/0054/0055/0057)
+
+- **Async transport: BullMQ on Valkey** via `@nestjs/bullmq`/ioredis (`queue/`, ADR-0053) — an accepted app-layer carve-out from the Bun preference; untrusted/memory-heavy jobs run in **sandboxed processors**. This resolved the long-standing "async workers deferred" gate.
+- **Workflow Engine (`workflow-engine/`, ADR-0054)**: opt-in extension of the Access pillar; **Postgres is the system of record**, a BullMQ job carries only `{workflowRunId}`. **Decoupling invariant**: the engine fires from a domain event **after the AccessGrant tx commits — never inside it**; a failing external call is a recoverable `FAILED` run + notification, never a rollback/503 of the grant.
+- **Egress safety (ADR-0055, *proposed*)**: `common/egress/ip-rules.ts` is the **un-allowlistable hard floor** (loopback/IMDS/link-local/CGNAT/reserved denied before any allowlist); a per-`WorkflowConnection` audited allowlist can only widen reach within RFC1918/ULA. **Retry/replay (ADR-0057)**: clone-to-new-run + a break-glass payload override; sequence-suffix idempotency keys.
+- **Web**: `app/(app)/applications/[id]/workflows/` (incl. `workflow-graph.tsx`).
+
+### Instance SMTP + email worker (ADR-0079, *proposed*)
+
+- `smtp/` module: singleton `SmtpSettings` (`GET`/`PUT /config/smtp` + `POST /config/smtp/test`, `settings:manage` + `ServicePrincipalForbiddenGuard`); password AES-256-GCM at rest on its **own key axis** (`smtp.crypto.ts`); a **BullMQ email-dispatch worker** (`email.worker.ts`) + a notification→email relay (`notification-email.relay.ts`) wired as a channel behind `emit()`. **ADR frontmatter is `proposed`** — the module exists in the tree; confirm acceptance before treating the decision as final.
+
+### In-app notifications (ADR-0056)
+
+- `notifications/` module: append-only `Notification` + per-admin `NotificationRead` (fan-out-on-read, ADMIN-only v1); redacted metadata only (INV-6); SSE bell feed consumed by the web via a fetch-based SSE client.
+
+### KB v2 — folders, aliases, wiki-links, ACL (ADR-0059/0060)
+
+- `ArticleCategory` evolved into a hierarchical **Folder** (self-ref `parentId`); every article keeps **one required home folder**. New entities: `ArticleAlias`, `ArticleWikiLink`. **Folder is the permission boundary (ADR-0060, INV-9)** — a new orthogonal data-scoping axis: `article:read` gates whether you can act on the KB at all; the **folder ACL** gates **which** articles you see (no per-article ACL). Bulk import worker added.
+
+### Audit read surface (ADR-0081)
+
+- `audit/` reader-only module over the existing append-only ledgers: `GET /audit/logs` (paged/filtered, one `source`), `/audit/logs/export` (streamed CSV, `StreamableFile`, never buffers), `/audit/logs/filters`; all `logs:read`. Web: `app/(app)/reports/audit/`.
+
+### Import / Migrator (ADR-0069)
+
+- `import/` module: guided bulk **Asset** import (JSON+CSV), sandboxed parse, dry-run → persisted plan → replay-at-commit (`import:run`). Entities `ImportSession`/`ImportRun`/`ImportRow`. Web: `app/(app)/imports/`.
+
+### Cross-cutting UX & platform additions
+
+- **i18n (ADR-0051)** — next-intl 4.x cookie-mode, en (default/fallback) + es, `NEXT_LOCALE` cookie, no URL prefix. Every user-facing string + the Manual ship en+es.
+- **In-app Help/Manual (ADR-0062)** — public, login-free product docs (markdown in `apps/web/content/manual/{en,es}`), in the `(marketing)` group; distinct from the KB. **Standing sync rule** (CLAUDE.md #7).
+- **Server-prefetch SSR pilot (ADR-0067)** — 6 high-traffic routes become thin Server Components that prefetch their primary list query.
+- **Quick View (ADR-0072)** — entity-preview popover (radix `Popover`, click/Enter/Space-to-pin, Alt+Enter open) in pickers/multi-select/global search; data reused in-memory.
+- **Company grouping (ADR-0076)** — optional free-text `Asset.company` (grouping, **not** a tenancy boundary; no RBAC change); `<datalist>` from `GET /assets/companies`.
+- **User identity graph (ADR-0058)** — `legajo`/`username`/`managerId`XOR`managerName` on `User` (live-only partial-unique; `username` is NOT auth/linking) + clone-user-with-actions.
+- **The Ledger design refactor (ADR-0077)** — **oxblood replaces indigo** as THE brand color across app/landing/docs/logo; tokens-first migration (token *values* swap, names stay) + Hanken/Commit Mono; Ledger-native patterns (status→stamp, audit→ledger tape). Re-tunes the ADR-0049 pillar/chart palette onto the new neutrals.
+- **Advisory per-category specs dictionary (ADR-0078)** — optional `AssetCategory.specsSchema` (declarative field list) producing **soft warnings only**, never a 400; `Asset.specs` stays open jsonb (extends ADR-0007).
 
 ### Cross-cutting middleware and global services
 
@@ -132,7 +206,7 @@ Zitadel). The seven non-negotiables are codified in `docs/06-security/INVARIANTS
 
 ### Framework and conventions
 
-- Next.js `16.2.6` (App Router) + React `19.2.4`
+- Next.js `16.2.9` (App Router) + React `19.2.4`
 - Tailwind v4 + shadcn/ui (preset `radix-nova`, base `neutral`)
 - **Palette (Round 1 #65 + Round 3 #81 + UX cycle #102)**: softened neutral — warm bone (light) + dark warm gray (dark), keeping the indigo brand accent. UX cycle (#102, ADR-0011 amendment 3) **activated + tuned** the `--success/--warning/--info` (+fg) tokens for AA contrast on the bone canvas (solid pills, light + dark) and repurposed `--chart-1..5` as the **categorical / avatar palette** (`lib/avatar-color.ts` → `avatarColorFor`). KB markdown rendered via `rehype-sanitize` (closes SEC-003 render-time XSS). Mobile nav added.
 - TanStack Query for data layer (ADR-0020); `keepPreviousData` on paginated lists
@@ -148,6 +222,17 @@ Zitadel). The seven non-negotiables are codified in `docs/06-security/INVARIANTS
 - `(marketing)` — landing / public surface (minimal; carries the same first-run "Set up lazyit" gate). Also hosts the **public Help/Manual** at `/help` (ADR-0062, #535/#560/#563/#564): login-free product docs from markdown in `apps/web/content/manual/{en,es}/`, nested IA (Category→Subcategory, manifest `_nav.ts`), sidebar + simple client-side search. **Standing rule:** every user-facing change updates its Manual page (en+es) — see `manual-authoring.md` / `CLAUDE.md` #7
 - `app/setup` — full-screen first-run wizard (top-level, outside `(app)`; ADR-0043)
 - `app/api/auth/[...nextauth]` — Auth.js route handler
+- **`(print)`** — **NEW** print-optimized surfaces (e.g. `(print)/users` — offboarding/print views)
+
+**New `(app)` screens since ADR-0048** (additive — the table below predates them):
+- **`/secrets`** + `/secrets/[vaultId]` — Secret Manager (zero-knowledge vaults; client-side crypto; typed-secret forms) — ADR-0061/0075/0080
+- **`/assets/diagram`** — Infra topology canvas (InfraNode/InfraEdge, agent review tray, servers table) — ADR-0070/0073/0074; **`/assets/servers`** — servers list view
+- **`/imports`** — the Migrator wizard (bulk Asset import) — ADR-0069
+- **`/reports`** + **`/reports/audit`** — the audit-log read + CSV export surface — ADR-0081
+- **`/applications/[id]/workflows`** — Workflow Engine UI (workflow graph, runs) — ADR-0054/0057
+- **`/kb`** now folder-based (aliases, wiki-links, folder ACL; `_lib`/`_components`) — ADR-0059/0060
+- **Settings** grew: SMTP config (ADR-0079), and existing role/SA/taxonomy managers
+- Nav is now **Ledger-styled** (oxblood, ADR-0077); i18n en/es everywhere (ADR-0051); Quick View popovers in pickers/search (ADR-0072)
 
 ### Live screens (functional as of 2026-06-01 — post UX cycle)
 
@@ -362,6 +447,18 @@ All entities are in Prisma. See `apps/api/prisma/schema.prisma` for fields.
 **Enum**:
 - `Role { ADMIN MEMBER VIEWER }` — **NEW** (ADR-0040), default VIEWER (ADR-0043).
 
+**Entities added since ADR-0048 (2026-07-01 — verified against `schema.prisma`)**:
+- **UserHistory** (ADR-0050) — append-only user event log (`autoincrement`, table `user_history`); actor pair + at-most-one-actor CHECK like the ADR-0048 tables.
+- **AssetTagScheme** (ADR-0063) — single-row instance config + monotonic counter.
+- **Secret Manager (ADR-0061/0075/0080)** — `SecretVault`, `SecretItem` (+ `kind` enum), `UserKeypair`, `VaultMembership`, `SecretAuditLog` (append-only), `ServiceAccountKeypair`, `ServiceAccountVaultMembership`. **INV-10: server never decrypts. There is NO `Secret` model.**
+- **Infra topology (ADR-0070/0073/0074)** — `InfraNode` (`source`/`state`/`reportingSource`/`lastReportedAt` — PENDING/AGENT provenance), `InfraEdge`, `InfraNodeSecretRef` (soft handle-ref, Cascade to node, NO FK to secret).
+- **Notifications (ADR-0056)** — `Notification` (append-only) + `NotificationRead` (per-admin join).
+- **Workflow Engine (ADR-0054/0057)** — `ApplicationWorkflow`, `WorkflowVersion`, `WorkflowRun`, `WorkflowStepRun`, `WorkflowConnection`, `WorkflowSecret` (server-decryptable **by design** — the inverse of the Secret Manager), `ManualTask`.
+- **Import/Migrator (ADR-0069)** — `ImportSession`, `ImportRun`, `ImportRow`.
+- **SMTP (ADR-0079, *proposed*)** — `SmtpSettings` (singleton, `id='singleton'`).
+- **KB v2 (ADR-0059)** — `ArticleAlias`, `ArticleWikiLink`; `ArticleCategory` reframed as a hierarchical Folder (`parentId`).
+- **New `User` fields (ADR-0058)** — `legajo`, `username` (each live-only partial-unique), `managerId`/`managerName`; **new `Asset.company`** (ADR-0076); **new `AssetCategory.specsSchema`** (ADR-0078).
+
 **Key constraints**:
 - `User.id` = uuid (ADR-0005); most others = cuid
 - `AssetHistory.id`, `ConsumableMovement.id`, `ArticleVersion.id` = autoincrement (never exposed)
@@ -436,9 +533,9 @@ items are the **Round-2 backlog** the CEO parked while the epics shipped.
 | **Integration-test tier** — only unit (Jest/`bun test`); no API integration suite | Low | ADR-0012 deferred | When critical flows stabilize |
 | **CSV import/export** — not built | Low | Round-2 backlog (product feature) | When operators ask |
 | **Warranty / expiry read filters** — no list filters for expiring assets/warranties | Low | Round-2 backlog | When the inventory grows |
-| SEC-002: .docx decompression bomb | Medium | Deferred to BullMQ worker | When async workers are built |
+| SEC-002: .docx decompression bomb | Medium | Was deferred to a BullMQ worker — **BullMQ/Valkey now exist (ADR-0053) + the KB import worker is built (ADR-0059)**; verify the memory-budgeted/sandboxed path actually covers the docx bomb before closing | Sentinel verify against the current import worker |
 | SEC-003: stored XSS in KB markdown — render-time `rehype-sanitize` **shipped on the web**; the finding file is still `open` (no write-time sanitize; SEC doc not yet moved to `closed/`) | Low | Render-time defense is the chosen posture (ADR-0029) | Sentinel close-out: verify + move SEC-003 |
-| Async **scheduler** (cron/queue for expiry, reminders, periodic role-sync) | Deferred | CEO deferred; no BullMQ yet | When a recurring job is actually needed |
+| Async **scheduler** (cron for expiry, reminders, periodic role-sync) | Deferred | **BullMQ/Valkey now exist (ADR-0053)** — the queue transport is no longer the blocker; a repeatable/cron scheduler on top is still not wired | When a recurring job is actually needed |
 | Lint warnings, CI non-blocking | Low | Pre-existing; `continue-on-error: true` | Cleanup sprint |
 | `noUncheckedIndexedAccess` not enforced in shared build | Low | Editor-only strictness | When shared tsconfig.build.json is tightened |
 | No E2E tests | Low | ADR-0012 deferred | When critical flows stabilize |
@@ -456,16 +553,22 @@ items are the **Round-2 backlog** the CEO parked while the epics shipped.
 | **Frontend pagination + list contract** | ✅ Decided + done (ADR-0030 + amendment §6/§7): `Page<T>` + server `q`/sort/`dir`/`deleted` live on all 6 main lists + /articles + /access-grants + /dashboard/activity; full pagination UI + URL list-state shipped (#104/#110/#114) | — |
 | **Authorization model (RBAC v2 — Roles & Permissions)** | ✅ **DECIDED + done** (ADR-0046): 3 FIXED roles + fully-configurable per-role permissions (catalog-as-code, `RolePermission`, `@RequirePermission`); `@Roles` retired; **read-authz CLOSED** via the safe-default seed | — |
 | **Service Accounts (non-human principals)** | ✅ **DECIDED + done** (ADR-0048): separate `ServiceAccount` + native hashed `lzit_sa_…` token, direct catalog grants, fail-closed, SA-actor audit columns | — |
-| Async workers: BullMQ + Redis (+ scheduler) | ⬛ Not decided | **STILL the gate** for SEC-002, backups-from-frontend, and the Application workflow engine (P4); any recurring job unblocks on this |
-| CD / image publishing (GHCR + deploy flow) | ⬛ Not decided | Deferred in ADR-0027 |
+| Async workers: BullMQ + Valkey (+ scheduler) | ✅ **DECIDED + done** (ADR-0053): BullMQ on Valkey via `@nestjs/bullmq`, sandboxed processors. Unblocked SEC-002, the Workflow Engine (ADR-0054), and email dispatch (ADR-0079) | — |
+| **Applications Workflow Engine** | ✅ **DECIDED** (ADR-0054, phase-1a; +0057 retry/replay); egress connectors (ADR-0055) still *proposed* | Postgres = system of record; fires after the grant tx commits |
+| **Secret Manager (zero-knowledge)** | ✅ **DECIDED + done** (ADR-0061; +0066 recovery, +0075 typed, +0080 SA-fetch) — INV-10 | — |
+| **Infra topology CMDB + reporting agent** | ✅ **DECIDED + done** (ADR-0070/0073/0074) | — |
+| CD / image publishing (GHCR + deploy flow) | ⬛ Not decided | Deferred in ADR-0027 (ADR-0052 parallelized the CI docker builds but did not add publishing/CD) |
 | E2E / integration testing tooling | ⬛ Not decided | Deferred in ADR-0012 |
-| Settings backend (general app settings store) | ⬛ Not decided | `/config` covers first-run only; the new `/settings` web area is ADMIN UI over existing endpoints (taxonomies, asset-models, roles overview, config-status) — there is still no general settings store |
+| Settings backend (general app settings store) | 🟨 **Partially resolved** — purpose-built instance-config stores now exist (`AssetTagScheme` ADR-0063, `SmtpSettings` ADR-0079, the RolePermission matrix ADR-0046). Still **no single general key-value store**; `/settings` remains ADMIN UI over discrete endpoints | When a settings need appears that no purpose-built store fits |
+| Instance SMTP / outbound email | 🟨 **Built, ADR *proposed*** (ADR-0079) — `smtp/` module exists; confirm ADR acceptance | — |
+| On-prem / internal-target workflow connectors | 🟨 **ADR *proposed*** (ADR-0055) — the IP-classifier floor + seam are built | CEO acceptance |
 | BYOI write-back interface (SCIM/webhook) + bidirectional role sync | ⬛ Deferred to a future ADR | ADR-0043 Fork #5 |
 
 ---
 
-## Current state (2026-06-03)
+## Current state (2026-07-01 — refreshed; the detailed bullets below are the 2026-06-03 baseline)
 
+- **Since the 2026-06-03 (ADR-0048) baseline, `dev`/`master` have shipped ~33 more ADRs (0049–0081).** Headline arc: **async workers** (BullMQ/Valkey, ADR-0053) → the **Applications Workflow Engine** (ADR-0054/0057; connectors ADR-0055 *proposed*) → the **zero-knowledge Secret Manager** (ADR-0061, +0066/0075/0080; INV-10) → the **Infra topology CMDB** (ADR-0070/0073) → the **self-installing Linux reporting agent** (`apps/agent`, ADR-0074) → **KB v2** folders/aliases/wiki-links/ACL (ADR-0059/0060; INV-9) → **i18n en/es** (ADR-0051) → the **in-app Help/Manual** (ADR-0062) → the **Migrator** bulk import (ADR-0069) → **instance SMTP + email worker** (ADR-0079 *proposed*) → the **audit read + CSV surface** (ADR-0081) → **Quick View** (ADR-0072), **Company grouping** (ADR-0076), **typed secrets** (ADR-0075) → the **«Ledger» design refactor** (ADR-0077, oxblood replaces indigo). New invariants **INV-9** + **INV-10**. See the "Subsystems added since ADR-0048" section above for the current-state overlay; the bullets below are retained as the ADR-0048-era baseline.
 - `dev` is **post-RBAC-v2 + Service-Accounts epic** — ADR-0046 (Roles & Permissions v2), ADR-0047 (`start.sh`), ADR-0048 (Service Accounts), plus SEC-009/SEC-010 closed and a Clone feature, all merged. (PRs #122 #123 #126 #127 #129 #131 #134 #135 #138 #139 #142 #143 + the `69fb9cf` migrate.Dockerfile hotfix committed directly to `dev` at the CEO's request.)
 - `dev` is also **post-auth-epic** — ADR-0043 (Zitadel source-of-truth, Option B) delivered and **validated live end-to-end on 2026-06-01** (zero-touch first boot + in-app `/setup` wizard creating + mirroring the first ADMIN). Phase-4 hardening (#92–#96) merged.
 - Three rounds landed on `dev` since 2026-05-26:
@@ -475,7 +578,7 @@ items are the **Round-2 backlog** the CEO parked while the epics shipped.
 - **UX northstar cycle (PRs #100–#115) merged to `dev` 2026-06-01** — Fase 1+2 + four new surfaces (settings / KB runbooks UI / restore / bulk). Backend: list contracts extended with `sort`/`dir` (ADR-0030 §6) + `q` + `deleted=only` (§7) on the 5 lists, batch endpoints, KB reverse endpoints, consumable soft-delete leak fixed (#114). Frontend: shared chrome (PageHeader/Breadcrumb/SearchInput), StatusBadge/tokens (ADR-0011 amd 3), DetailPanel, RBAC-gated writes (`useCanWrite`), URL-driven list state, real pagination UI, bulk/restore + archived toggle, `/settings` admin area, KB runbooks panels, **heroicons-only (ADR-0045, lucide dropped)**. CEO authorized the CTO to merge these PRs to `dev`.
 - **RBAC v2 + Service-Accounts epic (2026-06-03)** — delivered via the validated pattern: a **read-only design/audit workflow → CEO forks → serialized implementation waves**, each wave gated by an adversarial multi-agent review (correctness + sentinel, with verification) before merge. Backend: PermissionResolverService + `@RequirePermission` (41 read GETs `<domain>:read`-annotated, 63 write gates migrated, `@Roles` retired), `/config/permissions` + `/config/my-permissions`, the new `/service-accounts` module, the SA-token branch in JwtAuthGuard, 5 new entities + SA-actor audit columns + CHECK. Shared: the 33-permission catalog + matrix/preset/clone helpers + SA schemas. Frontend: `/settings/roles/permissions` (role-first editor), `/settings/service-accounts` (one-time secret reveal), the `can()` infra with ALL gating migrated `isAdmin`→`can()` (`useCanWrite` retired), Clone. Security: SEC-009 + SEC-010 closed; read-authz debt closed.
 - Infra consolidated to a single `compose.yaml` + `compose.override.yaml` + `prod` profile + `infra/docker-compose.prod.yaml`; old `docker-compose.yml` / `infra/docker-compose.prod.yml` gone. Zero-touch Zitadel sidecars + `zitadel_secrets` volume. **`start.sh`** first-deploy bootstrap added (ADR-0047).
-- ADR count: 48 (0001–0048). `docs/06-security/INVARIANTS.md` records the 7 auth non-negotiables + INV-8 (ADMIN immutable/full) + INV-SA-1..4.
+- ADR count: **81 (0001–0081) as of 2026-07-01** (was 48 at this baseline). `docs/06-security/INVARIANTS.md` records the 7 auth non-negotiables + INV-8 (ADMIN immutable/full) + INV-SA-1..4 + **INV-9** (KB folder ACL, ADR-0060) + **INV-10** (Secret Manager server-never-decrypts, ADR-0061).
 - Next candidates: **async workers (BullMQ + Redis)** — now the explicit gate for backups-from-frontend + the Application workflow engine (P4); the residual UX Phase-3 polish + the not-yet-wired access-grants bulk-revoke UI + server-side filters for the client-side filter cases; the Round-2 backlog (revoke/release races, DB indexes/pg_trgm, integration tests, CSV import/export, warranty/expiry filters); the ServiceAccountAuditLog SA-actor column (own future ADR).
 
 ---

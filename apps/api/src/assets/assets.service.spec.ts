@@ -890,6 +890,93 @@ describe('AssetsService', () => {
     expect(countArgs.includeSoftDeleted).toBe(true);
   });
 
+  // --- streamInventoryCsvRows (filtered CSV export, issue #872) ------------
+  // Collect the whole async generator into one string (the API pipes it to a StreamableFile).
+  const collect = async (gen: AsyncGenerator<string>): Promise<string> => {
+    let out = '';
+    for await (const chunk of gen) out += chunk;
+    return out;
+  };
+  const CSV_HEADER =
+    'name,assetTag,serial,status,category,manufacturer,model,location,company,purchaseDate,warrantyEnd,owners,notes,createdAt,updatedAt';
+
+  it('streamInventoryCsvRows yields the header first, then batches over the lean select and terminates', async () => {
+    // A FULL batch then a short (empty) one → proves the OFFSET loop terminates without an extra call.
+    asset.findMany
+      .mockResolvedValueOnce(
+        Array.from({ length: AssetsService.EXPORT_BATCH_SIZE }, () =>
+          leanRow(),
+        ),
+      )
+      .mockResolvedValueOnce([]);
+
+    const csv = await collect(service.streamInventoryCsvRows({}, 'active'));
+
+    expect(asset.findMany).toHaveBeenCalledTimes(2);
+    expect(csv.startsWith(`${CSV_HEADER}\n`)).toBe(true);
+    // The lean select (no specs) is reused, with a stable total order + the batch size as `take`.
+    const args = (
+      asset.findMany.mock.calls as Array<
+        [{ where: unknown; orderBy: unknown; take: number; select: unknown }]
+      >
+    )[0][0];
+    expect(args.select).toEqual(EXPECTED_LIST_SELECT);
+    expect(args.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
+    expect(args.take).toBe(AssetsService.EXPORT_BATCH_SIZE);
+    expect(args.where).toEqual({ deletedAt: null });
+    // One data line per row of the full batch, plus the header line (trailing newline splits to '').
+    const lines = csv.split('\n').filter((l) => l.length > 0);
+    expect(lines).toHaveLength(AssetsService.EXPORT_BATCH_SIZE + 1);
+  });
+
+  it('streamInventoryCsvRows reuses buildWhere so the export can never drift from the list', async () => {
+    asset.findMany.mockResolvedValueOnce([]);
+
+    await collect(
+      service.streamInventoryCsvRows(
+        { company: 'Acme', status: 'RETIRED', locationId: 'l1' },
+        'active',
+      ),
+    );
+
+    const args = (
+      asset.findMany.mock.calls as Array<[{ where: unknown }]>
+    )[0][0];
+    expect(args.where).toEqual({
+      company: 'Acme',
+      status: 'RETIRED',
+      locationId: 'l1',
+      deletedAt: null,
+    });
+  });
+
+  it('streamInventoryCsvRows deleted=only scopes to archived rows via the includeSoftDeleted escape hatch', async () => {
+    asset.findMany.mockResolvedValueOnce([]);
+
+    await collect(service.streamInventoryCsvRows({}, 'only'));
+
+    const args = (
+      asset.findMany.mock.calls as Array<
+        [{ where: unknown; includeSoftDeleted?: boolean }]
+      >
+    )[0][0];
+    expect(args.where).toEqual({ deletedAt: { not: null } });
+    expect(args.includeSoftDeleted).toBe(true);
+  });
+
+  it('streamInventoryCsvRows defuses a spreadsheet formula-injection in a resolved cell', async () => {
+    asset.findMany
+      .mockResolvedValueOnce([leanRow({ company: '=cmd|/c calc' })])
+      .mockResolvedValueOnce([]);
+
+    const csv = await collect(service.streamInventoryCsvRows({}, 'active'));
+
+    // Leading '=' neutralized with a single quote (the shared guard, reused — not reimplemented).
+    expect(csv).toContain("'=cmd|/c calc");
+    // No specs column can ever appear (the lean projection has none).
+    expect(csv).not.toContain('specs');
+  });
+
   // --- findPage server-side sort (ADR-0030 amendment) ---------------------
   it('findPage with no sort keeps the default createdAt desc order', async () => {
     asset.findMany.mockResolvedValue([]);

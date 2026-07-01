@@ -24,6 +24,7 @@ import {
   projectApplication,
   projectArticle,
   projectAsset,
+  projectConsumable,
   projectInfraNode,
   projectLocation,
   projectUser,
@@ -45,7 +46,7 @@ const prisma = new PrismaClient({
 const meili = new Meilisearch({ host, apiKey: process.env.MEILI_MASTER_KEY });
 
 async function reindex(): Promise<void> {
-  const [assets, articles, users, locations, applications, infra] =
+  const [assets, articles, users, locations, applications, infra, consumables] =
     await Promise.all([
       prisma.asset.findMany({ where: { deletedAt: null } }),
       // Draft privacy (ADR-0022): only PUBLISHED articles are searchable.
@@ -69,6 +70,8 @@ async function reindex(): Promise<void> {
           asset: { select: { name: true } },
         },
       }),
+      // Consumables (#873): soft-deleted rows excluded, like every other index. Flat, no joins.
+      prisma.consumable.findMany({ where: { deletedAt: null } }),
     ]);
 
   // `Meilisearch` structurally satisfies the small ReindexClient surface reindexIndex depends on.
@@ -86,6 +89,7 @@ async function reindex(): Promise<void> {
     applications.map(projectApplication),
   );
   await reindexIndex(client, 'infra', infra.map(projectInfraNode));
+  await reindexIndex(client, 'consumables', consumables.map(projectConsumable));
 
   console.log('Reindex complete (full rebuild — stale documents evicted):');
   console.log(`  assets:       ${assets.length}`);
@@ -94,6 +98,7 @@ async function reindex(): Promise<void> {
   console.log(`  locations:    ${locations.length}`);
   console.log(`  applications: ${applications.length}`);
   console.log(`  infra:        ${infra.length}`);
+  console.log(`  consumables:  ${consumables.length}`);
 }
 
 reindex()

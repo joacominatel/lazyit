@@ -102,8 +102,16 @@ Authoring is gated by Knowledge Base permissions, and the API additionally enfor
 
 - Reading the Knowledge Base needs the article-read permission, which every role holds by default.
 - Creating, importing, editing, publishing, unpublishing and linking need the article-write
-  permission — and **only the article's author** may edit, publish or delete their own article. A
-  permission holder who is not the author still gets a permission error.
+  permission. By default a normal writer may only edit, publish or delete **their own** articles — a
+  write-permission holder who is not the author gets a permission error on someone else's article.
+- **Editing any article.** Two callers are exempt from the author-only rule so a runbook is never
+  stuck behind an unavailable author: **administrators** (who can always edit, publish, delete and
+  restore any article), and holders of the **"Edit any article"** capability (`article:manage`). This
+  is an admin-grantable permission you can give a trusted teammate. It bypasses authorship **only** —
+  the person still needs the write permission to edit (or the delete permission to delete), and a
+  non-admin holder still cannot touch an article in a folder they cannot see. **Attribution is never
+  lost:** the original author stays recorded, and each edit is stamped with who actually made it in
+  the article's version history.
 - Administrators can always see every article, including drafts, regardless of folder restrictions.
 
 See [Roles and permissions](/help/permissions) for the full capability set.

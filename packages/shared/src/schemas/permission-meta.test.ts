@@ -110,6 +110,9 @@ describe("Above-default-tier markers", () => {
           "accessGrant:grant",
           "settings:manage",
           "user:manage",
+          // article:manage (#877) — the delegatable "edit any article" verb (bypasses authorship);
+          // coarse (neither `:read` nor `:write`), ADMIN-only by seed default.
+          "article:manage",
           // workflow coarse verbs (epic #248) — `read` is a view tier, the other four are coarse
           "workflow:manage",
           "workflow:run",

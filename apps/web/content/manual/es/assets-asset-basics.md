@@ -117,6 +117,18 @@ aplicas aparece también como una etiqueta que puedes quitar debajo de la barra,
 en la dirección de la página, así que una vista filtrada es fácil de deshacer, compartir o guardar
 en marcadores.
 
+### Exportar el inventario
+
+El botón **Exportar (filtrado)** en la parte superior de la página de Activos descarga un **CSV** del
+inventario que coincide con tus **filtros actuales** — todo el conjunto de resultados, no solo la
+página que tienes delante. Ajusta primero el estado, la categoría, la ubicación, la empresa, el
+responsable o la búsqueda que te interesan (por ejemplo *todos los servidores Dell del colo fuera de
+garantía*) y exporta solo esa porción. El archivo lleva una fila por activo con su nombre, etiqueta de
+activo, número de serie, estado, categoría, fabricante, modelo, ubicación, empresa, fechas de compra y
+de garantía, responsables actuales, notas y las marcas de tiempo de creación/actualización, y es
+seguro abrirlo en una hoja de cálculo. Los campos **specs** personalizados no se incluyen en esta
+versión. Si tienes abierta la vista *Ver archivados*, la exportación es esa porción archivada.
+
 ### Elegir qué columnas mostrar
 
 El botón **Columnas** (junto a *Filtros*) abre una lista de las columnas de la tabla — etiqueta,

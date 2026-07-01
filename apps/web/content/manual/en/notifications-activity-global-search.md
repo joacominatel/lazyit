@@ -8,8 +8,8 @@ subcategory: global-search
 # Global search
 
 Global search is the command palette that spans the whole product: one box that searches across
-assets, articles, users, locations, applications and topology nodes at once. It is typo-tolerant and
-ranked, so a near-miss or a partial word still finds the record.
+assets, articles, users, locations, applications, topology nodes and consumables at once. It is
+typo-tolerant and ranked, so a near-miss or a partial word still finds the record.
 
 ## Opening it
 
@@ -21,7 +21,7 @@ Start typing and results appear, grouped by kind. Move through them with the **�
 
 ## What it searches
 
-Six kinds of records are indexed:
+Seven kinds of records are indexed:
 
 - **Assets** — by name, asset tag or serial.
 - **Articles** — Knowledge Base articles, including their body text, so a procedure inside an article
@@ -31,6 +31,8 @@ Six kinds of records are indexed:
 - **Applications** — by name and vendor.
 - **Topology nodes** — servers, VMs, containers and the rest of the infrastructure map, by label, IP
   address or linked asset name.
+- **Consumables** — spare parts and stock items, by name, SKU or description. The preview shows how
+  much is on hand, so "how many HDMI cables are left?" is answered right in the palette.
 
 Use the **filter chips** above the results to scope the search to a single kind, or leave it on
 **All** to search everything. Selecting a result navigates straight to that record.

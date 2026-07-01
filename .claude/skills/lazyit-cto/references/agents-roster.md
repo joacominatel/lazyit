@@ -21,6 +21,19 @@ If no agent fits the task, **the CTO escalates to the CEO** before inventing a n
 
 ---
 
+## Current working model (2026-07-01) — READ FIRST
+
+> The lane/roster entries below are still the mental model for **who owns what**, but the *mechanics* of dispatch have settled into a concrete loop. This section is authoritative on the mechanics; the per-agent entries are authoritative on the lanes.
+
+- **Agents are general-purpose worktree agents that LOAD a skill**, not distinct Agent-tool agentTypes. `lazyit-navigator` / `lazyit-devops` / `lazyit-sentinel` / `lazyit-remediator` (and `lazyit-cto`) are **skills** — the CTO dispatches a general-purpose (or `Explore`) agent and bakes the relevant skill's lens into its prompt. **Do NOT pass these as `subagent_type`** — they are not valid workflow/Agent agentTypes and the call will not do what you expect.
+- **The standard build loop** (per issue): a worktree agent **branches off `dev`** → builds in its own worktree → **self-verifies locally**: `tsc --noEmit` (strict — CI catches what `bun test` doesn't), **Jest** (apps/api) or **`bun test`** (shared/scripts), **`bunx eslint` on changed files** (this is where the **apps/api `prettier/prettier`** rule lives and bites — apps/web eslint has **no** prettier rule), and a **targeted build** of the touched package. **No docker, no shared DB, no full `bun run dev`** in the worktree.
+- **The agent pushes and opens a PR to `dev`** (never `master`). **The CTO reviews + security-gates + merges to `dev`.** **Only the CEO promotes `dev` → `master`** — agents never merge to master. Anti-clobber holds per branch (no `--amend`/`rebase`/`reset`/`add -A`; stage explicit files; commit file-by-file; no Claude attribution trailers).
+- **Security gate for crypto / INV-10 / auth PRs = a SINGLE focused general-purpose agent with the security lens written into its prompt** (the "sentinel lens"), not a separate agentType and not necessarily a multi-agent panel. For high-stakes epics the CTO may still run the adversarial correctness+security pair (see the validated-pattern section below), but the everyday gate is one security-lensed reviewer.
+- **Persona-user feedback panel** is a **recurring track**: the CTO periodically dispatches persona agents (operator personas) to exercise a shipped surface and file friction/feedback, feeding the backlog. Treat it as a standing input source, not a one-off.
+- **Verification lessons baked in** (memory): worktree agents can misreport `dev`/`shared` as broken from a **stale base** — re-verify against `origin/dev` and trust CI; agents sometimes **leak git state into the main checkout** — after each wave verify `git symbolic-ref --short HEAD` == `dev`; a backend/api PR that skips `bunx eslint` will fail the diff-lint gate on prettier.
+
+---
+
 ## Concurrency rules
 
 This roster also informs **parallel-dispatch decisions**. The CTO uses three tiers:

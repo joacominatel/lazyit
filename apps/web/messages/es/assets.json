@@ -3,6 +3,12 @@
     "title": "Activos",
     "subtitle": "Todo lo que tu equipo rastrea y posee.",
     "newAsset": "Nuevo activo",
+    "export": {
+      "button": "Exportar (filtrado)",
+      "exporting": "Exportando…",
+      "exportTitle": "Descargar como CSV todos los activos que coinciden con los filtros actuales",
+      "error": "No se pudo exportar el inventario"
+    },
     "searchLabel": "Buscar activos",
     "searchPlaceholder": "Buscar por nombre, número de serie, etiqueta…",
     "selectAllLabel": "Seleccionar todos los activos de esta página",

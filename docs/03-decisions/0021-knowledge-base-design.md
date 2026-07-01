@@ -73,7 +73,9 @@ can be added later without a destructive migration**.
 - **`status` lifecycle:** `DRAFT` is author-private; `PUBLISHED` is team-visible. Transitions go
   through dedicated `POST /articles/:id/publish` and `/unpublish` endpoints (not `PATCH`, which
   never touches `status`). The visibility + authorship rules are in
-  [[0022-draft-visibility-auth-shim]].
+  [[0022-draft-visibility-auth-shim]] — including the #877 amendment where **admins and holders of the
+  coarse `article:manage` capability may edit/publish/delete any article, not just their own** (author
+  attribution stays intact; a non-admin holder still passes folder access).
 - **File import** (`POST /articles/import`, multipart) supports `.md`, `.txt` and `.docx`; it
   extracts **markdown only** and does **not** store the original file. `.docx` is converted with
   `mammoth` (pure JS, no external binaries). Max size via `MAX_IMPORT_SIZE_MB` (default 5).

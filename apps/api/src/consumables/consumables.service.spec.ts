@@ -8,6 +8,11 @@ import { ConsumablesService } from './consumables.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SearchService } from '../search/search.service';
+
+// Jest can't transform the ESM-only `meilisearch` package; ConsumablesService transitively imports it
+// via SearchService, so stub the module out (we never construct a real client in these tests).
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -72,6 +77,7 @@ describe('ConsumablesService', () => {
   };
   let actor: ActorService;
   let notifications: { emit: jest.Mock };
+  let search: { upsert: jest.Mock; remove: jest.Mock };
 
   beforeEach(async () => {
     consumable = {
@@ -106,12 +112,16 @@ describe('ConsumablesService', () => {
 
     notifications = { emit: jest.fn().mockResolvedValue(null) };
 
+    // Fire-and-forget search sync (ADR-0035): upsert/remove are no-op jest.fns here (no live Meili).
+    search = { upsert: jest.fn(), remove: jest.fn() };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         ConsumablesService,
         { provide: PrismaService, useValue: prisma },
         { provide: ActorService, useValue: actor },
         { provide: NotificationsService, useValue: notifications },
+        { provide: SearchService, useValue: search },
       ],
     }).compile();
 
@@ -650,5 +660,91 @@ describe('ConsumablesService', () => {
     await expect(service.restore('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  // --- search sync (#873) --------------------------------------------------
+  describe('search sync (ADR-0035, #873)', () => {
+    // A full live row + its projected search document (id/name/sku/description/currentStock/unit).
+    const FULL_ROW = {
+      id: 'k1',
+      name: 'HDMI cable',
+      sku: 'HDMI-2M',
+      description: '2m cable',
+      currentStock: 12,
+      unit: 'units',
+      minStock: null, // null so the movement path's low-stock check is a clean early-return
+    };
+    const DOC = {
+      id: 'k1',
+      name: 'HDMI cable',
+      sku: 'HDMI-2M',
+      description: '2m cable',
+      currentStock: 12,
+      unit: 'units',
+    };
+
+    it('create upserts the projected consumable into the index', async () => {
+      consumable.create.mockResolvedValue(FULL_ROW);
+
+      await service.create({ name: 'HDMI cable', unit: 'units' });
+
+      expect(search.upsert).toHaveBeenCalledWith('consumables', DOC);
+    });
+
+    it('update re-upserts after a successful edit', async () => {
+      consumable.findFirst.mockResolvedValue({ id: 'k1' });
+      consumable.update.mockResolvedValue(FULL_ROW);
+
+      await service.update('k1', { name: 'HDMI cable' });
+
+      expect(search.upsert).toHaveBeenCalledWith('consumables', DOC);
+    });
+
+    it('soft-delete removes the consumable from the index (never upserts)', async () => {
+      consumable.findFirst.mockResolvedValue({ id: 'k1' });
+      consumable.update.mockResolvedValue({ id: 'k1', deletedAt: new Date() });
+
+      await service.remove('k1');
+
+      expect(search.remove).toHaveBeenCalledWith('consumables', 'k1');
+      expect(search.upsert).not.toHaveBeenCalled();
+    });
+
+    it('restore re-upserts the reactivated consumable', async () => {
+      consumable.findFirst.mockResolvedValue({
+        ...FULL_ROW,
+        deletedAt: new Date(),
+      });
+      consumable.update.mockResolvedValue({ ...FULL_ROW, deletedAt: null });
+
+      await service.restore('k1');
+
+      expect(search.upsert).toHaveBeenCalledWith('consumables', DOC);
+    });
+
+    it('restore is a search no-op when the consumable is already live (idempotent)', async () => {
+      consumable.findFirst.mockResolvedValue({ ...FULL_ROW, deletedAt: null });
+
+      await service.restore('k1');
+
+      expect(search.upsert).not.toHaveBeenCalled();
+    });
+
+    it('re-indexes after a movement commits so the cached currentStock stays fresh', async () => {
+      // IN tx path (increment).
+      tx.consumable.findFirst.mockResolvedValue({ currentStock: 9 });
+      tx.consumable.update.mockResolvedValue({ id: 'k1' });
+      tx.consumableMovement.create.mockResolvedValue({ id: 1 });
+      // The post-commit reindex (and the low-stock `before` read) go through the top-level findFirst.
+      consumable.findFirst.mockResolvedValue(FULL_ROW);
+
+      await service.createMovement('k1', { type: 'IN', quantity: 3 });
+      // reindex is fire-and-forget (un-awaited .then) — flush the microtask queue so it runs.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(search.upsert).toHaveBeenCalledWith('consumables', DOC);
+    });
   });
 });

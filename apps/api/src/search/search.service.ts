@@ -19,6 +19,7 @@ export const SEARCH_INDEXES = [
   'locations',
   'applications',
   'infra', // topology nodes (ADR-0070 v1) — kind/status/state filterable (see reindex.ts)
+  'consumables', // #873 — name/sku/description searchable; currentStock/unit for the lean hit preview
 ] as const;
 
 export type SearchIndex = (typeof SEARCH_INDEXES)[number];
@@ -43,6 +44,10 @@ const RETRIEVE: Record<SearchIndex, string[]> = {
   // attributes (declared in reindex.ts) AND are returned so the canvas can badge a hit. No secret
   // values, no `specs`/`shortcuts` blobs — a node holds no secrets (zero-knowledge, ADR-0061).
   infra: ['id', 'label', 'kind', 'status', 'state', 'ipAddress', 'assetName'],
+  // #873: the consumable-hit fields. name/sku/description are searchable; currentStock/unit are
+  // returned so the palette renders a "12 units" preview from the lean hit (zero extra fetch). Keep in
+  // lockstep with `ConsumableHitSchema` in @lazyit/shared.
+  consumables: ['id', 'name', 'sku', 'description', 'currentStock', 'unit'],
 };
 
 /** The internal-only article-hit field stripped before a hit ships (the post-filter's folder key). */

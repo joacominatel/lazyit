@@ -28,6 +28,8 @@ The product is built around three operational pillars an IT team handles daily:
 
 These three are first-class in the data model and the UI. Everything else (tickets, notifications, integrations, webhooks) builds **on top of these three**, not parallel to them. When proposing new features, the CTO must check: *does this strengthen one of the three pillars, or is it scope creep?*
 
+> **Update (2026-07-01):** the three pillars still anchor the product, but capability has grown well beyond them and two adjacent surfaces are now first-class in their own right: a **zero-knowledge Secret Manager** (vaults beside the KB; the server can never decrypt — INV-10, ADR-0061) and an **Infra-topology CMDB** (a generic visual map of the server estate — InfraNode/InfraEdge, ADR-0070), fed by a **self-installing Linux reporting agent** (inventory-only, review-tray-gated — ADR-0074). Auditability is now *surfaced*, not just stored (an in-app audit read + CSV export, ADR-0081; reveal/offboard auditing). Read these as **deepenings of Inventory + Access + Knowledge under the auditable-by-default philosophy**, not a fourth pillar — but the "three pillars" framing below is no longer the whole map.
+
 ---
 
 ## Distribution model
@@ -159,18 +161,15 @@ Append-only tables (`AssetAssignment`, `AccessGrant`, `AssetHistory`, `Consumabl
 
 ## Auth and identity
 
-Auth is the **single largest pending technical decision**. Until it is implemented:
+> **Update (2026-07-01): DONE.** Auth is no longer pending — it was delivered and validated live end-to-end on 2026-06-01. The section below is retained for history; the shim it describes now survives only as `AUTH_MODE=shim` (dev/tests, prod-guarded).
 
-- A shim header `X-User-Id` simulates the authenticated user (per ADR-0022)
-- Visibility rules (drafts in the KB, for example) respect the shim already, so the auth layer can drop in without rewriting visibility logic
-- The `User.externalId` field exists, ready to map to whatever the IdP returns as `sub` in the JWT
+**Current reality:**
+- **AuthN**: generic OIDC (bundled **Zitadel** default, BYOI by env), `JwtAuthGuard` validates a Bearer JWT via JWKS (RS256-pinned); JIT provisioning + email account-linking on first login (ADR-0037/0038/0039/0043).
+- **AuthZ**: **RBAC v2** — 3 FIXED roles (ADMIN/MEMBER/VIEWER) with **fully-configurable per-role permissions** (a catalog-as-code + `RolePermission` matrix + `@RequirePermission`); **DB-first, a token claim is never an authZ source** (INV-1); ADMIN immutable/full (INV-8). Read-authz is CLOSED (ADR-0046).
+- **Non-human principals**: **Service Accounts** with native hashed `lzit_sa_…` tokens + direct catalog grants (ADR-0048), extended to hold a keypair for headless secret retrieval (ADR-0080).
+- **Zitadel is the source of truth** with app→IdP write-back via the Management API; BYOI degrades gracefully (ADR-0043).
 
-The CTO's role during the auth epic is critical:
-- Identify which subagent owns each phase (devops for IdP setup, backend for OIDC integration, frontend for login flow, etc.)
-- Ensure the shim is removed cleanly and ADR-0022 is marked superseded
-- Validate that bring-your-own-IdP works after the bundled IdP is in place
-
-When auth is in production, the CTO updates this file to reflect the new identity flow.
+**Historical (pre-2026-06-01):** Auth was the single largest pending decision. A shim header `X-User-Id` simulated the caller (ADR-0022); `User.externalId` was reserved for the OIDC `sub`. The auth epic (devops IdP setup + backend OIDC + frontend Auth.js login) delivered all of it; ADR-0016/0022/0024 are superseded.
 
 ---
 
@@ -179,7 +178,7 @@ When auth is in production, the CTO updates this file to reflect the new identit
 Saying what the product is not is as important as saying what it is. The CTO uses this list to push back when scope creeps.
 
 - **Not a ticketing system.** Tickets are a future option. They are not a pillar.
-- **Not a monitoring tool.** lazyit does not poll devices, does not collect metrics, does not page on-call. Other tools do that. lazyit references those tools.
+- **Not a monitoring tool.** lazyit does not poll devices, does not collect metrics, does not page on-call. Other tools do that. lazyit references those tools. *(2026-07-01: the self-installing Linux reporting agent (ADR-0074) deliberately stays on the right side of this line — it reports **inventory only** (host identity/hardware/installed software) for **itself**, review-tray-gated; explicitly no health snapshots, no time-series metrics, no alerting.)*
 - **Not an HR system.** Users exist for access and ownership. Onboarding workflows, payroll, etc. are outside scope.
 - **Not a CRM.** No customer-facing entities. The user base is the IT team and the company employees they support, period.
 - **Not enterprise.** The target is mid-market. If a feature only makes sense at 10,000+ employees, it is not for us.
@@ -190,18 +189,20 @@ When a feature proposal makes lazyit resemble any of the above, the CTO escalate
 
 ## Strategic horizons
 
+> **Update (2026-07-01):** most of the near/medium-term items below have shipped. Auth is done; the Workflow Engine (ADR-0054) delivers provisioning-on-grant; UserHistory (ADR-0050) extended history to users; per-concern settings stores exist (ADR-0063/0079). The lists below are retained for context; the live roadmap is now CEO-driven per session.
+
 ### Near term (next 1-3 epics)
 
-- **Auth**: end the shim. This is the gate to everything else.
-- **Frontend completion**: finish the screens that materialize the backend's current capability.
-- **Operational polish**: error UX, search UX, history UX — the things that make the product feel finished.
+- ~~**Auth**: end the shim.~~ **DONE** (ADR-0043, live 2026-06-01).
+- **Frontend completion / design**: the **«Ledger» refactor** (ADR-0077, oxblood) is the current large frontend arc.
+- **Operational polish**: error UX, search UX, history UX, i18n (en/es shipped, ADR-0051).
 
 ### Medium term (next 3-6 epics, contingent on validation)
 
-- **Access requests with approval**: workflow for end-users to request access, IT to approve. Currently access is admin-granted only.
-- **Asset-history extension** to applications and consumables (currently only assets have a history table).
-- **Settings backend** for configurable behavior (renamed instance, branding, import limits). Deliberately deferred until justified.
-- **Webhooks**: outbound events for integration with other tools.
+- **Access requests / provisioning workflow**: partly delivered as the **Applications Workflow Engine** (ADR-0054/0057) — provisioning fires after a grant commits.
+- **History extension**: **UserHistory** shipped (ADR-0050); consumables/apps history still asset-only.
+- ~~**Settings backend**~~: **partially delivered** as purpose-built stores (`AssetTagScheme` ADR-0063, `SmtpSettings` ADR-0079) — no single general store yet.
+- **Webhooks / outbound integration**: still open; **instance SMTP + email** (ADR-0079, *proposed*) is the first outbound channel.
 
 ### Longer term (beyond MVP)
 

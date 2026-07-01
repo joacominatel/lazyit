@@ -262,7 +262,11 @@
           "search": "Search",
           "settings": "Settings",
           "logs": "Activity logs",
-          "workflow": "Workflows"
+          "workflow": "Workflows",
+          "notification": "Notifications",
+          "secret": "Secret Manager",
+          "import": "Imports",
+          "infra": "Server map"
         }
       },
       "segmented": {
@@ -513,6 +517,7 @@
       "article:read": { "label": "Read the Knowledge Base" },
       "article:write": { "label": "Write & edit articles" },
       "article:delete": { "label": "Delete articles" },
+      "article:manage": { "label": "Edit any article" },
       "user:read": { "label": "View the user directory" },
       "user:write": { "label": "Edit user records (reserved)" },
       "user:delete": { "label": "Delete users" },
@@ -588,6 +593,10 @@
       "article:delete": {
         "label": "Delete articles",
         "description": "Archive Knowledge Base articles."
+      },
+      "article:manage": {
+        "label": "Edit any article",
+        "description": "Edit, publish, delete and restore ANY Knowledge Base article — not just your own. Still requires the write/delete capability for the action, and folder access is still respected."
       },
       "user:view": {
         "label": "View the user directory",

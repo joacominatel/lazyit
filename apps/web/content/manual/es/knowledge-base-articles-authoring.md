@@ -108,8 +108,18 @@ La redacción está gobernada por los permisos de la Base de conocimiento, y la 
 - Leer la Base de conocimiento requiere el permiso de lectura de artículos, que todos los roles
   tienen por defecto.
 - Crear, importar, editar, publicar, despublicar y vincular requieren el permiso de escritura de
-  artículos — y **solo el autor del artículo** puede editar, publicar o eliminar su propio artículo.
-  Un titular del permiso que no sea el autor recibe igualmente un error de permisos.
+  artículos. Por defecto, un redactor normal solo puede editar, publicar o eliminar **sus propios**
+  artículos — un titular del permiso de escritura que no sea el autor recibe un error de permisos en
+  el artículo de otra persona.
+- **Editar cualquier artículo.** Dos tipos de usuario quedan exentos de la regla de solo-autor para
+  que un runbook nunca quede bloqueado por un autor no disponible: los **administradores** (que
+  siempre pueden editar, publicar, eliminar y restaurar cualquier artículo) y los titulares de la
+  capacidad **«Editar cualquier artículo»** (`article:manage`). Es un permiso que un administrador
+  puede otorgar a un compañero de confianza. Solo omite la **autoría**: la persona sigue necesitando
+  el permiso de escritura para editar (o el de eliminación para eliminar), y un titular que no sea
+  administrador tampoco puede tocar un artículo en una carpeta que no puede ver. **La atribución nunca
+  se pierde:** el autor original permanece registrado y cada edición queda marcada con quién la hizo
+  realmente en el historial de versiones del artículo.
 - Los administradores siempre ven todos los artículos, incluidos los borradores, sin importar las
   restricciones de carpeta.
 

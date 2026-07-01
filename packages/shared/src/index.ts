@@ -72,6 +72,7 @@ export * from "./schemas/user";
 export * from "./schemas/user-history";
 export * from "./schemas/user-list";
 export * from "./schemas/workflow";
+export * from "./utils/asset-inventory-csv";
 export * from "./utils/audit-log-csv";
 export * from "./utils/recent-activity-csv";
 export * from "./utils/slug";

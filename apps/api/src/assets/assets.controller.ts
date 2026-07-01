@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import {
   BadRequestException,
   Body,
@@ -8,11 +9,13 @@ import {
   Patch,
   Post,
   Query,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -175,25 +178,6 @@ export class AssetsController {
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
   ) {
-    let parsedStatus: AssetStatus | undefined;
-    if (status !== undefined) {
-      const result = AssetStatusSchema.safeParse(status);
-      if (!result.success) {
-        throw new BadRequestException(
-          `Invalid status. Expected one of: ${AssetStatusSchema.options.join(', ')}`,
-        );
-      }
-      parsedStatus = result.data;
-    }
-    let parsedOwnership: 'HAS' | 'NONE' | undefined;
-    if (ownership !== undefined) {
-      if (ownership !== 'HAS' && ownership !== 'NONE') {
-        throw new BadRequestException(
-          'Invalid ownership. Expected one of: HAS, NONE',
-        );
-      }
-      parsedOwnership = ownership;
-    }
     const pageQuery = parsePageQuery({
       limit,
       offset,
@@ -206,18 +190,66 @@ export class AssetsController {
     // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
     assertCanListDeleted(pageQuery.deleted, user);
     return this.assets.findPage(
-      {
-        categoryId: parseCuidQuery(categoryId, 'categoryId'),
-        locationId: parseCuidQuery(locationId, 'locationId'),
-        status: parsedStatus,
-        company: company?.trim() || undefined,
+      this.parseAssetFilters({
+        categoryId,
+        locationId,
+        status,
+        company,
         q,
-        // User.id is a uuid (ADR-0005) — validate with parseUuidQuery (cf. categoryId/locationId cuid).
-        assignedToUserId: parseUuidQuery(assignedToUserId, 'assignedToUserId'),
-        ownership: parsedOwnership,
-      },
+        assignedToUserId,
+        ownership,
+      }),
       pageQuery,
     );
+  }
+
+  /**
+   * Parse + validate the shared asset FILTERS (the additive `where` inputs common to the list read and
+   * the CSV export) into the service's {@link AssetFilters}. The global ZodValidationPipe only checks
+   * `@Body()`, so these raw `@Query` strings are validated here: an invalid status/ownership → 400, and
+   * categoryId/locationId (cuid) / assignedToUserId (a User uuid, ADR-0005) are id-validated. Shared so
+   * the export interprets every param IDENTICALLY to the list — it can never drift.
+   */
+  private parseAssetFilters(raw: {
+    categoryId?: string;
+    locationId?: string;
+    status?: string;
+    company?: string;
+    q?: string;
+    assignedToUserId?: string;
+    ownership?: string;
+  }) {
+    let parsedStatus: AssetStatus | undefined;
+    if (raw.status !== undefined) {
+      const result = AssetStatusSchema.safeParse(raw.status);
+      if (!result.success) {
+        throw new BadRequestException(
+          `Invalid status. Expected one of: ${AssetStatusSchema.options.join(', ')}`,
+        );
+      }
+      parsedStatus = result.data;
+    }
+    let parsedOwnership: 'HAS' | 'NONE' | undefined;
+    if (raw.ownership !== undefined) {
+      if (raw.ownership !== 'HAS' && raw.ownership !== 'NONE') {
+        throw new BadRequestException(
+          'Invalid ownership. Expected one of: HAS, NONE',
+        );
+      }
+      parsedOwnership = raw.ownership;
+    }
+    return {
+      categoryId: parseCuidQuery(raw.categoryId, 'categoryId'),
+      locationId: parseCuidQuery(raw.locationId, 'locationId'),
+      status: parsedStatus,
+      company: raw.company?.trim() || undefined,
+      q: raw.q,
+      assignedToUserId: parseUuidQuery(
+        raw.assignedToUserId,
+        'assignedToUserId',
+      ),
+      ownership: parsedOwnership,
+    };
   }
 
   // STATIC route declared BEFORE the `:id` param route so `/assets/companies` never resolves as an id.
@@ -230,6 +262,73 @@ export class AssetsController {
   @ApiOkResponse({ type: [String] })
   listCompanies() {
     return this.assets.listCompanies();
+  }
+
+  // STATIC route declared BEFORE the `:id` param route so `/assets/export` never resolves as an id.
+  @Get('export')
+  @RequirePermission('asset:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'Bulk CSV export of the WHOLE filtered asset inventory (issue #872), gated on asset:read. Takes the SAME filters as GET /assets (minus paging/sort) and streams EVERY matching asset newest-first — not just the visible page. Cells are RFC-4180 escaped with a spreadsheet formula-injection guard. `deleted=only` (archived) is ADMIN-only (403 otherwise). The per-unit `specs` jsonb is not included (v1).',
+  })
+  @ApiQuery({ name: 'categoryId', required: false })
+  @ApiQuery({ name: 'locationId', required: false })
+  @ApiQuery({ name: 'company', required: false })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: [...AssetStatusSchema.options],
+  })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'assignedToUserId', required: false })
+  @ApiQuery({ name: 'ownership', required: false, enum: ['HAS', 'NONE'] })
+  @ApiQuery({
+    name: 'deleted',
+    required: false,
+    enum: ['active', 'only'],
+    description:
+      'Soft-delete slice. active (default) = live assets; only = archived — ADMIN only (403 otherwise).',
+  })
+  @ApiOkResponse({
+    description: 'The filtered asset inventory as CSV (text/csv).',
+  })
+  export(
+    @Query('categoryId') categoryId?: string,
+    @Query('locationId') locationId?: string,
+    @Query('status') status?: string,
+    @Query('company') company?: string,
+    @Query('q') q?: string,
+    @Query('assignedToUserId') assignedToUserId?: string,
+    @Query('ownership') ownership?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
+  ): StreamableFile {
+    const filters = this.parseAssetFilters({
+      categoryId,
+      locationId,
+      status,
+      company,
+      q,
+      assignedToUserId,
+      ownership,
+    });
+    // Reuse parsePageQuery ONLY for its `deleted` validation (the export is unpaginated); an invalid
+    // slice → 400, then gate the privileged archived slice ADMIN-only exactly like the list (ADR-0041).
+    const { deleted: slice } = parsePageQuery({ deleted });
+    assertCanListDeleted(slice, user);
+
+    const filename = `lazyit-assets-${new Date().toISOString().slice(0, 10)}.csv`;
+    // Readable.from drains the async generator one chunk at a time → never the whole estate in memory.
+    return new StreamableFile(
+      Readable.from(this.assets.streamInventoryCsvRows(filters, slice), {
+        objectMode: false,
+      }),
+      {
+        type: 'text/csv; charset=utf-8',
+        disposition: `attachment; filename="${filename}"`,
+      },
+    );
   }
 
   @Get(':id')
