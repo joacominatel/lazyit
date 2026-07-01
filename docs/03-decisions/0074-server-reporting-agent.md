@@ -126,6 +126,15 @@ never a 400.
 and it is deliberately coarse — a liveness bit, not a metric. // a downed agent ⇒ OFFLINE on the map,
 which already drives the blast-radius UI from [[0070-infra-topology-graph]] §7.
 
+**Amendment (2026-06-30, #852) — one bell nudge per OFFLINE transition.** The sweeper now emits a
+broadcast **`infra.agent_offline`** notification ([[0056-in-app-notification-bell]] amendment §A) for each
+node **transitioning** CONFIRMED→OFFLINE, so a dark agent surfaces as an admin nudge, not just a map badge.
+The bulk `updateMany` can't report which rows it flipped, so the sweep **snapshots the `status != OFFLINE`
+doomed set before the flip** and emits one nudge per snapshot node, POST-flip + best-effort (a failed emit
+never aborts the sweep). Deduped on the node's last-report instant → **one nudge per outage**, never
+once-per-sweep. Still the coarse liveness bit — no metrics, no thresholds beyond the existing staleness
+cutoff.
+
 ### §5 — Auth & permission
 
 - The agent authenticates as a **Service Account** ([[0048-service-accounts]]) —
