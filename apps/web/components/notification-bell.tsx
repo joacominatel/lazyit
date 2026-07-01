@@ -7,6 +7,8 @@ import {
   ExclamationTriangleIcon,
   KeyIcon,
   ShieldCheckIcon,
+  ShieldExclamationIcon,
+  SignalSlashIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
 import type { Notification, NotificationType } from "@lazyit/shared";
@@ -89,6 +91,19 @@ const TYPE_META: Record<
     icon: KeyIcon,
     tone: "bg-pillar-access/10 text-pillar-access",
     href: () => "/secrets",
+  },
+  // The two SENSITIVE-audit alerts (ADR-0056 amendment #852) — admin-broadcast security nudges. Both
+  // carry no entityId, so they deep-link by TYPE: a matrix widening → the role→permission editor; an
+  // agent going dark → the topology map. Destructive tone marks them as "look at this".
+  permission_widened: {
+    icon: ShieldExclamationIcon,
+    tone: "bg-destructive/10 text-destructive",
+    href: () => "/settings/roles/permissions",
+  },
+  "infra.agent_offline": {
+    icon: SignalSlashIcon,
+    tone: "bg-destructive/10 text-destructive",
+    href: () => "/assets/diagram",
   },
 };
 
