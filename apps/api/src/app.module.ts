@@ -27,6 +27,7 @@ import { AuditModule } from './audit/audit.module';
 import { HealthModule } from './health/health.module';
 import { CommonModule } from './common/common.module';
 import { ConfigModule } from './config/config.module';
+import { InstanceModule } from './instance/instance.module';
 import { QueueModule } from './queue/queue.module';
 import { ServiceAccountsModule } from './service-accounts/service-accounts.module';
 import { WorkflowEngineModule } from './workflow-engine/workflow-engine.module';
@@ -61,6 +62,9 @@ import { buildLoggerParams } from './logging/logging.config';
     // In-app first-run setup (ADR-0043 Phase 3): @Public() GET /config/status + the idempotent,
     // CSRF + rate-limited POST /config/setup that bootstraps the first ADMIN. No migration.
     ConfigModule,
+    // Version identity (ADR-0083): the authenticated GET /instance/version read of the build-time
+    // APP_VERSION / GIT_SHA env baked into the image. No service, no schema.
+    InstanceModule,
     AssetHistoryModule,
     UsersModule,
     LocationsModule,
