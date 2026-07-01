@@ -139,6 +139,7 @@ describe('SearchController', () => {
       'locations',
       'applications',
       'infra',
+      'consumables',
     ]);
   });
 
