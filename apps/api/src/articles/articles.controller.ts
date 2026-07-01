@@ -300,7 +300,7 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      "Restore an article to a previous version: replays that version's title/body/excerpt through the normal edit path, appending a NEW version (history is never mutated). Author only; keeps the article's current status. (ADMIN or MEMBER) (ADR-0042)",
+      "Restore an article to a previous version: replays that version's title/body/excerpt through the normal edit path, appending a NEW version (history is never mutated). Author, admins, or article:manage holders; keeps the article's current status. (ADMIN or MEMBER) (ADR-0042)",
   })
   @ApiOkResponse({ type: ArticleDto })
   restoreVersion(
@@ -427,7 +427,7 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Update an article (author only; never changes status) (ADMIN or MEMBER)',
+      'Update an article (author, admins, or article:manage holders; never changes status) (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ArticleDto })
   update(
@@ -442,7 +442,7 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Link an article to an Asset XOR an Application (author only; exactly one target). (ADMIN or MEMBER) (ADR-0042)',
+      'Link an article to an Asset XOR an Application (author, admins, or article:manage holders; exactly one target). (ADMIN or MEMBER) (ADR-0042)',
   })
   @ApiCreatedResponse({ type: ArticleLinkDto })
   addLink(
@@ -457,7 +457,7 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Remove a link from an article (author only). (ADMIN or MEMBER) (ADR-0042)',
+      'Remove a link from an article (author, admins, or article:manage holders). (ADMIN or MEMBER) (ADR-0042)',
   })
   @ApiOkResponse({ type: ArticleLinkDto })
   removeLink(
@@ -472,7 +472,7 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Alias an article into another folder — a nav-only symlink (author only). The folder must be live and not the home folder; a duplicate is 409. Aliases NEVER widen access. (ADMIN or MEMBER) (ADR-0059 §2)',
+      'Alias an article into another folder — a nav-only symlink (author, admins, or article:manage holders). The folder must be live and not the home folder; a duplicate is 409. Aliases NEVER widen access. (ADMIN or MEMBER) (ADR-0059 §2)',
   })
   @ApiCreatedResponse({ type: ArticleAliasDto })
   addAlias(
@@ -487,7 +487,7 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Remove a folder alias from an article — hard delete (author only). (ADMIN or MEMBER) (ADR-0059 §2)',
+      'Remove a folder alias from an article — hard delete (author, admins, or article:manage holders). (ADMIN or MEMBER) (ADR-0059 §2)',
   })
   @ApiOkResponse({ type: ArticleAliasDto })
   removeAlias(
@@ -502,7 +502,7 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Publish an article (author only). Sets publishedAt on first publish. (ADMIN or MEMBER)',
+      'Publish an article (author, admins, or article:manage holders). Sets publishedAt on first publish. (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ArticleDto })
   publish(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
@@ -513,7 +513,7 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Unpublish an article back to DRAFT (author only). Keeps publishedAt. (ADMIN or MEMBER)',
+      'Unpublish an article back to DRAFT (author, admins, or article:manage holders). Keeps publishedAt. (ADMIN or MEMBER)',
   })
   @ApiOkResponse({ type: ArticleDto })
   unpublish(
@@ -537,7 +537,7 @@ export class ArticlesController {
   @RequirePermission('article:delete')
   @ApiOperation({
     summary:
-      'Restore a soft-deleted article (author only) — ADMIN only (ADR-0041)',
+      'Restore a soft-deleted article — needs article:delete (ADMIN by default). Governs WHICH article: the author, or admins / article:manage holders for any article (ADR-0041 / #877)',
   })
   @ApiOkResponse({ type: ArticleDto })
   restore(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
