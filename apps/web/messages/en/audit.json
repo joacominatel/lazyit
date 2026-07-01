@@ -1,0 +1,49 @@
+{
+  "page": {
+    "title": "Audit log",
+    "subtitle": "Security audit trail — secret, permission and service-account events.",
+    "accessDeniedTitle": "The audit log is admin-only",
+    "accessDeniedDescription": "The security audit trail needs the Reports permission. Ask an admin if you need access to this view.",
+    "accessDeniedAction": "Back to reports"
+  },
+  "sources": {
+    "secret": "Secrets",
+    "permission": "Permissions",
+    "serviceAccount": "Service accounts"
+  },
+  "filters": {
+    "anyActor": "Any actor",
+    "allActions": "All actions",
+    "fromDate": "From date",
+    "toDate": "To date",
+    "selectedUser": "Selected user",
+    "chips": {
+      "action": "Action: {value}",
+      "actor": "Actor: {value}",
+      "vault": "Vault: {value}",
+      "item": "Item: {value}",
+      "serviceAccount": "Service account: {value}",
+      "rangeCustom": "Range: {from} → {to}"
+    }
+  },
+  "table": {
+    "system": "System",
+    "noSubject": "—"
+  },
+  "export": {
+    "exportAll": "Export all (filtered)",
+    "exportAllTitle": "Download every event matching the current filters (the whole range, not just this page)",
+    "exportAllBusy": "Exporting…",
+    "exportAllError": "Couldn't export the audit log",
+    "exportVisible": "Export visible events",
+    "exportTitle": "Export the events currently visible (the filtered page)",
+    "print": "Print",
+    "printTitle": "Print the audit log"
+  },
+  "empty": {
+    "errorTitle": "Couldn't load the audit log",
+    "title": "No audit events match these filters",
+    "descriptionFiltered": "Nothing in this log matches these filters. Try clearing one.",
+    "description": "Security-relevant actions on this source will show up here as your team works."
+  }
+}
