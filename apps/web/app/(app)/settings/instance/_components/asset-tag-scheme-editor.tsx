@@ -166,7 +166,7 @@ export function AssetTagSchemeEditor() {
   const [backfillOpen, setBackfillOpen] = useState(false);
 
   return (
-    <Card className="max-w-xl">
+    <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
           <TagIcon className="size-5 text-muted-foreground" />
