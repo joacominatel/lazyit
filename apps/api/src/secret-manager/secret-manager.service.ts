@@ -595,6 +595,11 @@ export class SecretManagerService {
     const userId = this.requireHumanId(principal);
     await this.getLiveVaultOr404(vaultId);
     await this.assertLiveMembership(userId, vaultId);
+    // IDOR / audit-trail integrity: itemId MUST be a live item OF this vault (else 404), mirroring the
+    // updateItem/deleteItem sibling gate. Without this a member of vault V could beacon a bogus or FOREIGN
+    // itemId (an item in another vault), salting the very audit trail #870 exists to make trustworthy.
+    // On the fire-and-forget client path a 404 is harmless (the reveal itself already happened locally).
+    await this.getLiveItemOr404(vaultId, itemId);
     await this.prisma.$transaction(async (tx) => {
       await this.writeAudit(tx, {
         action: 'ITEM_REVEALED',
