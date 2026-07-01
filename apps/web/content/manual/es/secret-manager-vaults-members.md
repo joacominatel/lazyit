@@ -117,6 +117,11 @@ un archivo `.env`.
 
 ## Agregar y revocar miembros
 
+Los miembros de una bóveda se muestran como **tarjetas** compactas. Selecciona un miembro para abrir una
+**vista previa rápida** (su rol y datos de directorio si es una persona; el estado de la cuenta si es una
+cuenta de servicio) sin salir de la bóveda. Pasa el cursor o enfoca una tarjeta para mostrar su control
+de **Revocar acceso**.
+
 Las bóvedas se comparten gestionando **miembros**:
 
 - **Conceder acceso** — abre una bóveda, elige **Conceder acceso** y selecciona a una persona. Obtiene
@@ -124,9 +129,15 @@ Las bóvedas se comparten gestionando **miembros**:
   mismo seas miembro — no puedes compartir un acceso que no tienes. La persona debe haber abierto el
   Gestor de Secretos y configurado su propia contraseña al menos una vez; si no lo ha hecho, lazyit te
   indica que se lo pidas primero.
-- **Revocar acceso** — elige **Revocar acceso** junto a un miembro para quitarlo. Ya no podrá leer los
-  secretos de la bóveda. Una bóveda siempre debe conservar al menos un miembro, así que no puedes
-  revocar al último — agrega otro miembro primero.
+- **Revocar acceso** — elige **Revocar acceso** en la tarjeta de un miembro para quitarlo. Ya no podrá
+  leer los secretos de la bóveda. Una bóveda siempre debe conservar al menos una persona como miembro,
+  así que no puedes revocar al último — agrega otro miembro primero.
+
+**Las cuentas de servicio también aparecen como miembros.** Una cuenta de servicio a la que hayas
+concedido acceso programático (consulta [Acceso programático](/help/secret-manager-programmatic-access))
+aparece en la misma lista con una insignia de **Cuenta de servicio** y un icono de robot, para que
+siempre veas qué máquinas pueden leer la bóveda — y puedas revocar una desde su tarjeta, igual que a una
+persona.
 
 > **Revocar detiene el acceso futuro; no "des-cuenta" un secreto.** Quitar a un miembro le impide leer
 > la bóveda de ahí en adelante, pero no puede deshacer un valor que ya vio. Si una credencial pudo

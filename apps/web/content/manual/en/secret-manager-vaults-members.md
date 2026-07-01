@@ -113,15 +113,24 @@ To back up a vault, seed an app's `.env`, or hand secrets to a developer, open a
 
 ## Adding and revoking members
 
+A vault's members are shown as compact **cards**. Select a member to open a **quick preview** (their
+role and directory details for a person; the account status for a service account) without leaving the
+vault. Hover or focus a card to reveal its **Revoke access** control.
+
 Vaults are shared by managing **members**:
 
 - **Grant access** — open a vault, choose **Grant access**, and pick a person. They gain the ability
   to read the vault's secrets. You can only grant access to a vault you are a member of yourself — you
   cannot share access you do not have. The person must have opened the Secret Manager and set up their
   own password at least once; if they haven't, lazyit tells you to ask them to do so first.
-- **Revoke access** — choose **Revoke access** next to a member to remove them. They can no longer
-  read the vault's secrets. A vault must always keep at least one member, so you cannot revoke the
-  last one — add another member first.
+- **Revoke access** — choose **Revoke access** on a member's card to remove them. They can no longer
+  read the vault's secrets. A vault must always keep at least one person as a member, so you cannot
+  revoke the last one — add another member first.
+
+**Service accounts appear as members too.** A service account you have granted programmatic access
+(see [Programmatic access](/help/secret-manager-programmatic-access)) shows up in the same list with a
+**Service account** badge and a robot icon, so you can always see which machines can read the vault —
+and revoke one from its card, just like a person.
 
 > **Revoking stops future access; it does not "un-tell" a secret.** Removing a member prevents them
 > from reading the vault going forward, but it cannot undo a value they have already seen. If a

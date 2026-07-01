@@ -58,6 +58,8 @@
     "none": "—",
     "noOwner": "Sin asignar",
     "moreOwners": "+{count} más",
+    "saActive": "Activa",
+    "saInactive": "Inactiva",
     "fields": {
       "serial": "Número de serie",
       "assetTag": "Etiqueta",
@@ -86,7 +88,8 @@
       "url": "URL",
       "kind": "Tipo",
       "linkedAsset": "Activo vinculado",
-      "ip": "Dirección IP"
+      "ip": "Dirección IP",
+      "tokenPrefix": "Token"
     }
   }
 }

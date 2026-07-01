@@ -27,7 +27,8 @@ export type QuickViewEntity =
   | "article"
   | "consumable"
   | "category"
-  | "infra";
+  | "infra"
+  | "serviceAccount";
 
 /** A plain `<dl>` field: a localized label key (under `common.quickView.fields`) and its value. A
  *  `null`/empty value is dropped by {@link selectFields} so the grid never shows a dangling label. */
@@ -90,6 +91,20 @@ export type QuickViewData =
         status: InfraNodeStatus;
         ipAddress?: string | null;
         assetName?: string | null;
+      };
+    }
+  | {
+      // A vault SERVICE-ACCOUNT member (#888, ADR-0080). The preview is built straight from the vault's
+      // SA-members read (`VaultServiceAccountMemberMeta`) — non-secret display metadata only, zero extra
+      // fetch. `isActive` renders as the identity badge (active/inactive), like the human/asset cases.
+      // NEVER a secret: an SA holds a wrapped DEK the server can't read, and no plaintext appears here.
+      entity: "serviceAccount";
+      data: {
+        id: string;
+        name: string;
+        description?: string | null;
+        tokenPrefix: string;
+        isActive: boolean;
       };
     };
 
@@ -214,7 +229,9 @@ export function selectFields(
       );
       push(
         "assets",
-        u.assetsInPossession !== undefined ? String(u.assetsInPossession) : null,
+        u.assetsInPossession !== undefined
+          ? String(u.assetsInPossession)
+          : null,
       );
       push("apps", u.appAccesses !== undefined ? String(u.appAccesses) : null);
       break;
@@ -267,6 +284,14 @@ export function selectFields(
       push("kind", labels?.infraKind ? labels.infraKind(n.kind) : n.kind);
       push("linkedAsset", n.assetName ?? null);
       push("ip", n.ipAddress ?? null, true);
+      break;
+    }
+    case "serviceAccount": {
+      const sa = view.data;
+      // isActive is the identity badge (like asset/user status), so it isn't a <dl> field here.
+      // The short, non-secret tokenPrefix helps recognise which credential this SA is (mono).
+      push("description", sa.description ?? null);
+      push("tokenPrefix", sa.tokenPrefix, true);
       break;
     }
   }

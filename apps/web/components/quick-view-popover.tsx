@@ -79,6 +79,7 @@ const ENTITY_GLYPH = {
   consumable: CubeIcon,
   category: TagIcon,
   infra: CpuChipIcon,
+  serviceAccount: CpuChipIcon,
 } as const;
 
 export interface QuickViewPopoverProps {
@@ -241,8 +242,9 @@ export function QuickViewPopover({
 /** The status/role badge in the identity row, per entity. Returns nothing for entities with no badge
  *  (asset model, category, consumable) so the row collapses cleanly. */
 function IdentityBadge({ view }: { view: QuickViewData }) {
-  // Called unconditionally (hook rules); only the infra case reads it.
+  // Called unconditionally (hook rules); the infra + service-account cases read these.
   const ti = useTranslations("infra");
+  const tq = useTranslations("common.quickView");
   switch (view.entity) {
     case "asset":
       return <AssetStatusBadge status={view.data.status} />;
@@ -263,6 +265,14 @@ function IdentityBadge({ view }: { view: QuickViewData }) {
       return (
         <StatusBadge tone={statusTone(view.data.status)} dot>
           {ti(`status.${view.data.status}`)}
+        </StatusBadge>
+      );
+    case "serviceAccount":
+      // A machine member (#888): active (token authenticates) vs. inactive (soft-disabled). Neutral tone
+      // for the paused state mirrors the Service accounts admin surface.
+      return (
+        <StatusBadge tone={view.data.isActive ? "success" : "neutral"} dot>
+          {tq(view.data.isActive ? "saActive" : "saInactive")}
         </StatusBadge>
       );
     default:

@@ -30,6 +30,7 @@ import type {
   UserPublicKey,
   VaultMemberMeta,
   VaultMembership as VaultMembershipWire,
+  VaultServiceAccountMemberMeta,
 } from '@lazyit/shared';
 import type {
   Prisma as PrismaTypes,
@@ -587,6 +588,22 @@ export class SecretManagerService {
     await this.getLiveVaultOr404(vaultId);
     await this.assertVaultMetadataVisible(principal, userId, vaultId);
     return this.loadMembers(vaultId);
+  }
+
+  /**
+   * The vault's SERVICE-ACCOUNT members (ADR-0080) — the machine members a human members list omits.
+   * Same visibility contract as {@link listMembers}: an ADMIN or a live human member (`secret:read` at the
+   * controller). Returns non-secret display metadata only (id + name + tokenPrefix + isActive) — NEVER a
+   * wrapped DEK or the token. Without this read the members UI could not show (or revoke) a granted SA.
+   */
+  async listServiceAccountMembers(
+    principal: Principal | undefined,
+    vaultId: string,
+  ): Promise<VaultServiceAccountMemberMeta[]> {
+    const userId = this.requireHumanId(principal);
+    await this.getLiveVaultOr404(vaultId);
+    await this.assertVaultMetadataVisible(principal, userId, vaultId);
+    return this.loadServiceAccountMembers(vaultId);
   }
 
   /**
@@ -1265,6 +1282,41 @@ export class SecretManagerService {
       firstName: r.user.firstName,
       lastName: r.user.lastName,
       email: r.user.email,
+      memberSince: r.createdAt.toISOString(),
+    }));
+  }
+
+  /**
+   * Load a vault's SERVICE-ACCOUNT members as display metadata (ADR-0080). Only LIVE memberships exist here
+   * — a revoked (soft-deleted) SA has its wrapped-DEK row hard-dropped — so no soft-delete filter is needed.
+   * `isActive` is surfaced so the UI can flag a member whose token is currently disabled (a paused SA is
+   * still a crypto member, but its token will not authenticate). Never a wrapped DEK or the token (INV-10).
+   */
+  private async loadServiceAccountMembers(
+    vaultId: string,
+  ): Promise<VaultServiceAccountMemberMeta[]> {
+    const rows = await this.prisma.serviceAccountVaultMembership.findMany({
+      where: { vaultId },
+      select: {
+        serviceAccountId: true,
+        createdAt: true,
+        serviceAccount: {
+          select: {
+            name: true,
+            description: true,
+            tokenPrefix: true,
+            isActive: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map((r) => ({
+      serviceAccountId: r.serviceAccountId,
+      name: r.serviceAccount.name,
+      description: r.serviceAccount.description,
+      tokenPrefix: r.serviceAccount.tokenPrefix,
+      isActive: r.serviceAccount.isActive,
       memberSince: r.createdAt.toISOString(),
     }));
   }

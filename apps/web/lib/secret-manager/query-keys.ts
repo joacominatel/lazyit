@@ -55,6 +55,9 @@ export const membershipKeys = {
   /** A vault's member metadata list. */
   members: (vaultId: string) =>
     [...membershipBase.all, "members", vaultId] as const,
+  /** A vault's SERVICE-ACCOUNT member metadata list (ADR-0080, machine members). */
+  serviceAccountMembers: (vaultId: string) =>
+    [...membershipBase.all, "sa-members", vaultId] as const,
   /** The caller's OWN membership (wrapped-DEK row) for a vault. */
   me: (vaultId: string) => [...membershipBase.all, "me", vaultId] as const,
 };
@@ -67,6 +70,5 @@ export const chipKeys = {
   handles: (q: string | undefined) =>
     [...chipBase.all, "handles", { q: q ?? null }] as const,
   /** A resolved handle (item envelope + the caller's membership). `handle` is public metadata. */
-  byHandle: (handle: string) =>
-    [...chipBase.all, "by-handle", handle] as const,
+  byHandle: (handle: string) => [...chipBase.all, "by-handle", handle] as const,
 };
