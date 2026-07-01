@@ -423,6 +423,12 @@
       "acknowledge": "He guardado este token en un lugar seguro.",
       "done": "Listo"
     },
+    "keypairSetup": {
+      "working": "Configurando la clave de cifrado…",
+      "done": "Clave de cifrado configurada. Esta cuenta de servicio ya puede recuperar secretos de las bóvedas a las que le des acceso.",
+      "forbidden": "Necesitas el permiso de gestión del Gestor de secretos para configurar el acceso programático. La cuenta de servicio se creó, pero sin clave de cifrado.",
+      "error": "No se pudo configurar la clave de cifrado. La cuenta de servicio se creó sin ella; vuelve a crearla para habilitar la recuperación programática de secretos."
+    },
     "testIt": {
       "title": "Comprueba que funciona",
       "description": "Ejecuta una verificación rápida desde tu terminal para confirmar que el token autentica y tiene el alcance esperado. Reemplaza el marcador por el token que copiaste.",
