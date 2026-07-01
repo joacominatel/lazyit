@@ -60,8 +60,21 @@ Cuando alguien se va, ábrelo y elige **Dar de baja**. lazyit muestra el impacto
 los **activos a devolver** y el **acceso a aplicaciones a revocar** — y luego, al confirmar:
 
 - **revoca** el acceso activo a aplicaciones de la persona,
+- **quita** el acceso de la persona a cada [bóveda de secretos](/help/secret-manager-vaults-members) a
+  la que pertenecía (se elimina su membresía criptográfica),
 - **libera** los activos que tiene,
 - **archiva** al usuario (un borrado lógico) para que ya no se le puedan asignar activos.
+
+Todo ocurre junto: si algún paso falla, la baja completa se revierte, de modo que una persona nunca queda
+a medio dar de baja (archivada pero conservando acceso).
+
+**Rota los secretos que pudo leer.** Si la persona era miembro de alguna bóveda de secretos, la
+confirmación lista esas bóvedas (con cuántos secretos tiene cada una) como recordatorio para **rotar esos
+secretos a mano**. Quitar su membresía detiene cualquier lectura *nueva*, pero como ya pudo leer esas
+bóvedas, conviene cambiar los valores. lazyit **no puede rotarlos por ti** — es zero-knowledge y nunca ve
+el texto plano, así que no puede volver a cifrarlos en tu nombre. Es un aviso, no una acción automática.
+(Quién quitó el acceso a la bóveda de quién, y cuándo, queda registrado en la auditoría del Gestor de
+Secretos.)
 
 **Nada se destruye.** La persona y su historial se conservan para el registro. Puedes completar una nota
 de entrega e imprimir un **acta de baja** (con el nombre de la empresa y líneas de firma) para firmar en
