@@ -3,6 +3,7 @@
 import {
   BookOpenIcon,
   CpuChipIcon,
+  CubeIcon,
   KeyIcon,
   MagnifyingGlassIcon,
   MapPinIcon,
@@ -66,6 +67,7 @@ const ENTITY_ICON: Record<SearchEntity, typeof ServerStackIcon> = {
   locations: MapPinIcon,
   applications: KeyIcon,
   infra: CpuChipIcon,
+  consumables: CubeIcon,
 };
 
 /** The lifted single-open Quick View state: which row's preview is open and whether it's pinned.
@@ -386,6 +388,31 @@ export function GlobalSearch() {
                     })}
                     quickViewState={quickViewState}
                     quickView={(hit) => infraViewFromHit(hit)}
+                  />
+                  <ResultGroup
+                    entity="consumables"
+                    block={data?.consumables}
+                    onSelect={(hit) => go(`/consumables/${hit.id}`)}
+                    render={(hit) => ({
+                      primary: hit.name,
+                      // Prefer the SKU (the recognisable identifier); fall back to on-hand stock.
+                      secondary: hit.sku ?? `${hit.currentStock} ${hit.unit}`,
+                    })}
+                    quickViewState={quickViewState}
+                    quickView={(hit) => ({
+                      entity: "consumable",
+                      // The lean hit already carries name/sku/stock/unit/description — the full preview,
+                      // zero extra fetch. `categoryName` isn't indexed (#873 deferral), so it stays null.
+                      data: {
+                        id: hit.id,
+                        name: hit.name,
+                        sku: hit.sku,
+                        currentStock: hit.currentStock,
+                        unit: hit.unit,
+                        categoryName: null,
+                        description: hit.description,
+                      },
+                    })}
                   />
                   {totalHits === 0 &&
                     (isFetching ? (
