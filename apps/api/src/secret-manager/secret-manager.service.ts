@@ -577,6 +577,34 @@ export class SecretManagerService {
     return { ok: true, itemCount: audit?.itemCount ?? null };
   }
 
+  /**
+   * Record a single-item REVEAL (#870). The decrypt itself happens ENTIRELY CLIENT-SIDE after the member
+   * unlocks the vault (INV-10 / ADR-0061: the server never sees plaintext); this method takes NO secret
+   * material (only the path-param `vaultId`/`itemId`) and appends ONE metadata-only {@link SecretAuditLog}
+   * row (ITEM_REVEALED): WHO revealed WHICH item, in WHICH vault, when. NEVER a value, key, or blob.
+   * Requires LIVE membership — only a member holds a decryptable value, mirroring the item reads / export
+   * (an ADMIN without a membership has nothing to reveal, INV-10). Distinct from ITEMS_FETCHED, which is
+   * the machine/whole-vault programmatic read (ADR-0080, no itemId). The web caller fires this
+   * fire-and-forget: a failed audit write must never block a member from seeing their own secret.
+   */
+  async recordReveal(
+    principal: Principal | undefined,
+    vaultId: string,
+    itemId: string,
+  ): Promise<void> {
+    const userId = this.requireHumanId(principal);
+    await this.getLiveVaultOr404(vaultId);
+    await this.assertLiveMembership(userId, vaultId);
+    await this.prisma.$transaction(async (tx) => {
+      await this.writeAudit(tx, {
+        action: 'ITEM_REVEALED',
+        actorId: userId,
+        vaultId,
+        itemId,
+      });
+    });
+  }
+
   // ── Members ──────────────────────────────────────────────────────────────────
 
   /** Member list of a vault (userId + display metadata). ADMIN or a live member. */
