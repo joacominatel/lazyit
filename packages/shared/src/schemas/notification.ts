@@ -44,6 +44,14 @@ import { pageSchema } from "./pagination";
  *     deep-linking to `/secrets`. Delivered targeted (`recipientUserId = that user`) so it lands in
  *     that user's OWN bell even when they hold no `notification:read`. INV-10-safe — carries NO key
  *     material, only "you have not set up your vault" metadata + a link.
+ *   - `permission_widened`   — a SENSITIVE-audit alert (ADR-0056 amendment 2026-06-30, issue #852): a
+ *     `PUT /config/permissions` matrix edit GRANTED a non-admin role (MEMBER/VIEWER) a high-risk verb
+ *     (`settings:manage`, `user:manage`, `accessGrant:grant`, or any `:delete`). Broadcast to the admin
+ *     feed; deep-links to the role→permission matrix. Metadata is REDACTED (role + verb names only).
+ *   - `infra.agent_offline`  — a SENSITIVE-audit / liveness alert (ADR-0056 amendment 2026-06-30, issue
+ *     #852; ADR-0074 §4): the staleness sweeper flipped a reporting-agent node CONFIRMED→OFFLINE (it
+ *     stopped reporting). Broadcast to the admin feed; deep-links to the topology map. ONE per outage
+ *     (deduped on the node's last-report timestamp), never once-per-sweep.
  */
 export const NOTIFICATION_TYPES = [
   "critical_app_access",
@@ -52,6 +60,8 @@ export const NOTIFICATION_TYPES = [
   "workflow.manual_task",
   "workflow.run_failed",
   "secret.vault_setup",
+  "permission_widened",
+  "infra.agent_offline",
 ] as const;
 
 /** A single known notification type. The wire shape validates against this enum (→ 400 otherwise). */
