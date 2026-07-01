@@ -500,6 +500,9 @@
       "location:write": { "label": "Agregar y editar ubicaciones" },
       "location:delete": { "label": "Eliminar ubicaciones" },
       "import:run": { "label": "Ejecutar importaciones" },
+      "infra:read": { "label": "Ver el mapa de infraestructura" },
+      "infra:manage": { "label": "Gestionar el mapa de infraestructura" },
+      "infra:report": { "label": "Reportar inventario de servidores (agente)" },
       "application:read": { "label": "Ver aplicaciones" },
       "application:write": { "label": "Agregar y editar aplicaciones" },
       "application:delete": { "label": "Eliminar aplicaciones" },
@@ -526,7 +529,8 @@
       "workflow:secrets": { "label": "Gestionar credenciales de conectores" },
       "notification:read": { "label": "Ver notificaciones" },
       "secret:read": { "label": "Ver el Gestor de Secretos" },
-      "secret:manage": { "label": "Gestionar bóvedas y membresías" }
+      "secret:manage": { "label": "Gestionar bóvedas y membresías" },
+      "secret:fetch": { "label": "Obtener secretos de forma programática (cuenta de servicio)" }
     },
     "capabilities": {
       "inventory:view": {
@@ -540,6 +544,18 @@
       "inventory:delete": {
         "label": "Eliminar inventario",
         "description": "Archivar activos, consumibles, modelos, categorías y ubicaciones."
+      },
+      "inventory:import": {
+        "label": "Ejecutar importaciones masivas",
+        "description": "Usa el asistente guiado para importar activos de forma masiva desde un archivo CSV o JSON. También requiere los permisos de edición correspondientes (activos, modelos, categorías, ubicaciones), verificados por fila al confirmar."
+      },
+      "infra:view": {
+        "label": "Ver el mapa de infraestructura",
+        "description": "Ver el lienzo de topología — nodos, conexiones y el detalle por nodo (responsable, base de conocimiento, IP, accesos directos)."
+      },
+      "infra:manage": {
+        "label": "Gestionar el mapa de infraestructura",
+        "description": "Crear, editar y eliminar nodos de la topología, abrir y cerrar conexiones, y conservar las posiciones de los nodos en el lienzo. Crear un nodo respaldado por un activo también requiere el permiso de edición de activos."
       },
       "application:view": {
         "label": "Ver aplicaciones",
