@@ -262,7 +262,11 @@
           "search": "Búsqueda",
           "settings": "Configuración",
           "logs": "Registros de actividad",
-          "workflow": "Flujos de trabajo"
+          "workflow": "Flujos de trabajo",
+          "notification": "Notificaciones",
+          "secret": "Gestor de Secretos",
+          "import": "Importaciones",
+          "infra": "Mapa de servidores"
         }
       },
       "segmented": {
@@ -513,6 +517,7 @@
       "article:read": { "label": "Leer la base de conocimiento" },
       "article:write": { "label": "Escribir y editar artículos" },
       "article:delete": { "label": "Eliminar artículos" },
+      "article:manage": { "label": "Editar cualquier artículo" },
       "user:read": { "label": "Ver el directorio de usuarios" },
       "user:write": { "label": "Editar registros de usuario (reservado)" },
       "user:delete": { "label": "Eliminar usuarios" },
@@ -588,6 +593,10 @@
       "article:delete": {
         "label": "Eliminar artículos",
         "description": "Archivar artículos de la base de conocimiento."
+      },
+      "article:manage": {
+        "label": "Editar cualquier artículo",
+        "description": "Editar, publicar, eliminar y restaurar CUALQUIER artículo de la base de conocimiento — no solo los tuyos. Sigue requiriendo la capacidad de escritura/eliminación para la acción, y se respeta el acceso a la carpeta."
       },
       "user:view": {
         "label": "Ver el directorio de usuarios",
