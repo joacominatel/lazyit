@@ -22,6 +22,9 @@ import type {
   SecretItemKind,
   ServiceAccount,
   User,
+  UserListItem,
+  VaultMemberMeta,
+  VaultServiceAccountMemberMeta,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -36,7 +39,12 @@ import {
 import { toast } from "sonner";
 import { Callout } from "@/components/callout";
 import { PageHeader } from "@/components/page-header";
+import {
+  type QuickViewData,
+  QuickViewPopover,
+} from "@/components/quick-view-popover";
 import { SearchInput } from "@/components/search-input";
+import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -77,10 +85,14 @@ import {
 import {
   useAddServiceAccountMember,
   useRemoveServiceAccountMember,
+  useServiceAccountMembers,
   useServiceAccountPublicKey,
 } from "@/lib/secret-manager/hooks/use-service-account-members";
 import { useUserPublicKey } from "@/lib/secret-manager/hooks/use-keypair";
-import { useRecordExport, useVault } from "@/lib/secret-manager/hooks/use-vaults";
+import {
+  useRecordExport,
+  useVault,
+} from "@/lib/secret-manager/hooks/use-vaults";
 import {
   type EnvEntry,
   parseEnv,
@@ -119,7 +131,8 @@ function classifyMembership(q: {
 }): MembershipState {
   if (q.isLoading) return "loading";
   if (q.data) return "member";
-  if (q.isError && q.error instanceof ApiError && q.error.status === 404) return "not-member";
+  if (q.isError && q.error instanceof ApiError && q.error.status === 404)
+    return "not-member";
   if (q.isError) return "error";
   // No data, no error, not loading — treat as still settling.
   return "loading";
@@ -134,11 +147,7 @@ function classifyMembership(q: {
 
 /** VaultDetail's independent dialog-open booleans. */
 type VaultDialog =
-  | "addItem"
-  | "addMember"
-  | "addServiceAccount"
-  | "export"
-  | "import";
+  "addItem" | "addMember" | "addServiceAccount" | "export" | "import";
 type VaultDialogsState = Record<VaultDialog, boolean>;
 function vaultDialogsReducer(
   state: VaultDialogsState,
@@ -295,7 +304,8 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
     if (!q) return items;
     return items.filter(
       (it) =>
-        it.label.toLowerCase().includes(q) || it.handle.toLowerCase().includes(q),
+        it.label.toLowerCase().includes(q) ||
+        it.handle.toLowerCase().includes(q),
     );
   }, [items, query]);
 
@@ -358,7 +368,9 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => dispatchDialogs({ dialog: "export", open: true })}
+                onClick={() =>
+                  dispatchDialogs({ dialog: "export", open: true })
+                }
               >
                 <ArrowDownTrayIcon className="size-4" />
                 {t("export.trigger")}
@@ -368,7 +380,9 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => dispatchDialogs({ dialog: "import", open: true })}
+                onClick={() =>
+                  dispatchDialogs({ dialog: "import", open: true })
+                }
               >
                 <ArrowUpTrayIcon className="size-4" />
                 {t("import.trigger")}
@@ -425,7 +439,9 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
       {/* Members section */}
       <section className="space-y-4">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-base font-semibold">{t("members.sectionTitle")}</h2>
+          <h2 className="text-base font-semibold">
+            {t("members.sectionTitle")}
+          </h2>
           {canManage ? (
             <div className="flex items-center gap-2">
               {/* ADR-0080: grant a service account programmatic read of this vault (machine member). */}
@@ -442,7 +458,9 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => dispatchDialogs({ dialog: "addMember", open: true })}
+                onClick={() =>
+                  dispatchDialogs({ dialog: "addMember", open: true })
+                }
               >
                 <UserPlusIcon className="size-4" />
                 {t("members.addMember")}
@@ -458,26 +476,12 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
           </Callout>
         ) : null}
 
-        {membersLoading ? (
-          <MembersSkeleton />
-        ) : !members || members.length === 0 ? (
-          <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-            {t("members.empty")}
-          </div>
-        ) : (
-          // ponytail: members as a ledger too — hairline-divided rows in one card (ADR-0077).
-          <ul className="divide-y overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
-            {members.map((m) => (
-              <MemberRow
-                key={m.userId}
-                member={m}
-                vaultId={vaultId}
-                canManage={canManage}
-                membersCount={members.length}
-              />
-            ))}
-          </ul>
-        )}
+        <MemberCards
+          vaultId={vaultId}
+          canManage={canManage}
+          humanMembers={members}
+          humanMembersLoading={membersLoading}
+        />
 
         {/* Revoke-semantics nudge — shown only to managers who can trigger a revoke */}
         {canManage ? (
@@ -492,12 +496,16 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
         <>
           <AddItemDialog
             open={addItemOpen}
-            onOpenChange={(open) => dispatchDialogs({ dialog: "addItem", open })}
+            onOpenChange={(open) =>
+              dispatchDialogs({ dialog: "addItem", open })
+            }
             vaultId={vaultId}
           />
           <AddMemberDialog
             open={addMemberOpen}
-            onOpenChange={(open) => dispatchDialogs({ dialog: "addMember", open })}
+            onOpenChange={(open) =>
+              dispatchDialogs({ dialog: "addMember", open })
+            }
             vaultId={vaultId}
           />
           <AddServiceAccountDialog
@@ -511,7 +519,9 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
           {importOpen ? (
             <ImportDialog
               open={importOpen}
-              onOpenChange={(open) => dispatchDialogs({ dialog: "import", open })}
+              onOpenChange={(open) =>
+                dispatchDialogs({ dialog: "import", open })
+              }
               vaultId={vaultId}
               vaultName={vault?.name ?? t("detail.unknownVault")}
               existingItems={items ?? []}
@@ -567,7 +577,9 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
     deleteOpen: false,
   });
   const { editOpen, deleteOpen } = rowDialogs;
-  const maskTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const maskTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   // #607: cancel handle for the pending best-effort clipboard auto-clear from the last copy.
   const clipboardClearRef = useRef<(() => void) | undefined>(undefined);
 
@@ -620,7 +632,10 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
       setPlaintext(value);
       // Auto-mask after timeout.
       clearTimeout(maskTimerRef.current);
-      maskTimerRef.current = setTimeout(() => setPlaintext(undefined), REVEAL_TIMEOUT_MS);
+      maskTimerRef.current = setTimeout(
+        () => setPlaintext(undefined),
+        REVEAL_TIMEOUT_MS,
+      );
     } catch {
       // Wrong DEK or tampered ciphertext — surface a friendly error, never the raw exception.
       setRevealError(true);
@@ -672,7 +687,9 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
             </span>
           ) : null}
         </p>
-        <p className="truncate text-xs text-muted-foreground font-mono">{item.handle}</p>
+        <p className="truncate text-xs text-muted-foreground font-mono">
+          {item.handle}
+        </p>
 
         {/* Value area */}
         <div className="mt-1.5">
@@ -690,7 +707,10 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
                   className="shrink-0 text-muted-foreground hover:text-foreground"
                 >
                   {copied ? (
-                    <CheckIcon className="size-3.5 text-pillar-knowledge" aria-hidden />
+                    <CheckIcon
+                      className="size-3.5 text-pillar-knowledge"
+                      aria-hidden
+                    />
                   ) : (
                     <ClipboardIcon className="size-3.5" aria-hidden />
                   )}
@@ -699,13 +719,17 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
                     clipboard.ts); this signals the intent without promising a guarantee. */}
                 {copied ? (
                   <span className="text-xs text-muted-foreground">
-                    {t("items.copiedClears", { seconds: CLIPBOARD_CLEAR_MS / 1000 })}
+                    {t("items.copiedClears", {
+                      seconds: CLIPBOARD_CLEAR_MS / 1000,
+                    })}
                   </span>
                 ) : null}
                 {/* SECW-06: clipboard unavailable (insecure context). Prompt manual copy — the value
                     above is `select-all`, so a manual selection still works. */}
                 {copyFailed ? (
-                  <span className="text-xs text-destructive">{t("items.copyFailed")}</span>
+                  <span className="text-xs text-destructive">
+                    {t("items.copyFailed")}
+                  </span>
                 ) : null}
               </div>
             ) : (
@@ -716,7 +740,9 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
           ) : revealError ? (
             // SM-WEB-07: pair the genuine decrypt error with a retry affordance so it is never a dead end.
             <span className="flex items-center gap-2">
-              <span className="text-xs text-destructive">{t("items.revealError")}</span>
+              <span className="text-xs text-destructive">
+                {t("items.revealError")}
+              </span>
               <button
                 type="button"
                 onClick={handleReveal}
@@ -726,13 +752,21 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
               </button>
             </span>
           ) : membershipState === "not-member" ? (
-            <span className="text-xs text-destructive">{t("items.notMember")}</span>
+            <span className="text-xs text-destructive">
+              {t("items.notMember")}
+            </span>
           ) : membershipState === "error" ? (
-            <span className="text-xs text-destructive">{t("detail.membershipError")}</span>
+            <span className="text-xs text-destructive">
+              {t("detail.membershipError")}
+            </span>
           ) : membershipState === "loading" ? (
-            <span className="text-xs text-muted-foreground">{t("items.preparingKey")}</span>
+            <span className="text-xs text-muted-foreground">
+              {t("items.preparingKey")}
+            </span>
           ) : (
-            <span className="text-xs text-muted-foreground">{"•".repeat(16)}</span>
+            <span className="text-xs text-muted-foreground">
+              {"•".repeat(16)}
+            </span>
           )}
         </div>
       </div>
@@ -760,7 +794,9 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
           <>
             <button
               type="button"
-              onClick={() => dispatchRowDialogs({ type: "setEditOpen", open: true })}
+              onClick={() =>
+                dispatchRowDialogs({ type: "setEditOpen", open: true })
+              }
               title={t("items.edit")}
               aria-label={t("items.edit")}
               className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -769,7 +805,9 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
             </button>
             <button
               type="button"
-              onClick={() => dispatchRowDialogs({ type: "setDeleteOpen", open: true })}
+              onClick={() =>
+                dispatchRowDialogs({ type: "setDeleteOpen", open: true })
+              }
               title={t("items.delete")}
               aria-label={t("items.delete")}
               className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
@@ -783,7 +821,9 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
       {/* Edit dialog */}
       <EditItemDialog
         open={editOpen}
-        onOpenChange={(open) => dispatchRowDialogs({ type: "setEditOpen", open })}
+        onOpenChange={(open) =>
+          dispatchRowDialogs({ type: "setEditOpen", open })
+        }
         vaultId={vaultId}
         item={item}
       />
@@ -791,7 +831,9 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
       {/* Delete confirm dialog */}
       <DeleteItemDialog
         open={deleteOpen}
-        onOpenChange={(open) => dispatchRowDialogs({ type: "setDeleteOpen", open })}
+        onOpenChange={(open) =>
+          dispatchRowDialogs({ type: "setDeleteOpen", open })
+        }
         vaultId={vaultId}
         item={item}
       />
@@ -800,112 +842,325 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
 }
 
 // ---------------------------------------------------------------------------
-// MemberRow — one vault member with optional revoke
+// MemberCards — the vault's members as clickable Quick-View chips (#888)
 // ---------------------------------------------------------------------------
 
-interface MemberMeta {
-  userId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  memberSince: string;
-}
+/**
+ * A vault member unified across the two kinds: a HUMAN (`VaultMemberMeta`) or a SERVICE ACCOUNT
+ * (`VaultServiceAccountMemberMeta`, ADR-0080). The members UI merges both so a granted SA is visible and
+ * revocable — before #888 the members read returned humans only, leaving machine members invisible.
+ */
+type UnifiedMember =
+  | { kind: "user"; id: string; meta: VaultMemberMeta }
+  | {
+      kind: "service_account";
+      id: string;
+      meta: VaultServiceAccountMemberMeta;
+    };
 
-function MemberRow({
-  member,
+/**
+ * MemberCards (#888) — renders the vault's members as a wrap of compact chips ("globitos"): humans (avatar
+ * + name) and service accounts (robot glyph + name + a "Service account" badge, so they read as non-human).
+ * Clicking a chip opens the Quick View preview (ADR-0072 / #788); the revoke affordance appears on the chip
+ * on hover/focus. One Quick View is open at a time (`openId` lifted here). SA members come from the new
+ * `useServiceAccountMembers` read; human chips reuse the already-loaded user directory for a rich preview.
+ */
+function MemberCards({
   vaultId,
   canManage,
-  membersCount,
+  humanMembers,
+  humanMembersLoading,
 }: {
-  member: MemberMeta;
   vaultId: string;
   canManage: boolean;
-  membersCount: number;
+  humanMembers: VaultMemberMeta[] | undefined;
+  humanMembersLoading: boolean;
+}) {
+  const t = useTranslations("secrets");
+  const { data: saMembers, isLoading: saLoading } =
+    useServiceAccountMembers(vaultId);
+  // Reuse the user directory (cached, shared across the app) to enrich a human chip's Quick View — the
+  // member metadata alone lacks the role/username/department the preview shows. Zero new endpoint.
+  const { data: users } = useUsers();
+  const usersById = useMemo(() => {
+    const map = new Map<string, UserListItem>();
+    for (const u of users ?? []) map.set(u.id, u);
+    return map;
+  }, [users]);
+
+  // Which chip's Quick View is pinned open (single-open, like the picker hosts).
+  const [openId, setOpenId] = useState<string | null>(null);
+  // The member awaiting a revoke confirmation (null = dialog closed).
+  const [pendingRevoke, setPendingRevoke] = useState<UnifiedMember | null>(
+    null,
+  );
+
+  const members: UnifiedMember[] = useMemo(
+    () => [
+      ...(humanMembers ?? []).map((m): UnifiedMember => ({
+        kind: "user",
+        id: m.userId,
+        meta: m,
+      })),
+      ...(saMembers ?? []).map((m): UnifiedMember => ({
+        kind: "service_account",
+        id: m.serviceAccountId,
+        meta: m,
+      })),
+    ],
+    [humanMembers, saMembers],
+  );
+
+  const humanCount = humanMembers?.length ?? 0;
+
+  if (humanMembersLoading || saLoading) return <MembersSkeleton />;
+  if (members.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+        {t("members.empty")}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <ul className="flex flex-wrap gap-2">
+        {members.map((m) => (
+          <li key={`${m.kind}:${m.id}`} className="max-w-full">
+            <MemberChip
+              member={m}
+              canManage={canManage}
+              userRow={m.kind === "user" ? usersById.get(m.id) : undefined}
+              isLastHuman={m.kind === "user" && humanCount <= 1}
+              open={openId === m.id}
+              onOpen={() => setOpenId(m.id)}
+              onClose={() => setOpenId((cur) => (cur === m.id ? null : cur))}
+              onRevoke={() => setPendingRevoke(m)}
+            />
+          </li>
+        ))}
+      </ul>
+
+      {canManage ? (
+        <RevokeMemberDialog
+          vaultId={vaultId}
+          member={pendingRevoke}
+          onDone={() => setPendingRevoke(null)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** One member chip. The name+glyph is the Quick-View anchor (click/Enter opens the preview); a hover/focus
+ *  revoke button sits alongside it. Service accounts get the robot glyph + a "Service account" badge. */
+function MemberChip({
+  member,
+  canManage,
+  userRow,
+  isLastHuman,
+  open,
+  onOpen,
+  onClose,
+  onRevoke,
+}: {
+  member: UnifiedMember;
+  canManage: boolean;
+  userRow: UserListItem | undefined;
+  isLastHuman: boolean;
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onRevoke: () => void;
+}) {
+  const t = useTranslations("secrets");
+  const tq = useTranslations("common.quickView");
+
+  const name =
+    member.kind === "user"
+      ? `${member.meta.firstName} ${member.meta.lastName}`.trim()
+      : member.meta.name;
+
+  // The Quick-View row — a user (enriched from the directory) or a service account (built straight from the
+  // SA-members metadata; zero extra fetch). A human whose directory row hasn't resolved yet renders a static
+  // chip until it does.
+  const view: QuickViewData | null =
+    member.kind === "service_account"
+      ? {
+          entity: "serviceAccount",
+          data: {
+            id: member.id,
+            name: member.meta.name,
+            description: member.meta.description,
+            tokenPrefix: member.meta.tokenPrefix,
+            isActive: member.meta.isActive,
+          },
+        }
+      : userRow
+        ? { entity: "user", data: userRow }
+        : null;
+
+  const glyph =
+    member.kind === "service_account" ? (
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-pillar-knowledge/10 text-pillar-knowledge">
+        <CpuChipIcon className="size-3.5" aria-hidden />
+      </span>
+    ) : (
+      <UserAvatar
+        firstName={member.meta.firstName}
+        lastName={member.meta.lastName}
+        email={member.meta.email}
+        size="sm"
+      />
+    );
+
+  const label = (
+    <span className="flex min-w-0 items-center gap-2 py-1 pl-1">
+      {glyph}
+      <span className="truncate text-sm font-medium">{name}</span>
+      {member.kind === "service_account" ? (
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
+          {t("serviceAccountMembers.badge")}
+        </span>
+      ) : null}
+    </span>
+  );
+
+  const anchor = view ? (
+    <button
+      type="button"
+      aria-label={tq("trigger", { name })}
+      onClick={() => (open ? onClose() : onOpen())}
+      className="flex min-w-0 items-center rounded-full pr-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+    >
+      {label}
+    </button>
+  ) : (
+    <span className="flex min-w-0 items-center pr-2">{label}</span>
+  );
+
+  return (
+    <div className="group/chip inline-flex max-w-full items-center gap-0.5 rounded-full border border-foreground/10 bg-card pr-1 pl-1 shadow-sm transition-colors hover:border-foreground/20">
+      {view ? (
+        <QuickViewPopover
+          view={view}
+          open={open}
+          pinned
+          onOpenChange={(next) => {
+            // Radix drives this on Escape / outside-click — collapse our lifted state to match.
+            if (!next) onClose();
+          }}
+          anchor={anchor}
+        />
+      ) : (
+        anchor
+      )}
+
+      {canManage ? (
+        <button
+          type="button"
+          onClick={onRevoke}
+          disabled={isLastHuman}
+          // SM-WEB-06: explain WHY it is disabled on the last human member instead of a misleading label.
+          title={
+            isLastHuman ? t("members.cannotRemoveLast") : t("members.revoke")
+          }
+          aria-label={
+            isLastHuman ? t("members.cannotRemoveLast") : t("members.revoke")
+          }
+          className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity] outline-none group-hover/chip:opacity-100 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-40"
+        >
+          <UserMinusIcon className="size-3.5" aria-hidden />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The shared revoke-confirm dialog for a member chip (#888), driven by the parent's `pendingRevoke`. It
+ * dispatches to the human or the service-account revoke by kind, and keeps the semantic note (revoking
+ * stops future decryption but cannot un-tell a value already revealed — rotate the credential if exposed).
+ */
+function RevokeMemberDialog({
+  vaultId,
+  member,
+  onDone,
+}: {
+  vaultId: string;
+  member: UnifiedMember | null;
+  onDone: () => void;
 }) {
   const t = useTranslations("secrets");
   const tc = useTranslations("common");
   const removeMember = useRemoveMember();
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const removeServiceAccount = useRemoveServiceAccountMember();
   const [busy, setBusy] = useState(false);
 
+  const name =
+    member?.kind === "user"
+      ? `${member.meta.firstName} ${member.meta.lastName}`.trim()
+      : (member?.meta.name ?? "");
+  const isSa = member?.kind === "service_account";
+
   async function handleRevoke() {
+    if (!member) return;
     setBusy(true);
     try {
-      await removeMember.mutateAsync({ vaultId, userId: member.userId });
-      toast.success(t("members.revoked", { name: `${member.firstName} ${member.lastName}` }));
-      setConfirmOpen(false);
+      if (member.kind === "user") {
+        await removeMember.mutateAsync({ vaultId, userId: member.id });
+        toast.success(t("members.revoked", { name }));
+      } else {
+        await removeServiceAccount.mutateAsync({ vaultId, saId: member.id });
+        toast.success(t("serviceAccountMembers.revoked", { name }));
+      }
+      onDone();
     } catch (err) {
-      notifyError(err, t("members.revokeError"));
+      notifyError(
+        err,
+        isSa
+          ? t("serviceAccountMembers.revokeError")
+          : t("members.revokeError"),
+      );
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <li className="flex items-center gap-3 p-3">
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold uppercase text-muted-foreground">
-        {member.firstName[0]}{member.lastName[0]}
-      </span>
-
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">
-          {member.firstName} {member.lastName}
-        </p>
-        <p className="truncate text-xs text-muted-foreground">{member.email}</p>
-      </div>
-
-      {canManage ? (
-        <>
-          <button
-            type="button"
-            onClick={() => setConfirmOpen(true)}
-            // SM-WEB-06: explain WHY the button is disabled when it's the last member, instead of the stale
-            // "Remove access" tooltip that implies the action is available.
-            // a11y (#606): mirror the same string into `aria-label` so this icon-only button has a name.
-            title={membersCount <= 1 ? t("members.cannotRemoveLast") : t("members.revoke")}
-            aria-label={membersCount <= 1 ? t("members.cannotRemoveLast") : t("members.revoke")}
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-40"
-            disabled={membersCount <= 1}
-          >
-            <UserMinusIcon className="size-4" aria-hidden />
-          </button>
-
-          {/* Revoke confirm */}
-          <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>{t("members.revokeTitle")}</DialogTitle>
-                <DialogDescription>
-                  {t("members.revokeDescription", {
-                    name: `${member.firstName} ${member.lastName}`,
-                  })}
-                </DialogDescription>
-              </DialogHeader>
-              <Callout tone="warning" className="text-xs">
-                {t("members.revokeSemanticNote")}
-              </Callout>
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setConfirmOpen(false)}
-                  disabled={busy}
-                >
-                  {tc("cancel")}
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleRevoke}
-                  disabled={busy}
-                >
-                  {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : null}
-                  {t("members.revoke")}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </>
-      ) : null}
-    </li>
+    <Dialog
+      open={!!member}
+      onOpenChange={(next) => {
+        if (!next && !busy) onDone();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {isSa
+              ? t("serviceAccountMembers.revokeTitle")
+              : t("members.revokeTitle")}
+          </DialogTitle>
+          <DialogDescription>
+            {isSa
+              ? t("serviceAccountMembers.revokeDescription", { name })
+              : t("members.revokeDescription", { name })}
+          </DialogDescription>
+        </DialogHeader>
+        <Callout tone="warning" className="text-xs">
+          {t("members.revokeSemanticNote")}
+        </Callout>
+        <DialogFooter>
+          <Button variant="outline" onClick={onDone} disabled={busy}>
+            {tc("cancel")}
+          </Button>
+          <Button variant="destructive" onClick={handleRevoke} disabled={busy}>
+            {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : null}
+            {t("members.revoke")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -967,7 +1222,8 @@ function AddItemDialog({
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (busy || preparingKey || !label.trim() || !handle.trim() || !complete) return;
+    if (busy || preparingKey || !label.trim() || !handle.trim() || !complete)
+      return;
     const dek = ensureDek();
     if (!dek) {
       // Genuinely can't unwrap — keep the typed value, surface an inline recoverable error, do NOT toast
@@ -1013,11 +1269,15 @@ function AddItemDialog({
 
         <form onSubmit={handleCreate} className="space-y-4">
           <Field>
-            <FieldLabel htmlFor="item-label">{t("items.labelField")}</FieldLabel>
+            <FieldLabel htmlFor="item-label">
+              {t("items.labelField")}
+            </FieldLabel>
             <Input
               id="item-label"
               value={label}
-              onChange={(e) => dispatchForm({ type: "setLabel", value: e.target.value })}
+              onChange={(e) =>
+                dispatchForm({ type: "setLabel", value: e.target.value })
+              }
               disabled={busy}
               maxLength={200}
               placeholder={t("items.labelPlaceholder")}
@@ -1025,14 +1285,18 @@ function AddItemDialog({
             />
           </Field>
           <Field>
-            <FieldLabel htmlFor="item-handle">{t("items.handleField")}</FieldLabel>
+            <FieldLabel htmlFor="item-handle">
+              {t("items.handleField")}
+            </FieldLabel>
             <Input
               id="item-handle"
               value={handle}
               onChange={(e) =>
                 dispatchForm({
                   type: "setHandle",
-                  value: e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ""),
+                  value: e.target.value
+                    .toLowerCase()
+                    .replace(/[^a-z0-9_.-]/g, ""),
                 })
               }
               disabled={busy}
@@ -1073,10 +1337,20 @@ function AddItemDialog({
             </Button>
             <Button
               type="submit"
-              disabled={busy || preparingKey || !label.trim() || !handle.trim() || !complete}
+              disabled={
+                busy ||
+                preparingKey ||
+                !label.trim() ||
+                !handle.trim() ||
+                !complete
+              }
             >
               {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : null}
-              {busy ? t("items.creating") : preparingKey ? t("items.preparingKey") : t("items.addSubmit")}
+              {busy
+                ? t("items.creating")
+                : preparingKey
+                  ? t("items.preparingKey")
+                  : t("items.addSubmit")}
             </Button>
           </DialogFooter>
         </form>
@@ -1173,7 +1447,8 @@ function EditItemDialog({
     };
     const patch: PatchData = {};
     if (label.trim() && label.trim() !== item.label) patch.label = label.trim();
-    if (handle.trim() && handle.trim() !== item.handle) patch.handle = handle.trim();
+    if (handle.trim() && handle.trim() !== item.handle)
+      patch.handle = handle.trim();
 
     if (needsKey) {
       const dek = ensureDek();
@@ -1185,7 +1460,10 @@ function EditItemDialog({
       }
       // ADR-0075: encode the typed payload, seal it, and pair `kind` with the fresh ciphertext so the
       // server-visible type and the encrypted shape never disagree.
-      const envelope = sealItem(dek, encodeSecretPayload(buildTypedSecret(kind, fields)));
+      const envelope = sealItem(
+        dek,
+        encodeSecretPayload(buildTypedSecret(kind, fields)),
+      );
       Object.assign(patch, envelope);
       patch.kind = kind;
     }
@@ -1219,25 +1497,33 @@ function EditItemDialog({
 
         <form onSubmit={handleUpdate} className="space-y-4">
           <Field>
-            <FieldLabel htmlFor="edit-item-label">{t("items.labelField")}</FieldLabel>
+            <FieldLabel htmlFor="edit-item-label">
+              {t("items.labelField")}
+            </FieldLabel>
             <Input
               id="edit-item-label"
               value={label}
-              onChange={(e) => dispatchForm({ type: "setLabel", value: e.target.value })}
+              onChange={(e) =>
+                dispatchForm({ type: "setLabel", value: e.target.value })
+              }
               disabled={busy}
               maxLength={200}
               autoFocus
             />
           </Field>
           <Field>
-            <FieldLabel htmlFor="edit-item-handle">{t("items.handleField")}</FieldLabel>
+            <FieldLabel htmlFor="edit-item-handle">
+              {t("items.handleField")}
+            </FieldLabel>
             <Input
               id="edit-item-handle"
               value={handle}
               onChange={(e) =>
                 dispatchForm({
                   type: "setHandle",
-                  value: e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ""),
+                  value: e.target.value
+                    .toLowerCase()
+                    .replace(/[^a-z0-9_.-]/g, ""),
                 })
               }
               disabled={busy}
@@ -1281,11 +1567,18 @@ function EditItemDialog({
             <Button
               type="submit"
               disabled={
-                busy || (needsKey && preparingKey) || retypedWithoutValue || !label.trim()
+                busy ||
+                (needsKey && preparingKey) ||
+                retypedWithoutValue ||
+                !label.trim()
               }
             >
               {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : null}
-              {busy ? t("items.updating") : needsKey && preparingKey ? t("items.preparingKey") : tc("save")}
+              {busy
+                ? t("items.updating")
+                : needsKey && preparingKey
+                  ? t("items.preparingKey")
+                  : tc("save")}
             </Button>
           </DialogFooter>
         </form>
@@ -1493,7 +1786,11 @@ function ExportDialog({
             {tc("cancel")}
           </Button>
           <Button type="button" onClick={handleExport} disabled={busy}>
-            {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : <ArrowDownTrayIcon className="size-4" />}
+            {busy ? (
+              <ArrowPathIcon className="size-4 animate-spin" />
+            ) : (
+              <ArrowDownTrayIcon className="size-4" />
+            )}
             {busy ? t("export.exporting") : t("export.confirm")}
           </Button>
         </DialogFooter>
@@ -1617,7 +1914,9 @@ function ImportDialog({
 
         <div className="space-y-4">
           <Field>
-            <FieldLabel htmlFor="import-text">{t("import.pasteLabel")}</FieldLabel>
+            <FieldLabel htmlFor="import-text">
+              {t("import.pasteLabel")}
+            </FieldLabel>
             <textarea
               id="import-text"
               value={text}
@@ -1670,7 +1969,9 @@ function ImportDialog({
               ) : null}
               {parsed.malformed.length > 0 ? (
                 <p className="text-destructive">
-                  {t("import.previewMalformed", { count: parsed.malformed.length })}
+                  {t("import.previewMalformed", {
+                    count: parsed.malformed.length,
+                  })}
                 </p>
               ) : null}
             </div>
@@ -1691,7 +1992,11 @@ function ImportDialog({
             onClick={handleImport}
             disabled={busy || toCreate.length === 0}
           >
-            {busy ? <ArrowPathIcon className="size-4 animate-spin" /> : <ArrowUpTrayIcon className="size-4" />}
+            {busy ? (
+              <ArrowPathIcon className="size-4 animate-spin" />
+            ) : (
+              <ArrowUpTrayIcon className="size-4" />
+            )}
             {busy
               ? t("import.importing")
               : t("import.confirm", { count: toCreate.length })}
@@ -1734,7 +2039,12 @@ function AddMemberDialog({
         </DialogHeader>
         {/* Gate the data hooks behind `open` — the body (and its useUsers/useMembers/useMyMembership/
             useUserPublicKey queries) only mounts once the dialog is open. */}
-        {open ? <AddMemberDialogBody vaultId={vaultId} onClose={() => onOpenChange(false)} /> : null}
+        {open ? (
+          <AddMemberDialogBody
+            vaultId={vaultId}
+            onClose={() => onOpenChange(false)}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
   );
@@ -1756,7 +2066,11 @@ function AddMemberDialogBody({
   const addMember = useAddMember();
 
   // SM-WEB-02: read isError so a users load error is NOT indistinguishable from "no one to add".
-  const { data: allUsers, isLoading: usersLoading, isError: usersLoadError } = useUsers();
+  const {
+    data: allUsers,
+    isLoading: usersLoading,
+    isError: usersLoadError,
+  } = useUsers();
   const { data: currentMembers } = useMembers(vaultId);
 
   const [targetUserId, setTargetUserId] = useState("");
@@ -1773,11 +2087,13 @@ function AddMemberDialogBody({
 
   // Filter out users who are already members.
   const memberUserIds = new Set(currentMembers?.map((m) => m.userId) ?? []);
-  const eligibleUsers: User[] = allUsers?.filter((u: User) => !memberUserIds.has(u.id)) ?? [];
+  const eligibleUsers: User[] =
+    allUsers?.filter((u: User) => !memberUserIds.has(u.id)) ?? [];
 
   // SM-WEB-02: with users loaded successfully but nobody left to add, show an explicit empty state and
   // disable Grant — instead of a dead <select> with only the placeholder option.
-  const noEligible = !usersLoading && !usersLoadError && eligibleUsers.length === 0;
+  const noEligible =
+    !usersLoading && !usersLoadError && eligibleUsers.length === 0;
   // SECW-03: a 404 on the target's public key means they never bootstrapped; any other resolved-empty key
   // is a different failure. Both block the grant, but the 404 gets a clear, actionable message.
   const targetNoKeypair =
@@ -1859,19 +2175,28 @@ function AddMemberDialogBody({
           <FieldDescription className="text-destructive">
             {/* SECW-03: a 404 means the target never bootstrapped — give an actionable message;
                 any other resolved-empty key keeps the generic note. */}
-            {targetNoKeypair ? t("members.targetNoKeypair") : t("members.noPublicKey")}
+            {targetNoKeypair
+              ? t("members.targetNoKeypair")
+              : t("members.noPublicKey")}
           </FieldDescription>
         ) : null}
       </Field>
 
       {!usersLoading && !usersLoadError && !noEligible ? (
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={busy}
+          >
             {tc("cancel")}
           </Button>
           <Button
             type="submit"
-            disabled={busy || !targetUserId || publicKeyLoading || !targetPublicKeyData}
+            disabled={
+              busy || !targetUserId || publicKeyLoading || !targetPublicKeyData
+            }
           >
             {busy || publicKeyLoading ? (
               <ArrowPathIcon className="size-4 animate-spin" />
@@ -1881,7 +2206,12 @@ function AddMemberDialogBody({
         </DialogFooter>
       ) : (
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={busy}
+          >
             {tc("cancel")}
           </Button>
         </DialogFooter>
@@ -1899,11 +2229,9 @@ function AddMemberDialogBody({
  * service-account + membership + public-key queries) mounts ONLY while `open`, so nothing fetches until an
  * admin opens the dialog.
  *
- * ponytail: the backend exposes POST (grant) + DELETE (revoke) for SA memberships but NO endpoint to LIST
- * a vault's current service-account members (`loadMembers` returns human members only). So this dialog
- * grants/revokes BY SELECTION and relies on the server for truth (409 = already a member, 404 = not a
- * member) rather than rendering an inline SA-member list. Ceiling: an inline "current machine members"
- * list is a follow-up once the API exposes a read.
+ * This dialog GRANTS by selection (and can revoke a selected account); the current machine members are now
+ * shown — and revocable — as chips in the Members section itself (#888, via `useServiceAccountMembers`).
+ * The grant/revoke here still relies on the server for truth (409 = already a member, 404 = not a member).
  */
 function AddServiceAccountDialog({
   open,
@@ -2017,7 +2345,9 @@ function AddServiceAccountDialogBody({
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         // Desired end-state already holds — the SA is a member. Inform, don't alarm.
-        toast.info(t("serviceAccountMembers.alreadyMember", { name: targetName }));
+        toast.info(
+          t("serviceAccountMembers.alreadyMember", { name: targetName }),
+        );
       } else {
         notifyError(err, t("serviceAccountMembers.grantError"));
       }
@@ -2122,10 +2452,7 @@ function AddServiceAccountDialogBody({
             <Button
               type="submit"
               disabled={
-                busy !== null ||
-                !targetSaId ||
-                publicKeyLoading ||
-                !saPublicKey
+                busy !== null || !targetSaId || publicKeyLoading || !saPublicKey
               }
             >
               {busy === "grant" || publicKeyLoading ? (
@@ -2175,14 +2502,14 @@ function ItemsSkeleton() {
 
 function MembersSkeleton() {
   return (
-    <ul className="space-y-2">
-      {["a", "b"].map((k) => (
-        <li key={k} className="flex items-center gap-3 rounded-lg border p-3">
-          <div className="size-8 animate-pulse rounded-full bg-muted" />
-          <div className="flex-1 space-y-1.5">
-            <div className="h-3.5 w-1/3 animate-pulse rounded bg-muted" />
-            <div className="h-3 w-1/4 animate-pulse rounded bg-muted" />
-          </div>
+    <ul className="flex flex-wrap gap-2">
+      {["a", "b", "c"].map((k) => (
+        <li
+          key={k}
+          className="inline-flex items-center gap-2 rounded-full border border-foreground/10 bg-card py-1 pr-3 pl-1"
+        >
+          <div className="size-6 animate-pulse rounded-full bg-muted" />
+          <div className="h-3.5 w-24 animate-pulse rounded bg-muted" />
         </li>
       ))}
     </ul>
