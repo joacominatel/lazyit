@@ -19,8 +19,8 @@ acotado:
 
 - **Notificaciones de difusión** — los avisos operativos de todo el parque (un acceso a una aplicación
   crítica, una elevación a administrador, stock bajo, un flujo de trabajo que necesita una persona o
-  que falló) solo son visibles para quienes tengan el permiso de notificaciones en su rol. Por defecto,
-  eso es **solo administradores**.
+  que falló, un otorgamiento de permiso sensible, un agente sin conexión) solo son visibles para quienes
+  tengan el permiso de notificaciones en su rol. Por defecto, eso es **solo administradores**.
 - **Notificaciones dirigidas** — una notificación dirigida a una persona concreta aparece en **su
   propia** campana, aunque no sea administrador ni tenga el permiso de notificaciones. Hoy la única
   notificación dirigida es el **aviso para configurar el almacén** (más abajo).
@@ -40,6 +40,8 @@ una manguera:
 | **Stock bajo** | Un consumible pasó de estar por encima de su stock mínimo a estar en él o por debajo. |
 | **Tarea manual** | Una ejecución de flujo de trabajo se pausó y espera que una persona actúe. |
 | **Ejecución fallida** | Una ejecución de flujo de trabajo falló o escaló y se detuvo. |
+| **Permiso sensible otorgado** | Una edición de permisos le dio al rol Miembro o Espectador una capacidad de alto riesgo — ajustes de la instancia, gestión de usuarios, control de accesos, o cualquier permiso de eliminación. Enlaza al editor de permisos por rol. |
+| **Agente sin conexión** | Un agente de reportes dejó de enviar informes y su nodo pasó a estar sin conexión. Una notificación por caída — no una por cada chequeo. Enlaza al mapa de topología. |
 | **Configurar almacén** | (Dirigida, una sola vez) A quien puede leer secretos pero nunca configuró una contraseña de almacén se le avisa al iniciar sesión para que configure una. |
 
 Las notificaciones se emiten **después** de que la acción que las origina se completa, y son **de mejor
