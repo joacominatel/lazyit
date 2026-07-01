@@ -3,6 +3,7 @@ import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { NotificationsRetentionSweeper } from './notifications-retention.sweeper';
 import { VaultSetupNudgeService } from './vault-setup-nudge.service';
+import { SmtpModule } from '../smtp/smtp.module';
 
 /**
  * NotificationsModule — the in-app notification bell (ADR-0056). Hosts the four POLL endpoints
@@ -23,6 +24,9 @@ import { VaultSetupNudgeService } from './vault-setup-nudge.service';
  * post-login seam in UsersModule.
  */
 @Module({
+  // SmtpModule provides the NotificationEmailRelay (the email channel producer) that
+  // NotificationsService.emit() calls behind the bell (ADR-0079). No cycle: SmtpModule never imports this.
+  imports: [SmtpModule],
   controllers: [NotificationsController],
   providers: [
     NotificationsService,
