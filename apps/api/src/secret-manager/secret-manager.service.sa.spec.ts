@@ -108,7 +108,14 @@ class FakePrisma {
     deletedAt: Date | null;
   }[] = [];
   humanMemberships: { vaultId: string; userId: string }[] = [];
-  serviceAccounts: { id: string; deletedAt: Date | null }[] = [];
+  serviceAccounts: {
+    id: string;
+    deletedAt: Date | null;
+    name?: string;
+    description?: string | null;
+    tokenPrefix?: string;
+    isActive?: boolean;
+  }[] = [];
   saKeypairs: {
     id: string;
     serviceAccountId: string;
@@ -143,8 +150,7 @@ class FakePrisma {
     findFirst: ({ where }: { where: Record<string, unknown> }) => {
       const some = (
         where.serviceAccountMemberships as
-          | { some?: { serviceAccountId?: string } }
-          | undefined
+          { some?: { serviceAccountId?: string } } | undefined
       )?.some;
       return (
         this.vaults.find((v) => {
@@ -166,8 +172,7 @@ class FakePrisma {
     findMany: ({ where }: { where?: Record<string, unknown> } = {}) => {
       const some = (
         where?.serviceAccountMemberships as
-          | { some?: { serviceAccountId?: string } }
-          | undefined
+          { some?: { serviceAccountId?: string } } | undefined
       )?.some;
       return this.vaults.filter((v) => {
         if (v.deletedAt !== null) return false;
@@ -272,6 +277,25 @@ class FakePrisma {
   };
 
   readonly serviceAccountVaultMembership = {
+    findMany: ({ where }: { where: { vaultId: string }; orderBy?: unknown }) =>
+      this.saMemberships
+        .filter((m) => m.vaultId === where.vaultId)
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .map((m) => {
+          const sa = this.serviceAccounts.find(
+            (s) => s.id === m.serviceAccountId,
+          );
+          return {
+            serviceAccountId: m.serviceAccountId,
+            createdAt: m.createdAt,
+            serviceAccount: {
+              name: sa?.name ?? 'SA',
+              description: sa?.description ?? null,
+              tokenPrefix: sa?.tokenPrefix ?? 'lzit_sa_x',
+              isActive: sa?.isActive ?? true,
+            },
+          };
+        }),
     findUnique: ({
       where,
     }: {
@@ -579,6 +603,58 @@ describe('SecretManagerService — SA programmatic retrieval (ADR-0080)', () => 
       await expect(
         svc.revokeServiceAccountMembership(human('alice'), vaultId, 'sa1'),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  // ── list SA members (#888 — SA members were invisible in the vault Members UI) ───
+  describe('listServiceAccountMembers', () => {
+    it('returns granted SA members with non-secret display metadata', async () => {
+      const { svc, db } = build();
+      const { vaultId, saId } = seed(db, { humanMemberId: 'alice' });
+      Object.assign(
+        db.serviceAccounts.find((s) => s.id === saId)!,
+        {
+          name: 'CI Runner',
+          description: 'nightly deploy',
+          tokenPrefix: 'lzit_sa_ci',
+          isActive: true,
+        },
+      );
+      await svc.grantServiceAccountMembership(human('alice'), vaultId, {
+        serviceAccountId: saId,
+        ...WRAP,
+      });
+
+      const members = await svc.listServiceAccountMembers(
+        human('alice'),
+        vaultId,
+      );
+      expect(members).toHaveLength(1);
+      expect(members[0]).toMatchObject({
+        serviceAccountId: saId,
+        name: 'CI Runner',
+        description: 'nightly deploy',
+        tokenPrefix: 'lzit_sa_ci',
+        isActive: true,
+      });
+      // INV-10: the metadata read never leaks the wrapped DEK blob.
+      expect(JSON.stringify(members)).not.toContain(WRAP.wrappedDek);
+    });
+
+    it('is empty when no service account has been granted', async () => {
+      const { svc, db } = build();
+      const { vaultId } = seed(db, { humanMemberId: 'alice' });
+      expect(
+        await svc.listServiceAccountMembers(human('alice'), vaultId),
+      ).toEqual([]);
+    });
+
+    it('403s a human who is neither ADMIN nor a live member', async () => {
+      const { svc, db } = build();
+      const { vaultId } = seed(db, { humanMemberId: 'alice' });
+      await expect(
+        svc.listServiceAccountMembers(human('mallory', 'MEMBER'), vaultId),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 
