@@ -5,6 +5,7 @@
 // barrel. Adding a brand-new namespace is the only reason to touch this file.
 import applications from "./applications.json";
 import assets from "./assets.json";
+import audit from "./audit.json";
 import auth from "./auth.json";
 import common from "./common.json";
 import consumables from "./consumables.json";
@@ -40,6 +41,7 @@ const messages = {
   locations,
   settings,
   reports,
+  audit,
   setup,
   auth,
   workflow,

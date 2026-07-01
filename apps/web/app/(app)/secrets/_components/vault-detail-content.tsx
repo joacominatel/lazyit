@@ -74,6 +74,7 @@ import {
   useCreateItem,
   useDeleteItem,
   useItems,
+  useRecordReveal,
   useUpdateItem,
 } from "@/lib/secret-manager/hooks/use-items";
 import {
@@ -557,6 +558,9 @@ interface ItemRowProps {
 function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
   const t = useTranslations("secrets");
   const { ensureDek } = useVaultDek(vaultId);
+  // #870: fire-and-forget audit beacon written when this member REVEALS the value (INV-10 metadata-only —
+  // WHO revealed WHICH item, when; no plaintext ever leaves the browser). Best-effort by design.
+  const recordReveal = useRecordReveal();
   const { isUnlocked } = useSecretSession();
   // SECW-02: read the caller's membership directly so we can distinguish "not a member" (404, e.g. a
   // non-member ADMIN) and "still loading" from a genuine decrypt failure — revealError is reserved for
@@ -630,6 +634,11 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
       });
       setRevealError(false);
       setPlaintext(value);
+      // #870: the decrypt SUCCEEDED → beacon the reveal (metadata-only, INV-10). Fire-and-forget: a
+      // failed/blocked audit write must never stop the member from seeing their own secret. One beacon
+      // per reveal-click; copy (which always follows a reveal) is deliberately NOT logged to stay
+      // un-chatty. ponytail: no debounce — the ceiling is one row per manual reveal-click.
+      recordReveal.mutate({ vaultId, itemId: item.id });
       // Auto-mask after timeout.
       clearTimeout(maskTimerRef.current);
       maskTimerRef.current = setTimeout(
@@ -640,7 +649,7 @@ function ItemRow({ item, vaultId, canManage }: ItemRowProps) {
       // Wrong DEK or tampered ciphertext — surface a friendly error, never the raw exception.
       setRevealError(true);
     }
-  }, [plaintext, ensureDek, item]);
+  }, [plaintext, ensureDek, item, recordReveal, vaultId]);
 
   async function handleCopy() {
     if (!plaintext) return;

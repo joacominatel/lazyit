@@ -57,8 +57,20 @@ When someone leaves, open them and choose **Offboard**. lazyit shows the full im
 **assets to return** and the **application access to revoke** — and then, on confirm:
 
 - **revokes** the person's active application access,
+- **removes** the person's access to every [Secret vault](/help/secret-manager-vaults-members) they
+  belonged to (their cryptographic membership is dropped),
 - **releases** the assets they hold,
 - **archives** the user (a soft delete) so they can no longer be assigned assets.
+
+It all happens together: if any step fails, the whole offboarding is rolled back, so a departing person
+is never left half-offboarded (archived but still holding access).
+
+**Rotate the secrets they could read.** If the person was a member of any Secret vault, the confirmation
+lists those vaults (with how many secrets each holds) as a reminder to **rotate those secrets by hand**.
+Removing their membership stops any *new* reads, but because they could already read those vaults, the
+values themselves should be changed. lazyit **cannot rotate them for you** — it is zero-knowledge and
+never sees the plaintext, so it can't re-encrypt on your behalf. This is a prompt, not an automatic
+action. (Who removed whose vault access, and when, is recorded in the Secret Manager's audit trail.)
 
 **Nothing is destroyed.** The person and their history are preserved for the record. You can fill in a
 handover note and print a **return act** (with company name and signature lines) to sign on paper at

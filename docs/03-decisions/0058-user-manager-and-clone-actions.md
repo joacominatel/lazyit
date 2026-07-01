@@ -3,7 +3,7 @@ title: "ADR-0058: User identity graph (legajo / username / manager) + clone-with
 tags: [adr, users, identity, access, workflow-engine, data-model]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-07-01
 deciders: [Joaquín Minatel]
 ---
 
@@ -373,6 +373,40 @@ implementation.
 5. **`legajo` uniqueness (Q5) — optional + unique-among-live.** A partial unique index
    `WHERE "deletedAt" IS NULL` (the email precedent), so offboarding frees the `legajo` for
    reuse/restore. Normalized (trim) on write.
+
+## Amendment (2026-07-01, #869) — offboarding also revokes Secret-vault memberships + a rotation prompt
+
+The offboard transaction (`UsersService.remove`, `apps/api/src/users/users.service.ts`) previously
+revoked active [[access-grant]]s + released [[asset-assignment]]s + deactivated the IdP account, but
+**never touched [[vault-membership]]** — so a departed user kept their wrapped-DEK rows and retained
+**cryptographic read access** to every Secret vault they belonged to (a SOC2 offboarding-control gap).
+This amendment folds the vault-membership revoke into the **same one transaction** (a half-offboarding
+that leaves crypto access is strictly worse; separation-of-duties is acceptable because it only
+**removes** access, never reads a secret). Concretely, inside the existing `$transaction`:
+
+- **Hard-drop every membership the user holds** — `tx.vaultMembership.deleteMany({ where: { userId } })`,
+  the bulk twin of `SecretManagerService.revokeMembership`. [[vault-membership]] is a HARD-DROP join (no
+  `deletedAt`), so `deleteMany` is correct. **INV-10-safe** ([[0061-secret-manager-zero-knowledge]] §9):
+  a **pure row-delete** of wrapped key material — the server never decrypts anything.
+- **A rotation prompt, read BEFORE the delete** — the affected vaults' **name + live secret count** (pure
+  metadata, left of the §9 zero-knowledge line — never a value/key/ciphertext) are collected first (the
+  rows vanish after the delete) and returned as `rotationVaults`. lazyit **cannot auto-rotate** (it can't
+  re-encrypt), so the offboarding success sheet surfaces a **display-only "Secrets to rotate"** section —
+  an honest prompt to rotate those secrets by hand, in the ambient restraint register
+  ([[0049-activated-restraint-ux-direction]]).
+- **Audit parity, in-lane** — one **`MEMBERSHIP_REVOKED` [[secret-audit-log]]** row per revoked vault via
+  a direct `tx.secretAuditLog.createMany` (not a call into `SecretManagerService` — lanes disjoint),
+  attributed with the **same human-XOR-SA actor mapping** the grant revocation uses (human → `actorId`,
+  service account → `serviceAccountId`; the table's at-most-one-actor CHECK, [[0048-service-accounts]]).
+  This is the SOC2 "who removed this person's vault access, when" answer.
+- **`OffboardResult`** gains `revokedVaultMemberships: number` + `rotationVaults: { vaultId, name,
+  itemCount }[]` (api + web mirror). **No new endpoint, permission verb, enum value, or migration**
+  (`MEMBERSHIP_REVOKED` already exists in `SecretAuditAction`).
+
+**Atomicity:** everything stays in the one transaction, so an IdP failure (or any step) rolls the
+membership drops back too — no split-brain. **Deferred (unchanged):** no auto-rotation, no DEK rotation,
+no hard-revoke of a cached DEK (ADR-0061 §5 Phase-2); the pre-confirm preview of memberships and the
+printable Return Act secrets section are separable later UX.
 
 ## References
 

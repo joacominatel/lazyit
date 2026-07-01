@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -217,6 +218,25 @@ export class VaultsController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.secrets.recordExport(principal, vaultId, dto);
+  }
+
+  @Post(':vaultId/items/:itemId/reveal')
+  @RequirePermission('secret:read')
+  @HttpCode(204)
+  @ApiOperation({
+    summary:
+      'Record a single-item secret REVEAL (audit-only; decryption happens client-side, INV-10)',
+  })
+  @ApiOkResponse({
+    description:
+      'Audit row written (ITEM_REVEALED, 204). The server NEVER receives, sees, or stores a plaintext value — only WHO revealed WHICH item, when. No request body (the path params carry vaultId + itemId).',
+  })
+  recordReveal(
+    @Param('vaultId') vaultId: string,
+    @Param('itemId') itemId: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.secrets.recordReveal(principal, vaultId, itemId);
   }
 
   // ── Members ─────────────────────────────────────────────────────────────────

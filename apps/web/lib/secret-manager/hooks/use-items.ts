@@ -4,6 +4,7 @@ import {
   createItem,
   deleteItem,
   getItems,
+  recordReveal,
   updateItem,
 } from "../endpoints/items";
 import { itemKeys } from "../query-keys";
@@ -59,6 +60,19 @@ export function useUpdateItem() {
     }) => updateItem(vaultId, itemId, data),
     onSuccess: (_result, { vaultId }) =>
       queryClient.invalidateQueries({ queryKey: itemKeys.list(vaultId) }),
+  });
+}
+
+/**
+ * Record a single-item REVEAL (#870) — the metadata-only audit call AFTER the browser has decrypted the
+ * item's value. No cache invalidation (it mutates only the server-side audit log, nothing the UI reads).
+ * Called fire-and-forget from the reveal surfaces (`.mutate`, best-effort) so a failed or blocked audit
+ * write never stops a member from seeing their own secret. INV-10: the call carries no secret material.
+ */
+export function useRecordReveal() {
+  return useMutation({
+    mutationFn: ({ vaultId, itemId }: { vaultId: string; itemId: string }) =>
+      recordReveal(vaultId, itemId),
   });
 }
 

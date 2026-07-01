@@ -1186,6 +1186,100 @@ describe('SecretManagerService', () => {
     });
   });
 
+  describe('reveal audit (ITEM_REVEALED, #870)', () => {
+    it('a member records a reveal → exactly one ITEM_REVEALED row (actorId+vaultId+itemId, no value)', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const item = await svc.createItem(alice, vaultId, {
+        handle: 'prod-db',
+        label: 'Prod DB',
+        ...ENVELOPE,
+      });
+      db.audit.length = 0; // isolate the reveal audit row
+
+      await expect(
+        svc.recordReveal(alice, vaultId, item.id),
+      ).resolves.toBeUndefined();
+
+      expect(db.audit).toHaveLength(1);
+      const row = db.audit[0];
+      expect(row.action).toBe('ITEM_REVEALED');
+      expect(row.actorId).toBe('alice');
+      expect(row.vaultId).toBe(vaultId);
+      expect(row.itemId).toBe(item.id);
+      // METADATA ONLY: the row carries no value/key/blob — only the standard audit columns.
+      expect(Object.keys(row).sort()).toEqual(
+        [
+          'action',
+          'actorId',
+          'serviceAccountId',
+          'itemId',
+          'targetUserId',
+          'targetServiceAccountId',
+          'vaultId',
+        ].sort(),
+      );
+    });
+
+    it('a non-member (even with secret:read) cannot record a reveal (403) — reveal is member-only', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const eve = human('eve');
+      await expect(
+        svc.recordReveal(eve, vaultId, 'citem00000000000000nope'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('a service-account principal is rejected (403) — human-only', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      await expect(
+        svc.recordReveal(serviceAccount(), vaultId, 'citem0000000000000item'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('revealing under a missing/soft-deleted vault is a 404', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      await expect(
+        svc.recordReveal(
+          alice,
+          'cvault00000000000000nope',
+          'citem0000000000000item',
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('a member cannot beacon a FOREIGN/nonexistent itemId (item not in this vault) → 404, NO audit row', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      // Two vaults alice is a member of; the item lives in the OTHER vault.
+      const vaultA = await makeVault(svc, alice, 'A');
+      const vaultB = await makeVault(svc, alice, 'B');
+      const foreign = await svc.createItem(alice, vaultB, {
+        handle: 'other-db',
+        label: 'Other DB',
+        ...ENVELOPE,
+      });
+      db.audit.length = 0; // isolate: prove no reveal row is written on the rejected call
+
+      // Revealing vaultB's item THROUGH vaultA must 404 (IDOR / audit-trail-poisoning fence) — even though
+      // alice is a live member of vaultA, the itemId does not belong to it.
+      await expect(
+        svc.recordReveal(alice, vaultA, foreign.id),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      // A plain nonexistent itemId is likewise a 404.
+      await expect(
+        svc.recordReveal(alice, vaultA, 'citem00000000000000nope'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(db.audit).toHaveLength(0);
+    });
+  });
+
   // ── revoke / rename basics ────────────────────────────────────────────────────
   describe('membership revoke + vault rename', () => {
     it('revoking a non-member is a 404; revoking a member hard-drops the row', async () => {

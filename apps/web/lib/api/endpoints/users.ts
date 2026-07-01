@@ -134,6 +134,18 @@ export interface OffboardResult {
   releasedAssignments: { id: string; assetId: string }[];
   /** Count of active access grants revoked. */
   revokedGrants: number;
+  /**
+   * Count of Secret-vault crypto memberships hard-dropped (issue #869). INV-10-safe: revoking a
+   * membership is a pure row-delete of wrapped key material — the server never decrypts anything.
+   */
+  revokedVaultMemberships: number;
+  /**
+   * The vaults the departing user could read, as a ROTATION PROMPT (issue #869). Pure METADATA only —
+   * vault name + live item count, never a value/key/ciphertext. Informational: lazyit cannot auto-rotate
+   * (the server can't re-encrypt — zero-knowledge), so an operator must rotate these secrets manually.
+   * Empty when the user was a member of no vault.
+   */
+  rotationVaults: { vaultId: string; name: string; itemCount: number }[];
 }
 
 /**

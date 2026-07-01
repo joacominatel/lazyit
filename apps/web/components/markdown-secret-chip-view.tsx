@@ -141,6 +141,8 @@ export function SecretChip({ handle }: { handle?: string }) {
         <SecretChipReveal
           item={{
             vaultId: item.vaultId,
+            // #870: carry the item id so the reveal can beacon a metadata-only ITEM_REVEALED audit row.
+            itemId: item.id,
             ciphertext: item.ciphertext,
             iv: item.iv,
             authTag: item.authTag,

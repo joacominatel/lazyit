@@ -33,6 +33,13 @@ The full closed verb set is the single source of truth for the `action` filter's
 (`RECENT_ACTIVITY_ACTIONS` in `@lazyit/shared`). An unknown verb on the filter is a 400, never a
 silent no-match. Keep it in sync with the view if a new source verb is added.
 
+> **Not in this view — the three security audit logs.** `SecretAuditLog`, `PermissionAuditLog` and
+> `ServiceAccountAuditLog` are deliberately NOT merged here (different columns; secret rows are
+> INV-10 metadata-only). They have their own read + CSV-export surface at `GET /audit/logs` (source-
+> scoped, same `logs:read` gate, streamed CSV) and the web `/reports/audit` route — see
+> [[0081-audit-log-read-surface]] (ADR-0081). The audit action filters are enum-driven from the shared
+> per-source enums, so a new DB enum value (e.g. `ITEM_REVEALED`) appears automatically.
+
 ## Normalized row (`RecentActivityItem`)
 
 - `occurredAt` — `timestamptz`; when the event happened. The feed is ordered by this, desc.

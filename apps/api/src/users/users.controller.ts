@@ -408,6 +408,8 @@ export class UsersController {
         userId: '00000000-0000-0000-0000-000000000000',
         releasedAssignments: [{ id: 'clx…', assetId: 'cla…' }],
         revokedGrants: 2,
+        revokedVaultMemberships: 1,
+        rotationVaults: [{ vaultId: 'clv…', name: 'Prod DB', itemCount: 3 }],
       },
     },
   })
@@ -435,6 +437,8 @@ export class UsersController {
         userId: '00000000-0000-0000-0000-000000000000',
         releasedAssignments: [{ id: 'clx…', assetId: 'cla…' }],
         revokedGrants: 2,
+        revokedVaultMemberships: 1,
+        rotationVaults: [{ vaultId: 'clv…', name: 'Prod DB', itemCount: 3 }],
       },
     },
   })
