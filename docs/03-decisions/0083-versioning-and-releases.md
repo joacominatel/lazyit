@@ -118,6 +118,13 @@ lazyit updates ride a git checkout (not a registry pull), SSH-signed git tags ar
 integrity control — near-zero cost, no key infrastructure. **Cosign / registry signing is rejected**
 (there is no registry to sign into — that would be machinery buying nothing here).
 
+**Implementation note (issue #905):** the signing key belongs to the release owner and never enters
+CI, so signing applies to **operator-cut tags** — the hand-seeded `v1.0.0` and any manually created
+tag. The tags `release.yml` cuts automatically on promotion are **annotated but unsigned** (tagger =
+the GitHub Actions identity). This is consistent with the paragraph below: the signer *is* the GitHub
+identity, and the mandatory control is MFA + branch protection on `master`, which gate exactly the
+event that triggers the automated tag.
+
 **Organizational prerequisite (recorded, not built here):** the release identity must have **MFA +
 branch protection** on `master`. The real single point of failure in any release system is the
 GitHub identity, not the transport; signing raises the bar but the signer *is* that identity, so

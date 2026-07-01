@@ -110,6 +110,16 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
 > `docker compose up` (no `-f`) is now the **dev** backing-services stack (Postgres + Meilisearch +
 > Zitadel for native `bun run dev`), not the full prod stack — see [[setup]].
 
+> [!note] Version identity ([[0083-versioning-and-releases]])
+> The guided `infra/start.sh` exports `LAZYIT_VERSION=$(git describe --tags --always)` and
+> `LAZYIT_GIT_SHA=$(git rev-parse --short HEAD)` before `up`, so the api/web images bake the running
+> version (shown on **Settings → Instance** and by `GET /instance/version`). When running the compose
+> command **by hand**, export both first — otherwise the build honestly reports `dev`/`unknown`:
+>
+> ```sh
+> export LAZYIT_VERSION=$(git describe --tags --always) LAZYIT_GIT_SHA=$(git rev-parse --short HEAD)
+> ```
+
 Caddy obtains a certificate automatically (Let's Encrypt for a public FQDN on :443, or its internal
 CA otherwise). The one-shot `migrate` service applies migrations and seeds before the API starts.
 
@@ -166,8 +176,13 @@ Full procedure: **[[auth-bootstrap]]**. JIT provisioning creates the `User` row 
 
 ## 4. Updating to a new version
 
+Releases are the `vX.Y.Z` tags + GitHub Releases cut on every dev→master promotion
+([[0083-versioning-and-releases]]): a **patch/minor** is one-click-safe; a **major** requires reading
+the Release's *⚠️ Upgrade actions* section first. Check the running version on **Settings →
+Instance** before and after.
+
 ```sh
-git pull                                                       # or ship a new build/image
+git pull                                                       # or `git fetch --tags && git checkout vX.Y.Z`
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
   --profile prod --env-file infra/env/.env.prod up -d --build  # rebuilds; migrate re-runs (deploy)
 ```
