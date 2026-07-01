@@ -500,6 +500,9 @@
       "location:write": { "label": "Add & edit locations" },
       "location:delete": { "label": "Delete locations" },
       "import:run": { "label": "Run imports" },
+      "infra:read": { "label": "View the server map" },
+      "infra:manage": { "label": "Manage the server map" },
+      "infra:report": { "label": "Report server inventory (agent)" },
       "application:read": { "label": "View applications" },
       "application:write": { "label": "Add & edit applications" },
       "application:delete": { "label": "Delete applications" },
@@ -526,7 +529,8 @@
       "workflow:secrets": { "label": "Manage connector credentials" },
       "notification:read": { "label": "View notifications" },
       "secret:read": { "label": "View the Secret Manager" },
-      "secret:manage": { "label": "Manage vaults & memberships" }
+      "secret:manage": { "label": "Manage vaults & memberships" },
+      "secret:fetch": { "label": "Fetch secrets programmatically (service account)" }
     },
     "capabilities": {
       "inventory:view": {
@@ -540,6 +544,18 @@
       "inventory:delete": {
         "label": "Delete inventory",
         "description": "Archive assets, consumables, models, categories and locations."
+      },
+      "inventory:import": {
+        "label": "Run bulk imports",
+        "description": "Use the guided Migrator to bulk-import assets from a CSV/JSON file. Also requires the relevant write permissions (assets, models, categories, locations), checked per row at commit."
+      },
+      "infra:view": {
+        "label": "View the server map",
+        "description": "See the infra topology canvas — nodes, edges and the per-node drill-in (owner, KB, IP, shortcuts)."
+      },
+      "infra:manage": {
+        "label": "Manage the server map",
+        "description": "Create, edit and delete topology nodes, open and close edges, and persist node positions on the canvas. Asset-backed node creation also requires the asset edit permission."
       },
       "application:view": {
         "label": "View applications",
