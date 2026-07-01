@@ -34,6 +34,16 @@ merely lets a user *enter* the Secret Manager ([[0061-secret-manager-zero-knowle
   public key — which requires the granter to **already** be able to unwrap it (**no grant-what-you-can't-read**).
 - **Soft-revoke v1 = DROP the row.** Revoking membership **deletes** the row so the member's wrapped DEK
   copy no longer exists; there is no soft-delete tombstone for v1 (a current-state join).
+- **Offboarding hard-drops ALL of a user's memberships (#869).** Offboarding a [[user]]
+  (`UsersService.remove`) revokes every one of that user's memberships **inside the same offboard
+  transaction** — a `deleteMany({ where: { userId } })`, the bulk twin of the single revoke above — so a
+  departed user never keeps a wrapped-DEK copy (a SOC2 offboarding-control gap otherwise). Still
+  **INV-10-safe**: a pure row-delete, no decryption. Because lazyit **cannot auto-rotate** (it can't
+  re-encrypt), the offboard result also returns a **rotation flag** — the affected vaults' name + live
+  secret count (pure metadata), read **before** the delete — as an informational prompt to rotate those
+  secrets by hand. Audit parity: one `MEMBERSHIP_REVOKED` [[secret-audit-log]] row per revoked vault,
+  same human-XOR-SA actor mapping as the grant revocation ([[0049-activated-restraint-ux-direction]]
+  #869 note; [[0048-service-accounts]]).
 - **Re-wrap on peer-reset.** When a member's [[user-keypair]] is replaced (password loss / peer-reset),
   surviving members re-wrap the DEK to the member's **new** public key, updating the row (hence the
   optional `updatedAt`).

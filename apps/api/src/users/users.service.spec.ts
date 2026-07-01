@@ -69,6 +69,11 @@ type TxMock = {
   assetAssignment: { create: jest.Mock };
   workflowRun: { create: jest.Mock };
   userHistory: { create: jest.Mock };
+  // Issue #869: the offboarding also revokes the user's Secret-vault memberships. `findMany` reads the
+  // affected vaults' metadata (for the rotation prompt) BEFORE `deleteMany` hard-drops the rows, then
+  // `secretAuditLog.createMany` appends one MEMBERSHIP_REVOKED row per revoked vault.
+  vaultMembership: { findMany: jest.Mock; deleteMany: jest.Mock };
+  secretAuditLog: { createMany: jest.Mock };
 };
 
 type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
@@ -146,6 +151,13 @@ describe('UsersService', () => {
         create: jest.fn().mockResolvedValue({ id: 'cloned-run-1' }),
       },
       userHistory: { create: jest.fn() },
+      // Issue #869 offboard vault-membership revoke. Defaults: the user is a member of no vault, so the
+      // read is empty and the audit createMany is skipped. Offboard tests override findMany per scenario.
+      vaultMembership: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      secretAuditLog: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
     };
     const prisma = {
       user,
@@ -777,12 +789,20 @@ describe('UsersService', () => {
     // Soft-delete drops the user from the search index (ADR-0035).
     expect(search.remove).toHaveBeenCalledWith('users', 'uuid-1');
 
-    // The offboarding summary is returned.
+    // The offboarding summary is returned. This user held no vault membership (the default), so the
+    // #869 fields are the empty base case: no crypto access revoked, no vaults to rotate.
     expect(result).toEqual({
       userId: 'uuid-1',
       releasedAssignments: [{ id: 'assign-1', assetId: 'asset-1' }],
       revokedGrants: 2,
+      revokedVaultMemberships: 0,
+      rotationVaults: [],
     });
+    // With no membership, we neither delete rows nor write an audit row (skip the empty createMany).
+    expect(tx.vaultMembership.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'uuid-1' },
+    });
+    expect(tx.secretAuditLog.createMany).not.toHaveBeenCalled();
 
     // DEBT-2 (issue #185): a DELETED UserHistory row is appended inside the SAME transaction, with the
     // full actor attribution (human → { userId }) on the SUBJECT being offboarded.
@@ -792,6 +812,122 @@ describe('UsersService', () => {
       eventType: 'DELETED',
       actor: { userId: 'actor-99' },
     });
+  });
+
+  // Issue #869 — offboarding also revokes the departing user's Secret-vault crypto memberships (a SOC2
+  // offboarding-control gap) and flags each vault to rotate. INV-10-safe: a pure row-delete of wrapped
+  // key material; no decryption. Reuses the offboard setup above.
+  it('offboards: revokes ALL the user’s vault memberships and flags each vault to rotate (#869)', async () => {
+    user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+    tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
+    tx.accessGrant.updateMany.mockResolvedValue({ count: 0 });
+    // The user is a crypto member of two vaults; the read carries each vault's name + LIVE item count.
+    tx.vaultMembership.findMany.mockResolvedValue([
+      { vaultId: 'vault-a', vault: { name: 'Prod DB', _count: { items: 3 } } },
+      { vaultId: 'vault-b', vault: { name: 'API keys', _count: { items: 0 } } },
+    ]);
+    tx.vaultMembership.deleteMany.mockResolvedValue({ count: 2 });
+
+    const result = await service.remove('uuid-1', { userId: 'actor-99' });
+
+    // The rotation list is read BEFORE the delete (the rows vanish after), scoped to only LIVE items.
+    expect(tx.vaultMembership.findMany).toHaveBeenCalledWith({
+      where: { userId: 'uuid-1' },
+      select: {
+        vaultId: true,
+        vault: {
+          select: {
+            name: true,
+            _count: { select: { items: { where: { deletedAt: null } } } },
+          },
+        },
+      },
+    });
+    // ALL of the user's memberships are hard-dropped (deleteMany — no soft-delete/deletedAt column).
+    expect(tx.vaultMembership.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'uuid-1' },
+    });
+
+    // (a) the count revoked + (b) the rotation prompt (vault name + live item count per vault).
+    expect(result.revokedVaultMemberships).toBe(2);
+    expect(result.rotationVaults).toEqual([
+      { vaultId: 'vault-a', name: 'Prod DB', itemCount: 3 },
+      { vaultId: 'vault-b', name: 'API keys', itemCount: 0 },
+    ]);
+
+    // (c) audit parity: one MEMBERSHIP_REVOKED row per revoked vault, targetUserId = the offboarded
+    // user, and a HUMAN offboarder → actorId (never serviceAccountId; the CHECK enforces exactly one).
+    expect(tx.secretAuditLog.createMany).toHaveBeenCalledTimes(1);
+    const auditCalls = tx.secretAuditLog.createMany.mock.calls as Array<
+      [{ data: Array<Record<string, unknown>> }]
+    >;
+    const auditArg = auditCalls[0][0];
+    expect(auditArg.data).toEqual([
+      {
+        action: 'MEMBERSHIP_REVOKED',
+        vaultId: 'vault-a',
+        targetUserId: 'uuid-1',
+        actorId: 'actor-99',
+      },
+      {
+        action: 'MEMBERSHIP_REVOKED',
+        vaultId: 'vault-b',
+        targetUserId: 'uuid-1',
+        actorId: 'actor-99',
+      },
+    ]);
+    for (const row of auditArg.data) {
+      expect(row).not.toHaveProperty('serviceAccountId');
+    }
+  });
+
+  it('attributes the vault-revoke audit rows to the SERVICE ACCOUNT when a SA offboards (#869)', async () => {
+    user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+    tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
+    tx.vaultMembership.findMany.mockResolvedValue([
+      { vaultId: 'vault-a', vault: { name: 'Prod DB', _count: { items: 1 } } },
+    ]);
+    tx.vaultMembership.deleteMany.mockResolvedValue({ count: 1 });
+
+    await service.remove('uuid-1', { serviceAccountId: 'sa-7' });
+
+    const auditCalls = tx.secretAuditLog.createMany.mock.calls as Array<
+      [{ data: Array<Record<string, unknown>> }]
+    >;
+    const auditArg = auditCalls[0][0];
+    // A SA offboarder → serviceAccountId, never actorId (mirrors the grant-revoke branch; ADR-0048).
+    expect(auditArg.data).toEqual([
+      {
+        action: 'MEMBERSHIP_REVOKED',
+        vaultId: 'vault-a',
+        targetUserId: 'uuid-1',
+        serviceAccountId: 'sa-7',
+      },
+    ]);
+    expect(auditArg.data[0]).not.toHaveProperty('actorId');
+  });
+
+  it('atomicity: an IdP deactivate failure rolls back — memberships are NOT dropped (#869)', async () => {
+    user.findFirst.mockResolvedValue({
+      id: 'uuid-1',
+      externalId: 'zitadel-9',
+      deletedAt: null,
+    });
+    // Step 0 (idp.deactivateUser) throws INSIDE the tx → the whole offboarding rolls back.
+    idp.deactivateUser.mockRejectedValue(
+      new ServiceUnavailableException('Zitadel management call failed'),
+    );
+
+    await expect(
+      service.remove('uuid-1', { userId: 'actor-99' }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    // The membership read/delete/audit never ran — crypto access stays intact for a retry (no split-
+    // brain), and the search index is untouched.
+    expect(tx.vaultMembership.findMany).not.toHaveBeenCalled();
+    expect(tx.vaultMembership.deleteMany).not.toHaveBeenCalled();
+    expect(tx.secretAuditLog.createMany).not.toHaveBeenCalled();
+    expect(search.remove).not.toHaveBeenCalled();
   });
 
   it('does not offboard a user that is missing', async () => {
@@ -1234,7 +1370,10 @@ describe('UsersService', () => {
       )[0][0];
       // The same where (role + live slice) drives the page and its total, so the count is authoritative.
       expect(findCall.where).toMatchObject({ role: 'VIEWER', deletedAt: null });
-      expect(countCall.where).toMatchObject({ role: 'VIEWER', deletedAt: null });
+      expect(countCall.where).toMatchObject({
+        role: 'VIEWER',
+        deletedAt: null,
+      });
     });
 
     it('absent role adds no role clause (shows all roles)', async () => {
