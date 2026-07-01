@@ -423,6 +423,12 @@
       "acknowledge": "I've saved this token in a secure place.",
       "done": "Done"
     },
+    "keypairSetup": {
+      "working": "Setting up the encryption key…",
+      "done": "Encryption key set up. This service account can now retrieve secrets from vaults you grant it access to.",
+      "forbidden": "You need Secret Manager manage permission to set up programmatic access. The service account was created, but without an encryption key.",
+      "error": "Couldn't set up the encryption key. The service account was created without one — recreate it to enable programmatic secret retrieval."
+    },
     "testIt": {
       "title": "Test it works",
       "description": "Run a quick check from your terminal to confirm the token authenticates and is scoped as expected. Replace the placeholder with the token you copied.",
