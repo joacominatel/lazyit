@@ -46,6 +46,29 @@ Firewall. Las categorías sirven para agrupar y para el filtro de categoría en 
 
 Gestiona las categorías en **Configuración → Taxonomías → Categorías de activo**.
 
+### Diccionario de specs (sugerencias de campos)
+
+Una categoría también puede declarar un **diccionario de specs** opcional — una lista de los
+[campos personalizados](/help/assets-asset-basics) que esperás en los activos de ese tipo (por
+ejemplo, que todo Servidor tenga `cpu`, `ramGb` y un `formFactor`). Es una ayuda de consistencia
+liviana, no una camisa de fuerza.
+
+- Cada campo tiene una **clave** (el nombre del campo personalizado que gobierna), una **etiqueta**, un
+  **tipo** (texto, número, sí/no o una lista de **opciones**) y se puede marcar como **obligatorio**.
+  Un campo de opciones enumera sus valores permitidos.
+- El diccionario es **orientativo**: cuando editás un activo cuyo modelo pertenece a esta categoría, se
+  sugieren los campos declarados a medida que escribís y lazyit muestra **avisos suaves** — un campo
+  obligatorio vacío, un valor que no coincide con su tipo, una opción fuera de la lista o un campo
+  personalizado que no está en el diccionario. **Nada se bloquea**: siempre podés guardar, y los
+  activos existentes nunca se modifican ni se invalidan.
+- Dejá el diccionario vacío para no tener governance (lo predeterminado) — se aceptan cualquier campo
+  personalizado, igual que antes.
+- Editar el diccionario más tarde **no** reescribe los activos ya guardados; solo cambia las
+  sugerencias que se muestran la próxima vez que alguien edite uno.
+
+Definí el diccionario de una categoría desde su editor en **Configuración → Taxonomías → Categorías de
+activo**.
+
 ## Cómo encajan
 
 La relación es una cadena simple:

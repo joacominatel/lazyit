@@ -404,6 +404,11 @@ model AssetCategory {
   description String?
   // Free string: a heroicon name for the web UI (e.g. "ServerStackIcon"). Not validated.
   icon        String?
+  // ADVISORY specs dictionary (ADR-0007 amendment, #851): a declarative field list
+  // (`{ key, label, type, required?, enumValues? }[]`) that drives hints + soft warnings for the
+  // Asset.specs of this category's models — validated in the app (zod, @lazyit/shared), NEVER in the
+  // DB and NEVER hard-blocking. Nullable/non-destructive: existing rows keep NULL = no governance.
+  specsSchema Json?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?

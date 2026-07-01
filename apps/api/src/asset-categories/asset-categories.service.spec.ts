@@ -63,6 +63,37 @@ describe('AssetCategoriesService', () => {
     expect(assetCategory.create).toHaveBeenCalledTimes(1);
   });
 
+  // ADR-0007 amendment (#851): the advisory specs dictionary is a jsonb passthrough. The service
+  // forwards a provided `specsSchema` to Prisma (validated upstream by the zod DTO) and omits the
+  // key entirely when absent, so an unset category stores NULL (no governance) — the create path is
+  // unchanged for callers that don't use it (asserted by the two "no findFirst / { data: dto }" tests
+  // above, which pass a specsSchema-free dto).
+  it('forwards a provided specsSchema dictionary on create', async () => {
+    const specsSchema = [
+      { key: 'cpu', label: 'CPU', type: 'string' as const, required: true },
+    ];
+    const dto = { name: 'Server', specsSchema };
+    assetCategory.create.mockResolvedValue({ id: 'c1', ...dto });
+
+    await service.create(dto);
+
+    expect(assetCategory.create).toHaveBeenCalledWith({
+      data: { name: 'Server', specsSchema },
+    });
+  });
+
+  it('forwards a specsSchema replacement (incl. [] to clear) on update', async () => {
+    assetCategory.findFirst.mockResolvedValue({ id: 'c1', deletedAt: null });
+    assetCategory.update.mockResolvedValue({ id: 'c1', specsSchema: [] });
+
+    await service.update('c1', { specsSchema: [] });
+
+    expect(assetCategory.update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { specsSchema: [] },
+    });
+  });
+
   it('returns a category by id when it exists', async () => {
     const found = { id: 'c1', name: 'Server', deletedAt: null };
     assetCategory.findFirst.mockResolvedValue(found);

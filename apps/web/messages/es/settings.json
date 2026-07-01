@@ -644,6 +644,32 @@
         "orderPlaceholder": "Opcional — el menor se ordena primero",
         "saveChanges": "Guardar cambios",
         "createButton": "Crear {label}",
+        "specsDictionary": {
+          "label": "Diccionario de especificaciones",
+          "description": "Declara los campos personalizados que deberían tener los activos de esta categoría. Solo es orientativo — impulsa el autocompletado y las sugerencias suaves en el formulario del activo; nunca bloquea el guardado ni invalida los activos existentes.",
+          "empty": "Aún no hay campos declarados.",
+          "addField": "Agregar campo",
+          "keyPlaceholder": "Clave (p. ej. ram)",
+          "labelPlaceholder": "Etiqueta (p. ej. RAM)",
+          "typeLabel": "Tipo",
+          "typeOptions": {
+            "string": "Texto",
+            "number": "Número",
+            "boolean": "Sí / No",
+            "enum": "Lista de opciones"
+          },
+          "requiredLabel": "Obligatorio",
+          "enumValuesPlaceholder": "8GB, 16GB, 32GB",
+          "enumValuesHint": "Valores permitidos separados por comas.",
+          "removeFieldTitle": "Quitar campo",
+          "removeFieldLabel": "Quitar campo {index}",
+          "fieldKeyLabel": "Clave del campo {index}",
+          "fieldLabelLabel": "Etiqueta del campo {index}",
+          "fieldEnumValuesLabel": "Valores permitidos del campo {index}",
+          "errors": {
+            "invalid": "Revisa el diccionario: cada campo necesita una clave y una etiqueta, los campos de lista de opciones necesitan al menos un valor y las claves deben ser únicas."
+          }
+        },
         "errors": {
           "nameRequired": "El nombre es obligatorio.",
           "orderInteger": "El orden debe ser un número entero."
