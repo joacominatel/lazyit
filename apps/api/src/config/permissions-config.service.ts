@@ -9,9 +9,25 @@ import {
 import { Role } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /** The roles the config surface may edit. ADMIN is immutable/full (ADR-0046) and never appears here. */
 const EDITABLE_ROLES = [Role.MEMBER, Role.VIEWER] as const;
+
+/**
+ * The coarse, high-risk verbs whose GRANT to a non-admin role is a SENSITIVE audit event worth a
+ * broadcast nudge (ADR-0056 amendment / issue #852). The explicit set plus every `:delete` verb, per
+ * the issue: raising MEMBER/VIEWER to instance config, user administration, access-grant control, or any
+ * destructive verb is exactly the "an admin should glance at this" widening. NOT a firehose — a normal
+ * `asset:write` grant is silent.
+ */
+const HIGH_RISK_VERBS = new Set<string>([
+  'settings:manage',
+  'user:manage',
+  'accessGrant:grant',
+]);
+const isHighRiskVerb = (permission: string): boolean =>
+  HIGH_RISK_VERBS.has(permission) || permission.endsWith(':delete');
 
 /**
  * The configurable role→permission matrix backend (Roles & Permissions v2, ADR-0046 P5).
@@ -37,6 +53,7 @@ export class PermissionsConfigService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly resolver: PermissionResolverService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -86,6 +103,10 @@ export class PermissionsConfigService {
       [Role.VIEWER]: body.VIEWER,
     };
 
+    // Collected inside the tx, emitted AFTER commit (ADR-0056 §3 best-effort): the high-risk verbs newly
+    // GRANTED to each non-admin role this edit. Empty ⇒ no sensitive widening ⇒ no nudge.
+    const widened: { role: Role; permission: string }[] = [];
+
     await this.prisma.$transaction(async (tx) => {
       for (const role of EDITABLE_ROLES) {
         const currentRows = await tx.rolePermission.findMany({
@@ -97,6 +118,12 @@ export class PermissionsConfigService {
 
         const toRevoke = [...current].filter((p) => !next.has(p));
         const toGrant = [...next].filter((p) => !current.has(p));
+
+        for (const permission of toGrant) {
+          if (isHighRiskVerb(permission)) {
+            widened.push({ role, permission });
+          }
+        }
 
         if (toRevoke.length > 0) {
           await tx.rolePermission.deleteMany({
@@ -134,7 +161,41 @@ export class PermissionsConfigService {
     // the DB. ADMIN isn't cached (always full), but a blanket invalidate is cheapest and safest.
     this.resolver.invalidate();
 
+    // Sensitive-audit alert (ADR-0056 amendment / #852): if this edit raised MEMBER/VIEWER to any
+    // high-risk verb, broadcast ONE nudge to the admin feed, POST-COMMIT + best-effort (emit never
+    // throws — a failed nudge must never roll back the matrix edit). ponytail: no "self-escalation"
+    // axis to distinguish here — only an ADMIN (settings:manage) can edit the matrix, ADMIN is
+    // immutable/full (INV-8), and edits target the MEMBER/VIEWER ROLE sets, never the actor's own
+    // account, so an admin can never widen *themselves*. Ceiling: revisit only if per-user grants land.
+    if (widened.length > 0) {
+      await this.emitWidened(widened, actorId);
+    }
+
     return this.getMatrix();
+  }
+
+  /**
+   * Broadcast the `permission_widened` nudge for a set of newly-granted high-risk verbs (ADR-0056
+   * amendment / #852). One notification per matrix edit (not per verb) — deduped on the emit instant so
+   * two distinct edits never collapse. Metadata is REDACTED (role + verb literals only, no bodies).
+   */
+  private async emitWidened(
+    widened: { role: Role; permission: string }[],
+    actorId: string | null,
+  ): Promise<void> {
+    const roles = [...new Set(widened.map((w) => w.role))].sort();
+    const verbs = [...new Set(widened.map((w) => w.permission))].sort();
+    await this.notifications.emit({
+      type: 'permission_widened',
+      // The matrix PUT is not retried by infra, and a re-run diffs to an empty grant set (nothing new to
+      // grant) — so a timestamp keeps distinct edits distinct without ever suppressing a real one.
+      dedupeKey: `permission_widened:${actorId ?? 'system'}:${Date.now()}`,
+      severity: 'warning',
+      title: `Sensitive permissions granted to ${roles.join(' & ')}`,
+      summary: `${roles.join(' & ')} now holds high-risk access: ${verbs.join(', ')}.`,
+      // No entityType — the bell deep-links this type to the role→permission matrix.
+      metadata: { roles, permissions: verbs, actorId },
+    });
   }
 
   /**
