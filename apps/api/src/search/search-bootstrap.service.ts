@@ -8,6 +8,7 @@ import {
   projectApplication,
   projectArticle,
   projectAsset,
+  projectConsumable,
   projectInfraNode,
   projectLocation,
   projectUser,
@@ -179,6 +180,13 @@ export class SearchBootstrapService implements OnApplicationBootstrap {
           },
         });
         return rows.map(projectInfraNode);
+      }
+      case 'consumables': {
+        // #873: soft-deleted consumables are excluded like every other index. Flat, no joins.
+        const rows = await this.prisma.consumable.findMany({
+          where: { deletedAt: null },
+        });
+        return rows.map(projectConsumable);
       }
     }
   }
