@@ -63,6 +63,15 @@ ENV NODE_ENV=production
 # PORT is read by NestJS (main.ts) and by the healthcheck below; compose overrides it.
 ENV PORT=3001
 
+# Version identity (ADR-0083): the git tag is the source of truth, injected at build time —
+# compose passes APP_VERSION/GIT_SHA from LAZYIT_VERSION/LAZYIT_GIT_SHA (exported by infra/start.sh
+# from `git describe --tags --always` / `git rev-parse --short HEAD`). Baked to ENV and surfaced by
+# GET /instance/version. A plain `docker build` (no args) honestly reads dev/unknown.
+ARG APP_VERSION=dev
+ARG GIT_SHA=unknown
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_SHA=${GIT_SHA}
+
 # Flat production node_modules + the built artifacts. The generated Prisma client is already
 # inside dist/generated (tsc emits it next to dist/src). @lazyit/shared resolves via the
 # node_modules symlink -> /app/packages/shared (its dist + package.json are copied below).
