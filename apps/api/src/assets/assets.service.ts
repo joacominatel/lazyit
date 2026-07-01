@@ -5,13 +5,21 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type {
+  AssetInventoryCsvItem,
   AssetStatus,
   BatchResult,
   CreateAsset,
+  DeletedFilter,
   PageQuery,
   UpdateAsset,
 } from '@lazyit/shared';
-import { applyAssetModelSpecsDefaults, offsetOf, pageOf } from '@lazyit/shared';
+import {
+  applyAssetModelSpecsDefaults,
+  ASSET_INVENTORY_CSV_HEADER,
+  assetInventoryCsvRow,
+  offsetOf,
+  pageOf,
+} from '@lazyit/shared';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { Prisma } from '../../generated/prisma/client';
@@ -143,6 +151,16 @@ export class AssetsService {
   ) {}
 
   /**
+   * Rows per round-trip when STREAMING the full filtered inventory export (issue #872). Mirrors the
+   * audit/activity export batch: a bounded skip/take loop over the SAME lean list query so the whole
+   * estate never sits in memory at once.
+   *
+   * ponytail: OFFSET/LIMIT batching (like the other exports). CEILING: deep OFFSET is O(offset) per
+   * page — fine for an admin/audit dump; a keyset cursor is a clean future upgrade if ever needed.
+   */
+  static readonly EXPORT_BATCH_SIZE = 1000;
+
+  /**
    * A single page of assets (the inventory pillar's main, heaviest list), newest first. Uses the
    * LEAN projection ({@link ASSET_LIST_SELECT}): no `specs` blob and trimmed joins — the full
    * relation graph stays on {@link findOne}. Runs the page `findMany(take/skip)` and the `count`
@@ -251,6 +269,88 @@ export class AssetsService {
     });
     // `company` is non-null here (filtered above), but Prisma's type keeps it `string | null`.
     return rows.map((r) => r.company).filter((c): c is string => c !== null);
+  }
+
+  /**
+   * Bulk CSV export of the WHOLE filtered inventory (issue #872) — not just the visible page. Reuses
+   * the SAME {@link buildWhere} + the SAME lean {@link ASSET_LIST_SELECT} projection as the list read,
+   * and {@link assetInventoryCsvRow} from `@lazyit/shared` (the one place the RFC-4180 escaping +
+   * formula-injection guard live), so the file can NEVER drift from the on-screen list. Streamed as an
+   * async generator (bounded skip/take batches) so a large estate never buffers in memory.
+   *
+   * `deleted` scopes the export to the live (`active`, default) or archived (`only`) slice — exactly as
+   * {@link findPage} does; the controller keeps `only` ADMIN-gated (assertCanListDeleted). `specs` is
+   * omitted (the lean projection has none) — a per-spec-key export is a deferred follow-up.
+   */
+  async *streamInventoryCsvRows(
+    filters: AssetFilters = {},
+    deleted: DeletedFilter = 'active',
+  ): AsyncGenerator<string> {
+    yield `${ASSET_INVENTORY_CSV_HEADER}\n`;
+
+    const where = {
+      ...this.buildWhere(filters),
+      ...deletedWhere(deleted),
+    };
+    // The `only` slice needs the ADR-0032 escape hatch so the read filter doesn't re-hide soft-deleted
+    // rows (mirrors findPage). `active` doesn't (the filter and `deletedAt: null` agree).
+    const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(deleted)
+      ? { includeSoftDeleted: true }
+      : {};
+
+    let skip = 0;
+    for (;;) {
+      const rows = await this.prisma.asset.findMany({
+        where,
+        // A stable TOTAL order for OFFSET batching: createdAt desc with `id` as a unique tiebreaker so
+        // a createdAt tie at a batch boundary can never skip or duplicate a row across pages.
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: AssetsService.EXPORT_BATCH_SIZE,
+        skip,
+        select: ASSET_LIST_SELECT,
+        ...escapeHatch,
+      });
+      if (rows.length === 0) break;
+      yield `${rows
+        .map((row) => assetInventoryCsvRow(this.toInventoryCsvItem(row)))
+        .join('\n')}\n`;
+      skip += rows.length;
+      // A short batch means the estate is exhausted — stop without an extra empty round-trip.
+      if (rows.length < AssetsService.EXPORT_BATCH_SIZE) break;
+    }
+  }
+
+  /**
+   * Shape one lean Prisma row into the wire {@link AssetInventoryCsvItem} the shared CSV row fn reads —
+   * the SAME lean shaping the list uses, plus the Date → ISO-string conversion the HTTP boundary does
+   * automatically for the JSON list (the CSV builds strings directly, so it must convert explicitly).
+   */
+  private toInventoryCsvItem(row: AssetWithLeanSelect): AssetInventoryCsvItem {
+    return {
+      name: row.name,
+      assetTag: row.assetTag,
+      serial: row.serial,
+      status: row.status,
+      company: row.company,
+      purchaseDate: row.purchaseDate?.toISOString() ?? null,
+      warrantyEnd: row.warrantyEnd?.toISOString() ?? null,
+      notes: row.notes,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      model: row.model,
+      location: row.location,
+      activeAssignments: row.assignments.map((assignment) => ({
+        id: assignment.id,
+        userId: assignment.userId,
+        user: {
+          id: assignment.user.id,
+          firstName: assignment.user.firstName,
+          lastName: assignment.user.lastName,
+          email: assignment.user.email,
+          deletedAt: assignment.user.deletedAt?.toISOString() ?? null,
+        },
+      })),
+    };
   }
 
   /** A single non-deleted asset by id, expanded with its relations; 404 if missing or deleted. */
