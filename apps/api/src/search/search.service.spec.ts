@@ -113,6 +113,7 @@ describe('SearchService', () => {
         'applications',
         'articles',
         'assets',
+        'consumables',
         'infra',
         'locations',
         'users',
@@ -558,6 +559,7 @@ describe('SearchService', () => {
         'locations',
         'applications',
         'infra',
+        'consumables',
       ]);
     });
 
@@ -638,6 +640,7 @@ describe('SearchService', () => {
         'applications',
         'articles',
         'assets',
+        'consumables',
         'degraded',
         'infra',
         'locations',
@@ -655,13 +658,18 @@ describe('SearchService', () => {
             articles: { numberOfDocuments: 0 }, // empty -> needs rebuild
             users: { numberOfDocuments: 3 },
             infra: { numberOfDocuments: 4 },
-            // locations + applications absent from the map -> never created -> need rebuild
+            // locations + applications + consumables absent from the map -> never created -> need rebuild
           },
         });
 
         const stale = await service.emptyOrMissingIndexes();
 
-        expect(stale.sort()).toEqual(['applications', 'articles', 'locations']);
+        expect(stale.sort()).toEqual([
+          'applications',
+          'articles',
+          'consumables',
+          'locations',
+        ]);
       });
 
       it('reports nothing when every index has documents', async () => {
@@ -673,6 +681,7 @@ describe('SearchService', () => {
             locations: { numberOfDocuments: 1 },
             applications: { numberOfDocuments: 1 },
             infra: { numberOfDocuments: 1 },
+            consumables: { numberOfDocuments: 1 },
           },
         });
 

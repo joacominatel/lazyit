@@ -8,9 +8,9 @@ subcategory: global-search
 # Búsqueda global
 
 La búsqueda global es la paleta de comandos que abarca todo el producto: una sola caja que busca a la
-vez en activos, artículos, usuarios, ubicaciones, aplicaciones y nodos de topología. Tolera errores de
-tipeo y ordena los resultados por relevancia, así que una palabra parcial o casi acertada igual
-encuentra el registro.
+vez en activos, artículos, usuarios, ubicaciones, aplicaciones, nodos de topología y consumibles.
+Tolera errores de tipeo y ordena los resultados por relevancia, así que una palabra parcial o casi
+acertada igual encuentra el registro.
 
 ## Cómo abrirla
 
@@ -22,7 +22,7 @@ pulsa **Enter** para abrir el resultado resaltado y **Esc** para cerrar.
 
 ## Qué busca
 
-Se indexan seis tipos de registros:
+Se indexan siete tipos de registros:
 
 - **Activos** — por nombre, etiqueta de activo o número de serie.
 - **Artículos** — artículos de la Base de Conocimiento, incluido su cuerpo de texto, así que un
@@ -33,6 +33,8 @@ Se indexan seis tipos de registros:
 - **Aplicaciones** — por nombre y proveedor.
 - **Nodos de topología** — servidores, máquinas virtuales, contenedores y el resto del mapa de
   infraestructura, por etiqueta, dirección IP o nombre del activo vinculado.
+- **Consumibles** — repuestos y artículos de stock, por nombre, SKU o descripción. La vista previa
+  muestra cuánto queda en existencia, así que "¿cuántos cables HDMI quedan?" se responde en la paleta.
 
 Usa las **fichas de filtro** encima de los resultados para acotar la búsqueda a un solo tipo, o déjala en
 **Todos** para buscar en todo. Al seleccionar un resultado se navega directamente a ese registro.

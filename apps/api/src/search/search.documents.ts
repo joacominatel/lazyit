@@ -74,6 +74,21 @@ export interface InfraNodeRow {
   asset: { name: string } | null;
 }
 
+/**
+ * A consumable row (#873). Flat, no joins — like {@link ApplicationRow}. `name`/`sku`/`description`
+ * are the searchable fields; `currentStock` (the cached on-hand count, re-indexed on every movement so
+ * it stays fresh) and `unit` ride along for the lean hit's "12 units" preview. No `category` — deferred
+ * (YAGNI; it would need a join in every load path).
+ */
+export interface ConsumableRow {
+  id: string;
+  name: string;
+  sku: string | null;
+  description: string | null;
+  currentStock: number;
+  unit: string;
+}
+
 /** A projected search document — always carries the `id` primary key plus its searchable fields. */
 export type SearchDocument = { id: string } & Record<string, unknown>;
 
@@ -147,5 +162,22 @@ export function projectInfraNode(row: InfraNodeRow): SearchDocument {
     state: row.state,
     ipAddress: row.ipAddress,
     assetName: row.asset?.name ?? null,
+  };
+}
+
+/**
+ * Project a consumable (#873). Searchable: name, sku, description. `currentStock` + `unit` ride along
+ * so the lean hit can show "12 units" in the palette (zero extra fetch) — `currentStock` stays fresh
+ * because the service re-indexes on every movement (stock only moves via movements). Flat, no joins —
+ * `category` is deferred (YAGNI). Nulls pass through as `null`, like every other projector.
+ */
+export function projectConsumable(row: ConsumableRow): SearchDocument {
+  return {
+    id: row.id,
+    name: row.name,
+    sku: row.sku,
+    description: row.description,
+    currentStock: row.currentStock,
+    unit: row.unit,
   };
 }

@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import type {
   CreateConsumable,
@@ -17,6 +18,8 @@ import type { Principal } from '../auth/principal';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SearchService } from '../search/search.service';
+import { projectConsumable } from '../search/search.documents';
 
 /**
  * PostgreSQL `int4` upper bound — the max value a Prisma `Int` column (here `currentStock`) can
@@ -62,6 +65,10 @@ export class ConsumablesService {
     private readonly prisma: PrismaService,
     private readonly actor: ActorService,
     private readonly notifications: NotificationsService,
+    // Best-effort search sync (ADR-0035). @Global SearchModule always provides it at runtime (no module
+    // import needed); @Optional so unit suites that construct the service directly needn't wire a search
+    // double, and every call site null-guards (`this.search?.`) so an absent client simply no-ops.
+    @Optional() private readonly search?: SearchService,
   ) {}
 
   /**
@@ -151,25 +158,37 @@ export class ConsumablesService {
 
   /**
    * Create. `currentStock` is never set here — it starts at the schema default (0) and only moves
-   * through movements (ADR-0034). Invalid categoryId hits the FK and is mapped to 400.
+   * through movements (ADR-0034). Invalid categoryId hits the FK and is mapped to 400. Now `async` so
+   * the fire-and-forget search sync can fire on the created row (#873).
    */
-  create(data: CreateConsumable) {
-    return this.prisma.consumable.create({ data });
+  async create(data: CreateConsumable) {
+    const consumable = await this.prisma.consumable.create({ data });
+    // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
+    this.search?.upsert('consumables', projectConsumable(consumable));
+    return consumable;
   }
 
   /** Partial update. `currentStock` is not updatable here. 404 if missing or already soft-deleted. */
   async update(id: string, data: UpdateConsumable) {
     await this.assertExists(id);
-    return this.prisma.consumable.update({ where: { id }, data });
+    const consumable = await this.prisma.consumable.update({
+      where: { id },
+      data,
+    });
+    this.search?.upsert('consumables', projectConsumable(consumable));
+    return consumable;
   }
 
   /** Soft delete: set deletedAt (never hard-delete; movements keep the FK alive). */
   async remove(id: string) {
     await this.assertExists(id);
-    return this.prisma.consumable.update({
+    const consumable = await this.prisma.consumable.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
+    // Drop from the index so a soft-deleted consumable never surfaces in search (ADR-0035).
+    this.search?.remove('consumables', id);
+    return consumable;
   }
 
   /**
@@ -189,10 +208,13 @@ export class ConsumablesService {
     if (consumable.deletedAt === null) {
       return consumable; // already live — idempotent
     }
-    return this.prisma.consumable.update({
+    const restored = await this.prisma.consumable.update({
       where: { id },
       data: { deletedAt: null },
     });
+    // Re-index the restored consumable (ADR-0035).
+    this.search?.upsert('consumables', projectConsumable(restored));
+    return restored;
   }
 
   /**
@@ -312,7 +334,30 @@ export class ConsumablesService {
     // AFTER commit, best-effort: a low-stock bell nudge on a DOWNWARD crossing (ADR-0056 §3) — NEVER
     // inside the tx (a notification must not roll back the movement).
     await this.emitLowStock(consumableId, before);
+    // Keep the indexed `currentStock` fresh (#873): stock only moves through movements, so re-index the
+    // consumable after the movement commits. Fire-and-forget (`void`) — a search hiccup never fails the
+    // movement, and the read/upsert are best-effort inside {@link reindex}.
+    void this.reindex(consumableId);
     return movement;
+  }
+
+  /**
+   * Re-index a consumable from its current live row (#873). Best-effort (ADR-0035): reads the live row
+   * and upserts its projection into the `consumables` index, swallowing any read error — a search hiccup
+   * must never fail the domain write, and the row self-heals on its next write or a `reindex:all`. Called
+   * fire-and-forget (`void`) by {@link createMovement} (whose tx returns the ledger row, not the
+   * consumable) to refresh the cached `currentStock`; create/update/restore upsert their in-hand row
+   * directly instead.
+   */
+  private async reindex(id: string): Promise<void> {
+    try {
+      const row = await this.prisma.consumable.findFirst({
+        where: { id, deletedAt: null },
+      });
+      if (row) this.search?.upsert('consumables', projectConsumable(row));
+    } catch {
+      // Best-effort: a dropped re-index leaves the row stale until its next write or `reindex:all`.
+    }
   }
 
   /**
