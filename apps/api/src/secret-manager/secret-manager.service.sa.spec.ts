@@ -150,7 +150,8 @@ class FakePrisma {
     findFirst: ({ where }: { where: Record<string, unknown> }) => {
       const some = (
         where.serviceAccountMemberships as
-          { some?: { serviceAccountId?: string } } | undefined
+          | { some?: { serviceAccountId?: string } }
+          | undefined
       )?.some;
       return (
         this.vaults.find((v) => {
@@ -172,7 +173,8 @@ class FakePrisma {
     findMany: ({ where }: { where?: Record<string, unknown> } = {}) => {
       const some = (
         where?.serviceAccountMemberships as
-          { some?: { serviceAccountId?: string } } | undefined
+          | { some?: { serviceAccountId?: string } }
+          | undefined
       )?.some;
       return this.vaults.filter((v) => {
         if (v.deletedAt !== null) return false;
@@ -611,15 +613,12 @@ describe('SecretManagerService — SA programmatic retrieval (ADR-0080)', () => 
     it('returns granted SA members with non-secret display metadata', async () => {
       const { svc, db } = build();
       const { vaultId, saId } = seed(db, { humanMemberId: 'alice' });
-      Object.assign(
-        db.serviceAccounts.find((s) => s.id === saId)!,
-        {
-          name: 'CI Runner',
-          description: 'nightly deploy',
-          tokenPrefix: 'lzit_sa_ci',
-          isActive: true,
-        },
-      );
+      Object.assign(db.serviceAccounts.find((s) => s.id === saId)!, {
+        name: 'CI Runner',
+        description: 'nightly deploy',
+        tokenPrefix: 'lzit_sa_ci',
+        isActive: true,
+      });
       await svc.grantServiceAccountMembership(human('alice'), vaultId, {
         serviceAccountId: saId,
         ...WRAP,
