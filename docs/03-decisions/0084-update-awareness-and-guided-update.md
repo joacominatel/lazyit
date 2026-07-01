@@ -14,7 +14,7 @@ deciders: [Joaquín Minatel]
 accepted — issue #904. CEO decision (2026-07-01): **guided updater v1** ("Guiado v1, one-click
 después") — a host-side `infra/update.sh` plus an in-app enqueue button; the true one-click trigger
 is *designed* here (§6) as a deferred, slot-in-compatible phase. Depends on
-[[0083-tag-driven-semver-versioning]] (#903): tags exist, are SSH-signed, MAJOR means "not
+[[0083-versioning-and-releases]] (#903): tags exist, are SSH-signed, MAJOR means "not
 one-click-safe", and the running version is baked in via `git describe` → build-arg →
 `GET /instance/version`. Sibling of [[0047-guided-first-deploy-bootstrap]] (the `start.sh` pattern
 this extends) and [[backups]] (the DR story this must never weaken).
@@ -100,7 +100,7 @@ operator before they run it. Mailcow's `update.sh` is the named reference patter
    printed — visible proof, not a promise. This runs regardless of whether the operator ever
    configured the backup sidecar; the updater is its own safety net.
 4. **`git fetch --tags && git verify-tag <tag> && git checkout <tag>`** — only SSH-signed tags
-   ([[0083-tag-driven-semver-versioning]]) are applied; verification failure stops the update.
+   ([[0083-versioning-and-releases]]) are applied; verification failure stops the update.
 5. **Missing-env detection, FAIL LOUD** — diff the target tag's `.env.prod.example` keys against the
    live `.env.prod`; on a gap, stop and print the *exact line to add* (the `REDIS_URL` /
    `WORKFLOW_SECRET_KEY` upgrade notes, automated). The script **never writes `.env.prod`** — a
