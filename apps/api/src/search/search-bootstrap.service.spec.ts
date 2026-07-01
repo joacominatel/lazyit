@@ -30,6 +30,7 @@ function prismaMock() {
     location: { findMany: jest.fn().mockResolvedValue([]) },
     application: { findMany: jest.fn().mockResolvedValue([]) },
     infraNode: { findMany: jest.fn().mockResolvedValue([]) },
+    consumable: { findMany: jest.fn().mockResolvedValue([]) },
   };
 }
 
@@ -144,9 +145,10 @@ describe('SearchBootstrapService', () => {
         'locations',
         'applications',
         'infra',
+        'consumables',
       ]);
       expect(search.emptyOrMissingIndexes).not.toHaveBeenCalled();
-      expect(search.rebuildIndex).toHaveBeenCalledTimes(6);
+      expect(search.rebuildIndex).toHaveBeenCalledTimes(7);
       expect(search.rebuildIndex).toHaveBeenCalledWith('assets', [
         { id: 'a1' },
       ]);
@@ -167,8 +169,9 @@ describe('SearchBootstrapService', () => {
         'locations',
         'applications',
         'infra',
+        'consumables',
       ]);
-      expect(search.rebuildIndex).toHaveBeenCalledTimes(6);
+      expect(search.rebuildIndex).toHaveBeenCalledTimes(7);
     });
   });
 
