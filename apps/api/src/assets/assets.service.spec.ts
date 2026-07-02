@@ -913,7 +913,9 @@ describe('AssetsService', () => {
     const csv = await collect(service.streamInventoryCsvRows({}, 'active'));
 
     expect(asset.findMany).toHaveBeenCalledTimes(2);
-    expect(csv.startsWith(`${CSV_HEADER}\n`)).toBe(true);
+    // Provenance stamp (#909) then the header.
+    expect(csv.startsWith('# lazyit ')).toBe(true);
+    expect(csv).toContain(`\n${CSV_HEADER}\n`);
     // The lean select (no specs) is reused, with a stable total order + the batch size as `take`.
     const args = (
       asset.findMany.mock.calls as Array<
@@ -924,9 +926,9 @@ describe('AssetsService', () => {
     expect(args.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
     expect(args.take).toBe(AssetsService.EXPORT_BATCH_SIZE);
     expect(args.where).toEqual({ deletedAt: null });
-    // One data line per row of the full batch, plus the header line (trailing newline splits to '').
+    // One data line per row of the full batch, plus the provenance stamp + header lines (#909).
     const lines = csv.split('\n').filter((l) => l.length > 0);
-    expect(lines).toHaveLength(AssetsService.EXPORT_BATCH_SIZE + 1);
+    expect(lines).toHaveLength(AssetsService.EXPORT_BATCH_SIZE + 2);
   });
 
   it('streamInventoryCsvRows reuses buildWhere so the export can never drift from the list', async () => {
