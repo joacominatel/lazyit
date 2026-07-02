@@ -9,6 +9,7 @@ import {
   ExclamationTriangleIcon,
   KeyIcon,
   ServerStackIcon,
+  ShieldExclamationIcon,
   WrenchScrewdriverIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
@@ -600,6 +601,7 @@ const ATTENTION_KEYS = [
   "expiring-grants",
   "critical-grants",
   "low-stock",
+  "warranty-expiring",
   "in-maintenance",
   "lost",
 ] as const;
@@ -649,6 +651,19 @@ function buildAttentionItems(
         count: consumables.lowStock,
         tone: "warning",
         href: "/consumables?lowStock=true",
+      },
+      {
+        // Warranty expiry (#955): the date-driven "renew or retire on time" signal, deep-linking
+        // into the assets list pre-filtered to the same ≤ N-day window the API counts server-side.
+        key: "warranty-expiring",
+        icon: ShieldExclamationIcon,
+        label: t("needsAttention.warrantiesExpiring", {
+          count: assets.warrantiesExpiringSoon,
+          days: assets.warrantyExpiringWithinDays,
+        }),
+        count: assets.warrantiesExpiringSoon,
+        tone: "warning",
+        href: "/assets?warranty=expiring90d",
       },
       {
         key: "in-maintenance",
