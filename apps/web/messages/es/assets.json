@@ -9,6 +9,10 @@
       "exportTitle": "Descargar como CSV todos los activos que coinciden con los filtros actuales",
       "error": "No se pudo exportar el inventario"
     },
+    "import": {
+      "button": "Importar",
+      "title": "Registra muchos activos a la vez desde un CSV"
+    },
     "searchLabel": "Buscar activos",
     "searchPlaceholder": "Buscar por nombre, etiqueta, número de serie o modelo…",
     "selectAllLabel": "Seleccionar todos los activos de esta página",
@@ -94,8 +98,9 @@
   },
   "empty": {
     "title": "Aún no hay nada registrado",
-    "description": "Registra tu primer activo — laptops, monitores, teléfonos — y aparecerá aquí, listo para asignar y dar seguimiento.",
-    "action": "Registra tu primer activo"
+    "description": "Agrega tu primer activo — laptops, monitores, teléfonos — y aparecerá aquí, listo para asignar y dar seguimiento. ¿Tienes muchos? Impórtalos desde un CSV en su lugar.",
+    "action": "Registra tu primer activo",
+    "importLink": "Importar desde CSV"
   },
   "form": {
     "newTitle": "Nuevo activo",
@@ -134,10 +139,22 @@
     "notes": "Notas",
     "saveChanges": "Guardar cambios",
     "createAsset": "Crear activo",
+    "createAndAddAnother": "Crear y agregar otro",
     "savedToast": "Activo guardado",
     "saveError": "No se pudo guardar el activo",
     "createdToast": "Activo creado",
     "createError": "No se pudo crear el activo",
+    "assignedToast": "Responsable asignado",
+    "assignError": "El activo se creó, pero no se pudo asignar al responsable. Asígnalo desde el activo.",
+    "headStart": {
+      "title": "Ventaja inicial",
+      "description": "Opcional — define el primer responsable ahora en lugar de un paso aparte después.",
+      "assignLabel": "Asignar a usuario",
+      "assignPlaceholder": "Sin asignar",
+      "assignSearch": "Buscar usuarios…",
+      "assignEmpty": "No se encontraron usuarios",
+      "assignHelp": "Registra quién tiene este activo desde el momento en que se crea. Déjalo vacío para asignar después."
+    },
     "customFields": {
       "label": "Campos personalizados",
       "description": "Atributos de formato libre almacenados en el activo (p. ej. CPU, RAM, dirección IP). Los esquemas por categoría son una mejora futura (ADR-0007).",
@@ -174,6 +191,9 @@
     "copySerial": "Copiar número de serie",
     "deleteAssetLabel": "Eliminar activo",
     "clone": "Clonar",
+    "changeStatusLabel": "Cambiar estado",
+    "statusChangedToast": "Estado establecido en {status}",
+    "statusChangeError": "No se pudo cambiar el estado",
     "onTopology": "En la topología",
     "viewInTopology": "Ver en la topología",
     "detailsTitle": "Detalles",

@@ -29,8 +29,25 @@ Abre **Activos** y elige **Nuevo activo**. El formulario captura:
 - **Fecha de compra** y **Fin de garantía** — fechas opcionales.
 - **Notas** y **Campos personalizados** — detalle libre opcional.
 
-Aquí no asignas un responsable. La asignación es un paso aparte que haces una vez que el activo
-existe — ver [Asignaciones e historial](/help/assets-assignments-history).
+En **Ventaja inicial** puedes, de forma opcional, **asignar al primer responsable** de una vez: elige
+un usuario y, al crear el activo, queda registrado como su responsable actual en el mismo paso.
+Dejarlo vacío mantiene el flujo clásico — de lo contrario, la asignación es un paso aparte que haces
+una vez que el activo existe (ver [Asignaciones e historial](/help/assets-assignments-history)). Si la
+parte de la asignación falla por algún motivo, el activo igual se crea; solo se te pedirá asignar al
+responsable desde el activo.
+
+¿Registras un lote de unidades parecidas? Usa **Crear y agregar otro** en lugar de **Crear activo**:
+guarda la actual y mantiene el formulario abierto con el **modelo, la ubicación, la empresa y el
+estado** conservados, borrando solo el nombre, la serie y la etiqueta para que escribas la siguiente
+unidad enseguida.
+
+## Registrar muchos a la vez
+
+Si tienes una planilla entera de equipo por incorporar, no los cargues uno por uno — usa la
+**Importación** masiva. El botón **Importar** está junto a *Exportar* en la parte superior de la lista
+de Activos (y la pantalla vacía de Activos ofrece un enlace *Importar desde CSV*), llevándote directo
+al asistente de [importación masiva](/help/assets-bulk-import). El botón aparece solo si tienes permiso
+para ejecutar una importación.
 
 ## Estado
 
@@ -45,7 +62,9 @@ registrarlo. Los valores son:
 - **Desconocido** — estado no establecido.
 
 El estado aparece como una etiqueta de color en la lista y en la página de detalle. Cambiarlo queda
-registrado en la actividad del activo. También puedes fijar el estado de varios activos a la vez desde
+registrado en la actividad del activo. Puedes cambiarlo rápido sin abrir el editor: en la **página de
+detalle** la propia etiqueta de estado es un menú desplegable, y en la lista el menú **⋯** de la fila
+tiene la opción **Cambiar estado**. También puedes fijar el estado de varios activos a la vez desde
 la lista.
 
 ## Serie y etiqueta de activo

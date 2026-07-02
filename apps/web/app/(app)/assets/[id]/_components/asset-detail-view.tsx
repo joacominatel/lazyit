@@ -2,13 +2,18 @@
 
 import {
   ArrowPathIcon,
+  ChevronDownIcon,
   DocumentDuplicateIcon,
   PencilSquareIcon,
   ShareIcon,
   TrashIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
-import type { AssetAssignmentWithUser } from "@lazyit/shared";
+import {
+  type AssetAssignmentWithUser,
+  type AssetStatus,
+  AssetStatusSchema,
+} from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -23,22 +28,93 @@ import { RelatedArticlesPanel } from "@/components/related-articles-panel";
 import { AssetDocumentsPanel } from "./asset-documents-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { UserAvatar } from "@/components/user-avatar";
 import { ErrorState } from "@/components/resource-table";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useAsset, useAssetAssignments } from "@/lib/api/hooks/use-assets";
 import { useAssetInfraNodeId } from "@/lib/api/hooks/use-infra-nodes";
-import { useDeleteAsset } from "@/lib/api/hooks/use-asset-mutations";
+import { useDeleteAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { notifyError } from "@/lib/api/notify-error";
 import { formatFieldLabel, formatSpecValue } from "@/lib/utils/format";
 import { AssetHistoryTimeline } from "../../_components/asset-history-timeline";
-import { AssetStatusBadge } from "../../_components/asset-status-badge";
+import {
+  AssetStatusBadge,
+  useAssetStatusLabel,
+} from "../../_components/asset-status-badge";
 import { AssignUserDialog } from "../../_components/assign-user-dialog";
 
 function ownerName(assignment: AssetAssignmentWithUser): string {
   return `${assignment.user.firstName} ${assignment.user.lastName}`;
+}
+
+/**
+ * Quick status change straight from the detail header (issue #951) — the status badge doubles as a
+ * dropdown so an operator flips OPERATIONAL → IN_MAINTENANCE without entering Edit. Rides the SAME
+ * `useUpdateAsset` PATCH the form/list use, so the server still emits the `STATUS_CHANGED`
+ * AssetHistory event. Only rendered when the caller holds `asset:write` (the parent gates it).
+ */
+function AssetStatusMenu({
+  assetId,
+  status,
+}: {
+  assetId: string;
+  status: AssetStatus;
+}) {
+  const t = useTranslations("assets.detail");
+  const statusLabel = useAssetStatusLabel();
+  const updateAsset = useUpdateAsset();
+
+  function handleChange(next: AssetStatus) {
+    if (next === status) return;
+    updateAsset.mutate(
+      { id: assetId, data: { status: next } },
+      {
+        onSuccess: () =>
+          toast.success(t("statusChangedToast", { status: statusLabel(next) })),
+        onError: (error) => notifyError(error, t("statusChangeError")),
+      },
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          disabled={updateAsset.isPending}
+          aria-label={t("changeStatusLabel")}
+          className="inline-flex items-center gap-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+        >
+          <AssetStatusBadge status={status} />
+          <ChevronDownIcon
+            className="size-3.5 text-muted-foreground"
+            aria-hidden
+          />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuRadioGroup
+          value={status}
+          onValueChange={(value) => handleChange(value as AssetStatus)}
+        >
+          {AssetStatusSchema.options.map((option) => (
+            <DropdownMenuRadioItem key={option} value={option}>
+              {statusLabel(option)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 export function AssetDetailView({ id }: { id: string }) {
@@ -138,7 +214,11 @@ export function AssetDetailView({ id }: { id: string }) {
         }
         badge={
           <span className="inline-flex items-center gap-2">
-            <AssetStatusBadge status={asset.status} />
+            {canWrite ? (
+              <AssetStatusMenu assetId={asset.id} status={asset.status} />
+            ) : (
+              <AssetStatusBadge status={asset.status} />
+            )}
             {topologyNodeId ? (
               <Badge variant="secondary" className="gap-1">
                 <ShareIcon className="size-3.5" aria-hidden />
