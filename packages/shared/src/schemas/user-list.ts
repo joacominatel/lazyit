@@ -1,6 +1,28 @@
 import { z } from "zod";
 import { RoleSchema, UserSchema } from "./user";
-import { pageSchema } from "./pagination";
+import { MAX_PAGE_LIMIT, pageSchema } from "./pagination";
+
+/**
+ * Cap for the batch id→name resolver (`GET /users?ids=…`, issue #961). Bounds the `IN (…)` clause so a
+ * caller can never build an unbounded query, and — because it reuses the list page cap (ADR-0030), the
+ * same 200 ceiling the old whole-directory read materialized — one max page always covers a full batch
+ * (the resolver pairs `?ids=` with `limit` = the id count).
+ *
+ * ponytail: a 5–20-person org never references more than this many distinct users in one read-only view
+ * (a history timeline, a grantee chip row, a vault's members), so the resolver never chunks — a batch
+ * over the cap is a clean 400 rather than an extra round-trip nobody hits.
+ */
+export const MAX_RESOLVE_USER_IDS = MAX_PAGE_LIMIT;
+
+/**
+ * The `?ids=` filter for the users list (issue #961): an optional, de-duplicated set of user UUIDs to
+ * resolve to their rows for READ-ONLY id→name lookups (history timelines, grantee chips, vault member
+ * chips, KB committed-rule names). Validated element-wise (each must be a UUID → a garbage id is a clean
+ * 400) and bounded by {@link MAX_RESOLVE_USER_IDS} (an over-cap batch → 400). The controller splits the
+ * comma-encoded query param, de-duplicates, then validates the resulting array with this schema.
+ */
+export const ResolveUserIdsSchema = z.array(z.uuid()).max(MAX_RESOLVE_USER_IDS);
+export type ResolveUserIds = z.infer<typeof ResolveUserIdsSchema>;
 
 /**
  * The `GET /users` list ITEM (ADR-0030 envelope, ADR-0058 fields, issue #386). It is the full {@link
