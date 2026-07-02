@@ -18,8 +18,9 @@ time, or a whole tree of Markdown at once. Use **Import** from the Knowledge Bas
 | `.docx` (Word) | One article — the text is extracted to Markdown |
 | `.zip` | **Bulk import** — many articles, see below |
 
-Only the **text** is imported. The original file is **not stored**, and images and other binaries
-inside a document are not kept.
+The **text** is imported, and **images embedded in the document are carried over** as article
+attachments (see [Embedded images](#embedded-images) below). The original file itself is **not
+stored**, and non-image binaries are not kept.
 
 When you import, you choose:
 
@@ -71,8 +72,26 @@ Review it, then close the dialog — a bulk import does not navigate you away to
   enormous `.zip` (a "decompression bomb") cannot exhaust the server — it fails that one import
   safely and leaves everything else running. A failure of this kind is permanent for that file:
   fix or shrink the archive and import again.
-- **Images inside imported files are not carried over.** Import brings in the **text**; pictures
-  embedded in a `.docx` (or linked from Markdown) are not turned into article attachments. After
-  importing, add any screenshots the runbook needs directly in the editor — see
-  [Articles and authoring](/help/knowledge-base-articles-authoring). References you write yourself to
-  images already uploaded in lazyit are kept as-is.
+## Embedded images
+
+Images **embedded inside** an imported file are now brought across automatically, so a migrated
+Word or Markdown runbook keeps its screenshots:
+
+- A picture pasted into a **`.docx`**, or a base64 image embedded directly in **Markdown**, is
+  extracted, saved as an article **attachment**, and shown inline in the imported article — the same
+  way an image you paste into the editor is (see
+  [Articles and authoring](/help/knowledge-base-articles-authoring)). This also applies to `.md`
+  entries inside a `.zip`.
+- **What is not brought across:** images **linked** from the web (`https://…`) are left as links and
+  not shown (lazyit never fetches remote images); separate image **files** sitting alongside notes
+  in a `.zip` are skipped; and drawings that aren't real raster images — **SVG** or HTML — are not
+  imported. Export those to PNG first.
+- Each image passes the **same checks as an editor upload**: its true type is verified, it is
+  re-encoded (stripping camera/location metadata), and it counts against your instance's attachment
+  **storage limit**. An image that can't be read is dropped from the article; if attachment storage
+  is **full**, the whole import fails with a clear message — free space (or ask your administrator to
+  raise the limit) and import again. Documents with a very large number of embedded images keep only
+  the first several dozen.
+
+References you write yourself to images already uploaded in lazyit (`attachment:` links) are kept
+as-is.
