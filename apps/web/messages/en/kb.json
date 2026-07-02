@@ -286,6 +286,8 @@
     "selectApplication": "Select an application",
     "selectAsset": "Select an asset",
     "noUsers": "No users yet.",
+    "searchUsers": "Search by name or email…",
+    "noUsersFound": "No users found.",
     "noApplications": "No applications yet.",
     "noAssets": "No assets yet.",
     "save": "Save",
