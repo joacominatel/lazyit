@@ -74,3 +74,8 @@ Revísalo y luego cierra el diálogo — una importación en lote no te lleva a 
   el servidor: falla esa importación concreta de forma segura y deja todo lo demás en marcha. Un fallo
   de este tipo es permanente para ese archivo: corrige o reduce el archivo comprimido e impórtalo de
   nuevo.
+- **Las imágenes dentro de los archivos importados no se trasladan.** La importación trae el
+  **texto**; las imágenes incrustadas en un `.docx` (o enlazadas desde Markdown) no se convierten en
+  adjuntos del artículo. Tras importar, añade las capturas que necesite el runbook directamente en el
+  editor — consulta [Artículos y redacción](/help/knowledge-base-articles-authoring). Las referencias
+  que escribas tú a imágenes ya subidas en lazyit se conservan tal cual.

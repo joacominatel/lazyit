@@ -71,3 +71,8 @@ Review it, then close the dialog — a bulk import does not navigate you away to
   enormous `.zip` (a "decompression bomb") cannot exhaust the server — it fails that one import
   safely and leaves everything else running. A failure of this kind is permanent for that file:
   fix or shrink the archive and import again.
+- **Images inside imported files are not carried over.** Import brings in the **text**; pictures
+  embedded in a `.docx` (or linked from Markdown) are not turned into article attachments. After
+  importing, add any screenshots the runbook needs directly in the editor — see
+  [Articles and authoring](/help/knowledge-base-articles-authoring). References you write yourself to
+  images already uploaded in lazyit are kept as-is.

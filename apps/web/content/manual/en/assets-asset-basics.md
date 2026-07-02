@@ -138,6 +138,23 @@ these when you have permission to view the topology.) The reverse link exists to
 panel links its *inventory name* back to this asset, so you can move between an asset and its node in
 either direction.
 
+## Documents
+
+An asset can carry **documents** — warranty PDFs, purchase receipts, damage photos — kept on the
+asset record instead of scattered across drives and chat threads. The **Documents** section on the
+asset's detail page lists them with their name, size and upload date.
+
+- **Upload** with the button, or **drag and drop** files onto the section. Supported types are
+  **PDF, PNG, JPEG, WebP, GIF, TXT, CSV, DOCX and XLSX**, up to **25 MB** each.
+- **Download** opens the file. Documents are served **only** to people who can read the asset — they
+  are never on a public link.
+- **Delete** removes a document after a confirmation. Like the rest of lazyit this is reversible at
+  the storage layer; the record of who uploaded it is kept.
+- Uploading and deleting need the asset-write permission; anyone who can view the asset can download.
+
+> **Backups.** Attachments are stored on the server's file volume, which is **not yet covered by the
+> database backup**. Until backup support ships, keep an independent copy of anything irreplaceable.
+
 ## Editing, cloning and deactivating
 
 - **Edit** updates the asset in place; each meaningful change (status, location, model, custom
