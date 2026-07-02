@@ -30,5 +30,11 @@
     "title": "Couldn't load your profile",
     "description": "Something went wrong loading your profile. Please try again.",
     "retry": "Retry"
+  },
+  "requests": {
+    "title": "My access requests",
+    "empty": "You haven't requested access to any applications.",
+    "requestedOn": "Requested {date}",
+    "deniedReason": "Reason: {reason}"
   }
 }
