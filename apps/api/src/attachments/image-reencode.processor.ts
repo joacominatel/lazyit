@@ -3,7 +3,6 @@ import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PrismaPg } from '@prisma/adapter-pg';
 import type { SandboxedJob } from 'bullmq';
-import sharp from 'sharp';
 import { PrismaClient } from '../../generated/prisma/client';
 import {
   attachmentsTmpDir,
@@ -11,6 +10,7 @@ import {
   promoteBlob,
   sha256OfFile,
 } from './attachment-storage';
+import { RASTER_FORMATS, reencodeRaster } from './attachment-reencode';
 
 /**
  * BullMQ SANDBOXED processor for the `attachment-reencode` queue (ADR-0082 §3 / ADR-0053). Raster
@@ -41,10 +41,6 @@ interface ReencodeJobResult {
   error?: string;
 }
 
-// Bound sharp's native memory in the child: no libvips operation cache, one thread.
-sharp.cache(false);
-sharp.concurrency(1);
-
 let prismaSingleton: PrismaClient | undefined;
 
 /** One PrismaClient per child, reused across jobs (no Nest DI here — the BullMQ sandbox contract). */
@@ -60,14 +56,6 @@ function getPrisma(): PrismaClient {
   }
   return prismaSingleton;
 }
-
-/** The raster types we re-encode, each to ITS OWN format (the stored mimeType never changes). */
-const RASTER_FORMATS: Record<string, keyof sharp.FormatEnum> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpeg',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-};
 
 const processor = async (
   job: SandboxedJob<ReencodeJobData>,
@@ -85,13 +73,10 @@ const processor = async (
   const tmpPath = join(tmpDir, `reencode-${randomUUID()}`);
   try {
     await mkdir(tmpDir, { recursive: true });
-    // `animated` keeps every gif/webp frame; sharp strips EXIF/ICC-extras by default (no
-    // .keepMetadata()), which is exactly the point.
-    await sharp(src, {
-      animated: row.mimeType === 'image/gif' || row.mimeType === 'image/webp',
-    })
-      .toFormat(format)
-      .toFile(tmpPath);
+    // Shared with the KB-import ingest so the EXIF-strip / polyglot-neutralization behaviour never
+    // drifts between the two paths (see attachment-reencode.ts). `format` above already proved the
+    // mimeType is a supported raster.
+    await reencodeRaster(src, row.mimeType).toFile(tmpPath);
 
     const newSha = await sha256OfFile(tmpPath);
     const newSize = (await stat(tmpPath)).size;
