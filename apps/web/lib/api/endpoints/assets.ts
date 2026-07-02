@@ -138,6 +138,25 @@ export function downloadAssetInventoryExport(
 }
 
 /**
+ * The CALLER's OWN assets (`GET /assets/mine`, issue #947) — those currently assigned (live) to them.
+ * A SELF-SCOPE read: available to ANY authenticated human WITHOUT `asset:read` (the id comes from the
+ * session, never a param), so it powers the self-service `/profile` page. Returns the same lean
+ * `Page<AssetListItem>` envelope as {@link getAssets}. `limit` defaults to the API's page size.
+ */
+export function getMyAssets(
+  { limit }: { limit?: number } = {},
+  token?: string,
+): Promise<AssetListPage> {
+  const params = new URLSearchParams();
+  if (limit !== undefined) params.set("limit", String(limit));
+  const qs = params.toString();
+  return apiFetch<AssetListPage>(
+    qs ? `${BASE}/mine?${qs}` : `${BASE}/mine`,
+    { token },
+  );
+}
+
+/**
  * The distinct, non-empty company values across live assets (ADR-0076) — the autocomplete catalog for
  * the asset form's company datalist and the list's company filter. A grouping facet, not an access
  * boundary. Gated server-side by asset:read.

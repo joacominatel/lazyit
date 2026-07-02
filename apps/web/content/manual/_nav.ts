@@ -32,7 +32,13 @@ export interface ManualNavCategory {
 export const MANUAL_NAV: readonly ManualNavCategory[] = [
   {
     category: "getting-started",
-    subcategories: ["introduction", "initial-setup", "users-team", "languages"],
+    subcategories: [
+      "introduction",
+      "your-profile",
+      "initial-setup",
+      "users-team",
+      "languages",
+    ],
   },
   {
     category: "assets",

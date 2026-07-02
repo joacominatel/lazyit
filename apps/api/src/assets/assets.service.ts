@@ -170,6 +170,25 @@ function warrantyWhere(warranty: AssetWarrantyFilter): Prisma.AssetWhereInput {
   return { warrantyEnd: { gt: now, lte: cutoff } };
 }
 
+/**
+ * The SELF-SCOPE variant of {@link ASSET_LIST_SELECT} for `GET /assets/mine` (#947 security review):
+ * the SAME lean projection, but the `assignments` join is narrowed to the CALLER's own live
+ * assignment. The regular list select inlines EVERY live assignee's identity (name + email) —
+ * `user:read`-class PII the admin list legitimately shows, but that a self-read must not leak: on a
+ * co-owned asset the caller would otherwise receive every co-assignee's email through a route that
+ * (deliberately) carries no `asset:read`/`user:read` gate. Narrowing the join keeps the wire shape
+ * (`Page<AssetListItem>`) intact — the only inlined identity is the caller's own. The admin list keeps
+ * the full projection unchanged.
+ */
+const assetMineListSelect = (userId: string) =>
+  ({
+    ...ASSET_LIST_SELECT,
+    assignments: {
+      ...ASSET_LIST_SELECT.assignments,
+      where: { releasedAt: null, userId },
+    },
+  }) satisfies Prisma.AssetSelect;
+
 @Injectable()
 export class AssetsService {
   constructor(
@@ -200,8 +219,18 @@ export class AssetsService {
    * (`active` default | `only`) scopes the page to live or soft-deleted assets; `only` carries the
    * ADR-0032 `includeSoftDeleted` escape hatch so the read filter doesn't re-hide them (ADMIN-gated at
    * the controller).
+   *
+   * `selfUserId` is the `GET /assets/mine` PROJECTION override (#947 security review): when set, the
+   * lean select's `assignments` join is narrowed to that user's own live assignment
+   * ({@link assetMineListSelect}), so a co-owned asset never inlines other holders' identity
+   * (name + email) through the ungated self-read. Omitted (every admin/list call site), the full
+   * projection is used unchanged.
    */
-  async findPage(filters: AssetFilters = {}, page: PageQuery) {
+  async findPage(
+    filters: AssetFilters = {},
+    page: PageQuery,
+    selfUserId?: string,
+  ) {
     const where = {
       ...this.buildWhere(filters),
       ...deletedWhere(page.deleted),
@@ -228,7 +257,11 @@ export class AssetsService {
         orderBy,
         take,
         skip,
-        select: ASSET_LIST_SELECT,
+        // Self-scope (#947): the mine-path narrows the assignments join to the caller's own row;
+        // every other call site keeps the full lean projection.
+        select: selfUserId
+          ? assetMineListSelect(selfUserId)
+          : ASSET_LIST_SELECT,
         ...escapeHatch,
       }),
       this.prisma.asset.count({ where, ...escapeHatch }),

@@ -722,6 +722,39 @@ describe('AssetsService', () => {
     expect(calls[0][0].select.assignments.where).toEqual({ releasedAt: null });
   });
 
+  it('findPage with a selfUserId narrows the assignments join to that user — the /assets/mine projection (#947 security review)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { assignedToUserId: 'u1' },
+      { limit: 50, offset: 0, deleted: 'active' },
+      'u1',
+    );
+
+    const calls = asset.findMany.mock.calls as Array<
+      [
+        {
+          select: { assignments: { where: unknown } } & Record<string, unknown>;
+        },
+      ]
+    >;
+    // DB-LEVEL narrowing: on a co-owned asset the query itself can only return the CALLER's own
+    // assignment row — co-assignees' identity (name + email) never leaves the database through the
+    // ungated self-read. The rest of the projection is IDENTICAL to the lean list select.
+    expect(calls[0][0].select.assignments.where).toEqual({
+      releasedAt: null,
+      userId: 'u1',
+    });
+    expect(calls[0][0].select).toEqual({
+      ...EXPECTED_LIST_SELECT,
+      assignments: {
+        ...EXPECTED_LIST_SELECT.assignments,
+        where: { releasedAt: null, userId: 'u1' },
+      },
+    });
+  });
+
   it('findPage filters by categoryId through the related model', async () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
