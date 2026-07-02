@@ -1,5 +1,4 @@
 import { getTranslations } from "next-intl/server";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { PermissionGate } from "@/components/permission-gate";
 import { UserCreateForm } from "../_components/user-create-form";
@@ -10,6 +9,9 @@ import { UserCreateForm } from "../_components/user-create-form";
 // permission set loads, an explicit "admin-only" locked state for anyone without `user:manage`, and
 // the form for holders. The API enforces the same gate server-side, so this is a UI affordance, not
 // the boundary (#936) — before this, a MEMBER reaching /users/new by URL saw the full onboarding form.
+// No `breadcrumb` prop on the PageHeader below: the layout-level route-driven <Breadcrumb />
+// (app/(app)/layout.tsx) already derives "Users › New" for this exact path from KNOWN_SEGMENTS —
+// an explicit PageHeader breadcrumb rendered a visible duplicate above it (#972).
 export default async function NewUserPage() {
   const t = await getTranslations("users");
   return (
@@ -19,18 +21,7 @@ export default async function NewUserPage() {
         title={t("gate.title")}
         description={t("gate.description")}
       >
-        <PageHeader
-          breadcrumb={
-            <Breadcrumb
-              items={[
-                { label: t("list.title"), href: "/users" },
-                { label: t("create.breadcrumb") },
-              ]}
-            />
-          }
-          title={t("create.title")}
-          subtitle={t("create.subtitle")}
-        />
+        <PageHeader title={t("create.title")} subtitle={t("create.subtitle")} />
         <UserCreateForm />
       </PermissionGate>
     </div>
