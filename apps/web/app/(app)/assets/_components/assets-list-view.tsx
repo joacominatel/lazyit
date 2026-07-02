@@ -122,12 +122,22 @@ import { AssignUserDialog } from "./assign-user-dialog";
 import { StackedOwnerAvatars } from "./stacked-owner-avatars";
 
 type OwnershipFilter = "ALL" | "HAS" | "NONE";
+type WarrantyFilter = "ALL" | "expiring90d" | "expired";
 
 /** Maps each ownership filter to its label key under `assets.list.ownership`. */
 const OWNERSHIP_LABEL_KEY: Record<OwnershipFilter, "any" | "has" | "none"> = {
   ALL: "any",
   HAS: "has",
   NONE: "none",
+};
+
+/** Maps each warranty filter to its chip-value label key under `assets.list.warranty` (#955). */
+const WARRANTY_LABEL_KEY: Record<
+  Exclude<WarrantyFilter, "ALL">,
+  "expiring" | "expired"
+> = {
+  expiring90d: "expiring",
+  expired: "expired",
 };
 
 /**
@@ -231,6 +241,9 @@ export function AssetsListView() {
   const companyFilter = filters.company; // "ALL" = unset; otherwise an exact company value.
   const ownerFilter = filters.owner; // "" = unset; otherwise a User uuid (server-side filter)
   const ownershipFilter = filters.ownership as OwnershipFilter;
+  // Warranty window (#955), deep-linked from the dashboard's "Needs attention" tile. Like the model
+  // filter it's URL-only (no picker): the chip is its sole surface + clear.
+  const warrantyFilter = filters.warranty as WarrantyFilter;
   // Resolve the owner-filter user's name for its chip, even when not on the current search page.
   // Skip the `/users/:id` lookup when the caller can't read the directory (would 403 — #935).
   const { data: ownerUser } = useUser(
@@ -630,6 +643,17 @@ export function AssetsListView() {
               value: t(`ownership.${OWNERSHIP_LABEL_KEY[ownershipFilter]}`),
             }),
             onClear: () => setFilter("ownership", FILTER_DEFAULTS.ownership),
+          },
+        ]
+      : []),
+    ...(warrantyFilter !== "ALL"
+      ? [
+          {
+            key: "warranty",
+            label: t("chips.warranty", {
+              value: t(`warranty.${WARRANTY_LABEL_KEY[warrantyFilter]}`),
+            }),
+            onClear: () => setFilter("warranty", FILTER_DEFAULTS.warranty),
           },
         ]
       : []),
