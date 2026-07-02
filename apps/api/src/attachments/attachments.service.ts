@@ -28,6 +28,7 @@ import { isServicePrincipal, type Principal } from '../auth/principal';
 import {
   ATTACHMENT_REENCODE_JOB_NAME,
   ATTACHMENT_REENCODE_QUEUE,
+  ATTACHMENTS_GC_GRACE_MS,
   maxTotalAttachmentBytes,
 } from './attachments.constants';
 import {
@@ -108,7 +109,7 @@ export class AttachmentsService {
       if (!file?.path) {
         throw new BadRequestException('A file is required');
       }
-      const uploadedById = this.requireHumanUploader(principal);
+      const uploadedById = this.requireHuman(principal);
       await this.assertParentWritable(entityType, entityId, principal);
 
       const surface = SURFACE[entityType];
@@ -209,7 +210,9 @@ export class AttachmentsService {
 
   /**
    * Soft-delete an attachment — behind the parent's WRITE authz (ADR-0006: never a hard delete; the
-   * blob stays until the GC proves nothing restorable references it — ADR-0082 §6).
+   * blob stays until the GC proves nothing restorable references it — ADR-0082 §6). HUMAN-only for
+   * BOTH parents, symmetric with upload: the ARTICLE edit gate already rejects a service account,
+   * and the explicit gate here keeps an `asset:write` SA from deleting asset documents too.
    */
   async remove(
     entityType: AttachmentEntityType,
@@ -217,6 +220,7 @@ export class AttachmentsService {
     attachmentId: string,
     principal?: Principal,
   ) {
+    this.requireHuman(principal);
     await this.assertParentWritable(entityType, entityId, principal);
     const row = await this.findRow(entityType, entityId, attachmentId);
     return this.prisma.attachment.update({
@@ -286,13 +290,14 @@ export class AttachmentsService {
   }
 
   /**
-   * The uploader must be a HUMAN (`Attachment.uploadedById` is a User FK — a service account has no
-   * User identity to attribute the upload to; honest 403, mirroring article authorship).
+   * Attachment WRITES (upload + delete) are HUMAN-only (`Attachment.uploadedById` is a User FK — a
+   * service account has no User identity to attribute the action to; honest 403, mirroring article
+   * authorship). Returns the human's id (the upload's `uploadedById`).
    */
-  private requireHumanUploader(principal?: Principal): string {
+  private requireHuman(principal?: Principal): string {
     if (isServicePrincipal(principal)) {
       throw new ForbiddenException(
-        'Service accounts cannot upload attachments (an uploader is a human user)',
+        'Service accounts cannot manage attachments (attachment writes are human-only)',
       );
     }
     const resolved = principal?.user.id;
@@ -305,18 +310,34 @@ export class AttachmentsService {
   }
 
   /**
-   * The single-host storage quota (ADR-0082 §7): live-row bytes + the incoming file must fit
-   * `ATTACHMENTS_MAX_TOTAL_MB`. Over budget → a clean, UI-mappable **507 "storage full"** — never a
-   * 500 or a half-written blob (the tmp file is discarded by the caller's finally). Live rows only:
-   * GC-reclaimed space frees budget. Summing rows over-counts DEDUP-shared blobs — a deliberate,
-   * conservative approximation (predictable per-row accounting; never under-counts real disk use).
+   * The single-host storage quota (ADR-0082 §7): bytes NOT YET PHYSICALLY RECLAIMED + the incoming
+   * file must fit `ATTACHMENTS_MAX_TOTAL_MB`. Over budget → a clean, UI-mappable **507 "storage
+   * full"** — never a 500 or a half-written blob (the tmp file is discarded by the caller's finally).
+   *
+   * "Not yet reclaimed" = live rows PLUS rows soft-deleted within the GC grace window (their blobs
+   * are still on disk until the daily sweep runs — counting only live rows let upload→delete→upload
+   * churn stack many × the budget on disk inside that window, defeating the "one thing can't sink
+   * the host" invariant). Soft-deleted rows past the grace drop out of the sum — their blobs are
+   * gone (or about to be) and version-pinned survivors are the rare, accepted slack. Summed
+   * DISTINCT-by-sha256 (`groupBy`), so dedup-shared blobs count once — matching real disk use.
    */
   private async assertWithinBudget(nextBytes: number): Promise<void> {
     const max = maxTotalAttachmentBytes();
-    const used = await this.prisma.attachment.aggregate({
-      _sum: { byteSize: true },
+    const graceCutoff = new Date(Date.now() - ATTACHMENTS_GC_GRACE_MS);
+    // includeSoftDeleted (spread past groupBy's strict arg type — the extension strips it): the
+    // soft-delete extension would otherwise scope this aggregate to live rows — exactly the churn
+    // hole this closes; the where clause re-bounds the read to the not-yet-reclaimed window.
+    const blobs = await this.prisma.attachment.groupBy({
+      by: ['sha256'],
+      where: {
+        OR: [{ deletedAt: null }, { deletedAt: { gt: graceCutoff } }],
+      },
+      _max: { byteSize: true },
+      orderBy: { sha256: 'asc' },
+      ...({ includeSoftDeleted: true } as object),
     });
-    if ((used._sum.byteSize ?? 0) + nextBytes > max) {
+    const used = blobs.reduce((sum, b) => sum + (b._max.byteSize ?? 0), 0);
+    if (used + nextBytes > max) {
       throw new HttpException(
         `Attachment storage is full (the ${Math.floor(max / (1024 * 1024))} MB total limit would be exceeded). Ask your administrator to free space or raise ATTACHMENTS_MAX_TOTAL_MB.`,
         HttpStatus.INSUFFICIENT_STORAGE,
