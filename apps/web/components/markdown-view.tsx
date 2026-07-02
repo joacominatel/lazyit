@@ -16,6 +16,12 @@ import {
   SECRET_CHIP_TAG,
 } from "@/components/markdown-secret-chip";
 import { SecretChip } from "@/components/markdown-secret-chip-view";
+import {
+  ATTACHMENT_IMG_TAG,
+  rehypeAttachmentImages,
+  rehypeAttachmentRefsPre,
+} from "@/components/markdown-attachment-image";
+import { AttachmentImage } from "@/components/markdown-attachment-image-view";
 import { cn } from "@/lib/utils";
 
 /**
@@ -110,10 +116,23 @@ const SECRET_CHIP_COMPONENTS = {
   ),
 } as Components;
 
+/**
+ * The `attachmentimg` element minted by `rehypeAttachmentImages` AFTER sanitize (ADR-0082 §5) — same
+ * post-sanitize slot as wiki-links / secret chips. `attachment` carries the attachment id; the
+ * `AttachmentImage` component resolves it to the authenticated `/api` content URL against the article
+ * supplied by `ArticleAttachmentProvider`. No `<img>` ever passes through the sanitizer.
+ */
+const ATTACHMENT_IMG_COMPONENTS = {
+  [ATTACHMENT_IMG_TAG]: ({ attachment }: { attachment?: string }) => (
+    <AttachmentImage attachment={attachment} />
+  ),
+} as Components;
+
 const ALL_COMPONENTS: Components = {
   ...MARKDOWN_COMPONENTS,
   ...WIKI_LINK_COMPONENTS,
   ...SECRET_CHIP_COMPONENTS,
+  ...ATTACHMENT_IMG_COMPONENTS,
 };
 
 /**
@@ -152,10 +171,21 @@ export function MarkdownView({
   // Typed via the component's own prop so the conditional's two array shapes both narrow to the
   // expected `PluggableList` (re-exported by react-markdown from `unified`) without a fragile
   // transitive import.
+  // KB inline images (ADR-0082 §5): `rehypeAttachmentRefsPre` runs BEFORE sanitize (it strips every
+  // `<img>` — attachment refs → an inert token, external/`data:` → dropped), and
+  // `rehypeAttachmentImages` runs AFTER, minting the trusted `attachmentimg` element the sanitizer
+  // never has to allow. Both are KB-only: the Manual (`disableKbExtensions`) keeps the plain
+  // sanitize-only pipeline, so its `![](/manual/…)` static images render as before.
   const rehypePlugins: ComponentProps<typeof Markdown>["rehypePlugins"] =
     disableKbExtensions
       ? [[rehypeSanitize, SANITIZE_SCHEMA]]
-      : [[rehypeSanitize, SANITIZE_SCHEMA], rehypeWikiLinks, rehypeSecretChips];
+      : [
+          rehypeAttachmentRefsPre,
+          [rehypeSanitize, SANITIZE_SCHEMA],
+          rehypeWikiLinks,
+          rehypeSecretChips,
+          rehypeAttachmentImages,
+        ];
 
   // With the KB passes off, the wiki-link / secret-chip elements can never be minted, so the
   // components map is the plain HTML-only set — keeping the rendered tree free of any KB element.
