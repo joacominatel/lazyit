@@ -60,7 +60,7 @@ import { ApiError } from "@/lib/api/client";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useServiceAccounts } from "@/lib/api/hooks/use-service-accounts";
-import { useUser, useUsers } from "@/lib/api/hooks/use-users";
+import { useUser, useUserNames } from "@/lib/api/hooks/use-users";
 import { UserCombobox } from "@/components/user-combobox";
 import {
   CLIPBOARD_CLEAR_MS,
@@ -893,14 +893,14 @@ function MemberCards({
   const t = useTranslations("secrets");
   const { data: saMembers, isLoading: saLoading } =
     useServiceAccountMembers(vaultId);
-  // Reuse the user directory (cached, shared across the app) to enrich a human chip's Quick View — the
-  // member metadata alone lacks the role/username/department the preview shows. Zero new endpoint.
-  const { data: users } = useUsers();
-  const usersById = useMemo(() => {
-    const map = new Map<string, UserListItem>();
-    for (const u of users ?? []) map.set(u.id, u);
-    return map;
-  }, [users]);
+  // Resolve just this vault's human members (#961) to enrich their chip Quick View — the member
+  // metadata alone lacks the role/username/department the preview shows. A targeted id→name batch
+  // (no whole-directory read), so it resolves every member regardless of team size.
+  const humanMemberIds = useMemo(
+    () => (humanMembers ?? []).map((m) => m.userId),
+    [humanMembers],
+  );
+  const usersById = useUserNames(humanMemberIds);
 
   // Which chip's Quick View is pinned open (single-open, like the picker hosts).
   const [openId, setOpenId] = useState<string | null>(null);
@@ -2028,8 +2028,8 @@ function ImportDialog({
 // ---------------------------------------------------------------------------
 
 /**
- * AddMemberDialog — the OUTER shell. SM-FE-004: the grant flow pulls the WHOLE user directory
- * (`useUsers`) plus this vault's membership/members queries. Those used to fire on vault-detail mount even
+ * AddMemberDialog — the OUTER shell. SM-FE-004: the grant flow pulls the member picker plus this
+ * vault's membership/members queries. Those used to fire on vault-detail mount even
  * while the dialog was closed, because the heavy hooks lived on this always-mounted component. We now keep
  * the hooks in {@link AddMemberDialogBody} and mount the body ONLY when `open` is true — so nothing fetches
  * until the admin actually opens the grant dialog. The dialog chrome (title/description) stays in the shell
@@ -2053,7 +2053,7 @@ function AddMemberDialog({
           <DialogTitle>{t("members.addTitle")}</DialogTitle>
           <DialogDescription>{t("members.addDescription")}</DialogDescription>
         </DialogHeader>
-        {/* Gate the data hooks behind `open` — the body (and its useUsers/useMembers/useMyMembership/
+        {/* Gate the data hooks behind `open` — the body (and its useMembers/useMyMembership/
             useUserPublicKey queries) only mounts once the dialog is open. */}
         {open ? (
           <AddMemberDialogBody
