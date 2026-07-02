@@ -27,8 +27,24 @@ Open **Assets** and choose **New asset**. The form captures:
 - **Purchase date** and **Warranty end** — optional dates.
 - **Notes** and **Custom fields** — optional free-form detail.
 
-You do not assign an owner here. Ownership is a separate step you take once the asset exists — see
-[Assignments & history](/help/assets-assignments-history).
+Under **Head start** you can optionally **assign the first owner** right away: pick a user and, when
+you create the asset, they're recorded as its current owner in the same step. Leaving it blank keeps
+the classic flow — ownership is otherwise a separate step you take once the asset exists (see
+[Assignments & history](/help/assets-assignments-history)). If the assignment part fails for any
+reason, the asset is still created; you'll just be asked to assign the owner from the asset.
+
+Registering a batch of similar units? Use **Create & add another** instead of **Create asset**: it
+saves the current one and keeps the form open with the **model, location, company and status**
+carried over, clearing just the name, serial and asset tag so you can type the next unit straight
+away.
+
+## Registering many at once
+
+If you have a whole spreadsheet of gear to bring in, don't type them one by one — use the bulk
+**Import**. The **Import** button sits next to *Export* at the top of the Assets list (and the empty
+Assets screen offers an *Import from CSV* link), taking you straight to the guided
+[bulk import](/help/assets-bulk-import) wizard. The button appears only if you have permission to run
+an import.
 
 ## Status
 
@@ -43,7 +59,9 @@ it. The values are:
 - **Unknown** — status not established.
 
 Status appears as a colored badge in the list and on the detail page. Changing it is recorded in the
-asset's activity log. You can also set the status of several assets at once from the list.
+asset's activity log. You can change it quickly without opening the editor: on the **detail page**
+the status badge itself is a dropdown, and in the list the row's **⋯** menu has a **Change status**
+option. You can also set the status of several assets at once from the list.
 
 ## Serial and asset tag
 
