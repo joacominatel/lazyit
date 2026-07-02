@@ -356,6 +356,13 @@ EOF
   MIGRATIONS_BEFORE=$(count_migrations)
   stamp "migrating"
   if ! $DC up -d; then
+    # CRITICAL: capture what ACTUALLY applied BEFORE classifying. The migrate one-shot runs first
+    # (service_completed_successfully), so a failure here is often "migration A applied, B failed" —
+    # a schema change DID happen. Measuring migrations only after a SUCCESSFUL up would leave
+    # MIGRATIONS_AFTER empty on this path and wrongly take the auto-rollback branch; ADR-0084 §9
+    # requires the guided-restore branch once any migration ran. count_migrations counts only
+    # finished_at IS NOT NULL, so a half-failed migration correctly does NOT count.
+    MIGRATIONS_AFTER=$(count_migrations)
     stamp "restarting"
     handle_failure "docker compose up failed during the swap"
     return
