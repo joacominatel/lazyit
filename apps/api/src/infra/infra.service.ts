@@ -174,12 +174,12 @@ export class InfraService {
    */
   async ingestReport(report: AgentReport): Promise<AgentReportAck> {
     // The inventory blob (ADR-0074 §2 / ADR-0007 jsonb posture): host facts + software under clear
-    // keys, plus the agent's own version/timestamp for provenance. Stored verbatim — validated already
-    // by `AgentReportSchema` at the controller. `software` is omitted when the agent couldn't list it.
+    // keys, plus the report timestamp for provenance. Stored verbatim — validated already by
+    // `AgentReportSchema` at the controller. `software` is omitted when the agent couldn't list it.
+    // `agentVersion` is NOT duplicated here (#907): it now lives in its own queryable column below.
     const specs: Prisma.InputJsonValue = {
       host: report.host,
       ...(report.software !== undefined ? { software: report.software } : {}),
-      agentVersion: report.agentVersion,
       reportedAt: report.reportedAt,
     };
     const now = new Date();
@@ -198,7 +198,12 @@ export class InfraService {
       // human's and is deliberately left untouched.
       const updated = await this.prisma.infraNode.update({
         where: { id: existing.id },
-        data: { specs, status: 'ONLINE', lastReportedAt: now },
+        data: {
+          specs,
+          status: 'ONLINE',
+          lastReportedAt: now,
+          agentVersion: report.agentVersion,
+        },
         select: { id: true, state: true },
       });
       void this.syncNodeToSearch(updated.id);
@@ -216,6 +221,7 @@ export class InfraService {
         reportingSource: report.reportingSource,
         externalId: report.externalId,
         lastReportedAt: now,
+        agentVersion: report.agentVersion,
         specs,
       },
       select: { id: true, state: true },

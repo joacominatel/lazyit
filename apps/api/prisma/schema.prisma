@@ -2315,6 +2315,7 @@ model InfraNode {
   reportingSource String? // which agent/host reported it (dedup scope)
   externalId      String? // platform id (vmid/container-id) for reconciliation
   lastReportedAt  DateTime? // agent liveness; stale => OFFLINE
+  agentVersion    String? // reporting agent's own build version at last check-in (#907; null = manual/pre-stamp)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

@@ -97,6 +97,15 @@ Cada secreto se convierte en una línea, `HANDLE=valor`. El **handle** se pasa a
 no alfanuméricos se vuelven `_`, así que `prod-db-password` queda `PROD_DB_PASSWORD`. Elegí handles que sean
 buenos nombres de variables de entorno.
 
+## Mantener la compatibilidad
+
+`lazyit-fetch` lleva estampada su propia versión. En cada ejecución consulta discretamente la versión
+de tu servidor, y si la herramienta está una **versión mayor** por detrás imprime una advertencia de
+una línea en **stderr** (nunca en la salida `.env`, para que el pipe quede limpio) indicándote que
+actualices el binario. Es solo un aviso: la descarga se ejecuta igual. La comprobación es de mejor
+esfuerzo: si no se puede contactar al servidor o es más antiguo, permanece en silencio, y una
+herramienta ejecutada desde el código fuente reporta como `dev` y nunca advierte.
+
 ## Qué ve el servidor y qué no
 
 - El servidor devuelve **solo texto cifrado** — los valores cifrados más las claves cifradas que la

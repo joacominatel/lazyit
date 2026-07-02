@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   compareSemver,
   countVersionsBehind,
+  isMajorBehind,
   isNewerVersion,
   maxVersion,
   parseSemver,
@@ -79,6 +80,31 @@ describe("countVersionsBehind", () => {
 
   test("ignores unparseable release entries", () => {
     expect(countVersionsBehind("v1.4.2", ["v1.5.0", "nightly", "latest"])).toBe(1);
+  });
+});
+
+describe("isMajorBehind", () => {
+  test("true only when the client's MAJOR is behind the server's", () => {
+    expect(isMajorBehind("v1.9.9", "v2.0.0")).toBe(true); // one major behind
+    expect(isMajorBehind("v1.0.0", "v3.0.0")).toBe(true); // multiple majors behind
+  });
+
+  test("same or ahead major ⇒ not behind (minor/patch drift is not nagged)", () => {
+    expect(isMajorBehind("v2.0.0", "v2.9.9")).toBe(false); // same major, minor/patch drift
+    expect(isMajorBehind("v2.0.0", "v2.0.0")).toBe(false); // identical
+    expect(isMajorBehind("v2.1.0", "v2.0.0")).toBe(false); // client ahead
+  });
+
+  test("fail-soft: a dev / unstamped / unparseable build is never behind", () => {
+    expect(isMajorBehind("dev", "v2.0.0")).toBe(false); // pre-stamp binary
+    expect(isMajorBehind("v1.0.0", "dev")).toBe(false); // native-dev server
+    expect(isMajorBehind(null, "v2.0.0")).toBe(false);
+    expect(isMajorBehind("banana", "v2.0.0")).toBe(false);
+  });
+
+  test("compares the numeric core across git-describe forms", () => {
+    expect(isMajorBehind("v1.4.2-3-gabc1234", "v2.0.0")).toBe(true);
+    expect(isMajorBehind("v2.0.0-1-gdeadbee", "v2.1.0")).toBe(false);
   });
 });
 

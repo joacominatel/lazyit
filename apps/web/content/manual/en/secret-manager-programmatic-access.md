@@ -95,6 +95,14 @@ Each secret becomes one line, `HANDLE=value`. The **handle** is upper-cased and 
 characters become `_`, so `prod-db-password` becomes `PROD_DB_PASSWORD`. Choose handles that make good
 environment-variable names.
 
+## Staying compatible
+
+`lazyit-fetch` is stamped with its own version. On each run it quietly checks your server's version,
+and if the tool is a **major version** behind it prints a one-line warning to **stderr** (never to the
+`.env` output, so piping stays clean) telling you to update the binary. It's a hint only — the fetch
+still runs. The check is best-effort: if the server can't be reached or is older, it stays silent, and
+a tool run from source reports as `dev` and never warns.
+
 ## What the server sees, and what it doesn't
 
 - The server returns **ciphertext only** — the encrypted values plus the encrypted keys the tool needs. It

@@ -83,6 +83,27 @@ export function countVersionsBehind(
 }
 
 /**
+ * True when a distributed binary's `clientVersion` is at least one MAJOR behind the server's
+ * `serverVersion` — the "outdated agent / stale fetch-cli" signal (ADR-0074/0080/0083, issue #907).
+ *
+ * Deliberately MAJOR-only granularity: ADR-0083 defines MAJOR as "requires a manual operator step /
+ * not one-click-safe" and the support policy is "jump freely across PATCH/MINOR, stop at each MAJOR".
+ * So only a MAJOR gap is a meaningful contract-break warning; minor/patch drift is expected and
+ * one-click-safe, and nagging on it would be noise. Either side unparseable — a `dev`/`unknown`/
+ * unstamped build, or an odd tag — ⇒ false: we never nag a dev build or a pre-stamp binary (same
+ * fail-soft posture as {@link isNewerVersion}).
+ */
+export function isMajorBehind(
+  clientVersion: string | null | undefined,
+  serverVersion: string | null | undefined,
+): boolean {
+  const client = parseSemver(clientVersion);
+  const server = parseSemver(serverVersion);
+  if (!client || !server) return false;
+  return server.major > client.major;
+}
+
+/**
  * The single newest tag among `tags` (highest semver), or `null` when none parse. Ties (same X.Y.Z
  * from different describe forms) resolve to the first seen — irrelevant for ordering.
  */

@@ -275,7 +275,12 @@ describe('InfraService', () => {
           reportingSource: string;
           externalId: string;
           lastReportedAt: Date;
-          specs: { host: { hostname: string }; software: unknown };
+          agentVersion: string;
+          specs: {
+            host: { hostname: string };
+            software: unknown;
+            agentVersion?: unknown;
+          };
         };
       }>(prisma.infraNode.create);
       expect(createArg.data.source).toBe('AGENT');
@@ -286,6 +291,9 @@ describe('InfraService', () => {
       expect(createArg.data.reportingSource).toBe('agent:abc123');
       expect(createArg.data.externalId).toBe('machine-id-xyz');
       expect(createArg.data.lastReportedAt).toBeInstanceOf(Date);
+      // The agent's build version lands in its own column (#907), NOT duplicated inside specs.
+      expect(createArg.data.agentVersion).toBe('1.0.0');
+      expect(createArg.data.specs).not.toHaveProperty('agentVersion');
       // The inventory blob is carried into specs (host + software under clear keys).
       expect(createArg.data.specs.host.hostname).toBe('web-01');
       expect(createArg.data.specs.software).toEqual([
@@ -321,6 +329,7 @@ describe('InfraService', () => {
       // Only inventory facts + liveness are written…
       expect(updateArg.data.status).toBe('ONLINE');
       expect(updateArg.data.lastReportedAt).toBeInstanceOf(Date);
+      expect(updateArg.data.agentVersion).toBe('1.0.0'); // refreshed on every check-in (#907)
       expect(updateArg.data.specs).toBeDefined();
       // …NEVER the human's curation (state/label/position/asset link).
       expect(updateArg.data).not.toHaveProperty('state');

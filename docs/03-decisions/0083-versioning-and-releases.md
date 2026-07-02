@@ -241,6 +241,31 @@ This gives every retirement a predictable, pre-announced home and keeps the vers
 "is-this-one-click-safe?" contract honest: a deprecation alone never forces a manual step, but the eventual
 removal rides the MAJOR that already carries one.
 
+## Amendment (2026-07-02) — distributed-binary version handshake
+
+Issue #907. lazyit ships two binaries that drift from the server — the reporting agent
+([[0074-server-reporting-agent]]) and `lazyit-fetch` ([[0080-service-account-secret-retrieval]]). They
+now reuse this ADR's **identity** mechanism so skew is visible. Deliberately **warn/hint-only, never a
+gate** (a version negotiation protocol would break running agents and is explicitly out of scope; a
+minimum-supported-version gate is future work).
+
+- **Same build stamp.** Both binaries bake `APP_VERSION` at compile time via `bun build --define`
+  (`process.env.APP_VERSION` ⇐ `git describe --tags --always`, env-overridable by the release build),
+  mirroring the api/web `--build-arg APP_VERSION`. An unstamped/source build reports `"dev"`.
+- **Agent → server.** The agent already carries `agentVersion` in its check-in (`POST /infra/report`);
+  the server now persists it to a first-class **`InfraNode.agentVersion`** column (migration
+  `20260702010000_infra_node_agent_version`, backfilled from the prior `specs.agentVersion`). Topology
+  (Servers table + node panel) shows a subtle **"Agent outdated"** badge when the agent is a MAJOR
+  behind the server — display-only.
+- **`lazyit-fetch` → server.** On each run it best-effort probes `GET /instance/version` with its SA
+  token and prints a one-line **stderr** warning when it is a MAJOR behind (never stdout — `.env`
+  piping stays clean). No server-side storage or new endpoint; silent on any failure.
+- **Skew rule — MAJOR-only.** A shared pure helper `isMajorBehind(client, server)`
+  (`@lazyit/shared` `utils/semver.ts`) returns true only when the server's MAJOR exceeds the client's.
+  MAJOR is this ADR's "not one-click-safe / must read the notes" boundary, so a MAJOR gap is the only
+  meaningful contract-break signal; PATCH/MINOR drift is expected and one-click-safe and is never
+  nagged. Either side `dev`/unparseable ⇒ never behind (fail-soft — never nag a dev/pre-stamp build).
+
 ## Amendment — security-release flag (issue #908, 2026-07-02)
 
 An OPTIONAL `release:security` label on the promotion PR is orthogonal to the semver `release:*` bump. When
