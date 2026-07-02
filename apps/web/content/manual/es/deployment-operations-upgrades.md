@@ -42,6 +42,15 @@ nuevo ajuste obligatorio, un cambio de topología). Así que salta con libertad 
 menores, pero **detente y lee las Acciones de actualización de cada versión mayor que cruces**. La versión
 en ejecución se muestra en **Configuración → Instancia**.
 
+### Funciones obsoletas
+
+Cuando una función, ajuste, endpoint o formato de importación/exportación va a retirarse, primero se marca
+como **obsoleto en una versión menor** — las notas de versión dicen *"obsoleto, se eliminará en X.0"* — y
+sigue funcionando hasta entonces. Solo **se elimina en la siguiente versión mayor**, y se detalla en las
+**⚠️ Acciones de actualización** de esa mayor (que ya lees antes de actualizar). Así, una actualización menor
+nunca elimina algo de lo que dependes; vigila las notas de versión para detectar obsolescencias y planifica
+el cambio antes de la siguiente mayor.
+
 ## Nuevos ajustes obligatorios tras una descarga
 
 Una versión que añade una función puede introducir un **nuevo valor de entorno obligatorio**. El arranque

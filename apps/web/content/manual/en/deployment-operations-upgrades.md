@@ -41,6 +41,14 @@ notes describing a manual step you must perform (a new required setting, a topol
 across patch and minor releases, but **stop and read the Upgrade actions for each major you cross**. The
 running version is shown on **Settings → Instance**.
 
+### Deprecated features
+
+When a feature, setting, endpoint, or import/export format is being retired, it is **deprecated in a minor
+release** first — the release notes say *"deprecated, will be removed in X.0"* — and it keeps working until
+then. It is **removed only in the next major**, listed in that major's **⚠️ Upgrade actions** (which you
+already read before upgrading). So a minor upgrade never removes something you depend on; watch the release
+notes for deprecations and plan the swap before the next major.
+
 ## New required settings after a pull
 
 A version that adds a feature may introduce a **new required environment value**. The guided bootstrap

@@ -190,6 +190,12 @@ Instance** before and after.
 > ([[0084-update-awareness-and-guided-update]]) automates the pull → verified dual backup → `verify-tag` →
 > build → migrate → health-gate sequence and blocks one-click across a major.
 
+> [!note] Deprecation policy ([[0083-versioning-and-releases]] amendment)
+> Anything user- or operator-facing (an endpoint, a config/env var, an import/export format) is
+> **deprecated in a MINOR** — announced in that release's notes as "deprecated, will be removed in X.0" and
+> still working — and **removed only in the next MAJOR** (listed in that major's *⚠️ Upgrade actions*). Watch
+> the release notes for deprecations so a major never removes something you still rely on unannounced.
+
 ```sh
 git pull                                                       # or `git fetch --tags && git checkout vX.Y.Z`
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
