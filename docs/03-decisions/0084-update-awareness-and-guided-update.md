@@ -249,3 +249,21 @@ explicitly **NEVER a Docker socket in a network-reachable container**:
 - **Arbitrary-version rollback** — v1 rolls back to the immediately-previous version only; crossing
   multiple Zitadel/Meili bumps gets complex fast.
 - **Offline bundle updates** for air-gapped hosts — real but rare; the manual path covers it today.
+
+## Amendment — security-relevant gap (issue #908, 2026-07-02)
+
+The weekly check now also parses the [[0083-versioning-and-releases|ADR-0083]] security marker. Reusing the
+SAME `per_page=100` releases response (no second call), it flags `securityRelevant = true` when ANY release
+strictly newer than the running version (i.e. anywhere in the gap up to and including latest) carries
+`SECURITY_RELEASE_MARKER` in its notes body. The boolean is cached on the `update_settings` singleton
+alongside `behindBy` (same reasoning: derived from the full list at check time, not recomputable at read)
+and surfaced on `GET /instance/update-status` as `securityRelevant`.
+
+- **Settings → Instance card:** a distinct red *N behind — security* badge + a **Security update available**
+  callout when `securityRelevant`.
+- **Weekly email:** a security-relevant gap ALWAYS reaches the inbox — it fires on a new latest version like
+  a routine nudge, AND re-fires exactly ONCE if a version already emailed as routine later flips to
+  security-relevant (a GHSA published on an already-notified version). A second cache boolean
+  `lastEmailedSecurity` de-dupes that transition so the security nudge never becomes a weekly re-nag; the
+  email raises severity to `warning`, prefixes the subject with "Security update:", and gains a
+  `:security` dedupeKey suffix so it is a distinct notification row from any prior routine one.
