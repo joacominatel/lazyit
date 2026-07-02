@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowUpCircleIcon,
   BellIcon,
   BoltIcon,
   CubeIcon,
@@ -104,6 +105,13 @@ const TYPE_META: Record<
     icon: SignalSlashIcon,
     tone: "bg-destructive/10 text-destructive",
     href: () => "/assets/diagram",
+  },
+  // The weekly update-awareness nudge (ADR-0084 §2) — a newer release is out. Admin-broadcast, carries
+  // no entityId, so it deep-links by TYPE to Settings → Instance (the "Version & updates" card).
+  "update.available": {
+    icon: ArrowUpCircleIcon,
+    tone: "bg-pillar-access/10 text-pillar-access",
+    href: () => "/settings/instance",
   },
 };
 
