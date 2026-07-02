@@ -70,6 +70,8 @@ export * from "./schemas/service-account";
 export * from "./schemas/service-account-keypair";
 export * from "./schemas/service-account-vault-membership";
 export * from "./schemas/smtp";
+// Update awareness & guided update (ADR-0084, #904) — version-check cache + append-only UpdateRun wire.
+export * from "./schemas/update";
 export * from "./schemas/user";
 export * from "./schemas/user-history";
 export * from "./schemas/user-list";
@@ -77,5 +79,6 @@ export * from "./schemas/workflow";
 export * from "./utils/asset-inventory-csv";
 export * from "./utils/audit-log-csv";
 export * from "./utils/recent-activity-csv";
+export * from "./utils/semver";
 export * from "./utils/slug";
 export * from "./utils/wiki-link";

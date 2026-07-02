@@ -1,4 +1,10 @@
-import type { InstanceVersion } from "@lazyit/shared";
+import type {
+  EnqueueUpdate,
+  InstanceVersion,
+  UpdateRun,
+  UpdateSettings,
+  UpdateStatus,
+} from "@lazyit/shared";
 import { apiFetch } from "../client";
 
 /**
@@ -19,4 +25,40 @@ const BASE = "/instance";
  */
 export function getInstanceVersion(token?: string): Promise<InstanceVersion> {
   return apiFetch<InstanceVersion>(`${BASE}/version`, { token });
+}
+
+/**
+ * The "Version & updates" card read (`GET /instance/update-status`, ADR-0084, `settings:read`) — running
+ * version, opt-in state, latest known release + N behind, last checked, the active run + recent history.
+ * Reads the server-side cache; never fetches GitHub. `token` is the optional SSR Bearer override.
+ */
+export function getUpdateStatus(token?: string): Promise<UpdateStatus> {
+  return apiFetch<UpdateStatus>(`${BASE}/update-status`, { token });
+}
+
+/** The update-check opt-in setting (`GET /instance/update-settings`, `settings:read`). */
+export function getUpdateSettings(token?: string): Promise<UpdateSettings> {
+  return apiFetch<UpdateSettings>(`${BASE}/update-settings`, { token });
+}
+
+/** Flip the opt-in weekly GitHub update check (`PUT /instance/update-settings`, `settings:manage`). */
+export function putUpdateSettings(
+  body: UpdateSettings,
+): Promise<UpdateSettings> {
+  return apiFetch<UpdateSettings>(`${BASE}/update-settings`, {
+    method: "PUT",
+    body,
+  });
+}
+
+/**
+ * ENQUEUE a guided update (`POST /instance/update`, `settings:manage`, human-only). Records an
+ * append-only UpdateRun and returns it; the UI then shows the operator the `./infra/update.sh` command.
+ * This executes NOTHING on the host — it only records intent (ADR-0084 §4).
+ */
+export function enqueueUpdate(body: EnqueueUpdate): Promise<UpdateRun> {
+  return apiFetch<UpdateRun>(`${BASE}/update`, {
+    method: "POST",
+    body,
+  });
 }

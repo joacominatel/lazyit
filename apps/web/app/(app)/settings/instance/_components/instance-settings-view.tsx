@@ -17,6 +17,7 @@ import { useInstanceVersion } from "@/lib/api/hooks/use-instance-version";
 import { AdminGate } from "../../_components/admin-gate";
 import { AssetTagSchemeEditor } from "./asset-tag-scheme-editor";
 import { SmtpSettingsEditor } from "./smtp-settings-editor";
+import { UpdatePanel } from "./update-panel";
 
 /** Stable empty breadcrumb for the instance settings PageHeader. */
 const BREADCRUMB = <Breadcrumb />;
@@ -82,6 +83,9 @@ export function InstanceSettingsView() {
 
         <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
           <div className="space-y-6">
+            {/* Version & updates — the FIRST card (ADR-0084 §5). */}
+            <UpdatePanel />
+
             <Card>
               <CardHeader>
                 <CardTitle>{t("instance.cardTitle")}</CardTitle>

@@ -55,8 +55,74 @@ de **solo lectura**: refleja el estado actual, no lo cambia. Muestra:
 > Instancia hace que el estado resultante sea visible dentro de la aplicación. Usa **Actualizar** para
 > volver a leerlo.
 
-Debajo de la tarjeta de estado, la página Instancia aloja el editor del **esquema de etiquetas de
-activos** y su herramienta de backfill — el único ajuste configurable de esta página. Consulta
+## Versión y actualizaciones
+
+La primera tarjeta de la página Instancia es **Versión y actualizaciones**. Muestra la versión que
+ejecutas y, si te suscribes, si hay una versión más nueva disponible — y te da una forma *guiada* de
+actualizar.
+
+### Comprobar actualizaciones (opcional)
+
+La comprobación de actualizaciones está **desactivada por defecto**. Activa **Comprobar actualizaciones
+semanalmente** y lazyit, aproximadamente una vez por semana, hará una única consulta anónima a GitHub
+para ver si existe una versión más nueva. Es **sin baliza**: nunca sale del host ninguna información
+sobre tu instancia — es el mismo tipo de consulta que comprobar un espejo de software. Si la consulta
+está bloqueada (un host de egreso restringido o aislado), simplemente falla en silencio y la tarjeta
+vuelve a mostrar tu versión actual. "No se pudo comprobar" nunca se interpreta como "actualizado".
+
+Cuando se ve por primera vez una versión más nueva, los administradores reciben una notificación al
+respecto (y un correo, si SMTP está configurado — consulta la tarjeta SMTP de esta página). Se te avisa
+**una vez por cada versión nueva**, no cada semana, para que el aviso siga siendo significativo.
+
+La tarjeta muestra tu **versión actual**, una insignia de estado (*Actualizado*, *N versiones por
+detrás*, *Comprobación desactivada* o *No se pudo comprobar*), la **última versión** con un enlace a sus
+notas, y cuándo fue la **última comprobación**.
+
+### Actualizar (guiado, no de un solo clic)
+
+Actualizar lazyit es una **acción guiada del lado del host** — deliberadamente *no* un botón de un solo
+clic dentro de la app. La aplicación nunca se actualiza a sí misma; una persona ejecuta la actualización
+en el servidor. Es una decisión de seguridad: cualquier cosa capaz de actualizar la app en su sitio
+necesitaría control con permisos de root sobre tu servidor, algo que la app está diseñada para no tener
+nunca.
+
+Cuando estás por detrás, la tarjeta muestra un único botón **Actualizar a vX.Y.Z**. Pulsarlo **no**
+actualiza nada — registra la solicitud y te muestra el comando exacto para ejecutar en el host:
+
+```
+./infra/update.sh vX.Y.Z
+```
+
+Ejecuta ese comando en el servidor (por SSH). El script es cuidadoso y no destructivo. En orden:
+
+1. **Respalda ambas bases de datos** (la de la app y la de identidad) y verifica que cada respaldo se
+   pueda restaurar. **Si el respaldo falla, la actualización se aborta** — no hay forma de forzarla.
+2. **Verifica la firma de la versión** y la descarga.
+3. **Comprueba si hay ajustes nuevos requeridos.** Si la nueva versión necesita una variable de entorno
+   que aún no tienes, **se detiene y te dice exactamente qué añadir** — nunca edita por ti tu archivo de
+   secretos.
+4. **Compila la nueva versión mientras la actual sigue sirviendo**, luego cambia a ella (una breve
+   interrupción de ~1 minuto) y confirma que la nueva versión está sana.
+
+Mientras una actualización se ejecuta, la tarjeta muestra la etapa real (respaldando, migrando,
+compilando, reiniciando, verificando) — no una barra de progreso falsa — y se reconecta con discreción
+cuando la app vuelve.
+
+### Si una actualización falla — el punto de restauración
+
+El respaldo previo a la actualización es un **punto de restauración**, no un deshacer mágico. Si la
+actualización falla **antes** de migrar la base de datos, el script revierte automáticamente y no se
+pierde nada. Si falla **después** de que corriera una migración, no hay reversión automática: volver
+atrás implica **restaurar el respaldo previo**, lo que **descarta todo lo escrito desde que se tomó el
+respaldo** (unos minutos). El script nunca hace esto en silencio — se detiene e imprime los comandos de
+restauración exactos para que los ejecutes tú, y la versión anterior, sus imágenes y los respaldos se
+conservan hasta que confirmes que la nueva versión está sana. El procedimiento completo está en el
+runbook de respaldos.
+
+## Esquema de etiquetas de activos
+
+Debajo de estas tarjetas, la página Instancia aloja el editor del **esquema de etiquetas de activos** y
+su herramienta de backfill. Consulta
 [Esquema de etiquetas de activos](/help/configuration-asset-tag-scheme).
 
 ## Qué se configura en otro sitio

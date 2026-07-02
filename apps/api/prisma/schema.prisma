@@ -162,6 +162,10 @@ model User {
   // uploader; attribution degrades to null, mirroring articlesEdited). ADR-0082.
   attachmentsUploaded Attachment[] @relation("AttachmentUploader")
 
+  // Guided updates this user enqueued (UpdateRun.requestedByUserId, SetNull — the append-only run
+  // ledger survives the requester's deletion, mirroring importRuns). ADR-0084, #904.
+  updateRunsRequested UpdateRun[] @relation("UpdateRunRequestedBy")
+
   @@map("users")
 }
 
@@ -600,6 +604,94 @@ model SmtpSettings {
 
   // No deletedAt: mutable instance config, never soft-deleted (same posture as AssetTagScheme).
   @@map("smtp_settings")
+}
+
+/// Update-awareness settings + cached check result — the singleton config store for the update check
+/// (ADR-0084 §1, issue #904). Same singleton pattern as SmtpSettings/AssetTagScheme (ADR-0063/0079):
+/// ONE admin-only row (`settings:manage`), a migration CHECK pins the id. Holds BOTH the opt-in toggle
+/// AND the cached result of the last successful anonymous GitHub-releases check, so the UI reads this
+/// cache and NEVER fetches GitHub at render time (the sweeper is the only writer of the cache columns).
+///
+/// The check is OPT-IN (default OFF), beacon-free and fail-soft: when `checkEnabled` is false or a
+/// check fails, the cache columns simply stay at their last value and the UI degrades to
+/// version-display-only. `lastEmailedVersion` de-dupes the weekly "N behind" email — one email per
+/// newly-observed latest version, never a re-nag about the same version (ADR-0084 §2).
+model UpdateSettings {
+  /// Fixed singleton key — the only valid value is "singleton" (a migration CHECK pins it).
+  id                 String    @id @default("singleton")
+  /// Master switch for the weekly anonymous update check. false (default) = never reach out; the UI
+  /// shows the running version only. Opt-in — restricted-egress / air-gapped instances stay first-class.
+  checkEnabled       Boolean   @default(false)
+  /// The latest release tag observed by the last SUCCESSFUL check (e.g. "v1.5.0"). null = never
+  /// checked / last check failed — which the UI treats as "couldn't check", NEVER as "up to date".
+  latestVersion      String?
+  /// How many releases newer than the running version the last check counted (the "N behind" figure).
+  /// Cached at check time relative to the running `APP_VERSION` (fixed for the process; a redeploy
+  /// re-runs the check). 0 when current / never checked. Can't be derived at read time from just
+  /// current+latest — the intermediate release count must be stored.
+  behindBy           Int       @default(0)
+  /// The latest release's GitHub page URL (for the "view release" link). null until known.
+  latestHtmlUrl      String?
+  /// A short, redacted excerpt of the latest release notes (title / first lines). null until known.
+  latestNotes        String?
+  /// When the last SUCCESSFUL check completed. null = never. Drives the "last checked" row + staleness.
+  checkedAt          DateTime?
+  /// The version the weekly email was last sent about — the de-dupe key. When the newly-observed
+  /// `latestVersion` differs, one email fires and this advances; equal ⇒ no re-nag (ADR-0084 §2).
+  lastEmailedVersion String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  // No deletedAt: mutable instance config, never soft-deleted (same posture as SmtpSettings).
+  @@map("update_settings")
+}
+
+/// UpdateRun — one guided update, the API↔host contract (ADR-0084 §4, issue #904). An APPEND-ONLY
+/// ledger row (autoincrement id, never deleted) whose `status` transitions during execution — the
+/// same shape as WorkflowRun (identity immutable; status + timestamps move). The in-app ADMIN action
+/// only ENQUEUES this row (status `requested`) and is shown the exact `./infra/update.sh vX.Y.Z`
+/// command; the HOST script executes the update and STAMPS every state transition back here over plain
+/// Postgres (the DB an app update never rebuilds, so run state survives the very containers being
+/// replaced). The API only READS it, plus a boot-time reconciliation that finalizes any run left
+/// in-flight by an abnormally-terminated host (compares its own APP_VERSION to `toVersion`).
+///
+/// This is deliberately NOT on the ADR-0081 audit-log read surface (that reads three SECURITY logs);
+/// an update is an OPERATIONAL event, rendered as a simple list on Settings → Instance.
+///
+/// `status` is a plain String (not a Prisma enum) — the closed catalog lives as zod `UpdateRunStatus`
+/// in @lazyit/shared, mirroring Notification.type. This lets the host advance it with a bare SQL
+/// `UPDATE` (no DB enum type to know) and makes adding a phase a shared-package change, not a migration.
+model UpdateRun {
+  /// autoincrement: an operational log row (ADR-0005 log convention), exposed only within the instance.
+  id                Int       @id @default(autoincrement())
+  /// The human who enqueued the update. Optional FK, SetNull (@db.Uuid to match User.id): losing the
+  /// requester never blocks deletion and the append-only run survives, mirroring ImportRun.actorId.
+  requestedByUserId String?   @db.Uuid
+  requestedBy       User?     @relation("UpdateRunRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  /// The version running when the update was requested (`APP_VERSION` at enqueue; may be "dev").
+  fromVersion       String
+  /// The target release tag being moved to (e.g. "v1.5.0").
+  toVersion         String
+  /// The lifecycle status — the closed `UpdateRunStatus` catalog in @lazyit/shared. Default the
+  /// enqueue state; the host advances it (backing_up → … → verifying → done|failed|rolled_back).
+  status            String    @default("requested")
+  /// When the host script picked the run up (first transition past `requested`); null while pending.
+  startedAt         DateTime?
+  /// When the run reached a terminal state; null while in flight.
+  finishedAt        DateTime?
+  /// A short, REDACTED tail of host-script output for the in-progress / failed view (operational lines
+  /// only — never secrets or env values, INV-6). null when none.
+  logTail           String?
+  /// A short, non-secret failure reason; null unless the run failed.
+  error             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // No deletedAt: an append-only ledger (ADR-0006), like WorkflowRun. Indexes: the active-run /
+  // reconcile scan by status, and the newest-first history list by createdAt.
+  @@index([status])
+  @@index([createdAt])
+  @@map("update_runs")
 }
 
 /// Timestamped join recording who owns an Asset, over time (asset-centric ownership; ADR-0004).
