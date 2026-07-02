@@ -231,3 +231,7 @@ CHECK on `SecretAuditLog`. A `--create-only` migration (no reset). New catalog v
 Related: [[0061-secret-manager-zero-knowledge]] · [[0048-service-accounts]] ·
 [[0075-typed-secrets-client-payload-kind-metadata]] · [[0046-roles-permissions-v2]] ·
 [[secret-vault]] · [[vault-membership]] · [[user-keypair]] · [[INVARIANTS]] (INV-10) · [[_MOC]]
+
+Version handshake — `lazyit-fetch` is build-stamped and best-effort warns (stderr) when it is a MAJOR
+behind the server (`GET /instance/version`); warn-only, no INV-10 impact: see
+[[0083-versioning-and-releases]] Amendment (2026-07-02), issue #907.
