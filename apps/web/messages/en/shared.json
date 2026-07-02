@@ -206,11 +206,13 @@
       "copyLabel": "Copy example",
       "wikiLink": {
         "title": "Link another article",
-        "note": "Type [[ for a picker. Use | for custom link text. A link to an article that doesn't exist yet stays as a forward reference."
+        "note": "Type [[ for a picker. Use | for custom link text. A link to an article that doesn't exist yet stays as a forward reference.",
+        "suggestionsAria": "Article suggestions"
       },
       "secret": {
         "title": "Reference a secret",
-        "note": "Shows a masked chip — only a vault member can reveal the value. Type '{{' for a picker; you pick a handle, never a value."
+        "note": "Shows a masked chip — only a vault member can reveal the value. Type '{{' for a picker; you pick a handle, never a value.",
+        "suggestionsAria": "Secret handle suggestions"
       },
       "links": {
         "title": "External link",

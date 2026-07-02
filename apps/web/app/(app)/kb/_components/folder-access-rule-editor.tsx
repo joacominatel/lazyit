@@ -42,6 +42,17 @@ import { cn } from "@/lib/utils";
 export type RawAccessRules = FolderAccessRules | unknown;
 
 /**
+ * A rule paired with a stable, add-time id — used ONLY as the React list key/removal handle so
+ * that deleting a middle row doesn't make React reuse an adjacent row's identity/focus (the raw
+ * `FolderAccessRule[]` sent to the API has no id field of its own — see `FolderAccessRuleSchema`).
+ */
+type StoredRule = { id: string; rule: FolderAccessRule };
+
+function withStableIds(rules: FolderAccessRules): StoredRule[] {
+  return (rules ?? []).map((rule) => ({ id: crypto.randomUUID(), rule }));
+}
+
+/**
  * FolderAccessRuleEditor — the compact ADMIN-only panel for viewing and editing a folder's
  * access rules (ADR-0060 §3). Gated by `settings:manage` client-side (the API enforces it
  * server-side as the real boundary — INV-9).
@@ -85,8 +96,17 @@ export function FolderAccessRuleEditor({
     return rawAccessRules as FolderAccessRules;
   }, [rawAccessRules]);
 
-  const [rules, setRules] = useState<FolderAccessRules>(initialRules);
+  const [storedRules, setStoredRules] = useState<StoredRule[]>(() =>
+    withStableIds(initialRules),
+  );
   const [dirty, setDirty] = useState(false);
+
+  // The raw rule list the mutation/API care about — `storedRules` exists only to give each row a
+  // stable key independent of its position in the list.
+  const rules = useMemo<FolderAccessRules>(
+    () => (storedRules.length > 0 ? storedRules.map((r) => r.rule) : null),
+    [storedRules],
+  );
 
   const setAccessRules = useSetFolderAccessRules();
 
@@ -128,20 +148,17 @@ export function FolderAccessRuleEditor({
   }, [folderId, rules, setAccessRules, t]);
 
   const handleMakePublic = useCallback(() => {
-    setRules(null);
+    setStoredRules([]);
     setDirty(true);
   }, []);
 
-  const removeRule = useCallback((index: number) => {
-    setRules((prev) => {
-      const next = (prev ?? []).filter((_, i) => i !== index);
-      return next.length === 0 ? null : next;
-    });
+  const removeRule = useCallback((id: string) => {
+    setStoredRules((prev) => prev.filter((r) => r.id !== id));
     setDirty(true);
   }, []);
 
   const addRule = useCallback((rule: FolderAccessRule) => {
-    setRules((prev) => [...(prev ?? []), rule]);
+    setStoredRules((prev) => [...prev, { id: crypto.randomUUID(), rule }]);
     setDirty(true);
   }, []);
 
@@ -205,16 +222,16 @@ export function FolderAccessRuleEditor({
       ) : null}
 
       {/* OR-rule list */}
-      {!isPublic && rules && rules.length > 0 ? (
+      {!isPublic && storedRules.length > 0 ? (
         <ul className="space-y-1.5">
-          {rules.map((rule, index) => (
+          {storedRules.map(({ id, rule }) => (
             <RuleRow
-              key={index}
+              key={id}
               rule={rule}
               userById={userById}
               appById={appById}
               assetById={assetById}
-              onRemove={() => removeRule(index)}
+              onRemove={() => removeRule(id)}
               disabled={setAccessRules.isPending}
               t={t}
             />
@@ -256,7 +273,7 @@ export function FolderAccessRuleEditor({
             size="sm"
             variant="ghost"
             onClick={() => {
-              setRules(initialRules);
+              setStoredRules(withStableIds(initialRules));
               setDirty(false);
             }}
             disabled={setAccessRules.isPending}

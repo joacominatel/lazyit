@@ -206,11 +206,13 @@
       "copyLabel": "Copiar ejemplo",
       "wikiLink": {
         "title": "Enlazar otro artículo",
-        "note": "Escribe [[ para abrir un selector. Usa | para un texto de enlace personalizado. Un enlace a un artículo que aún no existe queda como referencia futura."
+        "note": "Escribe [[ para abrir un selector. Usa | para un texto de enlace personalizado. Un enlace a un artículo que aún no existe queda como referencia futura.",
+        "suggestionsAria": "Sugerencias de artículos"
       },
       "secret": {
         "title": "Referenciar un secreto",
-        "note": "Muestra un chip enmascarado — solo un miembro del vault puede revelar el valor. Escribe '{{' para abrir un selector; eliges un identificador (handle), nunca un valor."
+        "note": "Muestra un chip enmascarado — solo un miembro del vault puede revelar el valor. Escribe '{{' para abrir un selector; eliges un identificador (handle), nunca un valor.",
+        "suggestionsAria": "Sugerencias de identificadores de secretos"
       },
       "links": {
         "title": "Enlace externo",

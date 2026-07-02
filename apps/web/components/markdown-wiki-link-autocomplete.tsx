@@ -1,6 +1,7 @@
 "use client";
 
 import { DocumentTextIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
 import type { CSSProperties } from "react";
 import type { ArticleSlugSuggestion } from "@/lib/api/hooks/use-article-slug-suggestions";
 import { cn } from "@/lib/utils";
@@ -82,10 +83,11 @@ export function WikiLinkSuggestions({
   onSelect: (slug: string) => void;
   style?: CSSProperties;
 }) {
+  const t = useTranslations("shared");
   return (
     <ul
       role="listbox"
-      aria-label="Article suggestions"
+      aria-label={t("editor.help.wikiLink.suggestionsAria")}
       style={style}
       className={cn(
         "absolute z-20 max-h-64 w-72 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-e3 ring-1 ring-foreground/10",
