@@ -771,7 +771,11 @@ describe('AssetsService', () => {
 
     const findManyArgs = (
       asset.findMany.mock.calls as Array<
-        [{ where: { warrantyEnd: { gt: Date; lte: Date }; deletedAt: unknown } }]
+        [
+          {
+            where: { warrantyEnd: { gt: Date; lte: Date }; deletedAt: unknown };
+          },
+        ]
       >
     )[0][0];
     expect(findManyArgs.where.deletedAt).toBeNull();
@@ -801,9 +805,7 @@ describe('AssetsService', () => {
     )[0][0];
     expect(findManyArgs.where.deletedAt).toBeNull();
     // Only a `lt: now` bound (no lower bound), so a null warrantyEnd never matches.
-    expect(
-      Object.keys(findManyArgs.where.warrantyEnd),
-    ).toEqual(['lt']);
+    expect(Object.keys(findManyArgs.where.warrantyEnd)).toEqual(['lt']);
     const { lt } = findManyArgs.where.warrantyEnd;
     expect(lt.getTime()).toBeGreaterThanOrEqual(before);
     expect(lt.getTime()).toBeLessThanOrEqual(after);
