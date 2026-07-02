@@ -6,6 +6,7 @@ import {
   ClockIcon,
   Cog6ToothIcon,
   CubeIcon,
+  InboxStackIcon,
   KeyIcon,
   LockClosedIcon,
   QuestionMarkCircleIcon,
@@ -146,6 +147,15 @@ const NAV: NavSection[] = [
         href: "/applications",
         icon: KeyIcon,
         expandable: true,
+      },
+      // Access requests → the admin review queue (ADR-0085, #948). Gated on `accessRequest:read`
+      // (ADMIN+MEMBER); a VIEWER tracks their OWN requests in `/profile` instead. The API's guard is
+      // the real gate — this just hides the link from a caller who can't read the estate queue.
+      {
+        labelKey: "accessRequests",
+        href: "/applications/access-requests",
+        icon: InboxStackIcon,
+        permission: "accessRequest:read",
       },
     ],
   },
