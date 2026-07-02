@@ -624,6 +624,13 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 
 ---
 
+**ADR-0085** — *Access request flow (request → approve/deny → grant)*
+**Status**: accepted (2026-07-02); resolves the ADR-0023 deferral
+**One-liner**: new `AccessRequest` entity (cuid, `PENDING|APPROVED|DENIED`, one PENDING per (requester, application) via a partial unique index) — request by ANY human (`accessRequest:create`, seeded to all roles via a new `SELF_SERVICE_CAPABILITIES` tier), decided with the existing `accessGrant:grant` (no new decide permission); **approve = grant + status flip in ONE tx** through the real grant write path (`createWithinApproval` — guarded `updateMany WHERE status='PENDING'`, so a raced double-approve rolls back), workflow engine still fires post-commit (ADR-0054); `access_request.created` rides the ADR-0056 bell (INV-6: justification never enters notifications).
+**CTO note**: backend shipped in v1.1.0 (PR #977, adversarial security gate PASS on all 8 points); **frontend part 2 pending** — contract in PR #977's body. `accessRequest:read` pre-tightened ADMIN+MEMBER (`VIEWER_DENIED_READS`); requesters always read their own via `GET /access-requests/mine` (self-scope carve-out, human-only). Known v1 gaps: no decision notification to the requester (bell is ADMIN-only), no withdraw endpoint, no separation-of-duties on self-approval (same privilege as direct grant — deliberate).
+
+---
+
 ## Decisions made outside ADRs
 
 | Date | Decision | Context | Implication |
