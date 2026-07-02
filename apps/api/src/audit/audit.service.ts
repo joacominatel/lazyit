@@ -14,6 +14,7 @@ import {
   pageOf,
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
+import { provenanceStampLine } from '../common/export-provenance';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -62,6 +63,8 @@ export class AuditService {
    * from the on-screen list or from the browser "export visible" path. Streamed as an async generator.
    */
   async *streamLogsCsvRows(filters: AuditLogFilters): AsyncGenerator<string> {
+    // Leading provenance stamp (#909) — names the build that produced the file (this log has no importer).
+    yield `${provenanceStampLine()}\n`;
     yield `${AUDIT_LOG_CSV_HEADER}\n`;
 
     let offset = 0;

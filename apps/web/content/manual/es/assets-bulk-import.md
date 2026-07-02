@@ -45,6 +45,11 @@ fila (u objeto) se convierte en un activo.
 - El archivo se analiza en segundo plano; suele tardar unos segundos.
 - Las columnas de solo fecha y cualquier columna de marca temporal `created`/`updated`/`deleted` se
   rechazan — esta primera fase importa el *estado actual* de un activo, no su historial.
+- Un archivo **exportado por lazyit** lleva una pequeña línea `# lazyit vX.Y.Z …` al inicio que registra
+  la versión que lo generó. Si esa versión es de una **versión mayor más nueva** que el servidor en el
+  que importas, la subida se rechaza con un mensaje claro — actualiza este servidor (o re-exporta desde
+  una versión compatible) antes de importar. Las hojas de cálculo o archivos de terceros habituales no
+  tienen esa línea y se importan con normalidad.
 
 ## 2. Confirma el resumen
 

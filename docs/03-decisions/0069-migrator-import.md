@@ -464,5 +464,32 @@ Post-Etapa-2 corrections, all within the existing design (no contract change):
   row with an invalid/incomplete person never produces an orphan asset. (A.3's order still holds for
   *creation*; #647 moves person *validation* ahead of the asset write.)
 
+## Amendment — version-provenance stamp on the parse layer (2026-07-02, #909)
+
+> Extends §3 (the parse/coerce layer). Ties the importer to the build-version identity of [[0083-versioning-and-releases]].
+
+lazyit CSV exports now lead with a one-line provenance stamp — `# lazyit vX.Y.Z — <ISO timestamp>` —
+naming the build that produced the file (`process.env.APP_VERSION`, the same source `GET
+/instance/version` reads; `'dev'` on a native run). The parse layer (`apps/api/src/import/parser.ts`
+→ `parseImport`) now screens the **first line** for this stamp via the api-local helper
+`apps/api/src/common/export-provenance.ts` (`checkImportProvenance`) BEFORE dispatching to the CSV/JSON
+parsers:
+
+- **A stamp from a NEWER major than the running server** → the import fails with a clear operator
+  message (`ok:false, reason`) instead of failing cryptically deep in row validation. The worker
+  records it as the graceful FAILED path (§10) exactly like any other malformed-but-present input.
+- **A stamp from the SAME or an OLDER major** → the stamp line is stripped (so it can never be parsed
+  as a phantom header/data row) and the import proceeds. This makes re-importing a lazyit asset-CSV
+  export a clean round-trip.
+- **No stamp** (a hand-made spreadsheet or third-party export) → accepted unchanged; the existing
+  non-lazyit import contract is untouched.
+- The gate is **disabled on a `dev` server** (or when either major is unparseable) — a dev build has
+  no meaningful major to vet another build's file against.
+
+The check is a single-major compatibility gate, not a version-negotiation framework: minor/patch
+differences never block. The same `provenanceStampLine()` helper stamps the asset (#872), audit-log
+(#871) and dashboard-activity (#840) CSV exports; only the asset CSV has a round-trip importer here.
+
 **Related:** [[0069-migrator-import.REDESIGN]] · [[0038-jit-user-provisioning]] · [[user]] ·
-[[INVARIANTS]] · [[SEC-072]] · [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]]
+[[INVARIANTS]] · [[SEC-072]] · [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]] ·
+[[0083-versioning-and-releases]]

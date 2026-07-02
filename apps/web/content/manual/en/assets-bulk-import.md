@@ -44,6 +44,11 @@ object) becomes one asset.
 - The file is parsed in the background; this usually takes a few seconds.
 - Date-only columns and any `created`/`updated`/`deleted` timestamp columns are rejected — this first
   phase imports the *current state* of an asset, not its history.
+- A file **exported by lazyit** carries a small `# lazyit vX.Y.Z …` line at the top recording the
+  version that produced it. If that version is a **newer major** than the server you're importing into,
+  the upload is refused with a clear message — upgrade this server (or re-export from a matching
+  version) before importing. Ordinary spreadsheet or third-party files have no such line and import
+  normally.
 
 ## 2. Confirm the summary
 

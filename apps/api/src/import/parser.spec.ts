@@ -211,6 +211,52 @@ describe('parseImport — JSON', () => {
   });
 });
 
+// Version provenance on import (#909, ADR-0083): a lazyit export leads with a `# lazyit vX.Y.Z` stamp;
+// the parser strips a compatible stamp and refuses one from a newer major with a clear message.
+describe('parseImport — version provenance stamp', () => {
+  const original = process.env.APP_VERSION;
+  afterEach(() => {
+    if (original === undefined) delete process.env.APP_VERSION;
+    else process.env.APP_VERSION = original;
+  });
+
+  it('strips a compatible (same-major) stamp and parses the real header', () => {
+    process.env.APP_VERSION = 'v1.4.2';
+    const result = parseImport(
+      buf(
+        '# lazyit v1.9.0 — 2026-07-02T10:00:00.000Z\nname,serial\nLaptop,ABC123\n',
+      ),
+      'csv',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.headers).toEqual(['name', 'serial']);
+    expect(result.rows).toEqual([{ name: 'Laptop', serial: 'ABC123' }]);
+  });
+
+  it('refuses a stamp from a NEWER major with a clear operator message', () => {
+    process.env.APP_VERSION = 'v1.4.2';
+    const result = parseImport(
+      buf(
+        '# lazyit v2.0.0 — 2026-07-02T10:00:00.000Z\nname,serial\nLaptop,ABC123\n',
+      ),
+      'csv',
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('v2.0.0');
+    expect(result.reason).toMatch(/newer major/i);
+  });
+
+  it('accepts a file with no stamp unchanged (legacy / third-party)', () => {
+    process.env.APP_VERSION = 'v1.4.2';
+    const result = parseImport(buf('name,serial\nLaptop,ABC123\n'), 'csv');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.headers).toEqual(['name', 'serial']);
+  });
+});
+
 describe('maxImportRows', () => {
   const original = process.env.MAX_IMPORT_ROWS;
   afterEach(() => {
