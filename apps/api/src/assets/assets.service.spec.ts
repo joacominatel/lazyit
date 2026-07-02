@@ -740,6 +740,24 @@ describe('AssetsService', () => {
     });
   });
 
+  it('findPage filters by modelId (exact model, distinct from categoryId — #943)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { modelId: 'm1' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({
+      modelId: 'm1',
+      deletedAt: null,
+    });
+  });
+
   it('findPage narrows by company (exact-match grouping filter — ADR-0076)', async () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
@@ -846,7 +864,7 @@ describe('AssetsService', () => {
     });
   });
 
-  it('findPage filters by q (case-insensitive OR over name/serial/assetTag)', async () => {
+  it('findPage filters by q (case-insensitive OR over name/serial/assetTag PLUS the related model name/manufacturer — #943)', async () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
 
@@ -863,6 +881,8 @@ describe('AssetsService', () => {
         { name: { contains: 'srv', mode: 'insensitive' } },
         { serial: { contains: 'srv', mode: 'insensitive' } },
         { assetTag: { contains: 'srv', mode: 'insensitive' } },
+        { model: { name: { contains: 'srv', mode: 'insensitive' } } },
+        { model: { manufacturer: { contains: 'srv', mode: 'insensitive' } } },
       ],
       deletedAt: null,
     });
