@@ -128,11 +128,17 @@ jobs:
             --jq '[.[] | select(.base.ref == "master")][0] // empty' || true)
           label_bump=""
           pr_body=""
+          security=""
           if [ -n "$pr_json" ]; then
             label_bump=$(printf '%s' "$pr_json" | jq -r \
               '[.labels[].name | select(. == "release:major" or . == "release:minor" or . == "release:patch")][0] // ""' \
               | sed 's/^release://')
             pr_body=$(printf '%s' "$pr_json" | jq -r '.body // ""')
+            # Optional, orthogonal to the bump (issue #908): a release:security label marks this release
+            # as security-relevant. Records a stable marker in the notes so the ADR-0084 update check flags
+            # the gap. Absent by default — a routine promotion carries no marker.
+            security=$(printf '%s' "$pr_json" | jq -r \
+              '[.labels[].name | select(. == "release:security")][0] // ""')
           fi
           if git log --no-merges --pretty=%s "$last_tag..HEAD" | grep -qE '^(feat|updt|del)[(:!]'; then
             suggested=minor
@@ -152,6 +158,13 @@ jobs:
 
           # Release notes, grouped for humans (ADR-0083): chore/docs hidden.
           notes=$(mktemp)
+          # Security marker FIRST (issue #908) when release:security is set. The HTML comment
+          # `<!-- lazyit:security -->` is the STABLE, machine-parseable literal the ADR-0084 update check
+          # greps for (mirrored in packages/shared SECURITY_RELEASE_MARKER — keep the two in sync); the
+          # heading + line make it human-visible on the Release page. Emitted only when the label is present.
+          if [ -n "$security" ]; then
+            printf '## 🔒 Security release\n\n<!-- lazyit:security -->\nThis release addresses security-relevant issues — updating promptly is recommended.\n\n' >> "$notes"
+          fi
           if [ "$bump" = "major" ]; then
             # A major REQUIRES the promotion PR's "## ⚠️ Upgrade actions" section — carried verbatim.
             upgrade=$(printf '%s\n' "$pr_body" \

@@ -240,3 +240,13 @@ two-step retirement:
 This gives every retirement a predictable, pre-announced home and keeps the version number's
 "is-this-one-click-safe?" contract honest: a deprecation alone never forces a manual step, but the eventual
 removal rides the MAJOR that already carries one.
+
+## Amendment — security-release flag (issue #908, 2026-07-02)
+
+An OPTIONAL `release:security` label on the promotion PR is orthogonal to the semver `release:*` bump. When
+present, the release job writes a stable, machine-parseable marker into the Release notes: a `## 🔒 Security
+release` heading followed by the exact HTML comment `<!-- lazyit:security -->` (human-visible heading +
+whitespace-free parseable literal — chosen over a fragile title convention). The marker literal is mirrored
+in `packages/shared` as `SECURITY_RELEASE_MARKER` (a bash workflow cannot import the shared package — keep
+the two in sync). Absent by default: a routine promotion carries no marker. The consumption side is
+[[0084-update-awareness-and-guided-update|ADR-0084]] §amendment.
