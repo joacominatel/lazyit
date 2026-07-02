@@ -31,7 +31,7 @@ export const applicationKeys = {
  * paging. Returns just `items`, so existing `Application[]` consumers are unchanged.
  *
  * `enabled` lets a caller skip the fetch when it would only 403 — e.g. the `/profile` grant labels for
- * a caller who lacks `application:read` (mirrors the `useUsers`/`useAccessGrants` guard). Omit it to
+ * a caller who lacks `application:read` (mirrors the `useUserNames`/`useAccessGrants` guard). Omit it to
  * keep the eager default.
  */
 export function useApplications({ enabled = true }: { enabled?: boolean } = {}) {
