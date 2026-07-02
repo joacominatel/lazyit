@@ -1,9 +1,13 @@
 "use client";
 
-import { LockOpenIcon } from "@heroicons/react/24/outline";
+import {
+  LockOpenIcon,
+  QuestionMarkCircleIcon,
+} from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { signOut } from "next-auth/react";
 import { useSession } from "next-auth/react";
+import Link from "next/link";
 import { useSecretSession } from "@/app/(app)/secrets/_components/secret-session";
 import { UserRoleBadge } from "@/app/(app)/users/_components/user-role-badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -109,6 +113,16 @@ export function UserMenu() {
         <DropdownMenuSeparator />
         {/* Locale switcher (ADR-0051): a Globe sub-menu with EN / ES. */}
         <LocaleSwitcher />
+        <DropdownMenuSeparator />
+        {/* Help (#953): the in-app Manual was previously reachable only by guessing the `/help` URL —
+            this is the user-menu counterpart to the sidebar footer affordance. Opens in a new tab (a
+            real link, so middle/modifier-click behave) rather than navigating the caller away. */}
+        <DropdownMenuItem asChild>
+          <Link href="/help" target="_blank" rel="noopener noreferrer">
+            <QuestionMarkCircleIcon aria-hidden />
+            {t("chrome.help")}
+          </Link>
+        </DropdownMenuItem>
         {/* SM-WEB-04: app-wide Secret Manager lock. Shown only to a `secret:read` holder whose session
             is currently unlocked. Clicking locks the session (drops the in-memory key + DEK cache). */}
         {showLock ? (

@@ -8,6 +8,7 @@ import {
   CubeIcon,
   KeyIcon,
   LockClosedIcon,
+  QuestionMarkCircleIcon,
   ServerStackIcon,
   ShareIcon,
   ShieldCheckIcon,
@@ -215,11 +216,14 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
   // worked example: one real section of the chrome wired through next-intl, proving the
   // plumbing end-to-end before the per-section fan-out extracts the rest.
   const t = useTranslations("nav");
+  // Chrome-level strings (not a domain nav label) for the Help/Manual footer affordance below.
+  const tShared = useTranslations("shared");
   // Resolve the whole permission set ONCE (rules of hooks: no `useCan` inside the item loop). `can`
   // answers any fine-grained gate (`logs:read`, …); `adminOnly` keeps mapping to `settings:manage`.
   const { can } = useMyPermissions();
 
   return (
+    <>
     <nav className={cn("flex-1 overflow-y-auto p-2", collapsed ? "space-y-0.5" : "space-y-4")}>
       {NAV.map((section, index) => {
         // Hide items the caller can't use, then drop a section that empties out:
@@ -306,6 +310,28 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
         );
       })}
     </nav>
+    {/* Help/Manual footer affordance (#953): the in-app Manual (`/help`) was previously reachable
+        only by guessing the URL — this is the one place every authenticated user sees it, regardless
+        of role or permission set. Opens in a new tab so it never navigates the caller away from what
+        they were doing. Lives here (not as a `NAV` entry) because it isn't a domain destination and
+        must never be permission-gated. */}
+    <div className={cn("shrink-0 border-t border-border p-2", collapsed && "flex justify-center")}>
+      <a
+        href="/help"
+        target="_blank"
+        rel="noopener noreferrer"
+        title={tShared("chrome.help")}
+        aria-label={tShared("chrome.help")}
+        className={cn(
+          "flex min-h-11 items-center rounded-md py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:min-h-9",
+          collapsed ? "justify-center px-0" : "gap-2.5 px-3",
+        )}
+      >
+        <QuestionMarkCircleIcon className="size-5 shrink-0" />
+        {!collapsed && tShared("chrome.help")}
+      </a>
+    </div>
+    </>
   );
 }
 

@@ -2,6 +2,8 @@
 
 import { LockClosedIcon } from "@heroicons/react/24/outline";
 import type { Permission } from "@lazyit/shared";
+import { useTranslations } from "next-intl";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMyPermissions } from "@/lib/hooks/use-permissions";
@@ -12,7 +14,8 @@ import { useMyPermissions } from "@/lib/hooks/use-permissions";
  * someone who would only get 403s. Fails CLOSED in all three states: loading (`/config/my-permissions`
  * in flight) renders a neutral skeleton so we never flash the gated UI; lacking the permission renders
  * an explicit locked empty-state (callers pass localized `title`/`description`, so the component stays
- * namespace-agnostic); holding it renders the children.
+ * namespace-agnostic for that copy) plus a link to the Manual's roles/permissions page (#953, `shared`
+ * namespace — same precedent as `ErrorState`'s forbidden branch); holding it renders the children.
  */
 export function PermissionGate({
   permission,
@@ -31,6 +34,7 @@ export function PermissionGate({
   loadingFallback?: ReactNode;
 }) {
   const { can, isLoading } = useMyPermissions();
+  const t = useTranslations("shared");
 
   if (isLoading) {
     return (
@@ -51,6 +55,17 @@ export function PermissionGate({
           <p className="text-sm font-medium">{title}</p>
           <p className="max-w-sm text-sm text-muted-foreground">{description}</p>
         </div>
+        {/* #953: deep-link the Manual's roles/permissions page instead of dead-ending here — every
+            caller of this component hits the same "ask an administrator" wall, so one internal link
+            (like the copy above, this stays namespace-agnostic for callers) fixes it everywhere. */}
+        <Link
+          href="/help/permissions"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+        >
+          {t("errors.manualLink")}
+        </Link>
       </div>
     );
   }
