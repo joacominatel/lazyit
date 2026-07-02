@@ -12,8 +12,13 @@
  */
 
 import { expect, describe, test } from "bun:test";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateUserSchema } from "@lazyit/shared";
-import { toResolverInput } from "./user-form-payload";
+import {
+  toResolverInput,
+  type UserFormValues,
+  wireShapeResolver,
+} from "./user-form-payload";
 
 // Minimal required fields for a valid create payload (email + names mandatory; rest optional).
 const BASE = {
@@ -131,5 +136,59 @@ describe("toResolverInput — optional directory fields", () => {
   test("isActive is absent when not passed (create mode)", () => {
     const payload = toResolverInput({ ...BASE, manager: { kind: "none" } });
     expect("isActive" in payload).toBe(false);
+  });
+});
+
+// ── wireShapeResolver (issue #934 regression) ─────────────────────────────────────────────────────
+// zodResolver returns its PARSED (wire) output as `values`, and react-hook-form forwards the
+// resolver's `values` — not the raw form values — to onSubmit. The old wrapper returned that wire
+// output, so onSubmit re-serialized an already-serialized payload: `toManagerInput(null)` crashed on
+// create, and edit silently cleared the manager. wireShapeResolver must return the ORIGINAL loose form
+// values on success while still validating the wire shape and passing field errors through.
+describe("wireShapeResolver (issue #934 regression)", () => {
+  const resolver = wireShapeResolver<UserFormValues>(
+    zodResolver(CreateUserSchema),
+    toResolverInput,
+  );
+  // Minimal ResolverOptions — the zod resolver only reads shouldUseNativeValidation here.
+  const opts = {
+    shouldUseNativeValidation: false,
+    fields: {},
+    criteriaMode: undefined,
+  } as never;
+
+  test("on success returns the ORIGINAL form values, not the wire shape", async () => {
+    const values: UserFormValues = { ...BASE, manager: { kind: "none" } };
+    const result = await resolver(values, undefined, opts);
+
+    expect(result.errors).toEqual({});
+    // The regression: `manager` must survive as the loose form value ({kind:'none'}), NOT the
+    // serialized wire value (null). Identity-equal to the input object.
+    expect(result.values).toBe(values);
+    expect(result.values.manager).toEqual({ kind: "none" });
+  });
+
+  test("preserves a linked-user manager as the loose form value on success", async () => {
+    const values: UserFormValues = {
+      ...BASE,
+      manager: { kind: "user", managerId: "11111111-1111-4111-8111-111111111111" },
+    };
+    const result = await resolver(values, undefined, opts);
+
+    expect(result.errors).toEqual({});
+    // Not { managerId } (the wire shape) — the discriminated form value passes straight through.
+    expect(result.values.manager).toEqual(values.manager);
+  });
+
+  test("on validation failure yields empty values and passes field errors through", async () => {
+    const values: UserFormValues = {
+      ...BASE,
+      email: "not-an-email",
+      manager: { kind: "none" },
+    };
+    const result = await resolver(values, undefined, opts);
+
+    expect(result.errors.email).toBeDefined();
+    expect(result.values).toEqual({});
   });
 });
