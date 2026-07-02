@@ -45,6 +45,7 @@
     "breadcrumbClone": "Clonar",
     "nameLabel": "Nombre",
     "namePlaceholder": "GitHub",
+    "nameRequired": "El nombre es obligatorio",
     "vendorLabel": "Proveedor",
     "vendorPlaceholder": "Atlassian, Microsoft, AWS…",
     "categoryLabel": "Categoría",
