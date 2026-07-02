@@ -186,6 +186,11 @@ export function AssetsListView() {
   const { isAdmin } = usePermissions();
   const canWrite = useCan("asset:write");
   const canDelete = useCan("asset:delete");
+  // The owner filter reads the user directory (`user:read`) to resolve names and populate its picker.
+  // A VIEWER lacks that permission, so the lookup 403s and the picker showed a misleading "No results"
+  // (forbidden presented as nonexistent — issue #935). Gate the whole control on `user:read`: hide it
+  // when the caller can't populate it, which also skips the doomed `/users` fetch entirely.
+  const canReadUsers = useCan("user:read");
   // Which assets back a topology node — drives the small "On topology" glyph per row (issue #765).
   // Gated on infra:read so a viewer without topology access never fires the node-list fetch.
   const onTopology = useAssetsOnTopology(useCan("infra:read"));
@@ -212,7 +217,10 @@ export function AssetsListView() {
   const ownerFilter = filters.owner; // "" = unset; otherwise a User uuid (server-side filter)
   const ownershipFilter = filters.ownership as OwnershipFilter;
   // Resolve the owner-filter user's name for its chip, even when not on the current search page.
-  const { data: ownerUser } = useUser(ownerFilter || undefined);
+  // Skip the `/users/:id` lookup when the caller can't read the directory (would 403 — #935).
+  const { data: ownerUser } = useUser(
+    canReadUsers ? ownerFilter || undefined : undefined,
+  );
   // The archived view is ADMIN-only; a non-admin can never set it (toggle hidden) and we never send
   // the param for them, so the API stays on the active-only list.
   const archived = isAdmin && filters.archived === "only";
@@ -777,20 +785,22 @@ export function AssetsListView() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="assets-filter-owner"
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    {t("filters.ownerLabel")}
-                  </label>
-                  <UserCombobox
-                    id="assets-filter-owner"
-                    value={ownerFilter || undefined}
-                    onValueChange={(value) => setFilter("owner", value)}
-                    placeholder={t("filters.ownerPlaceholder")}
-                  />
-                </div>
+                {canReadUsers && (
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="assets-filter-owner"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
+                      {t("filters.ownerLabel")}
+                    </label>
+                    <UserCombobox
+                      id="assets-filter-owner"
+                      value={ownerFilter || undefined}
+                      onValueChange={(value) => setFilter("owner", value)}
+                      placeholder={t("filters.ownerPlaceholder")}
+                    />
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <label
                     htmlFor="assets-filter-ownership"
