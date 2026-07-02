@@ -37,6 +37,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { Callout } from "@/components/callout";
+import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import {
   type QuickViewData,
@@ -413,14 +414,18 @@ function VaultDetail({ vaultId }: { vaultId: string }) {
         {itemsLoading ? (
           <ItemsSkeleton />
         ) : !items || items.length === 0 ? (
-          <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-            {t("items.empty")}
-          </div>
+          <EmptyState
+            icon={ShieldCheckIcon}
+            pillar="knowledge"
+            title={t("items.empty")}
+          />
         ) : filteredItems && filteredItems.length === 0 ? (
           // #609: empty-search state (localized) — distinct from the no-items-at-all state above.
-          <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-            {t("items.searchEmpty", { query: query.trim() })}
-          </div>
+          <EmptyState
+            icon={ShieldCheckIcon}
+            pillar="knowledge"
+            title={t("items.searchEmpty", { query: query.trim() })}
+          />
         ) : (
           // ponytail: the items list IS a ledger — one card, hairline-divided rows (ADR-0077),
           // not a stack of separately-ringed mini-cards.
@@ -925,9 +930,11 @@ function MemberCards({
   if (humanMembersLoading || saLoading) return <MembersSkeleton />;
   if (members.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-        {t("members.empty")}
-      </div>
+      <EmptyState
+        icon={UserPlusIcon}
+        pillar="knowledge"
+        title={t("members.empty")}
+      />
     );
   }
 
