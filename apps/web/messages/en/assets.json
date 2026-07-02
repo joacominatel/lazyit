@@ -120,6 +120,7 @@
     "breadcrumbClone": "Clone",
     "name": "Name",
     "namePlaceholder": "Ada's laptop",
+    "nameRequired": "Name is required",
     "status": "Status",
     "model": "Model",
     "modelPlaceholder": "Select a model",
