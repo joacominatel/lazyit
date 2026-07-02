@@ -80,6 +80,7 @@
     "stateDescription": "Es posible que la API esté caída o inaccesible.",
     "forbiddenTitle": "No tenés acceso a esto",
     "forbiddenDescription": "Tu rol no incluye permiso para ver esto. Consultá con un administrador si creés que deberías tener acceso.",
+    "manualLink": "Conocé más sobre roles y permisos",
     "tryAgain": "Reintentar",
     "retry": "Reintentar",
     "requestId": "ID de solicitud",
@@ -105,6 +106,7 @@
     "dismissModeBanner": "Descartar aviso de modo",
     "collapseSidebar": "Colapsar barra lateral",
     "expandSidebar": "Expandir barra lateral",
+    "help": "Ayuda",
     "breadcrumbLabel": "Ruta de navegación",
     "breadcrumb": {
       "dashboard": "Panel",
