@@ -208,6 +208,23 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
     pillar: "access",
     tier: "coarse",
   },
+  "accessRequest:create": {
+    // Self-service (ADR-0085): any authenticated human — incl VIEWER — may REQUEST access to an
+    // application. `edit` tier (a within-default mutation, no ⚠ escalation marker): it is seeded to
+    // every role via SELF_SERVICE_CAPABILITIES, so granting it is never above-default. The DECISION
+    // (approve/deny) is the separate `accessGrant:grant` coarse verb.
+    label: "Request access to applications",
+    pillar: "access",
+    tier: "edit",
+  },
+  "accessRequest:read": {
+    // See the estate-wide access-request list (who asked for what). A sensitive read like
+    // `accessGrant:read` — pre-tightened to ADMIN + MEMBER (VIEWER denied). A requester always reads
+    // their OWN requests via `/access-requests/mine`, independent of this permission.
+    label: "See access requests",
+    pillar: "access",
+    tier: "view",
+  },
   // ── Knowledge ──────────────────────────────────────────────────────────────
   "article:read": { label: "Read the Knowledge Base", pillar: "knowledge", tier: "view" },
   "article:write": {
@@ -351,6 +368,8 @@ export const CAPABILITY_IDS = [
   "application.delete",
   "accessGrant.view",
   "accessGrant.grant",
+  "accessRequest.create",
+  "accessRequest.view",
   // Knowledge
   "article.view",
   "article.edit",
@@ -504,9 +523,27 @@ export const CAPABILITIES: readonly Capability[] = [
     id: "accessGrant.grant",
     label: "Grant & revoke access",
     description:
-      "Open, revoke and edit access grants for any user — including to sensitive applications.",
+      "Open, revoke and edit access grants for any user — including to sensitive applications. Also approve and deny access requests.",
     pillar: "access",
     permissions: ["accessGrant:grant"],
+  },
+  {
+    // Self-service (ADR-0085) — seeded to every role by default. Within-tier (no ⚠), so an admin who
+    // wants to withhold self-service requests from a role simply turns this off.
+    id: "accessRequest.create",
+    label: "Request access",
+    description:
+      "Ask for access to an application (with an optional level and justification). Approving or denying the request is the separate Grant & revoke access capability.",
+    pillar: "access",
+    permissions: ["accessRequest:create"],
+  },
+  {
+    id: "accessRequest.view",
+    label: "See access requests",
+    description:
+      "View the estate-wide list of access requests (who asked for what). A requester can always see their own requests regardless of this.",
+    pillar: "access",
+    permissions: ["accessRequest:read"],
   },
   // ── Knowledge ──────────────────────────────────────────────────────────────
   {
