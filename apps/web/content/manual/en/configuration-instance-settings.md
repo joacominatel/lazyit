@@ -69,9 +69,15 @@ When a newer release is first seen, administrators get one notification about it
 SMTP is configured — see the SMTP card on this page). You are reminded **once per new version**, not
 every week, so the reminder stays meaningful.
 
+**Security releases stand out.** When a release in the gap is a security fix, the status badge turns red
+(*N versions behind — security*), a distinct **Security update available** callout appears, and the email
+is flagged as a security update in its subject — so a fix worth applying tonight is never lost among
+routine version bumps. If a version you were already told about is *later* published as a security fix,
+you get one more email so you don't miss it; after that it doesn't re-nag.
+
 The card shows your **current version**, a status badge (*Up to date*, *N versions behind*, *Update
-checks off*, or *Couldn't check*), the **latest release** with a link to its notes, and when it was
-**last checked**.
+checks off*, *Couldn't check*, or the red *security* variant), the **latest release** with a link to its
+notes, and when it was **last checked**.
 
 ### Updating (guided, not one-click)
 
