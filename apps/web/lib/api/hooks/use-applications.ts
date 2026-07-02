@@ -29,12 +29,17 @@ export const applicationKeys = {
  * client-side (e.g. a user's grants on the user detail). Paginated server-side (ADR-0030), so this
  * requests the hard-max page (200); the **Access list page** uses {@link useApplicationList} for real
  * paging. Returns just `items`, so existing `Application[]` consumers are unchanged.
+ *
+ * `enabled` lets a caller skip the fetch when it would only 403 — e.g. the `/profile` grant labels for
+ * a caller who lacks `application:read` (mirrors the `useUsers`/`useAccessGrants` guard). Omit it to
+ * keep the eager default.
  */
-export function useApplications() {
+export function useApplications({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: applicationKeys.lists(),
     queryFn: ({ signal }) => getApplications({ limit: MAX_PAGE_LIMIT }, signal),
     select: (page) => page.items,
+    enabled,
   });
 }
 

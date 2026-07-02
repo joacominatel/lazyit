@@ -10,6 +10,7 @@ import {
   Post,
   Query,
   StreamableFile,
+  UnauthorizedException,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
@@ -341,6 +342,60 @@ export class AssetsController {
         type: 'text/csv; charset=utf-8',
         disposition: `attachment; filename="${filename}"`,
       },
+    );
+  }
+
+  // SELF-SCOPE carve-out (issue #947) — STATIC route declared BEFORE the `:id` param route so
+  // `/assets/mine` never resolves as an id. The caller's OWN assets: those with a LIVE (releasedAt
+  // null) assignment to them, via the SAME lean list projection + `assignedToUserId` where-clause the
+  // directory list already uses. INTENTIONALLY NOT gated with `asset:read`: reading YOUR OWN rows is a
+  // self-read (like `GET /users/me`), so any authenticated HUMAN may call it — a VIEWER answers "what
+  // laptop do I have?" without the directory read. The user id is taken ONLY from the authenticated
+  // principal (never a query param), so it can never be turned into a cross-user enumeration. A SERVICE
+  // account is refused with 403 automatically: the RolesGuard is FAIL-CLOSED on an unannotated route
+  // (INV-SA-2) — a bot has no "self".
+  @Get('mine')
+  @ApiOperation({
+    summary:
+      "The caller's OWN assets — those currently assigned (live) to them. Any authenticated human; no asset:read required (a self-read, like /users/me). Service accounts 403. Paginated (ADR-0030).",
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: AssetListPageDto })
+  findMine(
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+    @CurrentUser() user?: User,
+  ) {
+    // The route is non-@Public, so a human is guaranteed in OIDC mode; in shim mode an anonymous
+    // caller has no user — surface 401 rather than silently listing nothing (mirrors /users/me).
+    if (!user) {
+      throw new UnauthorizedException('Not authenticated');
+    }
+    return this.assets.findPage(
+      { assignedToUserId: user.id },
+      parsePageQuery({ limit, offset, page }),
+      // Self-scope PROJECTION (#947 security review): narrow the inlined assignments to the caller's
+      // own row, so a co-owned asset never leaks co-assignees' identity (name + email) through this
+      // ungated self-read. The filter above picks WHICH assets; this narrows what each row inlines.
+      user.id,
     );
   }
 

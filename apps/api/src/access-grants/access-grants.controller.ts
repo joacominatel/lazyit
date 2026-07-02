@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   Query,
+  UnauthorizedException,
 } from '@nestjs/common';
 import {
   ApiConflictResponse,
@@ -31,8 +32,10 @@ import {
   UpdateAccessGrantNotesDto,
 } from './access-grant.dto';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { Principal } from '../auth/principal';
+import type { User } from '../../generated/prisma/client';
 
 @ApiTags('access-grants')
 @Controller('access-grants')
@@ -93,6 +96,75 @@ export class AccessGrantsController {
         userId: parseUuidQuery(userId, 'userId'),
         applicationId: parseCuidQuery(applicationId, 'applicationId'),
         activeOnly: parseBooleanQuery(activeOnly, true),
+        includeExpired: parseBooleanQuery(includeExpired, true),
+      },
+      parsePageQuery({ limit, offset, page }),
+    );
+  }
+
+  // SELF-SCOPE carve-out (issue #947) — STATIC route declared BEFORE the `:id` param route so
+  // `/access-grants/mine` never resolves as an id. The caller's OWN grants (active + revoked history),
+  // via the SAME `userId` where-clause the admin list uses. INTENTIONALLY NOT gated with
+  // `accessGrant:read` (which a VIEWER does NOT hold): reading YOUR OWN grants is a self-read, so any
+  // authenticated HUMAN may answer "what apps can I access?". The userId is taken ONLY from the
+  // authenticated principal (never a query param) — no cross-user enumeration. A SERVICE account is
+  // refused with 403 automatically (RolesGuard FAIL-CLOSED on an unannotated route, INV-SA-2). History
+  // is included by default (`activeOnly=false`) so the profile shows current + past access in one read.
+  @Get('mine')
+  @ApiOperation({
+    summary:
+      "The caller's OWN access grants (active + revoked history). Any authenticated human; no accessGrant:read required (a self-read). Service accounts 403. Paginated (ADR-0030).",
+  })
+  @ApiQuery({
+    name: 'activeOnly',
+    required: false,
+    type: Boolean,
+    description:
+      'Default false (includes revoked history). Pass true for active grants only.',
+  })
+  @ApiQuery({
+    name: 'includeExpired',
+    required: false,
+    type: Boolean,
+    description:
+      'Default true. Pass false to hide active grants already past their expiresAt.',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: AccessGrantListPageDto })
+  findMine(
+    @Query('activeOnly') activeOnly?: string,
+    @Query('includeExpired') includeExpired?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+    @CurrentUser() user?: User,
+  ) {
+    // The route is non-@Public, so a human is guaranteed in OIDC mode; in shim mode an anonymous
+    // caller has no user — surface 401 rather than a confusing empty page (mirrors /users/me).
+    if (!user) {
+      throw new UnauthorizedException('Not authenticated');
+    }
+    return this.grants.findPage(
+      {
+        userId: user.id,
+        activeOnly: parseBooleanQuery(activeOnly, false),
         includeExpired: parseBooleanQuery(includeExpired, true),
       },
       parsePageQuery({ limit, offset, page }),

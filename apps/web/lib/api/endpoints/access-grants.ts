@@ -62,6 +62,26 @@ export function getAccessGrants(
   return apiFetch<AccessGrantListPage>(qs ? `${BASE}?${qs}` : BASE);
 }
 
+/**
+ * The CALLER's OWN access grants (`GET /access-grants/mine`, issue #947) — active + revoked history.
+ * A SELF-SCOPE read: available to ANY authenticated human WITHOUT `accessGrant:read` (a VIEWER does
+ * NOT hold it), scoped to the caller by the session, so it powers the self-service `/profile` page.
+ * Returns the same `Page<AccessGrant>` envelope as {@link getAccessGrants}; `limit` defaults to the
+ * API page size. History is included by default (the API defaults `activeOnly` to false here).
+ */
+export function getMyGrants(
+  { limit }: { limit?: number } = {},
+  token?: string,
+): Promise<AccessGrantListPage> {
+  const params = new URLSearchParams();
+  if (limit !== undefined) params.set("limit", String(limit));
+  const qs = params.toString();
+  return apiFetch<AccessGrantListPage>(
+    qs ? `${BASE}/mine?${qs}` : `${BASE}/mine`,
+    { token },
+  );
+}
+
 /** Open a grant (give a user access to an application). 400 if the user/app isn't live. */
 export function createAccessGrant(
   data: CreateAccessGrant,

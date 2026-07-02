@@ -9,6 +9,7 @@ import {
   getAssetAssignments,
   getAssetCompanies,
   getAssets,
+  getMyAssets,
 } from "../endpoints/assets";
 import { invalidateDashboard } from "./use-dashboard";
 
@@ -26,6 +27,8 @@ export const assetKeys = {
   assignments: (assetId: string, activeOnly: boolean) =>
     [...assetKeys.all, "detail", assetId, "assignments", activeOnly] as const,
   companies: () => [...assetKeys.all, "companies"] as const,
+  /** The caller's OWN assets (`GET /assets/mine`, #947) — the self-service `/profile` read. */
+  mine: () => [...assetKeys.all, "mine"] as const,
 };
 
 /**
@@ -69,6 +72,20 @@ export function useAssetCompanies() {
   return useQuery({
     queryKey: assetKeys.companies(),
     queryFn: ({ signal }) => getAssetCompanies(signal),
+  });
+}
+
+/**
+ * The caller's OWN assets (`GET /assets/mine`, #947) — those currently assigned to them, for the
+ * self-service `/profile` page. A SELF-SCOPE read: any authenticated human, no `asset:read` needed.
+ * Returns the lean `Page<AssetListItem>` envelope (asset name/model/category/location are inline, so
+ * no catalog join is required). `limit` requests the whole holding in one page (a person's live
+ * assignments are few); the default page size would rarely truncate but this keeps it single-shot.
+ */
+export function useMyAssets({ limit = 200 }: { limit?: number } = {}) {
+  return useQuery({
+    queryKey: assetKeys.mine(),
+    queryFn: () => getMyAssets({ limit }),
   });
 }
 
