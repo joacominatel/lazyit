@@ -13,11 +13,16 @@ import { skip4xxRetry } from "./retry";
 /**
  * Handle suggestions for an optional substring `q` (handle/label match), member-scoped. `q` is public
  * metadata — safe in the key. Returns the suggestion list (no values).
+ *
+ * `enabled` (default `true`) gates the fetch — pass `false` when the caller already knows it lacks
+ * `secret:read` (the endpoint's guard) so the query never fires and never eats a guaranteed 403
+ * (issue #942, the KB editor's chip autocomplete prefetch).
  */
-export function useHandleSuggestions(q?: string) {
+export function useHandleSuggestions(q?: string, enabled = true) {
   return useQuery({
     queryKey: chipKeys.handles(q),
     queryFn: () => getHandleSuggestions(q),
+    enabled,
     // A 403 means the caller lost membership between navigations. Settle immediately on any 4xx
     // rather than burning 4 round-trips through exponential backoff (fix #444).
     retry: skip4xxRetry,
