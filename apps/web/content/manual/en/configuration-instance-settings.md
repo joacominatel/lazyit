@@ -41,6 +41,10 @@ reflects the current state; it does not change it. It shows:
   own)*.
 - **Administrators** — how many administrator accounts the instance has.
 - **Runtime posture** — *Development* or *Production*.
+- **Version** — the exact version this instance is running, baked in when its images were built. A
+  release deploy shows the release tag (for example `v1.4.2`); a build cut between releases honestly
+  shows the extended form `v1.4.2-3-gabc1234` (the nearest release plus the commit it was built
+  from); a local development run shows `dev`. Quote this value in bug reports and before upgrading.
 
 > These values are set by the environment the instance runs in, not by a form. Operators change the
 > identity provider and runtime posture through environment variables at deploy time (see

@@ -1,0 +1,180 @@
+name: Release
+
+# ADR-0083 — tag-driven semver releases riding the dev→master promotion (one promotion = one release).
+#
+#   suggest — on a PR targeting master: compute the bump SUGGESTION from the commit prefixes since
+#             the last v* tag (any feat/updt/del ⇒ minor; only fix/chore/docs ⇒ patch; MAJOR is never
+#             auto-detected) and keep ONE sticky comment updated on the PR (no spam on sync).
+#   release — on push to master (the promotion merge): resolve the bump from a release:major|minor|
+#             patch label on the merged PR (fallback = the suggestion), create the annotated tag +
+#             the GitHub Release with human-grouped notes (New & Changed / Fixes / Removed; chore and
+#             docs hidden). A major release carries the promotion PR's "## ⚠️ Upgrade actions"
+#             section verbatim. Idempotent: a HEAD that already carries a v* tag is left alone.
+#
+# Signing note (ADR-0083 §Signed tags): v1.0.0 is seeded BY HAND, SSH-signed, by the release owner —
+# this workflow never creates it. Subsequent automated tags are ANNOTATED but unsigned: CI cannot
+# hold the owner's SSH key, and per the ADR the mandatory control is MFA + branch protection on the
+# GitHub identity (the signer IS that identity). An operator can still `git verify-tag v1.0.0`.
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+permissions: {}
+
+jobs:
+  suggest:
+    name: Bump suggestion (promotion PR)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # Full history + tags: the suggestion needs the last v* tag and the commits since it. The PR
+      # checkout is the MERGE ref, so the last master tag is reachable through the master parent.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute the suggestion and upsert the sticky comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+          marker='<!-- adr-0083-bump-suggestion -->'
+
+          last_tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+          if [ -z "$last_tag" ]; then
+            body="$marker
+          ### Release bump suggestion (ADR-0083)
+
+          No \`v*\` tag exists yet — the first release is **v1.0.0**, seeded **by hand** (SSH-signed) per ADR-0083:
+
+          \`\`\`sh
+          git tag -s v1.0.0 -m 'lazyit v1.0.0' && git push origin v1.0.0
+          \`\`\`
+
+          Automation takes over from the next promotion."
+          else
+            if git log --no-merges --pretty=%s "$last_tag..HEAD" | grep -qE '^(feat|updt|del)[(:!]'; then
+              bump=minor
+            else
+              bump=patch
+            fi
+            v=${last_tag#v}
+            maj=${v%%.*}; rest=${v#*.}; min=${rest%%.*}; pat=${rest#*.}
+            case "$bump" in
+              minor) next="v$maj.$((min + 1)).0" ;;
+              patch) next="v$maj.$min.$((pat + 1))" ;;
+            esac
+            body="$marker
+          ### Release bump suggestion (ADR-0083)
+
+          Suggested bump since \`$last_tag\`: **$bump** → **$next** (from the commit prefixes; feat/updt/del ⇒ minor, only fix/chore/docs ⇒ patch).
+
+          To override, add a \`release:major\`, \`release:minor\` or \`release:patch\` label to this PR before merging — the label always wins. **MAJOR is never auto-detected**: if this promotion needs a manual operator step, label it \`release:major\` and add a \`## ⚠️ Upgrade actions\` section to this PR body (it is copied into the Release notes verbatim)."
+          fi
+
+          cid=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.body | startswith("<!-- adr-0083-bump-suggestion -->"))][0].id // empty')
+          if [ -n "$cid" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$cid" -f body="$body" >/dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -f body="$body" >/dev/null
+          fi
+
+  release:
+    name: Tag + GitHub Release (promotion merge)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the annotated tag + the Release
+      pull-requests: read # read the merged PR's release:* label + body
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Cut the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+
+          # Idempotency guard: a HEAD already carrying a v* tag (re-run, manual tag) is a no-op.
+          if git tag --points-at HEAD | grep -qE '^v[0-9]'; then
+            echo "HEAD is already tagged ($(git tag --points-at HEAD | tr '\n' ' ')) — nothing to do."
+            exit 0
+          fi
+
+          # v1.0.0 is seeded BY HAND (SSH-signed) per ADR-0083 — automation only continues a series.
+          last_tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+          if [ -z "$last_tag" ]; then
+            echo "No v* tag exists yet. Seed the first release by hand (ADR-0083):"
+            echo "  git tag -s v1.0.0 -m 'lazyit v1.0.0' && git push origin v1.0.0"
+            exit 0
+          fi
+
+          # Bump = release:* label on the merged promotion PR, else the prefix suggestion.
+          pr_json=$(gh api "repos/$REPO/commits/$GITHUB_SHA/pulls" \
+            --jq '[.[] | select(.base.ref == "master")][0] // empty' || true)
+          label_bump=""
+          pr_body=""
+          if [ -n "$pr_json" ]; then
+            label_bump=$(printf '%s' "$pr_json" | jq -r \
+              '[.labels[].name | select(. == "release:major" or . == "release:minor" or . == "release:patch")][0] // ""' \
+              | sed 's/^release://')
+            pr_body=$(printf '%s' "$pr_json" | jq -r '.body // ""')
+          fi
+          if git log --no-merges --pretty=%s "$last_tag..HEAD" | grep -qE '^(feat|updt|del)[(:!]'; then
+            suggested=minor
+          else
+            suggested=patch
+          fi
+          bump=${label_bump:-$suggested}
+
+          v=${last_tag#v}
+          maj=${v%%.*}; rest=${v#*.}; min=${rest%%.*}; pat=${rest#*.}
+          case "$bump" in
+            major) next="v$((maj + 1)).0.0" ;;
+            minor) next="v$maj.$((min + 1)).0" ;;
+            patch) next="v$maj.$min.$((pat + 1))" ;;
+          esac
+          echo "Releasing $next ($bump — label: '${label_bump:-none}', suggested: $suggested) from $last_tag."
+
+          # Release notes, grouped for humans (ADR-0083): chore/docs hidden.
+          notes=$(mktemp)
+          if [ "$bump" = "major" ]; then
+            # A major REQUIRES the promotion PR's "## ⚠️ Upgrade actions" section — carried verbatim.
+            upgrade=$(printf '%s\n' "$pr_body" \
+              | awk '/^## ⚠️ Upgrade actions/{f=1; print; next} f && /^## /{exit} f' || true)
+            if [ -n "$upgrade" ]; then
+              printf '%s\n\n' "$upgrade" >> "$notes"
+            else
+              printf '## ⚠️ Upgrade actions\n\n> **Missing.** ADR-0083 requires this section on every MAJOR release — edit these notes with the manual operator steps.\n\n' >> "$notes"
+            fi
+          fi
+          section() { # $1 = heading, $2 = prefix alternation
+            lines=$(git log --no-merges --pretty='- %s' "$last_tag..HEAD" | grep -E "^- ($2)[(:!]" || true)
+            [ -n "$lines" ] && printf '## %s\n\n%s\n\n' "$1" "$lines" >> "$notes"
+            return 0
+          }
+          section 'New & Changed' 'feat|updt'
+          section 'Fixes' 'fix'
+          section 'Removed' 'del'
+          printf '**Full changelog**: https://github.com/%s/compare/%s...%s\n' "$REPO" "$last_tag" "$next" >> "$notes"
+
+          # Annotated tag (unsigned in CI — see the header note) + the Release.
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "$next" -m "lazyit $next"
+          git push origin "refs/tags/$next"
+          gh release create "$next" --title "$next" --notes-file "$notes" --verify-tag

@@ -43,6 +43,14 @@ ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 
+# Version identity (ADR-0083): same injection as the api image (compose passes APP_VERSION/GIT_SHA
+# from LAZYIT_VERSION/LAZYIT_GIT_SHA, exported by infra/start.sh). Baked to ENV so the running web
+# image carries its own identity; the in-app display reads GET /instance/version from the api.
+ARG APP_VERSION=dev
+ARG GIT_SHA=unknown
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_SHA=${GIT_SHA}
+
 # Standalone output already contains a traced, minimal node_modules. In this monorepo the
 # server entry lands at apps/web/server.js; static assets and public/ are copied alongside it.
 COPY --from=builder /app/apps/web/.next/standalone ./

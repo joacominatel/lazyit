@@ -43,6 +43,11 @@ de **solo lectura**: refleja el estado actual, no lo cambia. Muestra:
   (el tuyo propio)*.
 - **Administradores** — cuántas cuentas de administrador tiene la instancia.
 - **Postura de ejecución** — *Desarrollo* o *Producción*.
+- **Versión** — la versión exacta que ejecuta esta instancia, fijada al construir sus imágenes. Un
+  despliegue de una versión publicada muestra la etiqueta de la versión (por ejemplo, `v1.4.2`); una
+  compilación hecha entre versiones muestra, con honestidad, la forma extendida `v1.4.2-3-gabc1234`
+  (la versión publicada más cercana más el commit desde el que se construyó); una ejecución local de
+  desarrollo muestra `dev`. Cita este valor en los reportes de errores y antes de actualizar.
 
 > Estos valores los define el entorno en el que corre la instancia, no un formulario. Los operadores
 > cambian el proveedor de identidad y la postura de ejecución mediante variables de entorno al

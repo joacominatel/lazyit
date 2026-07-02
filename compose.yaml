@@ -98,6 +98,12 @@ services:
     build:
       context: .
       dockerfile: infra/docker/api.Dockerfile
+      args:
+        # Version identity (ADR-0083): infra/start.sh exports LAZYIT_VERSION/LAZYIT_GIT_SHA from the
+        # checkout (`git describe --tags --always` / short HEAD sha); a hand-run compose without them
+        # honestly builds as dev/unknown. Surfaced by GET /instance/version.
+        APP_VERSION: ${LAZYIT_VERSION:-dev}
+        GIT_SHA: ${LAZYIT_GIT_SHA:-unknown}
     image: lazyit-api:dev
     restart: unless-stopped
     logging: *default-logging
@@ -152,6 +158,9 @@ services:
       args:
         # Baked at build time. Relative /api keeps the image domain-portable (ADR-0026).
         NEXT_PUBLIC_API_URL: /api
+        # Version identity (ADR-0083) — same wiring as the api service above.
+        APP_VERSION: ${LAZYIT_VERSION:-dev}
+        GIT_SHA: ${LAZYIT_GIT_SHA:-unknown}
     image: lazyit-web:dev
     restart: unless-stopped
     logging: *default-logging

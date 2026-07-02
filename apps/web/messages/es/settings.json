@@ -45,7 +45,8 @@
       "configured": "Configurada",
       "identityProvider": "Proveedor de identidad",
       "administrators": "Administradores",
-      "runtimePosture": "Postura de ejecución"
+      "runtimePosture": "Postura de ejecución",
+      "version": "Versión"
     },
     "configuredBadge": "Configurada",
     "setupPending": "Configuración pendiente",
