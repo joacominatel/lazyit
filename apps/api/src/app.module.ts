@@ -36,6 +36,7 @@ import { SmtpModule } from './smtp/smtp.module';
 import { SecretManagerModule } from './secret-manager/secret-manager.module';
 import { InfraModule } from './infra/infra.module';
 import { AgentDistModule } from './agent-dist/agent-dist.module';
+import { AttachmentsModule } from './attachments/attachments.module';
 import { SearchModule } from './search/search.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
@@ -117,6 +118,10 @@ import { buildLoggerParams } from './logging/logging.config';
     // Agent distribution (ADR-0074 §6, #831): token-gated GET /agent/download streaming the baked
     // reporting-agent binary. Separate from InfraModule by design — distribution is its own concern.
     AgentDistModule,
+    // File attachments (ADR-0082, #906): asset documents + KB inline images. Blobs on the
+    // attachments volume (content-addressed by sha256), API-only serving behind the PARENT's authz
+    // with hardened headers; sandboxed sharp re-encode + the daily four-pin GC sweep.
+    AttachmentsModule,
   ],
   controllers: [AppController],
   providers: [

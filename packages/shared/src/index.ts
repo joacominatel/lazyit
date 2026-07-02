@@ -33,6 +33,7 @@ export * from "./schemas/asset-model-list";
 export * from "./schemas/asset-specs-dictionary";
 export * from "./schemas/asset-tag-backfill";
 export * from "./schemas/asset-tag-scheme";
+export * from "./schemas/attachment";
 export * from "./schemas/audit-log-query";
 export * from "./schemas/application-list";
 export * from "./schemas/batch";

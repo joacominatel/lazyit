@@ -56,3 +56,6 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 /generated/prisma
+
+# Local attachment blob store (ADR-0082) — native-dev default for ATTACHMENTS_DIR.
+/attachments
