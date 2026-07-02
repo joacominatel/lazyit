@@ -21,6 +21,7 @@ import {
   LIKE_ESCAPE_CHAR,
   escapeLikePattern,
 } from '../common/escape-like-pattern';
+import { provenanceStampLine } from '../common/export-provenance';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** AssetStatus enum values, in schema order — used to zero-fill the `byStatus` buckets. */
@@ -299,6 +300,8 @@ export class DashboardService {
   ): AsyncGenerator<string> {
     const where = this.buildActivityWhere(query);
 
+    // Leading provenance stamp (#909) — names the build that produced the file (no importer consumes it).
+    yield `${provenanceStampLine()}\n`;
     yield `${RECENT_ACTIVITY_CSV_HEADER}\n`;
 
     let offset = 0;
