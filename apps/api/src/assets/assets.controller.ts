@@ -92,6 +92,12 @@ export class AssetsController {
       'List assets (paginated; lean: model/category, location, activeAssignments — no specs). Active by default; deleted=only lists archived assets (ADMIN).',
   })
   @ApiQuery({ name: 'categoryId', required: false })
+  @ApiQuery({
+    name: 'modelId',
+    required: false,
+    description:
+      'Exact model filter (#943) — deep-linked from the asset detail page Model link. Distinct from categoryId (the broader model-category filter next to it). Invalid cuid → 400.',
+  })
   @ApiQuery({ name: 'locationId', required: false })
   @ApiQuery({
     name: 'company',
@@ -108,7 +114,7 @@ export class AssetsController {
     name: 'q',
     required: false,
     description:
-      'Case-insensitive substring match on name, serial and assetTag',
+      "Case-insensitive substring match on name, serial, assetTag, and the related model's name/manufacturer (#943)",
   })
   @ApiQuery({
     name: 'assignedToUserId',
@@ -164,6 +170,7 @@ export class AssetsController {
   @ApiOkResponse({ type: AssetListPageDto })
   findAll(
     @Query('categoryId') categoryId?: string,
+    @Query('modelId') modelId?: string,
     @Query('locationId') locationId?: string,
     @Query('status') status?: string,
     @Query('company') company?: string,
@@ -192,6 +199,7 @@ export class AssetsController {
     return this.assets.findPage(
       this.parseAssetFilters({
         categoryId,
+        modelId,
         locationId,
         status,
         company,
@@ -212,6 +220,7 @@ export class AssetsController {
    */
   private parseAssetFilters(raw: {
     categoryId?: string;
+    modelId?: string;
     locationId?: string;
     status?: string;
     company?: string;
@@ -240,6 +249,7 @@ export class AssetsController {
     }
     return {
       categoryId: parseCuidQuery(raw.categoryId, 'categoryId'),
+      modelId: parseCuidQuery(raw.modelId, 'modelId'),
       locationId: parseCuidQuery(raw.locationId, 'locationId'),
       status: parsedStatus,
       company: raw.company?.trim() || undefined,
@@ -273,6 +283,7 @@ export class AssetsController {
       'Bulk CSV export of the WHOLE filtered asset inventory (issue #872), gated on asset:read. Takes the SAME filters as GET /assets (minus paging/sort) and streams EVERY matching asset newest-first — not just the visible page. Cells are RFC-4180 escaped with a spreadsheet formula-injection guard. `deleted=only` (archived) is ADMIN-only (403 otherwise). The per-unit `specs` jsonb is not included (v1).',
   })
   @ApiQuery({ name: 'categoryId', required: false })
+  @ApiQuery({ name: 'modelId', required: false })
   @ApiQuery({ name: 'locationId', required: false })
   @ApiQuery({ name: 'company', required: false })
   @ApiQuery({
@@ -295,6 +306,7 @@ export class AssetsController {
   })
   export(
     @Query('categoryId') categoryId?: string,
+    @Query('modelId') modelId?: string,
     @Query('locationId') locationId?: string,
     @Query('status') status?: string,
     @Query('company') company?: string,
@@ -306,6 +318,7 @@ export class AssetsController {
   ): StreamableFile {
     const filters = this.parseAssetFilters({
       categoryId,
+      modelId,
       locationId,
       status,
       company,
