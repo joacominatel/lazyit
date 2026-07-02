@@ -77,7 +77,7 @@ async function docxWithImage(): Promise<Buffer> {
 }
 
 /** Prisma double: records article create/update + version create, and owns an attachment store. */
-function makePrisma() {
+function makePrisma(opts?: { failVersion?: boolean }) {
   let content = '';
   const attachmentRows: Array<{
     id: string;
@@ -115,44 +115,58 @@ function makePrisma() {
       });
     },
   );
+  // The TRANSACTIONAL attachment client lives on `tx` (issue #918 fix): the round-trip mints rows on
+  // this client so they share the article transaction. `create` pushes to the shared store and
+  // `groupBy` reads it back (read-your-writes within the tx — the budget accumulates across images).
+  const attachment = {
+    // eslint-disable-next-line @typescript-eslint/require-await
+    groupBy: async () => {
+      const bySha = new Map<string, number>();
+      for (const r of attachmentRows) {
+        bySha.set(r.sha256, Math.max(bySha.get(r.sha256) ?? 0, r.byteSize));
+      }
+      return [...bySha.values()].map((v) => ({ _max: { byteSize: v } }));
+    },
+    // eslint-disable-next-line @typescript-eslint/require-await
+    create: async (args: {
+      data: { entityId: string; sha256: string; byteSize: number };
+    }) => {
+      const id = `clatt${String(++attSeq).padStart(20, '0')}`;
+      attachmentRows.push({ id, ...args.data });
+      return { id };
+    },
+  };
   const tx = {
     article: {
       create: articleCreate,
       update: articleUpdate,
       findMany: jest.fn(() => Promise.resolve([])),
     },
-    articleVersion: { create: versionCreate },
+    articleVersion: {
+      create: opts?.failVersion
+        ? jest.fn(() => Promise.reject(new Error('forced tx failure')))
+        : versionCreate,
+    },
     articleWikiLink: {
       createMany: jest.fn(() => Promise.resolve({ count: 0 })),
     },
+    attachment,
   } as unknown as ImportTx;
+  // Model interactive-transaction atomicity: attachment rows written during a FAILED transaction are
+  // rolled back (truncated to the pre-tx mark), exactly as Prisma discards `tx` writes on abort.
   const prisma: ImportPrismaClient = {
-    $transaction: <T>(fn: (t: ImportTx) => Promise<T>) => fn(tx),
-  };
-  // The attachment slice `rewriteEmbeddedImages` needs (the child's raw client shape).
-  const attachmentClient = {
-    attachment: {
-      // eslint-disable-next-line @typescript-eslint/require-await
-      groupBy: async () => {
-        const bySha = new Map<string, number>();
-        for (const r of attachmentRows) {
-          bySha.set(r.sha256, Math.max(bySha.get(r.sha256) ?? 0, r.byteSize));
-        }
-        return [...bySha.values()].map((v) => ({ _max: { byteSize: v } }));
-      },
-      // eslint-disable-next-line @typescript-eslint/require-await
-      create: async (args: {
-        data: { entityId: string; sha256: string; byteSize: number };
-      }) => {
-        const id = `clatt${String(++attSeq).padStart(20, '0')}`;
-        attachmentRows.push({ id, ...args.data });
-        return { id };
-      },
+    $transaction: async <T>(fn: (t: ImportTx) => Promise<T>): Promise<T> => {
+      const mark = attachmentRows.length;
+      try {
+        return await fn(tx);
+      } catch (err) {
+        attachmentRows.length = mark;
+        throw err;
+      }
     },
   };
   return {
     prisma,
-    attachmentClient,
     attachmentRows,
     versionCreate,
     articleUpdate,
@@ -181,9 +195,11 @@ afterEach(() => {
 describe('KB import image round-trip (issue #918)', () => {
   it('extracts a .docx embedded image into one attachment and rewrites the body to attachment:<id>', async () => {
     const h = makePrisma();
-    const resolveContent: ResolveImportedContent = async (articleId, body) =>
-      (await rewriteEmbeddedImages(h.attachmentClient, articleId, AUTHOR, body))
-        .content;
+    const resolveContent: ResolveImportedContent = async (
+      articleId,
+      body,
+      tx,
+    ) => (await rewriteEmbeddedImages(tx, articleId, AUTHOR, body)).content;
 
     const result = await runImportJob(
       jobData(await docxWithImage()),
@@ -209,9 +225,11 @@ describe('KB import image round-trip (issue #918)', () => {
 
   it('is a no-op for a body with no embedded images (no attachment, no update)', async () => {
     const h = makePrisma();
-    const resolveContent: ResolveImportedContent = async (articleId, body) =>
-      (await rewriteEmbeddedImages(h.attachmentClient, articleId, AUTHOR, body))
-        .content;
+    const resolveContent: ResolveImportedContent = async (
+      articleId,
+      body,
+      tx,
+    ) => (await rewriteEmbeddedImages(tx, articleId, AUTHOR, body)).content;
 
     // A plain .md with no images.
     const data: ImportJobData = {
@@ -229,5 +247,29 @@ describe('KB import image round-trip (issue #918)', () => {
     expect(result).toEqual({ kind: 'single', articleId: 'art1' });
     expect(h.attachmentRows).toHaveLength(0);
     expect(h.articleUpdate).not.toHaveBeenCalled();
+  });
+
+  it('leaves NO committed attachment row when the create transaction rolls back (#918 budget-leak fix)', async () => {
+    // Force the transaction to abort AFTER the image is ingested (version create throws). Because the
+    // attachment row was minted on the transaction client, it must roll back with the article — no
+    // orphan row survives to count against the budget (which the GC could never reclaim).
+    const h = makePrisma({ failVersion: true });
+    const resolveContent: ResolveImportedContent = async (
+      articleId,
+      body,
+      tx,
+    ) => (await rewriteEmbeddedImages(tx, articleId, AUTHOR, body)).content;
+
+    await expect(
+      runImportJob(
+        jobData(await docxWithImage()),
+        h.prisma,
+        undefined,
+        resolveContent,
+      ),
+    ).rejects.toThrow(/forced tx failure/);
+
+    // The row was staged on `tx` (so the ingest saw it), but the rollback discarded it.
+    expect(h.attachmentRows).toHaveLength(0);
   });
 });
