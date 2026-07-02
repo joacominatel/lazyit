@@ -8,6 +8,7 @@ import {
   ChevronUpDownIcon,
   DocumentDuplicateIcon,
   EllipsisVerticalIcon,
+  LockClosedIcon,
   PencilSquareIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
@@ -663,7 +664,16 @@ export function EmptyState({
   );
 }
 
-/** Full-bleed error state with a retry action shown in place of the table. */
+/**
+ * Full-bleed error state shown in place of the table.
+ *
+ * 403-aware (issue #935): a 403 (and 401) is a PERMISSION decision, not an outage — retrying it can
+ * never succeed. When the failed query's `error` is a 401/403 `ApiError` we render the calm
+ * "restricted" presentation (a lock, a plain-language line, no Retry) instead of the generic
+ * "the API may be down… Retry" surface, so a forbidden read stops masquerading as a flaky one. Any
+ * other failure (5xx / network / unknown) keeps the retryable presentation. This single change
+ * covers every list that already forwards `error` — Users, the infra map, Assets, Applications, etc.
+ */
 export function ErrorState({
   title,
   description,
@@ -677,7 +687,29 @@ export function ErrorState({
   error?: unknown;
 }) {
   const t = useTranslations("shared");
+  const status = error instanceof ApiError ? error.status : undefined;
+  const forbidden = status === 401 || status === 403;
   const requestId = error instanceof ApiError ? error.requestId : undefined;
+
+  if (forbidden) {
+    return (
+      <div
+        className="animate-rise-in flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
+        role="status"
+        aria-live="polite"
+      >
+        <div className="flex size-12 items-center justify-center rounded-full bg-muted">
+          <LockClosedIcon className="size-6 text-muted-foreground" />
+        </div>
+        <p className="text-sm font-medium">{t("errors.forbiddenTitle")}</p>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          {t("errors.forbiddenDescription")}
+        </p>
+        <RequestIdNote requestId={requestId} />
+      </div>
+    );
+  }
+
   return (
     <div
       className="animate-rise-in flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
