@@ -7,35 +7,52 @@ subcategory: access-requests
 
 # Access requests
 
-> **Coming, not here yet.** Today, access is **granted directly** by an administrator — there is
-> no request-and-approve queue. This page describes what is planned so you know how the model is
-> meant to grow.
+An **access request** lets a person ask for access to an application instead of waiting for an
+administrator to grant it directly. The request moves through a small approval flow: **requested →
+approved or denied**. On approval it produces an ordinary [access grant](/help/applications-access-grants) —
+the same record you get when an admin grants access by hand — so nothing about how access is tracked
+changes.
 
-## How access works today
+Anyone can request access, including read-only viewers. Deciding on a request is an administrator
+capability (the same people who can grant access).
 
-Right now the flow is simple and deliberate: an administrator decides someone should have access
-to an application and creates the grant for them. There is no pending state, no approver step and
-no waiting — see [Access grants](/help/applications-access-grants). If your process needs an
-approval, run it in your existing channel (a chat message, a ticket in another tool) and record
-the outcome by granting access, using the grant's **notes** to capture the reason.
+## How to request access
 
-## What an access request will be
+1. Open the application from **Applications** and go to its detail page.
+2. In the **Active access** panel, click **Request access**. (If you already have access, or already
+   have a request waiting for a decision, the button is replaced by a short status instead.)
+3. Optionally add:
+   - an **access level** — the kind of access you need, if the application distinguishes them; and
+   - a **justification** — a short note so the approver understands why you need it.
+4. Click **Send request**. Administrators are notified, and your request appears in the review queue.
 
-An **access request** is a planned addition: instead of access being created directly, a person
-(or someone on their behalf) **requests** access to an application, and the request moves through
-an approval workflow — requested, then approved or rejected. **On approval, it produces an access
-grant** exactly like the ones you create today.
+You can only have **one pending request per application** at a time. If you already have one, lazyit
+tells you so instead of creating a duplicate.
 
-This is designed to slot in **without changing what already exists**. Grants stay the append-only
-record of who-has-access; requests simply become one of the ways a grant comes to be. Direct
-granting will remain available.
+## What happens next
 
-## Why it is deferred
+- Administrators see your request in **Access → Access requests** and get a notification in the bell.
+- An approver either **approves** it — which creates your access grant immediately — or **denies** it
+  with a reason.
+- Approval and denial are final for that request. If a request was denied and you still need access,
+  you can raise a new one.
 
-lazyit ships access management without an approval workflow on purpose, to keep the first version
-focused and predictable. Approver rules — who signs off, and whether that is tied to the
-application, a team or a role — are a design decision best made when the workflow is built rather
-than guessed at up front.
+## Reviewing requests (administrators)
 
-> When access requests arrive, this page will be replaced with how to use them. Until then, treat
-> direct grants (with good notes) as the supported way to give and track access.
+Open **Access → Access requests** to see everything waiting for a decision. Each row shows who is
+asking, which application, the requested level, any justification, and when it was raised.
+
+- **Approve** grants the access right away — no extra form. The new grant behaves exactly like one you
+  create by hand (it runs any access workflows and is recorded in the application's access history).
+- **Deny** asks for a **reason**, which is required. The reason is shown to the requester so they know
+  why.
+
+Reviewing the queue needs the access-requests read permission; approving or denying needs the same
+permission as granting access. See [Roles & permissions](/help/permissions).
+
+## Tracking your requests
+
+Open your **Profile** to see **My access requests** — every request you've raised and its current
+status (**Pending**, **Approved** or **Denied**). A denied request shows the reason the approver gave.
+This is the place to check the outcome; lazyit doesn't send you a separate notification when a decision
+is made.
