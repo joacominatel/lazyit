@@ -8,6 +8,7 @@ import {
 } from '@lazyit/shared';
 import { parseImportFile, titleFromFilename } from '../article-import';
 import { extractZipEntries, type ZipExtractOptions } from './zip-extract';
+import type { AttachmentIngestPrisma } from '../../attachments/attachment-ingest';
 import type { ArticleRow } from '../../search/search.documents';
 import type {
   ImportJobData,
@@ -96,6 +97,11 @@ export interface ImportTx {
   articleWikiLink: {
     createMany(args: ArticleWikiLinkCreateManyArgs): Promise<unknown>;
   };
+  // The TRANSACTIONAL attachment client (satisfied by Prisma's interactive-transaction client).
+  // The image round-trip mints its `Attachment` rows on THIS client so they ride the article's
+  // transaction and roll back with it — no orphan rows/blobs (counting against the budget, never
+  // GC-reclaimable) if the transaction aborts (e.g. the create times out mid-ingest). See #918.
+  attachment: AttachmentIngestPrisma['attachment'];
 }
 
 /** The minimal Prisma client the SINGLE-file worker needs — satisfied structurally by PrismaClient. */
@@ -170,16 +176,19 @@ export interface ZipImportPrismaClient extends ImportPrismaClient {
 export type IndexArticle = (doc: ArticleRow) => void | Promise<void>;
 
 /**
- * Optional embedded-image round-trip hook (ADR-0082 §5). Given the just-created article's id and its
- * parsed body, extract the body's embedded `data:` images into attachments and return the body with
- * each rewritten to `![alt](attachment:<id>)`. Absent ⇒ the importer behaves exactly as before (bodies
- * stored verbatim). The processor supplies it (wiring in `AttachmentIngest` + a plain PrismaClient);
- * the specs that call the job runners directly omit it. It runs INSIDE the create transaction so the
- * version-1 snapshot is written with the final ref-only body — see {@link createArticleWithVersion}.
+ * Optional embedded-image round-trip hook (ADR-0082 §5). Given the just-created article's id, its
+ * parsed body, and the TRANSACTIONAL client for the enclosing create, extract the body's embedded
+ * `data:` images into attachments (minted on `tx`, so they roll back with the article) and return the
+ * body with each rewritten to `![alt](attachment:<id>)`. Absent ⇒ the importer behaves exactly as
+ * before (bodies stored verbatim). The processor supplies it; the specs that call the job runners
+ * directly omit it. It runs INSIDE the create transaction so the version-1 snapshot is written with
+ * the final ref-only body AND the attachment rows share the article's atomicity — see
+ * {@link createArticleWithVersion}.
  */
 export type ResolveImportedContent = (
   articleId: string,
   content: string,
+  tx: AttachmentIngestPrisma,
 ) => Promise<string>;
 
 /**
@@ -242,7 +251,8 @@ async function createArticleWithVersion(
   // the untrusted image bytes through sniff + re-encode + quota in this sandboxed child (ADR-0053).
   let content = created.content;
   if (resolveContent) {
-    content = await resolveContent(created.id, created.content);
+    // Pass `tx` so the minted Attachment rows ride THIS transaction (roll back with the article).
+    content = await resolveContent(created.id, created.content, tx);
     if (content !== created.content) {
       await tx.article.update({
         where: { id: created.id },
