@@ -3,6 +3,7 @@
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
+  ArrowUpTrayIcon,
   ArrowUturnLeftIcon,
   FunnelIcon,
   PlusIcon,
@@ -194,6 +195,9 @@ export function AssetsListView() {
   const mounted = useMounted();
   const canWrite = useCan("asset:write");
   const canDelete = useCan("asset:delete");
+  // Same coarse gate the Migrator wizard route uses (`import:run`, ADR-0069) — only surface the
+  // shortcut to those who can actually run a bulk import; the wizard enforces it again server-side.
+  const canImport = useCan("import:run");
   // The owner filter reads the user directory (`user:read`) to resolve names and populate its picker.
   // A VIEWER lacks that permission, so the lookup 403s and the picker showed a misleading "No results"
   // (forbidden presented as nonexistent — issue #935). Gate the whole control on `user:read`: hide it
@@ -660,6 +664,16 @@ export function AssetsListView() {
               <ArrowDownTrayIcon />
               {isExportingAll ? t("export.exporting") : t("export.button")}
             </Button>
+            {/* Discoverable entry to the bulk Migrator (#950): register many assets from a CSV
+                without hunting through Settings. Gated on `import:run` like the wizard itself. */}
+            {canImport ? (
+              <Button variant="outline" asChild title={t("import.title")}>
+                <Link href="/imports">
+                  <ArrowUpTrayIcon />
+                  {t("import.button")}
+                </Link>
+              </Button>
+            ) : null}
             {canWrite ? (
               <Button asChild>
                 <Link href="/assets/new">
@@ -691,7 +705,17 @@ export function AssetsListView() {
               ? { label: tEmpty("action"), href: "/assets/new" }
               : undefined
           }
-        />
+        >
+          {/* Point operators with many assets at the bulk Migrator instead of the one-by-one form (#950). */}
+          {canImport ? (
+            <Link
+              href="/imports"
+              className="mt-1 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              {tEmpty("importLink")}
+            </Link>
+          ) : null}
+        </EmptyState>
       ) : (
         <>
           <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
