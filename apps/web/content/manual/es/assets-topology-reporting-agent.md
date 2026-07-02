@@ -114,6 +114,15 @@ y no envía métricas.
   el agente solo se comunica con esa instancia y funciona totalmente sin conexión. Los tokens se pueden
   revocar en cualquier momento desde [Cuentas de servicio](/help/users-permissions-service-accounts).
 
+## Mantener el agente al día
+
+Cada agente estampa su propia versión en cada reporte. Cuando un agente queda una **versión mayor**
+por detrás de tu servidor, su fila (y su panel de detalle) muestra una pequeña insignia **Agente
+desactualizado** — un aviso para volver a ejecutar el comando de instalación y obtener el último
+binario. Es solo un empujón: un agente desactualizado sigue reportando con normalidad, no se bloquea
+nada, y las actualizaciones menores no la activan. Los agentes compilados desde el código fuente (o
+anteriores al versionado) reportan como `dev` y nunca muestran la insignia.
+
 ## Qué sigue
 
 - [Diagrama de infraestructura](/help/assets-topology-diagram) — el mapa donde aparecen los servidores

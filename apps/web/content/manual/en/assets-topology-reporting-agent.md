@@ -110,6 +110,14 @@ metrics.
   only to that instance, and it works fully offline. Tokens are revocable any time from
   [Service accounts](/help/users-permissions-service-accounts).
 
+## Keeping the agent current
+
+Each agent stamps its own version into every check-in. When an agent falls a **major version** behind
+your server, its row (and its detail panel) shows a small **Agent outdated** badge — a hint to
+re-run the install command and pick up the latest binary. It's only a nudge: an outdated agent keeps
+reporting normally, nothing is blocked, and minor updates don't raise it. Agents built from source (or
+before versioning was added) report as `dev` and never show the badge.
+
 ## What's next
 
 - [Infrastructure diagram](/help/assets-topology-diagram) — the map the confirmed servers appear on.
