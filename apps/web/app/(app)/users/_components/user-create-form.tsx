@@ -20,7 +20,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { Controller, type Resolver, useForm, useWatch } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { ApplicationCombobox } from "@/components/application-combobox";
 import { AssetCombobox } from "@/components/asset-combobox";
@@ -53,6 +53,7 @@ import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { ManagerField } from "./manager-field";
+import { wireShapeResolver } from "./user-form-payload";
 
 const FORM_ID = "user-create-form";
 
@@ -222,19 +223,15 @@ export function UserCreateForm() {
     password: string;
   } | null>(null);
 
-  // One resolver wraps the shared `CreateUserSchema` so it validates the wire shape (manager
-  // serialized, empties dropped, password included only on the management path). The form shape and
-  // the wire shape genuinely differ on `manager`, so the wrapped resolver is cast through `unknown` —
-  // the runtime contract (the shared schema) is what matters.
-  const baseResolver = zodResolver(CreateUserSchema);
-  const resolver: Resolver<UserCreateFormValues> = (values, context, options) =>
-    (
-      baseResolver as unknown as (
-        v: unknown,
-        c: unknown,
-        o: unknown,
-      ) => ReturnType<Resolver<UserCreateFormValues>>
-    )(toResolverInput(values, requiresPassword), context, options);
+  // `wireShapeResolver` validates against the shared `CreateUserSchema` on the wire shape (manager
+  // serialized, empties dropped, password included only on the management path) but returns the
+  // ORIGINAL form values to `onSubmit` (issue #934). Without that, RHF would hand onSubmit the
+  // resolver's parsed wire output — re-serializing `manager` (crash on `null`) and stripping the
+  // assign-at-creation fields, firing spurious assign/grant calls with `undefined` ids.
+  const resolver = wireShapeResolver<UserCreateFormValues>(
+    zodResolver(CreateUserSchema),
+    (values) => toResolverInput(values, requiresPassword),
+  );
 
   const form = useForm<UserCreateFormValues>({
     resolver,
