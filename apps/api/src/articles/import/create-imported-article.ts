@@ -81,6 +81,12 @@ interface ArticleWikiLinkCreateManyArgs {
 export interface ImportTx {
   article: {
     create(args: ArticleCreateArgs): Promise<ImportedArticleRow>;
+    // Used ONLY by the image round-trip (ADR-0082 §5): after the row exists we know the article id,
+    // ingest its embedded images and write the ref-rewritten body back — before the version snapshot.
+    update(args: {
+      where: { id: string };
+      data: { content: string; readingMinutes: number };
+    }): Promise<unknown>;
     findMany(args: {
       where: { slug: { in: string[] } };
       select: { id: true; slug: true };
@@ -94,8 +100,22 @@ export interface ImportTx {
 
 /** The minimal Prisma client the SINGLE-file worker needs — satisfied structurally by PrismaClient. */
 export interface ImportPrismaClient {
-  $transaction<T>(fn: (tx: ImportTx) => Promise<T>): Promise<T>;
+  $transaction<T>(
+    fn: (tx: ImportTx) => Promise<T>,
+    options?: { maxWait?: number; timeout?: number },
+  ): Promise<T>;
 }
+
+/**
+ * Interactive-transaction timeout (ms) for the create path. The default Prisma limit (5 s) is too
+ * tight once the image round-trip re-encodes embedded images INSIDE the transaction (sharp is
+ * CPU-bound; a body can carry up to the per-article image ceiling of them). The import worker
+ * runs at concurrency 1 (SEC-002) so a longer-held transaction has no lock contention here. 2 min is
+ * generous; a genuinely hostile image OOM-kills the child long before it (SEC-002), aborting the tx.
+ */
+// ponytail: reuse the existing single-transaction create; a bigger timeout beats splitting the write
+// into two transactions (which would need a pre-generated id or a mutable v1 snapshot).
+const IMPORT_TX_TIMEOUT_MS = 120_000;
 
 /** A live (non-soft-deleted) Folder row, as the zip folder-mirror pass reads/creates it. */
 interface FolderRow {
@@ -150,6 +170,19 @@ export interface ZipImportPrismaClient extends ImportPrismaClient {
 export type IndexArticle = (doc: ArticleRow) => void | Promise<void>;
 
 /**
+ * Optional embedded-image round-trip hook (ADR-0082 §5). Given the just-created article's id and its
+ * parsed body, extract the body's embedded `data:` images into attachments and return the body with
+ * each rewritten to `![alt](attachment:<id>)`. Absent ⇒ the importer behaves exactly as before (bodies
+ * stored verbatim). The processor supplies it (wiring in `AttachmentIngest` + a plain PrismaClient);
+ * the specs that call the job runners directly omit it. It runs INSIDE the create transaction so the
+ * version-1 snapshot is written with the final ref-only body — see {@link createArticleWithVersion}.
+ */
+export type ResolveImportedContent = (
+  articleId: string,
+  content: string,
+) => Promise<string>;
+
+/**
  * Estimated reading time of a Markdown body in whole minutes. Mirrors
  * `ArticlesService.readingMinutesOf` (and the SQL backfill) so the `readingMinutes` column stays
  * consistent across the create/update/import paths (ADR-0042).
@@ -188,6 +221,7 @@ async function createArticleWithVersion(
     categoryId: string;
     authorId: string;
   },
+  resolveContent?: ResolveImportedContent,
 ): Promise<ImportedArticleRow> {
   const created = await tx.article.create({
     data: {
@@ -201,13 +235,29 @@ async function createArticleWithVersion(
       authorId: params.authorId,
     },
   });
-  // An import is a create — version 1 (ADR-0042); same transaction so both commit atomically.
+  // Embedded-image round-trip (ADR-0082 §5). Done HERE — after the row exists (so the article id is
+  // known) and BEFORE the version-1 snapshot — so the snapshot and the wiki-link edges both see the
+  // FINAL, ref-only body (never a `data:` URI). No-op when no resolver is supplied or the body has no
+  // embedded image (then `content === created.content` and nothing is rewritten). The resolver runs
+  // the untrusted image bytes through sniff + re-encode + quota in this sandboxed child (ADR-0053).
+  let content = created.content;
+  if (resolveContent) {
+    content = await resolveContent(created.id, created.content);
+    if (content !== created.content) {
+      await tx.article.update({
+        where: { id: created.id },
+        data: { content, readingMinutes: readingMinutesOf(content) },
+      });
+    }
+  }
+  // An import is a create — version 1 (ADR-0042); same transaction so both commit atomically. The
+  // snapshot freezes the FINAL body, so a restore-to-v1 keeps the imported images.
   await tx.articleVersion.create({
     data: {
       articleId: created.id,
       version: 1,
       title: created.title,
-      content: created.content,
+      content,
       excerpt: created.excerpt,
       status: created.status,
       editedById: params.authorId,
@@ -215,7 +265,7 @@ async function createArticleWithVersion(
   });
   // Materialize the outgoing `[[slug]]` edges (ADR-0059 §3) in the SAME transaction. A fresh import
   // has no prior edges, so this is a pure insert. Unresolved forward references stay null.
-  const slugs = parseWikiLinks(created.content);
+  const slugs = parseWikiLinks(content);
   if (slugs.length > 0) {
     const matches = await tx.article.findMany({
       where: { slug: { in: slugs } },
@@ -230,7 +280,8 @@ async function createArticleWithVersion(
       })),
     });
   }
-  return created;
+  // Return the row carrying the FINAL body so the search index (below) never holds a `data:` blob.
+  return { ...created, content };
 }
 
 /** Best-effort PUBLISHED-only index of a created article (search is fire-and-forget, ADR-0035). */
@@ -265,10 +316,12 @@ export async function runImportJob(
   data: ImportJobData,
   prisma: ImportPrismaClient,
   index?: IndexArticle,
+  resolveContent?: ResolveImportedContent,
 ): Promise<SingleImportJobResult> {
   const buffer = Buffer.from(data.contentBase64, 'base64');
   // DANGEROUS step: .docx is unzipped/parsed here. In the sandboxed child a bomb dies under the
-  // heap cap (SEC-002); md/txt are read verbatim.
+  // heap cap (SEC-002); md/txt are read verbatim. mammoth inlines embedded .docx images as `data:`
+  // URIs in this markdown; `resolveContent` (if supplied) turns them into attachments (ADR-0082 §5).
   const content = await parseImportFile({
     originalname: data.originalname,
     buffer,
@@ -280,15 +333,21 @@ export async function runImportJob(
   const title = data.title ?? titleFromFilename(data.originalname);
   const slug = data.slug ?? deriveSlug(title);
 
-  const article = await prisma.$transaction((tx) =>
-    createArticleWithVersion(tx, {
-      slug,
-      title,
-      content,
-      status: data.status,
-      categoryId: data.categoryId,
-      authorId: data.authorId,
-    }),
+  const article = await prisma.$transaction(
+    (tx) =>
+      createArticleWithVersion(
+        tx,
+        {
+          slug,
+          title,
+          content,
+          status: data.status,
+          categoryId: data.categoryId,
+          authorId: data.authorId,
+        },
+        resolveContent,
+      ),
+    { timeout: IMPORT_TX_TIMEOUT_MS },
   );
 
   await indexIfPublished(article, index);
@@ -360,6 +419,7 @@ export async function runZipImportJob(
   prisma: ZipImportPrismaClient,
   index?: IndexArticle,
   extractOpts?: ZipExtractOptions,
+  resolveContent?: ResolveImportedContent,
 ): Promise<ZipImportJobResult> {
   const buffer = Buffer.from(data.contentBase64, 'base64');
   // DANGEROUS step: the archive is unzipped here. The quota rejects an over-large/over-many archive;
@@ -373,7 +433,9 @@ export async function runZipImportJob(
     select: { id: true, deletedAt: true },
   });
   if (!root || root.deletedAt) {
-    throw new Error('The import target folder does not reference a live folder');
+    throw new Error(
+      'The import target folder does not reference a live folder',
+    );
   }
 
   const items: ZipItemResult[] = [];
@@ -434,15 +496,21 @@ export async function runZipImportJob(
       foldersCreated,
     );
 
-    const article = await prisma.$transaction((tx) =>
-      createArticleWithVersion(tx, {
-        slug: finalSlug,
-        title,
-        content: entry.content,
-        status: data.status,
-        categoryId: homeFolderId,
-        authorId: data.authorId,
-      }),
+    const article = await prisma.$transaction(
+      (tx) =>
+        createArticleWithVersion(
+          tx,
+          {
+            slug: finalSlug,
+            title,
+            content: entry.content,
+            status: data.status,
+            categoryId: homeFolderId,
+            authorId: data.authorId,
+          },
+          resolveContent,
+        ),
+      { timeout: IMPORT_TX_TIMEOUT_MS },
     );
     created.push(article);
     batchSlugToId.set(finalSlug, article.id);
@@ -498,9 +566,10 @@ export async function runAnyImportJob(
   data: ImportJobData,
   prisma: ZipImportPrismaClient,
   index?: IndexArticle,
+  resolveContent?: ResolveImportedContent,
 ): Promise<ImportJobResult> {
   if (data.kind === 'zip') {
-    return runZipImportJob(data, prisma, index);
+    return runZipImportJob(data, prisma, index, undefined, resolveContent);
   }
-  return runImportJob(data, prisma, index);
+  return runImportJob(data, prisma, index, resolveContent);
 }
