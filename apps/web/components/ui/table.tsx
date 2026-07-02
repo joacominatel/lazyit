@@ -8,7 +8,10 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      // scroll-shadow-x (issue #945): a pure-CSS edge fade hinting the horizontal overflow this
+      // container already had (`overflow-x-auto`) but never surfaced — at narrow widths a wide
+      // table (e.g. Assets' "Updated"/"Owners" columns) just clipped mid-word with no affordance.
+      className="relative w-full overflow-x-auto scroll-shadow-x"
     >
       <table
         data-slot="table"

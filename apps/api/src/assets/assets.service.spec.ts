@@ -722,6 +722,39 @@ describe('AssetsService', () => {
     expect(calls[0][0].select.assignments.where).toEqual({ releasedAt: null });
   });
 
+  it('findPage with a selfUserId narrows the assignments join to that user — the /assets/mine projection (#947 security review)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { assignedToUserId: 'u1' },
+      { limit: 50, offset: 0, deleted: 'active' },
+      'u1',
+    );
+
+    const calls = asset.findMany.mock.calls as Array<
+      [
+        {
+          select: { assignments: { where: unknown } } & Record<string, unknown>;
+        },
+      ]
+    >;
+    // DB-LEVEL narrowing: on a co-owned asset the query itself can only return the CALLER's own
+    // assignment row — co-assignees' identity (name + email) never leaves the database through the
+    // ungated self-read. The rest of the projection is IDENTICAL to the lean list select.
+    expect(calls[0][0].select.assignments.where).toEqual({
+      releasedAt: null,
+      userId: 'u1',
+    });
+    expect(calls[0][0].select).toEqual({
+      ...EXPECTED_LIST_SELECT,
+      assignments: {
+        ...EXPECTED_LIST_SELECT.assignments,
+        where: { releasedAt: null, userId: 'u1' },
+      },
+    });
+  });
+
   it('findPage filters by categoryId through the related model', async () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
@@ -738,6 +771,77 @@ describe('AssetsService', () => {
       model: { categoryId: 'c1' },
       deletedAt: null,
     });
+  });
+
+  it('findPage filters by modelId (exact model, distinct from categoryId — #943)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { modelId: 'm1' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({
+      modelId: 'm1',
+      deletedAt: null,
+    });
+  });
+
+  it('findPage warranty=expiring90d filters to a (now, now + 90 days] warrantyEnd window (#955)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    const before = Date.now();
+    await service.findPage(
+      { warranty: 'expiring90d' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+    const after = Date.now();
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<
+        [
+          {
+            where: { warrantyEnd: { gt: Date; lte: Date }; deletedAt: unknown };
+          },
+        ]
+      >
+    )[0][0];
+    expect(findManyArgs.where.deletedAt).toBeNull();
+    const { gt, lte } = findManyArgs.where.warrantyEnd;
+    // Lower bound is "now" (not-yet-expired): between the call's before/after clock reads.
+    expect(gt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(gt.getTime()).toBeLessThanOrEqual(after);
+    // Upper bound is exactly 90 days past the lower bound.
+    expect(lte.getTime() - gt.getTime()).toBe(90 * 24 * 60 * 60 * 1000);
+  });
+
+  it('findPage warranty=expired filters to assets whose warrantyEnd is already past (#955)', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    const before = Date.now();
+    await service.findPage(
+      { warranty: 'expired' },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+    const after = Date.now();
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<
+        [{ where: { warrantyEnd: { lt: Date }; deletedAt: unknown } }]
+      >
+    )[0][0];
+    expect(findManyArgs.where.deletedAt).toBeNull();
+    // Only a `lt: now` bound (no lower bound), so a null warrantyEnd never matches.
+    expect(Object.keys(findManyArgs.where.warrantyEnd)).toEqual(['lt']);
+    const { lt } = findManyArgs.where.warrantyEnd;
+    expect(lt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(lt.getTime()).toBeLessThanOrEqual(after);
   });
 
   it('findPage narrows by company (exact-match grouping filter — ADR-0076)', async () => {
@@ -846,7 +950,7 @@ describe('AssetsService', () => {
     });
   });
 
-  it('findPage filters by q (case-insensitive OR over name/serial/assetTag)', async () => {
+  it('findPage filters by q (case-insensitive OR over name/serial/assetTag PLUS the related model name/manufacturer — #943)', async () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
 
@@ -863,6 +967,8 @@ describe('AssetsService', () => {
         { name: { contains: 'srv', mode: 'insensitive' } },
         { serial: { contains: 'srv', mode: 'insensitive' } },
         { assetTag: { contains: 'srv', mode: 'insensitive' } },
+        { model: { name: { contains: 'srv', mode: 'insensitive' } } },
+        { model: { manufacturer: { contains: 'srv', mode: 'insensitive' } } },
       ],
       deletedAt: null,
     });

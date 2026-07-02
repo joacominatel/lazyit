@@ -90,7 +90,9 @@
       "kind": "Kind",
       "linkedAsset": "Linked asset",
       "ip": "IP address",
-      "tokenPrefix": "Token"
+      "tokenPrefix": "Token",
+      "slug": "Slug",
+      "excerpt": "Excerpt"
     }
   }
 }

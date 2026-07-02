@@ -27,8 +27,24 @@ Open **Assets** and choose **New asset**. The form captures:
 - **Purchase date** and **Warranty end** — optional dates.
 - **Notes** and **Custom fields** — optional free-form detail.
 
-You do not assign an owner here. Ownership is a separate step you take once the asset exists — see
-[Assignments & history](/help/assets-assignments-history).
+Under **Head start** you can optionally **assign the first owner** right away: pick a user and, when
+you create the asset, they're recorded as its current owner in the same step. Leaving it blank keeps
+the classic flow — ownership is otherwise a separate step you take once the asset exists (see
+[Assignments & history](/help/assets-assignments-history)). If the assignment part fails for any
+reason, the asset is still created; you'll just be asked to assign the owner from the asset.
+
+Registering a batch of similar units? Use **Create & add another** instead of **Create asset**: it
+saves the current one and keeps the form open with the **model, location, company and status**
+carried over, clearing just the name, serial and asset tag so you can type the next unit straight
+away.
+
+## Registering many at once
+
+If you have a whole spreadsheet of gear to bring in, don't type them one by one — use the bulk
+**Import**. The **Import** button sits next to *Export* at the top of the Assets list (and the empty
+Assets screen offers an *Import from CSV* link), taking you straight to the guided
+[bulk import](/help/assets-bulk-import) wizard. The button appears only if you have permission to run
+an import.
 
 ## Status
 
@@ -43,7 +59,9 @@ it. The values are:
 - **Unknown** — status not established.
 
 Status appears as a colored badge in the list and on the detail page. Changing it is recorded in the
-asset's activity log. You can also set the status of several assets at once from the list.
+asset's activity log. You can change it quickly without opening the editor: on the **detail page**
+the status badge itself is a dropdown, and in the list the row's **⋯** menu has a **Change status**
+option. You can also set the status of several assets at once from the list.
 
 ## Serial and asset tag
 
@@ -95,7 +113,9 @@ unexpected field). These hints are advisory only — you can always save.
 ## Finding assets in the list
 
 The **Assets** list has a search box and a **Status** dropdown right in the toolbar, plus a
-**Filters** button that opens a small panel for the rest:
+**Filters** button that opens a small panel for the rest. The search box matches an asset's name,
+serial, asset tag, and its model's name or manufacturer — so searching a model like "ThinkPad" or
+"Pro 14" finds every asset carrying it, even though the model isn't in the name.
 
 - **Category** and **Location** — narrow to one model category or one place.
 - **Company** — narrow to one company (the grouping label above). Only companies in use appear.
@@ -103,10 +123,18 @@ The **Assets** list has a search box and a **Status** dropdown right in the tool
   pick them; the list then shows just that person's live assignments.
 - **Ownership** — filter by whether an asset has any current owner at all (*Has owners* /
   *No owners*), regardless of who.
+- **Warranty** — narrow to assets whose **warranty is about to lapse** (*Expiring ≤ 90d*) or has
+  **already lapsed** (*Expired*). This filter has no toolbar control: it appears as a chip when you
+  arrive from the dashboard's **Needs attention** warranty tile (which links to *Expiring ≤ 90d*),
+  and you clear it by removing the chip.
 
 The **Filters** button shows a small count of how many of these are active. Every filter you set
 also appears as a removable chip below the toolbar, and the filters live in the page address, so a
 filtered view is easy to undo, share or bookmark.
+
+On the asset detail page, both **Model** and **Category** are links back into this list: Model
+narrows to that exact model, Category to every model in that category — a quick way to see "what
+else is this exact model" versus "what else is in this category."
 
 ### Exporting the inventory
 

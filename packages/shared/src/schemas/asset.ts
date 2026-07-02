@@ -19,6 +19,23 @@ export const AssetStatusSchema = z.enum([
   "UNKNOWN",
 ]);
 
+/**
+ * Look-ahead window (days) for the "warranty expiring soon" surfaces (#955): both the dashboard
+ * "Needs attention" tile and the assets list's `warranty=expiring90d` filter compute the same
+ * `(now, now + N days]` window from this one constant, so the tile's count and the pre-filtered list
+ * it deep-links into can never diverge. Mirrors the access-grant "expiring soon" pattern.
+ */
+export const WARRANTY_EXPIRING_WITHIN_DAYS = 90;
+
+/**
+ * Warranty-window filter value for `GET /assets` (#955). `expiring90d` = the warranty ends within the
+ * next {@link WARRANTY_EXPIRING_WITHIN_DAYS} days and has NOT already lapsed (`now < warrantyEnd <=
+ * now + 90d`) — the set the dashboard tile deep-links into; `expired` = the warranty end is already in
+ * the past (`warrantyEnd < now`). Assets with no `warrantyEnd` match neither. The `90` in the value is
+ * a stable public label, not a knob — the day count lives in `WARRANTY_EXPIRING_WITHIN_DAYS`.
+ */
+export const AssetWarrantyFilterSchema = z.enum(["expiring90d", "expired"]);
+
 // specs stays an OPEN record here on purpose. Per-category governance (ADR-0007 amendment, #851) is
 // ADVISORY: an AssetCategory can declare a `specsSchema` dictionary, but it drives soft warnings +
 // hints via `validateSpecsAgainstDictionary` (asset-specs-dictionary.ts) — NOT hard validation. The
@@ -89,6 +106,7 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
 );
 
 export type AssetStatus = z.infer<typeof AssetStatusSchema>;
+export type AssetWarrantyFilter = z.infer<typeof AssetWarrantyFilterSchema>;
 export type Asset = z.infer<typeof AssetSchema>;
 export type CreateAsset = z.infer<typeof CreateAssetSchema>;
 export type UpdateAsset = z.infer<typeof UpdateAssetSchema>;

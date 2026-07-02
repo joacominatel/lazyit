@@ -78,6 +78,9 @@
     "boundaryTitle": "Something went wrong",
     "boundaryDescription": "An unexpected error occurred while loading this page.",
     "stateDescription": "The API may be down or unreachable.",
+    "forbiddenTitle": "You don't have access to this",
+    "forbiddenDescription": "Your role doesn't include permission to view this. Ask an administrator if you think you should have access.",
+    "manualLink": "Learn about roles & permissions",
     "tryAgain": "Try again",
     "retry": "Retry",
     "requestId": "Request ID",
@@ -94,6 +97,7 @@
   "chrome": {
     "skipToContent": "Skip to content",
     "openUserMenu": "Open user menu",
+    "myProfile": "My profile",
     "signOut": "Sign out",
     "openNavigationMenu": "Open navigation menu",
     "toggleTheme": "Toggle theme",
@@ -103,6 +107,7 @@
     "dismissModeBanner": "Dismiss mode banner",
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar",
+    "help": "Help",
     "breadcrumbLabel": "Breadcrumb",
     "breadcrumb": {
       "dashboard": "Dashboard",
@@ -204,11 +209,13 @@
       "copyLabel": "Copy example",
       "wikiLink": {
         "title": "Link another article",
-        "note": "Type [[ for a picker. Use | for custom link text. A link to an article that doesn't exist yet stays as a forward reference."
+        "note": "Type [[ for a picker. Use | for custom link text. A link to an article that doesn't exist yet stays as a forward reference.",
+        "suggestionsAria": "Article suggestions"
       },
       "secret": {
         "title": "Reference a secret",
-        "note": "Shows a masked chip — only a vault member can reveal the value. Type '{{' for a picker; you pick a handle, never a value."
+        "note": "Shows a masked chip — only a vault member can reveal the value. Type '{{' for a picker; you pick a handle, never a value.",
+        "suggestionsAria": "Secret handle suggestions"
       },
       "links": {
         "title": "External link",

@@ -315,6 +315,61 @@ _key_create="$(api POST "/users/${SA_USER_ID}/keys" \
 _key_details="$(printf '%s' "$_key_create" | jq -r '.keyDetails')"
 [ -n "$_key_details" ] && [ "$_key_details" != "null" ] || fail "key create response had no keyDetails"
 
+# ---------- 3f. login branding + localization (INSTANCE-level, best-effort) ---
+# Issue #952: brand the Zitadel login (oxblood primary + no ZITADEL watermark) and offer es/en so it
+# stops reading as a stock/foreign page after the branded landing. These are INSTANCE-default settings
+# (Admin API `/admin/v1`, which the FirstInstance machine user may set via its IAM_OWNER role) so they
+# apply to the single default org's login UI. Endpoints verified against the pinned Zitadel v2.68 Admin
+# API (UpdateLabelPolicy `PUT /policies/label` + ActivateLabelPolicy `POST /policies/label/_activate`;
+# SetRestrictions `PUT /restrictions` with `SelectLanguages{list}`; SetDefaultLanguage
+# `PUT /languages/default/{lang}`).
+#
+# BEST-EFFORT, unlike the OIDC provisioning above: a failure here logs a loud WARN but does NOT abort —
+# we never block sign-in (api/web boot) over a COSMETIC setting. All calls are idempotent upserts (PUT +
+# _activate), so re-applying on a clean re-bootstrap is safe. The logo is NOT uploaded here (it needs a
+# multipart asset upload + the brand files baked into this image); operators upload it once in the
+# console — documented in docs/05-runbooks/auth-bootstrap.md.
+ADMIN="${ZITADEL_INTERNAL_URL%/}/admin/v1"
+
+# brand_req METHOD PATH [BODY]: call an Admin-API endpoint. On non-2xx, print a loud WARN and continue
+# (returns 0 so `set -e` cannot abort the run on a cosmetic failure). Injects auth + forwarded headers.
+brand_req() {
+  _bm="$1"; _bp="$2"; _bb="${3:-}"; _bt="$(mktemp)"
+  if [ -n "$_bb" ]; then
+    _bc="$(curl -sS -o "$_bt" -w '%{http_code}' -X "$_bm" "${ADMIN}${_bp}" \
+      -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" -H "Accept: application/json" \
+      -H "X-Forwarded-Host: $(ext_host)" -H "X-Forwarded-Proto: $(ext_proto)" -d "$_bb")" || _bc=000
+  else
+    _bc="$(curl -sS -o "$_bt" -w '%{http_code}' -X "$_bm" "${ADMIN}${_bp}" \
+      -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Accept: application/json" \
+      -H "X-Forwarded-Host: $(ext_host)" -H "X-Forwarded-Proto: $(ext_proto)")" || _bc=000
+  fi
+  if is_2xx "$_bc"; then
+    log "  + ${_bm} ${_bp} -> ${_bc} ok."
+  else
+    log "  WARN: ${_bm} ${_bp} -> HTTP ${_bc} (cosmetic — continuing). Response:"
+    cat "$_bt" >&2 || true
+  fi
+  rm -f "$_bt"
+}
+
+log "applying login branding + localization (instance-level, best-effort) ..."
+# Brand oxblood #9e2b25 — the lazyit brand mark (brand/lazyit-mark.svg), the SAME hue the marketing
+# landing uses, so the login no longer reads as a stock/phishing page. Dark-theme primary is a lifted
+# oxblood for contrast on Zitadel's dark login. disableWatermark hides "Powered by ZITADEL". Omitted
+# color fields fall back to Zitadel's neutral defaults (a clean light login), which is what we want.
+brand_req PUT /policies/label "$(jq -nc '{
+    primaryColor:"#9e2b25",
+    primaryColorDark:"#c04a42",
+    disableWatermark:true
+  }')"
+# UpdateLabelPolicy edits the PREVIEW; activate promotes it to the live login. Safe to re-run.
+brand_req POST /policies/label/_activate ""
+# Allow BOTH shipped locales (Zitadel already ships es translations) so the login can render in es/en;
+# the app passes ui_locales on the authorize request (apps/web) to pick per-user. Fallback = en.
+brand_req PUT /restrictions "$(jq -nc '{allowedLanguages:{list:["en","es"]}}')"
+brand_req PUT /languages/default/en ""
+
 # ---------- 3e. write the two secret files (atomic, WORLD-READABLE) ----------
 # api/web consume these (oidc-client.json + sa-key.json) but run as a DIFFERENT uid than this sidecar
 # and mount zitadel_secrets READ-ONLY (infra/docker-compose.prod.yaml), so the files MUST be readable

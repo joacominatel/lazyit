@@ -80,7 +80,15 @@ export interface MyPermissionsState {
 }
 
 export function useMyPermissions(): MyPermissionsState {
-  const { data, isLoading, error } = useMyPermissionsQuery();
+  // `isPending` (status === "pending" ⇒ no data yet), NOT `isLoading` (`isPending && isFetching`).
+  // `isFetching` reads the query's `fetchStatus`, which React Query leaves `"idle"` during SSR (it
+  // never starts a fetch on the server) but flips to `"fetching"` on the FIRST client render — so
+  // `isLoading` is `false` on the server and `true` on hydration, and any gate that branches on it
+  // (AdminGate, the reports/audit/secrets gates, PermissionGate) renders a different tree on each
+  // pass → a hydration mismatch (#931). `isPending` depends only on data presence, which is
+  // identical on both passes (the caller's permissions are never prefetched), so the gate's first
+  // render agrees; the real decision lands on the next render once the set arrives.
+  const { data, isPending, error } = useMyPermissionsQuery();
 
   // SECW-02: memoize the Set so components that consume `permissions` or `can` do not re-render
   // on every parent render (a new Set literal is a new reference even when the contents are
@@ -103,7 +111,7 @@ export function useMyPermissions(): MyPermissionsState {
     permissions,
     // Fails closed: an empty set while loading/errored means `can()` is false everywhere.
     can,
-    isLoading,
+    isLoading: isPending,
     error,
   };
 }

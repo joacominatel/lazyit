@@ -1,5 +1,6 @@
 import type { CreateWorkflowConnection } from "@lazyit/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import {
   createWorkflowConnection,
   deleteWorkflowConnection,
@@ -9,6 +10,7 @@ import {
   type UpdateWorkflowConnection,
   updateWorkflowConnection,
 } from "../endpoints/workflow-connections";
+import { notifyError } from "../notify-error";
 import { createQueryKeys } from "../query-keys";
 
 /**
@@ -82,12 +84,18 @@ export function useTestWorkflowConnection() {
   });
 }
 
-/** Soft-delete a connection. Invalidates the list. */
+/**
+ * Soft-delete a connection. Invalidates the list. Toasts its own failure via `onError` (issue #938 —
+ * the connection card's confirm dialog does not surface mutation errors on its own), so a 404/409/500
+ * is never silent even if a caller forgets to handle it.
+ */
 export function useDeleteWorkflowConnection() {
   const queryClient = useQueryClient();
+  const t = useTranslations("workflow");
   return useMutation({
     mutationFn: (id: string) => deleteWorkflowConnection(id),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: workflowConnectionKeys.all }),
+    onError: (error) => notifyError(error, t("connection.deleteError")),
   });
 }

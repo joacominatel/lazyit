@@ -2,7 +2,7 @@ import {
   ExclamationTriangleIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -83,7 +83,11 @@ export default async function LoginPage({
     redirect(destination);
   }
 
-  const [t, unconfigured] = await Promise.all([getTranslations("auth"), instanceIsUnconfigured()]);
+  const [t, locale, unconfigured] = await Promise.all([
+    getTranslations("auth"),
+    getLocale(),
+    instanceIsUnconfigured(),
+  ]);
   const errorKeyBase = error
     ? (ERROR_KEY_BASE[error] ?? ERROR_KEY_BASE.Default)
     : null;
@@ -131,9 +135,14 @@ export default async function LoginPage({
             </div>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            {t("login.ssoHelper")}
-          </p>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              {t("login.ssoHelper")}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {t("login.firstTimeHint")}
+            </p>
+          </div>
         )}
       </CardContent>
       <CardFooter className="flex-col gap-2">
@@ -145,7 +154,10 @@ export default async function LoginPage({
           <form
             action={async () => {
               "use server";
-              await signIn("oidc", { redirectTo: destination });
+              // Pass the active UI locale as OIDC `ui_locales` so the IdP renders its login in the
+              // same language as the app (issue #952 — the login was English-only). Zitadel ships es
+              // translations and the bootstrap allows es/en, so it honors this.
+              await signIn("oidc", { redirectTo: destination }, { ui_locales: locale });
             }}
             className="w-full"
           >

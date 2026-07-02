@@ -29,8 +29,25 @@ Abre **Activos** y elige **Nuevo activo**. El formulario captura:
 - **Fecha de compra** y **Fin de garantía** — fechas opcionales.
 - **Notas** y **Campos personalizados** — detalle libre opcional.
 
-Aquí no asignas un responsable. La asignación es un paso aparte que haces una vez que el activo
-existe — ver [Asignaciones e historial](/help/assets-assignments-history).
+En **Ventaja inicial** puedes, de forma opcional, **asignar al primer responsable** de una vez: elige
+un usuario y, al crear el activo, queda registrado como su responsable actual en el mismo paso.
+Dejarlo vacío mantiene el flujo clásico — de lo contrario, la asignación es un paso aparte que haces
+una vez que el activo existe (ver [Asignaciones e historial](/help/assets-assignments-history)). Si la
+parte de la asignación falla por algún motivo, el activo igual se crea; solo se te pedirá asignar al
+responsable desde el activo.
+
+¿Registras un lote de unidades parecidas? Usa **Crear y agregar otro** en lugar de **Crear activo**:
+guarda la actual y mantiene el formulario abierto con el **modelo, la ubicación, la empresa y el
+estado** conservados, borrando solo el nombre, la serie y la etiqueta para que escribas la siguiente
+unidad enseguida.
+
+## Registrar muchos a la vez
+
+Si tienes una planilla entera de equipo por incorporar, no los cargues uno por uno — usa la
+**Importación** masiva. El botón **Importar** está junto a *Exportar* en la parte superior de la lista
+de Activos (y la pantalla vacía de Activos ofrece un enlace *Importar desde CSV*), llevándote directo
+al asistente de [importación masiva](/help/assets-bulk-import). El botón aparece solo si tienes permiso
+para ejecutar una importación.
 
 ## Estado
 
@@ -45,7 +62,9 @@ registrarlo. Los valores son:
 - **Desconocido** — estado no establecido.
 
 El estado aparece como una etiqueta de color en la lista y en la página de detalle. Cambiarlo queda
-registrado en la actividad del activo. También puedes fijar el estado de varios activos a la vez desde
+registrado en la actividad del activo. Puedes cambiarlo rápido sin abrir el editor: en la **página de
+detalle** la propia etiqueta de estado es un menú desplegable, y en la lista el menú **⋯** de la fila
+tiene la opción **Cambiar estado**. También puedes fijar el estado de varios activos a la vez desde
 la lista.
 
 ## Serie y etiqueta de activo
@@ -102,7 +121,10 @@ o un campo inesperado). Estas sugerencias son solo orientativas — siempre pod�
 ## Encontrar activos en la lista
 
 La lista de **Activos** tiene un buscador y un desplegable de **Estado** en la barra de
-herramientas, y además un botón **Filtros** que abre un panel con el resto:
+herramientas, y además un botón **Filtros** que abre un panel con el resto. El buscador coincide
+con el nombre del activo, número de serie, etiqueta de activo, y el nombre o fabricante de su
+modelo — así que buscar un modelo como "ThinkPad" o "Pro 14" encuentra todos los activos que lo
+llevan, aunque el modelo no esté en el nombre.
 
 - **Categoría** y **Ubicación** — acota a una categoría de modelo o a un lugar.
 - **Empresa** — acota a una empresa (la etiqueta de agrupación de arriba). Solo aparecen las empresas en uso.
@@ -111,11 +133,19 @@ herramientas, y además un botón **Filtros** que abre un panel con el resto:
   persona.
 - **Responsabilidad** — filtra según si el activo tiene algún responsable actual (*Con responsables*
   / *Sin responsables*), sin importar quién.
+- **Garantía** — acota a los activos cuya **garantía está por vencer** (*Por vencer ≤ 90d*) o ya
+  **venció** (*Vencida*). Este filtro no tiene control en la barra: aparece como una etiqueta cuando
+  llegas desde la tarjeta de **garantías** en **Requiere atención** del panel (que enlaza a *Por
+  vencer ≤ 90d*), y lo quitas eliminando la etiqueta.
 
 El botón **Filtros** muestra un pequeño contador de cuántos de estos están activos. Cada filtro que
 aplicas aparece también como una etiqueta que puedes quitar debajo de la barra, y los filtros viven
 en la dirección de la página, así que una vista filtrada es fácil de deshacer, compartir o guardar
 en marcadores.
+
+En la página de detalle de un activo, tanto **Modelo** como **Categoría** son enlaces que vuelven a
+esta lista: Modelo acota a ese modelo exacto, Categoría a todos los modelos de esa categoría — una
+forma rápida de ver "qué más es este modelo exacto" frente a "qué más hay en esta categoría".
 
 ### Exportar el inventario
 

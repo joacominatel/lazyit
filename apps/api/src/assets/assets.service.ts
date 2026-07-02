@@ -7,6 +7,7 @@ import {
 import type {
   AssetInventoryCsvItem,
   AssetStatus,
+  AssetWarrantyFilter,
   BatchResult,
   CreateAsset,
   DeletedFilter,
@@ -19,6 +20,7 @@ import {
   assetInventoryCsvRow,
   offsetOf,
   pageOf,
+  WARRANTY_EXPIRING_WITHIN_DAYS,
 } from '@lazyit/shared';
 import { provenanceStampLine } from '../common/export-provenance';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
@@ -42,6 +44,8 @@ import {
 /** Optional filters for listing assets. `categoryId` filters by the asset's model's category. */
 export interface AssetFilters {
   categoryId?: string;
+  /** Filter to assets carrying this exact AssetModel (#943) — deep-linked from the asset detail page. */
+  modelId?: string;
   locationId?: string;
   status?: AssetStatus;
   /** Exact-match grouping filter over the free-text `company` column (ADR-0076). */
@@ -55,6 +59,12 @@ export interface AssetFilters {
    * owner; `NONE` = unassigned assets. Independent of `assignedToUserId` (which already implies HAS).
    */
   ownership?: 'HAS' | 'NONE';
+  /**
+   * Warranty-window filter (#955). `expiring90d` = warranty ends within the next
+   * WARRANTY_EXPIRING_WITHIN_DAYS days and hasn't lapsed (deep-linked from the dashboard tile);
+   * `expired` = warranty end already passed. Assets with no `warrantyEnd` match neither.
+   */
+  warranty?: AssetWarrantyFilter;
 }
 
 /**
@@ -141,6 +151,44 @@ type AssetWithLeanSelect = Prisma.AssetGetPayload<{
   select: typeof ASSET_LIST_SELECT;
 }>;
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * The `warrantyEnd` predicate for the warranty-window list filter (#955). `expiring90d` = the same
+ * (now, now + N days] look-ahead the dashboard tile counts (warranty not yet lapsed but ending soon);
+ * `expired` = warranty end already in the past. `now` is captured at call time so the window tracks
+ * the request. Assets with a null `warrantyEnd` satisfy neither comparison, so they're excluded.
+ */
+function warrantyWhere(warranty: AssetWarrantyFilter): Prisma.AssetWhereInput {
+  const now = new Date();
+  if (warranty === 'expired') {
+    return { warrantyEnd: { lt: now } };
+  }
+  const cutoff = new Date(
+    now.getTime() + WARRANTY_EXPIRING_WITHIN_DAYS * MS_PER_DAY,
+  );
+  return { warrantyEnd: { gt: now, lte: cutoff } };
+}
+
+/**
+ * The SELF-SCOPE variant of {@link ASSET_LIST_SELECT} for `GET /assets/mine` (#947 security review):
+ * the SAME lean projection, but the `assignments` join is narrowed to the CALLER's own live
+ * assignment. The regular list select inlines EVERY live assignee's identity (name + email) —
+ * `user:read`-class PII the admin list legitimately shows, but that a self-read must not leak: on a
+ * co-owned asset the caller would otherwise receive every co-assignee's email through a route that
+ * (deliberately) carries no `asset:read`/`user:read` gate. Narrowing the join keeps the wire shape
+ * (`Page<AssetListItem>`) intact — the only inlined identity is the caller's own. The admin list keeps
+ * the full projection unchanged.
+ */
+const assetMineListSelect = (userId: string) =>
+  ({
+    ...ASSET_LIST_SELECT,
+    assignments: {
+      ...ASSET_LIST_SELECT.assignments,
+      where: { releasedAt: null, userId },
+    },
+  }) satisfies Prisma.AssetSelect;
+
 @Injectable()
 export class AssetsService {
   constructor(
@@ -166,12 +214,23 @@ export class AssetsService {
    * LEAN projection ({@link ASSET_LIST_SELECT}): no `specs` blob and trimmed joins — the full
    * relation graph stays on {@link findOne}. Runs the page `findMany(take/skip)` and the `count`
    * over the **same** `where` inside one `$transaction`, so the `total` can't drift from the page.
-   * Optional filters: category (via the model), location, status, and `q` (substring over
-   * name/serial/assetTag). The `deleted` slice (`active` default | `only`) scopes the page to live or
-   * soft-deleted assets; `only` carries the ADR-0032 `includeSoftDeleted` escape hatch so the read
-   * filter doesn't re-hide them (ADMIN-gated at the controller).
+   * Optional filters: category and model (via the model), location, status, and `q` (substring over
+   * name/serial/assetTag PLUS the related model's name/manufacturer, #943). The `deleted` slice
+   * (`active` default | `only`) scopes the page to live or soft-deleted assets; `only` carries the
+   * ADR-0032 `includeSoftDeleted` escape hatch so the read filter doesn't re-hide them (ADMIN-gated at
+   * the controller).
+   *
+   * `selfUserId` is the `GET /assets/mine` PROJECTION override (#947 security review): when set, the
+   * lean select's `assignments` join is narrowed to that user's own live assignment
+   * ({@link assetMineListSelect}), so a co-owned asset never inlines other holders' identity
+   * (name + email) through the ungated self-read. Omitted (every admin/list call site), the full
+   * projection is used unchanged.
    */
-  async findPage(filters: AssetFilters = {}, page: PageQuery) {
+  async findPage(
+    filters: AssetFilters = {},
+    page: PageQuery,
+    selfUserId?: string,
+  ) {
     const where = {
       ...this.buildWhere(filters),
       ...deletedWhere(page.deleted),
@@ -198,7 +257,11 @@ export class AssetsService {
         orderBy,
         take,
         skip,
-        select: ASSET_LIST_SELECT,
+        // Self-scope (#947): the mine-path narrows the assignments join to the caller's own row;
+        // every other call site keeps the full lean projection.
+        select: selfUserId
+          ? assetMineListSelect(selfUserId)
+          : ASSET_LIST_SELECT,
         ...escapeHatch,
       }),
       this.prisma.asset.count({ where, ...escapeHatch }),
@@ -213,21 +276,30 @@ export class AssetsService {
   /** The shared `where` for the asset list — used identically by findPage and its count. */
   private buildWhere({
     categoryId,
+    modelId,
     locationId,
     status,
     company,
     q,
     assignedToUserId,
     ownership,
+    warranty,
   }: AssetFilters): Prisma.AssetWhereInput {
     return {
       ...(locationId ? { locationId } : {}),
       ...(status ? { status } : {}),
+      // Warranty window (#955): `expiring90d` mirrors the dashboard tile's (now, now + N days]
+      // look-ahead (assets whose warranty hasn't lapsed but ends soon); `expired` = warranty end
+      // already past. `now` is read per-call so the window tracks the request time.
+      ...(warranty ? warrantyWhere(warranty) : {}),
       // Grouping filter (ADR-0076): exact match on the chosen company value (one of the distinct
       // values offered by listCompanies). Not a scoping boundary — just narrows the list.
       ...(company ? { company } : {}),
       // Category lives on the model, not the asset: match assets whose model is in it.
       ...(categoryId ? { model: { categoryId } } : {}),
+      // Exact model filter (#943) — deep-linked from the asset detail page's Model link, distinct
+      // from the (broader) categoryId filter next to it.
+      ...(modelId ? { modelId } : {}),
       // Owner: assets with a LIVE (releasedAt null) assignment to this user — ownership is a
       // timestamped join (asset-centric), never a column, so this filters the relation.
       ...(assignedToUserId
@@ -245,10 +317,15 @@ export class AssetsService {
             : {}),
       ...(q
         ? {
+            // #943: also match the related model's name/manufacturer (e.g. searching "Pro 14", visible
+            // only in the Model column, previously returned nothing) — an OR across the asset's own
+            // columns AND the model relation.
             OR: [
               { name: { contains: q, mode: 'insensitive' } },
               { serial: { contains: q, mode: 'insensitive' } },
               { assetTag: { contains: q, mode: 'insensitive' } },
+              { model: { name: { contains: q, mode: 'insensitive' } } },
+              { model: { manufacturer: { contains: q, mode: 'insensitive' } } },
             ],
           }
         : {}),

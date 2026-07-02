@@ -3,6 +3,7 @@
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
+  ArrowUpTrayIcon,
   ArrowUturnLeftIcon,
   FunnelIcon,
   PlusIcon,
@@ -80,6 +81,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
+import { useAssetModel } from "@/lib/api/hooks/use-asset-models";
 import { useAssetCompanies, useAssets } from "@/lib/api/hooks/use-assets";
 import { useAssetsOnTopology } from "@/lib/api/hooks/use-infra-nodes";
 import { useUser } from "@/lib/api/hooks/use-users";
@@ -100,6 +102,7 @@ import {
 import { notifyError } from "@/lib/api/notify-error";
 import type { EntityKey } from "@/lib/entity-key";
 import { useFormatters } from "@/lib/hooks/use-formatters";
+import { useMounted } from "@/lib/hooks/use-mounted";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
@@ -119,12 +122,22 @@ import { AssignUserDialog } from "./assign-user-dialog";
 import { StackedOwnerAvatars } from "./stacked-owner-avatars";
 
 type OwnershipFilter = "ALL" | "HAS" | "NONE";
+type WarrantyFilter = "ALL" | "expiring90d" | "expired";
 
 /** Maps each ownership filter to its label key under `assets.list.ownership`. */
 const OWNERSHIP_LABEL_KEY: Record<OwnershipFilter, "any" | "has" | "none"> = {
   ALL: "any",
   HAS: "has",
   NONE: "none",
+};
+
+/** Maps each warranty filter to its chip-value label key under `assets.list.warranty` (#955). */
+const WARRANTY_LABEL_KEY: Record<
+  Exclude<WarrantyFilter, "ALL">,
+  "expiring" | "expired"
+> = {
+  expiring90d: "expiring",
+  expired: "expired",
 };
 
 /**
@@ -184,8 +197,22 @@ export function AssetsListView() {
   // that view ADMIN-only (it was NOT migrated to a permission), so a MEMBER with asset:delete still
   // can't list archived rows. Write/delete affordances use the fine-grained permissions.
   const { isAdmin } = usePermissions();
+  // `isAdmin` is read from the client-only `/users/me` cache — always cold on the SERVER (never
+  // prefetched here) but possibly WARM on the first client render (the top-bar UserMenu shares it),
+  // so the `isAdmin`-gated "Show archived" toggle can flip into existence on hydration and mismatch
+  // the server tree (#931). `mounted` (false on the server and the first client render) gates the
+  // toggle so both passes render the same toolbar; it reveals on the next render.
+  const mounted = useMounted();
   const canWrite = useCan("asset:write");
   const canDelete = useCan("asset:delete");
+  // Same coarse gate the Migrator wizard route uses (`import:run`, ADR-0069) — only surface the
+  // shortcut to those who can actually run a bulk import; the wizard enforces it again server-side.
+  const canImport = useCan("import:run");
+  // The owner filter reads the user directory (`user:read`) to resolve names and populate its picker.
+  // A VIEWER lacks that permission, so the lookup 403s and the picker showed a misleading "No results"
+  // (forbidden presented as nonexistent — issue #935). Gate the whole control on `user:read`: hide it
+  // when the caller can't populate it, which also skips the doomed `/users` fetch entirely.
+  const canReadUsers = useCan("user:read");
   // Which assets back a topology node — drives the small "On topology" glyph per row (issue #765).
   // Gated on infra:read so a viewer without topology access never fires the node-list fetch.
   const onTopology = useAssetsOnTopology(useCan("infra:read"));
@@ -207,12 +234,25 @@ export function AssetsListView() {
 
   const statusFilter = filters.status as AssetStatus | "ALL";
   const categoryFilter = filters.category;
+  // The EXACT model filter (#943, deep-linked from the asset detail page's Model link) — distinct
+  // from `categoryFilter` above. No picker for it (URL-only); the chip is its sole surface + clear.
+  const modelFilter = filters.model;
   const locationFilter = filters.location;
   const companyFilter = filters.company; // "ALL" = unset; otherwise an exact company value.
   const ownerFilter = filters.owner; // "" = unset; otherwise a User uuid (server-side filter)
   const ownershipFilter = filters.ownership as OwnershipFilter;
+  // Warranty window (#955), deep-linked from the dashboard's "Needs attention" tile. Like the model
+  // filter it's URL-only (no picker): the chip is its sole surface + clear.
+  const warrantyFilter = filters.warranty as WarrantyFilter;
   // Resolve the owner-filter user's name for its chip, even when not on the current search page.
-  const { data: ownerUser } = useUser(ownerFilter || undefined);
+  // Skip the `/users/:id` lookup when the caller can't read the directory (would 403 — #935).
+  const { data: ownerUser } = useUser(
+    canReadUsers ? ownerFilter || undefined : undefined,
+  );
+  // Resolve the model-filter's name for its chip, mirroring the owner chip above.
+  const { data: modelFilterModel } = useAssetModel(
+    modelFilter !== "ALL" ? modelFilter : undefined,
+  );
   // The archived view is ADMIN-only; a non-admin can never set it (toggle hidden) and we never send
   // the param for them, so the API stays on the active-only list.
   const archived = isAdmin && filters.archived === "only";
@@ -548,6 +588,19 @@ export function AssetsListView() {
           },
         ]
       : []),
+    ...(modelFilter !== "ALL"
+      ? [
+          {
+            key: "model",
+            label: t("chips.model", {
+              value: modelFilterModel
+                ? `${modelFilterModel.manufacturer} ${modelFilterModel.name}`
+                : "…",
+            }),
+            onClear: () => setFilter("model", FILTER_DEFAULTS.model),
+          },
+        ]
+      : []),
     ...(locationFilter !== "ALL"
       ? [
           {
@@ -593,6 +646,17 @@ export function AssetsListView() {
           },
         ]
       : []),
+    ...(warrantyFilter !== "ALL"
+      ? [
+          {
+            key: "warranty",
+            label: t("chips.warranty", {
+              value: t(`warranty.${WARRANTY_LABEL_KEY[warrantyFilter]}`),
+            }),
+            onClear: () => setFilter("warranty", FILTER_DEFAULTS.warranty),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -604,7 +668,7 @@ export function AssetsListView() {
         subtitle={t("subtitle")}
         actions={
           <>
-            {isAdmin ? (
+            {mounted && isAdmin ? (
               <ArchivedToggle
                 checked={archived}
                 onCheckedChange={(on) => {
@@ -624,6 +688,16 @@ export function AssetsListView() {
               <ArrowDownTrayIcon />
               {isExportingAll ? t("export.exporting") : t("export.button")}
             </Button>
+            {/* Discoverable entry to the bulk Migrator (#950): register many assets from a CSV
+                without hunting through Settings. Gated on `import:run` like the wizard itself. */}
+            {canImport ? (
+              <Button variant="outline" asChild title={t("import.title")}>
+                <Link href="/imports">
+                  <ArrowUpTrayIcon />
+                  {t("import.button")}
+                </Link>
+              </Button>
+            ) : null}
             {canWrite ? (
               <Button asChild>
                 <Link href="/assets/new">
@@ -655,7 +729,17 @@ export function AssetsListView() {
               ? { label: tEmpty("action"), href: "/assets/new" }
               : undefined
           }
-        />
+        >
+          {/* Point operators with many assets at the bulk Migrator instead of the one-by-one form (#950). */}
+          {canImport ? (
+            <Link
+              href="/imports"
+              className="mt-1 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              {tEmpty("importLink")}
+            </Link>
+          ) : null}
+        </EmptyState>
       ) : (
         <>
           <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
@@ -777,20 +861,22 @@ export function AssetsListView() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="assets-filter-owner"
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    {t("filters.ownerLabel")}
-                  </label>
-                  <UserCombobox
-                    id="assets-filter-owner"
-                    value={ownerFilter || undefined}
-                    onValueChange={(value) => setFilter("owner", value)}
-                    placeholder={t("filters.ownerPlaceholder")}
-                  />
-                </div>
+                {canReadUsers && (
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="assets-filter-owner"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
+                      {t("filters.ownerLabel")}
+                    </label>
+                    <UserCombobox
+                      id="assets-filter-owner"
+                      value={ownerFilter || undefined}
+                      onValueChange={(value) => setFilter("owner", value)}
+                      placeholder={t("filters.ownerPlaceholder")}
+                    />
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <label
                     htmlFor="assets-filter-ownership"

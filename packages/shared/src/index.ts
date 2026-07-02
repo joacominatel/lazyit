@@ -10,6 +10,8 @@ export * from "./clone/clone-user-payload";
 export * from "./constants/app";
 export * from "./schemas/access-grant";
 export * from "./schemas/access-grant-list";
+export * from "./schemas/access-request";
+export * from "./schemas/access-request-list";
 export * from "./schemas/api-error";
 export * from "./schemas/application";
 export * from "./schemas/application-category";

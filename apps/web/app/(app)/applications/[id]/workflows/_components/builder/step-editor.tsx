@@ -196,6 +196,14 @@ function StepForm({
   const tc = useTranslations("common");
   const [values, setValues] = useState<EditorState>(() => initialState(step));
   const [error, setError] = useState<string | undefined>(undefined);
+  // Stable per-row ids for `values.inputFields`, generated when a row is added — used ONLY as the
+  // React list key so removing a middle row doesn't make React reuse an adjacent row's identity/
+  // focus. `ManualInputField` itself has no id field (see `@lazyit/shared`); this array is kept in
+  // lockstep with `values.inputFields` by `addField`/`removeField` (the only ops that change length
+  // or order — `editField` patches in place).
+  const [fieldIds, setFieldIds] = useState<string[]>(() =>
+    values.inputFields.map(() => crypto.randomUUID()),
+  );
 
   function set<K extends keyof EditorState>(key: K, value: EditorState[K]) {
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -288,6 +296,7 @@ function StepForm({
       ...values.inputFields,
       { name: "", label: "", type: "text", required: false },
     ]);
+    setFieldIds((prev) => [...prev, crypto.randomUUID()]);
   }
 
   function editField(index: number, patch: Partial<ManualInputField>) {
@@ -302,6 +311,7 @@ function StepForm({
       "inputFields",
       values.inputFields.filter((_, i) => i !== index),
     );
+    setFieldIds((prev) => prev.filter((_, i) => i !== index));
   }
 
   return (
@@ -461,7 +471,7 @@ function StepForm({
                   <ul className="flex flex-col gap-3">
                     {values.inputFields.map((field, index) => (
                       <ManualFieldRow
-                        key={`field-${index}`}
+                        key={fieldIds[index] ?? `field-${index}`}
                         field={field}
                         onChange={(patch) => editField(index, patch)}
                         onRemove={() => removeField(index)}

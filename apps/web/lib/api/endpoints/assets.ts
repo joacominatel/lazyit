@@ -3,6 +3,7 @@ import type {
   AssetAssignmentWithUser,
   AssetListPage,
   AssetStatus,
+  AssetWarrantyFilter,
   AssetWithRelations,
   BatchAssetStatus,
   BatchIds,
@@ -34,8 +35,9 @@ export const updateAsset = crud.update;
 export const deleteAsset = crud.remove;
 
 /**
- * Server-side filters for the asset list. `q` matches name / serial / assetTag;
- * `status`/`categoryId`/`locationId` scope the result set. `sort` is allowlisted to
+ * Server-side filters for the asset list. `q` matches name / serial / assetTag PLUS the related
+ * model's name/manufacturer (#943); `status`/`categoryId`/`modelId`/`locationId` scope the result
+ * set (`modelId` is the EXACT model, distinct from `categoryId`). `sort` is allowlisted to
  * `name|assetTag|serial|status|createdAt|updatedAt` (unknown → 400). `assignedToUserId` is a
  * server-side OWNER filter (assets with a live assignment to that user). `ownership` is the
  * server-side Has/None filter: `HAS` keeps only assets with a live assignment, `NONE` only those
@@ -49,6 +51,9 @@ export const deleteAsset = crud.remove;
 export interface AssetFilters {
   q?: string;
   categoryId?: string;
+  /** Exact model filter (#943) — deep-linked from the asset detail page's Model link, distinct
+   *  from `categoryId` (the broader model-category filter next to it). */
+  modelId?: string;
   locationId?: string;
   status?: AssetStatus;
   /** Exact-match grouping filter on the free-text company value (ADR-0076). */
@@ -57,6 +62,8 @@ export interface AssetFilters {
   assignedToUserId?: string;
   /** Server-side ownership filter: `HAS` = has a live owner, `NONE` = unassigned (#824). */
   ownership?: "HAS" | "NONE";
+  /** Warranty-window filter (#955): `expiring90d` = ends within 90d (not lapsed); `expired` = past. */
+  warranty?: AssetWarrantyFilter;
   sort?: string;
   dir?: "asc" | "desc";
   limit?: number;
@@ -73,8 +80,9 @@ export interface AssetFilters {
  */
 /**
  * Append the additive FILTER params (not paging/sort) shared by the list read and the CSV export —
- * `q`, `categoryId`, `locationId`, `status`, `company`, `assignedToUserId`, `ownership`, `deleted`. The
- * export reuses this so it serializes every filter IDENTICALLY to the list and can never drift from it.
+ * `q`, `categoryId`, `modelId`, `locationId`, `status`, `company`, `assignedToUserId`, `ownership`,
+ * `warranty`, `deleted`. The export reuses this so it serializes every filter IDENTICALLY to the
+ * list and can never drift from it.
  */
 function appendAssetFilterParams(
   params: URLSearchParams,
@@ -82,12 +90,14 @@ function appendAssetFilterParams(
 ): void {
   if (filters.q) params.set("q", filters.q);
   if (filters.categoryId) params.set("categoryId", filters.categoryId);
+  if (filters.modelId) params.set("modelId", filters.modelId);
   if (filters.locationId) params.set("locationId", filters.locationId);
   if (filters.status) params.set("status", filters.status);
   if (filters.company) params.set("company", filters.company);
   if (filters.assignedToUserId)
     params.set("assignedToUserId", filters.assignedToUserId);
   if (filters.ownership) params.set("ownership", filters.ownership);
+  if (filters.warranty) params.set("warranty", filters.warranty);
   if (filters.deleted) params.set("deleted", filters.deleted);
 }
 
@@ -125,6 +135,25 @@ export function downloadAssetInventoryExport(
   appendAssetFilterParams(params, filters);
   const qs = params.toString();
   return apiFetchBlob(qs ? `${BASE}/export?${qs}` : `${BASE}/export`);
+}
+
+/**
+ * The CALLER's OWN assets (`GET /assets/mine`, issue #947) — those currently assigned (live) to them.
+ * A SELF-SCOPE read: available to ANY authenticated human WITHOUT `asset:read` (the id comes from the
+ * session, never a param), so it powers the self-service `/profile` page. Returns the same lean
+ * `Page<AssetListItem>` envelope as {@link getAssets}. `limit` defaults to the API's page size.
+ */
+export function getMyAssets(
+  { limit }: { limit?: number } = {},
+  token?: string,
+): Promise<AssetListPage> {
+  const params = new URLSearchParams();
+  if (limit !== undefined) params.set("limit", String(limit));
+  const qs = params.toString();
+  return apiFetch<AssetListPage>(
+    qs ? `${BASE}/mine?${qs}` : `${BASE}/mine`,
+    { token },
+  );
 }
 
 /**

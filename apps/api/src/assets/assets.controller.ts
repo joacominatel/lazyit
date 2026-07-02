@@ -10,6 +10,7 @@ import {
   Post,
   Query,
   StreamableFile,
+  UnauthorizedException,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
@@ -29,6 +30,7 @@ import {
   AssetListPageSchema,
   AssetSchema,
   AssetStatusSchema,
+  AssetWarrantyFilterSchema,
   AssetWithRelationsSchema,
   BatchAssetStatusSchema,
   BatchIdsSchema,
@@ -36,6 +38,7 @@ import {
   CreateAssetSchema,
   UpdateAssetSchema,
   type AssetStatus,
+  type AssetWarrantyFilter,
 } from '@lazyit/shared';
 import { ASSET_SORT_ALLOWLIST } from './assets.service';
 import { AssetsService } from './assets.service';
@@ -92,6 +95,12 @@ export class AssetsController {
       'List assets (paginated; lean: model/category, location, activeAssignments — no specs). Active by default; deleted=only lists archived assets (ADMIN).',
   })
   @ApiQuery({ name: 'categoryId', required: false })
+  @ApiQuery({
+    name: 'modelId',
+    required: false,
+    description:
+      'Exact model filter (#943) — deep-linked from the asset detail page Model link. Distinct from categoryId (the broader model-category filter next to it). Invalid cuid → 400.',
+  })
   @ApiQuery({ name: 'locationId', required: false })
   @ApiQuery({
     name: 'company',
@@ -108,7 +117,7 @@ export class AssetsController {
     name: 'q',
     required: false,
     description:
-      'Case-insensitive substring match on name, serial and assetTag',
+      "Case-insensitive substring match on name, serial, assetTag, and the related model's name/manufacturer (#943)",
   })
   @ApiQuery({
     name: 'assignedToUserId',
@@ -155,6 +164,13 @@ export class AssetsController {
       'Ownership slice over LIVE assignments. HAS = assets with an active owner; NONE = unassigned. Invalid value → 400.',
   })
   @ApiQuery({
+    name: 'warranty',
+    required: false,
+    enum: [...AssetWarrantyFilterSchema.options],
+    description:
+      'Warranty-window filter (#955). expiring90d = warranty ends within the next 90 days and hasn’t lapsed (deep-linked from the dashboard tile); expired = warranty end already past. Invalid value → 400.',
+  })
+  @ApiQuery({
     name: 'deleted',
     required: false,
     enum: ['active', 'only'],
@@ -164,12 +180,14 @@ export class AssetsController {
   @ApiOkResponse({ type: AssetListPageDto })
   findAll(
     @Query('categoryId') categoryId?: string,
+    @Query('modelId') modelId?: string,
     @Query('locationId') locationId?: string,
     @Query('status') status?: string,
     @Query('company') company?: string,
     @Query('q') q?: string,
     @Query('assignedToUserId') assignedToUserId?: string,
     @Query('ownership') ownership?: string,
+    @Query('warranty') warranty?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -192,12 +210,14 @@ export class AssetsController {
     return this.assets.findPage(
       this.parseAssetFilters({
         categoryId,
+        modelId,
         locationId,
         status,
         company,
         q,
         assignedToUserId,
         ownership,
+        warranty,
       }),
       pageQuery,
     );
@@ -212,12 +232,14 @@ export class AssetsController {
    */
   private parseAssetFilters(raw: {
     categoryId?: string;
+    modelId?: string;
     locationId?: string;
     status?: string;
     company?: string;
     q?: string;
     assignedToUserId?: string;
     ownership?: string;
+    warranty?: string;
   }) {
     let parsedStatus: AssetStatus | undefined;
     if (raw.status !== undefined) {
@@ -238,8 +260,19 @@ export class AssetsController {
       }
       parsedOwnership = raw.ownership;
     }
+    let parsedWarranty: AssetWarrantyFilter | undefined;
+    if (raw.warranty !== undefined) {
+      const result = AssetWarrantyFilterSchema.safeParse(raw.warranty);
+      if (!result.success) {
+        throw new BadRequestException(
+          `Invalid warranty. Expected one of: ${AssetWarrantyFilterSchema.options.join(', ')}`,
+        );
+      }
+      parsedWarranty = result.data;
+    }
     return {
       categoryId: parseCuidQuery(raw.categoryId, 'categoryId'),
+      modelId: parseCuidQuery(raw.modelId, 'modelId'),
       locationId: parseCuidQuery(raw.locationId, 'locationId'),
       status: parsedStatus,
       company: raw.company?.trim() || undefined,
@@ -249,6 +282,7 @@ export class AssetsController {
         'assignedToUserId',
       ),
       ownership: parsedOwnership,
+      warranty: parsedWarranty,
     };
   }
 
@@ -273,6 +307,7 @@ export class AssetsController {
       'Bulk CSV export of the WHOLE filtered asset inventory (issue #872), gated on asset:read. Takes the SAME filters as GET /assets (minus paging/sort) and streams EVERY matching asset newest-first — not just the visible page. Cells are RFC-4180 escaped with a spreadsheet formula-injection guard. `deleted=only` (archived) is ADMIN-only (403 otherwise). The per-unit `specs` jsonb is not included (v1).',
   })
   @ApiQuery({ name: 'categoryId', required: false })
+  @ApiQuery({ name: 'modelId', required: false })
   @ApiQuery({ name: 'locationId', required: false })
   @ApiQuery({ name: 'company', required: false })
   @ApiQuery({
@@ -283,6 +318,11 @@ export class AssetsController {
   @ApiQuery({ name: 'q', required: false })
   @ApiQuery({ name: 'assignedToUserId', required: false })
   @ApiQuery({ name: 'ownership', required: false, enum: ['HAS', 'NONE'] })
+  @ApiQuery({
+    name: 'warranty',
+    required: false,
+    enum: [...AssetWarrantyFilterSchema.options],
+  })
   @ApiQuery({
     name: 'deleted',
     required: false,
@@ -295,23 +335,27 @@ export class AssetsController {
   })
   export(
     @Query('categoryId') categoryId?: string,
+    @Query('modelId') modelId?: string,
     @Query('locationId') locationId?: string,
     @Query('status') status?: string,
     @Query('company') company?: string,
     @Query('q') q?: string,
     @Query('assignedToUserId') assignedToUserId?: string,
     @Query('ownership') ownership?: string,
+    @Query('warranty') warranty?: string,
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
   ): StreamableFile {
     const filters = this.parseAssetFilters({
       categoryId,
+      modelId,
       locationId,
       status,
       company,
       q,
       assignedToUserId,
       ownership,
+      warranty,
     });
     // Reuse parsePageQuery ONLY for its `deleted` validation (the export is unpaginated); an invalid
     // slice → 400, then gate the privileged archived slice ADMIN-only exactly like the list (ADR-0041).
@@ -328,6 +372,60 @@ export class AssetsController {
         type: 'text/csv; charset=utf-8',
         disposition: `attachment; filename="${filename}"`,
       },
+    );
+  }
+
+  // SELF-SCOPE carve-out (issue #947) — STATIC route declared BEFORE the `:id` param route so
+  // `/assets/mine` never resolves as an id. The caller's OWN assets: those with a LIVE (releasedAt
+  // null) assignment to them, via the SAME lean list projection + `assignedToUserId` where-clause the
+  // directory list already uses. INTENTIONALLY NOT gated with `asset:read`: reading YOUR OWN rows is a
+  // self-read (like `GET /users/me`), so any authenticated HUMAN may call it — a VIEWER answers "what
+  // laptop do I have?" without the directory read. The user id is taken ONLY from the authenticated
+  // principal (never a query param), so it can never be turned into a cross-user enumeration. A SERVICE
+  // account is refused with 403 automatically: the RolesGuard is FAIL-CLOSED on an unannotated route
+  // (INV-SA-2) — a bot has no "self".
+  @Get('mine')
+  @ApiOperation({
+    summary:
+      "The caller's OWN assets — those currently assigned (live) to them. Any authenticated human; no asset:read required (a self-read, like /users/me). Service accounts 403. Paginated (ADR-0030).",
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: AssetListPageDto })
+  findMine(
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+    @CurrentUser() user?: User,
+  ) {
+    // The route is non-@Public, so a human is guaranteed in OIDC mode; in shim mode an anonymous
+    // caller has no user — surface 401 rather than silently listing nothing (mirrors /users/me).
+    if (!user) {
+      throw new UnauthorizedException('Not authenticated');
+    }
+    return this.assets.findPage(
+      { assignedToUserId: user.id },
+      parsePageQuery({ limit, offset, page }),
+      // Self-scope PROJECTION (#947 security review): narrow the inlined assignments to the caller's
+      // own row, so a co-owned asset never leaks co-assignees' identity (name + email) through this
+      // ungated self-read. The filter above picks WHICH assets; this narrows what each row inlines.
+      user.id,
     );
   }
 

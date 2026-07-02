@@ -28,6 +28,14 @@ export const DashboardAssetsSchema = z.object({
   // Distinct assets with at least one active assignment (`releasedAt = null`). An asset may hold
   // several active assignments (multi-owner); this counts the asset once.
   assigned: z.number().int().nonnegative(),
+  // Live assets whose `warrantyEnd` falls within the next `warrantyExpiringWithinDays` window and has
+  // NOT already lapsed (now < warrantyEnd <= now + N days) — the date-driven "renew or retire on time"
+  // signal (#955). Informative only; mirrors the access-grant `expiringSoon` count. Assets with no
+  // `warrantyEnd`, or one already in the past, are not counted here.
+  warrantiesExpiringSoon: z.number().int().nonnegative(),
+  // The look-ahead window (in days) used to compute `warrantiesExpiringSoon`. Echoed so the UI can
+  // label it ("≤ 90d") without hardcoding the number (WARRANTY_EXPIRING_WITHIN_DAYS).
+  warrantyExpiringWithinDays: z.number().int().positive(),
 });
 
 /** Access pillar — active grants, the soon-to-expire subset, and grants on critical apps. */

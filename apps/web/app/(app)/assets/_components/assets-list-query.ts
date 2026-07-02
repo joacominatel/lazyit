@@ -1,4 +1,9 @@
-import type { AssetStatus } from "@lazyit/shared";
+import {
+  type AssetStatus,
+  AssetStatusSchema,
+  type AssetWarrantyFilter,
+  AssetWarrantyFilterSchema,
+} from "@lazyit/shared";
 import type { AssetFilters } from "@/lib/api/endpoints/assets";
 import type { DerivedListState } from "@/lib/hooks/list-params-url";
 
@@ -12,24 +17,41 @@ import type { DerivedListState } from "@/lib/hooks/list-params-url";
  */
 
 /**
- * URL filter defaults for the assets list. `status`/`category`/`location`/`company` map to the
- * server's `status`/`categoryId`/`locationId`/`company`; `owner` maps to `assignedToUserId` (a User
- * uuid, "" = unset); `ownership` (Has/None) maps to the server `ownership` filter (#824); `archived`
- * ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
+ * URL filter defaults for the assets list. `status`/`category`/`model`/`location`/`company` map to
+ * the server's `status`/`categoryId`/`modelId`/`locationId`/`company` (`model`, #943, is the EXACT
+ * model deep-linked from the asset detail page's Model link — distinct from `category`, which maps to
+ * the model's category); `owner` maps to `assignedToUserId` (a User uuid, "" = unset); `ownership`
+ * (Has/None) maps to the server `ownership` filter (#824); `warranty` ("ALL" | "expiring90d" |
+ * "expired") maps to the server `warranty` filter (#955, deep-linked from the dashboard tile);
+ * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
  */
 export const ASSET_FILTER_DEFAULTS = {
   status: "ALL",
   category: "ALL",
+  model: "ALL",
   location: "ALL",
   company: "ALL",
   owner: "",
   ownership: "ALL",
+  warranty: "ALL",
   archived: "ALL",
 } as const;
 
-/** `useListParams` config for the assets list (defaults + first-paint sort), shared client/server. */
+/**
+ * `useListParams` config for the assets list (defaults + first-paint sort), shared client/server.
+ * `filterValidators` (#944) guards the enum-backed filters against a garbage/stale URL value (e.g. a
+ * bookmarked `?status=INVENTADO` from a renamed status): an unrecognized value is dropped back to its
+ * default at the SAME param-reading layer that derives `filters`/`query` — before it ever reaches a
+ * translation call (`t(status)` → next-intl `MISSING_MESSAGE`) or the API (which would 400 on it).
+ */
 export const ASSET_LIST_OPTIONS = {
   filters: ASSET_FILTER_DEFAULTS,
+  filterValidators: {
+    status: AssetStatusSchema.options,
+    ownership: ["HAS", "NONE"],
+    warranty: AssetWarrantyFilterSchema.options,
+    archived: ["only"],
+  },
   defaultSort: "updatedAt",
   defaultDir: "desc" as const,
 };
@@ -51,11 +73,16 @@ export function deriveAssetFilters(
     q: q || undefined,
     status: filters.status === "ALL" ? undefined : (filters.status as AssetStatus),
     categoryId: filters.category === "ALL" ? undefined : filters.category,
+    modelId: filters.model === "ALL" ? undefined : filters.model,
     locationId: filters.location === "ALL" ? undefined : filters.location,
     company: filters.company === "ALL" ? undefined : filters.company,
     assignedToUserId: filters.owner || undefined,
     ownership:
       filters.ownership === "ALL" ? undefined : (filters.ownership as "HAS" | "NONE"),
+    warranty:
+      filters.warranty === "ALL"
+        ? undefined
+        : (filters.warranty as AssetWarrantyFilter),
     sort,
     dir: sort ? dir : undefined,
     limit,

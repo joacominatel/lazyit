@@ -20,7 +20,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { Controller, type Resolver, useForm, useWatch } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { ApplicationCombobox } from "@/components/application-combobox";
 import { AssetCombobox } from "@/components/asset-combobox";
@@ -49,10 +49,12 @@ import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { useGrantAccess } from "@/lib/api/hooks/use-access-grant-mutations";
 import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { useCreateUser } from "@/lib/api/hooks/use-user-mutations";
+import { useMounted } from "@/lib/hooks/use-mounted";
 import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { ManagerField } from "./manager-field";
+import { wireShapeResolver } from "./user-form-payload";
 
 const FORM_ID = "user-create-form";
 
@@ -206,9 +208,15 @@ export function UserCreateForm() {
   const router = useRouter();
 
   // Capability flag — `requiresAdminPassword` is the bundled-Zitadel management signal (BYOI → false).
-  // Same hook the first-run wizard uses; while it loads we hold the credential section back.
-  const { data: status, isLoading: statusLoading } = useConfigStatus();
+  // Same hook the first-run wizard uses; `mounted` holds the credential section back until after
+  // hydration. `/config/status` is never prefetched for this page, so the SERVER always resolves it
+  // absent (`requiresPassword` false), but the client cache can be WARM (the auth/first-run flow reads
+  // it) and resolve it present on the FIRST client render — flipping the credential FieldSet into
+  // existence and mismatching the server tree (#939). Gating on `mounted` (false on the server and the
+  // first client render) keeps both passes identical; the section reveals on the next render.
+  const { data: status } = useConfigStatus();
   const requiresPassword = status?.requiresAdminPassword ?? false;
+  const mounted = useMounted();
 
   const createUser = useCreateUser();
   const assignUser = useAssignUser();
@@ -222,19 +230,15 @@ export function UserCreateForm() {
     password: string;
   } | null>(null);
 
-  // One resolver wraps the shared `CreateUserSchema` so it validates the wire shape (manager
-  // serialized, empties dropped, password included only on the management path). The form shape and
-  // the wire shape genuinely differ on `manager`, so the wrapped resolver is cast through `unknown` —
-  // the runtime contract (the shared schema) is what matters.
-  const baseResolver = zodResolver(CreateUserSchema);
-  const resolver: Resolver<UserCreateFormValues> = (values, context, options) =>
-    (
-      baseResolver as unknown as (
-        v: unknown,
-        c: unknown,
-        o: unknown,
-      ) => ReturnType<Resolver<UserCreateFormValues>>
-    )(toResolverInput(values, requiresPassword), context, options);
+  // `wireShapeResolver` validates against the shared `CreateUserSchema` on the wire shape (manager
+  // serialized, empties dropped, password included only on the management path) but returns the
+  // ORIGINAL form values to `onSubmit` (issue #934). Without that, RHF would hand onSubmit the
+  // resolver's parsed wire output — re-serializing `manager` (crash on `null`) and stripping the
+  // assign-at-creation fields, firing spurious assign/grant calls with `undefined` ids.
+  const resolver = wireShapeResolver<UserCreateFormValues>(
+    zodResolver(CreateUserSchema),
+    (values) => toResolverInput(values, requiresPassword),
+  );
 
   const form = useForm<UserCreateFormValues>({
     resolver,
@@ -524,7 +528,7 @@ export function UserCreateForm() {
       </FieldSet>
 
       {/* ── Credential provisioning (management path only — hidden under BYOI, ADR-0064 §4) ────── */}
-      {!statusLoading && requiresPassword ? (
+      {mounted && requiresPassword ? (
         <>
           <FieldSeparator />
           <FieldSet>

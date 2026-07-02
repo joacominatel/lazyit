@@ -1,6 +1,10 @@
 "use client";
 
-import { KeyIcon, PlusIcon } from "@heroicons/react/24/outline";
+import {
+  KeyIcon,
+  LockClosedIcon,
+  PlusIcon,
+} from "@heroicons/react/24/outline";
 import { MAX_PAGE_LIMIT, type User } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -62,6 +66,13 @@ export function ApplicationsListView() {
   const router = useRouter();
   const canWrite = useCan("application:write");
   const canDelete = useCan("application:delete");
+  // The "Active access" column joins the active-grants feed (`accessGrant:read`) against the user
+  // directory (`user:read`). A VIEWER holds neither, so both reads 403'd and the column fell back to
+  // "—" for every row — forbidden presented as nonexistent (issue #935). Gate the two lookups on the
+  // real permissions: skip the doomed fetches and render an explicit "restricted" cell instead.
+  const canReadGrants = useCan("accessGrant:read");
+  const canReadUsers = useCan("user:read");
+  const canSeeAccess = canReadGrants && canReadUsers;
   const {
     q,
     sort,
@@ -95,12 +106,12 @@ export function ApplicationsListView() {
   // counts/avatars (ADR-0020). The counts must see every active grant, so we request the hard-max
   // page (200); the Access list itself is per-application, so this dedicated count read stays
   // unpaginated.
-  const { data: activeGrantsPage } = useAccessGrants({
-    activeOnly: true,
-    limit: MAX_PAGE_LIMIT,
-  });
+  const { data: activeGrantsPage } = useAccessGrants(
+    { activeOnly: true, limit: MAX_PAGE_LIMIT },
+    { enabled: canSeeAccess },
+  );
   const activeGrants = activeGrantsPage?.items;
-  const { data: users } = useUsers();
+  const { data: users } = useUsers({ enabled: canSeeAccess });
   const deleteApplication = useDeleteApplication();
 
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(
@@ -231,6 +242,14 @@ export function ApplicationsListView() {
       : 0;
     return { count: access?.count ?? 0, granteeUsers, deactivatedGrantees };
   }
+
+  /** Shown in the access column when the caller can't read grants/users (issue #935). */
+  const accessRestricted = (
+    <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+      <LockClosedIcon className="size-3.5" aria-hidden />
+      {t("list.accessRestricted")}
+    </span>
+  );
 
   function categoryBadge(categoryId: string | null) {
     return categoryId && categoryNameById.has(categoryId) ? (
@@ -381,7 +400,9 @@ export function ApplicationsListView() {
                         {categoryBadge(application.categoryId)}
                       </ResourceCardMeta>
                       <ResourceCardMeta label={t("list.columns.activeAccess")}>
-                        {count === 0 ? (
+                        {!canSeeAccess ? (
+                          accessRestricted
+                        ) : count === 0 ? (
                           "—"
                         ) : (
                           <span className="inline-flex items-center gap-2">
@@ -468,7 +489,9 @@ export function ApplicationsListView() {
                     )}
                   </TableCell>
                   <TableCell>
-                    {count === 0 ? (
+                    {!canSeeAccess ? (
+                      accessRestricted
+                    ) : count === 0 ? (
                       <span className="text-sm text-muted-foreground">—</span>
                     ) : (
                       <div className="flex items-center gap-2">

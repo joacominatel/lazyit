@@ -44,6 +44,7 @@
   "subcategories": {
     "getting-started": {
       "introduction": "Introduction",
+      "your-profile": "Your profile",
       "initial-setup": "Initial setup",
       "users-team": "Users & team",
       "languages": "Languages"
@@ -81,7 +82,8 @@
       "vaults-members": "Vaults & members",
       "passwords-recovery-keys": "Passwords & recovery keys",
       "security-model": "Security model",
-      "secret-references": "Secret references"
+      "secret-references": "Secret references",
+      "programmatic-access": "Programmatic access"
     },
     "consumables": {
       "consumables-categories": "Consumables & categories",

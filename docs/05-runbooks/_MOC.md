@@ -29,6 +29,9 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
 - **[[deploy-self-hosted]]** — install on a single host on a real domain: the guided `infra/start.sh`
   bootstrap ([[0047-guided-first-deploy-bootstrap]]), env/secrets, Let's Encrypt, bring-up, updates, the
   bundled-Zitadel vs BYOI fork.
+- **[[releasing]]** — cut a version: release = a `dev → master` promotion (auto-tagged by
+  `release.yml`), the one-time signed `v1.0.0` seed, support/deprecation policy, and the guided
+  host update. [[0083-versioning-and-releases]] · [[0084-update-awareness-and-guided-update]].
 - **[[auth-bootstrap]]** — bring up the bundled Zitadel IdP for the prod stack: the zero-touch
   bootstrap sidecar (project / OIDC app / roles / service account, no console access), the BYOI
   path, and the manual console fallback. [[0037-idp-choice-zitadel-byoi]] · [[0043-zitadel-source-of-truth]].

@@ -8,7 +8,7 @@
 > Refreshed 2026-06-01 (post auth epic) — covered all 44 ADRs (0001–0044).
 > Refreshed 2026-06-01 (post UX northstar cycle, PRs #100–#115) — now covers all 45 ADRs (0001–0045; ADR-0045 = heroicons) + the ADR-0011/0030 amendments.
 > Refreshed 2026-06-03 (post RBAC v2 + Service-Accounts epic) — now covers all 48 ADRs (0001–0048; ADR-0046 = Roles & Permissions v2, ADR-0047 = `start.sh`, ADR-0048 = Service Accounts). Read-authorization is now CLOSED; `@Roles` retired in favor of `@RequirePermission`.
-> Refreshed 2026-07-01 (CTO memory refresh) — now covers all **81 ADRs (0001–0081)**. Added 0049–0081 as a chronological continuation block below (§"Index continued — ADRs 0049–0081"). Headline arc since 0048: async workers (BullMQ/Valkey, 0053) + Workflow Engine (0054/0055/0057) + Secret Manager zero-knowledge (0061/0065/0066/0075/0080) + Infra topology CMDB (0070/0073) + the Linux reporting agent (0074) + KB v2 folders/ACL (0059/0060) + i18n en/es (0051) + in-app Help/Manual (0062) + the "Ledger" design refactor (0077) + instance SMTP (0079, *proposed*) + the audit read surface (0081). New invariants: **INV-9** (KB folder ACL, ADR-0060) + **INV-10** (Secret Manager server-never-decrypts, ADR-0061).
+> Refreshed 2026-07-02 (CTO memory refresh) — now covers all **84 ADRs (0001–0084)**. Latest arc (0082–0084): file **attachments** (0082) + **tag-driven versioning/releases** (0083) + **update awareness & guided host update** (0084) — see the release runbook `docs/05-runbooks/releasing.md`. Added 0049–0081 as a chronological continuation block below (§"Index continued — ADRs 0049–0081"). Headline arc since 0048: async workers (BullMQ/Valkey, 0053) + Workflow Engine (0054/0055/0057) + Secret Manager zero-knowledge (0061/0065/0066/0075/0080) + Infra topology CMDB (0070/0073) + the Linux reporting agent (0074) + KB v2 folders/ACL (0059/0060) + i18n en/es (0051) + in-app Help/Manual (0062) + the "Ledger" design refactor (0077) + instance SMTP (0079, *proposed*) + the audit read surface (0081). New invariants: **INV-9** (KB folder ACL, ADR-0060) + **INV-10** (Secret Manager server-never-decrypts, ADR-0061).
 
 ---
 
@@ -600,6 +600,27 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 **Status**: accepted
 **One-liner**: a thin **reader-only** module `apps/api/src/audit/` (`AuditModule`/`Controller`/`Service` — readers live HERE, writers stay in their own modules) exposing `GET /audit/logs` (paged/filtered read of ONE source: `secret` | `permission` | `serviceAccount`, newest first), `GET /audit/logs/export` (**streamed CSV**, `StreamableFile`, never buffers), and `GET /audit/logs/filters`; all `@RequirePermission('logs:read')`.
 **CTO note**: surfaces the existing append-only audit ledgers for reading; a new `logs:read` capability; reuses the ADR-0044 / #840 CSV-export mold. Web surface at `/reports/audit`.
+
+---
+
+**ADR-0082** — *File attachments — asset docs + KB inline images*
+**Status**: accepted (2026-07-01)
+**One-liner**: one polymorphic `Attachment` (soft `entityId` ref, cuid, sha256, soft delete); blobs on a named **filesystem volume**, content-addressed `attachments/<sha[0:2]>/<sha>` + same-volume `tmp/` (atomic rename); upload = **multer diskStorage streaming** + **magic-byte sniff** + sharp re-encode in a sandboxed processor (strips EXIF, **SVG/HTML rejected**), caps 25/10 MB + `ATTACHMENTS_MAX_TOTAL_MB`; serving **API-only** with per-parent authz (404-not-403, nosniff, CSP sandbox); KB `attachment:` refs minted in the **post-sanitize rehype slot** (ADR-0029 guarantee holds by construction); 4-pin soft-delete/GC contract.
+**CTO note**: shipped backend (#906) + UX (#917) + import byte round-trip (#918). **Backup coverage DEFERRED to v1.1** (explicit CEO call — a LOUD documented DR gap). HARD constraint: `apps/web/proxy.ts` `isPublicPath` makes media-extension URLs public → content URLs end in `/content` and are served Bearer→Blob→objectURL (no token in URL). **`multer` must be an explicit `apps/api` dep** (#927 — `@types/multer` alone passes CI but crashes boot).
+
+---
+
+**ADR-0083** — *Tag-driven SemVer versioning & releases*
+**Status**: accepted (2026-07-01)
+**One-liner**: **a release = a `dev → master` promotion PR**; `release.yml` computes a prefix-derived bump SUGGESTION (feat/updt/del ⇒ minor; only fix/chore/docs ⇒ patch) + a `release:major|minor|patch` label override; **MAJOR is never auto** (operator impact); **SSH-signed tags** from a hand-seeded `v1.0.0`; version source of truth = the tag via `git describe` → build-arg → `GET /instance/version` → Settings; changelog = generated GitHub Release notes; **no committed VERSION/CHANGELOG**; CI stays push-free.
+**CTO note**: `v1.0.0` hand-seeded + signed on master 2026-07-02; from the next promotion the tag is automatic. `bun dev` always reports `dev` (no baked version). Amendments: **support = latest-only, sequential-safe jumps** (#910); **deprecate in a MINOR, remove in the next MAJOR** (#911). See runbook `docs/05-runbooks/releasing.md`.
+
+---
+
+**ADR-0084** — *Update awareness + guided host update*
+**Status**: accepted (2026-07-01)
+**One-liner**: anonymous **beacon-free** GitHub Releases check (opt-in, default OFF, fail-soft to version-display-only); weekly "N behind" email via `emit()` + ADR-0079 SMTP (de-dupe per version); **`infra/update.sh`** (start.sh sibling): lock → **mandatory verified dual pg_dump** → `git verify-tag` + checkout → missing-env FAIL LOUD (**never writes `.env.prod`**) → build-before-swap → health-gate → auto-rollback (no migration) / confirm-gated restore (migrated); the in-app ADMIN action only **enqueues an append-only `UpdateRun` + shows the command** (host writes state, API reads + boot reconciles). Security-release flag (`release:security` label → marker → `securityRelevant`) surfaced in check/email/UI (#908).
+**CTO note**: the update unit is a **git checkout + rebuild** (images build on the host, no registry) — image-swap is structurally impossible. RED LINES: no docker socket in web/api, no auto-apply, no silent DB restore, linchpins immutable. Adversarial-gated MERGE-SAFE. Version handshake (#907): agent/`lazyit-fetch` stamp their build; server surfaces "agent outdated" (MAJOR-only, warn-only).
 
 ---
 

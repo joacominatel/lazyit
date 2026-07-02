@@ -61,6 +61,11 @@ it is built to remove.
 - **Knowledge Base** — your team's articles and runbooks, organized into folders with access control.
 - **Secret Manager** — shared, end-to-end encrypted vaults for credentials your team holds in common.
 
+## Finding this Manual again
+
+While signed in, you don't need to remember this URL: open **Help** from the user menu (top right), or
+the **?** icon at the bottom of the sidebar — both open this Manual in a new tab.
+
 ## Next steps
 
 - Stand up a fresh instance: [Initial setup](/help/getting-started).

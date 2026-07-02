@@ -208,7 +208,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // it for confidential web clients. If the IdP does NOT return a refresh_token, the
       // refresh logic degrades gracefully to the existing #657 global-401 path — the
       // session is never broken by a missing refresh_token.
-      authorization: { params: { scope: "openid profile email offline_access" } },
+      // `prompt=login` forces the IdP to re-authenticate rather than reuse an existing browser
+      // session, so Zitadel skips its shared account-picker (issue #952: a brand-new employee was
+      // shown OTHER people's accounts on a machine that had prior sessions). The per-user `ui_locales`
+      // param is passed dynamically at sign-in time from the /login page (the active next-intl locale).
+      authorization: { params: { scope: "openid profile email offline_access", prompt: "login" } },
       // Map the OIDC standard claims to the Auth.js user. Fall back to
       // `preferred_username` / a `given_name + family_name` join when an IdP omits
       // the composite `name` claim, so the topbar never falls back to "—".

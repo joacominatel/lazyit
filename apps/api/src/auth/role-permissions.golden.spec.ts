@@ -31,7 +31,17 @@ const writePerms = PERMISSIONS.filter((p) => p.endsWith(':write'));
  */
 const VIEWER_DENIED_READS_EXPECTED: Permission[] = [
   'accessGrant:read',
+  'accessRequest:read', // self-service requests (ADR-0085) — who-asked-for-what is sensitive like accessGrant:read
   'user:read',
+];
+
+/**
+ * The SELF-SERVICE capabilities (ADR-0085): verbs seeded to EVERY role incl VIEWER — the only non-`:read`
+ * permissions in the MEMBER/VIEWER seed sets. Hand-listed here ON PURPOSE (the golden expectation, stated
+ * independently, not derived from the thing under test).
+ */
+const SELF_SERVICE_CAPABILITIES_EXPECTED: Permission[] = [
+  'accessRequest:create',
 ];
 
 /**
@@ -56,21 +66,24 @@ function documentedMatrix(): RolePermissionMatrix {
   // ADMIN — the COMPLETE catalog (immutable/full, ADR-0046).
   const admin = sorted([...PERMISSIONS]);
 
-  // MEMBER — all reads + all writes, MINUS the admin-only reads. No `:delete`, no coarse verb (all
-  // ADMIN-only per ADR-0040).
+  // MEMBER — all reads + all writes + the self-service capabilities, MINUS the admin-only reads. No
+  // `:delete`, no coarse verb (all ADMIN-only per ADR-0040).
   const member = sorted([
     ...readPerms.filter((p) => !ADMIN_ONLY_READS_EXPECTED.includes(p)),
     ...writePerms,
+    ...SELF_SERVICE_CAPABILITIES_EXPECTED,
   ]);
 
-  // VIEWER — all reads except the pre-tightened AND the admin-only reads; mutates nothing.
-  const viewer = sorted(
-    readPerms.filter(
+  // VIEWER — all reads except the pre-tightened AND the admin-only reads, PLUS the self-service
+  // capabilities (the only non-read verbs a VIEWER holds — raise its own access request).
+  const viewer = sorted([
+    ...readPerms.filter(
       (p) =>
         !VIEWER_DENIED_READS_EXPECTED.includes(p) &&
         !ADMIN_ONLY_READS_EXPECTED.includes(p),
     ),
-  );
+    ...SELF_SERVICE_CAPABILITIES_EXPECTED,
+  ]);
 
   return { ADMIN: admin, MEMBER: member, VIEWER: viewer };
 }
@@ -94,16 +107,21 @@ describe('RolePermission golden matrix (ADR-0046)', () => {
   });
 
   it('the matrix covers exactly the three roles (no extra/missing role key)', () => {
-    expect(new Set(Object.keys(DEFAULT_ROLE_PERMISSIONS))).toEqual(new Set(ROLES));
+    expect(new Set(Object.keys(DEFAULT_ROLE_PERMISSIONS))).toEqual(
+      new Set(ROLES),
+    );
   });
 
   it('ADMIN holds the complete catalog (immutable/full)', () => {
-    expect(new Set(DEFAULT_ROLE_PERMISSIONS.ADMIN)).toEqual(new Set(PERMISSIONS));
+    expect(new Set(DEFAULT_ROLE_PERMISSIONS.ADMIN)).toEqual(
+      new Set(PERMISSIONS),
+    );
   });
 
-  it('VIEWER is read-only and is missing the pre-tightened AND the admin-only reads', () => {
+  it('VIEWER holds only reads + the self-service capabilities, missing the pre-tightened AND admin-only reads', () => {
+    const selfService = new Set<string>(SELF_SERVICE_CAPABILITIES_EXPECTED);
     for (const p of DEFAULT_ROLE_PERMISSIONS.VIEWER) {
-      expect(p.endsWith(':read')).toBe(true);
+      expect(p.endsWith(':read') || selfService.has(p)).toBe(true);
     }
     for (const denied of [
       ...VIEWER_DENIED_READS_EXPECTED,
@@ -111,11 +129,12 @@ describe('RolePermission golden matrix (ADR-0046)', () => {
     ]) {
       expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain(denied);
     }
-    // VIEWER read count == total reads minus the pre-tightened minus the admin-only ones.
+    // VIEWER count == (total reads minus the pre-tightened minus the admin-only ones) + self-service.
     expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).toHaveLength(
       readPerms.length -
         VIEWER_DENIED_READS_EXPECTED.length -
-        ADMIN_ONLY_READS_EXPECTED.length,
+        ADMIN_ONLY_READS_EXPECTED.length +
+        SELF_SERVICE_CAPABILITIES_EXPECTED.length,
     );
   });
 
@@ -123,7 +142,9 @@ describe('RolePermission golden matrix (ADR-0046)', () => {
     const tightened = new Set<string>(VIEWER_DENIED_READS_EXPECTED);
     const adminOnly = new Set<string>(ADMIN_ONLY_READS_EXPECTED);
     for (const p of readPerms) {
-      const holders = ROLES.filter((r) => DEFAULT_ROLE_PERMISSIONS[r].includes(p));
+      const holders = ROLES.filter((r) =>
+        DEFAULT_ROLE_PERMISSIONS[r].includes(p),
+      );
       if (adminOnly.has(p)) {
         expect(new Set(holders)).toEqual(new Set(['ADMIN']));
       } else if (tightened.has(p)) {
@@ -135,21 +156,21 @@ describe('RolePermission golden matrix (ADR-0046)', () => {
   });
 
   it('logs:read is the admin-only read — ADMIN holds it, MEMBER and VIEWER do not', () => {
-    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain('logs:read' as Permission);
-    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain('logs:read' as Permission);
-    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('logs:read' as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain('logs:read');
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain('logs:read');
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('logs:read');
   });
 
   it('secret domain (ADR-0061 §7): secret:read and secret:manage are ADMIN-only — MEMBER and VIEWER hold neither', () => {
     // secret:read is an admin-only read (listed in ADMIN_ONLY_READS_EXPECTED, same posture as logs:read).
     // secret:manage is a coarse verb — neither :read nor :write — so it is ADMIN-only automatically.
     // Both are NEVER seeded to MEMBER or VIEWER (the two-layer authorization model, ADR-0061 §7).
-    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain('secret:read' as Permission);
-    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain('secret:manage' as Permission);
-    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain('secret:read' as Permission);
-    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain('secret:manage' as Permission);
-    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('secret:read' as Permission);
-    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('secret:manage' as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain('secret:read');
+    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain('secret:manage');
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain('secret:read');
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain('secret:manage');
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('secret:read');
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('secret:manage');
   });
 
   it('MEMBER never holds a :delete or a coarse capability verb', () => {

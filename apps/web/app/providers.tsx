@@ -14,6 +14,7 @@ import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { handleAuthExpiry } from "@/lib/api/handle-auth-expiry";
+import { skip4xxRetry } from "@/lib/api/retry";
 import { DEFAULT_TIME_ZONE, SHARED_FORMATS } from "@/i18n/config";
 
 function makeQueryClient() {
@@ -35,6 +36,11 @@ function makeQueryClient() {
       queries: {
         // Avoid an immediate refetch of freshly fetched/prefetched data.
         staleTime: 60 * 1000,
+        // Never auto-retry a 4xx (issues #935/#940): a 403 is a permission decision and a 404 is a
+        // missing record — both are terminal, so retrying only wastes exponential-backoff time and
+        // disguises "you can't see this" as "the API is down". Retry only transient (5xx / network)
+        // failures, up to 3 times. Wired once here so no hook needs its own `retry`.
+        retry: skip4xxRetry,
       },
     },
   });
@@ -54,6 +60,7 @@ export function Providers({
   children,
   locale,
   messages,
+  now,
   session,
 }: {
   children: React.ReactNode;
@@ -61,6 +68,14 @@ export function Providers({
   locale: string;
   /** The full message catalog for `locale`, forwarded to Client Components. */
   messages: AbstractIntlMessages;
+  /**
+   * The server-render "now", resolved once in the root layout. Seeding it here makes next-intl's
+   * `useNow()` return the SAME instant on the server and on the first client render, so relative
+   * times ("Updated 2m ago") are byte-identical across hydration instead of each pass computing its
+   * own `new Date()` — the classic relative-time hydration mismatch (#939). `useNow({ updateInterval })`
+   * still ticks forward from this seed on the client, so live relative times keep aging on their own.
+   */
+  now: Date;
   /**
    * Server-resolved Auth.js session (from `auth()` in the root layout). Seeding it here makes
    * `useSession()` return `authenticated` on the FIRST client render instead of starting in
@@ -86,6 +101,7 @@ export function Providers({
       messages={messages}
       formats={SHARED_FORMATS}
       timeZone={DEFAULT_TIME_ZONE}
+      now={now}
     >
       <SessionProvider session={session}>
         <QueryClientProvider client={queryClient}>

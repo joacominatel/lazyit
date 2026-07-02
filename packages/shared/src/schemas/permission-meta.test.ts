@@ -76,7 +76,10 @@ describe("PERMISSION_META — covering set over the catalog", () => {
       if (action === "read") expect(tier).toBe("view");
       else if (action === "write") expect(tier).toBe("edit");
       else if (action === "delete") expect(tier).toBe("delete");
-      // grant / manage are the coarse verbs
+      // `create` (the self-service accessRequest:create, ADR-0085) is a within-default mutation — `edit`
+      // tier, not coarse: it is seeded to every role, so granting it is never an escalation.
+      else if (action === "create") expect(tier).toBe("edit");
+      // grant / manage / run / task / secrets / report / fetch are the coarse verbs
       else expect(tier).toBe("coarse");
     }
   });

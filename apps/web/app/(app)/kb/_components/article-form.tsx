@@ -51,6 +51,7 @@ import {
 import { useUploadAttachment } from "@/lib/api/hooks/use-attachments";
 import { notifyError } from "@/lib/api/notify-error";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { useArticleDraft } from "../_lib/use-article-draft";
 
@@ -105,9 +106,16 @@ export function ArticleForm({ article }: { article?: Article }) {
   // `{{ lazyit_secret.HANDLE }}` chip autocomplete (ADR-0061 §8): the editor reports the partial handle,
   // we fetch matching handles (metadata only — never values) from the backend, scoped to the author's
   // vault memberships. Omit if the author has no memberships (the query returns [] gracefully).
+  // Gated on `secret:read` (issue #942 — the underlying `/secret-manager/items/handles` endpoint
+  // requires it) so a MEMBER without the permission never fires this prefetch and never eats a 403
+  // on every mount; the chip itself simply offers no suggestions for them.
+  const canReadSecrets = useCan("secret:read");
   const [chipQuery, setChipQuery] = useState<string | undefined>(undefined);
   const wikiLinkSuggestions = useArticleSlugSuggestions(wikiLinkQuery);
-  const { data: chipSuggestions } = useHandleSuggestions(chipQuery);
+  const { data: chipSuggestions } = useHandleSuggestions(
+    chipQuery,
+    canReadSecrets,
+  );
 
   // KB inline-image upload (ADR-0082 §5): paste/drop/pick uploads a raster image onto THIS article
   // and inserts an `attachment:<id>` ref. Only wired on an existing article — a brand-new draft has
@@ -200,6 +208,10 @@ export function ArticleForm({ article }: { article?: Article }) {
         },
         {
           onSuccess: (updated) => {
+            // Clear the dirty flag FIRST (issue #942): a saved form must never trip the
+            // beforeunload/leave-confirm guard, even for however brief a window the in-app
+            // navigation below takes.
+            form.reset(values);
             draft.clearDraft();
             toast.success(t("form.toast.saved"));
             router.push(`/kb/${updated.slug}`);
@@ -219,6 +231,9 @@ export function ArticleForm({ article }: { article?: Article }) {
         },
         {
           onSuccess: (created) => {
+            // Clear the dirty flag FIRST (issue #942): a successful "Create draft" must never
+            // leave the form looking unsaved, or trip beforeunload, during the navigation below.
+            form.reset(values);
             draft.clearDraft();
             toast.success(t("form.toast.draftCreated"));
             router.push(`/kb/${created.slug}`);
@@ -296,7 +311,7 @@ export function ArticleForm({ article }: { article?: Article }) {
           name="categoryId"
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid || undefined}>
-              <FieldLabel htmlFor="categoryId">
+              <FieldLabel htmlFor="categoryId" required>
                 {t("form.categoryLabel")}
               </FieldLabel>
               <CreatableField
@@ -336,7 +351,14 @@ export function ArticleForm({ article }: { article?: Article }) {
               {!hasCategories && (
                 <FieldDescription>{t("form.categoryHint")}</FieldDescription>
               )}
-              <FieldError errors={[fieldState.error]} />
+              {/* `categoryId` only ever fails its schema's `z.cuid()` check (an empty/unselected
+                  value), so the raw zod message ("Invalid cuid") is always the required case here —
+                  swap in the localized copy rather than leak it untranslated (issue #942). */}
+              <FieldError
+                errors={[
+                  fieldState.error && { message: t("form.categoryRequired") },
+                ]}
+              />
             </Field>
           )}
         />

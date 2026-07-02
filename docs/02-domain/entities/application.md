@@ -39,8 +39,9 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
 > [!note] Prior design discarded — no `type` enum, no approvers
 > An earlier draft of this note gave `Application` a hardcoded `type` enum and per-application
 > **approvers**. Both were dropped ([[0023-access-management-design]]): classification is a
-> user-managed [[application-category]] (consistent with assets/articles), and approver logic
-> belongs to the [[access-request]] workflow, which is **deferred**.
+> user-managed [[application-category]] (consistent with assets/articles), and the approval flow
+> belongs to the [[access-request]] entity — now **built** ([[0085-access-request-flow]]), though
+> **without** per-application approver chains (anyone with `accessGrant:grant` decides).
 
 > [!note] Authorization (RBAC)
 > **Grant writes are ADMIN-only** ([[0040-rbac-roles]]). **Application** create/edit are ordinary
@@ -98,8 +99,8 @@ Indexes: `@@index([categoryId])`.
 
 ## Not yet implemented (deferred)
 
-- [[access-request]] (approval workflow + approvers) — explicitly deferred
-  ([[0023-access-management-design]]).
+- Per-application **approver chains** — the [[access-request]] flow is built ([[0085-access-request-flow]]),
+  but deciding is the estate-wide `accessGrant:grant` capability, not per-app approvers.
 - `metadata` validation; a soft-delete-time guard for apps that still have active grants.
 
 Related: [[application-category]] · [[access-grant]] · [[access-request]] · [[user]] ·

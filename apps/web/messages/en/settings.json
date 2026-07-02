@@ -306,6 +306,7 @@
           "asset": "Assets",
           "application": "Applications",
           "accessGrant": "Access grants",
+          "accessRequest": "Access requests",
           "consumable": "Consumables",
           "article": "Knowledge Base",
           "location": "Locations",
@@ -568,6 +569,8 @@
       "accessGrant:write": { "label": "Edit access records (reserved)" },
       "accessGrant:delete": { "label": "Delete access records" },
       "accessGrant:grant": { "label": "Grant & revoke access" },
+      "accessRequest:create": { "label": "Request access to applications" },
+      "accessRequest:read": { "label": "See access requests" },
       "article:read": { "label": "Read the Knowledge Base" },
       "article:write": { "label": "Write & edit articles" },
       "article:delete": { "label": "Delete articles" },
@@ -634,7 +637,15 @@
       },
       "accessGrant:grant": {
         "label": "Grant & revoke access",
-        "description": "Open, revoke and edit access grants for any user — including to sensitive applications."
+        "description": "Open, revoke and edit access grants for any user — including to sensitive applications. Also approve and deny access requests."
+      },
+      "accessRequest:create": {
+        "label": "Request access",
+        "description": "Ask for access to an application (with an optional level and justification). Approving or denying the request is the separate Grant & revoke access capability."
+      },
+      "accessRequest:view": {
+        "label": "See access requests",
+        "description": "View the estate-wide list of access requests (who asked for what). A requester can always see their own requests regardless of this."
       },
       "article:view": {
         "label": "Read the Knowledge Base",

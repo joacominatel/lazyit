@@ -1,0 +1,34 @@
+{
+  "title": "Mi perfil",
+  "subtitle": "Tu identidad, los activos asignados a vos y las aplicaciones a las que podés acceder.",
+  "identity": {
+    "title": "Identidad",
+    "email": "Correo",
+    "role": "Rol",
+    "joined": "Alta"
+  },
+  "assets": {
+    "title": "Mis activos",
+    "description": "Activos actualmente asignados a vos.",
+    "empty": "No tenés activos asignados.",
+    "noModel": "Sin modelo",
+    "view": "Ver"
+  },
+  "access": {
+    "title": "Mi acceso a aplicaciones",
+    "description": "Aplicaciones a las que podés acceder.",
+    "empty": "Todavía no tenés acceso a ninguna aplicación.",
+    "granted": "Otorgado {date}",
+    "expiresSuffix": " · vence {date}",
+    "expired": "Vencido",
+    "applicationFallback": "Aplicación",
+    "view": "Ver",
+    "historyTitle": "Accesos anteriores",
+    "revokedRange": "{granted} → {revoked}"
+  },
+  "error": {
+    "title": "No se pudo cargar tu perfil",
+    "description": "Ocurrió un error al cargar tu perfil. Probá de nuevo.",
+    "retry": "Reintentar"
+  }
+}

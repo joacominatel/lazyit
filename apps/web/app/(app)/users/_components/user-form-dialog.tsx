@@ -12,7 +12,7 @@ import {
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
-import { Controller, type Resolver, useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +42,7 @@ import { ManagerField } from "./manager-field";
 import {
   toResolverInput,
   type UserFormValues,
+  wireShapeResolver,
 } from "./user-form-payload";
 
 const FORM_ID = "user-form";
@@ -106,20 +107,15 @@ export function UserFormDialog({
   const updateUser = useUpdateUser();
   const isPending = createUser.isPending || updateUser.isPending;
 
-  // The entity schema is the single source of validation truth. We wrap the zodResolver so it sees the
-  // wire-shaped payload (manager serialized, empty legajo/username dropped) instead of the loose form
-  // values — keeping field-level errors while never duplicating the legajo/username/manager rules. The
-  // wire shape and the form shape genuinely differ on `manager` (input union vs. the picker's discriminated
-  // value), so the wrapped resolver is cast through `unknown` — the runtime contract is what matters.
-  const baseResolver = zodResolver(isEdit ? UpdateUserSchema : CreateUserSchema);
-  const resolver: Resolver<UserFormValues> = (values, context, options) =>
-    (
-      baseResolver as unknown as (
-        v: unknown,
-        c: unknown,
-        o: unknown,
-      ) => ReturnType<Resolver<UserFormValues>>
-    )(toResolverInput(values), context, options);
+  // The entity schema is the single source of validation truth. `wireShapeResolver` runs the
+  // zodResolver against the wire-shaped payload (manager serialized, empty legajo/username dropped) —
+  // keeping field-level errors and never duplicating the legajo/username/manager rules — but hands the
+  // ORIGINAL loose form values back to `onSubmit` (issue #934), so onSubmit serializes the raw shape
+  // exactly once instead of re-serializing the resolver's already-wire output.
+  const resolver = wireShapeResolver<UserFormValues>(
+    zodResolver(isEdit ? UpdateUserSchema : CreateUserSchema),
+    toResolverInput,
+  );
 
   const form = useForm<UserFormValues>({
     resolver,
