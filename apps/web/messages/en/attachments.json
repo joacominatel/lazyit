@@ -1,0 +1,32 @@
+{
+  "image": {
+    "alt": "Attached image",
+    "loading": "Loading image…",
+    "broken": "Image unavailable",
+    "unavailable": "Image appears once the article is saved"
+  },
+  "paste": {
+    "insertImage": "Insert image",
+    "uploadingAlt": "uploading {name}…",
+    "saveFirst": "Save the draft first, then paste or drop images.",
+    "uploadError": "Could not upload the image."
+  },
+  "docs": {
+    "title": "Documents",
+    "upload": "Upload",
+    "hint": "PDFs, images, and Office files up to {max} MB. Drag and drop, or use Upload.",
+    "empty": "No documents yet.",
+    "loadError": "Could not load documents.",
+    "uploaded": "Uploaded \"{name}\".",
+    "uploadError": "Could not upload the file.",
+    "downloadAria": "Download {name}",
+    "downloadError": "Could not download the file.",
+    "deleteAria": "Delete {name}",
+    "deleted": "Deleted \"{name}\".",
+    "deleteError": "Could not delete the document.",
+    "deleteConfirmTitle": "Delete document?",
+    "deleteConfirmDescription": "\"{name}\" will be removed from this asset. This cannot be undone from here.",
+    "deleteCancel": "Cancel",
+    "deleteConfirm": "Delete"
+  }
+}
