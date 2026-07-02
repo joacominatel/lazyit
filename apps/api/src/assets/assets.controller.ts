@@ -392,6 +392,10 @@ export class AssetsController {
     return this.assets.findPage(
       { assignedToUserId: user.id },
       parsePageQuery({ limit, offset, page }),
+      // Self-scope PROJECTION (#947 security review): narrow the inlined assignments to the caller's
+      // own row, so a co-owned asset never leaks co-assignees' identity (name + email) through this
+      // ungated self-read. The filter above picks WHICH assets; this narrows what each row inlines.
+      user.id,
     );
   }
 
