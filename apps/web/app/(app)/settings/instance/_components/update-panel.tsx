@@ -4,6 +4,7 @@ import {
   ArrowPathIcon,
   ArrowTopRightOnSquareIcon,
   ArrowUpCircleIcon,
+  ShieldExclamationIcon,
 } from "@heroicons/react/24/outline";
 import type { UpdateRun, UpdateRunStatus } from "@lazyit/shared";
 import { isActiveUpdateRun } from "@lazyit/shared";
@@ -78,6 +79,8 @@ export function UpdatePanel() {
   const activeRun = data?.activeRun ?? null;
   const behindBy = data?.behindBy ?? 0;
   const isBehind = behindBy > 0 && !!data?.latestVersion;
+  // A security-relevant gap (issue #908) — a distinct, louder badge + a callout that says click-now.
+  const isSecurity = isBehind && (data?.securityRelevant ?? false);
   const runInFlight = !!activeRun && isActiveUpdateRun(activeRun.status);
 
   // The command the operator runs on the host once a run is enqueued (ADR-0084 §4).
@@ -114,6 +117,12 @@ export function UpdatePanel() {
       return (
         <StatusBadge tone="neutral" dot>
           {t("state.notChecked")}
+        </StatusBadge>
+      );
+    if (isSecurity)
+      return (
+        <StatusBadge tone="danger" dot>
+          {t("state.securityBehind", { count: behindBy })}
         </StatusBadge>
       );
     if (isBehind)
@@ -232,6 +241,22 @@ export function UpdatePanel() {
                     {t("command.reconnecting")}
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* Security emphasis (issue #908): a distinct danger-toned callout when the gap contains a
+                security-marked release, so the update reads as click-now rather than schedule-for-later. */}
+            {isSecurity && !runInFlight && (
+              <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+                <ShieldExclamationIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-destructive">
+                    {t("security.title")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t("security.description")}
+                  </p>
+                </div>
               </div>
             )}
 
