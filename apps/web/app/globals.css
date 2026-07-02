@@ -182,7 +182,14 @@
   --destructive-text: oklch(0.49 0.195 30);
   --border: oklch(0.88 0 0);
   --input: oklch(0.88 0 0);
-  --ring: var(--brand);
+  /* Focus ring (issue #945): NEUTRAL, not brand. It used to alias --brand, which put the same
+     saturated oxblood on a plain focused field AND on an aria-invalid one — a focused Title input
+     was visually indistinguishable from a failed-validation one. Reuses --muted-foreground's
+     lightness (0.45), already AA-legible as text elsewhere, comfortably clearing the 3:1 non-text
+     UI-component bar (WCAG 1.4.11) at ring/50 against the paper canvas. Saturated red stays
+     EXCLUSIVE to aria-invalid:ring-destructive, so "focused" and "invalid" read as different states.
+     --sidebar-ring is untouched (no invalid state there to collide with). */
+  --ring: oklch(0.45 0 0);
   /* Categorical data ramp (ADR-0077) — 5 hues DECOUPLED from the brand (oxblood ~25) and from
      --verify (green ~162): blue 255 · amber 80 · violet 300 · cyan 200 · magenta 335. The ramp
      deliberately vacates the red and green bands so no data color reads as "brand" or "verified",
@@ -286,7 +293,9 @@
   /* Neutral hairlines: a solid mid-gray rule against the carbon canvas (chroma 0, ADR-0077). */
   --border: oklch(0.32 0 0);
   --input: oklch(0.32 0 0);
-  --ring: var(--brand);
+  /* Focus ring (issue #945), dark: same neutral treatment as light — --muted-foreground's
+     lightness (0.7), legible against the carbon canvas without borrowing the invalid-state red. */
+  --ring: oklch(0.7 0 0);
   --chart-1: oklch(0.64 0.16 255);
   --chart-2: oklch(0.82 0.14 80);
   --chart-3: oklch(0.62 0.17 300);
@@ -527,6 +536,37 @@
     border-radius: 9999px;
     background-color: var(--border);
   }
+}
+
+/* Horizontal scroll-shadow hint (issue #945). A narrow viewport (e.g. ~1280px) can clip a wide
+   ResourceTable's trailing columns ("Updated", "Owners") with zero affordance that more content
+   is one scroll away — `Table`'s container already scrolls (`overflow-x-auto`), it just never
+   said so. Pure CSS, no JS: the classic four-layer trick (Lea Verou) — two `local`-attachment
+   "cover" gradients that scroll WITH the content and erase the two `scroll`-attachment shadow
+   gradients (fixed to the viewport) whenever that edge is fully scrolled-to, so a shadow only
+   ever shows on the side that still has clipped content. `--background`-matched cover color
+   keeps it invisible against the page canvas in both themes; the shadow itself is `--foreground`
+   mixed to a low alpha (the same `color-mix` pattern the RF minimap mask uses below) so it's dark
+   ink on the light canvas and light ink on the carbon canvas — a flat black would vanish in dark
+   mode. */
+@utility scroll-shadow-x {
+  --scroll-shadow-ink: color-mix(in oklab, var(--foreground) 14%, transparent);
+  background:
+    linear-gradient(to right, var(--background) 40%, transparent) local,
+    linear-gradient(to left, var(--background) 40%, transparent) local,
+    linear-gradient(to right, var(--scroll-shadow-ink), transparent) scroll,
+    linear-gradient(to left, var(--scroll-shadow-ink), transparent) scroll;
+  background-repeat: no-repeat;
+  background-size:
+    24px 100%,
+    24px 100%,
+    10px 100%,
+    10px 100%;
+  background-position:
+    0 0,
+    100% 0,
+    0 0,
+    100% 0;
 }
 
 /* The single source of truth for reduced-motion. Lands FIRST in the Wave-0 series so

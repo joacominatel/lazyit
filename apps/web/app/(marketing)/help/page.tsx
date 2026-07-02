@@ -41,31 +41,43 @@ export default async function HelpIndexPage() {
                 {t(`categories.${category.category}` as never)}
               </h2>
               <div className="flex flex-col gap-5">
-                {category.subcategories.map((subcategory) => (
-                  <div
-                    key={subcategory.subcategory}
-                    className="flex flex-col gap-2"
-                  >
-                    <h3 className="text-xs font-medium text-muted-foreground/80">
-                      {t(
-                        `subcategories.${category.category}.${subcategory.subcategory}` as never,
-                      )}
-                    </h3>
-                    <ul className="flex flex-col gap-1">
-                      {subcategory.pages.map((page) => (
-                        <li key={page.slug}>
-                          <Link
-                            href={`/help/${page.slug}`}
-                            // ponytail: neutral resting links (oxblood stays reserved); the accent + underline land on hover only, so the index isn't a wall of brand color.
-                            className="text-sm font-medium text-foreground underline-offset-2 transition-colors hover:text-primary hover:underline"
-                          >
-                            {page.frontmatter.title}
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
+                {category.subcategories.map((subcategory) => {
+                  const subcategoryLabel = t(
+                    `subcategories.${category.category}.${subcategory.subcategory}` as never,
+                  );
+                  // A single-page subcategory's label is almost always the page's own title
+                  // (e.g. subcategory "introduction" → "Introduction", page title "Introduction").
+                  // Rendering both stacked the same text twice (#945); skip the redundant grey
+                  // label in that case and let the link stand on its own.
+                  const showLabel =
+                    subcategory.pages.length > 1 ||
+                    subcategory.pages[0]?.frontmatter.title !== subcategoryLabel;
+                  return (
+                    <div
+                      key={subcategory.subcategory}
+                      className="flex flex-col gap-2"
+                    >
+                      {showLabel ? (
+                        <h3 className="text-xs font-medium text-muted-foreground/80">
+                          {subcategoryLabel}
+                        </h3>
+                      ) : null}
+                      <ul className="flex flex-col gap-1">
+                        {subcategory.pages.map((page) => (
+                          <li key={page.slug}>
+                            <Link
+                              href={`/help/${page.slug}`}
+                              // ponytail: neutral resting links (oxblood stays reserved); the accent + underline land on hover only, so the index isn't a wall of brand color.
+                              className="text-sm font-medium text-foreground underline-offset-2 transition-colors hover:text-primary hover:underline"
+                            >
+                              {page.frontmatter.title}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}

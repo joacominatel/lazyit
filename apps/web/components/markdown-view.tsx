@@ -200,6 +200,10 @@ export function MarkdownView({
         "prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-pretty",
         "prose-a:font-medium prose-a:text-primary prose-a:underline-offset-2",
         "prose-pre:bg-muted prose-pre:text-foreground",
+        // GFM task list (issue #945): Typography's default `<li>` marker still applies to a
+        // checkbox item, so "- [ ] Todo" rendered a bullet AND the checkbox ("• ☐"). The checkbox
+        // itself is the marker — drop the disc on any `<li>` that has one.
+        "[&_li:has(input[type=checkbox])]:list-none",
         className,
       )}
     >
