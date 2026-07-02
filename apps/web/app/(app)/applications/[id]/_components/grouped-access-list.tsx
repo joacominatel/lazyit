@@ -99,7 +99,9 @@ export function GroupedAccessList({
         <p className="text-sm text-muted-foreground">
           {search.trim()
             ? t("detail.accessSearchEmpty")
-            : t("detail.noActiveGrants")}
+            : canGrant
+              ? t("detail.noActiveGrants")
+              : t("detail.noActiveGrantsRequest")}
         </p>
       ) : (
         <ul className="divide-y">
