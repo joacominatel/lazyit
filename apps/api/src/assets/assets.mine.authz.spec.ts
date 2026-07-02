@@ -133,14 +133,78 @@ describe('GET /assets/mine — self-scope carve-out authZ (#947)', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual(page);
     // The where-clause is pinned to the CALLER's id — this is what makes it a self-read, not a
-    // cross-user enumeration. It can never return another user's assets.
+    // cross-user enumeration. It can never return another user's assets. The third arg is the
+    // SELF-SCOPE projection override (#947 security review): the service narrows the inlined
+    // assignments join to the caller's own row, so co-assignees' identity never rides along.
     expect(findPage).toHaveBeenCalledTimes(1);
     expect(findPage).toHaveBeenCalledWith(
       { assignedToUserId: 'viewer-1' },
       expect.anything(),
+      'viewer-1',
     );
     // The `mine` static route won over `:id` — the single-asset read was never invoked.
     expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it("never includes another user's identity in the response — the projection is self-scoped (#947 security review)", async () => {
+    // Emulate the REAL findPage contract for a CO-OWNED asset: the third (selfUserId) arg narrows
+    // the inlined assignments to the caller's own row (assetMineListSelect — the actual narrowing is
+    // proven at the service layer in assets.service.spec.ts). If the controller ever stopped passing
+    // the scope, the co-assignee's row (name + email) would survive the emulation and the negative
+    // assertions below would fail — the wire-level regression guard for the PII leak.
+    const coOwnedAssignments = [
+      {
+        id: 'as1',
+        userId: 'viewer-1',
+        user: {
+          id: 'viewer-1',
+          firstName: 'Vera',
+          lastName: 'Viewer',
+          email: 'vera@corp.io',
+          deletedAt: null,
+        },
+      },
+      {
+        id: 'as2',
+        userId: 'other-1',
+        user: {
+          id: 'other-1',
+          firstName: 'Otto',
+          lastName: 'Other',
+          email: 'otto@corp.io',
+          deletedAt: null,
+        },
+      },
+    ];
+    findPage.mockImplementation(
+      (_filters: unknown, _page: unknown, selfUserId?: string) =>
+        Promise.resolve({
+          items: [
+            {
+              id: 'a1',
+              name: 'Shared workstation',
+              activeAssignments: coOwnedAssignments.filter(
+                (a) => selfUserId === undefined || a.userId === selfUserId,
+              ),
+            },
+          ],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        }),
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/assets/mine')
+      .set('X-Test-Role', 'VIEWER')
+      .set('X-Test-User-Id', 'viewer-1');
+
+    expect(res.status).toBe(200);
+    const body = JSON.stringify(res.body);
+    // The caller's own identity is fine to return; the co-assignee's must NEVER appear.
+    expect(body).toContain('vera@corp.io');
+    expect(body).not.toContain('otto@corp.io');
+    expect(body).not.toContain('Otto');
   });
 
   it('refuses a SERVICE account with 403 and never reaches the service (fail-closed, INV-SA-2)', async () => {
