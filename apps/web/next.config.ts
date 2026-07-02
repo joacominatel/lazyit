@@ -71,6 +71,18 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
+
+  // Bulk import lives at `/imports` (issue #940). `/assets/import` used to resolve as the asset
+  // DETAIL route with id="import" — a doomed `GET /assets/import` that 404'd (and, pre-#935, looped
+  // on retry). Redirect the intuitive paths to the real page at the platform level (native Next.js
+  // redirect) so the mistaken URL never reaches the detail view. Permanent (308): these are stable
+  // canonical destinations, not a temporary move.
+  async redirects() {
+    return [
+      { source: "/assets/import", destination: "/imports", permanent: true },
+      { source: "/import", destination: "/imports", permanent: true },
+    ];
+  },
 };
 
 // i18n (next-intl, cookie-mode — ADR-0051). The plugin points at the request config that

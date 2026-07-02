@@ -14,6 +14,7 @@ import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { handleAuthExpiry } from "@/lib/api/handle-auth-expiry";
+import { skip4xxRetry } from "@/lib/api/retry";
 import { DEFAULT_TIME_ZONE, SHARED_FORMATS } from "@/i18n/config";
 
 function makeQueryClient() {
@@ -35,6 +36,11 @@ function makeQueryClient() {
       queries: {
         // Avoid an immediate refetch of freshly fetched/prefetched data.
         staleTime: 60 * 1000,
+        // Never auto-retry a 4xx (issues #935/#940): a 403 is a permission decision and a 404 is a
+        // missing record — both are terminal, so retrying only wastes exponential-backoff time and
+        // disguises "you can't see this" as "the API is down". Retry only transient (5xx / network)
+        // failures, up to 3 times. Wired once here so no hook needs its own `retry`.
+        retry: skip4xxRetry,
       },
     },
   });
