@@ -78,6 +78,8 @@
     "boundaryTitle": "Something went wrong",
     "boundaryDescription": "An unexpected error occurred while loading this page.",
     "stateDescription": "The API may be down or unreachable.",
+    "forbiddenTitle": "You don't have access to this",
+    "forbiddenDescription": "Your role doesn't include permission to view this. Ask an administrator if you think you should have access.",
     "tryAgain": "Try again",
     "retry": "Retry",
     "requestId": "Request ID",
