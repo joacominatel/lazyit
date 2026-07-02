@@ -1,4 +1,8 @@
 {
+  "gate": {
+    "title": "User management is admin-only",
+    "description": "Creating and onboarding users needs the user:manage permission, granted to administrators by default. Ask an administrator if you need to add someone."
+  },
   "list": {
     "title": "Users",
     "subtitle": "The people in your organization.",

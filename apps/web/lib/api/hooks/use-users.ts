@@ -42,13 +42,16 @@ export const userKeys = {
  * paging. Returns just `items` so the existing `User[]` consumers are unchanged — but `select` warns
  * (dev) when the directory exceeds the cap so the truncation is never silent (issue #508).
  */
-export function useUsers() {
+export function useUsers({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: userKeys.lists(),
     queryFn: ({ signal }) => getUsers({ limit: MAX_PAGE_LIMIT }, signal),
     // Pin the element generic: with the queryFn now taking the context arg, TanStack's overload no
     // longer back-infers the page item type into `select`, so name it to keep `data` as UserListItem[].
     select: selectDirectoryItems<UserListItem>("users"),
+    // Skip the directory fetch when the caller lacks `user:read` (would 403 — issue #935); callers
+    // that never gate simply omit the option and keep the eager default.
+    enabled,
   });
 }
 

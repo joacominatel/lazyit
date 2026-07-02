@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { UserMultiSelect } from "@/components/user-multi-select";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useAssets } from "@/lib/api/hooks/use-assets";
 import { useSetFolderAccessRules } from "@/lib/api/hooks/use-folder-access-rules";
@@ -227,7 +228,6 @@ export function FolderAccessRuleEditor({
           {!isPublic && <Separator className="my-2" />}
           <AddRuleRow
             existingRules={rules ?? []}
-            users={users ?? []}
             applications={applications ?? []}
             assets={assets}
             onAdd={addRule}
@@ -363,13 +363,11 @@ function ruleLabel(
 // ──────────────────────────────────────────────────────────────────────────────
 // Add-rule row — a two-step picker: choose kind, then choose the subject
 
-type User = { id: string; firstName: string; lastName: string };
 type Application = { id: string; name: string };
 type AssetItem = { id: string; name: string };
 
 type AddRuleRowProps = {
   existingRules: FolderAccessRule[];
-  users: User[];
   applications: Application[];
   assets: AssetItem[];
   onAdd: (rule: FolderAccessRule) => void;
@@ -430,7 +428,6 @@ function addRuleReducer(
 
 function AddRuleRow({
   existingRules,
-  users,
   applications,
   assets,
   onAdd,
@@ -543,12 +540,14 @@ function AddRuleRow({
 
       {/* Subject selector — rendered after a kind is chosen */}
       {state.kind === "users" ? (
-        <UserMultiPick
-          users={users}
+        <UserMultiSelect
+          label={t("access.kindUsers")}
           selected={state.selectedUserIds}
           onChange={(userIds) => dispatch({ type: "userIdsChanged", userIds })}
           disabled={disabled}
-          t={t}
+          searchPlaceholder={t("access.searchUsers")}
+          emptyText={t("access.noUsersFound")}
+          className="w-full"
         />
       ) : state.kind === "role" ? (
         <Select
@@ -645,63 +644,3 @@ function AddRuleRow({
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// UserMultiPick — a simple checkbox-list for picking explicit users
-
-function UserMultiPick({
-  users,
-  selected,
-  onChange,
-  disabled,
-  t,
-}: {
-  users: User[];
-  selected: string[];
-  onChange: (next: string[]) => void;
-  disabled: boolean;
-  t: ReturnType<typeof useTranslations<"kb">>;
-}) {
-  const selectedSet = useMemo(() => new Set(selected), [selected]);
-
-  function toggle(id: string) {
-    if (selectedSet.has(id)) {
-      onChange(selected.filter((v) => v !== id));
-    } else {
-      onChange([...selected, id]);
-    }
-  }
-
-  if (users.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground">{t("access.noUsers")}</p>
-    );
-  }
-
-  return (
-    <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border border-border bg-muted/20 p-1.5">
-      {users.map((user) => {
-        const checked = selectedSet.has(user.id);
-        return (
-          <label
-            key={user.id}
-            className={cn(
-              "flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs transition-colors hover:bg-accent/50",
-              disabled && "pointer-events-none opacity-50",
-            )}
-          >
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={() => toggle(user.id)}
-              disabled={disabled}
-              className="size-3 rounded accent-primary"
-            />
-            <span className="truncate">
-              {user.firstName} {user.lastName}
-            </span>
-          </label>
-        );
-      })}
-    </div>
-  );
-}

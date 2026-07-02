@@ -78,6 +78,8 @@
     "boundaryTitle": "Algo salió mal",
     "boundaryDescription": "Ocurrió un error inesperado al cargar esta página.",
     "stateDescription": "Es posible que la API esté caída o inaccesible.",
+    "forbiddenTitle": "No tenés acceso a esto",
+    "forbiddenDescription": "Tu rol no incluye permiso para ver esto. Consultá con un administrador si creés que deberías tener acceso.",
     "tryAgain": "Reintentar",
     "retry": "Reintentar",
     "requestId": "ID de solicitud",

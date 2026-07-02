@@ -153,7 +153,15 @@ const NAV: NavSection[] = [
     pillar: "knowledge",
     items: [
       { labelKey: "knowledgeBase", href: "/kb", icon: BookOpenIcon },
-      { labelKey: "secrets", href: "/secrets", icon: LockClosedIcon },
+      // Secrets → `secret:read` (ADMIN-only by default, ADR-0061): even list/metadata access to vaults
+      // is sensitive, so a MEMBER/VIEWER without the grant would hit a dead-end. Hide the link rather
+      // than route them to a locked state from primary nav (#936). Fails closed while loading.
+      {
+        labelKey: "secrets",
+        href: "/secrets",
+        icon: LockClosedIcon,
+        permission: "secret:read",
+      },
     ],
   },
   {
@@ -182,7 +190,15 @@ const NAV: NavSection[] = [
     headingKey: "manage",
     pillar: "manage",
     items: [
-      { labelKey: "users", href: "/users", icon: UsersIcon },
+      // Users → `user:read` (VIEWER-denied, ADR-0046): the directory (emails, roles, IdP linkage) is
+      // sensitive, so a VIEWER can't list it — showing the link guaranteed a click into a 403. Hide it
+      // for anyone without `user:read` (#936). Fails closed while loading.
+      {
+        labelKey: "users",
+        href: "/users",
+        icon: UsersIcon,
+        permission: "user:read",
+      },
       {
         labelKey: "settings",
         href: "/settings",

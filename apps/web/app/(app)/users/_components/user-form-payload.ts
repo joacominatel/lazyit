@@ -1,7 +1,8 @@
 /**
- * Pure form-to-wire glue for UserFormDialog (ADR-0058). Extracted so the mapping logic can be
- * unit-tested without mounting the React component. Nothing here talks to the network or React —
- * deterministic mappers over plain values only.
+ * Pure form-to-wire glue for the user create/edit forms (ADR-0058). Extracted so the mapping logic
+ * — and the resolver wrapper that keeps the loose form shape flowing to `onSubmit` (issue #934) —
+ * can be unit-tested without mounting a React component. Nothing here talks to the network or has any
+ * React runtime; the react-hook-form import is types-only (erased at build).
  *
  * The form keeps `legajo` / `username` as plain strings (empty = "not set") and `manager` as the
  * XOR {@link ManagerFormValue} discriminated union; the entity schemas expect optional normalized
@@ -11,6 +12,7 @@
  * surfaces field-level errors natively.
  */
 
+import type { FieldValues, Resolver, ResolverResult } from "react-hook-form";
 import {
   type ManagerFormValue,
   toManagerInput,
@@ -51,4 +53,41 @@ export function toResolverInput(values: UserFormValues): Record<string, unknown>
   if (values.username.trim() !== "") out.username = values.username;
   if (values.isActive !== undefined) out.isActive = values.isActive;
   return out;
+}
+
+/**
+ * Wrap a `zodResolver` so it VALIDATES the wire shape but returns the ORIGINAL form values to
+ * react-hook-form on success (issue #934).
+ *
+ * `zodResolver` returns its PARSED output as `values`, and RHF forwards the resolver's `values` — not
+ * the raw form values — to `onSubmit`. Feeding the resolver the already-serialized wire payload
+ * therefore made `onSubmit` receive the wire shape and serialize it a SECOND time (manager already
+ * `null`/`{managerId}`, optionals stripped), which crashed (`toManagerInput(null)` reads `.kind` of
+ * `null`) and, for edits, silently cleared the manager. Returning the original form values keeps
+ * validation on the wire shape while handing `onSubmit` the loose shape it expects. Field-level
+ * errors pass through untouched; a failed validation yields empty `values` per the RHF contract.
+ */
+export function wireShapeResolver<TValues extends FieldValues>(
+  // Any `zodResolver(schema)`: its parsed-output type is the wire shape (narrower than the loose form
+  // shape) and genuinely differs on `manager`. `never`-position params let this accept any such
+  // resolver; the wire payload we feed it is bridged by the cast below (same escape hatch the inline
+  // wrappers used) — the runtime contract (the shared schema) is what actually validates.
+  base: (
+    values: never,
+    context: never,
+    options: never,
+  ) => ResolverResult | Promise<ResolverResult>,
+  toWire: (values: TValues) => Record<string, unknown>,
+): Resolver<TValues> {
+  const validate = base as unknown as (
+    values: Record<string, unknown>,
+    context: unknown,
+    options: unknown,
+  ) => Promise<ResolverResult>;
+  return async (values, context, options) => {
+    const result = await validate(toWire(values), context, options);
+    return Object.keys(result.errors).length
+      ? { values: {}, errors: result.errors as ResolverResult<TValues>["errors"] }
+      : { values, errors: {} };
+  };
 }

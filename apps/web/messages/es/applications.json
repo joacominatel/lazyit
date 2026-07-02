@@ -20,6 +20,7 @@
       "actions": "Acciones"
     },
     "criticalBadge": "Crítica",
+    "accessRestricted": "Restringido",
     "chips": {
       "search": "Búsqueda: “{q}”",
       "category": "Categoría: {name}",

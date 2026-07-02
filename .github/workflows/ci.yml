@@ -153,6 +153,24 @@ jobs:
       - name: Build all workspaces
         run: bunx turbo build --cache-dir=.turbo
 
+      # Boot smoke (#929): require the COMPILED entrypoint so every module file's top-level import
+      # executes — the whole static require graph (AppModule → every feature module → its
+      # controllers/services → their package imports), exactly what `nest start` loads before
+      # NestFactory.create. A package imported at a module's top level but MISSING from apps/api
+      # dependencies (its types satisfied by an `@types/*` devDependency alone) throws
+      # MODULE_NOT_FOUND here and fails CI, instead of crashing the API at prod boot. This closes the
+      # #927 gap: `multer` was declared only via `@types/multer`, so tsc + the unit suite + the image
+      # build all passed, yet boot died on attachments/attachment-upload.storage's `import 'multer'`.
+      #   Run with node (not bun): the API runtime is a Node process (`nest start`), so we reproduce
+      # its exact module resolution — same as the "Test API" step invoking jest with node above.
+      #   `require.main === module` guards bootstrap() in main.ts, so require() runs the import graph
+      # WITHOUT calling bootstrap: no port bind, no Postgres/Valkey/Meilisearch connection (~1s).
+      #   Reuses apps/api/dist from the build step above (turbo `build` output `dist/**`, restored
+      # even on a cache hit; the generated Prisma client rides in via the `db:generate` output).
+      - name: API boot smoke (module graph)
+        working-directory: apps/api
+        run: node -e "require('./dist/src/main.js')"
+
       # Verify the Help/Manual en↔es parity invariant (ADR-0062 §4 / CLAUDE.md rule #7).
       # Exits 1 when any slug exists in one locale tree but lacks a counterpart in the other.
       # No DB or generated client needed — pure filesystem check. Resolves #589.

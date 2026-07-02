@@ -47,7 +47,16 @@ Repo facts that shape the pipeline:
   setup-bun `1.3.14` → cache `~/.bun/install/cache` (key on `bun.lock`) →
   `bun install --frozen-lockfile` → build `@lazyit/shared` → **`prisma generate`** (in `apps/api`)
   → typecheck (`tsc --noEmit` per workspace) → **lint** (see below) → test (api Jest, no DB; shared
-  `bun test`) → `turbo build`.
+  `bun test`) → `turbo build` → **API boot smoke** (see below).
+- **API boot smoke (#929).** After `turbo build`, `node -e "require('./dist/src/main.js')"` in
+  `apps/api` requires the compiled entrypoint, so every module file's top-level import runs — the
+  full `AppModule` require graph, exactly what `nest start` loads before `NestFactory.create`. A
+  package imported at a module's top level but **missing from `apps/api` dependencies** (its types
+  satisfied by an `@types/*` devDependency alone) throws `MODULE_NOT_FOUND` and fails CI instead of
+  crashing the API at prod boot — the gap that let #927's undeclared `multer` pass tsc + Jest + the
+  image build. The `require.main === module` guard in `main.ts` means `require()` does **not** call
+  `bootstrap()`: no port bind, no Postgres/Valkey/Meilisearch connection (~1s). Run with `node`
+  (not `bun`) to match the Node runtime `nest start` uses.
 - **Lint is two-tier (#591).** Full-repo `eslint .` per app is **report-only**
   (`continue-on-error: true`) because the codebase is not yet eslint-clean — it keeps the legacy
   backlog visible without failing CI. A separate **blocking** "Lint changed files" step lints
