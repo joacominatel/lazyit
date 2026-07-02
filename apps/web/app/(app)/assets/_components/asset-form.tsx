@@ -20,7 +20,7 @@ import {
 } from "@lazyit/shared";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useReducer } from "react";
+import { useReducer, useState } from "react";
 import { Controller, type Resolver, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { LocationFormDialog } from "@/app/(app)/locations/_components/location-form-dialog";
@@ -29,12 +29,17 @@ import { Callout } from "@/components/callout";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { LocationCombobox } from "@/components/location-combobox";
+import { UserCombobox } from "@/components/user-combobox";
 import { Button } from "@/components/ui/button";
 import {
   Field,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
+  FieldLegend,
+  FieldSeparator,
+  FieldSet,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -50,6 +55,7 @@ import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
 import { useAssetTagScheme } from "@/lib/api/hooks/use-asset-tag-scheme";
 import { useAssetCompanies } from "@/lib/api/hooks/use-assets";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
+import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { notifyError } from "@/lib/api/notify-error";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { useAssetStatusLabel } from "./asset-status-badge";
@@ -200,7 +206,14 @@ export function AssetForm({
   const statusLabel = useAssetStatusLabel();
   const createAsset = useCreateAsset();
   const updateAsset = useUpdateAsset();
+  const assignUser = useAssignUser();
   const isPending = createAsset.isPending || updateAsset.isPending;
+
+  // Optional "assign an owner at creation" (issue #951) — CREATE only. Kept OUTSIDE react-hook-form
+  // because `CreateAssetSchema` is a `strictObject` (an extra key would fail validation) and the
+  // assignment fans out to its own endpoint after the asset exists — same shape as the /users/new
+  // head start. The custom-field rows already live outside RHF here, so this follows the house pattern.
+  const [assignToUserId, setAssignToUserId] = useState("");
 
   // Asset-tag scheme hint (ADR-0063, #363): on CREATE, when the org enabled an auto-tag scheme, hint the
   // next auto-generated tag as the `assetTag` placeholder so the operator knows leaving it blank
@@ -301,7 +314,7 @@ export function AssetForm({
   };
 
   const onSubmit = form.handleSubmit(
-    (values) => {
+    (values, event) => {
       // Validate the custom-field rows (non-empty + unique names); abort on any error.
       const { errors, ok } = validateRows(specState.rows);
       dispatchSpec({ type: "errorsSet", errors });
@@ -345,9 +358,51 @@ export function AssetForm({
           },
         );
       } else {
+        // Which submit button fired? The "Create & add another" button tags itself via a data
+        // attribute; read it off the native SubmitEvent's `submitter` (no render-time ref needed).
+        const submitter = (event?.nativeEvent as SubmitEvent | undefined)
+          ?.submitter;
+        const addAnother =
+          submitter instanceof HTMLElement &&
+          submitter.dataset.submitIntent === "add-another";
         createAsset.mutate(payload, {
-          onSuccess: (created) => {
+          onSuccess: async (created) => {
             toast.success(t("createdToast"));
+
+            // Best-effort owner assignment (mirrors /users/new head start, ADR-0064 §1): a failed
+            // assignment NEVER un-creates the asset — it surfaces as a non-blocking warning toast.
+            if (assignToUserId) {
+              try {
+                await assignUser.mutateAsync({
+                  assetId: created.id,
+                  userId: assignToUserId,
+                });
+                toast.success(t("assignedToast"));
+              } catch (error) {
+                notifyError(error, t("assignError"));
+              }
+            }
+
+            if (addAnother) {
+              // Keep the shared context (model → category, location, company, status + the batch
+              // dates) and clear the per-unit identity (name/serial/tag/notes) for the next entry.
+              // Specs are left as-is — a same-model batch usually shares them.
+              form.reset({
+                name: "",
+                status: values.status,
+                modelId: values.modelId,
+                locationId: values.locationId,
+                company: values.company,
+                serial: undefined,
+                assetTag: undefined,
+                purchaseDate: values.purchaseDate,
+                warrantyEnd: values.warrantyEnd,
+                notes: undefined,
+              });
+              setAssignToUserId("");
+              form.setFocus("name");
+              return;
+            }
             router.push(`/assets/${created.id}`);
           },
           onError: (error) => notifyError(error, t("createError")),
@@ -655,6 +710,35 @@ export function AssetForm({
         ) : null}
       </FieldGroup>
 
+      {/* ── Head start (CREATE only): optionally assign the first owner in the same step (issue #951).
+          Ownership stays a separate AssetAssignment write (asset-centric — never a column), so this
+          just seeds it; leaving it blank keeps today's "assign later" flow. ─────────────────────── */}
+      {!isEdit ? (
+        <>
+          <FieldSeparator />
+          <FieldSet>
+            <FieldLegend>{t("headStart.title")}</FieldLegend>
+            <FieldDescription>{t("headStart.description")}</FieldDescription>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="assignToUserId">
+                  {t("headStart.assignLabel")}
+                </FieldLabel>
+                <UserCombobox
+                  id="assignToUserId"
+                  value={assignToUserId || undefined}
+                  onValueChange={setAssignToUserId}
+                  placeholder={t("headStart.assignPlaceholder")}
+                  searchPlaceholder={t("headStart.assignSearch")}
+                  emptyText={t("headStart.assignEmpty")}
+                />
+                <FieldDescription>{t("headStart.assignHelp")}</FieldDescription>
+              </Field>
+            </FieldGroup>
+          </FieldSet>
+        </>
+      ) : null}
+
       <div className="flex justify-end gap-2">
         <Button
           type="button"
@@ -664,6 +748,19 @@ export function AssetForm({
         >
           {tc("cancel")}
         </Button>
+        {/* Create & add another (issue #951): keep the form open with the shared context pre-filled.
+            Tagged with `data-submit-intent` so the submit handler can tell the two buttons apart. */}
+        {!isEdit ? (
+          <Button
+            type="submit"
+            form={FORM_ID}
+            variant="secondary"
+            disabled={isPending}
+            data-submit-intent="add-another"
+          >
+            {t("createAndAddAnother")}
+          </Button>
+        ) : null}
         <Button type="submit" form={FORM_ID} disabled={isPending}>
           {isPending && <ArrowPathIcon className="animate-spin" />}
           {isEdit ? t("saveChanges") : t("createAsset")}
