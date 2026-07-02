@@ -1,4 +1,8 @@
 {
+  "gate": {
+    "title": "La gestión de usuarios es solo para administradores",
+    "description": "Crear y dar de alta usuarios requiere el permiso user:manage, otorgado a los administradores por defecto. Consulta con un administrador si necesitas agregar a alguien."
+  },
   "list": {
     "title": "Usuarios",
     "subtitle": "Las personas de tu organización.",
