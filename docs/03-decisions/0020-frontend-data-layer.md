@@ -177,7 +177,9 @@ consumables, users, locations, kb) stay identical in structure and behaviour —
   now take a params object and return the **whole `Page<T>` envelope**. The bare directory hooks
   (`useUsers`/`useLocations`/`useApplications`) keep their `Entity[]` contract for client-side joins
   by requesting the max page (200) and `select`-ing `items`; dedicated `useUserList`/`useLocationList`/
-  `useApplicationList` hooks return the envelope for the list pages.
+  `useApplicationList` hooks return the envelope for the list pages. (`useUsers` was later **removed**
+  in #961 — its read-only id→name consumers moved to the batch `useUserNames(ids)` resolver over a
+  `GET /users?ids=…` filter, so names resolve past the 200-row directory window.)
 - **RBAC:** write affordances (New X, per-row Edit/Delete, consumable ±1 quick-adjust) are gated on
   `useCanWrite()` (the API is still the real gate).
 
