@@ -12,6 +12,7 @@ import {
   PermissionSchema,
   READ_PERMISSIONS,
   RolePermissionMatrixSchema,
+  SELF_SERVICE_CAPABILITIES,
   UpdateRolePermissionsSchema,
   VIEWER_DENIED_READS,
   WRITE_PERMISSIONS,
@@ -201,6 +202,33 @@ describe("Import permission (guided bulk Migrator, ADR-0069 §11)", () => {
   });
 });
 
+describe("AccessRequest permissions (self-service access requests, ADR-0085)", () => {
+  test("the `accessRequest` domain is in the catalog with create + read", () => {
+    expect(PERMISSION_DOMAINS).toContain("accessRequest");
+    expect(PERMISSIONS).toContain("accessRequest:create" as Permission);
+    expect(PERMISSIONS).toContain("accessRequest:read" as Permission);
+    // There is no accessRequest:write/:delete/:grant — a request is a lifecycle row; deciding reuses
+    // accessGrant:grant.
+    expect(PERMISSIONS).not.toContain("accessRequest:write" as Permission);
+    expect(PERMISSIONS).not.toContain("accessRequest:delete" as Permission);
+    expect(PERMISSIONS).not.toContain("accessRequest:grant" as Permission);
+  });
+
+  test("accessRequest:create is a self-service capability seeded to ALL THREE roles (incl VIEWER)", () => {
+    expect([...SELF_SERVICE_CAPABILITIES]).toEqual(["accessRequest:create"]);
+    for (const role of ["ADMIN", "MEMBER", "VIEWER"] as const) {
+      expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain("accessRequest:create" as Permission);
+    }
+  });
+
+  test("accessRequest:read is pre-tightened to ADMIN + MEMBER (VIEWER denied), like accessGrant:read", () => {
+    expect(VIEWER_DENIED_READS).toContain("accessRequest:read");
+    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain("accessRequest:read" as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).toContain("accessRequest:read" as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain("accessRequest:read" as Permission);
+  });
+});
+
 describe("RolePermissionMatrix wire shape", () => {
   test("accepts a Role → Permission[] record for all three roles", () => {
     const matrix = {
@@ -245,14 +273,15 @@ describe("DEFAULT_ROLE_PERMISSIONS (the seed source of truth)", () => {
     expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toHaveLength(PERMISSIONS.length);
   });
 
-  test("MEMBER = all reads + all writes, EXCEPT the admin-only reads", () => {
+  test("MEMBER = all reads + all writes + the self-service capabilities, EXCEPT the admin-only reads", () => {
     const adminOnly = new Set<string>(ADMIN_ONLY_READS);
     const expected = [
       ...READ_PERMISSIONS.filter((p) => !adminOnly.has(p)),
       ...WRITE_PERMISSIONS,
+      ...SELF_SERVICE_CAPABILITIES,
     ];
     expect(new Set(DEFAULT_ROLE_PERMISSIONS.MEMBER)).toEqual(new Set(expected));
-    // No delete, no coarse capability verb leaks into MEMBER.
+    // No delete, no coarse capability verb leaks into MEMBER (the self-service capabilities are neither).
     for (const p of DEFAULT_ROLE_PERMISSIONS.MEMBER) {
       expect(p.endsWith(":delete")).toBe(false);
       expect(["accessGrant:grant", "user:manage", "settings:manage"]).not.toContain(p);
@@ -263,26 +292,32 @@ describe("DEFAULT_ROLE_PERMISSIONS (the seed source of truth)", () => {
     }
   });
 
-  test("VIEWER = all reads EXCEPT the pre-tightened AND the admin-only reads", () => {
+  test("VIEWER = all reads (minus pre-tightened + admin-only) + the self-service capabilities", () => {
     const restricted = new Set<string>([...VIEWER_DENIED_READS, ...ADMIN_ONLY_READS]);
-    const expected = READ_PERMISSIONS.filter((p) => !restricted.has(p));
+    const expected = [
+      ...READ_PERMISSIONS.filter((p) => !restricted.has(p)),
+      ...SELF_SERVICE_CAPABILITIES,
+    ];
     expect(new Set(DEFAULT_ROLE_PERMISSIONS.VIEWER)).toEqual(new Set(expected));
-    // VIEWER can mutate nothing.
+    // VIEWER can mutate nothing beyond the self-service capabilities (raise its own access request).
+    const selfService = new Set<string>(SELF_SERVICE_CAPABILITIES);
     for (const p of DEFAULT_ROLE_PERMISSIONS.VIEWER) {
-      expect(p.endsWith(":read")).toBe(true);
+      expect(p.endsWith(":read") || selfService.has(p)).toBe(true);
     }
   });
 
-  test("the pre-tightening is EXACTLY accessGrant:read + user:read", () => {
+  test("the pre-tightening is EXACTLY accessGrant:read + accessRequest:read + user:read", () => {
     expect([...VIEWER_DENIED_READS].sort()).toEqual(
-      (["accessGrant:read", "user:read"] as const).slice().sort(),
+      (["accessGrant:read", "accessRequest:read", "user:read"] as const).slice().sort(),
     );
-    // VIEWER specifically lacks these two…
+    // VIEWER specifically lacks these three…
     expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain("accessGrant:read" as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain("accessRequest:read" as Permission);
     expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain("user:read" as Permission);
     // …while ADMIN and MEMBER keep them (behavior-preserving for those two roles).
     for (const role of ["ADMIN", "MEMBER"] as const) {
       expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain("accessGrant:read" as Permission);
+      expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain("accessRequest:read" as Permission);
       expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain("user:read" as Permission);
     }
   });
