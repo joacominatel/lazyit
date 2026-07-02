@@ -136,48 +136,9 @@ export class AccessGrantsService {
     // grant. If no enabled workflow with a version exists, `plan` is null and we behave EXACTLY as today.
     const plan = await this.planTrigger('ACCESS_GRANTED', data.applicationId);
 
-    const { grant, runId } = await this.prisma.$transaction(async (tx) => {
-      const grant = await tx.accessGrant.create({
-        data: {
-          userId: data.userId,
-          applicationId: data.applicationId,
-          ...(data.accessLevel !== undefined
-            ? { accessLevel: data.accessLevel }
-            : {}),
-          ...(data.expiresAt !== undefined
-            ? { expiresAt: new Date(data.expiresAt) }
-            : {}),
-          ...(data.grantedAt !== undefined
-            ? { grantedAt: new Date(data.grantedAt) }
-            : {}),
-          ...(data.notes !== undefined ? { notes: data.notes } : {}),
-          // Attribute the GRANT action: human → grantedById, service account → grantedBySaId. CHECK-safe
-          // by construction (resolveActor returns at most one of the pair; ADR-0048).
-          ...(actor.userId != null ? { grantedById: actor.userId } : {}),
-          ...(actor.serviceAccountId != null
-            ? { grantedBySaId: actor.serviceAccountId }
-            : {}),
-        },
-      });
-      // The PENDING run row is committed ATOMICALLY with the grant — the TRANSACTIONAL-OUTBOX tradeoff
-      // (ADR-0054 §1, the INV-5 inverse): this one engine write lives in the grant's CRITICAL PATH, so
-      // its failure WOULD roll back the grant. It is determined-safe ONLY by DB invariants — the unique
-      // `idempotencyKey` (`<trigger>:<accessGrantId>`) is fresh per new grant, and every FK it carries
-      // (workflowVersionId / applicationId / accessGrantId) was resolved by the pre-tx plan lookup, so
-      // the INSERT cannot violate a constraint here (CCOR-5). DO NOT add any other fallible engine write
-      // beside it inside this tx: a new engine call belongs to the post-commit best-effort enqueue (or a
-      // future dedicated outbox row), never here, or it reintroduces the grant-rollback coupling this
-      // decoupling exists to avoid.
-      const runId = plan
-        ? (
-            await tx.workflowRun.create({
-              data: this.workflowTrigger.buildRunData(plan, grant.id, actor),
-              select: { id: true },
-            })
-          ).id
-        : null;
-      return { grant, runId };
-    });
+    const { grant, runId } = await this.prisma.$transaction((tx) =>
+      this.writeGrantInTx(tx, data, actor, plan),
+    );
 
     // AFTER commit: best-effort enqueue. A broker-down enqueue leaves the run PENDING for the sweeper.
     if (runId) {
@@ -188,6 +149,106 @@ export class AccessGrantsService {
     // errors, and we guard again here so a thrown emit can never escape into the grant's return path.
     await this.emitGrantNotifications(grant);
     return grant;
+  }
+
+  /**
+   * Open a grant AND fold ONE extra write into the SAME transaction — the access-request APPROVAL path
+   * (ADR-0085). Reuses the ENTIRE grant write path unchanged (the live-checks, actor attribution, the
+   * engine transactional outbox and the post-commit bell + enqueue), but runs a caller-supplied `extra`
+   * write (marking the AccessRequest APPROVED with the new `grant.id`) INSIDE the grant's tx, so the
+   * grant and the request-close are ATOMIC — no orphan grant if the status flip fails, and no APPROVED
+   * request pointing at a grant that rolled back. The engine still fires AFTER commit (ADR-0054), so
+   * provisioning + audit attribution work exactly as for a directly-created grant. The `extra` callback
+   * must ONLY do determined-safe writes (a single update by PK); a fallible engine call belongs to the
+   * post-commit phase, never here (same CCOR-5 discipline as the outbox run insert).
+   */
+  async createWithinApproval(
+    data: CreateAccessGrant,
+    principal: Principal | undefined,
+    extra: (
+      tx: Prisma.TransactionClient,
+      grant: { id: string },
+    ) => Promise<void>,
+  ) {
+    const actor = this.actor.resolveActor(principal);
+    await this.assertUserUsable(data.userId);
+    await this.assertApplicationUsable(data.applicationId);
+    const plan = await this.planTrigger('ACCESS_GRANTED', data.applicationId);
+
+    const { grant, runId } = await this.prisma.$transaction(async (tx) => {
+      const result = await this.writeGrantInTx(tx, data, actor, plan);
+      await extra(tx, result.grant);
+      return result;
+    });
+
+    if (runId) {
+      await this.enqueueRunSafely(runId);
+    }
+    await this.emitGrantNotifications(grant);
+    return grant;
+  }
+
+  /**
+   * The grant + engine-outbox writes that make up the CRITICAL PATH of {@link create} — extracted so the
+   * access-request approval path ({@link createWithinApproval}) can compose it with an extra write in the
+   * SAME transaction. Creates the AccessGrant (with actor attribution) and, when a workflow `plan` exists,
+   * the ATOMIC PENDING WorkflowRun row.
+   *
+   * The PENDING run row is committed ATOMICALLY with the grant — the TRANSACTIONAL-OUTBOX tradeoff
+   * (ADR-0054 §1, the INV-5 inverse): this one engine write lives in the grant's CRITICAL PATH, so its
+   * failure WOULD roll back the grant. It is determined-safe ONLY by DB invariants — the unique
+   * `idempotencyKey` (`<trigger>:<accessGrantId>`) is fresh per new grant, and every FK it carries
+   * (workflowVersionId / applicationId / accessGrantId) was resolved by the pre-tx plan lookup, so the
+   * INSERT cannot violate a constraint here (CCOR-5). DO NOT add any other fallible engine write beside it
+   * inside this tx: a new engine call belongs to the post-commit best-effort enqueue (or a future
+   * dedicated outbox row), never here, or it reintroduces the grant-rollback coupling this decoupling
+   * exists to avoid.
+   */
+  private async writeGrantInTx(
+    tx: Prisma.TransactionClient,
+    data: CreateAccessGrant,
+    actor: ActorAttribution,
+    plan: TriggerPlan | null,
+  ): Promise<{
+    grant: {
+      id: string;
+      userId: string;
+      applicationId: string;
+      accessLevel: string | null;
+    };
+    runId: string | null;
+  }> {
+    const grant = await tx.accessGrant.create({
+      data: {
+        userId: data.userId,
+        applicationId: data.applicationId,
+        ...(data.accessLevel !== undefined
+          ? { accessLevel: data.accessLevel }
+          : {}),
+        ...(data.expiresAt !== undefined
+          ? { expiresAt: new Date(data.expiresAt) }
+          : {}),
+        ...(data.grantedAt !== undefined
+          ? { grantedAt: new Date(data.grantedAt) }
+          : {}),
+        ...(data.notes !== undefined ? { notes: data.notes } : {}),
+        // Attribute the GRANT action: human → grantedById, service account → grantedBySaId. CHECK-safe
+        // by construction (resolveActor returns at most one of the pair; ADR-0048).
+        ...(actor.userId != null ? { grantedById: actor.userId } : {}),
+        ...(actor.serviceAccountId != null
+          ? { grantedBySaId: actor.serviceAccountId }
+          : {}),
+      },
+    });
+    const runId = plan
+      ? (
+          await tx.workflowRun.create({
+            data: this.workflowTrigger.buildRunData(plan, grant.id, actor),
+            select: { id: true },
+          })
+        ).id
+      : null;
+    return { grant, runId };
   }
 
   /**
